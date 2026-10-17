@@ -382,7 +382,7 @@ describe("the license's band above the office's pages", () => {
     await waitFor(() => expect(band().childElementCount).toBe(0));
     const nav = screen.getByRole("navigation", { name: "Разделы офиса" });
     fireEvent.click(within(nav).getByRole("link", { name: "Обзор" }));
-    await screen.findByText(/Вы вошли как/);
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     expect(within(overviewAlerts()).queryByText(/Пробный период/)).toBeNull();
     // The license card names the state («Пробный период»); the warning is the text with the days.
     expect(screen.queryByText(/Пробный период: осталось/)).toBeNull();

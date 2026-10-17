@@ -276,7 +276,7 @@ describe("Резервные копии", () => {
     session.api.getBackups.mockResolvedValue(HELD);
     renderOffice(session);
     await waitFor(() => expect(session.api.getOrg).toHaveBeenCalled());
-    await screen.findByText(/Вы вошли как/);
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     expect(screen.queryByText(/Хост восстановлен из копии/)).toBeNull();
     release();
     expect(await screen.findByText(/Хост восстановлен из копии/)).toBeTruthy();
@@ -745,7 +745,8 @@ describe("Резервные копии", () => {
     });
     session.api.getBackups.mockReturnValue(pending);
     renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Резервные копии" }));
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
+    fireEvent.click(document.querySelector('.office-menu__link[href="/backups"]') as HTMLElement);
     await screen.findByRole("heading", { name: "Резервные копии", level: 1 });
     const region = document.querySelector('main [aria-live="polite"]');
     expect(region).toBeTruthy();
@@ -770,10 +771,11 @@ describe("Резервные копии", () => {
     expect(
       await screen.findByText("Последняя копия во вторую папку не удалась: папка недоступна."),
     ).toBeTruthy();
-    // The cards of the overview read the organization for the site's day; the warnings' own
-    // region is what this test is about.
-    const region = document.querySelector(".backup-alerts") as HTMLElement;
-    fireEvent.click(within(region).getByRole("link", { name: "Открыть «Резервные копии»" }));
+    // The eye reads the warning as a row of «Требует внимания» with its own button to the page
+    // (the polite region above holds the full text for the ear).
+    const attention = screen.getByRole("region", { name: "Требует внимания" });
+    expect(await within(attention).findByText(/Копия во второй папке не сделана/)).toBeTruthy();
+    fireEvent.click(within(attention).getByRole("button", { name: /Копии/ }));
     expect(await screen.findByRole("heading", { name: "Резервные копии", level: 1 })).toBeTruthy();
   });
 
@@ -792,9 +794,9 @@ describe("Резервные копии", () => {
   it("says nothing on «Обзор» while the copies are well", async () => {
     const session = sessionOf();
     renderOffice(session);
-    await screen.findByText(/Вы вошли как/);
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     await waitFor(() => expect(session.api.getBackups).toHaveBeenCalled());
-    // The warnings' region stays empty (the overview's own backups card has a link of its own).
+    // The warnings' region stays empty: nothing is announced while the copies are well.
     const region = document.querySelector(".backup-alerts") as HTMLElement;
     expect(within(region).queryByRole("link")).toBeNull();
     expect(region.querySelector(".mk-alert")).toBeNull();
@@ -804,9 +806,9 @@ describe("Резервные копии", () => {
     const session = sessionOf();
     session.api.getBackups.mockRejectedValue(new Error("down"));
     renderOffice(session);
-    await screen.findByText(/Вы вошли как/);
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     await waitFor(() => expect(session.api.getBackups).toHaveBeenCalled());
-    // Its own card says the copies did not load; the warnings' region says nothing.
+    // The system panel says the copies did not load; the warnings' region says nothing.
     const region = document.querySelector(".backup-alerts") as HTMLElement;
     expect(within(region).queryByRole("link")).toBeNull();
     expect(region.querySelector(".mk-alert")).toBeNull();

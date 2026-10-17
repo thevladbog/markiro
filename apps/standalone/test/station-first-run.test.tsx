@@ -251,7 +251,7 @@ async function signIn(): Promise<void> {
   fireEvent.change(screen.getByLabelText("Логин"), { target: { value: "admin" } });
   fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "correct horse battery" } });
   fireEvent.click(screen.getByRole("button", { name: "Войти" }));
-  await screen.findByText("Вы вошли как Ирина Смирнова.");
+  await screen.findByRole("heading", { name: "Обзор", level: 1 });
 }
 
 async function signInToOffice(): Promise<void> {
