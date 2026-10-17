@@ -9,6 +9,8 @@ export interface SwitchCardProps {
   hint?: string;
   /** Under the hint, when it has something to say: «Шаблон: …». */
   detail?: ReactNode;
+  /** The detail as plain text: its full words as the `title` of the line that cuts it short. */
+  detailTitle?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   /** The words of the state under the switch: «Включено» / «Выключено». */
@@ -24,6 +26,7 @@ export function SwitchCard({
   title,
   hint,
   detail,
+  detailTitle,
   checked,
   onChange,
   stateLabel,
@@ -46,11 +49,18 @@ export function SwitchCard({
         {title}
       </span>
       {hint !== undefined && (
-        <span id={hintId} className="floor-switch-card__hint">
+        <span id={hintId} className="floor-switch-card__hint" title={hint}>
           {hint}
         </span>
       )}
-      {detail !== undefined && <span className="floor-switch-card__detail">{detail}</span>}
+      {detail !== undefined && (
+        <span
+          className="floor-switch-card__detail"
+          {...(detailTitle === undefined ? {} : { title: detailTitle })}
+        >
+          {detail}
+        </span>
+      )}
       <span className="floor-switch-card__state" aria-hidden="true">
         <span className="floor-switch-card__track">
           <span className="floor-switch-card__knob">

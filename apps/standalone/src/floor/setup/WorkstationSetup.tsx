@@ -44,7 +44,7 @@ import {
 import { ComPortField } from "./ComPortField.js";
 import { DiagnosticCopy } from "./DiagnosticCopy.js";
 import { SetupTabList, SetupTabPanel, type SetupTabId } from "./SetupTabs.js";
-import { KeyboardIcon, TrashIcon } from "./setup-icons.js";
+import { KeyboardIcon, PencilIcon, PrintIcon, TrashIcon } from "./setup-icons.js";
 import { StationPanel, VolumeScale, type StationFacts } from "./setup-parts.js";
 import { unsavedParts, volumeDivisions } from "./setup-status.js";
 import {
@@ -1216,7 +1216,7 @@ export function WorkstationSetup({
                     <li className="setup-printer-row" key={printer.id}>
                       <div className="setup-printer-row__detail">
                         <div className="setup-printer-row__title">
-                          <h3>{printer.name}</h3>
+                          <h3 title={printer.name}>{printer.name}</h3>
                           {tested ? (
                             <StatusChip
                               size="floor"
@@ -1231,30 +1231,40 @@ export function WorkstationSetup({
                             />
                           )}
                         </div>
-                        <p className="setup-printer-row__connection">{summary(printer)}</p>
+                        <p className="setup-printer-row__connection" title={summary(printer)}>
+                          {summary(printer)}
+                        </p>
                       </div>
                       <div className="setup-printer-row__actions">
                         <Button
                           size="floor"
                           variant="secondary"
+                          icon={<PrintIcon />}
                           aria-label={t("floor.setup.printers.testFor", { name: printer.name })}
+                          title={t("floor.setup.printers.test")}
                           {...(test?.kind === "sending"
                             ? { "aria-disabled": true, style: WAITING_STYLE }
                             : {})}
                           onClick={() => void testPrint(printer)}
                         >
-                          {t("floor.setup.printers.test")}
+                          <span className="setup-row__action-text">
+                            {t("floor.setup.printers.test")}
+                          </span>
                         </Button>
                         <Button
                           size="floor"
                           variant="secondary"
+                          icon={<PencilIcon />}
                           aria-label={t("floor.setup.printers.editFor", { name: printer.name })}
+                          title={t("floor.setup.printers.edit")}
                           onClick={() => {
                             setSubmitted(false);
                             setEditor(draftOf(printer));
                           }}
                         >
-                          {t("floor.setup.printers.edit")}
+                          <span className="setup-row__action-text">
+                            {t("floor.setup.printers.edit")}
+                          </span>
                         </Button>
                         <Button
                           size="floor"
@@ -1429,6 +1439,8 @@ export function WorkstationSetup({
                   variant="secondary"
                   icon={<TrashIcon />}
                   aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
+                  title={t("floor.setup.scanners.remove")}
+                  className="setup-scanner-row__remove"
                   onClick={() => {
                     change({
                       ...draft,
@@ -1438,7 +1450,7 @@ export function WorkstationSetup({
                     scannersHeading.current?.focus();
                   }}
                 >
-                  {t("floor.setup.scanners.remove")}
+                  <span className="setup-row__action-text">{t("floor.setup.scanners.remove")}</span>
                 </Button>
               </li>
             );

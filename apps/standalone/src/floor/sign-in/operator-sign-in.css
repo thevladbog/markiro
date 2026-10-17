@@ -95,6 +95,17 @@
   margin-block-start: calc(-1 * var(--login-gap));
 }
 
+/*
+ * The shell's older `.floor-sign-in__message { min-height: 64px }` held 64 px of an empty slot on every
+ * window: on 1024 x 640 the name search's keyboard then ran 29 px past the window. An empty slot takes no
+ * room below 900 px (the tall window's rule below keeps it).
+ */
+@media (max-height: 899px) {
+  .operator-login .operator-login__message:empty {
+    min-height: 0;
+  }
+}
+
 /* A tall window keeps the slot's room, so that the keypad does not jump when a message comes. */
 @media (min-height: 900px) {
   .operator-login__message {
