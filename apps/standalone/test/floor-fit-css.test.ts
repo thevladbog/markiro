@@ -167,3 +167,12 @@ describe("the brand gradient", () => {
     );
   });
 });
+
+describe("the sign-in's empty message slot", () => {
+  it("takes no room below 900 px: the shell's 64 px minimum pushed the name search's keyboard off a 640 px window", () => {
+    const css = normal(strip(read("src/floor/sign-in/operator-sign-in.css")));
+    expect(media(css, "(max-height: 899px)")).toMatch(
+      /\.operator-login \.operator-login__message:empty \{ min-height: 0; \}/,
+    );
+  });
+});
