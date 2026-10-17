@@ -118,8 +118,8 @@ describe("Office", () => {
     expect(await screen.findByText("Ирина Смирнова")).toBeTruthy();
     expect(screen.getByText("Администратор")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Обзор" })).toBeTruthy();
-    expect(screen.getByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
-    expect(screen.getByText("Роль: администратор.")).toBeTruthy();
+    // The page itself no longer greets the user: the name and the role are in the user menu.
+    expect(screen.getByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
   });
 
   it("names the technologist role", async () => {

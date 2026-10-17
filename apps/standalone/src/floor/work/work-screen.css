@@ -160,6 +160,8 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   border-radius: var(--r-card);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
   background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
   border: 1px solid var(--brandline);
 }
@@ -889,7 +891,26 @@
     padding: 0 var(--sp-3) 0 0;
   }
 
+  /* Slimmer chips: when a wide band wraps them to two rows (a long counterparty, big counts) both still fit its height. */
+  .work-shift-band__chips {
+    gap: 6px;
+  }
+
+  .work-shift-band__chip {
+    padding: 2px 12px;
+    font: 600 15px/20px var(--font-ui);
+  }
+
   .work-shift-band__copy,
+  /* Narrower counters give the title and the chips the room a validation band's three need. */
+  .work-shift-band__total {
+    min-width: 150px;
+  }
+
+  .work-shift-band__small {
+    min-width: 72px;
+  }
+
   .work-shift-band__counters {
     padding-block: var(--sp-2);
   }
@@ -918,5 +939,237 @@
 
   .work-facts dl > div {
     min-height: 32px;
+  }
+}
+
+/*
+ * The compact work screen (a window up to 780 px high: the owner's terminal is a 1280x1024 panel at
+ * Windows 125 %, ~1024 x 640-720 CSS px). Nothing may clip or scroll the page, so the vertical rhythm
+ * shrinks as a whole: the 72 px action row (the primary's short-window size), a band of one title line
+ * and one row of chips, the open box with its three 64 px buttons, the pallet strip at the height of
+ * its own 64 px button, the last scan on one row, the figures as two slim rows, and the history takes
+ * the rest in whole rows (`scan-history.css`). Touch targets keep their 64 px; only text rows shrink.
+ */
+@media (max-height: 780px) {
+  .work-screen {
+    /* The short window's primary: 72 px, and the gap under it. */
+    --work-footer-h: calc(72px + var(--sp-2));
+  }
+
+  .work-screen__content {
+    padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  }
+
+  .work-screen__work,
+  .work-screen__instruments,
+  .work-screen__primary,
+  .work-screen__secondary {
+    gap: var(--sp-2);
+  }
+
+  .work-screen .station-floor-footer {
+    padding: 0 var(--sp-3) var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .work-screen .work-footer__action.mk-btn.floor-primary {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  /* The band: one title line, one row of chips, the photo a 72 px square at the least. */
+  .work-shift-band {
+    padding: 0 var(--sp-3) 0 0;
+    gap: var(--sp-3);
+  }
+
+  .work-shift-band__photo {
+    min-width: 72px;
+    min-height: 72px;
+  }
+
+  .work-shift-band__monogram {
+    font-size: 36px;
+  }
+
+  .work-shift-band__copy {
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .work-shift-band__copy h2 {
+    font: 600 22px/28px var(--font-ui);
+    -webkit-line-clamp: 1;
+  }
+
+  .work-shift-band__chips {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 6px;
+  }
+
+  .work-shift-band__chip {
+    padding: 2px 12px;
+    font: 600 15px/20px var(--font-ui);
+  }
+
+  /* The accepted count stays whole and large; the plan's percent and bar give their line up. */
+  .work-shift-band__counters {
+    padding-block: var(--sp-1);
+  }
+
+  .work-shift-band__total {
+    min-width: 150px;
+    padding: var(--sp-1) var(--sp-3);
+    gap: 0;
+  }
+
+  .work-shift-band__label {
+    font: 700 12px/16px var(--font-ui);
+  }
+
+  .work-shift-band__count {
+    font-size: 40px;
+  }
+
+  .work-shift-band__planned {
+    font: 500 14px/16px var(--font-mono);
+  }
+
+  .work-shift-band__bar,
+  .work-shift-band__meta {
+    display: none;
+  }
+
+  .work-shift-band__small {
+    min-width: 72px;
+    padding: var(--sp-1);
+  }
+
+  .work-shift-band__small-count {
+    font-size: 28px;
+  }
+
+  /* The open box: title and count on a slim row, the cells share the rest, the buttons keep 64 px. */
+  .work-box-fill {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+    grid-template-rows: auto minmax(72px, 1fr) minmax(64px, auto);
+  }
+
+  .work-box-fill[data-grouped="true"] {
+    grid-template-rows: auto minmax(72px, 1fr) auto minmax(64px, auto);
+  }
+
+  .work-box-fill__head h2 {
+    font: 600 20px/28px var(--font-ui);
+  }
+
+  .work-box-fill__count {
+    font: 600 32px/36px var(--font-mono);
+  }
+
+  .work-box-fill__count[data-empty="true"],
+  .work-box-fill__count.work-of-count {
+    font: var(--floor-body);
+  }
+
+  .work-box-fill__count .work-of-count__number {
+    font: 600 32px/36px var(--font-mono);
+  }
+
+  .work-box-fill__grid[data-large="true"] {
+    gap: 6px;
+  }
+
+  /* The last scan: the title and time on a slim row, the verdict and the code on one row. */
+  .work-screen__instruments[data-layout="box"] .work-scan-result {
+    padding: var(--sp-1) var(--sp-3) var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .work-scan-result__time {
+    font: 500 15px/20px var(--font-mono);
+  }
+
+  .work-scan-result h2 {
+    font: 600 16px/20px var(--font-ui);
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-screen__last {
+    padding: var(--sp-1) var(--sp-3);
+    gap: 0 var(--sp-3);
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__word {
+    font-size: 28px;
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__code .scan-code__serial {
+    font-size: 20px;
+    line-height: 24px;
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__detail {
+    font-size: 15px;
+    line-height: 18px;
+  }
+
+  .work-scan-hero__code .scan-code__gtin {
+    font-size: 13px;
+    line-height: 14px;
+  }
+
+  /* The figures: two slim rows of text (not controls). */
+  .work-facts {
+    padding: var(--sp-1) var(--sp-3);
+    gap: 0;
+  }
+
+  .work-facts dl {
+    gap: 2px;
+  }
+
+  .work-facts dl > div {
+    min-height: 30px;
+    gap: var(--sp-2);
+  }
+
+  .work-facts dt {
+    font-size: 16px;
+    line-height: 22px;
+  }
+
+  .work-facts dd {
+    font-size: 18px;
+    line-height: 22px;
+  }
+}
+
+/*
+ * A stage that fills the window (the exceptions, the full scan history, the labels' history) is
+ * given the stage's whole height as its one track, so what it holds is laid out in that height —
+ * its list takes the rest and keeps its own scroll — instead of growing the stage past the window,
+ * where the buttons under the list would wait below the fold.
+ */
+.work-screen__overlays > .work-screen__stage:has(> .exception-flow),
+.work-screen__overlays > .work-screen__stage:has(> .scan-history--full),
+.work-screen__overlays > .work-screen__stage:has(> .unit-label-history) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+@media (max-height: 780px) {
+  .work-screen__overlays {
+    padding: var(--sp-1) var(--sp-3);
+  }
+
+  .work-screen__overlays > .work-screen__stage {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
   }
 }

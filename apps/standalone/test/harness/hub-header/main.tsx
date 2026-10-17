@@ -422,6 +422,12 @@ createRoot(document.getElementById("root")!).render(<Page />);
         problems.push(`card details overflow by ${entry.detailsOverflow}px`);
       if (Math.abs(entry.photoH - entry.h) > 2)
         problems.push(`photo ${entry.photoH} high in a ${entry.h} card`);
+      // The brand gradient is the whole left panel's face, whatever the photo is (owner, beta 4.5).
+      const face = getComputedStyle(photo);
+      if (!face.backgroundImage.includes("linear-gradient"))
+        problems.push(`the product panel has no brand gradient: ${face.backgroundImage}`);
+      if (photo.getAttribute("data-photo-backing") !== "gradient")
+        problems.push(`the product panel's backing is ${photo.getAttribute("data-photo-backing")}`);
       if (entry.facts.some((f) => f.clipped)) problems.push("a fact is cut with an ellipsis");
       if (action && entry.actionBottomGap !== null && entry.actionBottomGap < 0)
         problems.push("action runs out of the card");

@@ -84,6 +84,20 @@ describe("the office layout rules", () => {
     expect(button).toContain("justify-self: start");
   });
 
+  it("sets a filter bar's result, on a page and in a drawer, at the right edge, level with the controls, like a list card's count", () => {
+    const bar = rule(".office-shell__content .mk-filter-bar,\n.mk-side-panel .mk-filter-bar");
+    expect(bar).toContain("display: grid");
+    expect(bar).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(bar).toContain("align-items: start");
+    const result = rule(
+      ".office-shell__content .mk-filter-bar__result,\n.mk-side-panel .mk-filter-bar__result",
+    );
+    expect(result).toContain("margin-top: 22px");
+    expect(result).toContain("min-height: 44px");
+    expect(result).toContain("justify-content: flex-end");
+    expect(result).toContain("text-align: right");
+  });
+
   it("makes every table a scroll region with an edge shade, a thin scrollbar and a focus ring", () => {
     const scroll = rule(".office-shell .mk-table__scroll,\n.mk-side-panel .mk-table__scroll");
     expect(scroll).toContain("scrollbar-width: thin");

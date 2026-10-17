@@ -39,6 +39,8 @@
 }
 
 :is(.shift-hub, .new-shift) .station-screen__header {
+  /* Its line box is a hair taller than the row on a short window: nothing to cut, so nothing is. */
+  overflow: visible;
   display: flex;
   gap: var(--sp-4);
   align-items: center;
@@ -579,7 +581,7 @@
   }
 
   .shift-hub .shift-card__details {
-    padding: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
     gap: var(--sp-1);
   }
 
@@ -674,7 +676,12 @@
   }
 
   .shift-hub .shift-card__details {
-    padding: var(--sp-3) var(--sp-4);
+    padding: var(--sp-2) var(--sp-4);
+    gap: 2px;
+  }
+
+  .shift-hub .shift-card__progress {
+    margin-top: var(--sp-1);
   }
 
   .shift-hub .shift-card__counterparty {
@@ -696,15 +703,14 @@
     min-height: 64px !important;
   }
 
-  /* The banner is one line (the header chip and the title's line say the same): the cards keep the room. */
+  /* The banner is at most two slim lines, read whole (its second sentence says what can still be done): the cards keep the room. */
   .shift-hub .shift-selection__message .mk-alert {
-    padding: 8px 16px !important;
+    padding: 4px 16px !important;
   }
 
   .shift-hub .shift-selection__message .mk-alert__text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 15px;
+    line-height: 18px;
   }
 }
 
@@ -861,8 +867,16 @@
   display: flex;
   min-width: 0;
   min-height: 0;
+  /* The last resort of a window shorter than any compaction: the column scrolls, never clips. */
+  overflow-x: hidden;
+  overflow-y: auto;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+/* A row keeps its content's height: a card squeezed below its text laid the text over the next row. */
+.new-shift .new-shift__left > * {
+  flex: none;
 }
 
 /* The product card: the kit's one gradient, the photo square sitting directly on it. */
@@ -874,6 +888,8 @@
   align-items: center;
   border: 1px solid var(--brandline);
   border-radius: var(--r-card);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
   background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
 }
 
@@ -935,6 +951,7 @@
 .new-shift .new-shift__dates {
   display: grid;
   margin-top: auto;
+  padding-top: var(--sp-2);
   gap: var(--sp-4);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
@@ -1246,9 +1263,10 @@ body:has(.floor-frame) .mk-date-picker__day[data-selected="true"] {
     display: none;
   }
 
+  /* Two lines of the error fit (they were cut at 52 px). */
   .new-shift .new-shift__pad-slot {
-    height: 52px;
-    min-height: 52px;
+    height: 58px;
+    min-height: 58px;
   }
 
   /* A problem to say takes room from the left zone: its explanatory lines give way. */
@@ -1260,5 +1278,175 @@ body:has(.floor-frame) .mk-date-picker__day[data-selected="true"] {
 
   .new-shift .new-shift__panel--found .new-shift__message .mk-alert {
     padding: 10px 16px !important;
+  }
+}
+
+/*
+ * The real terminal (a 1280 x 1024 panel at Windows 125 %: about 1024 x 640-720 of CSS pixels):
+ * the left zone's rows give up their air, not their words, and the keypad panel is the readouts
+ * in one row over 64 px keys, so the whole of it stays above the 72 px footer. The primary is
+ * 72 px here (84 on a tall window); every other control keeps its 64 px.
+ */
+@media (max-height: 780px) {
+  .station-screen.new-shift {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+  }
+
+  .new-shift .station-floor-footer,
+  .new-shift .station-floor-footer .mk-btn {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .new-shift .new-shift__panel--found {
+    column-gap: var(--sp-3);
+    --floor-photo: 72px;
+    --floor-readout: 64px;
+    --floor-readout-digits: 34px;
+  }
+
+  .new-shift .new-shift__left {
+    gap: var(--sp-2);
+  }
+
+  .new-shift .new-shift__product {
+    padding: var(--sp-1) var(--sp-2);
+    gap: var(--sp-3);
+  }
+
+  .new-shift .new-shift__product h3 {
+    font-size: 22px;
+    line-height: 26px;
+  }
+
+  .new-shift .new-shift__code {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .new-shift .new-shift__product-monogram {
+    font-size: 36px;
+  }
+
+  /* The mode's explanation is the roomy window's: the two words say it, and the caption stays. */
+  .new-shift .floor-mode {
+    gap: 2px;
+  }
+
+  .new-shift .floor-mode__label {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .new-shift .floor-mode__hint {
+    display: none;
+  }
+
+  .new-shift .floor-switch-card {
+    min-height: 0;
+    padding: var(--sp-2) var(--sp-4);
+    row-gap: 0;
+  }
+
+  .new-shift .floor-switch-card__title {
+    font-size: 20px;
+    line-height: 26px;
+  }
+
+  .new-shift .floor-switch-card__hint {
+    font-size: 17px;
+    line-height: 21px;
+  }
+
+  .new-shift .floor-switch-card__detail {
+    font-size: 17px;
+    line-height: 22px;
+  }
+
+  .new-shift .floor-switch-card__state {
+    gap: 2px;
+  }
+
+  .new-shift .floor-switch-card__word {
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .new-shift .new-shift__dates {
+    padding-top: 0;
+    gap: var(--sp-3);
+  }
+
+  .new-shift .new-shift__date .mk-date-picker {
+    gap: 2px;
+  }
+
+  .new-shift .new-shift__date .mk-date-picker > label {
+    font-size: 18px !important;
+    line-height: 22px !important;
+  }
+
+  /* The keypad panel: the readouts side by side, the explanation gone (an error still takes its line). */
+  .new-shift .new-shift__pad {
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .new-shift .new-shift__pad[data-fields="2"] {
+    --floor-readout: 64px;
+    --floor-readout-digits: 32px;
+  }
+
+  .new-shift .new-shift__readouts {
+    gap: var(--sp-2);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  /* Over one another again (the roomy short panel put the label beside the number): a half-width window is too narrow for both. */
+  .new-shift .new-shift__pad[data-fields="2"] .floor-readout,
+  .new-shift .floor-readout {
+    padding: 4px 12px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: space-between;
+  }
+
+  .new-shift .floor-readout__label {
+    font-size: 17px;
+    line-height: 20px;
+  }
+
+  .new-shift .floor-readout__label em {
+    display: none;
+  }
+
+  .new-shift .floor-readout__unit {
+    font-size: 18px;
+  }
+
+  .new-shift .new-shift__pad-slot {
+    height: auto;
+    min-height: 0;
+  }
+
+  .new-shift .new-shift__pad-slot:has(.new-shift__pad-hint) {
+    display: none;
+  }
+
+  .new-shift .new-shift__pad-error {
+    font-size: 17px;
+    line-height: 22px;
+  }
+
+  .new-shift .new-shift__pad .floor-keypad {
+    gap: var(--sp-2);
+    grid-template-rows: repeat(4, minmax(64px, 1fr));
+  }
+
+  .new-shift .floor-keypad__key {
+    min-width: 64px;
+    min-height: 64px;
   }
 }

@@ -130,10 +130,12 @@ export function PairingCodeDialog({
     const data = card();
     if (data === null) return;
     setCardFailure(null);
+    const failed = () => setCardFailure("office.devices.pairing.card.printFailed");
     try {
-      print(pairingCardHtml(data, paper));
+      // A print that waits for pictures answers with a promise; a failure of either kind is shown.
+      void Promise.resolve(print(pairingCardHtml(data, paper))).catch(failed);
     } catch {
-      setCardFailure("office.devices.pairing.card.printFailed");
+      failed();
     }
   };
   const downloadCard = async () => {

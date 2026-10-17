@@ -1629,6 +1629,26 @@ describe("Table", () => {
     expect(screen.getByRole("cell", { name: "Линия 1" }).style.position).toBe("");
   });
 
+  it("centres an end-pinned actions column under its heading and fits it to its content", () => {
+    render(
+      <Table
+        columns={[
+          { key: "name", title: "Название" },
+          { key: "actions", title: "Действия", stickyEnd: true },
+          { key: "note", title: "Заметка", stickyEnd: true, align: "right" },
+        ]}
+        rows={[{ name: "Линия 1", actions: "Изменить", note: "n" }]}
+      />,
+    );
+    const heading = screen.getByRole("columnheader", { name: "Действия" });
+    expect(heading.style.textAlign).toBe("center");
+    expect(heading.style.width).toBe("1px");
+    expect(screen.getByRole("cell", { name: "Изменить" }).style.textAlign).toBe("center");
+    // An explicit alignment still wins; an ordinary column stays at the left.
+    expect(screen.getByRole("cell", { name: "n" }).style.textAlign).toBe("right");
+    expect(screen.getByRole("cell", { name: "Линия 1" }).style.textAlign).toBe("left");
+  });
+
   it("holds a column at its minimum width, heading and cells alike", () => {
     render(
       <Table

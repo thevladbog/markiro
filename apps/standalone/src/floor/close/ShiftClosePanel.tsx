@@ -247,106 +247,108 @@ export function ShiftClosePanel({
     const chosen = summary.reasonRequired ? reason : null;
     return (
       <>
-        <dl className="shift-close__facts">
-          <div>
-            <dt>{t("floor.close.product")}</dt>
-            <dd>{productName}</dd>
-          </div>
-          <div>
-            <dt>{t("floor.close.plan")}</dt>
-            <dd>
-              {summary.plannedQty === null
-                ? t("floor.close.noPlan")
-                : formatQuantity(summary.plannedQty)}
-            </dd>
-          </div>
-          <div>
-            <dt>{t("floor.close.actual")}</dt>
-            <dd>{formatQuantity(summary.actualQty)}</dd>
-          </div>
-          {summary.plannedQty !== null && (
+        <div className="shift-close__body">
+          <dl className="shift-close__facts">
             <div>
-              <dt>{t("floor.close.deviation")}</dt>
-              <dd>{deviation(summary.plannedQty, summary.actualQty)}</dd>
+              <dt>{t("floor.close.product")}</dt>
+              <dd>{productName}</dd>
             </div>
-          )}
-          {!boxless && (
-            <>
+            <div>
+              <dt>{t("floor.close.plan")}</dt>
+              <dd>
+                {summary.plannedQty === null
+                  ? t("floor.close.noPlan")
+                  : formatQuantity(summary.plannedQty)}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("floor.close.actual")}</dt>
+              <dd>{formatQuantity(summary.actualQty)}</dd>
+            </div>
+            {summary.plannedQty !== null && (
               <div>
-                <dt>{t("floor.close.boxes")}</dt>
-                <dd>{formatQuantity(summary.closedBoxes)}</dd>
+                <dt>{t("floor.close.deviation")}</dt>
+                <dd>{deviation(summary.plannedQty, summary.actualQty)}</dd>
               </div>
-              <div>
-                <dt>{t("floor.close.average")}</dt>
-                <dd>{average ?? t("floor.close.none")}</dd>
-              </div>
-            </>
-          )}
-        </dl>
-        {summary.plannedQty !== null && (
-          <p
-            className="shift-close__result"
-            data-tone={
-              summary.actualQty === summary.plannedQty
-                ? "ok"
+            )}
+            {!boxless && (
+              <>
+                <div>
+                  <dt>{t("floor.close.boxes")}</dt>
+                  <dd>{formatQuantity(summary.closedBoxes)}</dd>
+                </div>
+                <div>
+                  <dt>{t("floor.close.average")}</dt>
+                  <dd>{average ?? t("floor.close.none")}</dd>
+                </div>
+              </>
+            )}
+          </dl>
+          {summary.plannedQty !== null && (
+            <p
+              className="shift-close__result"
+              data-tone={
+                summary.actualQty === summary.plannedQty
+                  ? "ok"
+                  : summary.actualQty < summary.plannedQty
+                    ? "warn"
+                    : "info"
+              }
+            >
+              {summary.actualQty === summary.plannedQty
+                ? t("floor.close.result.met")
                 : summary.actualQty < summary.plannedQty
-                  ? "warn"
-                  : "info"
-            }
-          >
-            {summary.actualQty === summary.plannedQty
-              ? t("floor.close.result.met")
-              : summary.actualQty < summary.plannedQty
-                ? t("floor.close.result.short", {
-                    quantity: formatQuantity(summary.plannedQty - summary.actualQty),
-                  })
-                : t("floor.close.result.over", {
-                    quantity: formatQuantity(summary.actualQty - summary.plannedQty),
-                  })}
-          </p>
-        )}
-        {summary.reasonRequired && (
-          <div
-            className="shift-close__reasons"
-            role="group"
-            aria-label={t("floor.close.reasonTitle")}
-          >
-            <p className="shift-close__reasons-title">{t("floor.close.reasonTitle")}</p>
-            {/* The cloud's floor choices: every reason a visible 64 px target, two to a row. */}
-            <div className="floor-choice-group">
-              {SHIFT_CLOSE_REASON_CODES.map((code) => (
-                <Button
-                  key={code}
-                  size="floor"
-                  variant="secondary"
-                  className="floor-choice"
-                  data-checked={reason === code ? "true" : undefined}
-                  aria-pressed={reason === code}
-                  {...press(() => setReason(code))}
-                >
-                  {/* The chosen reason is marked by a sign too, not by its colour alone. */}
-                  <span aria-hidden="true" className="floor-choice__mark">
-                    {reason === code ? "✓" : ""}
-                  </span>
-                  <span className="floor-choice__label">{t(`floor.close.reasons.${code}`)}</span>
-                </Button>
-              ))}
+                  ? t("floor.close.result.short", {
+                      quantity: formatQuantity(summary.plannedQty - summary.actualQty),
+                    })
+                  : t("floor.close.result.over", {
+                      quantity: formatQuantity(summary.actualQty - summary.plannedQty),
+                    })}
+            </p>
+          )}
+          {summary.reasonRequired && (
+            <div
+              className="shift-close__reasons"
+              role="group"
+              aria-label={t("floor.close.reasonTitle")}
+            >
+              <p className="shift-close__reasons-title">{t("floor.close.reasonTitle")}</p>
+              {/* The cloud's floor choices: every reason a visible 64 px target, two to a row. */}
+              <div className="floor-choice-group">
+                {SHIFT_CLOSE_REASON_CODES.map((code) => (
+                  <Button
+                    key={code}
+                    size="floor"
+                    variant="secondary"
+                    className="floor-choice"
+                    data-checked={reason === code ? "true" : undefined}
+                    aria-pressed={reason === code}
+                    {...press(() => setReason(code))}
+                  >
+                    {/* The chosen reason is marked by a sign too, not by its colour alone. */}
+                    <span aria-hidden="true" className="floor-choice__mark">
+                      {reason === code ? "✓" : ""}
+                    </span>
+                    <span className="floor-choice__label">{t(`floor.close.reasons.${code}`)}</span>
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        <p className="shift-close__note">{t("floor.close.irreversible")}</p>
-        {palletAsked && (
-          <Alert
-            tone="warn"
-            role="presentation"
-            title={t("floor.close.palletOpen", {
-              quantity: formatQuantity(openPallet.boxes),
-              capacity: formatQuantity(palletCapacity),
-            })}
-          >
-            <p>{t("floor.close.palletIrreversible")}</p>
-          </Alert>
-        )}
+          )}
+          <p className="shift-close__note">{t("floor.close.irreversible")}</p>
+          {palletAsked && (
+            <Alert
+              tone="warn"
+              role="presentation"
+              title={t("floor.close.palletOpen", {
+                quantity: formatQuantity(openPallet.boxes),
+                capacity: formatQuantity(palletCapacity),
+              })}
+            >
+              <p>{t("floor.close.palletIrreversible")}</p>
+            </Alert>
+          )}
+        </div>
         <div className="shift-close__actions">
           {back}
           <Button

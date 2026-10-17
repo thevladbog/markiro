@@ -1,125 +1,235 @@
 /*
- * The identity re-confirmation dialog (beta 3): a statement, the answer to the
- * last attempt, then the badge prompt or the keypad. Every control is the
- * floor's 64 px (`size="floor"`).
+ * The identity re-confirmation (beta 3; redrawn in the design kit 2026-10, the boards
+ * «Подтверждение (бейдж, выход из полного экрана)» and «Подтверждение: табельный номер и PIN»):
+ * a centred card over the dimmed screen, not a screen of its own, on ONE layer — a title, one
+ * statement, the badge's line or the two labelled fields beside the flat keypad, and the two
+ * actions in a row. The card keeps its width however wide the window is and is centred in it;
+ * it never scrolls the page. Colours, type and spacing come from @markiro/ui tokens; the
+ * fields and keys are the sign-in's own kit pieces (kit/floor-controls.css).
  */
-.reconfirm {
+
+.reconfirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  overflow: hidden;
+  padding: var(--sp-4);
+  place-items: center;
+  background: var(--surface-overlay);
+}
+
+.reconfirm-card {
   display: grid;
   width: min(720px, 100%);
+  max-height: 100%;
   min-width: 0;
-  margin-inline: auto;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
   gap: var(--sp-3);
-  justify-items: center;
+  align-content: start;
+  border: 1px solid var(--line2);
+  border-radius: var(--floor-r-primary, 24px);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  outline: none;
+}
+
+/* The number and PIN with the keypad need the room of two columns. */
+.reconfirm-card[data-stage="entry"] {
+  width: min(980px, 100%);
+}
+
+.reconfirm__title,
+.reconfirm__detail,
+.reconfirm__badge h3,
+.reconfirm__badge p {
+  margin: 0;
+}
+
+.reconfirm__title {
+  font: var(--floor-title);
+  overflow-wrap: anywhere;
 }
 
 .reconfirm__detail {
-  max-width: 100%;
-  margin: 0;
-  color: var(--fg-1);
+  color: var(--muted);
   font: var(--floor-body);
   overflow-wrap: anywhere;
 }
 
 .reconfirm__message {
   display: grid;
-  width: 100%;
   min-width: 0;
 }
 
+.reconfirm__message:empty {
+  display: none;
+}
+
+/* The badge's line: the picture and the one instruction side by side, no frame around them. */
 .reconfirm__badge {
   display: grid;
+  min-width: 0;
+  padding-block: var(--sp-2);
+  gap: var(--sp-5);
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  text-align: start;
+}
+
+.reconfirm__badge-picture {
+  width: 64px;
+  height: 80px;
+  color: var(--fg);
+}
+
+.reconfirm__badge-picture .sign-in-icon {
+  display: block;
   width: 100%;
-  padding: var(--sp-4);
-  gap: var(--sp-2);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--r-2);
-  text-align: center;
+  height: 100%;
+}
+
+.reconfirm__badge-copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-1);
 }
 
 .reconfirm__badge h3 {
-  margin: 0;
   font: var(--floor-title);
+  font-size: 26px;
+  line-height: 32px;
+  overflow-wrap: anywhere;
 }
 
 .reconfirm__badge p {
-  margin: 0;
-  color: var(--fg-2);
+  color: var(--muted);
   font: var(--floor-body);
 }
 
-.reconfirm__pad {
+/* The fields on the left (the answer under them), the one flat keypad on the right. */
+.reconfirm__entry {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-6);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+  align-items: start;
+}
+
+.reconfirm__fields {
   display: grid;
   min-width: 0;
   gap: var(--sp-2);
-  justify-items: center;
+  align-content: start;
 }
 
-.reconfirm__prompt {
-  margin: 0;
-  color: var(--fg-2);
-  font: var(--floor-body);
-}
-
-.reconfirm__readout {
-  display: flex;
-  width: min(360px, 100%);
-  height: 64px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-  font: var(--floor-lg);
-  font-variant-numeric: tabular-nums;
+.reconfirm__entry .floor-keypad {
+  align-self: start;
+  grid-template-rows: repeat(4, 72px);
 }
 
 .reconfirm__footer {
-  display: flex;
+  display: grid;
   min-width: 0;
-  gap: var(--sp-2);
+  padding-block-start: var(--sp-2);
+  gap: var(--sp-4);
+  grid-template-columns: repeat(var(--reconfirm-columns, 2), minmax(0, 1fr));
 }
 
-.reconfirm__footer > * {
-  flex: 1 1 0;
-  min-width: 0;
+.reconfirm__footer .mk-btn--floor {
+  height: var(--control-floor-primary) !important;
+  min-height: var(--control-floor-primary) !important;
+  border-radius: var(--floor-r-primary) !important;
+  font-size: 22px !important;
 }
 
 /*
- * A small panel (1024x600): the keypad's four 64 px rows need the room the
- * explanation took, so once the keypad is up the dialog's own title says what
- * is being confirmed and the paragraph waits for the first step.
+ * A short window (1280x800 outer = about 720 px of page, and below): the statement goes once the
+ * fields are up (the title says what is confirmed), the fields and the actions give a little,
+ * and nothing drops under the 64 px of the floor.
  */
-@media (max-height: 760px) {
-  .reconfirm[data-stage="login"] .reconfirm__detail,
-  .reconfirm[data-stage="pin"] .reconfirm__detail {
-    display: none;
-  }
-
-  .reconfirm {
-    --control-keypad: 64px;
-
+@media (max-height: 860px) {
+  .reconfirm-card {
+    padding: var(--sp-5) var(--sp-5) var(--sp-4);
     gap: var(--sp-2);
   }
 
-  /* The readout beside the keypad, as the sign-in does, so the keypad stays whole. */
-  .reconfirm__pad {
-    width: min(720px, 100%);
-    column-gap: var(--sp-4);
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
-    align-content: center;
-    align-items: center;
-    justify-items: stretch;
+  .reconfirm-card[data-stage="entry"] .reconfirm__detail {
+    display: none;
   }
 
-  .reconfirm__pad > .reconfirm__prompt,
-  .reconfirm__pad > .reconfirm__readout {
-    grid-column: 1;
-    text-align: center;
+  .reconfirm__fields .floor-entry__box {
+    height: 72px;
   }
 
-  .reconfirm__pad > :last-child {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+  .reconfirm__fields .floor-entry__hint {
+    min-height: 24px;
+  }
+
+  .reconfirm__footer .mk-btn--floor {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .reconfirm__entry .floor-keypad {
+    grid-template-rows: repeat(4, 64px);
+  }
+
+  .reconfirm__entry .floor-keypad__key {
+    min-height: 64px;
+  }
+}
+
+/* A low window (an ordinary window at its least, about 560 px of page; the 640 px terminal keeps the 72 px actions above): 64 px fields and actions. */
+@media (max-height: 639px) {
+  .reconfirm-overlay {
+    padding: var(--sp-3);
+  }
+
+  .reconfirm-card {
+    padding: var(--sp-4);
+  }
+
+  .reconfirm__fields .floor-entry__box {
+    height: 64px;
+  }
+
+  .reconfirm__fields .floor-entry__hint {
+    min-height: 22px;
+  }
+
+  /* A field with nothing to say under it gives its line back. */
+  .reconfirm__fields .floor-entry__hint:empty {
+    display: none;
+  }
+
+  .reconfirm__entry .floor-keypad {
+    gap: 4px;
+  }
+
+  .reconfirm__footer {
+    padding-block-start: 0;
+  }
+
+  .reconfirm__footer .mk-btn--floor {
+    height: 64px !important;
+    min-height: 64px !important;
+  }
+
+  .reconfirm__badge-picture {
+    width: 52px;
+    height: 65px;
+  }
+}
+
+@media (max-width: 860px) {
+  .reconfirm__entry {
+    gap: var(--sp-4);
   }
 }

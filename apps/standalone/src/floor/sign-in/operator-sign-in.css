@@ -95,6 +95,17 @@
   margin-block-start: calc(-1 * var(--login-gap));
 }
 
+/*
+ * The shell's older `.floor-sign-in__message { min-height: 64px }` held 64 px of an empty slot on every
+ * window: on 1024 x 640 the name search's keyboard then ran 29 px past the window. An empty slot takes no
+ * room below 900 px (the tall window's rule below keeps it).
+ */
+@media (max-height: 899px) {
+  .operator-login .operator-login__message:empty {
+    min-height: 0;
+  }
+}
+
 /* A tall window keeps the slot's room, so that the keypad does not jump when a message comes. */
 @media (min-height: 900px) {
   .operator-login__message {
@@ -440,6 +451,20 @@
   }
 }
 
+/*
+ * The 640 px terminal with the name search open: the keyboard's rows are the floor's 64 px keys and
+ * the 72 px action under them, so the page's padding gives a little to keep the page whole.
+ */
+@media (max-height: 700px) {
+  .operator-login {
+    padding-block: var(--sp-2);
+  }
+
+  .operator-login__body--search .floor-cyrillic {
+    --floor-cyrillic-key: 64px;
+  }
+}
+
 /* The cloud's compact step: below 1100 px of width the word mark goes, the mark stays. */
 @media (max-width: 1100px) {
   .operator-login__brand {
@@ -453,6 +478,69 @@
   min-height: var(--control-floor-primary) !important;
   border-radius: var(--floor-r-primary) !important;
   font-size: 22px !important;
+}
+
+/* ---- A window of any size (the full-screen panel is 1280 wide; a windowed one is whatever it is dragged to). ---- */
+
+/* A wide window keeps the panel's own width, centred: the keys and fields are not stretched. */
+.operator-login {
+  padding-inline: max(var(--sp-5), calc((100% - 1280px) / 2));
+}
+
+/*
+ * A low window (an ordinary window at its least, 960x600 outer = about 560 px of page, with the
+ * bar above): the fields, keys and actions go to the floor's 64 px, the least a touch target
+ * may be, and the page stays whole. The countdown number gives way too.
+ */
+@media (max-height: 639px) {
+  .operator-login {
+    padding-block: var(--sp-2);
+    --login-gap: var(--sp-1);
+  }
+
+  .operator-login__entry {
+    --sign-in-key: 64px;
+  }
+
+  .operator-login__fields .floor-entry__box {
+    height: 64px;
+  }
+
+  .operator-login__fields .floor-entry__hint {
+    min-height: 22px;
+  }
+
+  .operator-login .operator-login__actions .mk-btn--floor {
+    height: 64px !important;
+    min-height: 64px !important;
+  }
+
+  .operator-login__entry .floor-keypad {
+    gap: 4px;
+  }
+
+  .operator-login__entry .floor-keypad__key {
+    min-height: 64px;
+  }
+
+  /* The badge's half must not be taller than the keypad beside it. */
+  .operator-login__badge {
+    gap: var(--sp-2);
+  }
+
+  .operator-login__badge-picture {
+    width: 56px;
+    height: 70px;
+  }
+
+  .operator-login__badge[data-state="unavailable"] .operator-login__badge-picture,
+  .operator-login__badge[data-state="accepted"] .operator-login__badge-picture {
+    width: 70px;
+  }
+
+  .operator-login__countdown-time {
+    font-size: 40px;
+  }
 }
 
 /* ---- Motion: opacity and transform only, once, under a second in all. ---- */

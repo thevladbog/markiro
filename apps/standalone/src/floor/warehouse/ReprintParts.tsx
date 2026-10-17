@@ -1,4 +1,12 @@
-import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Input } from "@markiro/ui";
@@ -45,6 +53,45 @@ const KIND_GLYPH: Record<JobKindView, GlyphName> = {
 
 export function KindGlyph({ kind, size = 28 }: { kind: JobKindView; size?: number }) {
   return <Glyph name={KIND_GLYPH[kind]} size={size} />;
+}
+
+/**
+ * A zone that scrolls on its own when its content is taller than its row: the footer is never
+ * covered, a track and a thumb of 14 px stand on its right edge (touch and a glove can take them),
+ * and a fade at the foot says there is more below (`data-more`, the track and the fade are
+ * reprint.css). Touch-drag and the keyboard scroll it natively; a focused control scrolls into view.
+ */
+export function ScrollColumn({ children, className }: { children: ReactNode; className?: string }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el === null) return undefined;
+    const update = () =>
+      setMore(
+        el.scrollHeight - el.clientHeight > 1 &&
+          el.scrollTop + el.clientHeight < el.scrollHeight - 1,
+      );
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const watcher = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    watcher?.observe(el);
+    if (el.firstElementChild !== null) watcher?.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      watcher?.disconnect();
+    };
+  });
+  return (
+    <div
+      className={className === undefined ? "rp-col" : `rp-col ${className}`}
+      data-more={more ? "true" : "false"}
+    >
+      <div className="rp-scroll" ref={scroller}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /** A state as the kit says it: a glyph, a word and a tone (never colour alone), 40 px, not a target. */
@@ -211,7 +258,10 @@ export function SummaryList({
           </span>
           <div className="rp-summary__text">
             <strong>{t(`floor.warehouse.summary.kind.${row.kind}`)}</strong>
-            <span>{detail}</span>
+            {/* Two lines at most; the whole name is the title and the screen reader's label. */}
+            <span className="rp-summary__detail" title={detail}>
+              {detail}
+            </span>
           </div>
           {row.state === "ready" ? (
             <Tag tone="ok" glyph="printer" className="rp-summary__tag">
@@ -272,49 +322,51 @@ export function Journal({
       {jobs.length === 0 ? (
         <p className="rp-journal__none">{t("floor.warehouse.journal.noneInFilter")}</p>
       ) : (
-        <ul className="rp-journal__list">
-          {jobs.map((job) => {
-            const parts = jobRowParts(job);
-            const code = jobCode(job);
-            const tag = jobTag(job);
-            const main =
-              code.kind === "unreadable" ? t("floor.warehouse.journal.unreadable") : code.main;
-            const state = t(`floor.warehouse.tag.${tag.key}`);
-            const count =
-              parts.count === null
-                ? null
-                : t(`floor.warehouse.journal.${parts.count.unit}`, { n: parts.count.n });
-            return (
-              <li key={job.id}>
-                <Button
-                  size="floor"
-                  variant="ghost"
-                  className="rp-journal__row"
-                  aria-label={t("floor.warehouse.journal.open", { code: main, state })}
-                  {...press(() => onOpen(job))}
-                >
-                  <span className="rp-journal__glyph">
-                    <KindGlyph kind={parts.kind} />
-                  </span>
-                  <span className="rp-journal__text">
-                    <strong className="rp-journal__code">{main}</strong>
-                    <span className="rp-journal__line">
-                      {[t(`floor.warehouse.journal.kind.${parts.kind}`), parts.title, count]
-                        .filter((piece) => piece !== null && piece !== "")
-                        .join(" · ")}
+        <ScrollColumn>
+          <ul className="rp-journal__list">
+            {jobs.map((job) => {
+              const parts = jobRowParts(job);
+              const code = jobCode(job);
+              const tag = jobTag(job);
+              const main =
+                code.kind === "unreadable" ? t("floor.warehouse.journal.unreadable") : code.main;
+              const state = t(`floor.warehouse.tag.${tag.key}`);
+              const count =
+                parts.count === null
+                  ? null
+                  : t(`floor.warehouse.journal.${parts.count.unit}`, { n: parts.count.n });
+              return (
+                <li key={job.id}>
+                  <Button
+                    size="floor"
+                    variant="ghost"
+                    className="rp-journal__row"
+                    aria-label={t("floor.warehouse.journal.open", { code: main, state })}
+                    {...press(() => onOpen(job))}
+                  >
+                    <span className="rp-journal__glyph">
+                      <KindGlyph kind={parts.kind} />
                     </span>
-                  </span>
-                  <Tag tone={tag.tone} glyph={tag.glyph}>
-                    {state}
-                  </Tag>
-                  <time className="rp-journal__time" dateTime={job.updatedAt}>
-                    {jobTime(job.updatedAt)}
-                  </time>
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
+                    <span className="rp-journal__text">
+                      <strong className="rp-journal__code">{main}</strong>
+                      <span className="rp-journal__line">
+                        {[t(`floor.warehouse.journal.kind.${parts.kind}`), parts.title, count]
+                          .filter((piece) => piece !== null && piece !== "")
+                          .join(" · ")}
+                      </span>
+                    </span>
+                    <Tag tone={tag.tone} glyph={tag.glyph}>
+                      {state}
+                    </Tag>
+                    <time className="rp-journal__time" dateTime={job.updatedAt}>
+                      {jobTime(job.updatedAt)}
+                    </time>
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </ScrollColumn>
       )}
     </section>
   );
@@ -565,8 +617,13 @@ export function ReprintDialog({
 }
 
 /** The footer: the answers of a screen, the one primary at the right. */
-export function ReprintFooter({ children }: { children: ReactNode }) {
-  return <footer className="rp-footer">{children}</footer>;
+export function ReprintFooter({ children, note }: { children: ReactNode; note?: ReactNode }) {
+  return (
+    <footer className="rp-footer">
+      {note === undefined ? null : note}
+      <div className="rp-footer__row">{children}</div>
+    </footer>
+  );
 }
 
 /** A footer button with a glyph before its words. */

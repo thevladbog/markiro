@@ -29,19 +29,42 @@ export const VERIFYING_RETRY_MS: readonly number[] = [
  * the host refuses this app; never on a timer, except a bounded retry while
  * the host itself says its package is `verifying`.
  */
-export function useHostUpdateOffer({
-  link,
-  paired,
-  host,
-  updates,
-  retryDelaysMs = VERIFYING_RETRY_MS,
-}: {
+export function useHostUpdateOffer(options: HostUpdateOfferOptions): HostUpdateOffer {
+  return useHostUpdateCheck(options).offer;
+}
+
+interface HostUpdateOfferOptions {
   link: HostStatus | null;
   paired: boolean;
   host: Pick<HostApi, "getDeviceUpdate">;
   updates: Pick<UpdatesApi, "appVersion" | "checkManifest">;
   retryDelaysMs?: readonly number[];
-}): HostUpdateOffer {
+}
+
+export interface HostUpdateCheck {
+  offer: HostUpdateOffer;
+  /** This build's version, once the shell has said it. */
+  appVersion: string | null;
+  /** «Проверить обновление»: reads the host's offer again now (a person asked, not a timer). */
+  check: () => void;
+  checking: boolean;
+  /** A manual check has finished at least once. */
+  checked: boolean;
+  /** The host answers (online), or answers and refuses this app. */
+  reachable: boolean;
+}
+
+/**
+ * `useHostUpdateOffer` plus the station's manual «Проверить обновление»: `check` reads the offer
+ * again at once (the same read, the same rules), never on a timer.
+ */
+export function useHostUpdateCheck({
+  link,
+  paired,
+  host,
+  updates,
+  retryDelaysMs = VERIFYING_RETRY_MS,
+}: HostUpdateOfferOptions): HostUpdateCheck {
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -75,8 +98,15 @@ export function useHostUpdateOffer({
     count: 0,
   });
   const attempt = tries.key === fetchKey ? tries.count : 0;
+  // A manual check: `asked` counts the requests, `answered` the last one that finished.
+  const [asked, setAsked] = useState(0);
+  const [answered, setAnswered] = useState(0);
   useEffect(() => {
-    if (fetchKey === null || hostVersion === null) return;
+    if (fetchKey === null || hostVersion === null) {
+      // Nothing to read (the host is not newer, or cannot be reached): the check is done.
+      setAnswered(asked);
+      return;
+    }
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
@@ -94,6 +124,7 @@ export function useHostUpdateOffer({
         // The offer was not read: `offer` stays `null` and the rule says «unread».
       }
       if (!alive) return;
+      setAnswered(asked);
       setRead((previous) =>
         offer === null && previous !== null && previous.hostVersion === hostVersion
           ? previous
@@ -110,13 +141,20 @@ export function useHostUpdateOffer({
       alive = false;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [fetchKey, hostVersion, host, updates, attempt, retryDelaysMs]);
+  }, [fetchKey, hostVersion, host, updates, attempt, retryDelaysMs, asked]);
   const current = read !== null && read.hostVersion === hostVersion ? read : null;
-  return hostUpdateOffer({
+  return {
+    offer: hostUpdateOffer({
+      appVersion,
+      hostVersion,
+      offer: current?.offer ?? null,
+      manifest: current?.manifest ?? null,
+      appTooOld,
+    }),
     appVersion,
-    hostVersion,
-    offer: current?.offer ?? null,
-    manifest: current?.manifest ?? null,
-    appTooOld,
-  });
+    check: () => setAsked((count) => count + 1),
+    checking: asked !== answered,
+    checked: answered > 0,
+    reachable: link?.state === "online" || appTooOld,
+  };
 }

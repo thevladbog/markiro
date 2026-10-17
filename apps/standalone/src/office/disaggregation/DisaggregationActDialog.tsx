@@ -122,7 +122,7 @@ export function DisaggregationActDialog({
       if (alive.current) setHostCopy(kept === null ? null : t(kept));
       if (how === "print") {
         try {
-          print(html);
+          await print(html);
         } catch {
           setOutcome({ kind: "failed", message: t("office.forms.printFailed") });
           return;

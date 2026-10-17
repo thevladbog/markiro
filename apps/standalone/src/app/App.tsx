@@ -57,7 +57,8 @@ import type { UpdatesApi } from "../update/updates-api.js";
 import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
 import { UpdateFromHostDialog } from "../update/UpdateFromHostDialog.js";
 import { useKeptOffer } from "../update/kept-offer.js";
-import { useHostUpdateOffer } from "../update/use-host-offer.js";
+import { FloorFrameWithUpdateEntry } from "../update/floor-update-entry-context.js";
+import { useHostUpdateCheck } from "../update/use-host-offer.js";
 import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
@@ -69,6 +70,7 @@ import type { WindowMode } from "../office/window-mode.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
+import { createFullscreenController, type FullscreenController } from "./fullscreen.js";
 import { createTauriKioskPolicy, type KioskPolicyApi } from "./kiosk-policy.js";
 import {
   createLockdownLifecycle,
@@ -173,6 +175,11 @@ export interface AppProps {
   /** What the shell permits of kiosk mode on this PC; the shell's by default. */
   kioskPolicy?: KioskPolicyApi;
   /**
+   * The plain full-screen window the host's floor offers in place of the kiosk mode
+   * (a host PC is never locked); the webview's Fullscreen API by default.
+   */
+  fullscreen?: FullscreenController;
+  /**
    * Where the pairing screen hears a scanner that is not a keyboard: the
    * shell's COM scanners by default. A keyboard-wedge scanner types into the
    * screen's own field, so the keyboard is not a source here.
@@ -206,6 +213,7 @@ function AppScreens({
   signInSyncGapMs = SIGN_IN_SYNC_GAP_MS,
   lockdown,
   kioskPolicy,
+  fullscreen: fullscreenApi,
   pairingScanSource,
   updates = TAURI_UPDATES,
 }: AppProps) {
@@ -250,6 +258,8 @@ function AppScreens({
     [lockdown],
   );
   const kioskSnapshot = useSyncExternalStore(kiosk.subscribe, kiosk.getSnapshot);
+  const fullscreen = useMemo(() => fullscreenApi ?? createFullscreenController(), [fullscreenApi]);
+  const fullscreenSnapshot = useSyncExternalStore(fullscreen.subscribe, fullscreen.getSnapshot);
   const kioskShell = useMemo(() => kioskPolicy ?? createTauriKioskPolicy(), [kioskPolicy]);
   // What the shell permits of kiosk mode (the role, `"kiosk": false`, a
   // `--windowed` launch); `null` until it answers. A second launch with
@@ -317,12 +327,13 @@ function AppScreens({
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
   // The update the host offers this PC (plan ОБН-3): the office's banner, the
   // station's line off the work screen and the version screen read it.
-  const updateOffer = useHostUpdateOffer({
+  const updateCheck = useHostUpdateCheck({
     link: state.link,
     paired: pairedStatus !== null,
     host: hostApi,
     updates,
   });
+  const updateOffer = updateCheck.offer;
   // «Обновить с хоста» where no office opens (the version screen, a station
   // the host refuses): the dialog, and the shell's own install after it.
   const updateShell = useUpdateShell();
@@ -743,20 +754,39 @@ function AppScreens({
   // locks this PC (`due`), so a host, an office PC and an unconfigured station
   // never show it. Leaving needs a fresh proof of identity (`Reconfirm`, in the
   // control); the way back needs none.
-  const floorWindowMode = useMemo<FloorBarTools["windowMode"]>(
-    () =>
-      kiosk.enabled && due
-        ? {
-            snapshot: kioskSnapshot,
-            enter: kiosk.enter,
-            exit: async () => {
-              await kiosk.exit();
-            },
-            clearError: kiosk.clearError,
-          }
-        : null,
-    [kiosk, due, kioskSnapshot],
-  );
+  const floorWindowMode = useMemo<FloorBarTools["windowMode"]>(() => {
+    if (kiosk.enabled && due) {
+      return {
+        kind: "kiosk",
+        snapshot: kioskSnapshot,
+        enter: kiosk.enter,
+        exit: async () => {
+          await kiosk.exit();
+        },
+        clearError: kiosk.clearError,
+      };
+    }
+    // The host's PC is never locked (`rolePermitsKiosk`), yet its floor is a
+    // station's screen too: the rail offers the plain full-screen window there
+    // (owner report, beta 4.5), left with the same button or Esc, with no proof.
+    if (role === "host" && fullscreen.enabled) {
+      return {
+        kind: "fullscreen",
+        snapshot: fullscreenSnapshot,
+        enter: fullscreen.enter,
+        exit: fullscreen.exit,
+        clearError: fullscreen.clearError,
+      };
+    }
+    return null;
+  }, [kiosk, due, kioskSnapshot, role, fullscreen, fullscreenSnapshot]);
+  // A full-screen floor does not follow the host into the office: that is a
+  // mouse-and-keyboard app in an ordinary window.
+  const onFloor = view.kind === "floor" || view.kind === "floor_operator";
+  const fullscreenOn = fullscreenSnapshot.mode === "locked";
+  useEffect(() => {
+    if (!onFloor && fullscreenOn) void fullscreen.exit();
+  }, [onFloor, fullscreenOn, fullscreen]);
   // When the reference sync last finished since the app started.
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   useEffect(() => {
@@ -973,7 +1003,9 @@ function AppScreens({
         />
       )}
       {(view.kind === "floor" || view.kind === "floor_operator") && pairedStatus !== null && (
-        <div className="floor-frame">
+        <FloorFrameWithUpdateEntry
+          value={{ ...updateCheck, inShift: false, open: () => setUpdateOpen(true) }}
+        >
           <FloorStatusBar
             local={localDb}
             pairing={pairedStatus}
@@ -1059,7 +1091,7 @@ function AppScreens({
               />
             </UnpairContext.Provider>
           )}
-        </div>
+        </FloorFrameWithUpdateEntry>
       )}
       {view.kind === "office_login" && (
         <OfficeLogin

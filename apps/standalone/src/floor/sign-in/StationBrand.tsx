@@ -7,7 +7,10 @@
  */
 export function StationBrand({ label }: { label: string }) {
   return (
-    <div className="station-brand station-brand--compact operator-login__brand">
+    <div
+      className="station-brand station-brand--compact operator-login__brand"
+      data-fit-decorative-crop=""
+    >
       <svg
         className="station-brand__logo"
         viewBox="0 0 280 64"

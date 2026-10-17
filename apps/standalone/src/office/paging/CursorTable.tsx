@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Table, type TableProps } from "@markiro/ui";
 
+import { tableFloorStyle } from "../list/fill-model.js";
 import { PaginationBar } from "./PaginationBar.js";
 import type { PageSize } from "./page-size.js";
 
@@ -49,6 +50,7 @@ export function CursorTable<Row>({
       <Table
         fill
         {...table}
+        style={{ ...tableFloorStyle(paging.rows.length), ...table.style }}
         rows={paging.rows}
         scrollLabel={name ?? t("office.common.pagination.table")}
         {...(tableLabel === undefined ? {} : { tableLabel })}

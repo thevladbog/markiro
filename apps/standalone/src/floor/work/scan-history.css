@@ -217,3 +217,86 @@
     display: none;
   }
 }
+
+/*
+ * A window up to 780 px high: the card is the title row (the 64 px «Вся история» button) and whole
+ * rows of 48 px under it, as many as the card's remaining height holds (`useWholeRows`), none when
+ * it holds none; the button stays reachable at every height.
+ */
+@media (max-height: 780px) {
+  .scan-history--compact {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-1);
+  }
+
+  .scan-history--compact .scan-history__list {
+    gap: var(--sp-1);
+  }
+
+  .scan-history--compact .scan-history__row {
+    min-height: 48px;
+    padding-block: 2px;
+    gap: var(--sp-2);
+  }
+
+  .scan-history--compact .scan-code__serial {
+    font: 600 18px/20px var(--font-mono);
+  }
+
+  .scan-history--compact .scan-code__gtin {
+    font: 400 13px/14px var(--font-mono);
+  }
+}
+
+/*
+ * The full history in the window's height: the title, the column heads and the pager keep their
+ * height, and the page's rows share the rest — 64 px when the window is roomy, down to 40 px when it
+ * is not (a 1280 x 1024 panel at 125 % is ~640 CSS px high), so the seven rows and the pager are
+ * always whole and in view. A row holds two lines of its code in 40 px (20 + 14).
+ */
+.scan-history--full {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.scan-history--full > * {
+  flex: none;
+}
+
+.scan-history--full > .scan-history__list {
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  gap: var(--sp-1);
+  align-content: start;
+  grid-auto-rows: minmax(40px, 64px);
+}
+
+.scan-history--full .scan-history__row {
+  min-height: 0;
+}
+
+@media (max-height: 780px) {
+  .scan-history--full {
+    gap: var(--sp-2);
+  }
+
+  .scan-history--full > h2 {
+    font: 600 24px/30px var(--font-ui);
+  }
+
+  .scan-history--full .scan-history__head {
+    font-size: 15px;
+    line-height: 20px;
+  }
+
+  .scan-history--full .scan-code__serial {
+    font: 600 16px/18px var(--font-mono);
+  }
+
+  .scan-history--full .scan-code__gtin {
+    font: 400 12px/14px var(--font-mono);
+  }
+}

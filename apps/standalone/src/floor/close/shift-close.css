@@ -168,6 +168,13 @@
   text-overflow: ellipsis;
 }
 
+/* The summary's body: the figures, the reasons and the questions; the actions follow it. */
+.shift-close__body {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
 /* The row of floor actions, each an equal share, as the cloud's overlay has it. */
 .shift-close__actions {
   display: grid;
@@ -195,4 +202,116 @@
 /* A note or a blocker inside the card: its title at floor size, not the Alert's office size. */
 .shift-close .mk-alert > div > span:first-child {
   font: var(--floor-body-strong) !important;
+}
+
+/*
+ * A window up to 860 px high (the terminal's ~640-720 CSS px, and the 800 px panel): the card gives its air and its tiles
+ * their height, the six reasons stand three to a row (two rows of 64 px, a long name on two lines),
+ * and the note and the pallet's question take their own text height. When the card is still taller
+ * than the stage (an open pallet's question under six reasons on the lowest window) its body scrolls
+ * and the row of actions stays pinned, so «Подтвердить закрытие» is never below the fold.
+ */
+@media (max-height: 860px) {
+  .shift-close {
+    max-height: 100%;
+    padding: 6px var(--sp-4);
+    gap: var(--sp-1);
+    overflow: hidden;
+  }
+
+  .shift-close__body {
+    min-height: 0;
+    gap: var(--sp-1);
+    overflow-y: auto;
+  }
+
+  /* The pallet's question says that the close cannot be undone: it stands in for the note above it. */
+  .shift-close__body:has(> .mk-alert) > .shift-close__note {
+    display: none;
+  }
+
+  .shift-close h3 {
+    font: 600 22px/28px var(--font-ui);
+  }
+
+  /* The figures share one row: the product's line across it, the tiles an equal share each. */
+  .shift-close__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+  }
+
+  .shift-close__facts > div {
+    flex: 1 1 0;
+  }
+
+  .shift-close__facts > div:first-child {
+    flex: 0 0 100%;
+  }
+
+  .shift-close__facts > div {
+    padding: 0 var(--sp-3);
+    gap: 0;
+  }
+
+  .shift-close__facts dt {
+    font: 600 13px/16px var(--font-ui);
+  }
+
+  .shift-close__facts dd {
+    font: 600 20px/22px var(--font-mono);
+  }
+
+  .shift-close__facts > div:first-child dt,
+  .shift-close__facts > div:first-child dd {
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .shift-close__result {
+    font: 600 16px/20px var(--font-ui) !important;
+  }
+
+  .shift-close__reasons {
+    padding: var(--sp-1) var(--sp-3);
+    gap: var(--sp-1);
+  }
+
+  .shift-close__reasons-title {
+    font: 600 16px/20px var(--font-ui) !important;
+  }
+
+  .shift-close .floor-choice-group {
+    gap: var(--sp-1) var(--sp-2);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .shift-close .floor-choice.mk-btn {
+    padding: var(--sp-1) var(--sp-3) !important;
+    gap: var(--sp-2) !important;
+    font: 400 16px/20px var(--font-ui) !important;
+  }
+
+  .shift-close .floor-choice.mk-btn[data-checked="true"] {
+    font: 600 16px/20px var(--font-ui) !important;
+  }
+
+  .shift-close .floor-choice__label {
+    display: -webkit-box;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .shift-close__note {
+    font: 400 14px/18px var(--font-ui) !important;
+  }
+
+  .shift-close .mk-alert {
+    padding: 6px var(--sp-3);
+  }
+
+  .shift-close .mk-alert p {
+    font: 400 15px/20px var(--font-ui);
+  }
 }

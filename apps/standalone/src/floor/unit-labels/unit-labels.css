@@ -224,12 +224,16 @@
 
 /* «История этикеток» on the work screen's stage: the rows scroll, «Назад» stays under them. */
 .unit-label-history {
-  display: grid;
+  display: flex;
   min-width: 0;
   min-height: 0;
   height: 100%;
   gap: var(--sp-3);
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  flex-direction: column;
+}
+
+.unit-label-history > * {
+  flex: none;
 }
 
 .unit-label-history h2 {
@@ -247,6 +251,8 @@
 .unit-label-history__rows {
   display: grid;
   min-height: 0;
+  /* Natural height while it fits, the stage's rest (and its own scroll) when it does not: «К смене» stays in view. */
+  flex: 0 1 auto !important;
   margin: 0;
   padding: 0;
   overflow: auto;
@@ -280,4 +286,26 @@
 .unit-label-history__actions {
   display: flex;
   justify-content: flex-start;
+}
+
+/*
+ * The labels' history in the stage's height: the title and «К смене» keep theirs, the list keeps its
+ * own scroll (a shift can print hundreds of labels), so the way back is never below the fold.
+ */
+@media (max-height: 780px) {
+  .unit-label-history {
+    gap: var(--sp-2);
+  }
+
+  .unit-label-history h2 {
+    font: 600 24px/30px var(--font-ui);
+  }
+
+  .unit-label-history__rows {
+    gap: var(--sp-1);
+  }
+
+  .unit-label-history__row {
+    padding: var(--sp-1) var(--sp-3);
+  }
 }

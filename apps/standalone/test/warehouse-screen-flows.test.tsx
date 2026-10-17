@@ -478,11 +478,15 @@ describe("the session", () => {
     ).toHaveLength(1);
   });
 
-  it("offers no finish while a label waits: the detail has the label's answers, never the session's end", async () => {
+  it("keeps the finish disabled with its reason while a label waits: never the session's end", async () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
     await screen.findByText(/Неизвестно, вышла ли этикетка/);
-    expect(screen.queryByRole("button", { name: "Завершить сеанс" })).toBeNull();
+    // The finish stays reachable from the detail, disabled, with the reason beside it.
+    expect(
+      screen.getByRole("button", { name: "Завершить сеанс" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(screen.getByText(/Сначала закройте этикетку/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Следующий код" })).toBeNull();
     // The store itself refuses a finish while a label waits (warehouse-store.test.ts).
     expect(rows(at.db, "SELECT finished_at FROM wh_sessions")).toEqual([{ finished_at: null }]);
@@ -582,5 +586,93 @@ describe("without the link", () => {
     at.rerender({ online: false });
     await at.press("Повторить отправку");
     expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
+  });
+});
+
+describe("the check of the print by a second scan: the session's switch", () => {
+  const SWITCH = "Проверка распечатки повторным сканированием";
+
+  /** A session started with the check switched as asked (the switch stands on the start screen). */
+  async function startedWith(
+    on: boolean,
+    options: Parameters<typeof renderWarehouse>[0] = {},
+  ): Promise<Awaited<ReturnType<typeof renderWarehouse>>> {
+    const at = await renderWarehouse(options);
+    await screen.findByRole("button", { name: "Начать перепечатку" });
+    await at.press("Повреждена");
+    const toggle = screen.getByRole("switch", { name: SWITCH });
+    if ((toggle.getAttribute("aria-checked") === "true") !== on) fireEvent.click(toggle);
+    expect(screen.getByRole("switch", { name: SWITCH }).getAttribute("aria-checked")).toBe(
+      String(on),
+    );
+    await at.press("Начать перепечатку");
+    await at.scanner.listening();
+    return at;
+  }
+
+  it("is off by default and the next code follows a sent label at once", async () => {
+    const at = await startedWith(false);
+    await at.scan(BOX_SSCC);
+    expect(await screen.findByText("Этикетка передана на принтер")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Проверить сканом" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Следующий код" })).toBeTruthy();
+  });
+
+  it("when on, holds the next code until the new label is scanned, and a wrong scan does not release it", async () => {
+    const at = await startedWith(true);
+    await at.scan(BOX_SSCC);
+    expect(await screen.findByText("Этикетка передана на принтер")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Следующий код" })).toBeNull();
+    await at.press("Проверить сканом");
+    expect(screen.getByText("Отсканируйте новую этикетку")).toBeTruthy();
+    await at.scan(PALLET_SSCC);
+    expect(
+      await screen.findByText(
+        "Код не совпадает с новой этикеткой. Отсканируйте именно новую этикетку.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Следующий код" })).toBeNull();
+    await at.scan(BOX_SSCC);
+    expect(await screen.findByText("Новая этикетка проверена")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Следующий код" })).toBeTruthy();
+    expect(rows(at.db, "SELECT state, attempts FROM wh_jobs")).toEqual([
+      { state: "verified", attempts: 1 },
+    ]);
+    // The check sent nothing more to the printer.
+    expect(at.shell.sends).toHaveLength(1);
+  });
+
+  it("when on, lets the operator skip the check knowingly; no state is invented for it", async () => {
+    const at = await startedWith(true);
+    await at.scan(BOX_SSCC);
+    await screen.findByText("Этикетка передана на принтер");
+    await at.press("Пропустить проверку");
+    expect(rows(at.db, "SELECT state FROM wh_jobs")).toEqual([{ state: "sent" }]);
+    expect(screen.getByText("Отсканируйте код")).toBeTruthy();
+  });
+
+  it("starts as the workstation's own check is set, and the unknown outcome keeps its check either way", async () => {
+    await renderWarehouse({ answer: UNKNOWN_ANSWER });
+    await screen.findByRole("button", { name: "Начать перепечатку" });
+    expect(screen.getByRole("switch", { name: SWITCH }).getAttribute("aria-checked")).toBe("false");
+    cleanup();
+    const seeded = openLocalDb();
+    seedWarehouseCopies(seeded.db, { operator: true });
+    await setUpPrinting(seeded.executor, {
+      assignments: { box: "zebra", pallet: "zebra", duplicate: "tsc" },
+      verifyPrintedLabel: true,
+    });
+    const on = await renderWarehouse({ seeded, answer: UNKNOWN_ANSWER });
+    await screen.findByRole("button", { name: "Начать перепечатку" });
+    expect(screen.getByRole("switch", { name: SWITCH }).getAttribute("aria-checked")).toBe("true");
+    await on.press("Повреждена");
+    await on.press("Начать перепечатку");
+    await on.scanner.listening();
+    await on.scan(BOX_SSCC);
+    expect(await screen.findByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    await on.press("Проверить сканом");
+    await on.scan(BOX_SSCC);
+    expect(await screen.findByText("Новая этикетка проверена")).toBeTruthy();
+    expect(on.shell.sends).toHaveLength(1);
   });
 });

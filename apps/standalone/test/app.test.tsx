@@ -375,7 +375,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(false), device, host });
     expect(await screen.findByText("Первый запуск")).toBeTruthy();
     await completeWizard();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledWith("Рабочее место хоста");
     expect(host.bootstrap).toHaveBeenCalledWith(EXPECTED_REQUEST);
     // The site must not be created on this computer before it is paired.
@@ -388,7 +388,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(false), device, host });
     await screen.findByText("Первый запуск");
     await completeWizard();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(device.pairLocally).not.toHaveBeenCalled();
   });
 
@@ -422,7 +422,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(host.officeLogin).toHaveBeenCalledWith({
       login: "admin",
       password: "correct horse battery",
@@ -659,7 +659,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
     await screen.findByText("Шаг 6 из 6 · Проверка");
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
     expect(host.bootstrap).toHaveBeenCalledTimes(2);
   });
@@ -1528,7 +1528,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     // The office header shows the link as a dot with details on a press (beta 3.2).
     fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
     expect(
@@ -1843,7 +1843,7 @@ describe("reference sync health on screen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     expect(
       within(openLinkDetails()).getByText("Справочники не обновились — повторим автоматически"),
     ).toBeTruthy();
@@ -1906,7 +1906,7 @@ describe("reference sync health on screen", () => {
     // Reachable offline too: the office header shows it after signing in.
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     expect(within(openLinkDetails()).getByText("Не приняты записи справочников: 1")).toBeTruthy();
   });
 });
@@ -2436,7 +2436,7 @@ describe("the operator on the floor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
     expect(await screen.findByText("Отсканируйте бейдж")).toBeTruthy();
   });
@@ -4036,7 +4036,7 @@ describe("kiosk mode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     // The office is a mouse-and-keyboard app: it never fills the screen.
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
@@ -4061,7 +4061,7 @@ describe("kiosk mode", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     // The failed lock may have left the window half-locked: the office's own
     // exit is sent whatever the confirmed mode says.
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
@@ -4081,7 +4081,7 @@ describe("kiosk mode", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
@@ -4165,7 +4165,7 @@ describe("kiosk mode", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    expect(await screen.findByText("Вы вошли как Павел Орлов.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
     expect(kiosk.commands).toEqual(["enter_lockdown"]);
   });
@@ -4187,7 +4187,7 @@ describe("kiosk mode", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
   });
 
@@ -4374,7 +4374,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
     await signIn();
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
     await chooseFromUserMenu("Выйти из офиса");
     expect(await screen.findByText("Вход в офис")).toBeTruthy();

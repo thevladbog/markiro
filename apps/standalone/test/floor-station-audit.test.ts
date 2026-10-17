@@ -453,8 +453,25 @@ describe("the warehouse reprint (design: station reprint, 2026-10)", () => {
     expect(row["min-height"]).toBe("84px !important");
     expect(row["background"]).toBe("transparent !important");
     expect(rule(reprint, ".rp-journal__list li")["border-bottom"]).toBe("1px solid var(--line)");
-    // The list is the one scroll region of the session's view.
-    expect(rule(reprint, ".rp-journal__list")["overflow-y"]).toBe("auto");
+    // The list scrolls inside its column (`.rp-scroll`), as every zone of the reprint does.
+    expect(rule(reprint, ".rp-scroll")["overflow-y"]).toBe("auto");
+    expect(rule(reprint, ".rp-journal__list")["overflow-y"]).toBeUndefined();
+  });
+
+  it("makes a zone's scroll visible to a glove: a 16 px track, a thumb, a fade, no hidden platform bar", () => {
+    const own = rule(reprint, ".warehouse-reprint .rp-scroll");
+    // The global style hides the bar until a hover; here the standard properties go back to auto.
+    expect(own["scrollbar-width"]).toBe("auto");
+    expect(own["scrollbar-color"]).toBe("auto");
+    const width = rule(reprint, ".warehouse-reprint .rp-scroll::-webkit-scrollbar")["width"];
+    expect(Number.parseInt(width ?? "0", 10)).toBeGreaterThanOrEqual(14);
+    expect(
+      rule(reprint, ".warehouse-reprint .rp-scroll::-webkit-scrollbar-thumb")["background-color"],
+    ).toBe("var(--muted)");
+    // The fade at the foot shows only while more stands below (`data-more`).
+    expect(rule(reprint, ".rp-col::after")["opacity"]).toBe("0");
+    expect(rule(reprint, '.rp-col[data-more="true"]::after')["opacity"]).toBe("1");
+    expect(rule(reprint, ".rp-col::after")["pointer-events"]).toBe("none");
   });
 
   it("says a state in a 40 px tag with a glyph and a word, tone by tone on the kit's pairs", () => {

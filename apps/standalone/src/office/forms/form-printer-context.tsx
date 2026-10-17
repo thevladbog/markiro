@@ -3,7 +3,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import { printInFrame } from "./print-form.js";
 
 /** Prints a form's HTML; the office's own window by default, a test's mock otherwise. */
-export type PrintForm = (html: string) => void;
+export type PrintForm = (html: string) => void | Promise<void>;
 
 /** The webview's hidden frame (`printInFrame`). */
 export const FRAME_PRINT_FORM: PrintForm = (html) => printInFrame(html);

@@ -11,16 +11,22 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 const base = process.argv[2] ?? "http://127.0.0.1:5301";
 const VIEWPORTS = [
-  [1280, 1024],
-  [1280, 800],
-  // The 1280×1024 and 1280×800 panels at Windows 125 % scaling.
-  [1024, 820],
+  // The owner's terminal at Windows 125 % scaling (a CSS viewport about 1024 wide, 640-720 high)
+  // and the panels it stands for.
   [1024, 640],
+  [1024, 700],
+  [1024, 768],
+  [1024, 820],
+  [1280, 700],
+  [1280, 800],
+  [1280, 1024],
 ];
 const STATES = [
   "setup",
   "setup-sheets",
   "setup-none",
+  "setup-long",
+  "setup-check",
   "empty",
   "journal",
   "notfound",
@@ -30,6 +36,11 @@ const STATES = [
   "unit-prepared",
   "sending",
   "sent",
+  "sent-check",
+  "sent-check-verifying",
+  "sent-check-long",
+  "failed-setup",
+  "journal-blocked",
   "unit-sent",
   "unknown",
   "verifying",
@@ -45,7 +56,7 @@ const STATES = [
 ];
 const THEMES = ["dark", "light"];
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
 let failed = false;
 for (const [width, height] of VIEWPORTS) {
   const page = await browser.newPage({ viewport: { width, height } });

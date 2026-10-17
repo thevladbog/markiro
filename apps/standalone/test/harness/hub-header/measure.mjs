@@ -20,6 +20,9 @@ const VIEWPORTS = [
 ];
 const CASES = [
   { name: "one", query: "view=hub&shifts=1&queue=2" },
+  { name: "one-photo-jpeg", query: "view=hub&shifts=1&photo=jpeg" },
+  { name: "one-photo-png", query: "view=hub&shifts=1&photo=png" },
+  { name: "one-photo-transparent", query: "view=hub&shifts=1&photo=transparent" },
   { name: "two-long", query: "view=hub&shifts=2&long=1" },
   { name: "three-offline", query: "view=hub&shifts=3&offline=1&queue=3&rejected=1" },
   { name: "three-long-offline", query: "view=hub&shifts=3&offline=1&queue=3&long=1" },

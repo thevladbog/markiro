@@ -1,10 +1,11 @@
-import type { ReactNode, Ref } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@markiro/ui";
 
 import type { ScannerIndicator } from "../scanner-indicator.js";
 import { Glyph, type GlyphName } from "../kit/StatusIcons.js";
+import { SwitchCard } from "../kit/SwitchCard.js";
 import {
   Banner,
   FooterButton,
@@ -18,6 +19,7 @@ import {
   ReprintFooter,
   ReprintHeading,
   ScanZone,
+  ScrollColumn,
   SummaryList,
   Tag,
   type Press,
@@ -27,12 +29,15 @@ import {
 } from "./ReprintParts.js";
 import type { WarehouseJob, WarehouseReason } from "./warehouse-store.js";
 import {
+  awaitsCheck,
   filterJobs,
   isPrinterSetupFailure,
+  isUnresolved,
   printerView,
   resultView,
   type JobKindView,
   type JournalFilter,
+  type ReprintCheck,
 } from "./warehouse-view.js";
 import "./warehouse.css";
 
@@ -184,6 +189,69 @@ function PauseButton({ leave, onLeave }: { leave: Press; onLeave: () => void }) 
   );
 }
 
+/** What is disabled for the moment, in a style and a word for a screen reader. */
+const DISABLED_STYLE = { opacity: 0.45, cursor: "not-allowed" } as const;
+
+/**
+ * The footer every screen of a running session shares: «К сменам» (the pause: the session stays
+ * open, a label that waits is recovered on return) and «Завершить сеанс» are always there. While a
+ * label waits (`wh_jobs_open`) the finish is shown disabled with its reason in words beside it, never
+ * dropped. What belongs to the step is `children` (and `between`, before the finish at the end).
+ */
+function SessionFooter({
+  blocked,
+  press,
+  leave,
+  onLeave,
+  onFinish,
+  between,
+  finishAtEnd = false,
+  children,
+}: {
+  blocked: boolean;
+  press: Press;
+  leave: Press;
+  onLeave: () => void;
+  onFinish: () => void;
+  between?: ReactNode;
+  finishAtEnd?: boolean;
+  children?: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const reasonId = useId();
+  return (
+    <ReprintFooter
+      note={
+        blocked ? (
+          <p id={reasonId} className="rp-footer__note">
+            <Glyph name="info" size={22} />
+            <span>{t("floor.warehouse.finishWaits")}</span>
+          </p>
+        ) : undefined
+      }
+    >
+      <PauseButton leave={leave} onLeave={onLeave} />
+      {between}
+      {blocked ? (
+        <FooterButton
+          glyph="stop"
+          end={finishAtEnd}
+          aria-disabled="true"
+          aria-describedby={reasonId}
+          style={DISABLED_STYLE}
+        >
+          {t("floor.warehouse.finish")}
+        </FooterButton>
+      ) : (
+        <FooterButton glyph="stop" end={finishAtEnd} {...press(onFinish)}>
+          {t("floor.warehouse.finish")}
+        </FooterButton>
+      )}
+      {children}
+    </ReprintFooter>
+  );
+}
+
 /** A body: the banner's place, then the zones; the banner's row is there only while one stands. */
 function Body({
   banner,
@@ -214,8 +282,13 @@ export function SetupView({
   onLeave,
   onSetup,
   onStart,
+  check = "none",
+  onCheck,
 }: {
   reason: WarehouseReason | null;
+  /** The session's check of a print by a second scan; the switch is shown when the screen answers it. */
+  check?: ReprintCheck;
+  onCheck?: (next: ReprintCheck) => void;
   lines: readonly SummaryLine[];
   press: Press;
   leave: Press;
@@ -234,30 +307,53 @@ export function SetupView({
       head={heading(true)}
       body={
         <div className="rp-zones rp-zones--setup">
-          <section className="rp-setup-reasons" aria-labelledby="warehouse-setup-title">
-            <h3 id="warehouse-setup-title" className="rp-label rp-label--hidden">
-              {t("floor.warehouse.sessionSetup")}
-            </h3>
-            <ReasonList
-              picked={reason}
-              onPick={onPick}
-              press={press}
-              legend={t("floor.warehouse.reason")}
-            />
-            <p>{t("floor.warehouse.reasonHint")}</p>
-            <p>{t("floor.warehouse.scope")}</p>
-          </section>
-          <section aria-labelledby="warehouse-summary-title">
-            <h3 id="warehouse-summary-title" className="rp-label">
-              {t("floor.warehouse.summary.title")}
-            </h3>
-            <SummaryList
-              lines={lines}
-              press={press}
-              onChange={onChangeTemplates}
-              disabled={false}
-            />
-          </section>
+          <ScrollColumn>
+            <section className="rp-setup-reasons" aria-labelledby="warehouse-setup-title">
+              <h3 id="warehouse-setup-title" className="rp-label rp-label--hidden">
+                {t("floor.warehouse.sessionSetup")}
+              </h3>
+              <ReasonList
+                picked={reason}
+                onPick={onPick}
+                press={press}
+                legend={t("floor.warehouse.reason")}
+              />
+              {onCheck === undefined ? null : (
+                <div className="rp-check">
+                  <SwitchCard
+                    title={t("floor.warehouse.check.title")}
+                    hint={t(
+                      check === "required"
+                        ? "floor.warehouse.check.on"
+                        : "floor.warehouse.check.off",
+                    )}
+                    checked={check === "required"}
+                    stateLabel={t(
+                      check === "required"
+                        ? "floor.warehouse.check.stateOn"
+                        : "floor.warehouse.check.stateOff",
+                    )}
+                    onChange={(next) => onCheck(next ? "required" : "none")}
+                  />
+                </div>
+              )}
+              <p>{t("floor.warehouse.reasonHint")}</p>
+              <p>{t("floor.warehouse.scope")}</p>
+            </section>
+          </ScrollColumn>
+          <ScrollColumn>
+            <section aria-labelledby="warehouse-summary-title">
+              <h3 id="warehouse-summary-title" className="rp-label">
+                {t("floor.warehouse.summary.title")}
+              </h3>
+              <SummaryList
+                lines={lines}
+                press={press}
+                onChange={onChangeTemplates}
+                disabled={false}
+              />
+            </section>
+          </ScrollColumn>
         </div>
       }
       footer={
@@ -302,7 +398,10 @@ export function SessionView({
   onTemplates,
   onFinish,
   onLeave,
+  finishBlocked = false,
 }: {
+  /** A label waits (`wh_jobs_open`): the finish is shown, disabled, with its reason. */
+  finishBlocked?: boolean;
   journal: readonly WarehouseJob[];
   filter: JournalFilter;
   onFilter: (filter: JournalFilter) => void;
@@ -336,7 +435,9 @@ export function SessionView({
   const zones = (
     <div className="rp-zones">
       {journal.length === 0 ? (
-        <JournalEmpty />
+        <ScrollColumn>
+          <JournalEmpty />
+        </ScrollColumn>
       ) : (
         <Journal
           jobs={filterJobs(journal, filter)}
@@ -346,20 +447,22 @@ export function SessionView({
           press={press}
         />
       )}
-      <ScanZone
-        variant={variant}
-        manual={
-          <Button
-            size="floor"
-            variant={variant === "scanner" ? "primary" : "secondary"}
-            icon={<Glyph name="keyboard" size={26} />}
-            disabled={!online}
-            {...press(onManual)}
-          >
-            {t("floor.warehouse.manual")}
-          </Button>
-        }
-      />
+      <ScrollColumn>
+        <ScanZone
+          variant={variant}
+          manual={
+            <Button
+              size="floor"
+              variant={variant === "scanner" ? "primary" : "secondary"}
+              icon={<Glyph name="keyboard" size={26} />}
+              disabled={!online}
+              {...press(onManual)}
+            >
+              {t("floor.warehouse.manual")}
+            </Button>
+          }
+        />
+      </ScrollColumn>
     </div>
   );
   return (
@@ -382,15 +485,19 @@ export function SessionView({
         </Body>
       }
       footer={
-        <ReprintFooter>
-          <PauseButton leave={leave} onLeave={onLeave} />
-          <FooterButton glyph="file" {...press(onTemplates)}>
-            {t("floor.warehouse.chooseTemplates")}
-          </FooterButton>
-          <FooterButton glyph="stop" end {...press(onFinish)}>
-            {t("floor.warehouse.finish")}
-          </FooterButton>
-        </ReprintFooter>
+        <SessionFooter
+          blocked={finishBlocked}
+          press={press}
+          leave={leave}
+          onLeave={onLeave}
+          onFinish={onFinish}
+          finishAtEnd
+          between={
+            <FooterButton glyph="file" {...press(onTemplates)}>
+              {t("floor.warehouse.chooseTemplates")}
+            </FooterButton>
+          }
+        />
       }
       overlay={overlay ?? null}
     />
@@ -407,17 +514,21 @@ export interface JobHandlers {
   onVerify: () => void;
   onSetup: () => void;
   onLeave: () => void;
+  /** «Завершить сеанс»: the screen asks the question; a waiting label keeps it disabled. */
+  onFinish: () => void;
 }
 
 function JobFooter({
   job,
   verifying,
+  check,
   press,
   leave,
   handlers,
 }: {
   job: WarehouseJob;
   verifying: boolean;
+  check: ReprintCheck;
   press: Press;
   leave: Press;
   handlers: JobHandlers;
@@ -495,6 +606,32 @@ function JobFooter({
         </>
       );
     case "sent":
+      // The session requires the scan of the new label: the next code waits for it (or for a
+      // knowing skip), and the check is the main answer.
+      if (awaitsCheck(job, check)) {
+        return (
+          <>
+            {again(false)}
+            <FooterButton glyph="arrow-right" {...press(handlers.onNext)}>
+              {t("floor.warehouse.skipCheck")}
+            </FooterButton>
+            <FooterButton
+              primary={!verifying}
+              glyph="scan-frame"
+              aria-pressed={verifying}
+              {...press(handlers.onVerify)}
+            >
+              {t(verifying ? "floor.warehouse.verifyCancel" : "floor.warehouse.verifyButton")}
+            </FooterButton>
+          </>
+        );
+      }
+      return (
+        <>
+          {again(false)}
+          {next}
+        </>
+      );
     case "verified":
       return (
         <>
@@ -523,7 +660,10 @@ export function JobView({
   viewRef,
   overlay,
   handlers,
+  check = "none",
 }: {
+  /** The session's check of a print by a second scan (the switch of the start). */
+  check?: ReprintCheck;
   /** The job as the detail shows it (`sending` while its bytes are on their way). */
   job: WarehouseJob;
   verifying: boolean;
@@ -546,15 +686,19 @@ export function JobView({
   const banner = <ReprintBanner said={said} online={online} scanner={scanner} />;
   const zones = (
     <div className="rp-zones rp-zones--job">
-      <JobSubject job={job} />
-      <JobPrint
-        templateName={templateName}
-        printer={printerView(job)}
-        reason={t(`floor.warehouse.reasons.${job.reason}`)}
-        result={resultView(job, verifying)}
-        resultText={resultText}
-        note={note}
-      />
+      <ScrollColumn>
+        <JobSubject job={job} />
+      </ScrollColumn>
+      <ScrollColumn>
+        <JobPrint
+          templateName={templateName}
+          printer={printerView(job)}
+          reason={t(`floor.warehouse.reasons.${job.reason}`)}
+          result={resultView(job, verifying)}
+          resultText={resultText}
+          note={note}
+        />
+      </ScrollColumn>
     </div>
   );
   return (
@@ -562,13 +706,9 @@ export function JobView({
       {...(viewRef === undefined ? {} : { viewRef })}
       head={heading(
         false,
-        <>
-          <Tag tone="neutral" glyph="info">
-            {reasonText}
-          </Tag>
-          {/* Never held by work: the floor's leave waits for it (N9). */}
-          <PauseButton leave={leave} onLeave={handlers.onLeave} />
-        </>,
+        <Tag tone="neutral" glyph="info">
+          {reasonText}
+        </Tag>,
       )}
       body={
         <Body banner={banner} shown={hasBanner(said, online, scanner)}>
@@ -576,15 +716,23 @@ export function JobView({
         </Body>
       }
       footer={
-        <ReprintFooter>
+        /* The leave is never held by work: the floor's leave waits for it (N9). */
+        <SessionFooter
+          blocked={isUnresolved(job)}
+          press={press}
+          leave={leave}
+          onLeave={handlers.onLeave}
+          onFinish={handlers.onFinish}
+        >
           <JobFooter
             job={job}
             verifying={verifying}
+            check={check}
             press={press}
             leave={leave}
             handlers={handlers}
           />
-        </ReprintFooter>
+        </SessionFooter>
       }
       overlay={overlay ?? null}
     />
@@ -602,7 +750,16 @@ export function ManualView({
   press,
   viewRef,
   onCancel,
+  onLeave,
+  onFinish,
+  finishBlocked = false,
+  leave = press,
 }: {
+  onLeave: () => void;
+  onFinish: () => void;
+  finishBlocked?: boolean;
+  /** The leave's press (never held by work); the buttons' own when the screen has none. */
+  leave?: Press;
   value: string;
   onChange: (next: string) => void;
   onSubmit: () => void;
@@ -642,11 +799,17 @@ export function ManualView({
         </div>
       }
       footer={
-        <ReprintFooter>
+        <SessionFooter
+          blocked={finishBlocked}
+          press={press}
+          leave={leave}
+          onLeave={onLeave}
+          onFinish={onFinish}
+        >
           <FooterButton glyph="x" {...press(onCancel)}>
             {t("floor.warehouse.cancel")}
           </FooterButton>
-        </ReprintFooter>
+        </SessionFooter>
       }
     />
   );

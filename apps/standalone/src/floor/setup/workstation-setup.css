@@ -242,15 +242,19 @@ section.workstation-setup {
   font: var(--floor-body);
 }
 
-/* A row (84 px): the name with its test's tag over the mono line, and the actions at 64 px. */
+/*
+ * A row (84 px): the name with its test's tag over the mono line, the actions at 64 px. The name
+ * takes two lines at most and the line below it one, each cut with an ellipsis (the full text is
+ * its `title`): a long name never squeezes the buttons or grows the row past the list.
+ */
 .setup-printer-row {
-  display: flex;
+  display: grid;
   min-width: 0;
   min-height: 84px;
   padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
   gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   border-bottom: 1px solid var(--line);
 }
 
@@ -265,7 +269,11 @@ section.workstation-setup {
   min-width: 0;
   gap: var(--sp-2);
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.setup-printer-row__title > :not(h3) {
+  flex: none;
 }
 
 .setup-printer-row h3,
@@ -276,12 +284,19 @@ section.workstation-setup {
 }
 
 .setup-printer-row h3 {
+  display: -webkit-box;
+  overflow: hidden;
   font: var(--floor-lg);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .setup-printer-row__connection {
+  overflow: hidden;
   color: var(--muted);
   font: 400 18px/26px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .setup-printer-row__actions {
@@ -292,7 +307,7 @@ section.workstation-setup {
 
 .setup-printer-row__actions > button {
   min-width: 0;
-  padding-inline: var(--sp-2);
+  padding-inline: var(--sp-3);
   white-space: nowrap;
 }
 
@@ -318,6 +333,24 @@ section.workstation-setup {
 
 .setup-printer-assignments .setup-card__title {
   padding-inline: 4px;
+}
+
+/* A long printer name is cut inside its select (its full name is the control's `title`), never widens the column. */
+.setup-printer-assignments {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setup-printer-assignments .mk-select__control {
+  min-width: 0;
+}
+
+.setup-printer-assignments .mk-select__value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The A4 test sheet as it was sent, whole, within the list. */
@@ -520,6 +553,7 @@ section.workstation-setup {
 .setup-scanner-row__state {
   flex: none;
   min-width: 0;
+  max-width: 45%;
 }
 
 .setup-scanner-add {
@@ -732,8 +766,7 @@ section.workstation-setup {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .setup-station,
-  .setup-scanners {
+  .setup-station {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -761,6 +794,8 @@ section.workstation-setup {
 .self-test__code-side,
 .self-test__result-side {
   display: grid;
+  /* One shrinkable column: the kinds' buttons wrap in a narrow card instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3);
   align-content: start;
   min-width: 0;
@@ -994,4 +1029,116 @@ section.workstation-setup {
 
 .setup-scanners .self-test__figure {
   padding: 12px;
+}
+
+/*
+ * The real terminal (a 1280 x 1024 panel at Windows 125 %: about 1024 x 640-720 of CSS pixels) and
+ * every window as narrow or as short: a row of the printers is the name over its line with three
+ * icon buttons of 64 px (the words are their `aria-label` and `title`), the scanners' tab keeps
+ * its keypad docked on the right as the printer form does, so the keypad never lands under the
+ * form, and a panel too tall for the window scrolls inside itself, below the pinned footer.
+ */
+@media (max-width: 1100px), (max-height: 780px) {
+  .setup-row__action-text {
+    display: none;
+  }
+
+  .setup-printer-row__actions {
+    gap: 4px;
+  }
+
+  .setup-printer-row__actions > button,
+  .setup-printer-row__actions > .setup-printer-row__remove,
+  .setup-scanner-row__remove {
+    width: 64px;
+    min-width: 64px;
+    padding: 0;
+  }
+
+  .setup-printer-row {
+    padding-inline: var(--sp-3);
+  }
+
+  .setup-scanners {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+
+  .setup-scanners--only {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-scanners__side {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .setup-scanner-row {
+    min-height: 64px;
+    padding-block: 0;
+  }
+
+  /* The keyboard scanner is no control: a line, its explanation is the chip's «Всегда активен». */
+  .setup-scanner-row--always {
+    min-height: 48px;
+  }
+
+  .setup-scanner-row--always .setup-scanner-row__kind {
+    display: none;
+  }
+
+  .setup-scanner-add__fields {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-height: 780px) {
+  section.workstation-setup {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+    grid-template-rows: auto minmax(0, 1fr) auto 72px;
+  }
+
+  .workstation-setup__subtitle {
+    display: none;
+  }
+
+  .setup-tabs__list.mk-data-tabs {
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .workstation-setup__footer,
+  .workstation-setup__footer .setup-footer__back,
+  .workstation-setup__footer .floor-primary {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .setup-printer-list__header {
+    padding-block: var(--sp-1);
+  }
+
+  .setup-printer-row {
+    min-height: 72px;
+    padding-block: var(--sp-1);
+  }
+
+  .setup-card {
+    padding: var(--sp-3);
+    gap: var(--sp-2);
+  }
+
+  .setup-scanner-add {
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+    gap: var(--sp-1);
+  }
+
+  .setup-scanners__list .setup-printer-list__header {
+    padding-block: 0;
+  }
+
+  .setup-printer-assignments {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-1);
+  }
 }

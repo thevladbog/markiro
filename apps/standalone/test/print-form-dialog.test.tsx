@@ -488,6 +488,19 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     expect(screen.queryByRole("button", { name: "Бланк смены" })).toBeNull();
   });
 
+  it("says the window of printing did not open when a print that waits for the logo fails", async () => {
+    const print = vi.fn<PrintForm>(() => Promise.reject(new Error("no printer")));
+    await openCard(formSession(SHIFT), SHIFT, print, fakeOfficeFiles());
+    fireEvent.click(await formButton(BOX_FORM));
+    const dialog = await readyDialog(BOX_FORM);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    expect(
+      await within(dialog).findByText(
+        "Окно печати не открылось. Откройте форму в браузере и напечатайте оттуда.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("says the window of printing did not open when printing fails", async () => {
     const print = vi.fn<PrintForm>(() => {
       throw new Error("no frame");

@@ -163,8 +163,13 @@
 }
 
 :where(.floor-frame, .station-screen) .floor-switch-card__hint {
+  /* Two lines at most (the full text is the line's `title`): a longer hint never grows over the next row. */
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--muted);
   font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 :where(.floor-frame, .station-screen) .floor-switch-card__detail {
@@ -321,14 +326,23 @@
 
 :where(.floor-frame, .station-screen) .floor-readout__label {
   display: flex;
-  gap: 12px;
+  min-width: 0;
+  gap: 16px;
   justify-content: space-between;
   color: var(--muted);
   font: var(--floor-body-strong);
   white-space: nowrap;
 }
 
+/* The label gives way to its note by an ellipsis, never the other way round or into it. */
+:where(.floor-frame, .station-screen) .floor-readout__label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 :where(.floor-frame, .station-screen) .floor-readout__label em {
+  flex: none;
   color: var(--muted2);
   font-style: normal;
   font-weight: 400;

@@ -46,25 +46,64 @@ describe("the list card (pinned layout contract)", () => {
     expect(card).not.toContain("box-shadow");
   });
 
-  it("shrinks to the room the window leaves, but never below a usable table, and bounds its children", () => {
+  it("shrinks to its content and to the room the window leaves, and is never stretched past either", () => {
     const sized = declarations(".office-shell__content > .office-list-card");
     expect(sized).toContain("flex: 0 1 auto");
-    expect(sized).toContain("min-height: 320px");
+    // A floor on every card stretched a one-row list to 320 px (empty room under its last row).
+    expect(sized).not.toMatch(/min-height:\s*[1-9]/);
+    expect(sized).not.toMatch(/(^|[;\s])height:/);
     const card = declarations(".office-list-card");
     expect(card).toContain("display: flex");
     expect(card).toContain("flex-direction: column");
     expect(card).toContain("min-height: 0");
     expect(card).toContain("overflow: hidden");
+    expect(card).not.toMatch(/(^|[;\s])height:/);
   });
 
-  it("lets the table take what is left and keeps the filters and the pagination bar out of its scroll", () => {
-    expect(declarations(".office-list-card .office-paged")).toContain("flex: 1 1 auto");
+  it("floors only a card that is already taller than the floor, and never squeezes a card of filters alone", () => {
+    const floored = declarations(
+      ".office-shell__content > .office-list-card:has(.mk-table__row:nth-child(4))",
+    );
+    expect(floored).toContain("min-height: 320px");
+    expect(
+      declarations(".office-shell__content > .office-list-card:has(.office-list-body)"),
+    ).toContain("min-height: 320px");
+    expect(
+      declarations(
+        ".office-shell__content > .office-list-card:not(:has(.mk-table)):not(:has(.office-list-body))",
+      ),
+    ).toContain("flex-shrink: 0");
+    // Nor a card with another section under it: the page scrolls, the card is not crushed.
+    expect(declarations(".office-shell__content > .office-list-card:not(:last-child)")).toContain(
+      "flex-shrink: 0",
+    );
+  });
+
+  it("labels a period like a field: one weight and one 16 px row, so the bar's controls share a top", () => {
+    const label = declarations(".office-range__label");
+    expect(label).toContain("font: var(--text-caption)");
+    expect(label).toContain("line-height: 16px");
+  });
+
+  it("lets the table be as tall as its rows and scroll only past the room, never below its own floor", () => {
+    const table = declarations(".office-list-card .office-paged > .mk-table");
+    expect(table).toContain("flex: 0 1 auto");
+    expect(table).toContain("min-height: var(--office-table-floor, 0px)");
+    expect(table).not.toContain("flex: 1 1 auto");
+  });
+
+  it("keeps the pagination bar directly under the table and the filters out of its scroll", () => {
+    expect(declarations(".office-list-card .office-paged")).toContain("flex: 0 1 auto");
     expect(declarations(".office-list-card .office-paged")).toContain("min-height: 0");
-    expect(declarations(".office-list-card .office-paged > .mk-table")).toContain("min-height: 0");
     expect(declarations(".office-list-card .office-paged > :not(.mk-table)")).toContain(
       "flex: none",
     );
     expect(declarations(".office-list-filters")).toContain("flex: none");
+  });
+
+  it("gives a state of the list (empty, loading) room to breathe instead of collapsing the card", () => {
+    expect(declarations(".office-list-state")).toContain("min-height: 160px");
+    expect(declarations(".office-list-body")).toContain("min-height: 160px");
   });
 
   it("gives the card the frame: the table inside has none of its own", () => {
@@ -90,6 +129,42 @@ describe("the filters", () => {
   it("keeps a period on one line, each date wide enough for «10 октября 2026»", () => {
     expect(declarations(".office-range__row")).toContain("display: flex");
     expect(declarations(".office-range__row > .mk-date-picker")).toContain("min-width: 212px");
+  });
+
+  it("is one grid: the fields at the left, the aside (buttons, then the count) at the right edge", () => {
+    const bar = declarations(".office-list-filters");
+    expect(bar).toContain("display: grid");
+    expect(bar).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(bar).toContain("align-items: start");
+    expect(declarations(".office-list-filters--panel")).toContain(
+      "grid-template-columns: minmax(0, 1fr)",
+    );
+  });
+
+  it("puts every control of a bar on one top line and one height: the same label row, 44 px controls", () => {
+    const fields = declarations(".office-list-filters__fields");
+    expect(fields).toContain("align-items: flex-start");
+    const aside = declarations(".office-list-filters__aside");
+    // 22 px: a label (16 px) and the gap under it (6 px), so the buttons start where the inputs do.
+    expect(aside).toContain("margin-top: 22px");
+    expect(aside).toContain("min-height: 44px");
+    expect(aside).toContain("align-items: center");
+    expect(declarations(".office-list-filters .office-segmented")).toContain("height: 44px");
+    expect(declarations(".office-filter-row")).toContain("align-items: flex-start");
+  });
+
+  it("sets the count last, at the right edge, in a fixed width so the buttons beside it do not jump", () => {
+    const found = declarations(".office-list-filters__found");
+    expect(found).toContain("order: 3");
+    expect(found).toContain("text-align: right");
+    expect(found).toMatch(/min-width: \d+ch/);
+    expect(declarations(".office-filter-row__end")).toContain("margin-left: auto");
+  });
+});
+
+describe("the table's alignment", () => {
+  it("centres the row actions in their column, under a centred heading", () => {
+    expect(declarations(".office-row-actions")).toContain("justify-content: center");
   });
 });
 
@@ -157,6 +232,7 @@ describe("the search form's filter rows", () => {
     const top = declarations(".office-filter-row__end--top");
     expect(top).toContain("align-self: flex-start");
     expect(top).toContain("margin-top: 22px");
+    expect(top).toContain("min-height: 44px");
   });
 });
 
