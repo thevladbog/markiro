@@ -57,7 +57,7 @@ import type { UpdatesApi } from "../update/updates-api.js";
 import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
 import { UpdateFromHostDialog } from "../update/UpdateFromHostDialog.js";
 import { useKeptOffer } from "../update/kept-offer.js";
-import { FloorUpdateEntryProvider } from "../update/floor-update-entry-context.js";
+import { FloorFrameWithUpdateEntry } from "../update/floor-update-entry-context.js";
 import { useHostUpdateCheck } from "../update/use-host-offer.js";
 import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
@@ -884,211 +884,209 @@ function AppScreens({
   const repairError = repairState === "idle" || repairState === "busy" ? null : repairState;
 
   return (
-    <FloorUpdateEntryProvider
-      value={{ ...updateCheck, inShift: false, open: () => setUpdateOpen(true) }}
-    >
-      <main className="standalone-screen">
-        {view.kind === "loading" && <WaitScreen messageKey="shell.loading" />}
-        {view.kind === "config_error" && (
-          <ConfigErrorScreen
-            busy={repairBusy}
-            error={repairError}
-            unsent={unsentHere}
-            onReset={repair}
-            onConfirm={confirmRepair}
-          />
-        )}
-        {view.kind === "host_missing" && (
-          <HostMissingScreen
-            reason={view.reason}
-            address={address}
-            onRetry={retryProbe}
-            onNetwork={unpaired ? () => dispatch({ type: "network_pairing_requested" }) : null}
-            onUpdate={
-              offerToInstall === null || pairedStatus === null ? null : () => setUpdateOpen(true)
-            }
-          />
-        )}
-        {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
-        {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
-        {view.kind === "network_pairing" && scannerSetup && (
-          <WorkstationSetup
-            scope="scanners"
+    <main className="standalone-screen">
+      {view.kind === "loading" && <WaitScreen messageKey="shell.loading" />}
+      {view.kind === "config_error" && (
+        <ConfigErrorScreen
+          busy={repairBusy}
+          error={repairError}
+          unsent={unsentHere}
+          onReset={repair}
+          onConfirm={confirmRepair}
+        />
+      )}
+      {view.kind === "host_missing" && (
+        <HostMissingScreen
+          reason={view.reason}
+          address={address}
+          onRetry={retryProbe}
+          onNetwork={unpaired ? () => dispatch({ type: "network_pairing_requested" }) : null}
+          onUpdate={
+            offerToInstall === null || pairedStatus === null ? null : () => setUpdateOpen(true)
+          }
+        />
+      )}
+      {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
+      {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
+      {view.kind === "network_pairing" && scannerSetup && (
+        <WorkstationSetup
+          scope="scanners"
+          local={localDb}
+          hardware={hardwareApi}
+          printing={printing}
+          source={scanner}
+          onSaved={() => undefined}
+          onBack={() => setScannerSetup(false)}
+        />
+      )}
+      {view.kind === "network_pairing" && !scannerSetup && (
+        <NetworkPairing
+          probe={hostProbe}
+          onClaim={claim}
+          onBack={() => dispatch({ type: "network_pairing_cancelled" })}
+          comScans={comScans}
+          onScannerSetup={() => setScannerSetup(true)}
+        />
+      )}
+      {view.kind === "pair_failed" && (
+        <PairFailedScreen
+          code={view.code}
+          onRetry={() => {
+            // A stale probe snapshot can carry the wrong host identity (e.g.
+            // after a host swap): re-probe as well, not just the pairing.
+            dispatch({ type: "pairing_retried" });
+            retryProbe();
+          }}
+        />
+      )}
+      {view.kind === "device_rejected" && (
+        <DeviceRejectedScreen
+          reason={view.reason}
+          remoteAddress={remoteAddress}
+          busy={repairBusy}
+          error={repairError}
+          unsent={unsentHere}
+          owed={owedHere}
+          onRepair={repair}
+          onConfirm={confirmRepair}
+          onConfirmOwed={confirmOwed}
+        />
+      )}
+      {view.kind === "other_host" && (
+        <OtherHostScreen
+          hostAddress={view.hostAddress}
+          busy={repairBusy}
+          error={repairError}
+          unsent={unsentHere}
+          owed={owedHere}
+          onRepair={repair}
+          onConfirm={confirmRepair}
+          onConfirmOwed={confirmOwed}
+        />
+      )}
+      {view.kind === "line_select" && (
+        <LineSelect
+          local={localDb}
+          sync={state.sync}
+          link={state.link}
+          onSelect={selectLine}
+          onSync={requestSync}
+          onOffice={openOffice}
+        />
+      )}
+      {(view.kind === "floor" || view.kind === "floor_operator") && pairedStatus !== null && (
+        <FloorFrameWithUpdateEntry
+          value={{ ...updateCheck, inShift: false, open: () => setUpdateOpen(true) }}
+        >
+          <FloorStatusBar
             local={localDb}
-            hardware={hardwareApi}
-            printing={printing}
-            source={scanner}
-            onSaved={() => undefined}
-            onBack={() => setScannerSetup(false)}
-          />
-        )}
-        {view.kind === "network_pairing" && !scannerSetup && (
-          <NetworkPairing
-            probe={hostProbe}
-            onClaim={claim}
-            onBack={() => dispatch({ type: "network_pairing_cancelled" })}
-            comScans={comScans}
-            onScannerSetup={() => setScannerSetup(true)}
-          />
-        )}
-        {view.kind === "pair_failed" && (
-          <PairFailedScreen
-            code={view.code}
-            onRetry={() => {
-              // A stale probe snapshot can carry the wrong host identity (e.g.
-              // after a host swap): re-probe as well, not just the pairing.
-              dispatch({ type: "pairing_retried" });
-              retryProbe();
-            }}
-          />
-        )}
-        {view.kind === "device_rejected" && (
-          <DeviceRejectedScreen
-            reason={view.reason}
-            remoteAddress={remoteAddress}
-            busy={repairBusy}
-            error={repairError}
-            unsent={unsentHere}
-            owed={owedHere}
-            onRepair={repair}
-            onConfirm={confirmRepair}
-            onConfirmOwed={confirmOwed}
-          />
-        )}
-        {view.kind === "other_host" && (
-          <OtherHostScreen
-            hostAddress={view.hostAddress}
-            busy={repairBusy}
-            error={repairError}
-            unsent={unsentHere}
-            owed={owedHere}
-            onRepair={repair}
-            onConfirm={confirmRepair}
-            onConfirmOwed={confirmOwed}
-          />
-        )}
-        {view.kind === "line_select" && (
-          <LineSelect
-            local={localDb}
+            pairing={pairedStatus}
+            lineId={pairedStatus.lineId}
+            operator={view.kind === "floor_operator" ? view.operator : null}
+            link={state.link}
             sync={state.sync}
-            link={state.link}
-            onSelect={selectLine}
-            onSync={requestSync}
-            onOffice={openOffice}
+            deviceName={pairedStatus.deviceName}
+            shiftId={state.floorWork?.shiftId ?? null}
+            deviceNotSaved={state.deviceNotSaved}
+            outboxVersion={state.outboxVersion}
+            factsFailure={state.factsFailure}
+            refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
+            otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
+            license={stationLicense}
+            updateOffer={updateOffer}
+            watchScanners={hardwareApi.watchScanners}
+            tools={floorTools}
+            {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
           />
-        )}
-        {(view.kind === "floor" || view.kind === "floor_operator") && pairedStatus !== null && (
-          <div className="floor-frame">
-            <FloorStatusBar
+          {view.kind === "floor" && scannerSetup ? (
+            // The scanner's settings from the sign-in's warning (beta 3.2): as before the pairing.
+            <WorkstationSetup
+              scope="scanners"
               local={localDb}
-              pairing={pairedStatus}
-              lineId={pairedStatus.lineId}
-              operator={view.kind === "floor_operator" ? view.operator : null}
-              link={state.link}
-              sync={state.sync}
-              deviceName={pairedStatus.deviceName}
-              shiftId={state.floorWork?.shiftId ?? null}
-              deviceNotSaved={state.deviceNotSaved}
-              outboxVersion={state.outboxVersion}
-              factsFailure={state.factsFailure}
-              refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
-              otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
-              license={stationLicense}
-              updateOffer={updateOffer}
-              watchScanners={hardwareApi.watchScanners}
-              tools={floorTools}
-              {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
+              hardware={hardwareApi}
+              printing={printing}
+              source={scanner}
+              onSaved={() => undefined}
+              onBack={() => setScannerSetup(false)}
             />
-            {view.kind === "floor" && scannerSetup ? (
-              // The scanner's settings from the sign-in's warning (beta 3.2): as before the pairing.
-              <WorkstationSetup
-                scope="scanners"
+          ) : view.kind === "floor" ? (
+            <>
+              {offerToInstall?.required === true && (
+                <FloorUpdatePanel offer={offerToInstall} onUpdate={() => setUpdateOpen(true)} />
+              )}
+              <OperatorSignIn
+                // A number or PIN typed under another pairing or line is not kept.
+                key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
                 local={localDb}
-                hardware={hardwareApi}
-                printing={printing}
-                source={scanner}
-                onSaved={() => undefined}
-                onBack={() => setScannerSetup(false)}
+                pairing={pairedStatus}
+                lineId={pairedStatus.lineId}
+                sync={state.sync}
+                notice={state.floorNotice}
+                source={floorGate.source}
+                onSignedIn={operatorSignedIn}
+                onSync={signInSync.request}
+                onOffice={openOffice}
+                watchScanners={hardwareApi.watchScanners}
+                onScannerSettings={() => setScannerSetup(true)}
               />
-            ) : view.kind === "floor" ? (
-              <>
-                {offerToInstall?.required === true && (
-                  <FloorUpdatePanel offer={offerToInstall} onUpdate={() => setUpdateOpen(true)} />
-                )}
-                <OperatorSignIn
-                  // A number or PIN typed under another pairing or line is not kept.
-                  key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
-                  local={localDb}
-                  pairing={pairedStatus}
-                  lineId={pairedStatus.lineId}
-                  sync={state.sync}
-                  notice={state.floorNotice}
-                  source={floorGate.source}
-                  onSignedIn={operatorSignedIn}
-                  onSync={signInSync.request}
-                  onOffice={openOffice}
-                  watchScanners={hardwareApi.watchScanners}
-                  onScannerSettings={() => setScannerSetup(true)}
-                />
-              </>
-            ) : (
-              <UnpairContext.Provider value={unpairApi}>
-                <FloorApp
-                  // One session's screen: nothing of it outlives the sign-out.
-                  key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${view.operator.sessionId}`}
-                  operator={view.operator}
-                  local={localDb}
-                  device={pairedStatus}
-                  link={state.link}
-                  sync={state.sync}
-                  shiftReads={state.shiftReads}
-                  outboxVersion={state.outboxVersion}
-                  lineChangePending={state.pendingDevice !== null}
-                  rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
-                  license={stationLicense}
-                  enter={hostApi.enterShift}
-                  create={hostApi.createDeviceShift}
-                  checkCode={hostApi.checkCode}
-                  requestBlock={hostApi.requestSsccBlock}
-                  warehouseLookup={hostApi.warehouseLookup}
-                  palletSheets={hostApi.getDevicePalletSheets}
-                  requestFacts={requestFacts}
-                  source={floorGate.source}
-                  printing={printing}
-                  hardware={hardwareApi}
-                  awake={awake}
-                  {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
-                  dispatch={dispatch}
-                  onSignOut={operatorSignedOut}
-                  onSignOutReady={floorSignOutReady}
-                />
-              </UnpairContext.Provider>
-            )}
-          </div>
-        )}
-        {view.kind === "office_login" && (
-          <OfficeLogin
-            notice={view.notice}
-            onLogin={login}
-            onBack={officePc ? null : openFloor}
-            hostAddress={remoteAddress}
-            onChangeAddress={changeAddress}
-            link={state.link}
-          />
-        )}
-        {dialogOffer !== null && (
-          <UpdateFromHostDialog
-            open={updateOpen}
-            offer={dialogOffer}
-            // Opened from the station's sign-in or the version screen: touch targets.
-            size="floor"
-            onClose={() => setUpdateOpen(false)}
-            // No office here: no `app.update.start` report (its route is the
-            // office's); Windows' administrator prompt is the permission.
-            start={(report) => updateShell.install(report.path, report.confirmations)}
-          />
-        )}
-      </main>
-    </FloorUpdateEntryProvider>
+            </>
+          ) : (
+            <UnpairContext.Provider value={unpairApi}>
+              <FloorApp
+                // One session's screen: nothing of it outlives the sign-out.
+                key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${view.operator.sessionId}`}
+                operator={view.operator}
+                local={localDb}
+                device={pairedStatus}
+                link={state.link}
+                sync={state.sync}
+                shiftReads={state.shiftReads}
+                outboxVersion={state.outboxVersion}
+                lineChangePending={state.pendingDevice !== null}
+                rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
+                license={stationLicense}
+                enter={hostApi.enterShift}
+                create={hostApi.createDeviceShift}
+                checkCode={hostApi.checkCode}
+                requestBlock={hostApi.requestSsccBlock}
+                warehouseLookup={hostApi.warehouseLookup}
+                palletSheets={hostApi.getDevicePalletSheets}
+                requestFacts={requestFacts}
+                source={floorGate.source}
+                printing={printing}
+                hardware={hardwareApi}
+                awake={awake}
+                {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
+                dispatch={dispatch}
+                onSignOut={operatorSignedOut}
+                onSignOutReady={floorSignOutReady}
+              />
+            </UnpairContext.Provider>
+          )}
+        </FloorFrameWithUpdateEntry>
+      )}
+      {view.kind === "office_login" && (
+        <OfficeLogin
+          notice={view.notice}
+          onLogin={login}
+          onBack={officePc ? null : openFloor}
+          hostAddress={remoteAddress}
+          onChangeAddress={changeAddress}
+          link={state.link}
+        />
+      )}
+      {dialogOffer !== null && (
+        <UpdateFromHostDialog
+          open={updateOpen}
+          offer={dialogOffer}
+          // Opened from the station's sign-in or the version screen: touch targets.
+          size="floor"
+          onClose={() => setUpdateOpen(false)}
+          // No office here: no `app.update.start` report (its route is the
+          // office's); Windows' administrator prompt is the permission.
+          start={(report) => updateShell.install(report.path, report.confirmations)}
+        />
+      )}
+    </main>
   );
 }

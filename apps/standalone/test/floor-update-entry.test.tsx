@@ -140,7 +140,7 @@ describe("the entry exists in both places of the floor", () => {
 
   it("is provided by the app from the one check, with a way to open the dialog", () => {
     const app = source("src/app/App.tsx");
-    expect(app).toContain("<FloorUpdateEntryProvider");
+    expect(app).toContain("<FloorFrameWithUpdateEntry");
     expect(app).toContain("open: () => setUpdateOpen(true)");
   });
 });

@@ -39,3 +39,21 @@ export function InShiftUpdateEntry({ children }: { children: ReactNode }) {
     </FloorUpdateEntryProvider>
   );
 }
+
+/**
+ * The floor's frame (`.floor-frame`) with the entry provided to everything inside it: the sign-in
+ * footer and the setup's «Станция». A frame rather than a wrapper so the app's markup keeps its depth.
+ */
+export function FloorFrameWithUpdateEntry({
+  value,
+  children,
+}: {
+  value: FloorUpdateEntry;
+  children: ReactNode;
+}) {
+  return (
+    <FloorUpdateEntryProvider value={value}>
+      <div className="floor-frame">{children}</div>
+    </FloorUpdateEntryProvider>
+  );
+}
