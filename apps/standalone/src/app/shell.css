@@ -808,6 +808,31 @@
   min-width: 0;
 }
 
+/*
+ * On a page and in a drawer alike the bar's result is the count at the right edge, on the row of the
+ * controls: the same place as a list card's «Найдено», level with the inputs (a 16 px label and its
+ * 6 px gap: 22 px down) and 44 px high, its text centred on that row.
+ */
+.office-shell__content .mk-filter-bar,
+.mk-side-panel .mk-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.office-shell__content .mk-filter-bar__result,
+.mk-side-panel .mk-filter-bar__result {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin-top: 22px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 /* A bar with nothing to say about its result takes no room; its live region stays in the page. */
 :is(.office-shell__content, .mk-side-panel) .mk-filter-bar__result:empty {
   min-height: 0;

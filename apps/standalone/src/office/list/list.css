@@ -17,14 +17,34 @@
 }
 
 /*
- * The pinned layout contract. The card shrinks to the room the window leaves it (`flex: 0 1 auto`,
- * never below 320 px: a lower window scrolls the page instead of crushing the table); its table
- * (`Table fill`) takes what the filters and the pagination bar leave and scrolls its rows inside,
- * under a heading that stays; the pagination bar is not part of that scroll.
+ * The pinned layout contract. The card is as tall as its content and no taller (`flex: 0 1 auto`,
+ * no height and no floor of its own: a one-row list is one row and its pager, never stretched to
+ * the page's bottom) and shrinks to the room the window leaves it. Only then does its table
+ * (`Table fill`) scroll its rows inside, under a heading that stays; the table's own floor
+ * (`--office-table-floor`, set from the row count: `fill-model.ts`) keeps a low window from
+ * crushing it (the page scrolls instead). The pagination bar sits directly under the table and is
+ * not part of that scroll.
  */
 .office-shell__content > .office-list-card {
   flex: 0 1 auto;
+}
+
+/*
+ * What keeps the card itself from being crushed (its own `overflow: hidden` lets the window's
+ * shortage squeeze it below its children). The floor goes only where it cannot stretch a short
+ * list: a table of four rows or more is already taller than it, and so is a search card with its
+ * body (the filter rows and 160 px of body). A card of filters alone is never squeezed at all, nor
+ * is a card with another section under it (the page scrolls instead); a card of one to three rows
+ * has no floor, it is as tall as those rows.
+ */
+.office-shell__content > .office-list-card:has(.mk-table__row:nth-child(4)),
+.office-shell__content > .office-list-card:has(.office-list-body) {
   min-height: 320px;
+}
+
+.office-shell__content > .office-list-card:not(:has(.mk-table)):not(:has(.office-list-body)),
+.office-shell__content > .office-list-card:not(:last-child) {
+  flex-shrink: 0;
 }
 
 .office-list-card {
@@ -44,15 +64,15 @@
 
 .office-list-card .office-paged {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: 0;
   min-height: 0;
 }
 
 .office-list-card .office-paged > .mk-table {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 1 auto;
+  min-height: var(--office-table-floor, 0px);
 }
 
 .office-list-card .office-paged > :not(.mk-table) {
@@ -98,12 +118,19 @@
 
 /* ---- Filters ---- */
 
+/*
+ * THE filter bar (one rule for every list page). A grid of two columns: the fields at the left, the
+ * aside at the right. Every control hangs from one top line: a field's label row is 22 px (a 16 px
+ * label and the 6 px gap under it) and every control is 44 px, so the bottoms line up too; a hint or
+ * an error under a field hangs below it and moves nothing. The aside (the buttons, then the count)
+ * starts level with the inputs (22 px down) and is one 44 px row, its items centred on it, the count
+ * last at the right edge. A narrow window stacks the aside under the fields.
+ */
 .office-list-filters {
-  display: flex;
+  display: grid;
   flex: none;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px 16px;
   padding: 16px;
 }
@@ -113,7 +140,7 @@
   /* Zero basis: the fields wrap inside the room beside the aside, not under it. */
   flex: 1 1 0;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 12px 16px;
   min-width: 0;
 }
@@ -131,22 +158,46 @@
 
 .office-list-filters__aside {
   display: flex;
-  flex: none;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px 16px;
+  min-height: 44px;
+  margin-top: 22px;
 }
 
 .office-list-filters__found {
+  order: 3;
   margin: 0;
+  /* A fixed room, right-aligned: the buttons before the count do not move as the number grows. */
+  min-width: 14ch;
   color: var(--fg-2);
   font: 400 13px/18px var(--font-mono);
+  text-align: right;
   white-space: nowrap;
 }
 
 .office-list-filters__found:empty {
   display: none;
+}
+
+/* A segmented control in a bar is as tall as the inputs beside it (44 px): the 40 px segments in a 2 px track. */
+.office-list-filters .office-segmented {
+  box-sizing: border-box;
+  height: 44px;
+  padding: 2px;
+}
+
+@media (max-width: 900px) {
+  .office-list-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .office-list-filters__aside {
+    flex-wrap: wrap;
+    margin-top: 0;
+    justify-content: flex-start;
+  }
 }
 
 /*
@@ -160,8 +211,10 @@
 }
 
 .office-range__label {
-  color: var(--fg-1);
-  font: 600 13px/16px var(--font-ui);
+  /* The same label as a field's (`mk-field`): one weight and one 16 px row across the bar. */
+  color: var(--fg-2);
+  font: var(--text-caption);
+  line-height: 16px;
 }
 
 .office-range__row {
@@ -212,7 +265,7 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 4px;
 }
 
@@ -354,6 +407,8 @@
 .office-list-state {
   display: grid;
   place-items: center;
+  box-sizing: border-box;
+  min-height: 160px;
   padding: 24px 16px;
   color: var(--fg-2);
 }
@@ -541,7 +596,8 @@
 
 .office-list-body {
   flex: 1 1 auto;
-  min-height: 0;
+  box-sizing: border-box;
+  min-height: 160px;
   padding: 16px;
   overflow: auto;
 }
@@ -577,13 +633,14 @@
 
 .office-list-filters--panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
 .office-filter-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 12px 16px;
   min-width: 0;
 }
@@ -606,5 +663,15 @@
 /* The buttons beside a search field start level with its input, not with the hint under it (a label is 16 px and its gap 6). */
 .office-filter-row__end--top {
   align-self: flex-start;
+  min-height: 44px;
   margin-top: 22px;
+}
+
+/* The count at the end of a row: level with the controls (the 22 px label row), at the right edge. */
+.office-filter-row > .office-list-filters__found {
+  align-self: flex-start;
+  box-sizing: border-box;
+  margin-top: 22px;
+  line-height: 44px;
+  min-height: 44px;
 }
