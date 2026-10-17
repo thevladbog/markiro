@@ -42,7 +42,7 @@ const cleanup =
     .map((table) => `DELETE FROM ${table} WHERE tenant_id='${tenant}';`)
     .join("\n") + `DELETE FROM organization WHERE id='${tenant}';`;
 execute(
-  "CREATE TABLE IF NOT EXISTS codes_2026_10 PARTITION OF codes FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');",
+  "CREATE TABLE IF NOT EXISTS codes_202610 PARTITION OF codes FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');",
 );
 execute(cleanup);
 try {

@@ -66,7 +66,7 @@ test(
     const env = envFor(databaseUrl);
     execute(
       env,
-      `CREATE TABLE IF NOT EXISTS codes_2026_10 PARTITION OF codes FOR VALUES FROM ('2026-10-01') TO ('2026-11-01'); CREATE TABLE IF NOT EXISTS codes_2024_01 PARTITION OF codes FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');`,
+      `CREATE TABLE IF NOT EXISTS codes_202610 PARTITION OF codes FOR VALUES FROM ('2026-10-01') TO ('2026-11-01'); CREATE TABLE IF NOT EXISTS codes_202401 PARTITION OF codes FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');`,
     );
     execute(env, cleanup);
     try {
@@ -202,6 +202,25 @@ test(
       assert.deepEqual((await collect())[0], { type: "error", value: "cloud_not_clean" });
     } finally {
       execute(env, cleanup);
+    }
+    // CI runs the API against this same migrated database after the exporter.
+    // Its normal bootstrap must accept the fixture's existing partitions.
+    const { createDb, ensurePartitions } = await import("../../../packages/db/dist/index.js");
+    const { db, pool } = createDb(databaseUrl);
+    try {
+      await ensurePartitions(db, [
+        new Date("2026-10-01T00:00:00Z"),
+        new Date("2024-01-01T00:00:00Z"),
+      ]);
+      assert.deepEqual(
+        await ensurePartitions(db, [
+          new Date("2026-10-01T00:00:00Z"),
+          new Date("2024-01-01T00:00:00Z"),
+        ]),
+        [],
+      );
+    } finally {
+      await pool.end();
     }
   },
 );
