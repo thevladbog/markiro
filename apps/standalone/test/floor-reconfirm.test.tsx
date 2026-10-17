@@ -90,7 +90,7 @@ function press(...keys: string[]) {
 async function typeNumberAndPin(login: string, pin: string, confirm: string) {
   fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
   press(...login);
-  fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+  fireEvent.click(screen.getByRole("button", { name: "PIN" }));
   press(...pin);
   fireEvent.click(screen.getByRole("button", { name: confirm }));
 }
@@ -159,7 +159,7 @@ describe("the identity re-confirmation", () => {
     const { onConfirmed } = renderReconfirm(await synced([SITE, anna]), ANNA);
     fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
     press(..."0042");
-    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    fireEvent.click(screen.getByRole("button", { name: "PIN" }));
     for (let attempt = 0; attempt < 5; attempt += 1) {
       press(..."1111");
       fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
@@ -187,6 +187,41 @@ describe("the identity re-confirmation", () => {
     await waitFor(() => expect(onConfirmed).toHaveBeenCalledTimes(1));
   });
 
+  it("asks for the number and the PIN as two labelled fields beside one keypad, on one step", async () => {
+    renderReconfirm(await synced([SITE, anna, badge]), ANNA);
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
+    expect(screen.getByRole("button", { name: "Табельный номер" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "PIN" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Цифровая клавиатура" })).toBeTruthy();
+    // No «Далее»: both fields are on the screen at once (variant A of the kit).
+    expect(screen.queryByRole("button", { name: "Далее" })).toBeNull();
+    // «Подтвердить» waits for a valid number together with a valid PIN.
+    const confirm = screen.getByRole("button", { name: "Подтвердить" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    press(..."0042");
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "PIN" }));
+    press(..."4821");
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("still reads a badge once the number and PIN fields are open", async () => {
+    const { onConfirmed } = renderReconfirm(await synced([SITE, anna, badge]), ANNA);
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
+    scan("MRK-000742");
+    await waitFor(() => expect(onConfirmed).toHaveBeenCalledTimes(1));
+  });
+
+  it("is a card over the dimmed screen with a title, not a full-screen page, and Escape cancels it", async () => {
+    const { onCancel } = renderReconfirm(await synced([SITE, anna]), ANNA);
+    const dialog = screen.getByRole("dialog", { name: "Выйти из полноэкранного режима?" });
+    expect(dialog.classList.contains("reconfirm-card")).toBe(true);
+    expect(dialog.parentElement?.classList.contains("reconfirm-overlay")).toBe(true);
+    expect(document.querySelector(".mk-full-screen-dialog")).toBeNull();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("is cancelled with «Отмена»", async () => {
     const { onCancel } = renderReconfirm(await synced([SITE, anna]), ANNA);
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
@@ -209,8 +244,13 @@ describe("the gated scan source", () => {
   });
 });
 
-function windowMode(mode: LockdownSnapshot["mode"], error: LockdownSnapshot["error"] = null) {
+function windowMode(
+  mode: LockdownSnapshot["mode"],
+  error: LockdownSnapshot["error"] = null,
+  kind: FloorWindowMode["kind"] = "kiosk",
+) {
   const control: FloorWindowMode = {
+    kind,
     snapshot: { mode, pending: false, error },
     enter: vi.fn(async () => undefined),
     exit: vi.fn(async () => undefined),
@@ -272,6 +312,32 @@ describe("the header's window mode", () => {
     await renderControl(control);
     const alert = screen.getByRole("alert");
     expect(within(alert).getByText(/Не удалось выйти из полноэкранного режима/)).toBeTruthy();
+    fireEvent.click(within(alert).getByRole("button", { name: "Закрыть" }));
+    expect(control.clearError).toHaveBeenCalled();
+  });
+});
+
+describe("the plain full-screen mode of a PC that is never locked (the host's floor)", () => {
+  it("goes full screen with one press, asking nothing", async () => {
+    const control = windowMode("windowed", null, "fullscreen");
+    await renderControl(control);
+    fireEvent.click(screen.getByRole("button", { name: "Полноэкранный режим" }));
+    expect(control.enter).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves it with one press as well: nothing was locked, so no proof of identity is asked", async () => {
+    const control = windowMode("locked", null, "fullscreen");
+    await renderControl(control);
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из полноэкранного режима" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(control.exit).toHaveBeenCalledTimes(1);
+  });
+
+  it("says that the window did not change, in its own words, and can be dismissed", async () => {
+    const control = windowMode("windowed", "enter", "fullscreen");
+    await renderControl(control);
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText(/Не удалось перейти в полноэкранный режим/)).toBeTruthy();
     fireEvent.click(within(alert).getByRole("button", { name: "Закрыть" }));
     expect(control.clearError).toHaveBeenCalled();
   });
