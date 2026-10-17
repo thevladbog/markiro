@@ -637,6 +637,64 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
     });
   });
 
+  it("does not count an add-on whose parent subscription has ended, and counts a live one", async () => {
+    const addonVersionId = await createPublishedAddon(setup.db, [
+      { entitlementKey: "lines", increment: 1 },
+    ]);
+    const endedTenant = await createNoneTenant();
+    const ended = await createManagedSubscription(setup.db, {
+      tenantId: endedTenant,
+      planVersionId,
+      status: "active",
+      startsAt: new Date(Date.now() - 7_200_000),
+      endsAt: new Date(Date.now() - 3_600_000),
+    });
+    await setup.db.insert(schema.subscriptionAddons).values({
+      tenantId: endedTenant,
+      subscriptionId: ended.subscriptionId,
+      addonVersionId,
+      quantity: 1,
+      startsAt: new Date(Date.now() - 7_200_000),
+      endsAt: null,
+      status: "active",
+      source: "manual",
+    });
+    const endedResponse = await admin
+      .post(`/platform/tenants/${endedTenant}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(endedResponse.body).toMatchObject({
+      offlineAssignments: { plans: 0, addons: 0 },
+      demoCreated: true,
+    });
+
+    const liveTenant = await createNoneTenant();
+    const live = await createManagedSubscription(setup.db, {
+      tenantId: liveTenant,
+      planVersionId,
+      status: "active",
+      endsAt: null,
+    });
+    await setup.db.insert(schema.subscriptionAddons).values({
+      tenantId: liveTenant,
+      subscriptionId: live.subscriptionId,
+      addonVersionId,
+      quantity: 1,
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: null,
+      status: "active",
+      source: "manual",
+    });
+    const liveResponse = await admin
+      .post(`/platform/tenants/${liveTenant}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(liveResponse.body).toMatchObject({
+      offlineAssignments: { plans: 1, addons: 1 },
+      demoCreated: false,
+    });
+  });
+
   it("keeps counting an assignment that has not started yet as current", async () => {
     const tenantId = await createNoneTenant();
     await createManagedSubscription(setup.db, {

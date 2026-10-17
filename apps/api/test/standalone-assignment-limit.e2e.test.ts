@@ -129,6 +129,57 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect((await assign(admin, tenantId, subscriptionId, versionId)).status).toBe("active");
     });
 
+    it("does not count an add-on past its end that the status job has not settled", async () => {
+      const admin = await platformActor(db);
+      const tenantId = await createTenantWithoutCabinet(db);
+      const { subscriptionId } = await createManagedSubscription(db, { tenantId, endsAt: null });
+      const versionId = await createPublishedAddon(
+        db,
+        [{ entitlementKey: "lines", increment: 1 }],
+        { offlineAvailable: true },
+      );
+      await seedAddons(tenantId, subscriptionId, versionId, 63);
+      await db.insert(schema.subscriptionAddons).values({
+        tenantId,
+        subscriptionId,
+        addonVersionId: versionId,
+        quantity: 1,
+        startsAt: new Date(Date.now() - 2 * 86_400_000),
+        endsAt: new Date(Date.now() - 60_000),
+        status: "active",
+        source: "manual",
+      });
+      // 63 live + 1 ended-unsettled: the 64th live add-on fits, the 65th does not.
+      expect((await assign(admin, tenantId, subscriptionId, versionId)).status).toBe("active");
+      expect(await refusal(assign(admin, tenantId, subscriptionId, versionId))).toEqual({
+        status: 409,
+        body: { code: "standalone_assignment_limit_reached" },
+      });
+    });
+
+    it("counts a scheduled add-on that has not started: issuance can still name it later", async () => {
+      const admin = await platformActor(db);
+      const tenantId = await createTenantWithoutCabinet(db);
+      const { subscriptionId } = await createManagedSubscription(db, { tenantId, endsAt: null });
+      const versionId = await createPublishedAddon(
+        db,
+        [{ entitlementKey: "lines", increment: 1 }],
+        { offlineAvailable: true },
+      );
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 64 }, () => ({
+          tenantId,
+          subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(Date.now() + 86_400_000),
+          status: "scheduled" as const,
+          source: "manual" as const,
+        })),
+      );
+      expect((await refusal(assign(admin, tenantId, subscriptionId, versionId))).status).toBe(409);
+    });
+
     it("does not limit a tenant with a cabinet: its file names no assignments", async () => {
       const admin = await platformActor(db);
       const tenantId = await createOrganization(db);

@@ -492,15 +492,31 @@ export class TenantProvisioningService {
           ]),
         ),
       );
+    // Add-ons count only under a parent that is itself in force (the projection reads an
+    // add-on only through the current subscription): a qualifying status and no end yet.
     const [addons] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.subscriptionAddons)
+      .innerJoin(
+        schema.tenantSubscriptions,
+        and(
+          eq(schema.tenantSubscriptions.tenantId, schema.subscriptionAddons.tenantId),
+          eq(schema.tenantSubscriptions.id, schema.subscriptionAddons.subscriptionId),
+        ),
+      )
       .where(
         and(
           eq(schema.subscriptionAddons.tenantId, tenantId),
           inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
-          // An add-on past its end that the status job has not settled is not in force.
+          inArray(schema.tenantSubscriptions.status, [
+            "pending_activation",
+            "trial",
+            "active",
+            "scheduled",
+          ]),
+          // Past its end but not yet settled by the status job: not in force (add-on or parent).
           or(isNull(schema.subscriptionAddons.endsAt), gt(schema.subscriptionAddons.endsAt, at)),
+          or(isNull(schema.tenantSubscriptions.endsAt), gt(schema.tenantSubscriptions.endsAt, at)),
         ),
       );
     return { plans: plans?.count ?? 0, addons: addons?.count ?? 0 };

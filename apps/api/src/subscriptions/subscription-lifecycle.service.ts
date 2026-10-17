@@ -661,7 +661,7 @@ export class SubscriptionLifecycleService {
       throw new BadRequestException({ code: "addon_exceeds_subscription_term" });
     }
     const status = input.activationPolicy === "after_current" ? "scheduled" : "active";
-    await assertStandaloneAssignmentCapacity(tx, tenantId, target.id);
+    await assertStandaloneAssignmentCapacity(tx, tenantId, target.id, operationAt);
     const [created] = await tx
       .insert(schema.subscriptionAddons)
       .values({

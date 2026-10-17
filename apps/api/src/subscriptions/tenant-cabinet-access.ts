@@ -1,5 +1,5 @@
 import { ConflictException } from "@nestjs/common";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { STANDALONE_ASSIGNMENT_REFS_MAX } from "@markiro/platform-contracts";
 
@@ -72,6 +72,7 @@ export async function assertStandaloneAssignmentCapacity(
   tx: Pick<Db, "select">,
   tenantId: string,
   subscriptionId: string,
+  at: Date,
 ): Promise<void> {
   const [tenant] = await tx
     .select({ cabinetAccess: schema.organization.cabinetAccess })
@@ -87,6 +88,9 @@ export async function assertStandaloneAssignmentCapacity(
         eq(schema.subscriptionAddons.tenantId, tenantId),
         eq(schema.subscriptionAddons.subscriptionId, subscriptionId),
         inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+        // Past its end, unsettled by the status job: issuance never names it. A scheduled
+        // add-on that has not started still counts: it can be named once it starts.
+        or(isNull(schema.subscriptionAddons.endsAt), gt(schema.subscriptionAddons.endsAt, at)),
       ),
     );
   if ((live?.count ?? 0) >= STANDALONE_ASSIGNMENT_REFS_MAX - 1)
