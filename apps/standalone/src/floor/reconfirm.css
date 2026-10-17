@@ -186,8 +186,8 @@
   }
 }
 
-/* A low window (an ordinary window at its least, about 560 px of page): 64 px fields and actions. */
-@media (max-height: 640px) {
+/* A low window (an ordinary window at its least, about 560 px of page; the 640 px terminal keeps the 72 px actions above): 64 px fields and actions. */
+@media (max-height: 639px) {
   .reconfirm-overlay {
     padding: var(--sp-3);
   }

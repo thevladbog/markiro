@@ -478,7 +478,7 @@
  * bar above): the fields, keys and actions go to the floor's 64 px, the least a touch target
  * may be, and the page stays whole. The countdown number gives way too.
  */
-@media (max-height: 640px) {
+@media (max-height: 639px) {
   .operator-login {
     padding-block: var(--sp-2);
     --login-gap: var(--sp-1);

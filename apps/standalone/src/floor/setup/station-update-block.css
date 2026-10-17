@@ -50,11 +50,52 @@
   font: var(--floor-body);
 }
 
-@media (max-width: 1100px) {
+/*
+ * A narrow window stacks the three blocks in one column, unless it is also a short one (the
+ * 1024 x 640-780 terminal): there the two columns keep the version, the check and the unpairing
+ * in view beside the station's facts instead of under them, below the fold.
+ */
+@media (max-width: 1100px) and (min-height: 781px) {
   .setup-station:has(.setup-station__update) .setup-station__facts,
   .setup-station__update,
   .setup-station:has(.setup-station__update) .setup-station__unpair {
     grid-column: 1;
     grid-row: auto;
+  }
+}
+
+/* The two columns on the short narrow window: the base layout's single column is for the tall one. */
+@media (max-width: 1100px) and (max-height: 780px) {
+  .setup-station:has(.setup-station__update) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The short window: the version block is slimmer so the offer, «Обновить» and the check are all in view. */
+@media (max-height: 780px) {
+  .setup-station__update {
+    gap: var(--sp-1);
+  }
+
+  .setup-station__version {
+    font: 600 18px/24px var(--font-mono);
+  }
+
+  .setup-station__update-state,
+  .setup-station__offer {
+    gap: var(--sp-1);
+  }
+
+  .setup-station__offer-title {
+    font: 600 18px/24px var(--font-ui);
+  }
+
+  .setup-station__notes {
+    font: 400 15px/20px var(--font-ui);
+  }
+
+  .setup-station__offer .floor-primary.mk-btn {
+    height: 72px !important;
+    min-height: 72px !important;
   }
 }

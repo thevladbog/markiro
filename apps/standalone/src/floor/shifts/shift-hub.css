@@ -581,7 +581,7 @@
   }
 
   .shift-hub .shift-card__details {
-    padding: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
     gap: var(--sp-1);
   }
 
@@ -676,7 +676,12 @@
   }
 
   .shift-hub .shift-card__details {
-    padding: var(--sp-3) var(--sp-4);
+    padding: var(--sp-2) var(--sp-4);
+    gap: 2px;
+  }
+
+  .shift-hub .shift-card__progress {
+    margin-top: var(--sp-1);
   }
 
   .shift-hub .shift-card__counterparty {
@@ -698,15 +703,14 @@
     min-height: 64px !important;
   }
 
-  /* The banner is one line (the header chip and the title's line say the same): the cards keep the room. */
+  /* The banner is at most two slim lines, read whole (its second sentence says what can still be done): the cards keep the room. */
   .shift-hub .shift-selection__message .mk-alert {
-    padding: 8px 16px !important;
+    padding: 4px 16px !important;
   }
 
   .shift-hub .shift-selection__message .mk-alert__text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 15px;
+    line-height: 18px;
   }
 }
 

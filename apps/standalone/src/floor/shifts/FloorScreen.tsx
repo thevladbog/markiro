@@ -47,7 +47,12 @@ export function FloorScreen({
         ) : (
           <div className="station-screen__heading">
             {heading}
-            <p className="station-screen__subtitle">{subtitle}</p>
+            <p
+              className="station-screen__subtitle"
+              {...(typeof subtitle === "string" ? { title: subtitle } : {})}
+            >
+              {subtitle}
+            </p>
           </div>
         )}
         {header}

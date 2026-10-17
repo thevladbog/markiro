@@ -26,7 +26,8 @@ describe("the floor's sign-in and re-confirmation across window sizes", () => {
 
   it("has a step for a low window that never goes under the floor's 64 px", () => {
     for (const source of [signIn, reconfirm]) {
-      const step = /@media \(max-height: 640px\) \{([\s\S]*?)\n\}\n/.exec(source)?.[1] ?? "";
+      // Below 640 px: the 640 px terminal keeps the 72 px actions (station-fit-3).
+      const step = /@media \(max-height: 639px\) \{([\s\S]*?)\n\}\n/.exec(source)?.[1] ?? "";
       expect(step).not.toBe("");
       const heights = [...step.matchAll(/(?:height|min-height):\s*(\d+)px/g)].map((m) =>
         Number(m[1]),
