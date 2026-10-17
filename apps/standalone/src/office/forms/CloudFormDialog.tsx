@@ -122,7 +122,7 @@ export function CloudFormDialog({
       refresh();
       if (warning !== null)
         setFailure(t("office.storedFiles.hostCopyFailed", { reason: t(warning) }));
-      if (how === "print") print(form.html);
+      if (how === "print") await print(form.html);
       else {
         const saved = await openInBrowser(
           files,

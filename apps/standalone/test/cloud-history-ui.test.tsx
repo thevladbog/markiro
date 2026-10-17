@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { QueryClient } from "@tanstack/react-query";
 import type * as OfficeQueries from "../src/office/office-query.js";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HostError } from "../src/host/client.js";
 import {
@@ -344,7 +344,15 @@ it("prints the real cloud box form in StrictMode using its frozen zone", async (
     units: items.length,
   });
   session.api.getCloudBoxReportRows.mockResolvedValue(source);
-  const print = vi.fn<(html: string) => void>();
+  let finishPrint: () => void = () => {
+    throw new Error("print has not started");
+  };
+  const print = vi.fn<(html: string) => Promise<void>>(
+    () =>
+      new Promise<void>((resolve) => {
+        finishPrint = resolve;
+      }),
+  );
   render(
     <StrictMode>
       <ThemeProvider defaultTheme="dark">
@@ -356,6 +364,17 @@ it("prints the real cloud box form in StrictMode using its frozen zone", async (
   fireEvent.click(await screen.findByRole("button", { name: "Печать" }));
   await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
   expect(print.mock.calls[0]?.[0]).toContain("13:00");
+  expect((screen.getByRole("button", { name: "Печать" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Печать" }));
+  expect(print).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finishPrint();
+  });
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Печать" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
 });
 
 const UNSUPPORTED_ZONE_MESSAGE =
