@@ -247,12 +247,14 @@ async fn opened(
         Some(_) => return Ok(Applied::accepted()),
         None => {}
     }
-    let gtin14: Option<String> =
-        sqlx::query_scalar("SELECT gtin14 FROM products WHERE id = ? AND archived = 0")
-            .bind(&data.product_id)
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(ApiError::internal)?;
+    // An archived product is still a product: the operator opened this pallet offline before the
+    // office archived it, and queued work is never refused for what happened later. Only a
+    // product the host has never known is the device's fault.
+    let gtin14: Option<String> = sqlx::query_scalar("SELECT gtin14 FROM products WHERE id = ?")
+        .bind(&data.product_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
     let Some(gtin14) = gtin14 else {
         return Err(Reject::field("data.productId").into());
     };

@@ -575,3 +575,73 @@ async fn a_box_taken_apart_after_it_was_scanned_is_not_counted_at_the_close() {
         vec![accepted(5)]
     );
 }
+
+#[tokio::test]
+async fn a_pallet_opened_offline_is_accepted_after_its_product_was_archived() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 1).await;
+    let key = pair_handheld(&admin).await;
+    let block = pallet_block(&admin, &key, "8f7e6d5c-4b3a-4f2e-8d1c-9b8a7f6e5d4c").await;
+    // The operator opened the pallet offline; the office archived the product before it synced.
+    sqlx::query("UPDATE products SET archived = 1 WHERE id = ?")
+        .bind(product_of(&setup))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let got = receipts_of(
+        &admin,
+        &key,
+        &[
+            opened(1, PALLET_A, product_of(&setup), &instant(100, 0)),
+            added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
+            event(
+                3,
+                "warehouse_pallet_closed",
+                json!({
+                    "palletId": PALLET_A, "sscc": pallet_sscc(40), "blockId": block["id"],
+                    "serial": 40, "openedAt": instant(100, 0), "closedAt": instant(110, 0),
+                    "boxCount": 1
+                }),
+            ),
+        ],
+    )
+    .await;
+    assert_eq!(got, vec![accepted(1), accepted(2), accepted(3)]);
+    let (product, closed): (String, Option<String>) =
+        sqlx::query_as("SELECT product_id, closed_at FROM warehouse_pallets WHERE id = ?")
+            .bind(PALLET_A)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (product.as_str(), closed),
+        (product_of(&setup), Some(instant(110, 0)))
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_product_is_still_refused_when_a_pallet_opens() {
+    let admin = admin().await;
+    let _setup = shift_setup(&admin).await;
+    let key = pair_handheld(&admin).await;
+    let got = receipts_of(
+        &admin,
+        &key,
+        &[opened(
+            1,
+            PALLET_A,
+            "b1000000-0000-4000-8000-0000000000aa",
+            &instant(100, 0),
+        )],
+    )
+    .await;
+    assert_eq!(
+        got[0],
+        rejected(
+            1,
+            "invalid_record",
+            Some(json!({ "field": "data.productId" }))
+        )
+    );
+}
