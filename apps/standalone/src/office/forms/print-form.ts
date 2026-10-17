@@ -45,7 +45,8 @@ export function printInFrame(
   html: string,
   doc: Document = document,
   print: PrintWindow = (view) => view.print(),
-): void {
+  imageWaitMs: number = IMAGE_WAIT_MS,
+): void | Promise<void> {
   doc.getElementById(PRINT_FRAME_ID)?.remove();
   const frame = doc.createElement("iframe");
   frame.id = PRINT_FRAME_ID;
@@ -68,11 +69,54 @@ export function printInFrame(
     // frame of this print only: a later print has replaced it by then.
     view.addEventListener("afterprint", () => frame.remove(), { once: true });
     view.focus();
-    print(view);
+    const pending = pendingImages(written);
+    if (pending.length === 0) {
+      print(view);
+      return;
+    }
+    // A picture of the form (the organization's logo is a data URL) decodes after the write;
+    // a frame printed at once prints the form without it. Print when they are in.
+    return imagesSettled(pending, imageWaitMs).then(() => {
+      // A later print has replaced this frame while the pictures loaded: nothing to print.
+      if (!frame.isConnected) return;
+      try {
+        print(view);
+      } catch (error) {
+        frame.remove();
+        throw error;
+      }
+    });
   } catch (error) {
     frame.remove();
     throw error;
   }
+}
+
+/** The longest the print waits for the pictures of a form; a picture that never loads is printed without. */
+export const IMAGE_WAIT_MS = 5000;
+
+/** The pictures of the document that have not finished loading (or failing to). */
+function pendingImages(written: Document): HTMLImageElement[] {
+  return Array.from(written.images).filter((image) => !image.complete);
+}
+
+/** Resolves once every picture has loaded or failed, or after `waitMs`. */
+function imagesSettled(images: readonly HTMLImageElement[], waitMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let left = images.length;
+    const timer = setTimeout(resolve, waitMs);
+    const one = () => {
+      left -= 1;
+      if (left === 0) {
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    for (const image of images) {
+      image.addEventListener("load", one, { once: true });
+      image.addEventListener("error", one, { once: true });
+    }
+  });
 }
 
 /**

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { bitmapPngDataUrl } from "../src/labels/logo-png.js";
 import { OfficeFilesError } from "../src/office/exports/office-files.js";
 import {
   actFolder,
@@ -256,5 +257,88 @@ describe("the name of a form's file (plan О-Ф)", () => {
     const long = formFileName(`${"я".repeat(300)}.html`);
     expect(long).toBe(`${"я".repeat(100)}.html`);
     expect(Array.from(formFileName(`${"𠀀".repeat(300)}.html`))).toHaveLength(55);
+  });
+});
+
+describe("printing a form with the organization's logo (a picture loads after the write)", () => {
+  // The logo is an <img> with a PNG data URL: a frame printed the moment it is written prints the
+  // form before the picture is in (the owner's beta 4.5: the logo missing on the blank and the
+  // pallet sheet). jsdom loads no picture, so it stays "not complete" until the test says it loaded.
+  const LOGO = bitmapPngDataUrl({
+    width: 8,
+    height: 2,
+    stride: 1,
+    pixels: Uint8Array.from([0xff, 0x81]),
+  });
+  const WITH_LOGO = `<!DOCTYPE html><html><body><header><img class="brand-logo--organization" src="${LOGO}" alt="ООО"></header><p>Бланк</p></body></html>`;
+  function imageOf(): HTMLImageElement {
+    const frame = document.getElementById(PRINT_FRAME_ID);
+    const image = frame instanceof HTMLIFrameElement ? frame.contentDocument?.images[0] : undefined;
+    if (image === undefined) throw new Error("no picture in the print frame");
+    return image;
+  }
+
+  it("does not print until the logo picture has loaded", async () => {
+    const print = vi.fn<(view: Window) => void>();
+    const done = printInFrame(WITH_LOGO, document, print);
+    expect(done).toBeInstanceOf(Promise);
+    await Promise.resolve();
+    expect(print).not.toHaveBeenCalled();
+    expect(imageOf().getAttribute("src")).toBe(LOGO);
+    imageOf().dispatchEvent(new Event("load"));
+    await done;
+    expect(print).toHaveBeenCalledTimes(1);
+  });
+
+  it("prints without a picture that fails to load", async () => {
+    const print = vi.fn<(view: Window) => void>();
+    const done = printInFrame(WITH_LOGO, document, print);
+    imageOf().dispatchEvent(new Event("error"));
+    await done;
+    expect(print).toHaveBeenCalledTimes(1);
+  });
+
+  it("prints anyway when a picture never answers, after the wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const print = vi.fn<(view: Window) => void>();
+      const done = printInFrame(WITH_LOGO, document, print, 5000);
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(print).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(print).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not print a frame a later print has replaced while it waited", async () => {
+    const print = vi.fn<(view: Window) => void>();
+    const first = printInFrame(WITH_LOGO, document, print);
+    const firstImage = imageOf();
+    printInFrame("<p>second</p>", document, print);
+    firstImage.dispatchEvent(new Event("load"));
+    await first;
+    expect(print).toHaveBeenCalledTimes(1);
+    const frame = document.getElementById(PRINT_FRAME_ID);
+    expect(frame instanceof HTMLIFrameElement && frame.contentDocument?.body.textContent).toBe(
+      "second",
+    );
+  });
+
+  it("answers a print that throws after the wait with the failure, and removes the frame", async () => {
+    const done = printInFrame(WITH_LOGO, document, () => {
+      throw new Error("no printer");
+    });
+    imageOf().dispatchEvent(new Event("error"));
+    await expect(done).rejects.toThrow("no printer");
+    expect(document.getElementById(PRINT_FRAME_ID)).toBeNull();
+  });
+
+  it("prints at once a form with no picture still to load", () => {
+    const print = vi.fn<(view: Window) => void>();
+    expect(printInFrame(FORM.html, document, print)).toBeUndefined();
+    expect(print).toHaveBeenCalledTimes(1);
   });
 });
