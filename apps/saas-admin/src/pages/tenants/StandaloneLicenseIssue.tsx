@@ -13,7 +13,12 @@ import {
   standaloneSitesKey,
   standaloneWarningText,
 } from "./standalone-format.js";
-import { StandaloneAssignmentsSummary } from "./StandaloneAssignmentsSummary.js";
+import {
+  assignmentsDiffer,
+  StandaloneAssignmentsSummary,
+  tenantAssignmentsKey,
+  useTenantAssignments,
+} from "./StandaloneAssignmentsSummary.js";
 import { StandaloneLicenseComparison } from "./StandaloneLicenseComparison.js";
 
 /**
@@ -52,8 +57,22 @@ export function StandaloneLicenseIssue({
     onSuccess: () => {
       setRequestId(crypto.randomUUID());
       setIssuedSequence(null);
+      // Compare the preview with the tenant as it is now, not with an older read.
+      if (assignmentsPath)
+        void queryClient.invalidateQueries({ queryKey: tenantAssignmentsKey(tenantId) });
     },
   });
+  const tenant = useTenantAssignments(tenantId, assignmentsPath);
+  const previewed = assignmentsPath ? (preview.data?.next.sourceAssignments ?? null) : null;
+  // After the refetch the card must show what the API will issue from; until then, or
+  // when it cannot be read, the server's terms digest still refuses a moved preview.
+  const assignmentsChanged =
+    previewed !== null &&
+    tenant.data !== undefined &&
+    !tenant.isFetching &&
+    !tenant.isError &&
+    assignmentsDiffer(previewed, tenant.data, new Date(preview.data?.next.validFrom ?? 0));
+  const awaitingAssignments = previewed !== null && tenant.isFetching;
   const confirm = useMutation({
     mutationFn: () => {
       if (!preview.data) throw new Error("preview required");
@@ -98,13 +117,26 @@ export function StandaloneLicenseIssue({
           >
             {t("tenants.detail.standalone.issue.preview")}
           </Button>
-          <Button disabled={!preview.data || confirm.isPending} onClick={() => confirm.mutate()}>
+          <Button
+            disabled={
+              !preview.data || confirm.isPending || assignmentsChanged || awaitingAssignments
+            }
+            onClick={() => confirm.mutate()}
+          >
             {t("tenants.detail.standalone.issue.confirm")}
           </Button>
         </div>
       }
     >
-      {assignmentsPath ? <StandaloneAssignmentsSummary tenantId={tenantId} /> : null}
+      {assignmentsPath ? (
+        <StandaloneAssignmentsSummary
+          tenantId={tenantId}
+          detail={tenant.data}
+          isError={tenant.isError}
+          previewed={previewed}
+          changed={assignmentsChanged}
+        />
+      ) : null}
       <Input
         label={t("tenants.detail.standalone.issue.graceDays")}
         hint={t("tenants.detail.standalone.issue.graceHint")}

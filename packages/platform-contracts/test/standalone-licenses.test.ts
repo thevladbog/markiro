@@ -10,6 +10,8 @@ import {
 } from "@markiro/domain";
 import {
   platformStandaloneLicenseContracts,
+  STANDALONE_ASSIGNMENT_REFS_MAX,
+  standaloneAssignmentRefsSchema,
   standaloneIssuanceConfirmSchema,
   standaloneIssuancePreviewRequestSchema,
   standaloneIssuanceSummarySchema,
@@ -389,5 +391,34 @@ describe("standalone issuance confirmation and file", () => {
       "GET /platform/tenants/:tenantId/standalone-sites/:siteId/issuances",
       "GET /platform/tenants/:tenantId/standalone-sites/:siteId/issuances/:licenseId/file",
     ]);
+  });
+});
+
+describe("the issuance journal's assignment bound", () => {
+  const ref = () => ({
+    kind: "addon" as const,
+    id: randomUUID(),
+    catalogVersionId: randomUUID(),
+  });
+
+  it("accepts a plan with 64 add-ons (65 references) and rejects 66 or none", () => {
+    expect(STANDALONE_ASSIGNMENT_REFS_MAX).toBe(65);
+    expect(standaloneAssignmentRefsSchema.safeParse(Array.from({ length: 65 }, ref)).success).toBe(
+      true,
+    );
+    expect(standaloneAssignmentRefsSchema.safeParse(Array.from({ length: 66 }, ref)).success).toBe(
+      false,
+    );
+    expect(standaloneAssignmentRefsSchema.safeParse([]).success).toBe(false);
+  });
+
+  it("is the bound the database enforces, so the contract and the constraint cannot drift", () => {
+    const sql = readFileSync(
+      new URL("../../db/migrations/0195_offline_catalog_items.sql", import.meta.url),
+      "utf8",
+    );
+    expect(sql).toContain(
+      `jsonb_array_length("standalone_license_issuances"."source_assignments") between 1 and ${STANDALONE_ASSIGNMENT_REFS_MAX}`,
+    );
   });
 });

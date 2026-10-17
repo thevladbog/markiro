@@ -2076,6 +2076,7 @@
           "standalone_license_request_conflict": "This issuance was already confirmed with other data — preview again.",
           "standalone_license_grace_invalid": "A demo has a grace period of 0 days.",
           "generic": "The operation failed. Retry.",
+          "standalone_assignment_limit_reached": "The tenant has more assignments than a license can name (65). Retire an add-on and preview again.",
           "standalone_license_assignments_required": "There is no current plan assignment. Change the tenant's rights.",
           "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page."
         },
@@ -2086,6 +2087,10 @@
           "addon": "Add-on: {{name}} · version {{version}} · quantity {{quantity}} · {{term}}",
           "until": "until {{date}}",
           "open": "no end date",
+          "issuedTitle": "Will be issued from",
+          "changed": "The tenant's assignments changed after the preview. Preview again before confirming.",
+          "unnamedPlan": "Plan · version {{id}}",
+          "unnamedAddon": "Add-on · version {{id}}",
           "change": "Change the tenant's rights",
           "empty": "The tenant has no current plan. Assign a plan flagged «Available to offline customers».",
           "loadError": "Could not load the tenant's assignments."
@@ -2440,6 +2445,7 @@
       "grant_owner_conflict": "This tenant already has another cabinet member",
       "tenant_not_found": "Tenant not found",
       "grant_failed": "Could not grant cabinet access",
+      "standalone_assignment_limit_reached": "This tenant has no cabinet and its license can name at most 65 assignments (the plan and 64 add-ons). Retire an add-on first.",
       "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only items flagged as available to offline customers can be assigned. Reload the page: the flag may have been withdrawn."
     },
     "cabinet": {

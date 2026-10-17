@@ -403,13 +403,19 @@ describe("offline license from the assignments of a tenant without a cabinet (sp
     next: {
       ...STANDALONE_PREVIEW.next,
       source: "offline_assignments",
+      validFrom: new Date().toISOString(),
       validUntilReason: "one_year_cap",
       sourceAssignments: [
         {
           kind: "plan",
           id: OFFLINE_TENANT.currentSubscription.id,
-          catalogVersionId: STANDALONE_PREVIEW.next.planVersionId,
+          catalogVersionId: OFFLINE_TENANT.currentSubscription.planVersionId,
         },
+        ...OFFLINE_TENANT.activeAddons.map((addon) => ({
+          kind: "addon",
+          id: addon.id,
+          catalogVersionId: addon.addonVersionId,
+        })),
       ],
     },
     expected: { ...STANDALONE_PREVIEW.expected, boundaryAt: null },
@@ -475,6 +481,96 @@ describe("offline license from the assignments of a tenant without a cabinet (sp
         },
       },
     ]);
+  });
+
+  it("names what will be issued and lets the operator confirm when the cached assignments match", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [() => jsonResponse(200, OFFLINE_TENANT)],
+      [PREVIEW]: [() => jsonResponse(200, assignmentsPreview)],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+    const summary = within(dialog).getByRole("region", { name: "Права из назначений клиента" });
+    expect(await within(summary).findByText("Будет выпущена по")).toBeDefined();
+    expect(within(summary).getByText(/Тариф: Базовый · версия 1/)).toBeDefined();
+    expect(within(summary).getByText(/Дополнение: Дополнительная станция/)).toBeDefined();
+    expect(within(dialog).queryByText(/Назначения клиента изменились/)).toBeNull();
+    await vi.waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Подтвердить и скачать" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
+    );
+  });
+
+  it("shows what the preview will issue, warns and blocks confirmation when the plan changed from A to B", async () => {
+    const planB = {
+      kind: "plan",
+      id: "b2222222-2222-4222-8222-222222222222",
+      catalogVersionId: "c2222222-2222-4222-8222-222222222222",
+    };
+    const calls = stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      // The tenant card still shows plan A (and the add-on), also after the refetch.
+      [TENANT]: [() => jsonResponse(200, OFFLINE_TENANT)],
+      [PREVIEW]: [
+        () =>
+          jsonResponse(200, {
+            ...assignmentsPreview,
+            next: { ...assignmentsPreview.next, sourceAssignments: [planB] },
+          }),
+      ],
+      [CONFIRM]: [() => jsonResponse(200, STANDALONE_FILE)],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    const summary = within(dialog).getByRole("region", { name: "Права из назначений клиента" });
+    expect(await within(summary).findByText(/Тариф: Базовый · версия 1/)).toBeDefined();
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+
+    // What will be issued is what the API named, not the cached plan A.
+    expect(await within(summary).findByText("Будет выпущена по")).toBeDefined();
+    expect(within(summary).getByText(/Тариф · версия c2222222/)).toBeDefined();
+    expect(within(summary).queryByText(/Тариф: Базовый · версия 1/)).toBeNull();
+    expect(
+      await within(dialog).findByText(/Назначения клиента изменились после предпросмотра/),
+    ).toBeDefined();
+    expect(within(dialog).getByRole("button", { name: "Подтвердить и скачать" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    // The tenant was read again after the preview: the comparison is not against a stale cache.
+    expect(calls.filter((call) => call.key === TENANT).length).toBeGreaterThanOrEqual(2);
+    expect(calls.filter((call) => call.key === CONFIRM)).toEqual([]);
+  });
+
+  it("does not name an add-on that has not started as a difference", async () => {
+    const future = {
+      ...structuredClone(OFFLINE_TENANT.activeAddons[0]),
+      id: "e3333333-3333-4333-8333-333333333333",
+      startsAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+    };
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [
+        () =>
+          jsonResponse(200, {
+            ...OFFLINE_TENANT,
+            activeAddons: [...OFFLINE_TENANT.activeAddons, future],
+          }),
+      ],
+      [PREVIEW]: [() => jsonResponse(200, assignmentsPreview)],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+    expect(await within(dialog).findByText("Будет выпущена по")).toBeDefined();
+    expect(within(dialog).queryByText(/Назначения клиента изменились/)).toBeNull();
   });
 
   it("says that an assignment is missing and links to the rights of the tenant", async () => {
