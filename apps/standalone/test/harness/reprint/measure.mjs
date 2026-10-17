@@ -52,12 +52,16 @@ for (const [width, height] of VIEWPORTS) {
   for (const theme of THEMES) {
     for (const state of STATES) {
       const offline = state === "offline" ? "&online=0" : "";
-      await page.goto(`${base}/test/harness/reprint/index.html?theme=${theme}&state=${state}${offline}`);
+      await page.goto(
+        `${base}/test/harness/reprint/index.html?theme=${theme}&state=${state}${offline}`,
+      );
       await page.waitForSelector(".station-status-bar");
       await page.waitForTimeout(250);
       const result = await page.evaluate(() => window.__inspect());
       if (process.env.SHOT)
-        await page.screenshot({ path: `${process.env.SHOT}/${width}x${height}-${theme}-${state}.png` });
+        await page.screenshot({
+          path: `${process.env.SHOT}/${width}x${height}-${theme}-${state}.png`,
+        });
       if (result.problems.length) failed = true;
       console.log(JSON.stringify({ width, height, theme, state, ...result }));
     }

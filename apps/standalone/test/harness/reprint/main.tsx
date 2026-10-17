@@ -31,7 +31,10 @@ import {
   summaryRows,
   type JournalFilter,
 } from "../../../src/floor/warehouse/warehouse-view.js";
-import { UnitLabelPanel, type UnitLabelShown } from "../../../src/floor/unit-labels/UnitLabelPanel.js";
+import {
+  UnitLabelPanel,
+  type UnitLabelShown,
+} from "../../../src/floor/unit-labels/UnitLabelPanel.js";
 import "../../../src/floor/work/work-screen.css";
 import { t } from "i18next";
 
@@ -159,7 +162,12 @@ const base = {
   shiftNumber: "ОКТ26-004",
 };
 const boxFields = boxLabelFields({ ...base, sscc: BOX_SSCC, itemCount: 24 });
-const palletFields = palletLabelFields({ ...base, sscc: PALLET_SSCC, boxCount: 18, itemCount: 432 });
+const palletFields = palletLabelFields({
+  ...base,
+  sscc: PALLET_SSCC,
+  boxCount: 18,
+  itemCount: 432,
+});
 const unitFields = { ...boxLabelFields({ ...base, sscc: "", itemCount: 1 }), "km.code": KM };
 
 function job(over: Partial<WarehouseJob>): WarehouseJob {
@@ -188,7 +196,14 @@ function job(over: Partial<WarehouseJob>): WarehouseJob {
 }
 const at = (hhmm: string) => `2026-10-17T${hhmm}:00.000Z`;
 const JOURNAL: WarehouseJob[] = [
-  job({ id: "1", kind: "unit", identity: "h1", fields: unitFields, printer: TSC, updatedAt: at("11:32") }),
+  job({
+    id: "1",
+    kind: "unit",
+    identity: "h1",
+    fields: unitFields,
+    printer: TSC,
+    updatedAt: at("11:32"),
+  }),
   job({ id: "2", state: "verified", updatedAt: at("11:29") }),
   job({
     id: "3",
@@ -214,7 +229,15 @@ const JOURNAL: WarehouseJob[] = [
     identity: "046070123400004798",
     updatedAt: at("11:10"),
   }),
-  job({ id: "6", kind: "unit", identity: "h6", fields: unitFields, printer: TSC, state: "verified", updatedAt: at("11:02") }),
+  job({
+    id: "6",
+    kind: "unit",
+    identity: "h6",
+    fields: unitFields,
+    printer: TSC,
+    state: "verified",
+    updatedAt: at("11:02"),
+  }),
 ];
 const UNIT = JOURNAL[0] as WarehouseJob;
 const BOX = JOURNAL[1] as WarehouseJob;
@@ -271,14 +294,21 @@ const jobProps = (shown: WarehouseJob, over: { verifying?: boolean; said?: Said 
   job: shown,
   verifying: over.verifying ?? false,
   templateName:
-    shown.kind === "unit" ? "Дубликат Data Matrix 40×30" : shown.kind === "box" ? "Короб 100×150" : "Паллета 100×150",
+    shown.kind === "unit"
+      ? "Дубликат Data Matrix 40×30"
+      : shown.kind === "box"
+        ? "Короб 100×150"
+        : "Паллета 100×150",
   resultText: ((): string | null => {
     const result = resultView(shown, over.verifying ?? false);
     if (result.body === null) return null;
     if (result.body.kind === "hint") return t(`floor.warehouse.hint.${result.body.key}`);
-    return t(`floor.warehouse.${result.body.code === "printer_a4" ? "printerA4" : "printerUnconfigured"}`, {
-      defaultValue: "Ничего не напечатано. Проверьте принтер и его настройки, затем повторите.",
-    });
+    return t(
+      `floor.warehouse.${result.body.code === "printer_a4" ? "printerA4" : "printerUnconfigured"}`,
+      {
+        defaultValue: "Ничего не напечатано. Проверьте принтер и его настройки, затем повторите.",
+      },
+    );
   })(),
   note: null,
   said: over.said ?? null,
@@ -297,7 +327,10 @@ function Screen() {
   const closeProps = { onClick: noop };
   const dialogRef = { current: null };
   const session = (
-    over: Partial<typeof sessionProps> & { journal?: WarehouseJob[]; overlay?: React.ReactNode } = {},
+    over: Partial<typeof sessionProps> & {
+      journal?: WarehouseJob[];
+      overlay?: React.ReactNode;
+    } = {},
   ) => {
     const { journal, overlay, ...rest } = over;
     return (
@@ -343,7 +376,10 @@ function Screen() {
     case "verifying":
       return (
         <JobView
-          {...jobProps({ ...UNIT, state: "unknown", errorCode: "outcome_unknown" }, { verifying: true })}
+          {...jobProps(
+            { ...UNIT, state: "unknown", errorCode: "outcome_unknown" },
+            { verifying: true },
+          )}
         />
       );
     case "failed":
@@ -427,7 +463,11 @@ function ManualScreen() {
 
 /** The duplicate's panel as the work screen carries it, under a stub of the hero (a measure of its room). */
 function Duplicate() {
-  const shown = (attemptState: UnitLabelShown["attemptState"], verification: UnitLabelShown["verification"], policy: UnitLabelShown["verificationPolicy"]): UnitLabelShown => ({
+  const shown = (
+    attemptState: UnitLabelShown["attemptState"],
+    verification: UnitLabelShown["verification"],
+    policy: UnitLabelShown["verificationPolicy"],
+  ): UnitLabelShown => ({
     id: "u",
     attemptNo: 1,
     attemptState,
@@ -435,10 +475,21 @@ function Duplicate() {
     verification,
     fields: { "km.code": KM } as UnitLabelShown["fields"],
   });
-  const variants: Record<string, { job: UnitLabelShown; busy: boolean; policy: "none" | "required" }> = {
+  const variants: Record<
+    string,
+    { job: UnitLabelShown; busy: boolean; policy: "none" | "required" }
+  > = {
     dup: { job: shown("sent", "pending", "required"), busy: false, policy: "required" },
-    "dup-error": { job: shown("failed_before_send", "pending", "required"), busy: false, policy: "required" },
-    "dup-busy": { job: shown("failed_before_send", "pending", "required"), busy: true, policy: "required" },
+    "dup-error": {
+      job: shown("failed_before_send", "pending", "required"),
+      busy: false,
+      policy: "required",
+    },
+    "dup-busy": {
+      job: shown("failed_before_send", "pending", "required"),
+      busy: true,
+      policy: "required",
+    },
     "dup-none": { job: shown("sent", "not_required", "none"), busy: false, policy: "none" },
   };
   const v = variants[state] as (typeof variants)[string];
@@ -514,7 +565,9 @@ createRoot(document.getElementById("root")!).render(<Page />);
     problems.push(`page scrolls sideways by ${doc.scrollWidth - doc.clientWidth}px`);
   // Every touch target: 64 px at least both ways.
   const targets: Array<{ label: string; w: number; h: number }> = [];
-  for (const el of document.querySelectorAll("button, a[href], [role=button], [role=radio], input")) {
+  for (const el of document.querySelectorAll(
+    "button, a[href], [role=button], [role=radio], input",
+  )) {
     const b = box(el);
     if (b.width === 0 || b.height === 0) continue;
     const label = (el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 30);
@@ -523,10 +576,13 @@ createRoot(document.getElementById("root")!).render(<Page />);
       problems.push(`target under 64px: ${label} ${b.width}x${b.height}`);
   }
   // The one primary of a screen is the kit's 84 px.
-  for (const el of document.querySelectorAll(".warehouse-reprint .floor-primary, .rp-footer .mk-btn")) {
+  for (const el of document.querySelectorAll(
+    ".warehouse-reprint .floor-primary, .rp-footer .mk-btn",
+  )) {
     // On a 640 px window the footer's answers are the hub's 72 px, the rest of the floor's 84.
     const want = window.matchMedia("(max-height: 700px)").matches ? 72 : 84;
-    if (Math.abs(box(el).height - want) > 0.5) problems.push(`answer not ${want}px: ${box(el).height}`);
+    if (Math.abs(box(el).height - want) > 0.5)
+      problems.push(`answer not ${want}px: ${box(el).height}`);
   }
   // Nothing runs past the window or out of its own box.
   const frame = document.querySelector(".warehouse-reprint, .work-screen");
@@ -534,8 +590,11 @@ createRoot(document.getElementById("root")!).render(<Page />);
   if (frame) {
     const f = box(frame);
     out.frame = { w: Math.round(f.width), h: Math.round(f.height), bottom: Math.round(f.bottom) };
-    if (f.bottom > window.innerHeight + 0.5) problems.push(`frame past the window by ${f.bottom - window.innerHeight}px`);
-    for (const el of frame.querySelectorAll(".rp-footer, .rp-footer > *, .rp-journal__row, .rp-tag, .rp-summary__row")) {
+    if (f.bottom > window.innerHeight + 0.5)
+      problems.push(`frame past the window by ${f.bottom - window.innerHeight}px`);
+    for (const el of frame.querySelectorAll(
+      ".rp-footer, .rp-footer > *, .rp-journal__row, .rp-tag, .rp-summary__row",
+    )) {
       const b = box(el);
       if (b.width === 0) continue;
       // The journal's list is a scroll region: a row below its edge is reached by scrolling it.
@@ -543,9 +602,12 @@ createRoot(document.getElementById("root")!).render(<Page />);
       if (b.right > f.right + 0.5 || b.left < f.left - 0.5) {
         problems.push(`${el.className.toString().split(" ")[0]} leaves the frame sideways`);
       }
-      if (b.bottom > f.bottom + 0.5) problems.push(`${el.className.toString().split(" ")[0]} leaves the frame below`);
+      if (b.bottom > f.bottom + 0.5)
+        problems.push(`${el.className.toString().split(" ")[0]} leaves the frame below`);
     }
-    for (const el of frame.querySelectorAll(".rp-tag, .rp-banner__text, .rp-subject__code, .rp-print__row dd, .rp-journal__code")) {
+    for (const el of frame.querySelectorAll(
+      ".rp-tag, .rp-banner__text, .rp-subject__code, .rp-print__row dd, .rp-journal__code",
+    )) {
       if (el.scrollWidth - el.clientWidth > 1 && getComputedStyle(el).overflow === "visible") {
         problems.push(`${el.className.toString().split(" ")[0]} overflows sideways`);
       }
@@ -557,21 +619,32 @@ createRoot(document.getElementById("root")!).render(<Page />);
       const rects = [...range.getClientRects()];
       const lines = new Set(rects.map((r) => Math.round(r.top / 6))).size;
       if (lines > 1) problems.push(`footer button wraps: ${(el.textContent ?? "").trim()}`);
-      if (el.scrollWidth - el.clientWidth > 1) problems.push(`footer button clipped: ${(el.textContent ?? "").trim()}`);
+      if (el.scrollWidth - el.clientWidth > 1)
+        problems.push(`footer button clipped: ${(el.textContent ?? "").trim()}`);
     }
     const list = frame.querySelector(".rp-journal__list");
     if (list) {
-      out.journal = { listH: Math.round(box(list).height), scrolls: list.scrollHeight - list.clientHeight };
+      out.journal = {
+        listH: Math.round(box(list).height),
+        scrolls: list.scrollHeight - list.clientHeight,
+      };
       if (box(list).bottom > f.bottom + 0.5) problems.push("journal list leaves the frame below");
     }
     // The zones and the footer keep their own rows: nothing of the body runs into the footer.
     const footer = frame.querySelector(".rp-footer");
     const body = frame.querySelector(".rp-body, .rp-zones, .rp-manual");
     if (footer && body && box(body).bottom > box(footer).top + 0.5) {
-      problems.push(`body (${Math.round(box(body).bottom)}) runs into the footer (${Math.round(box(footer).top)})`);
+      problems.push(
+        `body (${Math.round(box(body).bottom)}) runs into the footer (${Math.round(box(footer).top)})`,
+      );
     }
-    for (const zone of frame.querySelectorAll(".rp-zone, .rp-empty, .rp-print, .rp-subject, .rp-setup-reasons, .rp-summary")) {
-      if (zone.scrollHeight - zone.clientHeight > 1 && getComputedStyle(zone).overflowY === "visible") {
+    for (const zone of frame.querySelectorAll(
+      ".rp-zone, .rp-empty, .rp-print, .rp-subject, .rp-setup-reasons, .rp-summary",
+    )) {
+      if (
+        zone.scrollHeight - zone.clientHeight > 1 &&
+        getComputedStyle(zone).overflowY === "visible"
+      ) {
         const inner = [...zone.children].at(-1);
         if (inner && box(inner).bottom > (footer ? box(footer).top : f.bottom) + 0.5) {
           problems.push(`${zone.className.toString().split(" ")[0]} runs below its row`);

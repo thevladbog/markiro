@@ -565,9 +565,9 @@ describe("without the link", () => {
   it("says so on the screen at all times, and a code found only when the link is back", async () => {
     const at = await startedWarehouse({ online: false });
     expect(screen.getByText("Нет связи с хостом: найти код нельзя")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Ввести код вручную" }).hasAttribute("disabled")).toBe(
-      true,
-    );
+    expect(
+      screen.getByRole("button", { name: "Ввести код вручную" }).hasAttribute("disabled"),
+    ).toBe(true);
     at.rerender({ online: true });
     expect(screen.queryByText("Нет связи с хостом: найти код нельзя")).toBeNull();
     await at.scan(BOX_SSCC);

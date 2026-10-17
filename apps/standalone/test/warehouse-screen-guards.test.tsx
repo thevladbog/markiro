@@ -38,7 +38,10 @@ function allFloorSized() {
   // The kit's own controls (the keypad's keys, the journal's segments) are floor-sized by their sheet.
   const kit = ["mk-btn--floor", "floor-keypad__key", "floor-segmented__option"];
   for (const button of buttons) {
-    expect(kit.some((name) => button.className.includes(name)), button.outerHTML).toBe(true);
+    expect(
+      kit.some((name) => button.className.includes(name)),
+      button.outerHTML,
+    ).toBe(true);
   }
 }
 
@@ -766,7 +769,9 @@ describe("what the operator can reach", () => {
     await screen.findByRole("button", { name: "Начать перепечатку" });
     await at.press("Утеряна");
     // Chosen is a fill and a tick in the row (a radio of its group), not colour alone.
-    expect(screen.getByRole("radio", { name: "Утеряна" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Утеряна" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     expect(screen.getByRole("radio", { name: "Повреждена" }).getAttribute("aria-checked")).toBe(
       "false",
     );

@@ -125,9 +125,7 @@ export async function renderWarehouse(
   const view = render(wrap(<WarehouseScreen {...props} />));
   // A reason is a radio of its group (design 2026-10), every other answer a button.
   const click = (name: string | RegExp) =>
-    fireEvent.click(
-      screen.queryByRole("button", { name }) ?? screen.getByRole("radio", { name }),
-    );
+    fireEvent.click(screen.queryByRole("button", { name }) ?? screen.getByRole("radio", { name }));
   return {
     view,
     db,

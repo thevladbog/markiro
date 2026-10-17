@@ -92,7 +92,12 @@ describe("the journal's kinds and filters", () => {
   });
 
   it("filters a list by kind and keeps its order", () => {
-    const all = [unitJob({ id: "a" }), job({ id: "b" }), palletJob({ id: "c" }), sheetJob({ id: "d" })];
+    const all = [
+      unitJob({ id: "a" }),
+      job({ id: "b" }),
+      palletJob({ id: "c" }),
+      sheetJob({ id: "d" }),
+    ];
     expect(filterJobs(all, "all").map((one) => one.id)).toEqual(["a", "b", "c", "d"]);
     expect(filterJobs(all, "box").map((one) => one.id)).toEqual(["b"]);
     expect(filterJobs(all, "pallet").map((one) => one.id)).toEqual(["c"]);
@@ -109,7 +114,11 @@ describe("the code of a row", () => {
 
   it("shows a box's and a pallet's SSCC grouped, a unit's serial first with the GTIN beside it", () => {
     expect(jobCode(job())).toEqual({ kind: "sscc", main: groupSscc(BOX_SSCC), gtin: null });
-    expect(jobCode(palletJob())).toEqual({ kind: "sscc", main: groupSscc(PALLET_SSCC), gtin: null });
+    expect(jobCode(palletJob())).toEqual({
+      kind: "sscc",
+      main: groupSscc(PALLET_SSCC),
+      gtin: null,
+    });
     expect(jobCode(unitJob())).toEqual({ kind: "serial", main: "S000001", gtin: "04600682000013" });
   });
 
@@ -129,7 +138,10 @@ describe("a row's words", () => {
       title: "Молоко 3,2%",
       count: { unit: "items", n: 12 },
     });
-    expect(jobRowParts(palletJob())).toMatchObject({ kind: "pallet", count: { unit: "boxes", n: 18 } });
+    expect(jobRowParts(palletJob())).toMatchObject({
+      kind: "pallet",
+      count: { unit: "boxes", n: 18 },
+    });
     expect(jobRowParts(unitJob())).toMatchObject({ kind: "unit", count: null });
     expect(jobRowParts(sheetJob())).toMatchObject({ kind: "sheet", count: null });
   });
@@ -180,19 +192,24 @@ describe("what a job tells of its printing", () => {
   it("starts a pallet's with its boxes, and a unit's with its date, leaving out what the label lacks", () => {
     expect(jobFacts(palletJob())[0]).toEqual({ key: "boxes", value: "18" });
     expect(jobFacts(palletJob())[1]).toEqual({ key: "quantity", value: "216" });
-    expect(jobFacts(unitJob({ fields: { ...FIELDS, "shift.no": "", "counterparty.name": "" } }))).toEqual([
-      { key: "productionDate", value: FIELDS.date },
-    ]);
+    expect(
+      jobFacts(unitJob({ fields: { ...FIELDS, "shift.no": "", "counterparty.name": "" } })),
+    ).toEqual([{ key: "productionDate", value: FIELDS.date }]);
   });
 
   it("says each state in its own words and tone, and a check of the label in a state of its own", () => {
-    expect(resultView(job({ state: "sending" }), false)).toMatchObject({ tone: "info", title: "sending" });
+    expect(resultView(job({ state: "sending" }), false)).toMatchObject({
+      tone: "info",
+      title: "sending",
+    });
     expect(resultView(job({ state: "sent" }), false)).toMatchObject({
       tone: "ok",
       title: "sent",
       body: { kind: "hint", key: "sent" },
     });
-    expect(resultView(job({ state: "unknown", errorCode: "outcome_unknown" }), false)).toMatchObject({
+    expect(
+      resultView(job({ state: "unknown", errorCode: "outcome_unknown" }), false),
+    ).toMatchObject({
       tone: "warn",
       title: "unknown",
       body: { kind: "hint", key: "unknown" },
@@ -202,9 +219,18 @@ describe("what a job tells of its printing", () => {
       title: "verify",
       body: { kind: "hint", key: "verify" },
     });
-    expect(resultView(job({ state: "verified" }), false)).toMatchObject({ tone: "ok", title: "verified" });
-    expect(resultView(job({ state: "cancelled" }), false)).toMatchObject({ tone: "neutral", title: "cancelled" });
-    expect(resultView(job({ state: "prepared" }), false)).toMatchObject({ tone: "info", title: "prepared" });
+    expect(resultView(job({ state: "verified" }), false)).toMatchObject({
+      tone: "ok",
+      title: "verified",
+    });
+    expect(resultView(job({ state: "cancelled" }), false)).toMatchObject({
+      tone: "neutral",
+      title: "cancelled",
+    });
+    expect(resultView(job({ state: "prepared" }), false)).toMatchObject({
+      tone: "info",
+      title: "prepared",
+    });
   });
 
   it("keeps a failed print's own code as its words, a printer setup one as a warning of its own", () => {
@@ -234,8 +260,13 @@ describe("what a job tells of its printing", () => {
   it("names the printer the job was made for and its state", () => {
     expect(printerView(job())).toEqual({ name: ZEBRA.name, tag: "ready" });
     expect(printerView(job({ state: "sending" }))).toEqual({ name: ZEBRA.name, tag: "accepting" });
-    expect(printerView(job({ state: "failed", errorCode: "not_sent" }))).toEqual({ name: ZEBRA.name, tag: "error" });
-    expect(printerView(job({ state: "failed", errorCode: "printer_unconfigured", printer: null }))).toEqual({
+    expect(printerView(job({ state: "failed", errorCode: "not_sent" }))).toEqual({
+      name: ZEBRA.name,
+      tag: "error",
+    });
+    expect(
+      printerView(job({ state: "failed", errorCode: "printer_unconfigured", printer: null })),
+    ).toEqual({
       name: null,
       tag: "unassigned",
     });
@@ -243,7 +274,10 @@ describe("what a job tells of its printing", () => {
 });
 
 describe("the summary of what prints on what", () => {
-  const settings = (assignments: Record<string, string | null>, printers = [ZEBRA, TSC, HP_A4]) => ({
+  const settings = (
+    assignments: Record<string, string | null>,
+    printers = [ZEBRA, TSC, HP_A4],
+  ) => ({
     printers,
     assignments: { box: null, pallet: null, duplicate: null, ...assignments },
   });
@@ -271,6 +305,11 @@ describe("the summary of what prints on what", () => {
 
   it("marks every kind with no printer", () => {
     const rows = summaryRows(settings({}));
-    expect(rows.map((row) => row.state)).toEqual(["unassigned", "unassigned", "unassigned", "unassigned"]);
+    expect(rows.map((row) => row.state)).toEqual([
+      "unassigned",
+      "unassigned",
+      "unassigned",
+      "unassigned",
+    ]);
   });
 });
