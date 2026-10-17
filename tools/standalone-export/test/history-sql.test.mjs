@@ -207,18 +207,23 @@ test(
     // Its normal bootstrap must accept the fixture's existing partitions.
     const { createDb, ensurePartitions } = await import("../../../packages/db/dist/index.js");
     const { db, pool } = createDb(databaseUrl);
+    const partitionNames = `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname IN ('scan_events_202610', 'scan_events_202401')
+        AND n.nspname = current_schema() ORDER BY c.relname`;
     try {
-      await ensurePartitions(db, [
-        new Date("2026-10-01T00:00:00Z"),
-        new Date("2024-01-01T00:00:00Z"),
-      ]);
-      assert.deepEqual(
-        await ensurePartitions(db, [
-          new Date("2026-10-01T00:00:00Z"),
-          new Date("2024-01-01T00:00:00Z"),
-        ]),
-        [],
+      const before = await db.execute(partitionNames);
+      // This compatibility probe must not leave scan partitions for later API tests.
+      const rollback = new Error("roll back partition compatibility probe");
+      await assert.rejects(
+        db.transaction(async (tx) => {
+          const months = [new Date("2026-10-01T00:00:00Z"), new Date("2024-01-01T00:00:00Z")];
+          await ensurePartitions(tx, months);
+          assert.deepEqual(await ensurePartitions(tx, months), []);
+          throw rollback;
+        }),
+        (error) => error === rollback,
       );
+      assert.deepEqual((await db.execute(partitionNames)).rows, before.rows);
     } finally {
       await pool.end();
     }
