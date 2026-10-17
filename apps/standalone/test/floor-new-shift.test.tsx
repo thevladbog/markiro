@@ -2607,7 +2607,7 @@ describe("the details step on the design kit (step B)", () => {
     ).toBeTruthy();
     const pallets = screen.getByRole("switch", { name: "С паллетами" });
     expect(pallets.textContent).toContain(
-      "Короба складываются на паллету: печатаются этикетки коробов и паллет, SSCC выдаётся станцией.",
+      "Короба идут на паллету: печатаются этикетки коробов и паллет.",
     );
     expect(pallets.textContent).toContain("Включено");
     fireEvent.click(pallets);
@@ -2631,7 +2631,7 @@ describe("the details step on the design kit (step B)", () => {
     expect(card.textContent).toContain("Выключено");
     expect(card.textContent).not.toContain("Шаблон:");
     expect(card.textContent).toContain(
-      "На внешнюю упаковку переносится полный код с продукции. Количество продукции не меняется.",
+      "Полный код с продукции — на внешнюю упаковку. Количество не меняется.",
     );
     fireEvent.click(card);
     expect(card.getAttribute("aria-checked")).toBe("true");

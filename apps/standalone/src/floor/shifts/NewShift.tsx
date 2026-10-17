@@ -814,6 +814,7 @@ export function NewShift({
               onChange={(printDuplicate) => update({ printDuplicate })}
               {...(form.printDuplicate && duplicateTemplate !== null
                 ? {
+                    detailTitle: `${t("floor.newShift.templateLine")} ${duplicateTemplate.name}`,
                     detail: (
                       <>
                         <span className="new-shift__detail-label">
@@ -837,6 +838,9 @@ export function NewShift({
               {...(form.pallets
                 ? {
                     detail: t("floor.newShift.palletCapacity", {
+                      quantity: formatQuantity(palletCapacity),
+                    }),
+                    detailTitle: t("floor.newShift.palletCapacity", {
                       quantity: formatQuantity(palletCapacity),
                     }),
                   }
