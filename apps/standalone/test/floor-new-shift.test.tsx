@@ -2755,21 +2755,51 @@ describe("the details step on the design kit (step B)", () => {
     renderNew(await copiesOf(CATALOG));
     await chooseMilk();
     const pad = document.querySelector(".new-shift__pad") as HTMLElement;
-    fireEvent.keyDown(pad, { key: "5" });
+    // The gap between keys is the browser's own arrival stamp of each key, not the moment the
+    // page got to it, so a loaded PC that handles a scan late still sees it as one run. The stamps
+    // are given here, the test never waits.
+    const keyAt = (key: string, stamp: number): boolean => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "timeStamp", { value: stamp });
+      return fireEvent(pad, event);
+    };
+    keyAt("5", 1000);
     expect(digitsOf("План, шт.")).toBe("5");
-    // The hand is slower than the scan gap: let it pass, then a scanner's burst arrives at once.
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    fireEvent.keyDown(pad, { key: "4" });
+    // The hand is slower than the scan gap: then a scanner's burst arrives at once.
+    keyAt("4", 1100);
     expect(digitsOf("План, шт.")).toBe("54");
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    fireEvent.keyDown(pad, { key: "9" });
-    fireEvent.keyDown(pad, { key: "8" });
-    fireEvent.keyDown(pad, { key: "7" });
+    // The burst's keys arrived 2 ms apart, however long the page took to handle each of them.
+    keyAt("9", 1200);
+    keyAt("8", 1202);
+    keyAt("7", 1204);
     // The burst took back its first digit and dropped the rest; what stood before it stays.
     expect(digitsOf("План, шт.")).toBe("54");
-    expect(fireEvent.keyDown(pad, { key: "Enter" })).toBe(false);
+    expect(keyAt("Enter", 1206)).toBe(false);
     fireEvent.keyDown(pad, { key: "Delete" });
     expect(digitsOf("План, шт.")).toBe("");
+  });
+
+  it("still reads a scan as one run when a loaded PC handles its keys late", async () => {
+    renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    const pad = document.querySelector(".new-shift__pad") as HTMLElement;
+    const keyAt = (key: string, stamp: number) => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "timeStamp", { value: stamp });
+      fireEvent(pad, event);
+    };
+    keyAt("5", 1000);
+    keyAt("4", 1100);
+    keyAt("9", 1200);
+    // The page is busy for longer than the scan gap before it gets to the scan's next keys,
+    // which arrived 1 ms apart: handled late, they are still one scan.
+    const busyUntil = performance.now() + 80;
+    while (performance.now() < busyUntil) {
+      /* a loaded PC */
+    }
+    keyAt("8", 1201);
+    keyAt("7", 1202);
+    expect(digitsOf("План, шт.")).toBe("54");
   });
 
   it("listens on the keypad's area, not the window: keys elsewhere edit nothing", async () => {

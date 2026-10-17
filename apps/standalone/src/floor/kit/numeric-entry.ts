@@ -47,8 +47,12 @@ export interface KeyboardDigitsOptions {
   onChange: (next: string) => void;
   maxLength: number;
   disabled?: boolean;
-  /** Milliseconds; tests give their own. */
-  clock?: () => number;
+  /**
+   * Milliseconds at which a key happened. By default the browser's own arrival stamp of the
+   * event (`event.timeStamp`), not the moment this handler runs: a loaded PC may handle a scan's
+   * keys late and far apart, and must still see them as the run they arrived as.
+   */
+  clock?: (event: KeyboardEvent) => number;
 }
 
 /**
@@ -57,14 +61,14 @@ export interface KeyboardDigitsOptions {
  * scanner is a keyboard too, so a run of digits typed faster than
  * `SCAN_KEY_GAP_MS` is a scan, not typing: the digits it had already entered
  * are taken back, the rest is dropped, and its closing Enter does not press
- * the focused key. Keys with Ctrl, Alt or Meta are shortcuts and are left alone.
+ * the focused key. The gap is measured between the keys' arrival stamps. Keys with Ctrl, Alt or Meta are shortcuts and are left alone.
  */
 export function useKeyboardDigits({
   value,
   onChange,
   maxLength,
   disabled = false,
-  clock = () => performance.now(),
+  clock = (event) => event.timeStamp,
 }: KeyboardDigitsOptions): (event: KeyboardEvent) => void {
   const latest = useRef({ value, onChange, maxLength, disabled, clock });
   latest.current = { value, onChange, maxLength, disabled, clock };
@@ -78,7 +82,7 @@ export function useKeyboardDigits({
       clock: time,
     } = latest.current;
     if (off || event.ctrlKey || event.altKey || event.metaKey) return;
-    const at = time();
+    const at = time(event);
     const state = chain.current;
     const gap = at - state.at;
     if (event.key === "Enter") {
