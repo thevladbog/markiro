@@ -533,9 +533,12 @@ export class StandaloneLicenseIssuanceService {
         ? [{ kind: source.kind, id: source.id, catalogVersionId: source.versionId }]
         : [],
     );
-    // The journal holds a bounded list; assignment creation enforces the same bound, so this
+    // The journal holds a bounded list (only for the assignments path; a cloud file names none); assignment creation enforces the same bound, so this
     // is a defence for rows that predate it, and answers with a code rather than a 500.
-    if (sourceAssignments.length > STANDALONE_ASSIGNMENT_REFS_MAX)
+    if (
+      missingCode === "standalone_license_assignments_required" &&
+      sourceAssignments.length > STANDALONE_ASSIGNMENT_REFS_MAX
+    )
       throw new ConflictException({ code: "standalone_assignment_limit_reached" });
     return {
       plan: subscription.status === "trial" ? ("demo" as const) : ("subscription" as const),

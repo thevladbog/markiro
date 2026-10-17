@@ -14,6 +14,7 @@ import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
 import { mountPlatformAuth, setupPlatformAuth } from "../src/platform-auth/platform-auth.setup";
 import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
+import { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import { createManagedSubscription, createPublishedAddon } from "./support/subscription-fixtures";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -693,6 +694,44 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       offlineAssignments: { plans: 1, addons: 1 },
       demoCreated: false,
     });
+  });
+
+  it("adds no demo when an ended plan has a scheduled successor whose start has arrived, and the job can still activate it", async () => {
+    const tenantId = await createNoneTenant();
+    const ended = await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "active",
+      startsAt: new Date(Date.now() - 7_200_000),
+      endsAt: new Date(Date.now() - 3_600_000),
+    });
+    const successor = await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "scheduled",
+      startsAt: new Date(Date.now() - 3_600_000),
+      endsAt: null,
+    });
+    const response = await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(response.body).toMatchObject({
+      offlineAssignments: { plans: 1, addons: 0 },
+      demoCreated: false,
+    });
+    expect((await subscriptionRows(tenantId)).map((row) => [row.id, row.status]).sort()).toEqual(
+      [
+        [ended.subscriptionId, "expired"],
+        [successor.subscriptionId, "scheduled"],
+      ].sort(),
+    );
+    // Nothing blocks the status job: no pending demo holds the one-current index.
+    await new SubscriptionStatusJob(setup.db, { dueTenantIds: async () => [tenantId] }).run(
+      new Date(),
+    );
+    const after = await subscriptionRows(tenantId);
+    expect(after.find((row) => row.id === successor.subscriptionId)?.status).toBe("active");
   });
 
   it("keeps counting an assignment that has not started yet as current", async () => {

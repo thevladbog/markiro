@@ -548,6 +548,74 @@ describe("offline license from the assignments of a tenant without a cabinet (sp
     expect(calls.filter((call) => call.key === CONFIRM)).toEqual([]);
   });
 
+  it("does not report a difference when a scheduled renewal has started but the job has not run", async () => {
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    const successor = {
+      ...structuredClone(OFFLINE_TENANT.currentSubscription),
+      id: "b4444444-4444-4444-8444-444444444444",
+      status: "scheduled",
+      startsAt: hourAgo,
+      endsAt: null,
+    };
+    const successorAddon = {
+      ...structuredClone(OFFLINE_TENANT.activeAddons[0]),
+      id: "e4444444-4444-4444-8444-444444444444",
+      subscriptionId: successor.id,
+      status: "scheduled",
+      startsAt: hourAgo,
+      endsAt: null,
+    };
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [
+        () =>
+          jsonResponse(200, {
+            ...OFFLINE_TENANT,
+            // The old plan ended an hour ago; the status job has not yet promoted the successor.
+            currentSubscription: { ...OFFLINE_TENANT.currentSubscription, endsAt: hourAgo },
+            activeAddons: [],
+            scheduledSubscription: successor,
+            scheduledAddons: [successorAddon],
+          }),
+      ],
+      [PREVIEW]: [
+        () =>
+          jsonResponse(200, {
+            ...assignmentsPreview,
+            next: {
+              ...assignmentsPreview.next,
+              sourceAssignments: [
+                {
+                  kind: "plan",
+                  id: successor.id,
+                  catalogVersionId: successor.planVersionId,
+                },
+                {
+                  kind: "addon",
+                  id: successorAddon.id,
+                  catalogVersionId: successorAddon.addonVersionId,
+                },
+              ],
+            },
+          }),
+      ],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+    const summary = within(dialog).getByRole("region", { name: "Права из назначений клиента" });
+    expect(await within(summary).findByText("Будет выпущена по")).toBeDefined();
+    expect(within(summary).getByText(/Тариф: Базовый · версия 1/)).toBeDefined();
+    expect(within(dialog).queryByText(/Назначения клиента изменились/)).toBeNull();
+    await vi.waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Подтвердить и скачать" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
+    );
+  });
+
   it("does not name an add-on that has not started as a difference", async () => {
     const future = {
       ...structuredClone(OFFLINE_TENANT.activeAddons[0]),

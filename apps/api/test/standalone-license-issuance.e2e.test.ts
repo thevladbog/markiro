@@ -1290,6 +1290,28 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(await issuedRows(f.tenantId)).toEqual([]);
     });
 
+    it("does not cap a tenant with a cabinet: it names no assignments, however many add-ons it has", async () => {
+      const f = await siteFor({ endsAt: null });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 65 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next).toMatchObject({ source: "subscription", sourceAssignments: null });
+      expect(preview.next.rights.quotas.lines).toBe(67);
+    });
+
     it("refuses the previewed file when the tenant got a cabinet before confirmation", async () => {
       const f = await offlineSiteFor();
       const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {

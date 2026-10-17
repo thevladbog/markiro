@@ -31,21 +31,28 @@ export function currentAssignmentRefs(detail: TenantDetail, at: Date): Standalon
   const inTerm = (term: { startsAt: string | null; endsAt: string | null }) =>
     (term.startsAt === null || new Date(term.startsAt) <= at) &&
     (term.endsAt === null || new Date(term.endsAt) > at);
+  // A scheduled renewal whose start has arrived is already the effective subscription on the
+  // server, though the card still lists it as scheduled until the status job promotes it.
+  const effective = [detail.currentSubscription, detail.scheduledSubscription].filter(
+    (subscription): subscription is NonNullable<TenantDetail["currentSubscription"]> =>
+      subscription !== null &&
+      (subscription.status !== "scheduled" || subscription.startsAt !== null) &&
+      inTerm(subscription),
+  );
+  const ids = new Set(effective.map((subscription) => subscription.id));
   return [
-    ...(detail.currentSubscription && inTerm(detail.currentSubscription)
-      ? [
-          {
-            kind: "plan" as const,
-            id: detail.currentSubscription.id,
-            catalogVersionId: detail.currentSubscription.planVersionId,
-          },
-        ]
-      : []),
-    ...detail.activeAddons.filter(inTerm).map((addon) => ({
-      kind: "addon" as const,
-      id: addon.id,
-      catalogVersionId: addon.addonVersionId,
+    ...effective.map((subscription) => ({
+      kind: "plan" as const,
+      id: subscription.id,
+      catalogVersionId: subscription.planVersionId,
     })),
+    ...[...detail.activeAddons, ...detail.scheduledAddons]
+      .filter((addon) => ids.has(addon.subscriptionId) && inTerm(addon))
+      .map((addon) => ({
+        kind: "addon" as const,
+        id: addon.id,
+        catalogVersionId: addon.addonVersionId,
+      })),
   ];
 }
 
@@ -112,9 +119,13 @@ export function StandaloneAssignmentsSummary({
   // A reference the card does not know is named by its version id, never dropped.
   const previewedRows = previewed
     ? previewed.map((ref) => {
-        if (ref.kind === "plan" && detail?.currentSubscription?.id === ref.id)
-          return planRow(detail.currentSubscription);
-        const addon = detail?.activeAddons.find((candidate) => candidate.id === ref.id);
+        const subscription = [detail?.currentSubscription, detail?.scheduledSubscription].find(
+          (candidate) => candidate?.id === ref.id,
+        );
+        if (ref.kind === "plan" && subscription) return planRow(subscription);
+        const addon = [...(detail?.activeAddons ?? []), ...(detail?.scheduledAddons ?? [])].find(
+          (candidate) => candidate.id === ref.id,
+        );
         if (ref.kind === "addon" && addon) return addonRow(addon);
         return {
           key: ref.id,

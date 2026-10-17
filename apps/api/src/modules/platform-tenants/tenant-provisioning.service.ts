@@ -18,7 +18,7 @@ import { PlatformAuditService } from "../../platform-auth/platform-audit.service
 import type { GrantCabinetAccessDto, GrantCabinetAccessResult } from "@markiro/platform-contracts";
 import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
 import { transitionSubscriptionStatus } from "../../subscriptions/subscription-status-transition";
-import { termEnded } from "../../subscriptions/subscription-term";
+import { termContains, termEnded } from "../../subscriptions/subscription-term";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
 import { activationIdentifier } from "../tenant-owner-activation/token";
 import { provisionTenantSchema, type ProvisionTenantDto, type ProvisionTenantInput } from "./dto";
@@ -404,12 +404,25 @@ export class TenantProvisioningService {
       .where(
         and(
           eq(schema.tenantSubscriptions.tenantId, tenantId),
-          inArray(schema.tenantSubscriptions.status, ["pending_activation", "trial", "active"]),
+          inArray(schema.tenantSubscriptions.status, [
+            "pending_activation",
+            "trial",
+            "active",
+            "scheduled",
+          ]),
         ),
       );
     let current = false;
     for (const row of stored) {
-      if (row.status !== "pending_activation" && termEnded(row, operationAt))
+      if (row.status === "scheduled") {
+        // A successor whose start has arrived is effective already (as `resolve` reads it)
+        // and the status job will activate it: a demo here would hold the one-current index.
+        if (
+          row.startsAt !== null &&
+          termContains({ startsAt: row.startsAt, endsAt: null }, operationAt)
+        )
+          current = true;
+      } else if (row.status !== "pending_activation" && termEnded(row, operationAt))
         await transitionSubscriptionStatus(tx, row, "expired", row.endsAt!, "term_ended");
       else current = true;
     }
