@@ -2,6 +2,38 @@ import { describe, expect, it } from "vitest";
 import { PARENT_ROW_MM, parentRowHeightMm } from "../src/print-forms/contents-report.js";
 import { renderPalletReportHtml, type PalletReportData } from "../src/print-forms/pallet-report.js";
 
+describe("pallet row geometry", () => {
+  it.each([
+    {
+      name: "leading spaces before the first paragraph",
+      input: `${" ".repeat(29)}A\nB`,
+      heightMm: 16,
+    },
+    {
+      name: "trailing spaces after the last paragraph",
+      input: `A\nB${" ".repeat(29)}`,
+      heightMm: 16,
+    },
+    {
+      name: "spaces next to a line feed",
+      input: `A${" ".repeat(80)}\n${" ".repeat(80)}B`,
+      heightMm: 13,
+    },
+    {
+      name: "one separator for a whitespace run with several line feeds",
+      input: "A\n \r\t\n\u00a0\nB",
+      heightMm: 13,
+    },
+    { name: "empty outer paragraphs", input: `\n${"A".repeat(56)}\n`, heightMm: 21 },
+  ])("preserves $name", ({ input, heightMm }) => {
+    expect(parentRowHeightMm(input)).toBe(heightMm);
+  });
+
+  it("handles long whitespace-only names without a newline", () => {
+    expect(parentRowHeightMm(" ".repeat(100_000))).toBe(16_434);
+  });
+});
+
 function box(n: number, codeCount = 12, disassembledAt: Date | null = null) {
   return {
     sscc: `0014600703496700${String(n).padStart(4, "0")}`,

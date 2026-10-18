@@ -198,12 +198,20 @@ const PRODUCT_LINE_MM = 4.6;
  */
 export function parentRowHeightMm(productName: string | null): number {
   if (!productName) return PARENT_ROW_MM;
-  const lines = productName
-    .split(/\s*\n\s*/)
-    .reduce(
-      (n, paragraph) => n + Math.max(1, Math.ceil(paragraph.length / PRODUCT_CHARS_PER_LINE)),
-      0,
-    );
+  let lines = 0;
+  let paragraphLength = 0;
+  // A whitespace run containing a line feed separates paragraphs. Preserve
+  // other whitespace in their measured lengths without retrying a failed
+  // newline match at every position in a long whitespace-only name.
+  for (const part of productName.split(/(\s+)/)) {
+    if (part.includes("\n")) {
+      lines += Math.max(1, Math.ceil(paragraphLength / PRODUCT_CHARS_PER_LINE));
+      paragraphLength = 0;
+    } else {
+      paragraphLength += part.length;
+    }
+  }
+  lines += Math.max(1, Math.ceil(paragraphLength / PRODUCT_CHARS_PER_LINE));
   return Math.max(PARENT_ROW_MM, Math.ceil(2 + lines * PRODUCT_LINE_MM));
 }
 /** A nested row: a unit code under a box, or a box under a pallet. */
