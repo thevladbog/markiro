@@ -67,7 +67,12 @@ export function RadioGroup({
         {...(ariaLabel === undefined && labelId ? { "aria-labelledby": labelId } : {})}
         {...(error ? { "aria-invalid": true } : {})}
         {...(errorId || hintId ? { "aria-describedby": errorId ?? hintId } : {})}
-        style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        // `--mk-radio-dir` and `--mk-radio-gap` let an app lay the options in a row without `!important`.
+        style={{
+          display: "flex",
+          flexDirection: "var(--mk-radio-dir, column)" as CSSProperties["flexDirection"],
+          gap: "var(--mk-radio-gap, 8px)",
+        }}
       >
         {options.map((option) => {
           const optionId = `${groupId}-${option.value}`;

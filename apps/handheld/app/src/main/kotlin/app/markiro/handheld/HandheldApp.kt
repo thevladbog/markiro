@@ -5,7 +5,7 @@ import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.sync.ConnectivityNudger
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,7 +15,7 @@ import javax.inject.Inject
 
 @HiltAndroidApp
 class HandheldApp : Application() {
-    @Inject lateinit var syncEngine: SyncEngine
+    @Inject lateinit var syncEngine: SyncDriver
 
     @Inject lateinit var inventorySync: InventorySyncEngine
 

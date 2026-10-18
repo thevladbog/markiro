@@ -1,0 +1,20 @@
+[package]
+name = "markiro-proto"
+version = "1.0.0"
+description = "Wire contract between the Markiro standalone host and its devices"
+edition = "2021"
+license-file = "../../../LICENSE"
+publish = false
+
+[dependencies]
+aws-lc-rs = "=1.18.1"
+base64 = "=0.22.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[features]
+# The test keys of packages/domain/fixtures/standalone-license join the
+# built-in keysets (`trust::license_keyset`, `trust::update_keyset`). Only the
+# host's dev-dependency enables it: a release build never trusts them.
+test-keys = []

@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "template": { "purpose": "box", "enabled": true, "chzProductGroupCodes": null },
+      "slot": { "purpose": "box", "chzProductGroupCode": null },
+      "fits": true
+    },
+    {
+      "template": { "purpose": "box", "enabled": false, "chzProductGroupCodes": null },
+      "slot": { "purpose": "box", "chzProductGroupCode": null },
+      "fits": false
+    },
+    {
+      "template": { "purpose": "box", "enabled": true, "chzProductGroupCodes": [8] },
+      "slot": { "purpose": "box", "chzProductGroupCode": null },
+      "fits": false
+    },
+    {
+      "template": { "purpose": "box", "enabled": true, "chzProductGroupCodes": [8] },
+      "slot": { "purpose": "box", "chzProductGroupCode": 8 },
+      "fits": true
+    },
+    {
+      "template": { "purpose": "box", "enabled": true, "chzProductGroupCodes": [8] },
+      "slot": { "purpose": "box", "chzProductGroupCode": 15 },
+      "fits": false
+    },
+    {
+      "template": { "purpose": "box", "enabled": true, "chzProductGroupCodes": null },
+      "slot": { "purpose": "box", "chzProductGroupCode": 15 },
+      "fits": true
+    },
+    {
+      "template": { "purpose": "pallet", "enabled": true, "chzProductGroupCodes": null },
+      "slot": { "purpose": "box", "chzProductGroupCode": null },
+      "fits": false
+    },
+    {
+      "template": { "purpose": "pallet", "enabled": true, "chzProductGroupCodes": null },
+      "slot": { "purpose": "pallet", "chzProductGroupCode": null },
+      "fits": true
+    },
+    {
+      "template": { "purpose": "pallet", "enabled": true, "chzProductGroupCodes": [8, 15] },
+      "slot": { "purpose": "pallet", "chzProductGroupCode": 15 },
+      "fits": true
+    },
+    {
+      "template": { "purpose": "product_duplicate", "enabled": true, "chzProductGroupCodes": null },
+      "slot": { "purpose": "product_duplicate", "chzProductGroupCode": null },
+      "fits": true
+    },
+    {
+      "template": {
+        "purpose": "product_duplicate",
+        "enabled": false,
+        "chzProductGroupCodes": [15]
+      },
+      "slot": { "purpose": "product_duplicate", "chzProductGroupCode": 15 },
+      "fits": false
+    },
+    {
+      "template": { "purpose": "box", "enabled": true, "chzProductGroupCodes": [8] },
+      "slot": { "purpose": "pallet", "chzProductGroupCode": 8 },
+      "fits": false
+    }
+  ]
+}

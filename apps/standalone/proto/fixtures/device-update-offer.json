@@ -1,0 +1,10 @@
+{
+  "hostVersion": "0.3.0",
+  "package": {
+    "state": "ok",
+    "manifest": "eyJ0eXAiOiJtYXJraXJvLXN0YW5kYWxvbmUtdXBkYXRlK2p3cyIsImFsZyI6IkVTMjU2Iiwia2lkIjoidGVzdC11cGQtMSJ9.eyJ2IjoxfQ.c2lnbmF0dXJl",
+    "version": "0.3.0",
+    "sizeBytes": 61234567,
+    "sha256": "7863191bce3b1317a5e56211c00c8a962523cc52264414ba528e791d12c1f1ae"
+  }
+}

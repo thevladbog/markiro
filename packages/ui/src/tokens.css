@@ -83,6 +83,45 @@
 
   --focus-ring: #1a4f9c;
 
+  /* Design kit 2026-10 §1 — new tokens (light) */
+  --linectl: #8a877f; /* field/checkbox border, UI 3:1 (3.59 on surface) */
+  --accentui: #0b9448; /* tab indicator / UI accent on bg (3.76) */
+  --onerr: #ffffff; /* text on solid err (7.58) */
+  --brand1: #f3d5db; /* product-card gradient */
+  --brand2: #f8e4e8;
+  --brand3: #fcf1f3;
+  --brandline: #e3b8c0; /* product-card border */
+
+  /* Design kit 2026-10 §1 — kit names as aliases of the semantic tokens above
+     (declared per theme block so a nested [data-theme] subtree re-resolves). */
+  --bg: var(--surface-page);
+  --surface: var(--surface-card);
+  --panel: var(--surface-panel);
+  --fg: var(--fg-1);
+  --muted: var(--fg-2);
+  --muted2: var(--fg-3);
+  --dis: var(--fg-disabled);
+  --line2: var(--line-strong);
+  --ok: var(--ok-fg);
+  --okbg: var(--ok-bg);
+  --warn: var(--warn-fg);
+  --warnbg: var(--warn-bg);
+  --err: var(--err-fg);
+  --errbg: var(--err-bg);
+  --info: var(--info-fg);
+  --infobg: var(--info-bg);
+  --done: var(--done-fg);
+  --donebg: var(--done-bg);
+  --focus: var(--focus-ring);
+  --violet: var(--cat-violet-fg);
+  --violetbg: var(--cat-violet-bg);
+  --teal: var(--cat-teal-fg);
+  --tealbg: var(--cat-teal-bg);
+  --magenta: var(--cat-magenta-fg);
+  --magentabg: var(--cat-magenta-bg);
+  --steel: var(--cat-steel-fg);
+  --steelbg: var(--cat-steel-bg);
+
   /* operational console aliases — composition-specific names, same shared palette */
   --mk-surface-paper: var(--surface-page);
   --mk-surface-workspace: var(--surface-card);
@@ -162,6 +201,45 @@
   --cat-steel-border: #353947; /* 7.36:1 */
 
   --focus-ring: #6db2ff;
+
+  /* Design kit 2026-10 §1 — new tokens (dark) */
+  --linectl: #6f6d76; /* 3.36 on surface */
+  --accentui: #3ddc7a;
+  --onerr: #391a16; /* 5.64 on err */
+  --brand1: #4e1d27;
+  --brand2: #281015;
+  --brand3: #15090c;
+  --brandline: #5a2a34;
+
+  /* Design kit 2026-10 §1 — kit names as aliases of the semantic tokens above
+     (declared per theme block so a nested [data-theme] subtree re-resolves). */
+  --bg: var(--surface-page);
+  --surface: var(--surface-card);
+  --panel: var(--surface-panel);
+  --fg: var(--fg-1);
+  --muted: var(--fg-2);
+  --muted2: var(--fg-3);
+  --dis: var(--fg-disabled);
+  --line2: var(--line-strong);
+  --ok: var(--ok-fg);
+  --okbg: var(--ok-bg);
+  --warn: var(--warn-fg);
+  --warnbg: var(--warn-bg);
+  --err: var(--err-fg);
+  --errbg: var(--err-bg);
+  --info: var(--info-fg);
+  --infobg: var(--info-bg);
+  --done: var(--done-fg);
+  --donebg: var(--done-bg);
+  --focus: var(--focus-ring);
+  --violet: var(--cat-violet-fg);
+  --violetbg: var(--cat-violet-bg);
+  --teal: var(--cat-teal-fg);
+  --tealbg: var(--cat-teal-bg);
+  --magenta: var(--cat-magenta-fg);
+  --magentabg: var(--cat-magenta-bg);
+  --steel: var(--cat-steel-fg);
+  --steelbg: var(--cat-steel-bg);
 }
 
 /* Маркиро — типографика. Plex Sans = интерфейс, Plex Mono = коды/счётчики/логотип. */
@@ -211,11 +289,17 @@
   --r-2: 8px;
   --r-3: 12px;
   --r-round: 999px;
+  /* kit radii (floor controls 20–24, cards 24); --r-1..3 stay */
+  --r-sm: 12px;
+  --r-ctl: 20px;
+  --r-card: 24px;
 
   /* elevation: границы важнее теней — характер «прибора» */
   --shadow-1: 0 1px 2px rgba(23, 22, 26, 0.06);
   --shadow-2: 0 2px 8px rgba(23, 22, 26, 0.1);
   --shadow-3: 0 8px 24px rgba(23, 22, 26, 0.16);
+  /* kit §3: L2 overlays only */
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.28);
 
   --z-modal-legacy: 100;
   --z-overlay-panel: 400;
@@ -226,6 +310,10 @@
   /* controls */
   --control-sm: 32px; /* компактные таблицы, офис */
   --control-md: 40px; /* минимальная цель, офис */
+  --menu-item-h: 40px; /* office menu entry: the ONE place to flip the entry to the kit's 44 */
+  --sidebar-w: 272px; /* office menu, open */
+  --sidebar-w-collapsed: 76px; /* office menu, icons only */
+  --control-floor-primary: 84px; /* kit: the one primary action of a floor screen */
   --control-floor: 64px; /* минимальная цель, цех (перчатка) */
   --control-keypad: 96px; /* клавиша цифрового блока; station compact может снизить до 80px */
   --focus-ring-w: 2px;
@@ -236,4 +324,9 @@
   --mk-table-row-dense: 44px;
   --mk-radius-operational: 2px;
   --mk-motion-fast: 140ms;
+
+  /* kit §6 motion: press feedback only */
+  --press-scale: 0.97;
+  --press-ms: 150ms;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
 }

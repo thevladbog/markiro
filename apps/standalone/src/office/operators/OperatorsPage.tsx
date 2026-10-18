@@ -1,0 +1,322 @@
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Alert, Button, PageHeader, StatusChip, type TableColumn } from "@markiro/ui";
+
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
+import { PagedTable } from "../paging/PagedTable.js";
+import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
+import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { useChangeList, useStoreRecord } from "../records.js";
+import { AddBadgeDialog } from "./AddBadgeDialog.js";
+import { BadgesDialog } from "./BadgesDialog.js";
+import { CreateOperatorDialog } from "./CreateOperatorDialog.js";
+import { EditOperatorDialog } from "./EditOperatorDialog.js";
+import { OperatorAccessDialog } from "./OperatorAccessDialog.js";
+import { OperatorPinDialog } from "./OperatorPinDialog.js";
+import { activeFirstByLogin, badgeLabel, withBadge, withBadgeRevoked } from "./operator-records.js";
+import { RevokeBadgeDialog } from "./RevokeBadgeDialog.js";
+
+// The badge dialogs name their operator by id and read it from the cached
+// list, so the badges they show follow every change stored there.
+type OperatorsDialog =
+  | { kind: "create" }
+  | { kind: "edit"; operator: OfficeOperator }
+  | { kind: "pin"; operator: OfficeOperator }
+  | { kind: "access"; operator: OfficeOperator }
+  | { kind: "badges"; operatorId: string; notice: string | null }
+  | { kind: "addBadge"; operatorId: string }
+  | { kind: "revokeBadge"; operatorId: string; badge: BadgeInfo };
+
+/**
+ * Operators (spec §4.3, §5.5, administrators only; the route is wrapped in
+ * `RequireRole`): who signs in on the stations with a personnel number and a
+ * PIN, or with a badge. The office sends only hashes. There is no delete:
+ * an operator is turned off instead, and the host keeps the record.
+ */
+export function OperatorsPage() {
+  const { t } = useTranslation();
+  const operators = useOfficeQuery(officeKeys.operators, (api, token) => api.listOperators(token));
+  const store = useStoreRecord<OfficeOperator>(officeKeys.operators);
+  // A badge write answers with the badge, or nothing: the change goes into the
+  // cached list at once, and with no list loaded the list is read again.
+  const changeList = useChangeList<OfficeOperator>(officeKeys.operators);
+  const [dialog, setDialog] = useState<OperatorsDialog | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const open = (next: OperatorsDialog) => {
+    setNotice(null);
+    setDialog(next);
+  };
+  const saved = (operator: OfficeOperator, message: string) => {
+    store(operator);
+    setDialog(null);
+    setNotice(message);
+  };
+  const reload = () => {
+    setDialog(null);
+    void operators.refetch();
+  };
+  const operatorOf = (id: string) => operators.data?.find((operator) => operator.id === id);
+  const badgesOf = (operatorId: string, notice: string | null) =>
+    setDialog({ kind: "badges", operatorId, notice });
+  const badgeSummary = (operator: OfficeOperator) => {
+    const active = operator.badges.filter((badge) => badge.revokedAt === null);
+    if (active.length === 0) return t("office.operators.noBadges");
+    const labels = active.map((badge) => badgeLabel(badge, t));
+    return t("office.operators.badgeSummary", { n: active.length, labels: labels.join(", ") });
+  };
+
+  const columns: TableColumn<OfficeOperator>[] = [
+    {
+      key: "login",
+      title: t("office.operators.table.login"),
+      mono: true,
+      // A short number under a long heading: the heading takes two lines, not the column's width.
+      wrapTitle: true,
+      render: (operator) => operator.login,
+    },
+    { key: "name", title: t("office.operators.table.name"), render: (operator) => operator.name },
+    {
+      key: "role",
+      title: t("office.operators.table.role"),
+      render: (operator) => operator.role ?? t("office.common.none"),
+    },
+    {
+      key: "pin",
+      title: t("office.operators.table.pin"),
+      render: (operator) => (
+        // A glyph and a word, not a colour: «PIN не задан» is the one that needs attention.
+        <StatusChip
+          phase={operator.hasPin ? "done" : "attention"}
+          label={t(operator.hasPin ? "office.operators.pinSet" : "office.operators.pinUnset")}
+        />
+      ),
+    },
+    {
+      key: "badges",
+      title: t("office.operators.table.badges"),
+      wrap: true,
+      minWidth: 140,
+      render: badgeSummary,
+    },
+    {
+      key: "status",
+      title: t("office.operators.table.status"),
+      render: (operator) => (
+        <StatusChip
+          phase={operator.active ? "active" : "retired"}
+          label={t(
+            operator.active ? "office.operators.status.active" : "office.operators.status.inactive",
+          )}
+        />
+      ),
+    },
+    {
+      key: "actions",
+      stickyEnd: true,
+      title: t("office.operators.table.actions"),
+      render: (operator) => (
+        <RowActionBar
+          actions={[
+            {
+              key: "edit",
+              label: t("office.operators.editNamed", { name: operator.name }),
+              icon: "pencil",
+              onSelect: () => open({ kind: "edit", operator }),
+            },
+          ]}
+          menu={{
+            label: t("office.common.rowActions", { name: operator.name }),
+            items: [
+              {
+                key: "pin",
+                label: t("office.operators.pin"),
+                ariaLabel: t("office.operators.pinNamed", { name: operator.name }),
+                icon: "key",
+                onSelect: () => open({ kind: "pin", operator }),
+              },
+              {
+                key: "badges",
+                label: t("office.operators.badgesOpen"),
+                ariaLabel: t("office.operators.badgesNamed", { name: operator.name }),
+                icon: "badge",
+                onSelect: () => open({ kind: "badges", operatorId: operator.id, notice: null }),
+              },
+              {
+                key: "access",
+                label: t(
+                  operator.active ? "office.operators.deactivate" : "office.operators.activate",
+                ),
+                ariaLabel: t(
+                  operator.active
+                    ? "office.operators.deactivateNamed"
+                    : "office.operators.activateNamed",
+                  { name: operator.name },
+                ),
+                icon: operator.active ? "stop" : "reset",
+                destructive: operator.active,
+                onSelect: () => open({ kind: "access", operator }),
+              },
+            ],
+          }}
+        />
+      ),
+    },
+  ];
+
+  const badgeDialog = () => {
+    if (dialog === null) return null;
+    if (dialog.kind !== "badges" && dialog.kind !== "addBadge" && dialog.kind !== "revokeBadge") {
+      return null;
+    }
+    const operator = operatorOf(dialog.operatorId);
+    if (operator === undefined) return null;
+    switch (dialog.kind) {
+      case "badges":
+        return (
+          <BadgesDialog
+            operator={operator}
+            notice={dialog.notice}
+            onAdd={() => setDialog({ kind: "addBadge", operatorId: operator.id })}
+            onRevoke={(badge) => setDialog({ kind: "revokeBadge", operatorId: operator.id, badge })}
+            onClose={() => setDialog(null)}
+          />
+        );
+      case "addBadge":
+        return (
+          <AddBadgeDialog
+            operator={operator}
+            operators={operators.data ?? []}
+            onClose={() => badgesOf(operator.id, null)}
+            onAdded={(badge) => {
+              changeList((list) => withBadge(list, operator.id, badge));
+              badgesOf(
+                operator.id,
+                t("office.operators.badges.added", { label: badgeLabel(badge, t) }),
+              );
+            }}
+          />
+        );
+      case "revokeBadge":
+        return (
+          <RevokeBadgeDialog
+            operator={operator}
+            badge={dialog.badge}
+            onClose={() => badgesOf(operator.id, null)}
+            onRevoked={() => {
+              // Revoked now, not when the list has been read again; the host's
+              // own time replaces this PC's when it has.
+              changeList((list) =>
+                withBadgeRevoked(list, operator.id, dialog.badge.id, new Date().toISOString()),
+              );
+              badgesOf(
+                operator.id,
+                t("office.operators.badges.revoked", { label: badgeLabel(dialog.badge, t) }),
+              );
+              void operators.refetch();
+            }}
+          />
+        );
+    }
+  };
+
+  const rows = operators.isSuccess ? activeFirstByLogin(operators.data) : [];
+  const view = listViewState({
+    pending: operators.isPending,
+    failed: operators.isError,
+    total: rows.length,
+    found: rows.length,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={operators.error} onRetry={() => void operators.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="badge"
+        title={t("office.operators.empty")}
+        action={
+          <Button
+            icon={<OfficeIcon name="plus" size={20} />}
+            onClick={() => open({ kind: "create" })}
+          >
+            {t("office.operators.add")}
+          </Button>
+        }
+      />
+    ) : null;
+  const content = (
+    <ListCard>
+      <PagedTable
+        tableId="operators"
+        columns={columns}
+        rows={rows}
+        getRowKey={(operator) => operator.id}
+        empty={state}
+        scrollLabel={t("office.operators.title")}
+      />
+    </ListCard>
+  );
+
+  return (
+    <>
+      <PageHeader
+        title={t("office.operators.title")}
+        description={t("office.operators.subtitle")}
+        actions={
+          <Button onClick={() => open({ kind: "create" })}>{t("office.operators.add")}</Button>
+        }
+      />
+      {notice && <Alert tone="ok">{notice}</Alert>}
+      {content}
+      {dialog?.kind === "create" && (
+        <CreateOperatorDialog
+          onClose={() => setDialog(null)}
+          onCreated={(operator) =>
+            saved(operator, t("office.operators.created", { name: operator.name }))
+          }
+        />
+      )}
+      {dialog?.kind === "edit" && (
+        <EditOperatorDialog
+          operator={dialog.operator}
+          onClose={() => setDialog(null)}
+          onSaved={(operator) => saved(operator, t("office.common.saved"))}
+          onReload={reload}
+        />
+      )}
+      {dialog?.kind === "pin" && (
+        <OperatorPinDialog
+          operator={dialog.operator}
+          onClose={() => setDialog(null)}
+          onSaved={(operator) =>
+            saved(operator, t("office.operators.pinChanged", { name: operator.name }))
+          }
+          onReload={reload}
+        />
+      )}
+      {dialog?.kind === "access" && (
+        <OperatorAccessDialog
+          operator={dialog.operator}
+          onClose={() => setDialog(null)}
+          onSaved={(operator) =>
+            saved(
+              operator,
+              t(operator.active ? "office.operators.activated" : "office.operators.deactivated", {
+                name: operator.name,
+              }),
+            )
+          }
+          onReload={reload}
+        />
+      )}
+      {badgeDialog()}
+    </>
+  );
+}

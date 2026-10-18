@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.backend.CloudBackend
+import app.markiro.handheld.core.backend.StationBackend
 import app.markiro.handheld.core.grants.*
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.ErrorBody
@@ -124,21 +126,28 @@ fun ShiftEntity.toDto() = ShiftDto(
 
 /** Shift list cache, entry (server participation + bundle) and the local leave mark. */
 class ShiftRepository(
-    private val api: StationApi,
+    private val backend: StationBackend,
     private val db: HandheldDatabase,
     private val json: Json,
     private val pool: SsccPool,
     private val blocks: SsccBlockApplier = SsccBlockApplier(pool),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    private val history = ValidationHistoryMirror(db, api, json)
+    constructor(
+        api: StationApi,
+        db: HandheldDatabase,
+        json: Json,
+        pool: SsccPool,
+        blocks: SsccBlockApplier = SsccBlockApplier(pool),
+        clock: () -> Long = System::currentTimeMillis,
+    ) : this(CloudBackend(api), db, json, pool, blocks, clock)
 
     fun boxSerialTopUp(
         shiftId: String,
         issuerPrefix: String,
         generation: app.markiro.handheld.core.storage.GenerationToken,
         scope: kotlinx.coroutines.CoroutineScope,
-    ) = BoxSerialTopUp(db, pool, shiftId, issuerPrefix, generation, scope, api::topUpBoxSscc)
+    ) = BoxSerialTopUp(db, pool, shiftId, issuerPrefix, generation, scope, backend::topUpBoxSscc)
 
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
 
@@ -159,7 +168,7 @@ class ShiftRepository(
     suspend fun refreshList(): Boolean = db.recovery.work { refreshListOwned() }
 
     private suspend fun refreshListOwned(): Boolean = try {
-        val items = api.shifts().items
+        val items = backend.shifts().items
         val now = clock()
         db.recovery.commit {
             val existing = db.shiftDao().all().associateBy { it.id }
@@ -173,9 +182,16 @@ class ShiftRepository(
         false
     }
 
-    suspend fun otherLines(ownLineId: String?): List<LineDto> = api.lines().items.filter { it.id != ownLineId }
+    suspend fun otherLines(ownLineId: String?): List<LineDto> {
+        // A host device sees its own line only (the shifts of other lines are not shown there).
+        val cloud = backend.cloudApi() ?: return emptyList()
+        return cloud.lines().items.filter { it.id != ownLineId }
+    }
 
-    suspend fun shiftsOfLine(lineId: String): List<ShiftDto> = api.shifts(lineId = lineId).items.filter { it.status != "closed" }
+    suspend fun shiftsOfLine(lineId: String): List<ShiftDto> {
+        val cloud = backend.cloudApi() ?: return emptyList()
+        return cloud.shifts(lineId = lineId).items.filter { it.status != "closed" }
+    }
 
     /**
      * The two calls are caught separately on purpose. They fail for unrelated
@@ -188,17 +204,18 @@ class ShiftRepository(
 
     private suspend fun enterOwned(shiftId: String, entryMethod: String): EnterResult {
         db.recovery.commit { app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("shift", shiftId) }
-        GrantTransport(db,api).refreshConfiguredDevice()
+        val cloud = backend.cloudApi()
+        if (cloud != null) GrantTransport(db, cloud).refreshConfiguredDevice()
         val cached = db.shiftDao().get(shiftId)
         val entered = try {
-            api.enter(shiftId, ShiftEntryRequest(entryMethod))
+            backend.enter(shiftId, ShiftEntryRequest(entryMethod))
         } catch (e: HttpException) {
             return refusal(EnterStep.ENTER, e)
         } catch (_: IOException) {
             return offline(cached)
         }
         val bundle = try {
-            api.bundle(shiftId)
+            backend.bundle(shiftId)
         } catch (e: HttpException) {
             return refusal(EnterStep.BUNDLE, e)
         } catch (_: IOException) {
@@ -231,12 +248,12 @@ class ShiftRepository(
                     leftAt = null,
                 ),
             )
-            db.grants.saveProvenance(TaskKind.SHIFT,shiftId,Json { encodeDefaults=true; explicitNulls=true }.encodeToString(ShiftBundleDto.serializer(),bundle))
+            if (cloud != null) db.grants.saveProvenance(TaskKind.SHIFT,shiftId,Json { encodeDefaults=true; explicitNulls=true }.encodeToString(ShiftBundleDto.serializer(),bundle))
             // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
         }
-        GrantTransport(db,api).refreshConfiguredTask(TaskKind.SHIFT,shiftId)
-        if (bundle.shift.validationPrint.mode == "duplicate_dm") history.refresh(shiftId, bundle.product.id)
+        if (cloud != null) GrantTransport(db, cloud).refreshConfiguredTask(TaskKind.SHIFT,shiftId)
+        if (cloud != null && bundle.shift.validationPrint.mode == "duplicate_dm") ValidationHistoryMirror(db, cloud, json).refresh(shiftId, bundle.product.id)
         return EnterResult.Ok
     }
 

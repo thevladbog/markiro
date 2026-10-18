@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Акт дезагрегации № DSG-26-0007</title>
+<style>
+@page { size: A4; margin: 0 }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
+.mono { font-family: monospace; font-variant-numeric: tabular-nums; }
+.rep-page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 11mm 14mm 10mm; background: #fff; display: grid; grid-template-rows: auto auto 1fr auto; gap: 4mm; overflow: hidden; break-after: page; page-break-after: always; font-size: 11px; line-height: 1.35; }
+.rep-page:last-child { break-after: auto; page-break-after: auto; }
+.rep-header { min-height: 18mm; display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; }
+.rep-brand { width: 48mm; min-width: 48mm; height: 12mm; display: flex; align-items: center; }
+.brand-logo { display: block; max-width: 44mm; max-height: 12mm; width: auto; height: auto; object-fit: contain; object-position: left center; }
+.brand-logo--markiro { width: 40mm; height: 9mm; }
+.rep-title { min-width: 0; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 1mm; }
+.rep-title-label, .rep-title-doc { font-size: 18px; line-height: 1.05; font-weight: 700; }
+.rep-title-doc { overflow-wrap: anywhere; }
+.rep-title-detail { color: #45433E; font-size: 10.5px; }
+.rep-meta { min-height: 18mm; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6mm; }
+.rep-meta-cell { min-width: 0; display: flex; flex-direction: column; gap: 1mm; }
+.rep-meta-label { color: #6B6862; font-size: 9px; line-height: 1; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.rep-meta-value { font-weight: 700; }
+.rep-meta-detail { color: #45433E; font-size: 10px; }
+.rep-content { min-height: 0; display: flex; flex-direction: column; gap: 2.5mm; overflow: hidden; }
+.rep-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.col-n { width: 8mm; } .col-sscc { width: 52mm; } .col-product { width: auto; } .col-count { width: 20mm; } .col-barcode { width: 52mm; }
+.rep-table-head { display: table-header-group; }
+.rep-table-head tr { height: 7mm; background: #17161A; color: #FAFAF8; }
+.rep-table-head th { padding: 1.5mm 2mm; font-size: 8.5px; line-height: 1; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
+.rep-table-head th:first-child { border-radius: 2mm 0 0 0; }
+.rep-table-head th:last-child { border-radius: 0 2mm 0 0; }
+.rep-box-row { height: 13mm; background: #F7F6F2; break-inside: avoid; page-break-inside: avoid; border-top: .25mm solid #C9C6BD; border-bottom: .25mm solid #E0DED7; }
+.rep-box-row td { height: 13mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-code-row { height: 14.5mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #EDEBE5; }
+.rep-code-row td { height: 14.5mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-km-label { color: #45433E; font-size: 8.5px; overflow-wrap: anywhere; padding-left: 5mm !important; }
+.rep-tree { display: inline-block; width: 3.5mm; color: #A5A29A; }
+.rep-code-row--empty { height: 8mm; }
+.rep-code-row--empty td { height: 8mm; color: #6B6862; font-size: 9.5px; }
+.rep-item-number { text-align: center; }
+.rep-product-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.25; }
+.rep-sscc-label { font-size: 9.5px; font-weight: 700; overflow-wrap: anywhere; }
+.rep-count { text-align: right !important; white-space: nowrap; }
+.rep-barcode-heading { text-align: center !important; }
+.sscc-box { height: 8mm; display: flex; align-items: center; justify-content: center; }
+.sscc-box svg { display: block; width: auto; max-width: 48mm; height: 100%; }
+.rep-code-missing { font-size: 9px; line-height: 1.2; color: #6B6862; text-align: center; }
+.dm-box { width: 11.5mm; height: 11.5mm; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
+.dm-box svg { display: block; width: 100%; height: 100%; }
+.rep-final-blocks { margin-top: auto; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; gap: 2.5mm; }
+.rep-total { min-height: 7mm; padding: 1.5mm 2mm; border-bottom: .25mm solid #C9C6BD; display: flex; justify-content: flex-end; align-items: baseline; gap: 8mm; font-size: 12px; font-weight: 700; }
+.rep-operation { padding: 3mm 4mm; border: .25mm solid #E0DED7; border-radius: 2mm; background: #F7F6F2; display: flex; flex-direction: column; gap: 1.5mm; color: #45433E; font-size: 9.5px; }
+.rep-operation-note { color: #6B6862; }
+.rep-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; padding: 1mm 3mm 0; }
+.rep-signature { display: grid; grid-template-columns: 1fr; gap: 1.5mm; }
+.signature-line { width: 48mm; height: 4mm; border-bottom: .35mm solid #17161A; display: block; }
+.signature-name { min-height: 4mm; color: #6B6862; font-size: 9.5px; }
+.rep-footer { min-height: 11mm; padding-top: 2mm; border-top: .25mm solid #E0DED7; display: grid; grid-template-columns: 48mm 1fr auto; align-items: center; gap: 4mm; color: #6B6862; font: 9px/1.3 monospace; }
+.code128-box { height: 9mm; display: flex; align-items: center; }
+.code128-box svg { display: block; width: auto; height: 100%; }
+.rep-footer-copy { text-align: right; }
+.rep-page-number { min-width: 20mm; text-align: right; color: #17161A; font-weight: 700; }
+@media print {
+  body { background: #fff; }
+  .rep-page { margin: 0; }
+}
+</style>
+</head>
+<body><section class="rep-page" data-report-page="1">
+    <header class="rep-header">
+      <div class="rep-brand"><svg class="brand-logo brand-logo--markiro" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
+    <g fill="#FAFAF8">
+      <rect x="14" y="14" width="8" height="8"/>
+      <rect x="14" y="26" width="8" height="8"/>
+      <rect x="14" y="38" width="8" height="8"/>
+      <rect x="26" y="22" width="8" height="8"/>
+      <rect x="38" y="14" width="8" height="8"/>
+      <rect x="38" y="26" width="8" height="8"/>
+      <rect x="38" y="38" width="8" height="8"/>
+      <rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>
+    </g>
+    <text x="76" y="45" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="34" letter-spacing="-0.5" fill="#17161A">маркиро</text>
+  </svg></div>
+      <div class="rep-title">
+        <span class="rep-title-label">Акт дезагрегации</span>
+        <span class="rep-title-doc">№ DSG-26-0007</span>
+        <span class="rep-title-detail">от 12 октября 2026 г. · коды упаковок и содержимого · статус: <strong>Черновик</strong></span>
+      </div>
+    </header>
+    <div class="rep-meta">
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Организация</span>
+      <span class="rep-meta-value">—</span>
+      <span class="rep-meta-detail">Профиль организации не заполнен</span>
+    </div>
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Документ составил</span>
+      <span class="rep-meta-value">Павел Орлов</span>
+      <span class="rep-meta-detail">12.10.2026 09:12 · статус: <strong>Черновик</strong></span>
+    </div>
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Причина</span>
+      <span class="rep-meta-value">не указана</span>
+      <span class="rep-meta-detail">Без комментария</span>
+    </div>
+  </div>
+    <main class="rep-content">
+      <table class="rep-table">
+        <colgroup><col class="col-n"><col class="col-sscc"><col class="col-product"><col class="col-count"><col class="col-barcode"></colgroup>
+        <thead class="rep-table-head">
+    <tr>
+      <th>№</th>
+      <th>Код упаковки (SSCC) / код маркировки (КМ)</th>
+      <th>Продукт</th>
+      <th class="rep-count">Кодов, шт.</th>
+      <th class="rep-barcode-heading">Штрихкод / DataMatrix</th>
+    </tr>
+  </thead>
+        <tbody>
+      <tr class="rep-box-row">
+        <td class="mono rep-item-number">1</td>
+        <td class="mono rep-sscc-label">(00)046007034967000017</td>
+        <td><span class="rep-product-name">—</span></td>
+        <td class="mono rep-count">1</td>
+        <td><span class="sscc-box"><svg viewBox="0 0 290 58" xmlns="http://www.w3.org/2000/svg">
+<path stroke="#000000" stroke-width="4" d="M2 58L2 0M24 58L24 0M30 58L30 0M38 58L38 0M60 58L60 0M96 58L96 0M124 58L124 0M134 58L134 0M170 58L170 0M178 58L178 0M184 58L184 0M192 58L192 0M200 58L200 0M206 58L206 0M214 58L214 0M238 58L238 0M256 58L256 0M266 58L266 0M288 58L288 0" />
+<path stroke="#000000" stroke-width="2" d="M7 58L7 0M45 58L45 0M51 58L51 0M85 58L85 0M89 58L89 0M105 58L105 0M111 58L111 0M117 58L117 0M139 58L139 0M155 58L155 0M165 58L165 0M221 58L221 0M243 58L243 0M247 58L247 0M283 58L283 0" />
+<path stroke="#000000" stroke-width="6" d="M15 58L15 0M69 58L69 0M149 58L149 0M229 58L229 0M277 58L277 0" />
+<path stroke="#000000" stroke-width="8" d="M78 58L78 0" />
+</svg>
+</span></td>
+      </tr>
+      <tr class="rep-code-row">
+        <td></td>
+        <td class="mono rep-km-label"><span class="rep-tree">└</span>01 04600682000013 21 BROKEN</td>
+        <td></td>
+        <td></td>
+        <td><span class="dm-box"><span class="rep-code-missing">Код не отображается</span></span></td>
+      </tr>
+      <tr class="rep-box-row">
+        <td class="mono rep-item-number">2</td>
+        <td class="mono rep-sscc-label">(00)046007034967000048</td>
+        <td><span class="rep-product-name">Вода «Атолл» 0,5 л</span></td>
+        <td class="mono rep-count">0</td>
+        <td><span class="sscc-box"><svg viewBox="0 0 290 58" xmlns="http://www.w3.org/2000/svg">
+<path stroke="#000000" stroke-width="4" d="M2 58L2 0M24 58L24 0M30 58L30 0M38 58L38 0M60 58L60 0M96 58L96 0M124 58L124 0M134 58L134 0M170 58L170 0M178 58L178 0M184 58L184 0M192 58L192 0M200 58L200 0M206 58L206 0M214 58L214 0M238 58L238 0M256 58L256 0M266 58L266 0M288 58L288 0" />
+<path stroke="#000000" stroke-width="2" d="M7 58L7 0M45 58L45 0M51 58L51 0M85 58L85 0M89 58L89 0M105 58L105 0M111 58L111 0M117 58L117 0M139 58L139 0M155 58L155 0M165 58L165 0M243 58L243 0M251 58L251 0M283 58L283 0" />
+<path stroke="#000000" stroke-width="6" d="M15 58L15 0M69 58L69 0M149 58L149 0M223 58L223 0M231 58L231 0M277 58L277 0" />
+<path stroke="#000000" stroke-width="8" d="M78 58L78 0" />
+</svg>
+</span></td>
+      </tr>
+      <tr class="rep-code-row rep-code-row--empty">
+        <td></td>
+        <td class="rep-km-label" colspan="4"><span class="rep-tree">└</span>Содержимое упаковки недоступно</td>
+      </tr></tbody>
+      </table>
+      <div class="rep-final-blocks">
+    <div class="rep-total">
+      <span>Итого по акту:</span>
+      <span class="mono">коробов — 2 · кодов — 1</span>
+    </div>
+    <div class="rep-operation">
+      <span class="rep-meta-label">Результат операции</span>
+      <span>Перечисленные короба расформированы: агрегация упаковок аннулирована, коды содержимого возвращены в статус свободных единиц.</span>
+      <span class="rep-operation-note">SSCC расформированной упаковки повторно не используется. Изменения агрегации передаются в ГИС МТ автоматически.</span>
+    </div>
+    <div class="rep-signatures">
+      <div class="rep-signature">
+        <span class="rep-meta-label">Операцию провёл</span>
+        <span class="signature-line"></span>
+        <span class="signature-name">Павел Орлов</span>
+      </div>
+      <div class="rep-signature">
+        <span class="rep-meta-label">Проверил</span>
+        <span class="signature-line"></span>
+        <span class="signature-name">ФИО</span>
+      </div>
+    </div>
+  </div>
+    </main>
+    <footer class="rep-footer">
+      <span class="code128-box"><svg viewBox="0 0 290 58" xmlns="http://www.w3.org/2000/svg">
+<path stroke="#000000" stroke-width="4" d="M2 58L2 0M28 58L28 0M46 58L46 0M68 58L68 0M96 58L96 0M112 58L112 0M134 58L134 0M162 58L162 0M200 58L200 0M206 58L206 0M214 58L214 0M228 58L228 0M244 58L244 0M266 58L266 0M288 58L288 0" />
+<path stroke="#000000" stroke-width="2" d="M7 58L7 0M13 58L13 0M23 58L23 0M37 58L37 0M59 58L59 0M73 58L73 0M81 58L81 0M89 58L89 0M129 58L129 0M149 58L149 0M155 58L155 0M177 58L177 0M221 58L221 0M237 58L237 0M253 58L253 0M261 58L261 0M283 58L283 0" />
+<path stroke="#000000" stroke-width="6" d="M53 58L53 0M103 58L103 0M121 58L121 0M143 58L143 0M169 58L169 0M183 58L183 0M277 58L277 0" />
+<path stroke="#000000" stroke-width="8" d="M192 58L192 0" />
+</svg>
+</span>
+      <span class="rep-footer-copy">Сформировано в Маркиро · Акт № DSG-26-0007</span>
+      <span class="rep-page-number">стр. 1 из 1</span>
+    </footer>
+  </section></body>
+</html>

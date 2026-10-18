@@ -60,3 +60,31 @@ Android tests must also verify its interpretation.
 - Ship Russian and English strings together using `res/values/strings.xml` and
   `res/values-en/strings.xml`. Keep fonts and required assets bundled for offline
   operation. Validate layout on the intended handheld screen as well as tests.
+
+## Host mode
+
+- `StationBackend` (`core/backend`) is the seam: `CloudBackend` forwards `StationApi`
+  unchanged, `HostBackend` translates host answers into the same DTOs. Selection is
+  by `device_config.backend`; the cloud OkHttp client has `BackendGuardInterceptor`
+  first, so a host device cannot call the cloud.
+- The host network layer (`core/network/host`) is HTTPS only, no proxy, no redirects,
+  `MODERN_TLS`, with `PinnedTrust` comparing the SHA-256 of the leaf DER to the pinned
+  fingerprint. System trust never applies. The observe-only client may send nothing but
+  `GET /v1/hello` and exists only before the pairing code is sent. Never add cleartext
+  or a debug-HTTP dependency to host mode; never log keys, codes, claim bodies or
+  fingerprints.
+- Host facts and pallet events are frozen once into `host_outbox` (`HostRecordFreezer`,
+  `HostPalletEvents`) and resent as the same bytes by `HostSyncEngine`; during normal
+  synchronization only receipts remove rows. The cloud `SyncEngine` returns early
+  on a host device.
+- Explicit cloud-import replacement uses `Hello.datasetEpoch`, independently of
+  restore replay. Send only the process-start epoch in the pinned client. Detect
+  changes before bootstrap or restore reconciliation, freeze recovery admission
+  and persist `DATASET_RESET_PENDING`. Purge classified business tables only in a
+  fresh process, atomically with the new epoch/generation. Retain credentials,
+  device configuration, printers/assignments and hardware preferences; do not use
+  revocation/sealing to reset business data. A failed reset stays blocked and
+  retryable. Never expose a new epoch to old callbacks or resume old outboxes.
+- Off in host mode: grants, replacement, inventory, write-offs, update checks, duplicate
+  DataMatrix print (`STATION_UPDATE_REQUIRED`). Protocol fixtures are read from
+  `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.

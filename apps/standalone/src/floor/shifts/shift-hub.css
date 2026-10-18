@@ -1,0 +1,1452 @@
+/*
+ * The shift hub («Смены линии») and the new shift, ported from the cloud
+ * station (apps/station/src/station.css: .station-screen, .station-floor-footer,
+ * .shift-selection__*, .shift-card*, .new-shift__*; shift card redesign
+ * 2026-09-20, PR #615/#619). Every rule is scoped to `.station-screen` of
+ * these screens: the office's shift card and the shell's older floor rules
+ * share some class names, and none of them may leak in either direction.
+ * Colours and type come from @markiro/ui tokens only.
+ */
+
+/* ---- The screen: title row, content, fixed action row (StationScreen). ---- */
+
+.station-screen.shift-hub,
+.station-screen.new-shift {
+  display: grid;
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  /* The cloud's own inset: the floor frame runs edge to edge (fb-login's frame). */
+  padding: var(--sp-4);
+  overflow: hidden;
+  gap: var(--sp-4);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* A fixed, non-scrolling station screen: it takes the room the floor frame
+     gives it and never grows the page with its content (the frame's height is
+     only a minimum, so without this a long form pushed the footer off screen). */
+  contain: size;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__header,
+:is(.shift-hub, .new-shift) .station-screen__content,
+:is(.shift-hub, .new-shift) .station-screen__actions {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__header {
+  /* Its line box is a hair taller than the row on a short window: nothing to cut, so nothing is. */
+  overflow: visible;
+  display: flex;
+  gap: var(--sp-4);
+  align-items: center;
+  justify-content: space-between;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__header h2 {
+  flex-shrink: 0;
+  margin: 0;
+  font: var(--floor-title);
+  white-space: nowrap;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__actions {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* ---- The fixed action row (FloorFooter), flush inside the screen. ---- */
+
+:is(.shift-hub, .new-shift) .station-floor-footer {
+  display: flex;
+  width: 100%;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* One line per label, as on the cloud station's footer. */
+:is(.shift-hub, .new-shift) .station-floor-footer .mk-btn {
+  white-space: nowrap;
+}
+
+/*
+ * The hub's footer (owner-approved board): «Новая смена» the one primary, the setup and the queue
+ * secondary, all 84 px, one line, the queue's count a badge in its button.
+ */
+.shift-hub .station-floor-footer {
+  height: var(--control-floor-primary);
+  min-height: var(--control-floor-primary);
+}
+
+.shift-hub .station-floor-footer .mk-btn {
+  height: var(--control-floor-primary) !important;
+  min-height: var(--control-floor-primary) !important;
+  border-radius: var(--floor-r-primary) !important;
+  font-size: 22px !important;
+  font-weight: 700;
+}
+
+.shift-hub .shift-hub__primary {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.shift-hub .shift-hub__primary > .mk-btn {
+  min-width: 320px;
+  flex: 0 0 auto;
+}
+
+.shift-hub .shift-hub__hint {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.shift-hub .shift-selection__secondary-actions {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  gap: var(--sp-3);
+}
+
+/* The queue's count: «✓ 0» quiet, «! N ждут» a warning, «Отклонено N» an error: words and a sign, never colour alone. */
+.shift-hub .shift-hub__queue-badge {
+  display: inline-flex;
+  height: 40px;
+  margin-inline-start: var(--sp-2);
+  padding: 0 14px;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg-2);
+  font: 600 18px/1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-hub .shift-hub__queue-badge[data-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.shift-hub .shift-hub__queue-badge[data-tone="warn"]::before {
+  content: "!";
+  font-weight: 700;
+}
+
+.shift-hub .shift-hub__queue-badge[data-tone="error"] {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/* ---- The hub's title row: the title and its quiet line, the pager and the reprint. ---- */
+
+.shift-hub .station-screen__heading {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.shift-hub .station-screen__subtitle {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-selection__header-actions {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 0;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.shift-hub .shift-selection__header-action {
+  flex-shrink: 0;
+}
+
+.shift-hub .shift-selection__header-action .mk-btn,
+.shift-hub .shift-pager .mk-btn {
+  min-height: 64px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-pager {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.shift-hub .shift-pager__page {
+  min-width: 64px;
+  color: var(--fg-1);
+  font: 700 22px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ---- The hub's content: the message row, then the cards the whole zone (no scroll). ---- */
+
+.shift-hub .shift-selection__content {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* Said in a polite region that is in the tree before any of it; flat while it says nothing. */
+.shift-hub .shift-selection__message {
+  display: grid;
+  min-width: 0;
+  max-height: min(144px, 18vh);
+  overflow: auto;
+  gap: var(--sp-2);
+}
+
+.shift-hub .shift-selection__message:not(:empty) {
+  margin-bottom: var(--sp-3);
+}
+
+.shift-hub .shift-selection__message p {
+  margin: 0;
+}
+
+.shift-hub .shift-selection__slot,
+.shift-hub .shift-selection__grid {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * The cards fill the zone: one shift is one card on the full width (photo 520 px), two are two
+ * columns (photo 260 px), more come two a page. A last page of one keeps the first column.
+ */
+.shift-hub .shift-selection__grid {
+  display: grid;
+  height: 100%;
+  gap: var(--sp-4);
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  --hub-photo: 260px;
+}
+
+.shift-hub .shift-selection__grid[data-columns="1"] {
+  grid-template-columns: minmax(0, 1fr);
+  --hub-photo: 520px;
+}
+
+.shift-hub .shift-selection__state {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  gap: var(--sp-3);
+  align-content: center;
+  color: var(--fg-2);
+  font: var(--floor-lg);
+  place-items: center;
+  text-align: center;
+}
+
+.shift-hub .shift-selection__state p {
+  max-width: 46ch;
+  margin: 0;
+}
+
+/* The empty state: a quiet clipboard in the zone, the words under it; «Новая смена» stays in the footer. */
+.shift-hub .shift-selection__state--empty {
+  gap: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
+}
+
+.shift-hub .shift-selection__empty-mark {
+  margin-bottom: var(--sp-3);
+  color: var(--fg-3);
+}
+
+.shift-hub .shift-selection__empty-title {
+  color: var(--fg-1);
+  font: var(--floor-title);
+}
+
+.shift-hub .shift-selection__empty-hint {
+  color: var(--fg-2);
+  font: var(--floor-lg);
+}
+
+/* ---- The shift card (owner-approved «Смены линии», 2026-10). ---- */
+
+.shift-hub .shift-card {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+  /* The card's border and shadow are `Card`'s own inline style; the kit's radius and no shadow win here. */
+  border-radius: var(--floor-r-card) !important;
+  box-shadow: none !important;
+}
+
+.shift-hub .shift-card .mk-card__body {
+  min-width: 0;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.shift-hub .shift-card p {
+  margin: 0;
+}
+
+/* The photo's half and the details, the full height of the card. */
+.shift-hub .shift-card__body {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* The photo's width at the 1280 px frame, never more than a share of the card (a 1024 px window). */
+  grid-template-columns: min(var(--hub-photo, 260px), 43%) minmax(0, 1fr);
+}
+
+/*
+ * The product's panel: the card's whole left half. Its face and border colour are the backing's
+ * (`data-photo-backing`: the brand gradient behind a cut-out or the monogram, nothing behind a photo
+ * with its own background); the photo is fitted whole, never cropped, and the tags sit on it.
+ */
+.shift-hub .shift-card__photo {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-4);
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  place-items: center;
+}
+
+.shift-hub .shift-card__photo .product-photo {
+  /* Laid over the frame: the picture's natural size never takes part in the layout. */
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-6);
+  box-sizing: border-box;
+  object-fit: contain;
+}
+
+.shift-hub .shift-card__photo-monogram {
+  color: var(--muted);
+  font: 700 96px / 1 var(--font-ui);
+}
+
+/* The tags (mode, pallets) as chips on the panel's lower edge. */
+.shift-hub .shift-card__tags {
+  position: absolute;
+  inset: auto var(--sp-3) var(--sp-3) var(--sp-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/*
+ * Rows: status and number · product · for whom · the facts · the progress · notes (the free row) ·
+ * the 84 px action at the bottom. A row that has nothing is not drawn.
+ */
+.shift-hub .shift-card__details {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow: hidden;
+  gap: var(--sp-3);
+  flex-direction: column;
+  /* The facts and the progress sit in a row or a column by the room the card has. */
+  container-type: inline-size;
+}
+
+.shift-hub .shift-card__heading {
+  display: flex;
+  flex-wrap: nowrap;
+  min-width: 0;
+  flex: none;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* The number is the shift's address: monospace beside the status. */
+.shift-hub .shift-card__number {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: 500 20px/26px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card .mk-tag {
+  border-radius: var(--r-round);
+}
+
+.shift-hub .shift-card .mk-chip {
+  border-radius: 999px;
+}
+
+.shift-hub .shift-card__status.mk-chip {
+  flex-shrink: 0;
+}
+
+.shift-hub .shift-card__product {
+  display: -webkit-box;
+  flex: none;
+  overflow: hidden;
+  font: 700 28px/34px var(--font-ui);
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.shift-hub .shift-card__counterparty {
+  display: -webkit-box;
+  flex: none;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.shift-hub .shift-card__counterparty:empty {
+  display: none;
+}
+
+/* Label and value: the label 18, the value monospace 24 (20 in two columns). */
+.shift-hub .shift-card__facts {
+  display: grid;
+  flex: none;
+  margin: auto 0 0;
+  gap: var(--sp-2) var(--sp-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shift-hub .shift-card__fact {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.shift-hub .shift-card__fact dt {
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__fact dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-1);
+  font: 500 20px/26px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__plan--none {
+  color: var(--fg-2);
+}
+
+/* The wide card (one shift, a wide window): the facts side by side, the value larger. */
+@container (min-width: 600px) {
+  .shift-hub .shift-card__facts {
+    grid-template-columns: repeat(auto-fit, minmax(0, max-content));
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+
+/* «Принято N из M» and its bar: the count mono, the bar a `fg` fill on the `panel` track. */
+.shift-hub .shift-card__progress {
+  display: grid;
+  flex: none;
+  margin-top: var(--sp-4);
+  gap: var(--sp-2);
+}
+
+.shift-hub .shift-card__progress-line {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.shift-hub .shift-card__progress-count {
+  color: var(--fg-1);
+  font: 600 22px/28px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__progress-bar {
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.shift-hub .shift-card__progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--fg-1);
+}
+
+.shift-hub .shift-card__notes {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  gap: var(--sp-1);
+  align-content: end;
+}
+
+.shift-hub .shift-card__notes:empty {
+  display: none;
+}
+
+.shift-hub .shift-card__hint {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+/* The action: 84 px, bold words (a secondary one is not grey on white), at the card's bottom. */
+.shift-hub .shift-card__action.mk-btn {
+  flex: none;
+  margin-top: auto;
+  font-weight: 700;
+}
+
+/* A short window (1280×800, 1366×768): tighter rows keep every fact and the 84 px action. */
+@media (max-height: 860px) {
+  .station-screen.shift-hub {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+  }
+
+  .shift-hub .shift-card__details {
+    padding: var(--sp-3) var(--sp-4);
+    gap: var(--sp-1);
+  }
+
+  .shift-hub .shift-card__product {
+    font: 700 24px/28px var(--font-ui);
+  }
+
+  .shift-hub .shift-card__counterparty {
+    -webkit-line-clamp: 1;
+  }
+
+  .shift-hub .shift-card__facts {
+    gap: 0 var(--sp-5);
+  }
+
+  .shift-hub .shift-card__fact {
+    gap: 0;
+  }
+
+  .shift-hub .shift-card__fact dt {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 20px;
+    line-height: 22px;
+  }
+
+  .shift-hub .shift-card__progress {
+    margin-top: var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .shift-hub .shift-card__progress-line {
+    font-size: 18px;
+    line-height: 24px;
+  }
+
+  .shift-hub .shift-card__progress-count {
+    font-size: 20px;
+    line-height: 24px;
+  }
+
+  .shift-hub .shift-card__progress-bar {
+    height: 12px;
+  }
+
+  .shift-hub .shift-card__photo-monogram {
+    font-size: 72px;
+  }
+}
+
+/*
+ * A narrow card (a 1024 px window: the details are about 250 px): the number steps down to the
+ * floor's 16 px so it is read whole beside the status chip.
+ */
+@container (max-width: 340px) {
+  .shift-hub .shift-card__number {
+    font-size: 16px;
+    line-height: 22px;
+  }
+}
+
+/*
+ * 1024×640 (the 1280×800 panel at 125 % scaling): the card is about 350 px high. «Для:» goes
+ * (it is on the card in the office), the facts are stacked tight, the action is 64 px, the
+ * smallest touch target of the floor; everything else stays.
+ */
+@media (max-height: 700px) {
+  .station-screen.shift-hub {
+    gap: var(--sp-2);
+  }
+
+  /* 72 px buttons here (the 84 px of the board does not fit): still over the floor's 64 px. */
+  .shift-hub .station-floor-footer {
+    height: 72px;
+    min-height: 72px;
+  }
+
+  .shift-hub .station-floor-footer .mk-btn {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .shift-hub .station-screen__subtitle {
+    display: none;
+  }
+
+  .shift-hub .shift-card__product {
+    -webkit-line-clamp: 1;
+  }
+
+  .shift-hub .shift-card__details {
+    padding: var(--sp-2) var(--sp-4);
+    gap: 2px;
+  }
+
+  .shift-hub .shift-card__progress {
+    margin-top: var(--sp-1);
+  }
+
+  .shift-hub .shift-card__counterparty {
+    display: none;
+  }
+
+  .shift-hub .shift-card__fact dt {
+    font-size: 16px;
+    line-height: 18px;
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 18px;
+    line-height: 20px;
+  }
+
+  .shift-hub .shift-card__action.mk-btn {
+    height: 64px !important;
+    min-height: 64px !important;
+  }
+
+  /* The banner is at most two slim lines, read whole (its second sentence says what can still be done): the cards keep the room. */
+  .shift-hub .shift-selection__message .mk-alert {
+    padding: 4px 16px !important;
+  }
+
+  .shift-hub .shift-selection__message .mk-alert__text {
+    font-size: 15px;
+    line-height: 18px;
+  }
+}
+
+/* ---- The new shift (NewShift). ---- */
+
+/* The footer's parts share the row equally, as the cloud's full-width buttons do. */
+.new-shift .station-floor-footer > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Kit step B: the footer is 84 px high and the one primary action is wide. */
+.new-shift .station-floor-footer {
+  height: 84px;
+  min-height: 84px;
+}
+
+.new-shift .station-floor-footer .mk-btn {
+  height: var(--control-floor-primary) !important;
+  min-height: var(--control-floor-primary) !important;
+  border-radius: var(--floor-r-primary) !important;
+  font-size: 22px !important;
+}
+
+.new-shift .station-floor-footer > .floor-primary {
+  flex-grow: 2;
+}
+
+.new-shift .new-shift__panel {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+}
+
+/* The product step: the scan prompt and the name search, centred. */
+.new-shift .new-shift__panel--input {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.new-shift .new-shift__search {
+  display: grid;
+  width: min(680px, 100%);
+  min-width: 0;
+  min-height: 0;
+  margin-inline: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: var(--sp-3);
+  align-content: center;
+}
+
+.new-shift .new-shift__prompt {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.new-shift .new-shift__results {
+  display: grid;
+  min-height: 0;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__results p {
+  margin: 0;
+}
+
+/*
+ * A found product: its name is cut with an ellipsis and the GTIN stays whole
+ * (beta 3: a long name pushed the row past the panel and the panel scrolled
+ * sideways). The full text is the button's title and accessible name.
+ */
+.new-shift .new-shift__results {
+  min-width: 0;
+}
+
+.new-shift .new-shift__result {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.new-shift .new-shift__result > * {
+  min-width: 0;
+}
+
+.new-shift .new-shift__result-name,
+.new-shift .new-shift__ellipsis {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-shift .new-shift__result-gtin {
+  flex: none;
+  white-space: pre;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The form step: two zones (kit step B), nothing scrolls. The panel is the grid: the left
+ * zone and the message under it share the first column, the keypad panel spans both rows, so
+ * a message takes room from the left zone alone and never from the keys. The wrappers of the
+ * zones (`__fields`, `__zones`) are `display: contents` on this step.
+ */
+.new-shift .new-shift__panel--found {
+  width: 100%;
+  column-gap: var(--sp-5);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  /* 1280 x 1024: the roomy sizes; the short panel below tightens them. */
+  --floor-photo: 208px;
+  --floor-readout: 108px;
+  --floor-readout-digits: 56px;
+}
+
+.new-shift .new-shift__panel--found .new-shift__fields,
+.new-shift .new-shift__panel--found .new-shift__zones {
+  display: contents;
+}
+
+.new-shift .new-shift__panel--found .new-shift__message {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+}
+
+.new-shift .new-shift__fields {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  gap: var(--sp-3);
+  align-content: start;
+  /* Every row at its content: a clipped part never shrinks to nothing. */
+  grid-auto-rows: max-content;
+}
+
+.new-shift .new-shift__fields p {
+  margin: 0;
+}
+
+.new-shift .new-shift__left {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  /* The last resort of a window shorter than any compaction: the column scrolls, never clips. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* A row keeps its content's height: a card squeezed below its text laid the text over the next row. */
+.new-shift .new-shift__left > * {
+  flex: none;
+}
+
+/* The product card: the kit's one gradient, the photo square sitting directly on it. */
+.new-shift .new-shift__product {
+  display: flex;
+  min-width: 0;
+  padding: var(--sp-3);
+  gap: var(--sp-5);
+  align-items: center;
+  border: 1px solid var(--brandline);
+  border-radius: var(--r-card);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
+  background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
+}
+
+.new-shift .new-shift__product-monogram {
+  color: var(--floor-paper-ink);
+  font: 700 72px / 1 var(--font-ui);
+}
+
+.new-shift .new-shift__product-text {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__product h3 {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font: 700 28px/34px var(--font-ui);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.new-shift .new-shift__code {
+  overflow: hidden;
+  color: var(--muted);
+  font: 500 20px/26px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Facts are plain chips: a `panel` fill is the kit's inset, no frame of their own. */
+.new-shift .new-shift__facts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__fact {
+  display: inline-flex;
+  height: 34px;
+  padding: 0 14px;
+  align-items: center;
+  border-radius: var(--r-round);
+  background: var(--panel);
+  color: var(--fg);
+  font: 600 16px/1 var(--font-ui);
+  white-space: nowrap;
+}
+
+.new-shift .new-shift__detail-label {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.new-shift .new-shift__dates {
+  display: grid;
+  margin-top: auto;
+  padding-top: var(--sp-2);
+  gap: var(--sp-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+/* The right zone: ONE flat L1 panel, the readouts and the keys directly on it. */
+.new-shift .new-shift__pad {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.new-shift .new-shift__readouts {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__pad .floor-keypad {
+  flex: 1;
+}
+
+/* A slot of fixed height, hint or error, so the keys never jump. */
+.new-shift .new-shift__pad-slot {
+  display: flex;
+  height: 56px;
+  min-height: 56px;
+  overflow: hidden;
+  align-items: flex-start;
+}
+
+.new-shift .new-shift__pad-slot p {
+  margin: 0;
+}
+
+.new-shift .new-shift__pad-hint {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+.new-shift .new-shift__pad-error {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  color: var(--err);
+  font: var(--floor-body-strong);
+}
+
+.new-shift .new-shift__pad-error svg {
+  flex: none;
+  width: 24px;
+  height: 28px;
+}
+
+.new-shift .new-shift__group {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__label {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.new-shift .new-shift__value {
+  font: var(--floor-body-strong);
+}
+
+.new-shift .new-shift__modes {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* The production date: the cloud's DatePicker at the floor's 64 px. */
+.new-shift .new-shift__date .mk-date-picker {
+  --control-md: 64px;
+}
+
+/* The label and the date in the floor's type, as `Input size="floor"` writes them
+   (the picker paints the office's sizes inline, hence `!important`). */
+.new-shift .new-shift__date .mk-date-picker > label {
+  font: var(--floor-body-strong) !important;
+}
+
+.new-shift .new-shift__date .mk-date-picker__trigger {
+  border-color: var(--linectl) !important;
+  border-radius: var(--floor-r-ctl) !important;
+  font: var(--floor-body) !important;
+  font-size: 22px !important;
+}
+
+/*
+ * The calendar is a popover in the document's root, outside the floor frame, so it is reached
+ * through the floor's presence: days and month arrows are 64 px touch targets (they were 32 px,
+ * station audit). The picker paints its width inline, hence `!important`; the grid is 7 x 64 px.
+ */
+body:has(.floor-frame) .mk-date-picker__popover {
+  --control-sm: 64px;
+
+  width: calc(7 * 64px + 6 * 4px + 24px) !important;
+  max-width: calc(100vw - 2 * var(--sp-4));
+  border-radius: var(--r-card) !important;
+}
+
+body:has(.floor-frame) .mk-date-picker__navigation,
+body:has(.floor-frame) .mk-date-picker__day {
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: var(--r-ctl);
+  /* The popover is outside the frame: the floor's type variables are not defined there. */
+  font: 600 20px/28px var(--font-ui);
+}
+
+body:has(.floor-frame) .mk-date-picker__navigation {
+  width: 64px;
+  height: 64px;
+}
+
+body:has(.floor-frame) .mk-date-picker__day[data-selected="true"] {
+  font-weight: 700;
+}
+
+/* The date is required: the picker's clearing «×» has nothing to do here. */
+.new-shift .new-shift__date .mk-icon-button {
+  display: none !important;
+}
+
+/* The template steps: the list beside the label, as the cloud's label-template-grid. */
+.new-shift .new-shift__panel--template {
+  width: 100%;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.new-shift .new-shift__panel--template .new-shift__fields {
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-auto-rows: auto;
+  overflow: hidden;
+}
+
+.new-shift .new-shift__template-title {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.new-shift .new-shift__template-grid {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.new-shift .new-shift__template-choices {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.new-shift .new-shift__template-list {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.new-shift .new-shift__preview {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+}
+
+/* The label as white stock, scaled down to its column, never cropped. */
+.new-shift .new-shift__preview-label {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: var(--paper);
+  object-fit: contain;
+}
+
+.new-shift .new-shift__hint {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.new-shift .new-shift__message {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-content: center;
+}
+
+.new-shift .new-shift__message p {
+  margin: 0;
+}
+
+/* The verification choice beside the duplicate templates (beta 3.2). */
+.new-shift .new-shift__verification {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+/*
+ * A short panel (1280 x 800 and the like): the same two zones, tighter. The photo
+ * and the readouts shrink, the product's facts go (the name, the GTIN and the
+ * photo stay), the switch card is 80 px and the keys stay at 72 px.
+ */
+@media (max-height: 860px) {
+  /* Four px less around the title and the footer: the keypad keeps its 72 px keys. */
+  .station-screen.new-shift {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+  }
+
+  .new-shift .new-shift__panel--found {
+    column-gap: var(--sp-4);
+    --floor-photo: 104px;
+    --floor-readout: 84px;
+    --floor-readout-digits: 46px;
+  }
+
+  .new-shift .new-shift__left {
+    gap: var(--sp-2);
+  }
+
+  .new-shift .new-shift__product {
+    gap: var(--sp-4);
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .new-shift .new-shift__facts {
+    display: none;
+  }
+
+  .new-shift .new-shift__product h3 {
+    font-size: 24px;
+    line-height: 30px;
+  }
+
+  .new-shift .new-shift__product-monogram {
+    font-size: 44px;
+  }
+
+  .new-shift .floor-switch-card {
+    min-height: 80px;
+    padding-block: 10px;
+  }
+
+  .new-shift .floor-switch-card__track {
+    width: 84px;
+    height: 44px;
+  }
+
+  .new-shift .floor-switch-card__knob {
+    width: 36px;
+    height: 36px;
+  }
+
+  .new-shift .floor-switch-card[aria-checked="true"] .floor-switch-card__knob {
+    transform: translateX(40px);
+  }
+
+  .new-shift .new-shift__pad {
+    padding: var(--sp-3);
+    gap: var(--sp-2);
+  }
+
+  .new-shift .new-shift__pad[data-fields="2"] {
+    --floor-readout: 64px;
+    --floor-readout-digits: 36px;
+  }
+
+  .new-shift .new-shift__pad[data-fields="2"] .floor-readout {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .new-shift .new-shift__pad[data-fields="2"] .floor-readout__label em {
+    display: none;
+  }
+
+  /* Two lines of the error fit (they were cut at 52 px). */
+  .new-shift .new-shift__pad-slot {
+    height: 58px;
+    min-height: 58px;
+  }
+
+  /* A problem to say takes room from the left zone: its explanatory lines give way. */
+  .new-shift
+    .new-shift__panel--found:has(.new-shift__message > *)
+    :is(.floor-mode__hint, .floor-switch-card__hint) {
+    display: none;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__message .mk-alert {
+    padding: 10px 16px !important;
+  }
+}
+
+/*
+ * The real terminal (a 1280 x 1024 panel at Windows 125 %: about 1024 x 640-720 of CSS pixels):
+ * the left zone's rows give up their air, not their words, and the keypad panel is the readouts
+ * in one row over 64 px keys, so the whole of it stays above the 72 px footer. The primary is
+ * 72 px here (84 on a tall window); every other control keeps its 64 px.
+ */
+@media (max-height: 780px) {
+  .station-screen.new-shift {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+  }
+
+  .new-shift .station-floor-footer,
+  .new-shift .station-floor-footer .mk-btn {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .new-shift .new-shift__panel--found {
+    column-gap: var(--sp-3);
+    --floor-photo: 72px;
+    --floor-readout: 64px;
+    --floor-readout-digits: 34px;
+  }
+
+  .new-shift .new-shift__left {
+    gap: var(--sp-2);
+  }
+
+  .new-shift .new-shift__product {
+    padding: var(--sp-1) var(--sp-2);
+    gap: var(--sp-3);
+  }
+
+  .new-shift .new-shift__product h3 {
+    font-size: 22px;
+    line-height: 26px;
+  }
+
+  .new-shift .new-shift__code {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .new-shift .new-shift__product-monogram {
+    font-size: 36px;
+  }
+
+  /* The mode's explanation is the roomy window's: the two words say it, and the caption stays. */
+  .new-shift .floor-mode {
+    gap: 2px;
+  }
+
+  .new-shift .floor-mode__label {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .new-shift .floor-mode__hint {
+    display: none;
+  }
+
+  .new-shift .floor-switch-card {
+    min-height: 0;
+    padding: var(--sp-2) var(--sp-4);
+    row-gap: 0;
+  }
+
+  .new-shift .floor-switch-card__title {
+    font-size: 20px;
+    line-height: 26px;
+  }
+
+  .new-shift .floor-switch-card__hint {
+    font-size: 17px;
+    line-height: 21px;
+  }
+
+  .new-shift .floor-switch-card__detail {
+    font-size: 17px;
+    line-height: 22px;
+  }
+
+  .new-shift .floor-switch-card__state {
+    gap: 2px;
+  }
+
+  .new-shift .floor-switch-card__word {
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .new-shift .new-shift__dates {
+    padding-top: 0;
+    gap: var(--sp-3);
+  }
+
+  .new-shift .new-shift__date .mk-date-picker {
+    gap: 2px;
+  }
+
+  .new-shift .new-shift__date .mk-date-picker > label {
+    font-size: 18px !important;
+    line-height: 22px !important;
+  }
+
+  /* The keypad panel: the readouts side by side, the explanation gone (an error still takes its line). */
+  .new-shift .new-shift__pad {
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .new-shift .new-shift__pad[data-fields="2"] {
+    --floor-readout: 64px;
+    --floor-readout-digits: 32px;
+  }
+
+  .new-shift .new-shift__readouts {
+    gap: var(--sp-2);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  /* Over one another again (the roomy short panel put the label beside the number): a half-width window is too narrow for both. */
+  .new-shift .new-shift__pad[data-fields="2"] .floor-readout,
+  .new-shift .floor-readout {
+    padding: 4px 12px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: space-between;
+  }
+
+  .new-shift .floor-readout__label {
+    font-size: 17px;
+    line-height: 20px;
+  }
+
+  .new-shift .floor-readout__label em {
+    display: none;
+  }
+
+  .new-shift .floor-readout__unit {
+    font-size: 18px;
+  }
+
+  .new-shift .new-shift__pad-slot {
+    height: auto;
+    min-height: 0;
+  }
+
+  .new-shift .new-shift__pad-slot:has(.new-shift__pad-hint) {
+    display: none;
+  }
+
+  .new-shift .new-shift__pad-error {
+    font-size: 17px;
+    line-height: 22px;
+  }
+
+  .new-shift .new-shift__pad .floor-keypad {
+    gap: var(--sp-2);
+    grid-template-rows: repeat(4, minmax(64px, 1fr));
+  }
+
+  .new-shift .floor-keypad__key {
+    min-width: 64px;
+    min-height: 64px;
+  }
+}

@@ -18,6 +18,9 @@ const jobNames = [
   "signer_rust",
   "signer_windows_build",
   "handheld_android",
+  "standalone_rust",
+  "standalone_windows_build",
+  "standalone_app_tests",
 ];
 
 const signerOnly = {
@@ -33,6 +36,9 @@ const signerOnly = {
     signer_rust: true,
     signer_windows_build: true,
     handheld_android: false,
+    standalone_rust: false,
+    standalone_windows_build: false,
+    standalone_app_tests: false,
   },
 };
 
@@ -92,6 +98,59 @@ test("Station native and web changes select different downstream work", () => {
   ]);
 });
 
+test("Standalone native and web changes select their jobs; its Vitest suite has its own job", () => {
+  for (const path of [
+    "apps/standalone/host/src/server.rs",
+    "apps/standalone/src-tauri/src/lib.rs",
+    "apps/standalone/Cargo.lock",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      ["standalone_rust", "standalone_windows_build"],
+      path,
+    );
+  }
+  for (const path of [
+    "apps/standalone/src/app/App.tsx",
+    "apps/standalone/src-tauri/migrations/0001_reference_data.sql",
+    "apps/standalone/src-tauri/tests/fixtures/local-sql.json",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      ["verify_static", "standalone_rust", "standalone_windows_build", "standalone_app_tests"],
+      path,
+    );
+  }
+});
+
+test("a changed wire fixture of the standalone protocol also runs the Android job that reads it", () => {
+  for (const path of [
+    "apps/standalone/proto/fixtures/hello.json",
+    "apps/standalone/proto/fixtures/pallet-events-request.json",
+  ]) {
+    const result = classifyChangedFiles([path]);
+    assert.equal(result.full, false, path);
+    assert.deepEqual(
+      enabledJobs(result),
+      [
+        "verify_static",
+        "handheld_android",
+        "standalone_rust",
+        "standalone_windows_build",
+        "standalone_app_tests",
+      ],
+      path,
+    );
+  }
+  // The host's and the shell's own sources still do not run it.
+  assert.deepEqual(enabledJobs(classifyChangedFiles(["apps/standalone/proto/src/lib.rs"])), [
+    "verify_static",
+    "standalone_rust",
+    "standalone_windows_build",
+    "standalone_app_tests",
+  ]);
+});
+
 test("application changes select their documented jobs", () => {
   const cases = [
     [
@@ -139,6 +198,9 @@ test("shared packages fan out to their current consumers", () => {
         "station_windows_build",
         "signer_rust",
         "signer_windows_build",
+        "standalone_rust",
+        "standalone_windows_build",
+        "standalone_app_tests",
       ],
     ],
     [
@@ -150,6 +212,9 @@ test("shared packages fan out to their current consumers", () => {
         "production_bundle",
         "station_rust",
         "station_windows_build",
+        "standalone_rust",
+        "standalone_windows_build",
+        "standalone_app_tests",
       ],
     ],
     [
@@ -230,10 +295,37 @@ test("deployment and release tooling selects its consuming jobs", () => {
     ["tools/production-browser/tests/docs.spec.ts", ["production_bundle"]],
     ["tools/station-release/build-manifest.mjs", ["station_rust", "station_windows_build"]],
     ["tools/signer-release/build-manifest.mjs", ["signer_rust", "signer_windows_build"]],
+    ["tools/standalone-release/smoke.ps1", ["standalone_rust", "standalone_windows_build"]],
+    ["tools/standalone-support/decrypt.mjs", ["verify_static", "standalone_app_tests"]],
   ];
 
   for (const [path, expected] of cases) {
     assert.deepEqual(enabledJobs(classifyChangedFiles([path])), expected, path);
+  }
+});
+
+test("the cloud → standalone export runs its Node tests and its SQL against the cloud schema", () => {
+  for (const path of [
+    "tools/standalone-export/export.sql",
+    "tools/standalone-export/test/fixtures/seed-cloud.sql",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      ["verify_static", "verify_api_tests"],
+      path,
+    );
+  }
+});
+
+test("the files the export tool compares itself with select the Node job that runs it", () => {
+  // The SSCC serial fixture and the golden file are read by tools/standalone-export/test;
+  // packages/domain's SSCC code is what its equivalence test imports.
+  for (const path of [
+    "apps/standalone/proto/fixtures/sscc-serials.json",
+    "apps/standalone/proto/fixtures/cloud-export-file.json",
+    "packages/domain/src/gs1/sscc.ts",
+  ]) {
+    assert.ok(enabledJobs(classifyChangedFiles([path])).includes("verify_static"), path);
   }
 });
 
@@ -349,6 +441,9 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "signer_rust=true",
       "signer_windows_build=true",
       "handheld_android=false",
+      "standalone_rust=false",
+      "standalone_windows_build=false",
+      "standalone_app_tests=false",
       "",
     ].join("\n"),
   );
@@ -408,6 +503,9 @@ test("offline grant protocol and signed fixture changes exercise every native co
         "station_rust",
         "station_windows_build",
         "handheld_android",
+        "standalone_rust",
+        "standalone_windows_build",
+        "standalone_app_tests",
       ],
       path,
     );

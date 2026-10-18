@@ -26,7 +26,7 @@ import app.markiro.handheld.core.update.UpdateCheck
 import app.markiro.handheld.core.update.UpdateInstaller
 import app.markiro.handheld.core.update.UpdateState
 import app.markiro.handheld.core.storage.MetaStore
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,7 +88,7 @@ class SettingsViewModel @Inject constructor(
     private val app: AppPreferences,
     config: DeviceConfigDao,
     private val signaller: Signaller,
-    sync: SyncEngine,
+    sync: SyncDriver,
     inventorySync: InventorySyncEngine,
     meta: MetaStore,
     printers: PrinterDao,

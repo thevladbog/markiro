@@ -28,6 +28,9 @@ const heavyJobs = [
   ["signer-rust", "signer_rust"],
   ["signer-windows-build", "signer_windows_build"],
   ["handheld-android", "handheld_android"],
+  ["standalone-rust", "standalone_rust"],
+  ["standalone-windows-build", "standalone_windows_build"],
+  ["standalone-app-tests", "standalone_app_tests"],
 ];
 
 function stepByName(job, name) {
@@ -200,6 +203,63 @@ test("isolated support chat tests retain explicit scratch database guards throug
     assert.ok(turbo.tasks.test.env.includes("SUPPORT_CHAT_ISOLATED_DB"), file);
     assert.ok(turbo.tasks.test.env.includes("SUPPORT_CHAT_TEST_MAINTENANCE_URL"), file);
     assert.ok(!turbo.tasks.test.env.includes("SUPPORT_CHAT_BROWSER_CONTROL_DIR"), file);
+  }
+});
+
+test("the standalone export runs in the Node job after the domain build and its SQL after the migrations", () => {
+  const command = "pnpm test:standalone-export";
+  const staticSteps = workflow.jobs["verify-static"].steps;
+  const staticRun = staticSteps.findIndex((step) => step.run === command);
+  assert.ok(staticRun >= 0, "verify-static must run the export tool's tests");
+  assert.equal(staticSteps[staticRun].env, undefined, "the pure run must not see a database");
+  const build = staticSteps.findIndex(
+    (step) => step.run === "pnpm turbo run build --filter=@markiro/domain",
+  );
+  assert.ok(build >= 0 && build < staticRun, "packages/domain must be built before the tests");
+
+  const apiSteps = workflow.jobs["verify-api-tests"].steps;
+  const migrate = apiSteps.findIndex((step) => step.run === "pnpm --filter @markiro/db db:migrate");
+  const sqlRun = apiSteps.findIndex((step) => step.run === command);
+  assert.ok(migrate >= 0 && sqlRun > migrate, "the SQL test must run after the cloud migrations");
+  assert.equal(
+    apiSteps[sqlRun].env.STANDALONE_EXPORT_TEST_DATABASE_URL,
+    workflow.jobs["verify-api-tests"].env.DATABASE_URL,
+  );
+});
+
+test("the standalone app's Vitest suite runs in its own job and in no other app slice", () => {
+  const appSlice = workflow.jobs["verify-app-tests"].steps.filter((step) =>
+    step.run?.startsWith("pnpm turbo test"),
+  );
+  assert.deepEqual(
+    appSlice.map((step) => step.run),
+    [
+      "pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --concurrency=1 --force",
+    ],
+  );
+
+  const job = workflow.jobs["standalone-app-tests"];
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.env, undefined, "the suite is database-free, like verify-app-tests");
+  assert.ok(Number.isInteger(job["timeout-minutes"]) && job["timeout-minutes"] > 0);
+  assert.deepEqual(
+    job.steps.filter((step) => step.run?.startsWith("pnpm turbo")).map((step) => step.run),
+    ["pnpm turbo test --filter=@markiro/standalone --concurrency=1 --force"],
+  );
+});
+
+test("both standalone cargo test steps report every failing test binary in one run", () => {
+  for (const name of ["standalone-rust", "standalone-windows-build"]) {
+    const commands = workflow.jobs[name].steps
+      .flatMap((step) => (step.run ?? "").split("\n"))
+      .map((line) => line.trim())
+      .filter((line) => /^cargo test\b/.test(line));
+    assert.equal(commands.length, 1, `${name} runs cargo test once`);
+    assert.match(
+      commands[0],
+      /--manifest-path apps\/standalone\/Cargo\.toml --workspace --no-fail-fast$/,
+      name,
+    );
   }
 });
 

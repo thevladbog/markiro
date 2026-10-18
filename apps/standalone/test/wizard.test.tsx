@@ -1,0 +1,131 @@
+import {
+  buildDefaultLabelTemplates,
+  buildDuplicateLabelTemplates,
+  buildPalletLabelTemplates,
+} from "@markiro/domain";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { HostError } from "../src/host/client.js";
+import { DeviceError } from "../src/host/device.js";
+import i18n from "../src/i18n/index.js";
+import { BootstrapWizard } from "../src/wizard/BootstrapWizard.js";
+import {
+  completeWizard,
+  EXPECTED_REQUEST,
+  next,
+  reachAddress,
+  reachReview,
+} from "./support/wizard.js";
+
+function type(label: string, value: string): void {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
+describe("BootstrapWizard", () => {
+  it("creates the site from every answer", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await completeWizard();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(EXPECTED_REQUEST));
+  });
+
+  it("says on the review step how many stock templates of each purpose it creates, each count in its own place", async () => {
+    render(<BootstrapWizard onSubmit={vi.fn()} />);
+    await reachReview();
+    const box = buildDefaultLabelTemplates().length;
+    const pallet = buildPalletLabelTemplates().length;
+    const duplicate = buildDuplicateLabelTemplates().length;
+    expect(
+      screen.getByText(
+        `Мастер создаст типовые шаблоны этикеток: для коробов — ${box}, для паллет — ${pallet}, для дубликатов товара — ${duplicate}.`,
+      ),
+    ).toBeTruthy();
+    // The domain builds as many pallet templates as duplicates: distinct counts pin each place.
+    expect(i18n.t("wizard.review.templates", { box: 3, pallet: 1, duplicate: 2 })).toBe(
+      "Мастер создаст типовые шаблоны этикеток: для коробов — 3, для паллет — 1, для дубликатов товара — 2.",
+    );
+  });
+
+  it("stays on a step until its fields are right", async () => {
+    render(<BootstrapWizard onSubmit={vi.fn()} />);
+    type("Логин", "admin");
+    type("Имя и фамилия", "Ирина");
+    type("Пароль", "correct horse battery");
+    type("Повторите пароль", "another password");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(await screen.findByText("Пароли не совпадают")).toBeTruthy();
+    expect(screen.getByText("Шаг 1 из 6 · Администратор")).toBeTruthy();
+  });
+
+  it("checks the GLN check digit before leaving the organization step", async () => {
+    render(<BootstrapWizard onSubmit={vi.fn()} />);
+    type("Имя и фамилия", "Ирина");
+    type("Пароль", "correct horse battery");
+    type("Повторите пароль", "correct horse battery");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Шаг 2 из 6 · Организация");
+    type("Название организации", "ООО «Атолл»");
+    type("GLN организации", "4600682000010");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(await screen.findByText("Неверная контрольная цифра GLN")).toBeTruthy();
+  });
+
+  it("returns to the field the host rejected", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "the GLN must be 13 digits",
+        details: { field: "org.gln" },
+      }),
+    );
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await completeWizard();
+    expect(await screen.findByText("Хост не принял это значение. Проверьте его.")).toBeTruthy();
+    expect(screen.getByText("Шаг 2 из 6 · Организация")).toBeTruthy();
+    expect(screen.getByLabelText("GLN организации")).toBeTruthy();
+  });
+
+  it("shows any other failure above the form", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new DeviceError("unreachable", "down"));
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await completeWizard();
+    expect(await screen.findByText("Служба хоста на этом компьютере не отвечает.")).toBeTruthy();
+    expect(screen.getByText("Шаг 6 из 6 · Проверка")).toBeTruthy();
+  });
+
+  it("clears the submit error banner when going back to fix a step", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new DeviceError("unreachable", "down"));
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await completeWizard();
+    expect(await screen.findByText("Служба хоста на этом компьютере не отвечает.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    await screen.findByText("Шаг 5 из 6 · Адрес хоста");
+    expect(screen.queryByText("Служба хоста на этом компьютере не отвечает.")).toBeNull();
+  });
+
+  it("lets the address step pass unticked, and sends the mark only when it is ticked", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await reachReview();
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty("addressConfirmed");
+  });
+
+  it("sends addressConfirmed when the box «Я зарезервировал адрес» is ticked", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await reachAddress();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Я зарезервировал адрес (или задал статический)" }),
+    );
+    next();
+    await screen.findByText("Шаг 6 из 6 · Проверка");
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ addressConfirmed: true });
+  });
+});

@@ -270,10 +270,11 @@ private fun rejectionText(row: PalletMembershipEntity): String = when (row.reaso
     // No winning SSCC means the box is on a pallet somebody else has not closed
     // yet, so there is no number to name -- «На паллете …» with an empty tail
     // read like a bug. Say what is actually known instead.
-    "already_on_pallet" -> row.winningPalletSscc?.let { stringResource(R.string.pallets_reject_already_on_pallet, it.takeLast(TAIL)) }
+    // The host's own words for the same refusals (`box_on_pallet` and the others of the pallet-events channel).
+    "already_on_pallet", "box_on_pallet" -> row.winningPalletSscc?.let { stringResource(R.string.pallets_reject_already_on_pallet, it.takeLast(TAIL)) }
         ?: stringResource(R.string.pallets_reject_already_on_open_pallet)
-    "not_found" -> stringResource(R.string.pallets_reject_not_found)
-    "not_closed" -> stringResource(R.string.pallets_reject_not_closed)
+    "not_found", "box_not_found" -> stringResource(R.string.pallets_reject_not_found)
+    "not_closed", "box_not_closed" -> stringResource(R.string.pallets_reject_not_closed)
     "disassembled" -> stringResource(R.string.pallets_reject_disassembled)
     "pallet_closed" -> stringResource(R.string.pallets_reject_pallet_closed)
     "product_mismatch" -> stringResource(R.string.pallets_reject_product_mismatch)

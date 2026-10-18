@@ -199,4 +199,22 @@ class WorkScreenTest {
         }
         compose.onNodeWithText("from_the_future").assertIsDisplayed()
     }
+
+    @Test
+    fun aHostDeviceCannotOpenTheExceptionsThatTheHostWouldNotHear() {
+        var opened = 0
+        compose.setContent { MarkiroTheme { WorkScreen(ui.copy(hostMode = true), WorkCallbacks(onExceptions = { opened++ })) } }
+        compose.onNodeWithContentDescription("Ещё").performClick()
+        compose.onNodeWithText("Исключения недоступны при работе с хостом").assertIsDisplayed().performClick()
+        assertEquals(0, opened)
+    }
+
+    @Test
+    fun aCloudDeviceStillOpensTheExceptions() {
+        var opened = 0
+        compose.setContent { MarkiroTheme { WorkScreen(ui, WorkCallbacks(onExceptions = { opened++ })) } }
+        compose.onNodeWithContentDescription("Ещё").performClick()
+        compose.onNodeWithText("Исключения").performClick()
+        assertEquals(1, opened)
+    }
 }

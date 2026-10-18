@@ -1,0 +1,20 @@
+{
+  "defaultBoxTemplateId": "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c",
+  "defaultPalletTemplateId": null,
+  "defaultDuplicateTemplateId": null,
+  "categories": [
+    {
+      "chzProductGroupCode": 8,
+      "purpose": "box",
+      "templateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d"
+    }
+  ],
+  "defaultPalletSheetId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b",
+  "palletSheetCategories": [
+    {
+      "chzProductGroupCode": 8,
+      "sheetId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b"
+    }
+  ],
+  "expectedRev": 63
+}

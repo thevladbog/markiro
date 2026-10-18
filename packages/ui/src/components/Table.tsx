@@ -19,6 +19,13 @@ export interface TableColumn<Row> {
   mono?: boolean;
   /** Разрешить перенос строк в ячейках (по умолчанию nowrap) */
   wrap?: boolean;
+  /** Least width of the column: a wrapping column stops at it and the table scrolls, instead of squeezing the text. */
+  minWidth?: number | string;
+  /**
+   * Pins the column to the right edge of the scrolling table (for the actions column), so it is
+   * always in reach however wide the table is; the other columns scroll under it.
+   */
+  stickyEnd?: boolean;
   /** Разрешить перенос заголовка (по умолчанию nowrap): для узкой колонки с длинным названием */
   wrapTitle?: boolean;
   sortable?: boolean;
@@ -44,6 +51,12 @@ export interface TableProps<Row> {
   scrollLabel?: string;
   /** Accessible name of the `<table>` itself (the scroll region has its own). */
   tableLabel?: string;
+  /**
+   * Fills its parent's height: the heading stays pinned at the top and only the rows scroll
+   * (a card of a fixed height with a pagination bar under it). The parent must bound the
+   * height; without a bound the table is as tall as its rows and nothing scrolls.
+   */
+  fill?: boolean;
   className?: string;
   style?: CSSProperties;
 }
@@ -83,6 +96,7 @@ export function Table<Row>({
   empty = "No data",
   scrollLabel,
   tableLabel,
+  fill = false,
   className,
   style,
 }: TableProps<Row>) {
@@ -90,10 +104,12 @@ export function Table<Row>({
     <div
       className={cn("mk-table", className)}
       style={{
-        border: "1px solid var(--line)",
-        borderRadius: "var(--r-3)",
-        background: "var(--surface-card)",
+        // The office's card owns the frame: it sets these three to nothing.
+        border: "var(--table-border, 1px solid var(--line))",
+        borderRadius: "var(--table-radius, var(--r-3))",
+        background: "var(--table-bg, var(--surface-card))",
         overflow: "hidden",
+        ...(fill ? { display: "flex", flexDirection: "column" as const, minHeight: 0 } : {}),
         ...style,
       }}
     >
@@ -103,7 +119,7 @@ export function Table<Row>({
         aria-label={scrollLabel}
         tabIndex={scrollLabel ? 0 : undefined}
         onKeyDown={scrollLabel ? moveHorizontalRegion : undefined}
-        style={{ overflowX: "auto" }}
+        style={fill ? { overflow: "auto", flex: "1 1 auto", minHeight: 0 } : { overflowX: "auto" }}
       >
         <table aria-label={tableLabel} style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -111,19 +127,60 @@ export function Table<Row>({
               {columns.map((column) => (
                 <th
                   key={column.key}
+                  className="mk-table__th"
                   scope="col"
                   onClick={column.sortable && onSort ? () => onSort(column.key) : undefined}
+                  // A sortable header is a control: reachable by the keyboard, and it says its order.
+                  tabIndex={column.sortable && onSort ? 0 : undefined}
+                  aria-sort={
+                    column.sortable && onSort
+                      ? sortKey === column.key
+                        ? sortDir === "desc"
+                          ? "descending"
+                          : "ascending"
+                        : "none"
+                      : undefined
+                  }
+                  onKeyDown={
+                    column.sortable && onSort
+                      ? (event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          onSort(column.key);
+                        }
+                      : undefined
+                  }
                   style={{
-                    textAlign: column.align ?? "left",
-                    padding: "10px 16px",
+                    textAlign: column.align ?? (column.stickyEnd ? "center" : "left"),
+                    padding: "var(--table-th-py, 10px) var(--table-px, 16px)",
                     font: "var(--text-caption)",
-                    color: "var(--fg-3)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
+                    color: "var(--table-th-fg, var(--fg-3))",
+                    textTransform:
+                      "var(--table-th-case, uppercase)" as CSSProperties["textTransform"],
+                    letterSpacing: "var(--table-th-tracking, 0.05em)",
+                    fontWeight: "var(--table-th-weight, 500)" as CSSProperties["fontWeight"],
                     cursor: column.sortable ? "pointer" : "default",
                     whiteSpace: column.wrapTitle ? "normal" : "nowrap",
-                    width: column.width,
+                    // An end-pinned actions column is as wide as its buttons (1px in an auto layout).
+                    width: column.width ?? (column.stickyEnd ? 1 : undefined),
+                    minWidth: column.minWidth,
                     userSelect: "none",
+                    ...(fill
+                      ? {
+                          position: "sticky" as const,
+                          top: 0,
+                          zIndex: column.stickyEnd ? 3 : 2,
+                          background: "var(--surface-panel)",
+                        }
+                      : {}),
+                    ...(column.stickyEnd
+                      ? {
+                          position: "sticky" as const,
+                          right: 0,
+                          background: "var(--surface-panel)",
+                          boxShadow: "-1px 0 0 var(--line)",
+                        }
+                      : {}),
                   }}
                 >
                   {column.title}
@@ -155,8 +212,24 @@ export function Table<Row>({
             {rows.map((row, index) => (
               <tr
                 key={getRowKey(row, index)}
+                className="mk-table__row"
                 tabIndex={onRowClick ? 0 : undefined}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={
+                  onRowClick
+                    ? (event) => {
+                        // A control inside the row (a link, a button, a menu) does its own thing.
+                        if (
+                          event.target instanceof Element &&
+                          event.target.closest(
+                            "a, button, input, select, textarea, [role='menuitem']",
+                          )
+                        ) {
+                          return;
+                        }
+                        onRowClick(row);
+                      }
+                    : undefined
+                }
                 onKeyDown={
                   onRowClick
                     ? (event) => {
@@ -169,22 +242,35 @@ export function Table<Row>({
                     : undefined
                 }
                 style={{
-                  borderTop: "1px solid var(--line)",
+                  // `--mk-table-row-rule` lets an app draw the rule between rows differently (none on the first).
+                  borderTop: "var(--mk-table-row-rule, 1px solid var(--line))",
                   cursor: onRowClick ? "pointer" : undefined,
                 }}
               >
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    className={cn(column.mono && "font-mono nowrap")}
+                    className={cn("mk-table__td", column.mono && "font-mono nowrap")}
                     style={{
-                      padding: "11px 16px",
-                      textAlign: column.align ?? "left",
+                      padding: "var(--table-td-py, 11px) var(--table-px, 16px)",
+                      height: "var(--table-row-h, auto)",
+                      textAlign: column.align ?? (column.stickyEnd ? "center" : "left"),
                       font: column.mono ? "var(--text-code)" : "var(--text-body)",
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--fg-1)",
+                      minWidth: column.minWidth,
+                      ...(column.stickyEnd
+                        ? {
+                            position: "sticky" as const,
+                            right: 0,
+                            background: "var(--surface-card)",
+                            boxShadow: "-1px 0 0 var(--line)",
+                          }
+                        : {}),
                       whiteSpace: column.wrap ? "normal" : "nowrap",
-                      overflowWrap: column.wrap ? "anywhere" : undefined,
+                      // `break-word`, not `anywhere`: a squeezed column keeps its longest word whole
+                      // (the table scrolls instead) and never breaks letter by letter.
+                      overflowWrap: column.wrap ? "break-word" : undefined,
                     }}
                   >
                     {column.render ? column.render(row) : cellValue(row, column.key)}

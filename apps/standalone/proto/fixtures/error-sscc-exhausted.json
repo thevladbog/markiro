@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "sscc_exhausted",
+    "message": "no serial of this prefix is left",
+    "details": { "issuerPrefix": "460068200", "extension": 0 }
+  }
+}

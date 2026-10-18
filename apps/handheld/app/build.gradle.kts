@@ -107,6 +107,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     sourceSets["test"].resources.srcDir("../../../packages/platform-contracts/fixtures")
+    // The host's wire fixtures (apps/standalone/proto/fixtures): the same files the Rust crate and the webview read,
+    // so a rule the host changes fails here too. `tools/ci/affected.mjs` runs this job when one of them changes.
+    sourceSets["test"].resources.srcDir("../../standalone/proto/fixtures")
 
     testOptions {
         unitTests {

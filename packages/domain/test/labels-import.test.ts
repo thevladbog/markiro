@@ -15,6 +15,8 @@ import {
 } from "../src/labels/import.js";
 import { parseZplLabel } from "../src/labels/zpl-import.js";
 import { parseTsplLabel } from "../src/labels/tspl-import.js";
+import { generateTspl } from "../src/labels/tspl.js";
+import { buildSscc } from "../src/gs1/sscc.js";
 
 describe("label code import contract", () => {
   it("exports one canonical ordered label-field inventory", () => {
@@ -334,6 +336,161 @@ describe("label code import contract", () => {
       expect(() => parseTsplLabel("SIZE 100 mm, 50 mm\nBAR 10,10,0,4", 203)).toThrow(
         expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
       );
+    });
+
+    it("reads back as the SSCC field the EAN128 the domain writes for it", async () => {
+      const spec = parseLabelTemplate({
+        widthMm: 58,
+        heightMm: 40,
+        dpi: 203,
+        language: "tspl",
+        elements: [
+          {
+            kind: "barcode",
+            id: "b1",
+            xMm: 5,
+            yMm: 5,
+            format: "code128",
+            data: "sscc",
+            sizeMm: 10,
+          },
+        ],
+      });
+      const exported = await generateTspl(spec, sampleLabelData());
+      expect(exported).toContain('"EAN128"');
+      const result = parseTsplLabel(exported, 203);
+      expect(result.spec.elements).toEqual([
+        expect.objectContaining({ kind: "barcode", format: "code128", data: "sscc" }),
+      ]);
+      expect(result.warnings).toEqual([]);
+      for (const payload of ["00{{sscc}}", "{{sscc}}"]) {
+        const again = parseTsplLabel(
+          `SIZE 58 mm, 40 mm\nBARCODE 40,40,"EAN128",80,0,0,2,2,"${payload}"`,
+          203,
+        );
+        expect(again.spec.elements[0]).toEqual(
+          expect.objectContaining({ format: "code128", data: "sscc" }),
+        );
+      }
+    });
+
+    it("round-trips the EAN128 the domain writes for any valid SSCC", async () => {
+      const spec = parseLabelTemplate({
+        widthMm: 58,
+        heightMm: 40,
+        dpi: 203,
+        language: "tspl",
+        elements: [
+          {
+            kind: "barcode",
+            id: "b1",
+            xMm: 5,
+            yMm: 5,
+            format: "code128",
+            data: "sscc",
+            sizeMm: 10,
+          },
+        ],
+      });
+      let checked = 0;
+      for (const extension of [0, 3, 9]) {
+        for (const prefix of ["4600682", "46006820", "460068200"]) {
+          for (const serial of [0, 1, 7, 12345, 99999]) {
+            const sscc = buildSscc(extension, prefix, serial);
+            const exported = await generateTspl(spec, { ...sampleLabelData(), sscc });
+            expect(exported).toContain(`"EAN128",`);
+            expect(exported).toContain(`"00${sscc}"`);
+            const result = parseTsplLabel(exported, 203);
+            expect(result.spec.elements).toEqual([
+              expect.objectContaining({ kind: "barcode", format: "code128", data: "sscc" }),
+            ]);
+            expect(result.warnings).toEqual([]);
+            checked += 1;
+          }
+        }
+      }
+      expect(checked).toBe(45);
+    });
+
+    it("refuses an EAN128 that holds no SSCC", () => {
+      for (const payload of [
+        "0012345",
+        "0104600682000013",
+        "00004601234560000018",
+        "{{product.gtin}}",
+        "00{{product.gtin}}",
+        "0000{{sscc}}",
+        "{{sscc}}00",
+        "0 0346006820000000014",
+        "01346006820000000014",
+        "003460068200000000140",
+        "00346006820000000015",
+      ]) {
+        expect(
+          () =>
+            parseTsplLabel(
+              `SIZE 58 mm, 40 mm\nBARCODE 40,40,"EAN128",80,0,0,2,2,"${payload}"`,
+              203,
+            ),
+          payload,
+        ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
+      }
+    });
+
+    it("reads an EAN128 with 00 and a valid SSCC as the SSCC field, type case-insensitive", () => {
+      for (const type of ["EAN128", "ean128"]) {
+        const result = parseTsplLabel(
+          `SIZE 58 mm, 40 mm\nBARCODE 40,40,"${type}",80,0,0,2,2,"00346006820000000014"`,
+          203,
+        );
+        expect(result.spec.elements).toEqual([
+          expect.objectContaining({ kind: "barcode", format: "code128", data: "sscc" }),
+        ]);
+      }
+    });
+
+    it("keeps reading the 128 and EAN13 barcodes it read before", () => {
+      const result = parseTsplLabel(
+        [
+          "SIZE 58 mm, 40 mm",
+          'BARCODE 40,40,"128",80,0,0,2,2,"{{product.gtin}}"',
+          'BARCODE 40,140,"128",80,0,0,2,2,"{{sscc}}"',
+          'BARCODE 40,240,"128",80,0,0,2,2,"ABC-123"',
+          'BARCODE 40,340,"EAN13",80,0,0,2,2,"4600682000013"',
+          'BARCODE 40,440,"EAN13",80,0,0,2,2,"{{product.gtin}}"',
+        ].join("\n"),
+        203,
+      );
+      expect(result.spec.elements).toEqual([
+        expect.objectContaining({ format: "code128", data: "product.gtin" }),
+        expect.objectContaining({ format: "code128", data: "sscc" }),
+        expect.objectContaining({ format: "code128", data: { literal: "ABC-123" } }),
+        expect.objectContaining({ format: "ean13", data: { literal: "4600682000013" } }),
+        expect.objectContaining({ format: "ean13", data: "product.gtin" }),
+      ]);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it("leaves the 128 the old export wrote with a literal !1 as the literal it is", () => {
+      // The pre-#692 export wrote "128" with "!100<sscc>"; only EAN128 is read as the SSCC field.
+      const result = parseTsplLabel(
+        'SIZE 58 mm, 40 mm\nBARCODE 40,40,"128",80,0,0,2,2,"!100346006820000000014"',
+        203,
+      );
+      expect(result.spec.elements).toEqual([
+        expect.objectContaining({
+          format: "code128",
+          data: { literal: "!100346006820000000014" },
+        }),
+      ]);
+    });
+
+    it("still refuses unknown TSPL barcode types", () => {
+      for (const type of ["39", "93", "EAN8", "EAN128M", "UPCA"]) {
+        expect(() =>
+          parseTsplLabel(`SIZE 58 mm, 40 mm\nBARCODE 40,40,"${type}",80,0,0,2,2,"12345"`, 203),
+        ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
+      }
     });
 
     it("decodes doubled quotes and reports unsupported bitmap lines", () => {

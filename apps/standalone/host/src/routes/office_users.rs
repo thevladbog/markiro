@@ -1,0 +1,322 @@
+//! Office users, administrators only: list, create, update (with the
+//! last-administrator guard) and set a password.
+
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::Json;
+use markiro_proto::{
+    codes, OfficeRole, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, PasswordSet,
+};
+use serde_json::json;
+use sqlx::SqliteConnection;
+
+use crate::audit::{self, actions, Actor, Entry, Outcome};
+use crate::auth::OfficeContext;
+use crate::db::{begin_write, commit_with_revision, next_revision};
+use crate::error::{ApiError, ApiJson, ApiPath};
+use crate::secrets::hash_password_blocking;
+use crate::server::AppState;
+use crate::validate;
+
+type UserRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    i64,
+    Option<i64>,
+);
+
+/// The columns of a [`UserRow`] from `office_users u`.
+const USER_COLUMNS: &str = "u.id, u.login, u.name, u.role, u.active, u.created_at, u.rev, \
+     (SELECT a.version FROM user_avatars a WHERE a.user_id = u.id)";
+
+fn record(
+    (id, login, name, role, active, created_at, rev, avatar_version): UserRow,
+) -> Result<OfficeUserRecord, ApiError> {
+    Ok(OfficeUserRecord {
+        id,
+        login,
+        name,
+        role: role.parse().map_err(ApiError::internal)?,
+        active: active == 1,
+        created_at,
+        rev,
+        avatar_version,
+    })
+}
+
+async fn read_user(
+    conn: &mut SqliteConnection,
+    id: &str,
+) -> Result<Option<OfficeUserRecord>, ApiError> {
+    let row: Option<UserRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLUMNS} FROM office_users u WHERE u.id = ?"
+    ))
+    .bind(id)
+    .fetch_optional(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    row.map(record).transpose()
+}
+
+/// The write tail shared by an admin resetting another user's password
+/// (`set_password`) and a user changing their own (`office_auth::change_password`):
+/// bump the revision, store the new hash, end every other session of that
+/// user (ending sessions on a password change is a security rule, kept in
+/// one place), and write the `ok` audit row. The caller has already verified
+/// the request (rights, the current password where relevant, the new
+/// password's shape) and commits the transaction afterwards, through
+/// `commit_with_revision` with the revision returned here.
+pub(crate) async fn replace_password(
+    conn: &mut SqliteConnection,
+    at: &str,
+    actor: Actor<'_>,
+    user_id: &str,
+    keep_session_id: &str,
+    password_phc: &str,
+) -> Result<i64, ApiError> {
+    let rev = next_revision(conn).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
+        .bind(password_phc)
+        .bind(rev)
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM office_sessions WHERE user_id = ? AND id <> ?")
+        .bind(user_id)
+        .bind(keep_session_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    audit::record(
+        conn,
+        at,
+        Entry {
+            actor,
+            action: actions::OFFICE_USER_PASSWORD,
+            target_type: Some("office_user"),
+            target_id: Some(user_id),
+            outcome: Outcome::Ok,
+            details: json!({}),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(rev)
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    context: OfficeContext,
+) -> Result<Json<Vec<OfficeUserRecord>>, ApiError> {
+    context.require_admin()?;
+    let rows: Vec<UserRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLUMNS} FROM office_users u ORDER BY u.login COLLATE NOCASE"
+    ))
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::internal)?;
+    rows.into_iter()
+        .map(record)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Json)
+}
+
+pub async fn create_user(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiJson(create): ApiJson<OfficeUserCreate>,
+) -> Result<Json<OfficeUserRecord>, ApiError> {
+    context.require_admin()?;
+    let login = create.login.trim().to_owned();
+    validate::office_login("login", &login)?;
+    let name = validate::person_name("name", &create.name)?;
+    validate::password("password", create.password.expose())?;
+    let password_phc = hash_password_blocking(create.password)
+        .await
+        .map_err(ApiError::internal)?;
+    let at = state.timestamp();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    // A seat of the license (plan ЛЦ-2): office users, not office PCs.
+    crate::license::seats::require_seat(
+        &state,
+        &mut tx,
+        crate::license::seats::Quota::CabinetUsers,
+    )
+    .await?;
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&login)
+    .bind(&name)
+    .bind(create.role.as_str())
+    .bind(&password_phc)
+    .bind(&at)
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        ApiError::conflict_on_unique_violation(error, "login", "this login is already taken")
+    })?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::OFFICE_USER_CREATE,
+            target_type: Some("office_user"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "login": login, "role": create.role.as_str() }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let created = read_user(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("user vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(created))
+}
+
+pub async fn update_user(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(update): ApiJson<OfficeUserUpdate>,
+) -> Result<Json<OfficeUserRecord>, ApiError> {
+    context.require_admin()?;
+    let name = validate::person_name("name", &update.name)?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    let current = read_user(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such office user"))?;
+    if current.rev != update.expected_rev {
+        return Err(ApiError::stale_revision(current.rev));
+    }
+    let loses_admin = current.active
+        && current.role == OfficeRole::Admin
+        && (update.role != OfficeRole::Admin || !update.active);
+    if loses_admin {
+        let other_admins: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM office_users WHERE role = 'admin' AND active = 1 AND id <> ?",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+        if other_admins == 0 {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                codes::LAST_ADMIN,
+                "the last active administrator must stay",
+            ));
+        }
+    }
+    // Turning a user on again takes a seat of the license (plan ЛЦ-2).
+    if update.active && !current.active {
+        crate::license::seats::require_seat(
+            &state,
+            &mut tx,
+            crate::license::seats::Quota::CabinetUsers,
+        )
+        .await?;
+    }
+    let Some(details) = audit::update_details(&[
+        ("name", json!(current.name), json!(name)),
+        (
+            "role",
+            json!(current.role.as_str()),
+            json!(update.role.as_str()),
+        ),
+        ("active", json!(current.active), json!(update.active)),
+    ]) else {
+        // Nothing actually changed: report the record as-is without bumping
+        // the revision, writing a row nobody changed, or auditing a no-op.
+        return Ok(Json(current));
+    };
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE office_users SET name = ?, role = ?, active = ?, rev = ? WHERE id = ?")
+        .bind(&name)
+        .bind(update.role.as_str())
+        .bind(i64::from(update.active))
+        .bind(rev)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    if !update.active {
+        sqlx::query("DELETE FROM office_sessions WHERE user_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    }
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::OFFICE_USER_UPDATE,
+            target_type: Some("office_user"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details,
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let updated = read_user(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("user vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(updated))
+}
+
+pub async fn set_password(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(body): ApiJson<PasswordSet>,
+) -> Result<StatusCode, ApiError> {
+    context.require_admin()?;
+    validate::password("password", body.password.expose())?;
+    let password_phc = hash_password_blocking(body.password)
+        .await
+        .map_err(ApiError::internal)?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    if read_user(&mut tx, &id).await?.is_none() {
+        return Err(ApiError::not_found("no such office user"));
+    }
+    // Every other session of that user ends; the caller's own session stays.
+    let rev = replace_password(
+        &mut tx,
+        &at,
+        context.actor(),
+        &id,
+        &context.session_id,
+        &password_phc,
+    )
+    .await?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}

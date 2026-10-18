@@ -1,0 +1,1144 @@
+/*
+  «Рабочее место», design kit 2026-10 (docs/design-briefs/design-kit-2026-10.md, the owner-approved
+  boards «Станция / Рабочее место»). One bounded screen: header (title, tabs), the active panel, a
+  result line, the 84 px footer. ONE layer (kit §3): L1 cards on the page, rows split by 1 px
+  hairlines, no container inside a container. Tokens only; every target is 64 px and up.
+*/
+section.workstation-setup {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  /* A fixed, non-scrolling station screen (as the shift hub's): it takes the room the floor
+     frame gives it and never grows the page with its content. */
+  contain: size;
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(0, 1fr) auto 84px;
+  color: var(--fg);
+}
+
+.workstation-setup__header {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workstation-setup__heading {
+  min-width: 0;
+}
+
+.workstation-setup__heading h2,
+.workstation-setup__subtitle {
+  margin: 0;
+}
+
+.workstation-setup__heading h2 {
+  overflow: hidden;
+  font: var(--floor-title);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workstation-setup__subtitle {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+.workstation-setup__loading {
+  align-self: start;
+}
+
+/* ---- The tabs: the kit's segmented control, 4 segments on the `panel` track. ---- */
+.setup-tabs__list.mk-data-tabs {
+  display: flex;
+  flex: none;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px;
+  overflow: hidden;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--floor-r-ctl) + 6px);
+  background: var(--panel);
+}
+
+.setup-tabs__list .mk-data-tabs__tab {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 64px;
+  padding: 0 var(--sp-4);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--floor-r-ctl);
+  background: transparent;
+  color: var(--muted);
+  font: var(--floor-body-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+/* Selected = `fg` fill, the check and weight 600: three signs, never the colour alone. */
+.setup-tabs__list .mk-data-tabs__tab--active {
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.setup-tabs__list .mk-data-tabs__tab--active::before {
+  content: "";
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--setup-check) center / contain no-repeat;
+  mask: var(--setup-check) center / contain no-repeat;
+}
+
+/* With a form open the other segments are off: `dis`, and the subtitle says why. */
+.setup-tabs__list .mk-data-tabs__tab:disabled {
+  color: var(--dis);
+}
+
+.setup-tabs__list .mk-data-tabs__tab:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+section.workstation-setup {
+  --setup-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='m5 12.5 4.5 4.5L19 7.5' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+.setup-tabs__panel {
+  min-width: 0;
+  min-height: 0;
+  /* The panel scrolls as a whole when its content is taller than the screen (a scan's full verdict). */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---- L1 cards: one layer, a surface with a hairline. ---- */
+.setup-card,
+.setup-printer-list,
+.setup-printer-assignments,
+.setup-editor__card,
+.setup-scanners__list,
+.setup-sound,
+.setup-station {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
+}
+
+.setup-card {
+  display: grid;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.setup-card__title {
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+.setup-card__title:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.setup-card__hint {
+  margin: 0;
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+.setup-card__waiting {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+/* A live region is in the page even when empty: no gap for it then. */
+.workstation-setup__live:empty {
+  display: none;
+}
+
+/* ---- Printers: the list with its rows, and «Что на каком принтере». ---- */
+.setup-printer-routing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--sp-3);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.setup-printer-list {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.setup-printer-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.setup-printer-list__heading {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.setup-printer-list__count {
+  color: var(--muted2);
+  font: var(--floor-lg);
+}
+
+.setup-printer-list__header > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.setup-printer-list__scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--linectl) transparent;
+}
+
+.setup-printer-list__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-printer-list__empty {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+/*
+ * A row (84 px): the name with its test's tag over the mono line, the actions at 64 px. The name
+ * takes two lines at most and the line below it one, each cut with an ellipsis (the full text is
+ * its `title`): a long name never squeezes the buttons or grows the row past the list.
+ */
+.setup-printer-row {
+  display: grid;
+  min-width: 0;
+  min-height: 84px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.setup-printer-row__detail {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.setup-printer-row__title {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setup-printer-row__title > :not(h3) {
+  flex: none;
+}
+
+.setup-printer-row h3,
+.setup-printer-row p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.setup-printer-row h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  font: var(--floor-lg);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.setup-printer-row__connection {
+  overflow: hidden;
+  color: var(--muted);
+  font: 400 18px/26px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-printer-row__actions {
+  display: flex;
+  flex: none;
+  gap: var(--sp-1);
+}
+
+.setup-printer-row__actions > button {
+  min-width: 0;
+  padding-inline: var(--sp-3);
+  white-space: nowrap;
+}
+
+.setup-printer-row__actions > .setup-printer-row__remove {
+  width: 64px;
+  padding: 0;
+}
+
+/* The label check: the kit's switch card as a row of the list, split by its hairline, not a card in a card. */
+.setup-printer-verification .floor-switch-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.setup-printer-assignments {
+  display: grid;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3);
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-printer-assignments .setup-card__title {
+  padding-inline: 4px;
+}
+
+/* A long printer name is cut inside its select (its full name is the control's `title`), never widens the column. */
+.setup-printer-assignments {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setup-printer-assignments .mk-select__control {
+  min-width: 0;
+}
+
+.setup-printer-assignments .mk-select__value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The A4 test sheet as it was sent, whole, within the list. */
+.setup-a4-preview {
+  display: flex;
+  height: min(240px, 30vh);
+  padding: var(--sp-3);
+  justify-content: center;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.setup-a4-preview > canvas {
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--line2);
+  background: var(--floor-paper);
+}
+
+/* ---- The printer's form: three columns, or the left column and the keypad. ---- */
+.setup-editor {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setup-editor--keypad {
+  grid-template-columns: minmax(0, 1fr) 380px;
+}
+
+.setup-editor__card {
+  display: grid;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-editor__grid {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
+.setup-editor--keypad .setup-editor__grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setup-editor__column {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-editor__top {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.setup-editor--keypad .setup-editor__top {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.setup-printer-connection {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.setup-printer-connection:empty {
+  display: none;
+}
+
+/* A button or a list that takes the whole row of the printer's form, and never breaks its words. */
+.setup-printer-connection__wide {
+  grid-column: 1 / -1;
+}
+
+.setup-nowrap {
+  white-space: nowrap;
+}
+
+/* The keypad's field: the field it types into is ringed 2 px `fg`, with the keyboard mark. */
+.setup-keyfield {
+  min-width: 0;
+}
+
+.setup-keyfield[data-active="true"] .mk-input:not(.mk-input--error) {
+  border-color: var(--fg) !important;
+  box-shadow: inset 0 0 0 1px var(--fg) !important;
+}
+
+.setup-keyfield__icon {
+  flex: none;
+  color: var(--fg);
+}
+
+.setup-editor__summary {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.setup-editor__summary-row {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setup-editor__chips {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+/* ---- Scanners: the list and the add form on the left, the check (or the baud keypad) on the right. ---- */
+.setup-scanners {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.setup-scanners--only {
+  height: auto;
+}
+
+.setup-scanners__list {
+  display: grid;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.setup-scanners__side {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.setup-scanners__side > .floor-ipkeypad {
+  width: 100%;
+  max-width: 380px;
+}
+
+.workstation-setup__single {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.setup-scanner-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-scanner-row {
+  display: flex;
+  min-height: 84px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.setup-scanner-row__detail {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  font: var(--floor-lg);
+  overflow-wrap: anywhere;
+}
+
+.setup-scanner-row__kind {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+.setup-scanner-row__state {
+  flex: none;
+  min-width: 0;
+  max-width: 45%;
+}
+
+.setup-scanner-add {
+  display: grid;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  gap: var(--sp-2);
+}
+
+.setup-scanner-add__title {
+  margin: 0;
+  color: var(--muted);
+  font: var(--floor-body-strong);
+}
+
+.setup-scanner-add__fields {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.setup-scanner-add__ports {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+}
+
+.setup-card--check {
+  align-content: center;
+}
+
+/* ---- Sound: the switch card, then the level (a number, ten divisions, and the words). ---- */
+.setup-sound {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-3);
+  gap: var(--sp-3);
+  align-content: start;
+  overflow-y: auto;
+}
+
+.setup-sound > .floor-switch-card {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.setup-volume {
+  display: grid;
+  padding: 0 var(--sp-2);
+  gap: var(--sp-2);
+}
+
+.setup-volume__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.setup-volume__value {
+  margin: 0;
+  font: 700 64px/68px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-volume__row {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.setup-volume__step {
+  min-width: 160px;
+  height: 84px !important;
+  min-height: 84px !important;
+  white-space: nowrap;
+}
+
+.setup-volume__scale {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+}
+
+.setup-volume__division {
+  height: 52px;
+  border-radius: var(--r-sm, 12px);
+  background: var(--panel);
+}
+
+.setup-volume__division[data-filled="true"] {
+  background: var(--fg);
+}
+
+.setup-volume__scale[data-silent="true"] .setup-volume__division {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--dis);
+}
+
+/* ---- Station: the facts (hairline rows), the floor's theme, and the unpairing. ---- */
+.setup-station {
+  display: grid;
+  height: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-content: start;
+  overflow-y: auto;
+}
+
+.setup-station__facts,
+.setup-station__unpair {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-station__list {
+  display: grid;
+  margin: 0;
+}
+
+.setup-station__row {
+  display: grid;
+  min-height: 64px;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  align-items: center;
+  border-top: 1px solid var(--line);
+}
+
+.setup-station__row dt {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+.setup-station__row dd {
+  min-width: 0;
+  margin: 0;
+  font: var(--floor-lg);
+  overflow-wrap: anywhere;
+}
+
+.setup-station__row dd.setup-station__mono {
+  font: 600 22px/30px var(--font-mono);
+}
+
+/* ---- The result line and the 84 px footer. ---- */
+.workstation-setup__result {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+/* Nothing to say: the row is a zero-height line (a hidden item would hand its row to the footer), the gap taken back. */
+.workstation-setup__result:has(.workstation-setup__live:empty) {
+  height: 0;
+  margin-top: calc(var(--sp-2) * -1);
+  overflow: hidden;
+}
+
+.workstation-setup__footer {
+  display: flex;
+  min-width: 0;
+  height: 84px;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+/* The button sets its 64 px inline: the 84 px footer's back button says its height with `!important`, as `floor-primary` does. */
+.workstation-setup__footer .setup-footer__back {
+  flex: none;
+  height: 84px !important;
+  min-height: 84px !important;
+  border-radius: var(--floor-r-primary) !important;
+  white-space: nowrap;
+}
+
+.setup-footer__primary {
+  flex: none;
+  width: 300px;
+  white-space: nowrap;
+}
+
+.setup-footer__status {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+}
+
+.setup-footer__status > * {
+  min-width: 0;
+}
+
+.setup-footer__hint {
+  margin: 0;
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+@media (max-width: 1100px) {
+  .setup-editor__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .setup-station {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-volume__step {
+    min-width: 120px;
+  }
+}
+
+/* The scanner tab: the check beside the connection; in a half column its body is one column. */
+.setup-scanners .self-test__body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.self-test {
+  gap: var(--sp-3);
+}
+
+.self-test__body {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.self-test__code-side,
+.self-test__result-side {
+  display: grid;
+  /* One shrinkable column: the kinds' buttons wrap in a narrow card instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.self-test__kinds,
+.self-test__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* The chosen kind is the kit's selected button (`fg` fill and a check, floor-kit.css); a second, blue
+   outline on it read as a focus ring that was not there (station audit). */
+
+.self-test__figure {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 16px;
+  background: var(--floor-paper);
+  border: 2px dashed var(--fg-3);
+  border-radius: var(--r-2);
+}
+
+/* «ТЕСТ» on the figure itself: a code of this panel cannot be taken for a product's. */
+.self-test__badge {
+  justify-self: start;
+  padding: 2px 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--floor-paper);
+  background: var(--floor-paper-ink);
+  border-radius: 4px;
+}
+
+.self-test__symbol {
+  width: 100%;
+  color: var(--floor-scan-ink);
+}
+
+.self-test__symbol svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.self-test__symbol--dm {
+  max-width: 240px;
+}
+
+.self-test__symbol--plain {
+  max-width: 420px;
+}
+
+.self-test__symbol--big {
+  max-width: min(56vh, 80vw);
+}
+
+.self-test__shown {
+  box-sizing: border-box;
+  max-height: 100%;
+  overflow: auto;
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-4);
+  padding: 24px;
+  background: var(--floor-paper);
+}
+
+/* On the white card whatever the theme: fixed dark colours, as the symbol's own card. */
+.self-test__shown {
+  color: var(--floor-paper-ink);
+}
+
+.self-test__shown .self-test__shown-status {
+  margin: 0;
+  font-weight: 700;
+}
+
+.self-test__shown .self-test__shown-status[data-tone="ok"] {
+  color: var(--floor-paper-ok);
+}
+
+.self-test__shown .self-test__shown-status[data-tone="warning"] {
+  color: var(--floor-paper-warn);
+}
+
+.self-test__shown .self-test__shown-status[data-tone="problem"] {
+  color: var(--floor-paper-err);
+}
+
+.self-test__code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.self-test__gs {
+  padding: 0 2px;
+  color: inherit;
+  background: transparent;
+  outline: 1px solid currentColor;
+  border-radius: 3px;
+}
+
+.self-test__verdict {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 2px solid var(--border-default, var(--fg-3));
+  border-radius: var(--r-2);
+  background: var(--bg-2, transparent);
+  color: var(--fg-1);
+}
+
+.self-test__verdict[data-tone="ok"] {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok-fg);
+}
+
+.self-test__verdict[data-tone="warning"] {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-fg);
+}
+
+.self-test__verdict[data-tone="problem"] {
+  background: var(--err-bg);
+  border-color: var(--err-border);
+  color: var(--err-fg);
+}
+
+.self-test__status {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.self-test__reason {
+  margin: 0;
+  font-weight: 600;
+}
+
+.self-test__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.self-test__facts dt {
+  font-weight: 600;
+}
+
+.self-test__facts dd {
+  margin: 0;
+}
+
+.self-test__history-title {
+  margin: 0;
+}
+
+.self-test__history {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.self-test__history li {
+  overflow-wrap: anywhere;
+}
+
+/* The line a refused A4 sheet gives for whoever helps, and the button that copies it (beta 3.2). */
+.setup-diagnostic {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.setup-diagnostic__title {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.setup-diagnostic__text {
+  min-width: 0;
+  max-height: 96px;
+  padding: var(--sp-2) var(--sp-3);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: 14px/20px var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.self-test__waiting {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+}
+
+.self-test__waiting .setup-card__waiting {
+  padding: 0;
+}
+
+/* The words of the label check's state are in its hint («Выключено. Действует …»): the row stays one line. */
+.setup-printer-verification .floor-switch-card__word {
+  display: none;
+}
+
+/* The form's segments share narrow columns: their words stay on one line. */
+.setup-editor .floor-segmented > .floor-segmented__option {
+  padding-inline: 8px;
+  font: var(--floor-body-strong);
+  white-space: nowrap;
+}
+
+/* In the half column the test symbol is smaller, so its actions stay in sight on a 800 px screen. */
+.setup-scanners .self-test__symbol {
+  max-width: 200px;
+}
+
+.setup-scanners .self-test__figure {
+  padding: 12px;
+}
+
+/*
+ * The real terminal (a 1280 x 1024 panel at Windows 125 %: about 1024 x 640-720 of CSS pixels) and
+ * every window as narrow or as short: a row of the printers is the name over its line with three
+ * icon buttons of 64 px (the words are their `aria-label` and `title`), the scanners' tab keeps
+ * its keypad docked on the right as the printer form does, so the keypad never lands under the
+ * form, and a panel too tall for the window scrolls inside itself, below the pinned footer.
+ */
+@media (max-width: 1100px), (max-height: 780px) {
+  .setup-row__action-text {
+    display: none;
+  }
+
+  .setup-printer-row__actions {
+    gap: 4px;
+  }
+
+  .setup-printer-row__actions > button,
+  .setup-printer-row__actions > .setup-printer-row__remove,
+  .setup-scanner-row__remove {
+    width: 64px;
+    min-width: 64px;
+    padding: 0;
+  }
+
+  .setup-printer-row {
+    padding-inline: var(--sp-3);
+  }
+
+  .setup-scanners {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+
+  .setup-scanners--only {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-scanners__side {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .setup-scanner-row {
+    min-height: 64px;
+    padding-block: 0;
+  }
+
+  /* The keyboard scanner is no control: a line, its explanation is the chip's «Всегда активен». */
+  .setup-scanner-row--always {
+    min-height: 48px;
+  }
+
+  .setup-scanner-row--always .setup-scanner-row__kind {
+    display: none;
+  }
+
+  .setup-scanner-add__fields {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-height: 780px) {
+  section.workstation-setup {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+    grid-template-rows: auto minmax(0, 1fr) auto 72px;
+  }
+
+  .workstation-setup__subtitle {
+    display: none;
+  }
+
+  .setup-tabs__list.mk-data-tabs {
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .workstation-setup__footer,
+  .workstation-setup__footer .setup-footer__back,
+  .workstation-setup__footer .floor-primary {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .setup-printer-list__header {
+    padding-block: var(--sp-1);
+  }
+
+  .setup-printer-row {
+    min-height: 72px;
+    padding-block: var(--sp-1);
+  }
+
+  .setup-card {
+    padding: var(--sp-3);
+    gap: var(--sp-2);
+  }
+
+  .setup-scanner-add {
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+    gap: var(--sp-1);
+  }
+
+  .setup-scanners__list .setup-printer-list__header {
+    padding-block: 0;
+  }
+
+  .setup-printer-assignments {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-1);
+  }
+}

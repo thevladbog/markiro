@@ -1,0 +1,27 @@
+{
+  "status": "found",
+  "source": {
+    "kind": "pallet",
+    "subjectId": "a0000000-0000-4000-8000-000000000001",
+    "identity": "146006820000000409",
+    "sscc": "146006820000000409",
+    "product": {
+      "id": "8b1c2d3e-4f5a-4b6c-9d7e-8f9a0b1c2d3e",
+      "gtin14": "04600682000013",
+      "name": "Молоко 3,2% 0,9 л",
+      "printName": null,
+      "chzProductGroupCode": 8,
+      "shelfLifeDays": null,
+      "egaisCode": null
+    },
+    "counterpartyName": "ООО «Север»",
+    "shiftId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "shiftNumber": "OCT26-003/S",
+    "productionDate": "2026-10-08",
+    "at": "2026-10-08T06:20:00.000Z",
+    "itemCount": 480,
+    "boxCount": 40,
+    "operatorName": null,
+    "deviceId": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
+  }
+}

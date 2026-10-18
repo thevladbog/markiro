@@ -1,0 +1,279 @@
+/*
+ * The floor's frame and status bar, forked from the cloud station's header
+ * (`apps/station/src/station.css`: `.station-root`, `.station-status-bar`,
+ * `.station-status-identity*`, `.station-status-pill*`, `.station-visually-hidden`).
+ * The one-row header of the kit (board `SgyS0`): the identity on the left, then
+ * the chips (a glyph and a word on a tone, never a bare dot), then the rail of
+ * 64 px buttons. A full-width row of warnings sits under it, empty and flat until
+ * a warning comes. What does not fit gives way by priority (`header-chips`,
+ * `use-header-collapse`): healthy chips lose their words, «Сменить оператора»
+ * becomes a glyph, the station's name is cut with an ellipsis. Colours, type and
+ * spacing come from @markiro/ui tokens; the only motion is the press feedback.
+ */
+
+/* The floor fills the window edge to edge, as the cloud's `.station-root`. */
+.standalone-screen:has(> .floor-frame) {
+  padding: 0;
+  place-items: stretch;
+}
+
+.floor-frame {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.floor-frame > :last-child {
+  min-height: 0;
+}
+
+.station-status-bar {
+  display: grid;
+  min-width: 0;
+  /* One row of 64 px touch targets and a hairline: 73 px, as drawn. */
+  padding: 4px var(--sp-4);
+  gap: 0 var(--sp-4);
+  /*
+   * Never taller and never wrapped: what does not fit collapses (`useHeaderCollapse`). The
+   * identity takes what the rail leaves and is cut with an ellipsis; chips and buttons
+   * never shrink.
+   */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 64px auto;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: var(--floor-body);
+}
+
+/* The identity deck: the station and the line, quiet; the operator under it, strong. */
+.station-status-identity {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  gap: 2px;
+  align-content: center;
+}
+
+.station-status-identity__row {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.station-status-item {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+}
+
+/* The shift's number stays whole; the operator and the organization give way to it with an ellipsis. */
+.station-status-item--keep {
+  flex: 0 0 auto;
+}
+
+/* The operator's name, the longest line, gives way first. */
+.station-status-identity__row--secondary > .station-status-item:first-child {
+  flex-shrink: 3;
+}
+
+.station-status-identity__row .station-status-item + .station-status-item::before {
+  margin-right: var(--sp-2);
+  color: var(--fg-3);
+  content: "·";
+}
+
+.station-status-identity dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-status-identity__row--primary dd {
+  color: var(--fg-2);
+  font: 500 16px/20px var(--font-ui);
+}
+
+.station-status-identity__row--secondary dd {
+  color: var(--fg-1);
+  font: 600 18px/24px var(--font-ui);
+}
+
+/* The rail: the chips, then the buttons. It never shrinks, and the header measures it. */
+.floor-bar__rail {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* The chips, on one row. */
+.station-status-pills {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+/* The polite region of the low-stock chip: in the tree always, in the layout not. */
+.floor-stock-chip-region {
+  display: contents;
+}
+
+/*
+ * A chip: 40 px, a glyph and a word on a tone's quiet fill (the kit's status vocabulary: ok,
+ * warn, error, neutral). The tone is never the only sign: the glyph and the word say it too.
+ * A collapsed chip is its glyph alone, a circle, its words still in the tree.
+ */
+.floor-chip {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 14px;
+  gap: 8px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg-2);
+  font: 600 16px/20px var(--font-ui);
+  white-space: nowrap;
+}
+
+.floor-chip[data-form="icon"] {
+  padding: 0;
+}
+
+.floor-chip .floor-glyph {
+  flex: none;
+}
+
+.floor-chip__text {
+  white-space: nowrap;
+}
+
+.floor-chip[data-tone="ok"] {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.floor-chip[data-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.floor-chip[data-tone="error"] {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/*
+ * Warnings: a full-width row of their own, flat while there is none. Never
+ * `display: none`: the polite region has to be in the tree before a warning
+ * lands, or it is not heard.
+ */
+.station-status-alerts {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-column: 1 / -1;
+}
+
+.station-status-alerts:not(:empty) {
+  padding-block: var(--sp-2);
+}
+
+.station-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .station-status-bar {
+    padding-inline: var(--sp-3);
+    column-gap: var(--sp-2);
+  }
+
+  .floor-bar__rail {
+    gap: var(--sp-2);
+  }
+
+  .floor-chip {
+    padding-inline: 12px;
+    font: 600 15px/18px var(--font-ui);
+  }
+
+  .station-status-identity__row--primary dd {
+    font: 500 15px/20px var(--font-ui);
+  }
+}
+
+/*
+ * The link to the host is a chip inside a 64 px touch target: the button is as wide as the chip
+ * and no narrower than 64 px, with no box of its own.
+ */
+.floor-link {
+  position: relative;
+}
+
+.floor-link__button.mk-btn {
+  width: auto;
+  min-width: 64px;
+  padding: 0 4px;
+  background: transparent;
+}
+
+/*
+ * Without a border style the browser's `outset` showed (a two-tone 2 px frame round the chip), and
+ * the kit's secondary border colour is `!important`: the target's frame is drawn here, hairline
+ * and quiet (it is a touch target, not a button with a caption).
+ */
+:where(.floor-frame, .station-screen) .floor-link__button.mk-btn.mk-btn--floor {
+  border: 1px solid transparent !important;
+}
+
+.floor-link__popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  /* From the dot's left edge: anchored at its right edge it ran off the window's left. */
+  left: 0;
+  width: max-content;
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.floor-link__popover .host-status {
+  justify-items: start;
+}

@@ -1,0 +1,846 @@
+//! The link to the paired host (stage 1 spec §5.2). A background task keeps
+//! `GET /v1/changes/stream` open with the device key and the pinned
+//! certificate, reconnects after a pause that grows from 1 to 30 s, and tells
+//! the webview how the link is (`standalone://host-status`) and which
+//! revision the host reached (`standalone://host-revision`). The webview syncs
+//! reference data on every revision; it never opens the stream itself. Before
+//! each stream it reads `GET /v1/hello` with the same pinned certificate, and
+//! the `Online` status carries the host's restore epoch (plan РК-С).
+
+use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
+
+use crate::device::HostLink;
+use crate::host_client::{
+    Credentials, HostResponse, PinnedClient, RequestError, StreamClient, StreamOpen,
+};
+use crate::host_probe::{classify_hello, read_versions, HostVersions, ProbeError};
+
+pub const STATUS_EVENT: &str = "standalone://host-status";
+pub const REVISION_EVENT: &str = "standalone://host-revision";
+const STREAM_PATH: &str = "/v1/changes/stream";
+const HELLO_PATH: &str = "/v1/hello";
+/// An event longer than this is not from a Markiro host.
+const MAX_EVENT_BYTES: usize = 64 * 1024;
+
+/// How the link is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkState {
+    /// The stream is open and the host has spoken on it.
+    Online,
+    /// Opening the stream.
+    Connecting,
+    /// No stream: waiting to reconnect, or not paired.
+    Offline,
+}
+
+/// Why the last attempt failed, as a stable code the webview maps to text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkError {
+    /// No connection, a TLS failure other than the pin, or no answer in time.
+    Unreachable,
+    /// The host presented a certificate other than the pinned one.
+    CertificateMismatch,
+    /// The host no longer accepts this device's key.
+    KeyRejected,
+    /// The host refused the stream with another error, or answered the
+    /// `hello` read before it with something other than a Markiro host's
+    /// `hello` (plan РК-С).
+    StreamRefused,
+    /// The stream closed, went silent or carried something unreadable.
+    StreamEnded,
+    /// The host's `hello` says it is older than this app (plan ОБН-3): the
+    /// host is updated first.
+    HostTooOld,
+    /// The host's `hello` says this app is older than it takes (plan
+    /// ОБН-3): this PC updates from the host (`GET /v1/device/update`,
+    /// outside the protocol guard).
+    AppTooOld,
+    /// The local copy could not be replaced; no online work may start.
+    DatasetResetFailed,
+}
+
+/// `standalone://host-status` and the answer of `connection_status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostStatus {
+    pub state: LinkState,
+    /// When the host last sent anything on the stream, in milliseconds since
+    /// the Unix epoch; `None` before the first contact and while unpaired. A
+    /// heartbeat advances this without publishing a new status (no new
+    /// `seq`), so `connection_status` can report a newer `lastContactAt`
+    /// than the last event the webview received; an event's own
+    /// `lastContactAt` is always the value current when that event was
+    /// published, never read again afterward.
+    pub last_contact_at: Option<u64>,
+    /// Why the last attempt failed; `None` while online and while unpaired.
+    pub last_error: Option<LinkError>,
+    /// Grows by one with every published status, so the webview can order a
+    /// `connection_status` answer against events that raced it.
+    pub seq: u64,
+    /// The host's `hello.restoreEpoch` (plan РК-С) as the connection that came
+    /// online last read it, with the pinned certificate, just before it opened
+    /// the stream: a new value tells the webview the host went back to a copy.
+    /// `None`, and absent from the JSON, before the host's first restore
+    /// (a host that predates restores names none either) and before this
+    /// pairing's first connection came online. A failed read ends the
+    /// attempt before the stream opens, so `Online` always means the epoch of
+    /// this host is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_epoch: Option<String>,
+    /// The host's `hello.version`, `protocol` and `minProtocol` as the last
+    /// `hello` of this pairing's host read them (plan ОБН-3, spec
+    /// §10.11.3): an incompatible host's too, so the webview can offer the
+    /// update. Absent until one was read; cleared with the pairing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_protocol: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_min_protocol: Option<u32>,
+}
+
+impl Default for HostStatus {
+    fn default() -> Self {
+        Self {
+            state: LinkState::Offline,
+            last_contact_at: None,
+            last_error: None,
+            seq: 0,
+            restore_epoch: None,
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
+        }
+    }
+}
+
+/// `standalone://host-revision`: the host has committed revision `rev`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostRevision {
+    pub rev: i64,
+}
+
+/// Where the task reports: the app emits Tauri events, tests record them.
+pub trait LinkEvents: Send + Sync + 'static {
+    fn status(&self, status: &HostStatus);
+    fn revision(&self, revision: HostRevision);
+    /// Complete native dataset reconciliation before any stream event/Online.
+    fn reconcile_dataset<'a>(
+        &'a self,
+        _host_id: &'a str,
+        _epoch: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), LinkError>> + Send + 'a>>
+    {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// Tauri state: the latest status, for `connection_status`.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectionState(Arc<Mutex<HostStatus>>);
+
+impl ConnectionState {
+    pub fn snapshot(&self) -> HostStatus {
+        self.0.lock().expect("status lock").clone()
+    }
+
+    /// Record contact with the host without publishing a status: a heartbeat
+    /// (or any stream data) advances `last_contact_at` on its own, so
+    /// `connection_status` can report it before the next status that bumps
+    /// `seq`.
+    fn touch(&self) {
+        self.0.lock().expect("status lock").last_contact_at = Some(now_ms());
+    }
+
+    /// Keep what a `hello` told of the host's versions without publishing:
+    /// the next status carries it. A read that told nothing keeps the last.
+    fn note_host(&self, versions: Option<HostVersions>) {
+        let Some(versions) = versions else {
+            return;
+        };
+        let mut current = self.0.lock().expect("status lock");
+        current.host_version = versions.version;
+        current.host_protocol = Some(versions.protocol);
+        current.host_min_protocol = Some(versions.min_protocol);
+    }
+
+    fn publish(&self, events: &dyn LinkEvents, state: LinkState, last_error: Option<LinkError>) {
+        self.publish_with(events, |current| {
+            current.state = state;
+            current.last_error = last_error;
+        });
+    }
+
+    /// Apply `update` and publish the result in one critical section, so a
+    /// `connection_status` racing the update never sees a status with some
+    /// fields already changed and others still old (as a status built from
+    /// two separate lock acquisitions could).
+    fn publish_with(&self, events: &dyn LinkEvents, update: impl FnOnce(&mut HostStatus)) {
+        let status = {
+            let mut current = self.0.lock().expect("status lock");
+            update(&mut current);
+            current.seq += 1;
+            current.clone()
+        };
+        events.status(&status);
+    }
+
+    /// Offline with nothing to report: the device is not paired.
+    fn unpaired(&self, events: &dyn LinkEvents) {
+        self.publish_with(events, |current| {
+            current.state = LinkState::Offline;
+            current.last_error = None;
+            current.last_contact_at = None;
+            current.restore_epoch = None;
+            current.host_version = None;
+            current.host_protocol = None;
+            current.host_min_protocol = None;
+        });
+    }
+}
+
+/// Pauses between attempts: `initial`, doubling up to `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Backoff {
+    pub initial: Duration,
+    pub max: Duration,
+}
+
+impl Default for Backoff {
+    fn default() -> Self {
+        Self {
+            initial: Duration::from_secs(1),
+            max: Duration::from_secs(30),
+        }
+    }
+}
+
+impl Backoff {
+    fn after(self, pause: Duration) -> Duration {
+        pause.saturating_mul(2).min(self.max)
+    }
+}
+
+/// The pause `hold` should sleep for now and carry into its next iteration,
+/// given the pause carried from the previous one and whether the session
+/// that just ended had come online. A session that came online resets to
+/// `initial`, no matter how far the pause had grown; otherwise it keeps
+/// doubling from wherever it left off.
+fn next_pause(backoff: Backoff, pause: Duration, came_online: bool) -> (Duration, Duration) {
+    let sleep_now = if came_online { backoff.initial } else { pause };
+    (sleep_now, backoff.after(sleep_now))
+}
+
+/// Follow the pairing: hold the stream while paired, stay offline and try
+/// nothing while not. Returns once the `DeviceState` behind `link` is gone.
+pub async fn supervise(
+    mut link: watch::Receiver<Option<Arc<HostLink>>>,
+    events: Arc<dyn LinkEvents>,
+    state: ConnectionState,
+    backoff: Backoff,
+) {
+    loop {
+        let current = link.borrow_and_update().clone();
+        let changed = match current {
+            None => {
+                state.unpaired(&*events);
+                link.changed().await
+            }
+            Some(current) => tokio::select! {
+                never = hold(&current, &*events, &state, backoff) => match never {},
+                changed = link.changed() => changed,
+            },
+        };
+        if changed.is_err() {
+            return;
+        }
+    }
+}
+
+/// Keep the stream to one host open, reconnecting forever. A pairing change
+/// drops this future, which closes the connection.
+async fn hold(
+    link: &HostLink,
+    events: &dyn LinkEvents,
+    state: &ConnectionState,
+    backoff: Backoff,
+) -> Infallible {
+    let mut pause = backoff.initial;
+    let mut last_error = None;
+    // A quick forget-and-re-pair can coalesce the transient `unpaired`
+    // status in the watch channel (only the latest value survives), so this
+    // link's first status clears the previous host's contact time itself
+    // rather than relying on having observed that transient status.
+    let mut fresh_link = true;
+    loop {
+        state.publish_with(events, |current| {
+            current.state = LinkState::Connecting;
+            current.last_error = last_error;
+            if fresh_link {
+                current.last_contact_at = None;
+                current.restore_epoch = None;
+                current.host_version = None;
+                current.host_protocol = None;
+                current.host_min_protocol = None;
+            }
+        });
+        fresh_link = false;
+        let (error, came_online) = follow(link, events, state).await;
+        last_error = Some(error);
+        state.publish(events, LinkState::Offline, last_error);
+        let (sleep_now, next) = next_pause(backoff, pause, came_online);
+        tokio::time::sleep(sleep_now).await;
+        pause = next;
+    }
+}
+
+/// One connection: open the stream and pass its events on until it ends.
+/// Returns why it ended and whether the host had spoken on it.
+async fn follow(
+    link: &HostLink,
+    events: &dyn LinkEvents,
+    state: &ConnectionState,
+) -> (LinkError, bool) {
+    let client = match StreamClient::new(&link.address, &link.fingerprint) {
+        Ok(client) => client,
+        Err(error) => return (request_error(error), false),
+    };
+    // Read before the stream opens, so that the `Online` status its first
+    // event publishes already carries it; without it no `Online` (plan РК-С:
+    // the outbox goes only once the station knows whether the host was
+    // restored).
+    let (versions, epoch) = read_hello(link).await;
+    state.note_host(versions);
+    let hello = match epoch {
+        Ok(hello) => hello,
+        Err(error) => return (error, false),
+    };
+    if let Err(error) = events
+        .reconcile_dataset(&hello.host_id, hello.dataset_epoch.as_deref())
+        .await
+    {
+        return (error, false);
+    }
+
+    let mut stream = match client.open(STREAM_PATH, link.key()).await {
+        Ok(StreamOpen::Open(stream)) => stream,
+        Ok(StreamOpen::Refused(response)) => return (refusal(&response), false),
+        Err(error) => return (request_error(error), false),
+    };
+    let mut parser = SseParser::default();
+    let mut online = false;
+    loop {
+        let bytes = match stream.chunk().await {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) | Err(_) => return (LinkError::StreamEnded, online),
+        };
+        state.touch();
+        let Ok(items) = parser.push(&bytes) else {
+            return (LinkError::StreamEnded, online);
+        };
+        for item in items {
+            if !online {
+                // A replacement can commit after the first hello and before
+                // this stream captures its initial revision. Reprobe before
+                // releasing any event to the old webview generation.
+                let (versions, current_hello) = read_hello(link).await;
+                state.note_host(versions);
+                let current_hello = match current_hello {
+                    Ok(hello) => hello,
+                    Err(error) => return (error, false),
+                };
+                if let Err(error) = events
+                    .reconcile_dataset(
+                        &current_hello.host_id,
+                        current_hello.dataset_epoch.as_deref(),
+                    )
+                    .await
+                {
+                    return (error, false);
+                }
+                online = true;
+                let epoch = current_hello.restore_epoch;
+                state.publish_with(events, |current| {
+                    current.state = LinkState::Online;
+                    current.last_error = None;
+                    current.restore_epoch = epoch;
+                });
+            }
+            if let SseItem::Revision(rev) = item {
+                events.revision(HostRevision { rev });
+            }
+        }
+    }
+}
+
+/// `GET /v1/hello` with the pinned certificate and no key: the host's restore
+/// epoch, `None` when it names none, and what it tells of the host's versions
+/// whatever the verdict. A transport failure is the link's
+/// (`request_error`, so a changed certificate is told apart).
+async fn read_hello(
+    link: &HostLink,
+) -> (
+    Option<HostVersions>,
+    Result<markiro_proto::Hello, LinkError>,
+) {
+    let client = match PinnedClient::new(&link.address, &link.fingerprint) {
+        Ok(client) => client,
+        Err(error) => return (None, Err(request_error(error))),
+    };
+    match client
+        .send("GET", HELLO_PATH, None, Credentials::default())
+        .await
+    {
+        Ok(response) => (versions_of(&response), hello_of(&response)),
+        Err(error) => (None, Err(request_error(error))),
+    }
+}
+
+/// The versions a `hello` of a Markiro host names, whatever its protocol
+/// (`host_probe::read_versions`, plan ОБН-2); `None` for anything else.
+fn versions_of(response: &HostResponse) -> Option<HostVersions> {
+    let body = response.body.as_ref().filter(|_| response.status == 200)?;
+    read_versions(body).ok()
+}
+
+/// The `restoreEpoch` of a `hello` answer: only from a 200 that reads as a
+/// compatible Markiro host's `hello` (`host_probe::classify_hello`); a host
+/// that predates restores answers without the field, which is `Ok(None)`.
+/// Anything else — another status, no body, not a Markiro host, an epoch
+/// that does not read — is `StreamRefused`: `hello` is unauthenticated and
+/// always a 200 on a healthy host.
+#[cfg(test)]
+fn epoch_of(response: &HostResponse) -> Result<Option<String>, LinkError> {
+    hello_of(response).map(|hello| hello.restore_epoch)
+}
+
+fn hello_of(response: &HostResponse) -> Result<markiro_proto::Hello, LinkError> {
+    if response.status != 200 {
+        return Err(LinkError::StreamRefused);
+    }
+    let body = response.body.clone().ok_or(LinkError::StreamRefused)?;
+    classify_hello(body).map_err(|error| match error {
+        ProbeError::HostTooOld => LinkError::HostTooOld,
+        ProbeError::AppTooOld => LinkError::AppTooOld,
+        _ => LinkError::StreamRefused,
+    })
+}
+
+fn request_error(error: RequestError) -> LinkError {
+    match error {
+        RequestError::CertificateMismatch => LinkError::CertificateMismatch,
+        _ => LinkError::Unreachable,
+    }
+}
+
+/// A refused stream: a rejected device key needs a new pairing; any other
+/// refusal is the host's to explain in its own log.
+fn refusal(response: &HostResponse) -> LinkError {
+    let credential = response
+        .body
+        .as_ref()
+        .and_then(|body| body["error"]["details"]["credential"].as_str());
+    if response.status == 401 && credential == Some(markiro_proto::credentials::DEVICE) {
+        LinkError::KeyRejected
+    } else {
+        LinkError::StreamRefused
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
+/// What one server-sent event carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SseItem {
+    /// `event: rev` with `data: {"rev": N}`.
+    Revision(i64),
+    /// A comment (the heartbeat) or an event this build does not read.
+    Other,
+}
+
+/// An event grew past the limit without ending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventTooLong;
+
+/// Splits a `text/event-stream` into events: blocks of lines that end with a
+/// blank line, with LF or CRLF line ends.
+#[derive(Debug, Default)]
+pub struct SseParser {
+    buffer: Vec<u8>,
+}
+
+impl SseParser {
+    /// Feed the next bytes; returns the events they completed.
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseItem>, EventTooLong> {
+        self.buffer
+            .extend(bytes.iter().copied().filter(|&byte| byte != b'\r'));
+        let mut items = Vec::new();
+        while let Some(end) = self.buffer.windows(2).position(|pair| pair == b"\n\n") {
+            let block: Vec<u8> = self.buffer.drain(..end + 2).collect();
+            items.push(parse_event(&block[..end]));
+        }
+        if self.buffer.len() > MAX_EVENT_BYTES {
+            return Err(EventTooLong);
+        }
+        Ok(items)
+    }
+}
+
+/// One event block: `event:` names it, `data:` lines carry it, lines that
+/// start with `:` are comments.
+fn parse_event(block: &[u8]) -> SseItem {
+    let text = String::from_utf8_lossy(block);
+    let mut name = None;
+    let mut data = String::new();
+    for line in text.split('\n') {
+        if line.starts_with(':') {
+            continue;
+        }
+        let (field, value) = match line.split_once(':') {
+            Some((field, value)) => (field, value.strip_prefix(' ').unwrap_or(value)),
+            None => (line, ""),
+        };
+        match field {
+            "event" => name = Some(value),
+            "data" => {
+                if !data.is_empty() {
+                    data.push('\n');
+                }
+                data.push_str(value);
+            }
+            _ => {}
+        }
+    }
+    match (name, serde_json::from_str::<HostRevision>(&data)) {
+        (Some("rev"), Ok(revision)) => SseItem::Revision(revision.rev),
+        _ => SseItem::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const REV_7: &[u8] = b"event: rev\ndata: {\"rev\":7}\n\n";
+
+    #[test]
+    fn a_revision_event_is_read_whole_or_in_pieces() {
+        let mut parser = SseParser::default();
+        assert_eq!(parser.push(REV_7), Ok(vec![SseItem::Revision(7)]));
+        for split in 1..REV_7.len() {
+            let mut parser = SseParser::default();
+            let mut items = parser.push(&REV_7[..split]).unwrap();
+            items.extend(parser.push(&REV_7[split..]).unwrap());
+            assert_eq!(items, vec![SseItem::Revision(7)], "split at {split}");
+        }
+    }
+
+    #[test]
+    fn heartbeats_crlf_and_several_events_in_one_chunk() {
+        let mut parser = SseParser::default();
+        let chunk =
+            b":\n\nevent: rev\r\ndata: {\"rev\":1}\r\n\r\nevent: rev\ndata: {\"rev\":2}\n\n";
+        assert_eq!(
+            parser.push(chunk),
+            Ok(vec![
+                SseItem::Other,
+                SseItem::Revision(1),
+                SseItem::Revision(2)
+            ])
+        );
+    }
+
+    #[test]
+    fn unknown_or_unreadable_events_are_other() {
+        let mut parser = SseParser::default();
+        assert_eq!(
+            parser.push(b"event: hello\ndata: {}\n\n"),
+            Ok(vec![SseItem::Other])
+        );
+        assert_eq!(
+            parser.push(b"event: rev\ndata: not json\n\n"),
+            Ok(vec![SseItem::Other])
+        );
+        assert_eq!(
+            parser.push(b"data: {\"rev\":3}\n\n"),
+            Ok(vec![SseItem::Other])
+        );
+    }
+
+    #[test]
+    fn an_endless_event_is_refused() {
+        let mut parser = SseParser::default();
+        assert_eq!(
+            parser.push(&vec![b'x'; MAX_EVENT_BYTES + 1]),
+            Err(EventTooLong)
+        );
+    }
+
+    #[test]
+    fn pauses_double_up_to_the_limit() {
+        let backoff = Backoff::default();
+        let mut pause = backoff.initial;
+        let mut seconds = vec![pause.as_secs()];
+        for _ in 0..6 {
+            pause = backoff.after(pause);
+            seconds.push(pause.as_secs());
+        }
+        assert_eq!(seconds, [1, 2, 4, 8, 16, 30, 30]);
+    }
+
+    #[test]
+    fn next_pause_grows_when_the_link_never_came_online() {
+        let backoff = Backoff::default();
+        let mut pause = backoff.initial;
+        let mut seconds = vec![pause.as_secs()];
+        for _ in 0..6 {
+            let (sleep_now, next) = next_pause(backoff, pause, false);
+            assert_eq!(
+                sleep_now, pause,
+                "sleeps the carried-over pause, not the grown one"
+            );
+            pause = next;
+            seconds.push(pause.as_secs());
+        }
+        assert_eq!(seconds, [1, 2, 4, 8, 16, 30, 30]);
+    }
+
+    #[test]
+    fn next_pause_resets_to_initial_after_a_session_that_came_online() {
+        let backoff = Backoff::default();
+        // However far the pause had grown, a session that came online
+        // resets it, and doubling starts over from `initial` again.
+        let (sleep_now, next) = next_pause(backoff, backoff.max, true);
+        assert_eq!(sleep_now, backoff.initial);
+        assert_eq!(next, backoff.after(backoff.initial));
+    }
+
+    #[test]
+    fn a_rejected_device_key_is_told_apart_from_other_refusals() {
+        let refused = |status: u16, body: serde_json::Value| {
+            refusal(&HostResponse {
+                status,
+                body: Some(body),
+            })
+        };
+        assert_eq!(
+            refused(
+                401,
+                json!({ "error": { "code": "unauthorized", "message": "", "details": { "credential": "device" } } })
+            ),
+            LinkError::KeyRejected
+        );
+        // A rejected office session, not the device key: no reason to send
+        // this device back to re-pairing.
+        assert_eq!(
+            refused(
+                401,
+                json!({ "error": { "code": "unauthorized", "message": "", "details": { "credential": "session" } } })
+            ),
+            LinkError::StreamRefused
+        );
+        assert_eq!(
+            refused(
+                400,
+                json!({ "error": { "code": "protocol_unsupported", "message": "" } })
+            ),
+            LinkError::StreamRefused
+        );
+        assert_eq!(
+            refusal(&HostResponse {
+                status: 500,
+                body: None
+            }),
+            LinkError::StreamRefused
+        );
+    }
+
+    /// Every wire string plan 1c3 relies on: its `errors.link.*` i18n keys
+    /// and its zod enum for `state`/`lastError` are built from these exact
+    /// values.
+    #[test]
+    fn every_link_state_and_error_serializes_to_its_wire_string() {
+        let states = [
+            (LinkState::Online, "online"),
+            (LinkState::Connecting, "connecting"),
+            (LinkState::Offline, "offline"),
+        ];
+        for (state, wire) in states {
+            assert_eq!(serde_json::to_value(state).unwrap(), json!(wire));
+        }
+        let errors = [
+            (LinkError::Unreachable, "unreachable"),
+            (LinkError::CertificateMismatch, "certificate_mismatch"),
+            (LinkError::KeyRejected, "key_rejected"),
+            (LinkError::StreamRefused, "stream_refused"),
+            (LinkError::StreamEnded, "stream_ended"),
+            (LinkError::HostTooOld, "host_too_old"),
+            (LinkError::AppTooOld, "app_too_old"),
+            (LinkError::DatasetResetFailed, "dataset_reset_failed"),
+        ];
+        for (error, wire) in errors {
+            assert_eq!(serde_json::to_value(error).unwrap(), json!(wire));
+        }
+    }
+
+    #[test]
+    fn statuses_and_revisions_serialize_to_the_webview_shape() {
+        let status = HostStatus {
+            state: LinkState::Offline,
+            last_contact_at: Some(1_700_000_000_000),
+            last_error: Some(LinkError::CertificateMismatch),
+            seq: 4,
+            restore_epoch: None,
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&status).unwrap(),
+            json!({ "state": "offline", "lastContactAt": 1_700_000_000_000u64, "lastError": "certificate_mismatch", "seq": 4 })
+        );
+        let restored = HostStatus {
+            state: LinkState::Online,
+            last_contact_at: Some(1_700_000_000_000),
+            last_error: None,
+            seq: 5,
+            restore_epoch: Some(EPOCH.to_owned()),
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap(),
+            json!({ "state": "online", "lastContactAt": 1_700_000_000_000u64, "lastError": null, "seq": 5, "restoreEpoch": EPOCH })
+        );
+        let known = HostStatus {
+            state: LinkState::Offline,
+            last_contact_at: None,
+            last_error: Some(LinkError::AppTooOld),
+            seq: 6,
+            restore_epoch: None,
+            host_version: Some("0.3.0".to_owned()),
+            host_protocol: Some(4),
+            host_min_protocol: Some(4),
+        };
+        assert_eq!(
+            serde_json::to_value(&known).unwrap(),
+            json!({
+                "state": "offline", "lastContactAt": null, "lastError": "app_too_old", "seq": 6,
+                "hostVersion": "0.3.0", "hostProtocol": 4, "hostMinProtocol": 4
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(HostRevision { rev: 12 }).unwrap(),
+            json!({ "rev": 12 })
+        );
+    }
+
+    /// `restoreEpoch` of `proto/fixtures/hello-restored.json`.
+    const EPOCH: &str = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+
+    #[test]
+    fn a_hello_of_an_incompatible_host_names_why_and_still_tells_its_versions() {
+        let hello: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/hello.json")).unwrap();
+        let answer = |body: serde_json::Value| HostResponse {
+            status: 200,
+            body: Some(body),
+        };
+        let mut old = hello.clone();
+        old["protocol"] = json!(1);
+        old["minProtocol"] = json!(1);
+        assert_eq!(epoch_of(&answer(old.clone())), Err(LinkError::HostTooOld));
+        assert_eq!(
+            versions_of(&answer(old)),
+            Some(HostVersions {
+                version: Some("0.1.0".to_owned()),
+                protocol: 1,
+                min_protocol: 1
+            })
+        );
+        let mut newer = hello.clone();
+        newer["protocol"] = json!(99);
+        newer["minProtocol"] = json!(99);
+        newer["version"] = json!("9.0.0");
+        assert_eq!(epoch_of(&answer(newer.clone())), Err(LinkError::AppTooOld));
+        assert_eq!(
+            versions_of(&answer(newer)).and_then(|seen| seen.version),
+            Some("9.0.0".to_owned())
+        );
+        // Not a Markiro host: no versions at all.
+        let mut foreign = hello;
+        foreign["product"] = json!("other");
+        assert_eq!(versions_of(&answer(foreign)), None);
+    }
+
+    #[test]
+    fn the_epoch_comes_only_from_a_hello_that_reads() {
+        let restored: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/hello-restored.json")).unwrap();
+        let epoch =
+            |status: u16, body: Option<serde_json::Value>| epoch_of(&HostResponse { status, body });
+        assert_eq!(
+            epoch(200, Some(restored.clone())),
+            Ok(Some(EPOCH.to_owned()))
+        );
+        let mut never = restored.clone();
+        never.as_object_mut().unwrap().remove("restoreEpoch");
+        assert_eq!(
+            epoch(200, Some(never)),
+            Ok(None),
+            "a host never restored, or one that predates restores"
+        );
+        // A failed read ends the attempt: no `Online` without the epoch.
+        assert_eq!(
+            epoch(503, Some(restored.clone())),
+            Err(LinkError::StreamRefused)
+        );
+        assert_eq!(epoch(200, None), Err(LinkError::StreamRefused));
+        let mut foreign = restored.clone();
+        foreign["product"] = json!("other");
+        assert_eq!(
+            epoch(200, Some(foreign)),
+            Err(LinkError::StreamRefused),
+            "not a Markiro host"
+        );
+        let mut unreadable = restored;
+        unreadable["restoreEpoch"] = json!(7);
+        assert_eq!(epoch(200, Some(unreadable)), Err(LinkError::StreamRefused));
+    }
+
+    #[test]
+    fn a_hello_of_a_host_that_predates_restores_reads_without_an_epoch() {
+        // `hello.json` is the answer of a host built before plan РК (no
+        // `restoreEpoch` at all); `hello-future.json` a later protocol with
+        // fields this build does not know. Both come online without an epoch.
+        for fixture in [
+            include_str!("../../proto/fixtures/hello.json"),
+            include_str!("../../proto/fixtures/hello-future.json"),
+        ] {
+            let body: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert_eq!(
+                epoch_of(&HostResponse {
+                    status: 200,
+                    body: Some(body)
+                }),
+                Ok(None),
+                "{fixture}"
+            );
+        }
+    }
+}

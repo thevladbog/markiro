@@ -1,0 +1,12 @@
+{
+  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "kind": "station",
+  "name": "Станция на линии 2",
+  "lineId": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+  "appVersion": "0.1.0",
+  "protocol": 3,
+  "versionSeenAt": "2026-09-26T10:40:00Z",
+  "pairedAt": "2026-09-26T09:15:00Z",
+  "lastSeenAt": "2026-09-26T10:40:00Z",
+  "revokedAt": null
+}

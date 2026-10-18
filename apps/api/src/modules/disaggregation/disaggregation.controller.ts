@@ -31,7 +31,7 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import type { Response } from "express";
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import { CABINET_CAPABILITY, renderDisaggregationReportHtml } from "@markiro/domain";
 import {
   ApiCabinetAuth,
   ApiHttpErrors,
@@ -69,7 +69,6 @@ import {
   type UpdateDocumentDto,
 } from "./dto";
 import { DisaggregationService } from "./disaggregation.service";
-import { renderDisaggregationReportHtml } from "./report";
 import { parseSsccImport } from "./import-parser";
 
 @ApiTags("disaggregation")

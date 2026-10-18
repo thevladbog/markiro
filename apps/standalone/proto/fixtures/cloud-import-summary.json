@@ -1,0 +1,25 @@
+{
+  "dryRun": false,
+  "repeated": false,
+  "linesCreated": 2,
+  "linesPresent": 1,
+  "counterparties": 2,
+  "templates": 5,
+  "orgDefaults": 2,
+  "categoryDefaults": 2,
+  "products": 4,
+  "operators": 3,
+  "badges": 3,
+  "badgeSaltReplaced": true,
+  "ssccCounters": [
+    { "issuerPrefix": "460068200", "extension": 0, "nextSerial": 30000 },
+    { "issuerPrefix": "460068200", "extension": 1, "nextSerial": 10000 },
+    { "issuerPrefix": "460123400", "extension": 0, "nextSerial": 1 },
+    { "issuerPrefix": "460999900", "extension": 0, "nextSerial": 10000 }
+  ],
+  "shiftNumberCounters": [
+    { "monthKey": "NOV26", "lastSeq": 1 },
+    { "monthKey": "OCT26", "lastSeq": 7 },
+    { "monthKey": "SEP26", "lastSeq": 41 }
+  ]
+}

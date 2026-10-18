@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Состав короба (00)146007034967000010</title>
+<style>
+@page { size: A4; margin: 0 }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
+.mono { font-family: monospace; font-variant-numeric: tabular-nums; }
+.rep-page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 11mm 14mm 10mm; background: #fff; display: grid; grid-template-rows: auto auto 1fr auto; gap: 4mm; overflow: hidden; break-after: page; page-break-after: always; font-size: 11px; line-height: 1.35; }
+.rep-page:last-child { break-after: auto; page-break-after: auto; }
+.rep-header { min-height: 18mm; display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; }
+.rep-brand { width: 48mm; min-width: 48mm; height: 12mm; display: flex; align-items: center; }
+.brand-logo { display: block; max-width: 44mm; max-height: 12mm; width: auto; height: auto; object-fit: contain; object-position: left center; }
+.brand-logo--markiro { width: 40mm; height: 9mm; }
+.rep-title { min-width: 0; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 1mm; }
+.rep-title-label, .rep-title-doc { font-size: 18px; line-height: 1.05; font-weight: 700; }
+.rep-title-doc { overflow-wrap: anywhere; }
+.rep-title-detail { color: #45433E; font-size: 10.5px; }
+.rep-meta { min-height: 18mm; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6mm; }
+.rep-meta-cell { min-width: 0; display: flex; flex-direction: column; gap: 1mm; }
+.rep-meta-label { color: #6B6862; font-size: 9px; line-height: 1; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.rep-meta-value { font-weight: 700; }
+.rep-meta-detail { color: #45433E; font-size: 10px; }
+.rep-content { min-height: 0; display: flex; flex-direction: column; gap: 2.5mm; overflow: hidden; }
+.rep-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.col-n { width: 8mm; } .col-sscc { width: 44mm; } .col-product { width: auto; } .col-count { width: 18mm; } .col-barcode { width: 46mm; }
+.rep-table-head { display: table-header-group; }
+.rep-table-head tr { height: 7mm; background: #17161A; color: #FAFAF8; }
+.rep-table-head th { padding: 1.5mm 2mm; font-size: 8.5px; line-height: 1; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
+.rep-table-head th:first-child { border-radius: 2mm 0 0 0; }
+.rep-table-head th:last-child { border-radius: 0 2mm 0 0; }
+.rep-box-row { min-height: 13mm; background: #F7F6F2; break-inside: avoid; page-break-inside: avoid; border-top: .25mm solid #C9C6BD; border-bottom: .25mm solid #E0DED7; }
+.rep-box-row td { min-height: 13mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-code-row { height: 14.5mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #EDEBE5; }
+.rep-code-row td { height: 14.5mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-km-label { color: #45433E; font-size: 8.5px; overflow-wrap: anywhere; padding-left: 5mm !important; }
+.rep-tree { display: inline-block; width: 3.5mm; color: #A5A29A; }
+.rep-row-note { color: #6B6862; font-size: 8px; font-family: Arial, sans-serif; }
+.rep-code-row--empty { height: 8mm; }
+.rep-code-row--empty td { height: 8mm; color: #6B6862; font-size: 9.5px; }
+.rep-item-number { text-align: center; }
+.rep-product-name { display: block; line-height: 1.25; overflow-wrap: anywhere; }
+.rep-sscc-label { font-size: 9.5px; font-weight: 700; overflow-wrap: anywhere; }
+.rep-count { text-align: right !important; white-space: nowrap; }
+.rep-barcode-heading { text-align: center !important; }
+.sscc-box { height: 8mm; display: flex; align-items: center; justify-content: center; }
+.sscc-box svg { display: block; width: auto; max-width: 42mm; height: 100%; }
+.rep-code-missing { font-size: 9px; line-height: 1.2; color: #6B6862; text-align: center; }
+.dm-box { width: 11.5mm; height: 11.5mm; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
+.dm-box svg { display: block; width: 100%; height: 100%; }
+.rep-final-blocks { margin-top: auto; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; gap: 2.5mm; }
+.rep-total { min-height: 7mm; padding: 1.5mm 2mm; border-bottom: .25mm solid #C9C6BD; display: flex; justify-content: flex-end; align-items: baseline; gap: 8mm; font-size: 12px; font-weight: 700; }
+.rep-footer { min-height: 11mm; padding-top: 2mm; border-top: .25mm solid #E0DED7; display: grid; grid-template-columns: 48mm 1fr auto; align-items: center; gap: 4mm; color: #6B6862; font: 9px/1.3 monospace; }
+.code128-box { height: 9mm; display: flex; align-items: center; }
+.code128-box svg { display: block; width: auto; height: 100%; }
+.rep-footer-copy { text-align: right; }
+.rep-page-number { min-width: 20mm; text-align: right; color: #17161A; font-weight: 700; }
+@media print {
+  body { background: #fff; }
+  .rep-page { margin: 0; }
+}
+</style>
+</head>
+<body><section class="rep-page" data-report-page="1">
+    <header class="rep-header">
+      <div class="rep-brand"><svg class="brand-logo brand-logo--markiro" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
+    <g fill="#FAFAF8">
+      <rect x="14" y="14" width="8" height="8"/>
+      <rect x="14" y="26" width="8" height="8"/>
+      <rect x="14" y="38" width="8" height="8"/>
+      <rect x="26" y="22" width="8" height="8"/>
+      <rect x="38" y="14" width="8" height="8"/>
+      <rect x="38" y="26" width="8" height="8"/>
+      <rect x="38" y="38" width="8" height="8"/>
+      <rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>
+    </g>
+    <text x="76" y="45" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="34" letter-spacing="-0.5" fill="#17161A">маркиро</text>
+  </svg></div>
+      <div class="rep-title">
+        <span class="rep-title-label">Состав короба</span>
+        <span class="rep-title-doc">(00)146007034967000010</span>
+        <span class="rep-title-detail">открыт 10.09.2026 00:58 · статус: <strong>Закрыт</strong></span>
+      </div>
+    </header>
+    <div class="rep-meta">
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Организация</span>
+      <span class="rep-meta-value">ООО «Пивзавод „Заря“»</span>
+      <span class="rep-meta-detail">ИНН 5029087641</span>
+    </div>
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Продукт</span>
+      <span class="rep-meta-value">Жигулёвское светлое 0,5 л</span>
+      <span class="rep-meta-detail">Кодов в коробе: 3</span>
+    </div>
+    <div class="rep-meta-cell">
+      <span class="rep-meta-label">Короб</span>
+      <span class="rep-meta-value">Закрыт</span>
+      <span class="rep-meta-detail">открыт 10.09.2026 00:58 · закрыт 10.09.2026 01:08</span>
+    </div>
+  </div>
+    <main class="rep-content">
+      <table class="rep-table">
+        <colgroup><col class="col-n"><col class="col-sscc"><col class="col-product"><col class="col-count"><col class="col-barcode"></colgroup>
+        <thead class="rep-table-head">
+    <tr>
+      <th>№</th>
+      <th>Код упаковки (SSCC) / код маркировки (КМ)</th>
+      <th>Продукт</th>
+      <th class="rep-count">Кодов, шт.</th>
+      <th class="rep-barcode-heading">Штрихкод / DataMatrix</th>
+    </tr>
+  </thead>
+        <tbody>
+      <tr class="rep-box-row">
+        <td class="mono rep-item-number">1</td>
+        <td class="mono rep-sscc-label">(00)146007034967000010</td>
+        <td><span class="rep-product-name">Жигулёвское светлое 0,5 л</span></td>
+        <td class="mono rep-count">3</td>
+        <td><span class="sscc-box"><svg viewBox="0 0 290 58" xmlns="http://www.w3.org/2000/svg">
+<path stroke="#000000" stroke-width="4" d="M2 58L2 0M24 58L24 0M30 58L30 0M38 58L38 0M52 58L52 0M96 58L96 0M124 58L124 0M134 58L134 0M170 58L170 0M178 58L178 0M184 58L184 0M192 58L192 0M200 58L200 0M206 58L206 0M214 58L214 0M222 58L222 0M266 58L266 0M288 58L288 0" />
+<path stroke="#000000" stroke-width="2" d="M7 58L7 0M45 58L45 0M85 58L85 0M89 58L89 0M105 58L105 0M111 58L111 0M117 58L117 0M139 58L139 0M155 58L155 0M165 58L165 0M229 58L229 0M237 58L237 0M253 58L253 0M259 58L259 0M283 58L283 0" />
+<path stroke="#000000" stroke-width="6" d="M15 58L15 0M61 58L61 0M69 58L69 0M149 58L149 0M277 58L277 0" />
+<path stroke="#000000" stroke-width="8" d="M78 58L78 0M246 58L246 0" />
+</svg>
+</span></td>
+      </tr>
+      <tr class="rep-code-row">
+        <td></td>
+        <td class="mono rep-km-label"><span class="rep-tree">├</span>01 04600682000013 21 SER1</td>
+        <td></td>
+        <td></td>
+        <td><span class="dm-box"><svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 120L120 120L120 114L114 114L114 108L108 108L108 114L90 114L90 108L96 108L96 96L102 96L102 108L108 108L108 90L114 90L114 84L120 84L120 78L108 78L108 84L102 84L102 78L108 78L108 72L96 72L96 78L90 78L90 90L84 90L84 96L78 96L78 102L72 102L72 90L84 90L84 78L78 78L78 84L66 84L66 72L72 72L72 66L78 66L78 72L84 72L84 66L102 66L102 60L108 60L108 54L102 54L102 48L96 48L96 42L90 42L90 48L78 48L78 54L72 54L72 36L66 36L66 48L54 48L54 60L60 60L60 54L66 54L66 60L60 60L60 78L54 78L54 90L48 90L48 84L24 84L24 90L18 90L18 96L30 96L30 90L42 90L42 96L54 96L54 102L60 102L60 90L66 90L66 108L72 108L72 114L66 114L66 108L54 108L54 114L48 114L48 108L54 108L54 102L42 102L42 114L30 114L30 108L24 108L24 114L6 114L6 108L12 108L12 84L6 84L6 72L12 72L12 78L18 78L18 72L24 72L24 78L30 78L30 66L24 66L24 60L30 60L30 66L42 66L42 54L30 54L30 48L24 48L24 54L18 54L18 66L6 66L6 60L12 60L12 48L6 48L6 30L18 30L18 36L24 36L24 18L12 18L12 24L6 24L6 12L12 12L12 6L6 6L6 0L0 0ZM18 108L24 108L24 102L18 102ZM114 108L120 108L120 102L114 102ZM30 102L36 102L36 96L30 96ZM114 96L120 96L120 90L114 90ZM36 78L48 78L48 72L36 72ZM72 78L78 78L78 72L72 72ZM84 78L90 78L90 72L84 72ZM108 72L120 72L120 66L108 66ZM84 60L84 54L90 54L90 60ZM114 60L120 60L120 54L114 54ZM42 54L48 54L48 48L42 48ZM108 54L114 54L114 48L108 48ZM18 48L24 48L24 42L18 42ZM30 48L36 48L36 42L30 42ZM48 48L54 48L54 42L48 42ZM114 48L120 48L120 42L114 42ZM12 42L18 42L18 36L12 36ZM36 42L42 42L42 36L54 36L54 30L36 30ZM54 42L60 42L60 36L54 36ZM78 42L84 42L84 36L78 36ZM96 42L102 42L102 36L108 36L108 30L114 30L114 24L102 24L102 30L96 30ZM114 36L120 36L120 30L114 30ZM66 30L96 30L96 24L90 24L90 18L84 18L84 12L78 12L78 0L72 0L72 18L78 18L78 24L72 24L72 18L66 18L66 0L60 0L60 24L66 24ZM36 24L42 24L42 18L48 18L48 12L54 12L54 0L48 0L48 6L42 6L42 0L36 0ZM48 24L54 24L54 18L48 18ZM96 24L102 24L102 18L96 18ZM114 24L120 24L120 18L114 18ZM24 18L30 18L30 0L24 0L24 6L18 6L18 12L24 12ZM102 18L108 18L108 12L120 12L120 6L114 6L114 0L108 0L108 6L102 6L102 0L96 0L96 12L102 12ZM84 12L90 12L90 0L84 0ZM12 6L18 6L18 0L12 0Z" fill="#000000" fill-rule="evenodd" />
+</svg>
+</span></td>
+      </tr>
+      <tr class="rep-code-row">
+        <td></td>
+        <td class="mono rep-km-label"><span class="rep-tree">├</span>01 04600682000013 21 SER2</td>
+        <td></td>
+        <td></td>
+        <td><span class="dm-box"><svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 120L120 120L120 114L114 114L114 108L108 108L108 114L90 114L90 108L72 108L72 114L66 114L66 108L54 108L54 114L48 114L48 102L42 102L42 108L36 108L36 114L30 114L30 108L36 108L36 102L42 102L42 84L48 84L48 78L54 78L54 72L36 72L36 78L30 78L30 84L24 84L24 90L18 90L18 108L24 108L24 114L6 114L6 108L12 108L12 84L6 84L6 72L12 72L12 78L18 78L18 72L24 72L24 78L30 78L30 66L24 66L24 60L30 60L30 66L42 66L42 54L30 54L30 48L24 48L24 54L18 54L18 66L6 66L6 60L12 60L12 48L6 48L6 30L18 30L18 36L24 36L24 18L12 18L12 24L6 24L6 12L12 12L12 6L6 6L6 0L0 0ZM90 108L108 108L108 102L96 102L96 96L84 96L84 102L90 102ZM114 108L120 108L120 102L114 102ZM24 102L24 96L30 96L30 102ZM48 102L78 102L78 96L66 96L66 84L48 84ZM30 96L30 90L36 90L36 96ZM54 96L54 90L60 90L60 96ZM96 96L108 96L108 90L96 90ZM114 96L120 96L120 90L114 90ZM72 90L78 90L78 84L84 84L84 78L66 78L66 84L72 84ZM90 90L96 90L96 78L102 78L102 60L96 60L96 54L84 54L84 78L90 78ZM108 90L114 90L114 84L120 84L120 78L108 78ZM108 72L120 72L120 66L108 66ZM60 66L66 66L66 60L60 60ZM54 60L60 60L60 54L72 54L72 60L78 60L78 54L84 54L84 48L90 48L90 42L84 42L84 36L78 36L78 48L72 48L72 36L66 36L66 48L54 48ZM102 60L108 60L108 54L102 54ZM114 60L120 60L120 54L114 54ZM42 54L48 54L48 48L42 48ZM96 54L102 54L102 48L96 48ZM108 54L114 54L114 48L120 48L120 42L102 42L102 48L108 48ZM18 48L24 48L24 42L18 42ZM30 48L36 48L36 42L30 42ZM48 48L54 48L54 42L48 42ZM12 42L18 42L18 36L12 36ZM36 42L42 42L42 36L54 36L54 30L36 30ZM54 42L60 42L60 36L54 36ZM90 42L96 42L96 36L90 36ZM84 36L90 36L90 30L96 30L96 18L84 18L84 12L90 12L90 0L84 0L84 6L78 6L78 0L72 0L72 18L78 18L78 24L72 24L72 18L66 18L66 0L60 0L60 24L66 24L66 30L84 30ZM114 36L120 36L120 30L114 30ZM108 30L114 30L114 24L108 24ZM36 24L42 24L42 18L48 18L48 12L54 12L54 0L48 0L48 6L42 6L42 0L36 0ZM48 24L54 24L54 18L48 18ZM114 24L120 24L120 18L114 18ZM24 18L30 18L30 0L24 0L24 6L18 6L18 12L24 12ZM102 18L108 18L108 12L120 12L120 6L114 6L114 0L108 0L108 6L102 6L102 0L96 0L96 12L102 12ZM12 6L18 6L18 0L12 0Z" fill="#000000" fill-rule="evenodd" />
+</svg>
+</span></td>
+      </tr>
+      <tr class="rep-code-row">
+        <td></td>
+        <td class="mono rep-km-label"><span class="rep-tree">└</span>01 04600682000013 21 SER3</td>
+        <td></td>
+        <td></td>
+        <td><span class="dm-box"><svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 120L120 120L120 114L114 114L114 108L108 108L108 114L90 114L90 108L78 108L78 102L84 102L84 96L72 96L72 114L66 114L66 108L48 108L48 114L42 114L42 108L36 108L36 114L30 114L30 102L18 102L18 108L24 108L24 114L6 114L6 108L12 108L12 84L6 84L6 72L12 72L12 78L18 78L18 72L24 72L24 78L30 78L30 66L24 66L24 60L30 60L30 66L42 66L42 54L30 54L30 48L24 48L24 54L18 54L18 66L6 66L6 60L12 60L12 48L6 48L6 30L18 30L18 36L24 36L24 18L12 18L12 24L6 24L6 12L12 12L12 6L6 6L6 0L0 0ZM102 108L108 108L108 102L102 102ZM114 108L120 108L120 102L114 102ZM42 102L48 102L48 84L54 84L54 90L60 90L60 96L54 96L54 102L66 102L66 96L72 96L72 90L66 90L66 84L60 84L60 72L54 72L54 66L48 66L48 78L42 78L42 72L36 72L36 78L30 78L30 84L36 84L36 90L42 90ZM96 102L102 102L102 90L90 90L90 96L96 96ZM114 96L120 96L120 90L114 90ZM24 90L30 90L30 84L24 84ZM78 90L84 90L84 84L78 84ZM108 90L114 90L114 84L120 84L120 78L108 78ZM72 84L78 84L78 78L84 78L84 84L90 84L90 78L108 78L108 72L72 72L72 66L66 66L66 78L72 78ZM108 72L120 72L120 66L108 66ZM54 66L60 66L60 54L66 54L66 48L54 48ZM78 66L90 66L90 60L96 60L96 48L90 48L90 42L84 42L84 30L90 30L90 24L96 24L96 18L84 18L84 12L72 12L72 18L78 18L78 24L72 24L72 18L66 18L66 12L72 12L72 6L66 6L66 0L60 0L60 24L66 24L66 30L78 30L78 42L72 42L72 36L66 36L66 48L72 48L72 54L78 54L78 48L84 48L84 54L78 54ZM96 66L102 66L102 60L96 60ZM102 60L108 60L108 48L102 48ZM114 60L120 60L120 54L114 54ZM42 54L48 54L48 48L42 48ZM18 48L24 48L24 42L18 42ZM30 48L36 48L36 42L30 42ZM48 48L54 48L54 42L48 42ZM96 48L102 48L102 36L108 36L108 30L114 30L114 24L102 24L102 30L96 30L96 36L90 36L90 42L96 42ZM114 48L120 48L120 42L114 42ZM12 42L18 42L18 36L12 36ZM36 42L42 42L42 36L54 36L54 30L36 30ZM54 42L60 42L60 36L54 36ZM114 36L120 36L120 30L114 30ZM36 24L42 24L42 18L48 18L48 12L54 12L54 0L48 0L48 6L42 6L42 0L36 0ZM48 24L54 24L54 18L48 18ZM114 24L120 24L120 18L114 18ZM24 18L30 18L30 0L24 0L24 6L18 6L18 12L24 12ZM102 18L108 18L108 12L120 12L120 6L114 6L114 0L108 0L108 6L102 6L102 0L96 0L96 12L102 12ZM84 12L90 12L90 0L84 0ZM12 6L18 6L18 0L12 0ZM72 6L78 6L78 0L72 0Z" fill="#000000" fill-rule="evenodd" />
+</svg>
+</span></td>
+      </tr></tbody>
+      </table>
+      <div class="rep-final-blocks">
+    <div class="rep-total">
+      <span>Итого по коробу:</span>
+      <span class="mono">кодов — 3</span>
+    </div>
+  </div>
+    </main>
+    <footer class="rep-footer">
+      <span class="code128-box"><svg viewBox="0 0 290 58" xmlns="http://www.w3.org/2000/svg">
+<path stroke="#000000" stroke-width="4" d="M2 58L2 0M24 58L24 0M30 58L30 0M38 58L38 0M52 58L52 0M96 58L96 0M124 58L124 0M134 58L134 0M170 58L170 0M178 58L178 0M184 58L184 0M192 58L192 0M200 58L200 0M206 58L206 0M214 58L214 0M222 58L222 0M266 58L266 0M288 58L288 0" />
+<path stroke="#000000" stroke-width="2" d="M7 58L7 0M45 58L45 0M85 58L85 0M89 58L89 0M105 58L105 0M111 58L111 0M117 58L117 0M139 58L139 0M155 58L155 0M165 58L165 0M229 58L229 0M237 58L237 0M253 58L253 0M259 58L259 0M283 58L283 0" />
+<path stroke="#000000" stroke-width="6" d="M15 58L15 0M61 58L61 0M69 58L69 0M149 58L149 0M277 58L277 0" />
+<path stroke="#000000" stroke-width="8" d="M78 58L78 0M246 58L246 0" />
+</svg>
+</span>
+      <span class="rep-footer-copy">Сформировано в Маркиро · Короб (00)146007034967000010</span>
+      <span class="rep-page-number">стр. 1 из 1</span>
+    </footer>
+  </section></body>
+</html>

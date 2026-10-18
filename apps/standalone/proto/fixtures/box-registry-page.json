@@ -1,0 +1,36 @@
+{
+  "until": "2026-10-08T07:30:00Z",
+  "items": [
+    {
+      "kind": "upsert",
+      "sscc": "046006820000015000",
+      "updatedAt": "2026-10-08T07:00:05Z",
+      "boxId": "b0000000-0000-4000-8000-000000000001",
+      "productId": "9f0e1d2c-3b4a-4958-8776-655443322110",
+      "bottleCount": 12,
+      "palletId": "a1000000-0000-4000-8000-000000000001",
+      "palletSscc": "146006820000000409",
+      "palletActive": true,
+      "closedAt": "2026-10-08T06:15:06.000Z",
+      "productionDate": "2026-10-08"
+    },
+    {
+      "kind": "upsert",
+      "sscc": "046006820000015017",
+      "updatedAt": "2026-10-08T07:00:14Z",
+      "boxId": "b0000000-0000-4000-8000-000000000002",
+      "productId": "9f0e1d2c-3b4a-4958-8776-655443322110",
+      "bottleCount": 12,
+      "palletActive": false,
+      "closedAt": "2026-10-08T06:15:20.000Z",
+      "productionDate": "2026-10-08"
+    },
+    {
+      "kind": "remove",
+      "sscc": "046006820000015024",
+      "updatedAt": "2026-10-08T07:10:00Z"
+    }
+  ],
+  "nextCursor": "2026-10-08T07:10:00Z|046006820000015024",
+  "restoreEpoch": "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e"
+}

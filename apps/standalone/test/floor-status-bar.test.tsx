@@ -1,0 +1,1897 @@
+import { readFileSync } from "node:fs";
+
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ThemeProvider } from "@markiro/ui";
+
+import type { SyncState } from "../src/app/shell.js";
+import { readFloorPlace } from "../src/floor/floor-status.js";
+import { FloorStatusBar, type FloorStatusBarProps } from "../src/floor/FloorStatusBar.js";
+import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
+import { enteredShiftSchema, type ChangeItem, type HostStatus } from "../src/host/protocol.js";
+import type { LocalExecutor } from "../src/local/executor.js";
+import { syncReferences } from "../src/local/reference-sync.js";
+import { noteRestoreEpoch, reconcileRestore } from "../src/local/restore-reconcile.js";
+import { lastMomentBefore, licenseDayMonth, licenseMinute } from "../src/lib/license-dates.js";
+import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
+import { seedBlock, unsentScans } from "./support/floor-work.js";
+import { deviceLicense } from "./support/license.js";
+import { openLocalDb } from "./support/local-db.js";
+import { closeBoxWithLabel, printStation } from "./support/printing.js";
+
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
+const ENTERED = enteredShiftSchema.parse(
+  JSON.parse(
+    readFileSync(new URL("../proto/fixtures/device-shift-entered.json", testModuleUrl), "utf8"),
+  ),
+);
+const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
+const OTHER_DEVICE = "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6";
+const OTHER_HOST = "7c6b5a49-3827-4165-9403-f2e1d0c9b8a7";
+const OTHER_LINE_ID = "00000000-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+const SYNCED: SyncState = { kind: "done", synced: 1, failure: null, quarantined: 0 };
+const ONLINE_LINK: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+const ORG: ChangeItem = {
+  entity: "org_profile",
+  id: "1",
+  rev: 2,
+  deleted: false,
+  data: {
+    name: "ООО «Атолл»",
+    inn: null,
+    gln: "4600682000013",
+    gs1Prefixes: ["4600682"],
+    timeZone: "Europe/Moscow",
+  },
+};
+
+function line(name: string, archived = false, id = LINE_ID): ChangeItem {
+  return { entity: "lines", id, rev: 3, deleted: false, data: { name, archived } };
+}
+
+async function synced(items: ChangeItem[], rev = 10): Promise<LocalExecutor> {
+  const { executor } = openLocalDb();
+  await syncReferences({
+    changes: async () => ({ hostId: HOST_ID, rev, hasMore: false, items }),
+    local: executor,
+    ...PAIRING,
+  });
+  return executor;
+}
+
+function bar(props: Partial<FloorStatusBarProps> & { local: LocalExecutor }) {
+  return (
+    <ThemeProvider>
+      <FloorStatusBar
+        pairing={PAIRING}
+        lineId={LINE_ID}
+        operator={null}
+        link={null}
+        sync={SYNCED}
+        deviceName={null}
+        shiftId={null}
+        deviceNotSaved={false}
+        refusalHeld={false}
+        outboxVersion={0}
+        factsFailure={null}
+        {...props}
+      />
+    </ThemeProvider>
+  );
+}
+
+/** The bar of the work screen: the queue's chips are drawn there only. */
+function workBar(props: Partial<FloorStatusBarProps> & { local: LocalExecutor }) {
+  return bar({ screen: "work", ...props });
+}
+
+describe("where the floor's status bar says the station works", () => {
+  it("names the organization and the line from this pairing's copies, an archived line too", async () => {
+    const local = await synced([ORG, line("Линия розлива 2", true)]);
+    expect(await readFloorPlace(local, PAIRING, LINE_ID)).toEqual({
+      organization: "ООО «Атолл»",
+      line: "Линия розлива 2",
+    });
+    expect(await readFloorPlace(local, PAIRING, null)).toEqual({
+      organization: "ООО «Атолл»",
+      line: null,
+    });
+  });
+
+  it("names the line the station is assigned to, not another one of the copies", async () => {
+    // The other line sorts and is inserted first, so a read that ignores the id names it.
+    const local = await synced([
+      ORG,
+      line("Линия фасовки 1", false, OTHER_LINE_ID),
+      line("Линия розлива 2"),
+    ]);
+    expect((await readFloorPlace(local, PAIRING, LINE_ID)).line).toBe("Линия розлива 2");
+    expect((await readFloorPlace(local, PAIRING, OTHER_LINE_ID)).line).toBe("Линия фасовки 1");
+  });
+
+  it("names nothing from copies that are not this pairing's", async () => {
+    const local = await synced([ORG, line("Линия розлива 2")]);
+    expect(
+      await readFloorPlace(local, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, LINE_ID),
+    ).toEqual({ organization: null, line: null });
+  });
+});
+
+describe("the floor's status bar", () => {
+  it("shows the organization, the line and that nobody is signed in, with nothing to press", async () => {
+    render(bar({ local: await synced([ORG, line("Линия розлива 2")]) }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(screen.getByText("Линия розлива 2")).toBeTruthy();
+    expect(screen.getByText("Никто не вошёл")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Строка состояния цеха" })).toBeTruthy();
+    // The only control is the link's dot (beta 3.2): nothing else in the bar is pressed.
+    expect(
+      screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Связь с хостом: Подключение к хосту…"]);
+  });
+
+  it("names the operator signed in", async () => {
+    render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+      }),
+    );
+    expect(await screen.findByText("Анна Кузнецова")).toBeTruthy();
+  });
+
+  it("shows the operator's name only: the personnel number is for the sign-in, not the bar", async () => {
+    const view = render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+      }),
+    );
+    await screen.findByText("Анна Кузнецова");
+    expect(view.container.textContent).not.toContain("0042");
+    expect(view.container.textContent).not.toContain("табельный");
+  });
+
+  it("shows the operator's name as text, whatever characters it holds", async () => {
+    const name = '<img src="x" alt="boom"> Анна & <b>Кузнецова</b>';
+    const view = render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name, role: null },
+      }),
+    );
+    expect(await screen.findByText(name)).toBeTruthy();
+    expect(view.container.querySelector("img, b")).toBeNull();
+  });
+
+  it("offers «Сменить оператора» in its rail once an operator is in, at the floor's 64 px", async () => {
+    const onSwitchOperator = vi.fn();
+    render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+        onSwitchOperator,
+      }),
+    );
+    const rail = await screen.findByRole("group", { name: "Действия станции" });
+    const button = within(rail).getByRole("button", { name: "Сменить оператора" });
+    expect(button.className).toContain("mk-btn--floor");
+    expect(button).toHaveProperty("disabled", false);
+    // Outside a shift there is nothing to keep: it signs out at once.
+    fireEvent.click(button);
+    expect(onSwitchOperator).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no switch while nobody is signed in", async () => {
+    render(bar({ local: await synced([ORG]), onSwitchOperator: vi.fn() }));
+    await screen.findByText("Никто не вошёл");
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
+  });
+
+  it("asks first in a shift: «Остаться» keeps the operator, the confirmation signs out", async () => {
+    const local = await synced([ORG]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1);
+    const onSwitchOperator = vi.fn();
+    render(
+      bar({
+        local,
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+        shiftId: ENTERED.id,
+        onSwitchOperator,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить оператора" }));
+    const dialog = await screen.findByRole("dialog", { name: "Сменить оператора?" });
+    expect(
+      within(dialog).getByText(
+        "Текущая смена останется открытой. Все записанные операции сохранятся на станции.",
+      ),
+    ).toBeTruthy();
+    expect(onSwitchOperator).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Остаться" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onSwitchOperator).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
+    const again = await screen.findByRole("dialog", { name: "Сменить оператора?" });
+    fireEvent.click(within(again).getByRole("button", { name: "Сменить оператора" }));
+    expect(onSwitchOperator).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the link to the host", async () => {
+    const offline: HostStatus = {
+      state: "offline",
+      lastContactAt: null,
+      lastError: "unreachable",
+      seq: 1,
+    };
+    render(bar({ local: await synced([ORG]), link: offline }));
+    // A chip with a glyph and «Связи нет» (kit header), amber without the host: the work goes on
+    // offline, so it is a warning and not an error; the reason is one tap away.
+    const dot = await screen.findByRole("button", { name: "Связь с хостом: Нет связи с хостом" });
+    expect(dot.querySelector('[data-tone="warn"]')?.textContent).toBe("Связи нет");
+    expect(screen.queryByText("Хост не отвечает.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
+    const details = screen.getByRole("dialog", { name: "Связь с хостом" });
+    expect(within(details).getByText("Хост не отвечает.")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows the link as green, amber while a sync fails or the link is being made, grey before the first status", async () => {
+    const local = await synced([ORG]);
+    const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+    const view = render(bar({ local, link: online }));
+    expect(
+      (await screen.findByRole("button", { name: "Связь с хостом: На связи с хостом" })).innerHTML,
+    ).toContain('data-tone="ok"');
+    view.rerender(
+      bar({ local, link: online, sync: { ...SYNCED, kind: "failed", failure: "host" } }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Связь с хостом: На связи с хостом" }).innerHTML,
+    ).toContain('data-tone="warn"');
+    view.rerender(bar({ local, link: { ...online, state: "connecting" } }));
+    expect(
+      screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
+    ).toContain('data-tone="warn"');
+    view.rerender(bar({ local, link: null }));
+    expect(
+      screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
+    ).toContain('data-tone="neutral"');
+  });
+
+  it("reads the names again after every sync", async () => {
+    const { executor } = openLocalDb();
+    const { rerender } = render(bar({ local: executor, sync: { ...SYNCED, synced: 0 } }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    expect(screen.queryByText("Организация")).toBeNull();
+    await syncReferences({
+      changes: async () => ({ hostId: HOST_ID, rev: 10, hasMore: false, items: [ORG] }),
+      local: executor,
+      ...PAIRING,
+    });
+    rerender(bar({ local: executor, sync: SYNCED }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+  });
+
+  it("leaves the names out when the copies cannot be read", async () => {
+    const real = await synced([ORG, line("Линия розлива 2")]);
+    let reads = 0;
+    const local: LocalExecutor = {
+      query: () => {
+        reads += 1;
+        return Promise.reject(new Error("disk"));
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    render(bar({ local }));
+    await waitFor(() => expect(reads).toBeGreaterThan(0));
+    expect(screen.getByText("Никто не вошёл")).toBeTruthy();
+    expect(screen.queryByText("ООО «Атолл»")).toBeNull();
+    expect(screen.queryByText("Организация")).toBeNull();
+  });
+
+  it("forgets the names when the next read of the copies fails", async () => {
+    const real = await synced([ORG, line("Линия розлива 2")]);
+    let failing = false;
+    let reads = 0;
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        if (!failing) return real.query(sql, params, row);
+        reads += 1;
+        return Promise.reject(new Error("disk"));
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    const { rerender } = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(await screen.findByText("Линия розлива 2")).toBeTruthy();
+
+    failing = true;
+    rerender(bar({ local, sync: { ...SYNCED, synced: 2 } }));
+    await waitFor(() => expect(reads).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.queryByText("ООО «Атолл»")).toBeNull());
+    expect(screen.queryByText("Линия розлива 2")).toBeNull();
+    expect(screen.getByText("Никто не вошёл")).toBeTruthy();
+  });
+
+  it("keeps the names of the line it has now when a read for the line before it lands late", async () => {
+    const real = await synced([
+      ORG,
+      line("Линия фасовки 1", false, OTHER_LINE_ID),
+      line("Линия розлива 2"),
+    ]);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let heldStarted = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        const result = real.query(sql, params, row);
+        if (!sql.includes("ref_lines") || params[0] !== OTHER_LINE_ID) return result;
+        heldStarted = true;
+        return gate.then(() => result);
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    const { rerender } = render(bar({ local, lineId: OTHER_LINE_ID }));
+    await waitFor(() => expect(heldStarted).toBe(true));
+
+    rerender(bar({ local, lineId: LINE_ID }));
+    expect(await screen.findByText("Линия розлива 2")).toBeTruthy();
+
+    await act(async () => {
+      release();
+      await gate;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("Линия розлива 2")).toBeTruthy();
+    expect(screen.queryByText("Линия фасовки 1")).toBeNull();
+  });
+
+  it("names the device, and the shift the operator works in while they work in it", async () => {
+    const local = await synced([ORG, line("Линия розлива 2")]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    const view = render(bar({ local, deviceName: "Станция у окна", shiftId: ENTERED.id }));
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(region).getByText("Станция у окна")).toBeTruthy();
+    expect(await within(region).findByText("OCT26-004")).toBeTruthy();
+    view.rerender(bar({ local, deviceName: "Станция у окна", shiftId: null }));
+    expect(within(region).queryByText("OCT26-004")).toBeNull();
+    expect(within(region).queryByText("Смена")).toBeNull();
+  });
+
+  it("shows the link as stopped while the host's refusal waits, whatever the link's last status says", async () => {
+    const local = await synced([ORG]);
+    const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+    const failing: SyncState = { ...SYNCED, kind: "failed", failure: "host" };
+    const view = render(bar({ local, link: online, sync: failing }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(
+      within(region).getByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeTruthy();
+    // The sync's failure is in the details behind the dot (a tap away), not across the header.
+    expect(
+      within(region).queryByText("Справочники не обновились — повторим автоматически"),
+    ).toBeNull();
+    fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
+    expect(
+      within(region).getByText("Справочники не обновились — повторим автоматически"),
+    ).toBeTruthy();
+    fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
+    expect(
+      within(region).queryByRole("button", { name: "Связь с хостом: Нет связи с хостом" }),
+    ).toBeNull();
+
+    // The link is torn down already, but a refusal that came from a call left its status online.
+    view.rerender(bar({ local, link: online, sync: failing, refusalHeld: true }));
+    expect(
+      within(region).queryByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeNull();
+    expect(
+      within(region).getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }),
+    ).toBeTruthy();
+    // A sync that cannot run is not the news now: the refusal is.
+    fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
+    expect(
+      within(region).queryByText("Справочники не обновились — повторим автоматически"),
+    ).toBeNull();
+
+    view.rerender(bar({ local, link: online, sync: failing, refusalHeld: false }));
+    expect(
+      within(region).getByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeTruthy();
+  });
+
+  it("shows no link of its own while the refusal waits before the first status of the link", async () => {
+    const local = await synced([ORG]);
+    render(bar({ local, link: null, refusalHeld: true }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(region).queryByText("Нет связи с хостом")).toBeNull();
+    expect(within(region).queryByText("На связи с хостом")).toBeNull();
+  });
+
+  it("names no device for a pairing file that has no name", async () => {
+    render(bar({ local: await synced([ORG]) }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(screen.queryByText("Устройство")).toBeNull();
+  });
+
+  it("keeps the number of the shift read before out of the bar when the next shift cannot be read", async () => {
+    const local = await synced([ORG]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    const view = render(bar({ local, shiftId: ENTERED.id }));
+    expect(await screen.findByText("OCT26-004")).toBeTruthy();
+    // A shift this pairing has no copy of, and one it cannot read at all.
+    view.rerender(bar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a" }));
+    await waitFor(() => expect(screen.queryByText("OCT26-004")).toBeNull());
+    expect(screen.queryByText("Смена")).toBeNull();
+    view.rerender(bar({ local, shiftId: ENTERED.id }));
+    expect(await screen.findByText("OCT26-004")).toBeTruthy();
+    const broken: LocalExecutor = {
+      query: () => Promise.reject(new Error("disk")),
+      transaction: (statements) => local.transaction(statements),
+    };
+    view.rerender(bar({ local: broken, shiftId: ENTERED.id }));
+    await waitFor(() => expect(screen.queryByText("OCT26-004")).toBeNull());
+  });
+
+  it("names no shift of a pairing other than its own", async () => {
+    const real = await synced([ORG]);
+    await keepEnteredShift(real, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    // The reads of the shift's copy and of its snapshot's prefix (for the serials) are
+    // watched, so that the assertion waits for their answers (and what the bar makes
+    // of them), not for a time that may be too short.
+    const reads: Promise<unknown>[] = [];
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        const read = real.query(sql, params, row);
+        if (sql.includes("FROM floor_shifts")) reads.push(read);
+        return read;
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    render(
+      bar({ local, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE }, shiftId: ENTERED.id }),
+    );
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => {
+      await Promise.all(reads);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText("OCT26-004")).toBeNull();
+  });
+
+  /** The polite live regions of the bar, before anything is warned of. */
+  function politeRegions(region: HTMLElement): Set<Element> {
+    return new Set(region.querySelectorAll('[aria-live="polite"]'));
+  }
+
+  /** The element sits in one of those regions (it is not, when it brought its own). */
+  function isIn(regions: Set<Element>, element: HTMLElement): boolean {
+    const region = element.closest('[aria-live="polite"]');
+    return region !== null && regions.has(region);
+  }
+
+  it("warns while a change the office made to the device was not saved here, in a polite region that was there before", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const before = politeRegions(region);
+    view.rerender(bar({ local, deviceNotSaved: true }));
+    const warning = screen.getByText(
+      "Офис изменил это устройство, но изменение не удалось сохранить на этом компьютере: станция работает по-прежнему. Освободите место на диске или обратитесь к администратору.",
+    );
+    // A region that appears together with its text is not announced.
+    expect(isIn(before, warning)).toBe(true);
+    // The warning is heard once, by that region: it is not an alert of its own as well.
+    expect(within(region).queryAllByRole("alert")).toEqual([]);
+    view.rerender(bar({ local, deviceNotSaved: false }));
+    expect(screen.queryByText(/не удалось сохранить на этом компьютере/)).toBeNull();
+  });
+
+  it("says in the same polite region that the host refused this station while the operator is still in the shift", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const before = politeRegions(region);
+    const marker =
+      "Хост отказал этой станции: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    expect(screen.queryByText(marker)).toBeNull();
+    view.rerender(bar({ local, refusalHeld: true }));
+    const shown = screen.getByText(marker);
+    expect(isIn(before, shown)).toBe(true);
+    expect(within(region).queryAllByRole("alert")).toEqual([]);
+    // Both warnings stand together.
+    view.rerender(bar({ local, refusalHeld: true, deviceNotSaved: true }));
+    expect(screen.getByText(marker)).toBeTruthy();
+    expect(screen.getByText(/не удалось сохранить на этом компьютере/)).toBeTruthy();
+    view.rerender(bar({ local, refusalHeld: false, deviceNotSaved: true }));
+    expect(screen.queryByText(marker)).toBeNull();
+  });
+
+  it("says, in the same region, that another host answers when that is what waits for the operator", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const before = politeRegions(region);
+    const refused =
+      "Хост отказал этой станции: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    const other =
+      "По адресу хоста отвечает другой хост: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    view.rerender(bar({ local, link: ONLINE_LINK, refusalHeld: true, otherHostHeld: true }));
+    const shown = screen.getByText(other);
+    expect(isIn(before, shown)).toBe(true);
+    expect(within(region).queryAllByRole("alert")).toEqual([]);
+    // It is not the host's refusal, and the link is not called up either.
+    expect(screen.queryByText(refused)).toBeNull();
+    expect(within(region).queryByText("На связи с хостом")).toBeNull();
+    view.rerender(bar({ local, link: ONLINE_LINK, refusalHeld: true }));
+    expect(screen.getByText(refused)).toBeTruthy();
+    expect(screen.queryByText(other)).toBeNull();
+    // A flag without the hold says nothing.
+    view.rerender(bar({ local, refusalHeld: false, otherHostHeld: true }));
+    expect(screen.queryByText(other)).toBeNull();
+  });
+});
+
+/** The header's count chips, by the words the tests used for the pills they replaced. */
+const COUNT_CHIPS: Record<string, string> = {
+  "Не отправлено": "queue",
+  "Отклонено хостом": "rejected",
+  Конфликтов: "conflicts",
+  "Вытеснено кодов": "displaced",
+  "Не отправлено прежним подключением": "stranded",
+};
+
+describe("the outbox and the serials on the floor's status bar", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The count the bar's chip for `label` shows (the number after its words), or `null` when it shows no such chip. */
+  function shown(label: string): string | null {
+    const kind = COUNT_CHIPS[label];
+    if (kind === undefined) return screen.queryByText(label)?.textContent ?? null;
+    const chip = document.querySelector(`[data-chip="${kind}"]`);
+    return chip === null ? null : (/(\d[\d\u00a0]*)$/.exec(chip.textContent ?? "")?.[1] ?? null);
+  }
+
+  /** The polite live regions of the bar, before anything is warned of. */
+  function politeRegions(): Set<Element> {
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    return new Set(region.querySelectorAll('[aria-live="polite"]'));
+  }
+
+  /** The element sits in one of those regions, and the bar has no alert of its own. */
+  function heardOnce(regions: Set<Element>, element: HTMLElement): boolean {
+    const region = element.closest('[aria-live="polite"]');
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    return (
+      region !== null && regions.has(region) && within(bar).queryAllByRole("alert").length === 0
+    );
+  }
+
+  /** An executor whose first read that `matches` waits for `release()`; the answer is the one it had. */
+  function holdingFirstRead(real: LocalExecutor, matches: (sql: string) => boolean) {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const executor: LocalExecutor = {
+      query: (sql, params, row) => {
+        const result = real.query(sql, params, row);
+        if (held || !matches(sql)) return result;
+        held = true;
+        return gate.then(() => result);
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    return { executor, started: () => held, release: () => release() };
+  }
+
+  const clock = () => new Date();
+
+  /** Lets the effects the last render scheduled run (a timer a bar sets is set by one). */
+  async function flushEffects(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+  }
+
+  const isUnsentCount = (sql: string): boolean =>
+    sql.includes("count(*)") && sql.includes("IS NULL");
+  const isHeadRecord = (sql: string): boolean => sql.includes("sent_at, created_at FROM outbox");
+  const isSerialsRead = (sql: string): boolean => sql.includes("next_serial, to_serial FROM");
+
+  it("counts this pairing's records not sent, refused and in conflict, and reads them again on a change", async () => {
+    const { db, executor } = openLocalDb();
+    const ids = await unsentScans(executor, 5);
+    await unsentScans(executor, 2, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 100);
+    await unsentScans(executor, 1, { hostId: OTHER_HOST, deviceId: DEVICE_ID }, 200);
+    const answer = db.prepare(
+      "UPDATE outbox SET outcome = ?, outcome_code = ?, acked_at = '2026-10-08T06:20:00.000Z' WHERE id = ?",
+    );
+    answer.run("accepted", null, ids[0] ?? "");
+    answer.run("rejected", "invalid_record", ids[1] ?? "");
+    const view = render(workBar({ local: executor }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("3"));
+    expect(shown("Отклонено хостом")).toBe("1");
+    expect(shown("Конфликтов")).toBeNull();
+    answer.run("conflict", null, ids[2] ?? "");
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    expect(shown("Конфликтов")).toBe("1");
+  });
+
+  it("shows every count with the thousands separator", async () => {
+    const { db, executor } = openLocalDb();
+    const fill = db.prepare(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) " +
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, acked_at) " +
+        "SELECT ? || i, ?, ?, 'scan', 's', '{}', '2026-10-08T06:20:00.000Z', ?, " +
+        "CASE WHEN ? IS NULL THEN NULL ELSE '2026-10-08T06:30:00.000Z' END FROM n",
+    );
+    fill.run(1234, "u", HOST_ID, DEVICE_ID, null, null);
+    fill.run(1111, "r", HOST_ID, DEVICE_ID, "rejected", "rejected");
+    fill.run(2222, "c", HOST_ID, DEVICE_ID, "conflict", "conflict");
+    render(workBar({ local: executor }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("1\u00a0234"));
+    expect(shown("Отклонено хостом")).toBe("1\u00a0111");
+    expect(shown("Конфликтов")).toBe("2\u00a0222");
+  });
+
+  it("keeps the box and pallet serial counters out of the header, in a shift and outside it (the counts live in the sync panel)", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1500, to: 3499 });
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      extension: 1,
+    });
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    render(workBar({ local: executor, shiftId: ENTERED.id }));
+    // The header has read the outbox: its other chips are on screen, the counters are not.
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
+    expect(shown("Номеров SSCC")).toBeNull();
+    expect(shown("Номеров SSCC паллет")).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC/)).toBeNull();
+    // Plenty left: no warning chip either.
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
+  });
+
+  it("leaves the counts out when this computer cannot read the outbox", async () => {
+    const { executor } = openLocalDb();
+    const failing: LocalExecutor = {
+      query: (sql, params, row) =>
+        sql.includes("FROM outbox")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    render(workBar({ local: failing }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(shown("Не отправлено")).toBeNull();
+  });
+
+  it("forgets the counts the outbox gave when its next read fails", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("FROM outbox")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(workBar({ local }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    failing = true;
+    view.rerender(workBar({ local, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Не отправлено")).toBeNull());
+  });
+
+  it("leaves the low-stock chip out when this computer cannot read the serials, and for a shift it has no snapshot of", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 2000,
+      next: 1501,
+    });
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("floor_sscc_blocks")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(workBar({ local, shiftId: ENTERED.id }));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
+    failing = true;
+    view.rerender(workBar({ local, shiftId: ENTERED.id, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
+    failing = false;
+    view.rerender(workBar({ local, shiftId: ENTERED.id, outboxVersion: 2 }));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
+    // A shift this pairing has no copy of names no serials.
+    view.rerender(
+      workBar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a", outboxVersion: 2 }),
+    );
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
+  });
+
+  it("shows one short chip, in the polite region that was there before, when the serials fall to a quarter of the block or less, and not above it (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    // A block of 2 000 with 501 left: more than a quarter, nothing to say yet.
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 2000,
+      next: 1500,
+    });
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
+    const before = politeRegions();
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
+
+    const step = (next: number, version: number) => {
+      db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
+      view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
+    };
+    step(1501, 1);
+    const chip = await screen.findByText("Заканчиваются номера SSCC");
+    expect(heardOnce(before, chip)).toBe(true);
+    // The header holds that one short chip and no long warning row of its own.
+    expect(screen.queryAllByText("Заканчиваются номера SSCC")).toHaveLength(1);
+    const detail = (): string =>
+      screen.getByText("Заканчиваются номера SSCC").closest(".floor-stock-chip")?.textContent ?? "";
+    expect(detail()).toContain("осталось 500 — четверть блока или меньше");
+    expect(screen.getByText("Заканчиваются номера SSCC").closest(".mk-alert")).toBeNull();
+    step(1801, 2);
+    await waitFor(() =>
+      expect(detail()).toContain("осталось 200 — десятая часть блока или меньше"),
+    );
+    expect(detail()).not.toContain("четверть блока");
+    step(2000, 3);
+    await waitFor(() => expect(detail()).toContain("Остался последний номер SSCC для коробов"));
+    step(2001, 4);
+    await waitFor(() => expect(detail()).toContain("Номера SSCC для коробов закончились"));
+    expect(screen.queryAllByText("Заканчиваются номера SSCC")).toHaveLength(1);
+
+    // A block arrives: the chip goes.
+    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 2001, to: 4000 });
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 5 }));
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
+  });
+
+  it("says «или меньше» at a quarter and a tenth, for boxes and pallets: both thresholds count exactly 25 % and 10 % (final review m-5)", () => {
+    const stock = (
+      JSON.parse(readFileSync(new URL("../src/i18n/ru.json", testModuleUrl), "utf8")) as {
+        floor: { status: { stock: Record<string, Record<string, string>> } };
+      }
+    ).floor.status.stock;
+    for (const what of ["box", "pallet"]) {
+      expect(stock[what]?.["quarter"], what).toContain("— четверть блока или меньше.");
+      expect(stock[what]?.["tenth"], what).toContain("— десятая часть блока или меньше.");
+      expect(JSON.stringify(stock[what]), what).not.toMatch(/меньше (четверти|десятой)/);
+    }
+  });
+
+  it("calls the chip by its weight: a warning at a quarter and a tenth, an error at the last serial and at none", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 2000,
+      next: 1501,
+    });
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    const toneOf = (): string | null =>
+      screen
+        .getByText("Заканчиваются номера SSCC")
+        .closest(".floor-stock-chip")
+        ?.getAttribute("data-tone") ?? null;
+    const step = (next: number, version: number) => {
+      db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
+      view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
+    };
+    await screen.findByText("Заканчиваются номера SSCC");
+    expect(toneOf()).toBe("warn");
+    step(1801, 1);
+    await waitFor(() => expect(screen.getByText(/десятая часть блока или меньше/)).toBeTruthy());
+    expect(toneOf()).toBe("warn");
+    step(2000, 2);
+    await waitFor(() => expect(screen.getByText(/Остался последний номер/)).toBeTruthy());
+    expect(toneOf()).toBe("error");
+    step(2001, 3);
+    await waitFor(() =>
+      expect(screen.getByText(/Номера SSCC для коробов закончились/)).toBeTruthy(),
+    );
+    expect(toneOf()).toBe("error");
+  });
+
+  it("warns of the pallets' serials only in a shift with pallets, through the same one chip (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      next: 181,
+      extension: 1,
+    });
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
+    // Pallets are off: their low stock says nothing.
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    const chip = await screen.findByText("Заканчиваются номера SSCC");
+    const detail = (): string => chip.closest(".floor-stock-chip")?.textContent ?? "";
+    expect(detail()).toContain(
+      "Номеров SSCC для паллет осталось 20 — десятая часть блока или меньше. Без связи с хостом полную паллету скоро не закрыть.",
+    );
+    // The boxes' stock is plentiful: nothing is said of it.
+    expect(detail()).not.toContain("для коробов");
+    expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("warn");
+    // The pallets' last serial and none have their own words.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 200 WHERE extension = 1").run();
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
+    await waitFor(() =>
+      expect(detail()).toContain(
+        "Остался последний номер SSCC для паллет: следующую полную паллету без связи с хостом не закрыть.",
+      ),
+    );
+    expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("error");
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 201 WHERE extension = 1").run();
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
+    await waitFor(() =>
+      expect(detail()).toContain(
+        "Номера SSCC для паллет закончились: полную паллету не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
+      ),
+    );
+    // Pallets are off again: nothing of them.
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 0 WHERE id = ?").run(ENTERED.id);
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
+  });
+
+  it("says the blocks the host gave and the station did not take, and the records an older pairing left (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, 'b-1', 'r', " +
+        "'460068200', 0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId);
+    await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
+    const view = render(workBar({ local: executor }));
+    const before = politeRegions();
+    const drops = await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 1/);
+    // Heard once in the region that was there before, and called an error in words, not by colour alone.
+    expect(heardOnce(before, drops)).toBe(true);
+    expect(drops.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
+    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
+    // The records of the other pairing are not this pairing's unsent ones.
+    expect(shown("Не отправлено")).toBe("0");
+    // The drops are read again with the outbox, the stranded records are not (a walk too dear for every scan).
+    db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, 'b-2', 'r', " +
+        "'460068200', 0, 11, 20, 'mismatch', '2026-10-11T08:01:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId);
+    await unsentScans(executor, 2, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 90);
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
+    expect(
+      await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 2/),
+    ).toBeTruthy();
+    expect(shown("Не отправлено прежним подключением")).toBe("3");
+  });
+
+  it("says nothing of dropped blocks or older records when there are none", async () => {
+    const { executor } = openLocalDb();
+    // Records of the pairing itself are not an older pairing's.
+    await unsentScans(executor, 2);
+    render(workBar({ local: executor }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    await flushEffects();
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    expect(screen.queryByText(/которые она не приняла/)).toBeNull();
+  });
+
+  it("keeps the drops and the older records of the newest read when an older one lands late", async () => {
+    const { db, executor } = openLocalDb();
+    const drop = db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, ?, 'r', '460068200', " +
+        "0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    );
+    drop.run(PAIRING.hostId, PAIRING.deviceId, "b-1");
+    const heldDrops = holdingFirstRead(executor, (sql) => sql.includes("FROM floor_block_drops"));
+    const view = render(workBar({ local: heldDrops.executor }));
+    await waitFor(() => expect(heldDrops.started()).toBe(true));
+    drop.run(PAIRING.hostId, PAIRING.deviceId, "b-2");
+    view.rerender(workBar({ local: heldDrops.executor, outboxVersion: 1 }));
+    expect(await screen.findByText(/которые она не приняла: 2/)).toBeTruthy();
+    await act(async () => {
+      heldDrops.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/которые она не приняла: 1/)).toBeNull();
+    expect(screen.queryByText(/которые она не приняла: 2/)).toBeTruthy();
+    view.unmount();
+
+    // The older records are read per pairing: an answer for the pairing left must not land on the next.
+    await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
+    const heldOld = holdingFirstRead(executor, (sql) => sql.includes("INDEXED BY"));
+    const second = render(workBar({ local: heldOld.executor }));
+    await waitFor(() => expect(heldOld.started()).toBe(true));
+    // Another pairing (the one that left the records) sees none of its own as an older one's.
+    second.rerender(
+      workBar({ local: heldOld.executor, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE } }),
+    );
+    await flushEffects();
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    await act(async () => {
+      heldOld.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+  });
+
+  it("drops the older records it said when the next read of them fails, and what a failed read of the drops said", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
+    let failing = false;
+    const flaky: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("INDEXED BY")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(workBar({ local: flaky }));
+    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
+    failing = true;
+    view.rerender(workBar({ local: flaky, pairing: { hostId: OTHER_HOST, deviceId: DEVICE_ID } }));
+    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBeNull());
+  });
+
+  it("drops what a failed read of the dropped blocks said", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, 'b-1', 'r', " +
+        "'460068200', 0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId);
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("floor_block_drops")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(workBar({ local }));
+    expect(await screen.findByText(/которые она не приняла: 1/)).toBeTruthy();
+    failing = true;
+    view.rerender(workBar({ local, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/которые она не приняла/)).toBeNull());
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+  });
+
+  it("says nothing of serials outside a shift, though the pairing has none", async () => {
+    const { executor } = openLocalDb();
+    render(workBar({ local: executor, shiftId: null }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(screen.queryByText(/Номера SSCC/)).toBeNull();
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
+    expect(shown("Номеров SSCC")).toBeNull();
+  });
+
+  it("says in the polite region when the host or this computer, not the link, fails the outbox's delivery", async () => {
+    const { executor } = openLocalDb();
+    const view = render(workBar({ local: executor, factsFailure: "offline" }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    const before = politeRegions();
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+    expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
+    view.rerender(workBar({ local: executor, factsFailure: "host" }));
+    const host = screen.getByText(
+      "Хост не принимает записи смены: на хосте ошибка. Станция повторяет отправку, записи хранятся на этом компьютере.",
+    );
+    expect(heardOnce(before, host)).toBe(true);
+    expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
+    view.rerender(workBar({ local: executor, factsFailure: "local" }));
+    const local = screen.getByText(
+      "Ответ хоста не удалось записать в базу этого компьютера. Станция повторяет отправку.",
+    );
+    expect(heardOnce(before, local)).toBe(true);
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+    view.rerender(workBar({ local: executor, factsFailure: null }));
+    expect(screen.queryByText(/Станция повторяет отправку/)).toBeNull();
+  });
+
+  it("says in the polite region that a host restored from a copy holds the records", async () => {
+    const { executor } = openLocalDb();
+    const view = render(workBar({ local: executor, factsFailure: null }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    const before = politeRegions();
+    expect(screen.queryByText(/отправка ждёт администратора/)).toBeNull();
+    view.rerender(workBar({ local: executor, factsFailure: "held" }));
+    const held = screen.getByText(
+      "Хост восстановлен из копии — отправка ждёт администратора. Станция работает и хранит записи на этом компьютере.",
+    );
+    expect(heardOnce(before, held)).toBe(true);
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+  });
+
+  it("says while the station owes a restored host its blocks, and then how many the host refused", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 3500, to: 5499 });
+    seedBlock(db, { blockId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 5500, to: 7499 });
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(workBar({ local: executor }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    const before = politeRegions();
+    const due = await screen.findByText(
+      "Хост восстановлен из копии — станция возвращает ему свои блоки номеров SSCC. Записи смены ждут и хранятся на этом компьютере.",
+    );
+    expect(heardOnce(before, due)).toBe(true);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({
+          id: block.id,
+          outcome: "refused" as const,
+          code: "block_overlap",
+        })),
+      }),
+      now: () => new Date(),
+    });
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
+    const refused = await screen.findByText(
+      "Блоков номеров SSCC, которые хост не принял после восстановления: 2. Станция больше не печатает номера из них — сообщите администратору.",
+    );
+    expect(heardOnce(before, refused)).toBe(true);
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+  });
+
+  it("does not call a wait of weeks stuck while the host holds the records or blocks are owed", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(workBar({ local: executor, factsFailure: "host", now: clock }));
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    expect(screen.getByText(/станция возвращает ему свои блоки/)).toBeTruthy();
+    await flushEffects();
+    expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({ id: block.id, outcome: "known", code: null })),
+      }),
+      now: () => new Date(),
+    });
+    view.rerender(workBar({ local: executor, factsFailure: "host", now: clock, outboxVersion: 1 }));
+    expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
+    view.rerender(workBar({ local: executor, factsFailure: "held", now: clock, outboxVersion: 1 }));
+    expect(screen.getByText(/отправка ждёт администратора/)).toBeTruthy();
+    expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
+    expect(shown("Не отправлено")).toBe("2");
+  });
+
+  it("says nothing of a restore for a station that owes nothing, with no block either", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(workBar({ local: executor }));
+    expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
+    // No block: one empty request marks the station on the host (plan ХП), and the obligation is settled at once.
+    const asked = vi.fn();
+    const result = await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => {
+        asked(request);
+        return { results: [] };
+      },
+      now: () => new Date(),
+    });
+    expect(result).toMatchObject({ kind: "reconciled", registered: 0, known: 0, refused: 0 });
+    expect(asked.mock.calls).toEqual([[{ blocks: [] }]]);
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
+    expect(screen.queryByText(/Блоков номеров SSCC, которые хост не принял/)).toBeNull();
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+  });
+
+  it("keeps the refused blocks in the bar when the host's refusal waits, and hides what is not news", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 3500, to: 5499 });
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(workBar({ local: executor, refusalHeld: true }));
+    expect(await screen.findByText(/Хост отказал этой станции/)).toBeTruthy();
+    await flushEffects();
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({
+          id: block.id,
+          outcome: "refused" as const,
+          code: "block_mismatch",
+        })),
+      }),
+      now: () => new Date(),
+    });
+    view.rerender(
+      workBar({ local: executor, refusalHeld: true, factsFailure: "held", outboxVersion: 1 }),
+    );
+    expect(
+      await screen.findByText(
+        /Блоков номеров SSCC, которые хост не принял после восстановления: 1/,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/отправка ждёт администратора/)).toBeNull();
+  });
+
+  it("does not say the host fails the delivery, or that the link is up, while the host's refusal waits", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+    const view = render(
+      workBar({ local: executor, link: online, factsFailure: "host", now: clock }),
+    );
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
+    expect(screen.getByText("На связи с хостом")).toBeTruthy();
+    view.rerender(
+      workBar({
+        local: executor,
+        link: online,
+        factsFailure: "host",
+        refusalHeld: true,
+        now: clock,
+      }),
+    );
+    expect(screen.getByText(/Хост отказал этой станции/)).toBeTruthy();
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+    expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
+    expect(screen.queryByText("На связи с хостом")).toBeNull();
+    view.rerender(
+      workBar({
+        local: executor,
+        link: online,
+        factsFailure: "local",
+        refusalHeld: true,
+        now: clock,
+      }),
+    );
+    expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
+  });
+  /** A moment of 2026-10-08 on this computer's clock: the bar's waits are differences, never clock times. */
+  const at = (hour: number, minute: number, second = 0): Date =>
+    new Date(2026, 9, 8, hour, minute, second);
+
+  /** Three records: one delivered, then the head the sender retries first, then one behind it. */
+  async function waitingRecords() {
+    const { db, executor } = openLocalDb();
+    const [done, head, behind] = await unsentScans(executor, 3);
+    const set = db.prepare(
+      "UPDATE outbox SET created_at = ?, attempts = ?, sent_at = ? WHERE id = ?",
+    );
+    set.run(at(6, 0).toISOString(), 1, at(6, 1).toISOString(), done ?? "");
+    db.prepare(
+      "UPDATE outbox SET outcome = 'accepted', acked_at = '2026-10-08T06:01:00.000Z' WHERE id = ?",
+    ).run(done ?? "");
+    // The head is not the newest by time, nor the most sent.
+    set.run(at(9, 41).toISOString(), 5, at(9, 50, 30).toISOString(), head ?? "");
+    set.run(at(9, 30).toISOString(), 9, at(9, 52, 55).toISOString(), behind ?? "");
+    return { db, executor, head: head ?? "" };
+  }
+
+  it("says how long the oldest undelivered record has waited and how often it was sent, while a send fails", async () => {
+    const { db, executor, head } = await waitingRecords();
+    const now = () => at(9, 53);
+    const view = render(workBar({ local: executor, factsFailure: "host", now }));
+    const waiting = await screen.findByText(
+      "Самая старая запись ждёт отправки уже 12 мин, попыток отправки: 5, последняя — 2 мин назад.",
+    );
+    // Said by the polite region that was there before, and not as an alert of its own as well.
+    expect(heardOnce(politeRegions(), waiting)).toBe(true);
+
+    // Never sent yet: nothing to say of a last attempt.
+    db.prepare("UPDATE outbox SET attempts = 0, sent_at = NULL WHERE id = ?").run(head);
+    view.rerender(workBar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
+    expect(
+      await screen.findByText("Самая старая запись ждёт отправки уже 12 мин, попыток отправки: 0."),
+    ).toBeTruthy();
+
+    // Hours, and a count with a thousands separator.
+    db.prepare("UPDATE outbox SET created_at = ?, attempts = 1234, sent_at = ? WHERE id = ?").run(
+      at(7, 48).toISOString(),
+      at(9, 52, 59).toISOString(),
+      head,
+    );
+    view.rerender(workBar({ local: executor, factsFailure: "host", now, outboxVersion: 2 }));
+    expect(
+      await screen.findByText(
+        "Самая старая запись ждёт отправки уже 2 ч 5 мин, попыток отправки: 1 234, последняя — меньше минуты назад.",
+      ),
+    ).toBeTruthy();
+
+    // A clock set back reads as no wait at all, never a negative one.
+    view.rerender(
+      workBar({ local: executor, factsFailure: "host", now: () => at(6, 0), outboxVersion: 3 }),
+    );
+    expect(
+      await screen.findByText(
+        "Самая старая запись ждёт отправки уже меньше минуты, попыток отправки: 1 234, последняя — меньше минуты назад.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says it for a failure of the link, of the host and of this computer, and not when nothing fails or nothing waits", async () => {
+    const { db, executor } = await waitingRecords();
+    const now = () => at(9, 53);
+    const stuck = /Самая старая запись ждёт отправки уже 12 мин/;
+    const view = render(workBar({ local: executor, factsFailure: "offline", now }));
+    expect(await screen.findByText(stuck)).toBeTruthy();
+    view.rerender(workBar({ local: executor, factsFailure: "local", now }));
+    expect(await screen.findByText(stuck)).toBeTruthy();
+    view.rerender(workBar({ local: executor, factsFailure: null, now }));
+    await waitFor(() => expect(screen.queryByText(stuck)).toBeNull());
+    // The failure comes back: the line is read again, not the one shown before.
+    db.prepare("UPDATE outbox SET created_at = ? WHERE acked_at IS NULL AND attempts = 5").run(
+      at(9, 33).toISOString(),
+    );
+    view.rerender(workBar({ local: executor, factsFailure: "host", now }));
+    expect(await screen.findByText(/ждёт отправки уже 20 мин/)).toBeTruthy();
+    // Nothing waits any more: a failure that nothing explains is not dressed up as a wait.
+    db.prepare(
+      "UPDATE outbox SET outcome = 'accepted', acked_at = '2026-10-08T06:20:00.000Z' WHERE acked_at IS NULL",
+    ).run();
+    view.rerender(workBar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
+    expect(screen.getByText(/Хост не принимает записи смены/)).toBeTruthy();
+  });
+
+  it("keeps the stuck line out of the bar when the outbox's head cannot be read, and says the rest", async () => {
+    const { executor } = await waitingRecords();
+    const failing: LocalExecutor = {
+      query: (sql, params, row) =>
+        isHeadRecord(sql) ? Promise.reject(new Error("disk")) : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    render(workBar({ local: failing, factsFailure: "host", now: () => at(9, 53) }));
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(screen.queryByText(/Самая старая запись/)).toBeNull();
+  });
+
+  it("forgets the wait it showed when the next read of the oldest record fails", async () => {
+    const { executor } = await waitingRecords();
+    let broken = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        broken && isHeadRecord(sql)
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const now = () => at(9, 53);
+    const view = render(workBar({ local, factsFailure: "host", now }));
+    expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
+    broken = true;
+    view.rerender(workBar({ local, factsFailure: "host", now, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
+    expect(screen.getByText(/Хост не принимает записи смены/)).toBeTruthy();
+  });
+
+  it("reads the oldest record again by itself every ten seconds while a send fails, and stops with the failure", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor, head } = await waitingRecords();
+    const now = () => at(9, 53);
+    const view = render(workBar({ local: executor, factsFailure: "host", now }));
+    expect(await screen.findByText(/попыток отправки: 5,/)).toBeTruthy();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+
+    db.prepare("UPDATE outbox SET attempts = 6 WHERE id = ?").run(head);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    expect(screen.getByText(/попыток отправки: 5,/)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(await screen.findByText(/попыток отправки: 6,/)).toBeTruthy();
+
+    // The failure goes: nothing is read on a timer for it any more.
+    view.rerender(workBar({ local: executor, factsFailure: null, now }));
+    await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts no timer while nothing is wrong, and none outlives the bar", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    const quiet = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    quiet.unmount();
+
+    const failing = render(workBar({ local: executor, factsFailure: "local" }));
+    expect(await screen.findByText(/Ответ хоста не удалось записать/)).toBeTruthy();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+    failing.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    // And the same for a station running out of serials.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1951").run();
+    const low = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+    // A block arrives with no record written: the bar finds out on its own.
+    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 2001, to: 4000 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    low.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps reading the serials by itself exactly while the warning stands", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    // 501 left, over a quarter of the block: no warning, no timer.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1500").run();
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    // 500 left: the warning stands, and so does the timer.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
+    // (Not inside `waitFor`: its own polling is a timer too.)
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("keeps reading by itself while only the pallets' serials are low, and stops when they are not", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      next: 181,
+      extension: 1,
+    });
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+    // A block of pallets' serials arrives with no record written: the next tick finds out.
+    seedBlock(db, {
+      blockId: "7f6e5d4c-3b2a-4f1e-8d9c-8b7a6f5e4d3d",
+      from: 201,
+      to: 400,
+      extension: 1,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_500);
+    });
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    view.unmount();
+  });
+
+  const isRestoreStatus = (sql: string): boolean => sql.includes("floor_restore_epochs");
+
+  it("keeps what the newest read says of a restore when an older one lands late", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const held = holdingFirstRead(executor, isRestoreStatus);
+    const view = render(workBar({ local: held.executor }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async () => ({ results: [] }),
+      now: () => new Date(),
+    });
+    view.rerender(workBar({ local: held.executor, outboxVersion: 1 }));
+    await flushEffects();
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+    // The older read, which saw the obligation, lands now.
+    await act(async () => {
+      held.release();
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+  });
+
+  it("drops what it said of a restore when the next read of it fails", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    let failing = false;
+    const flaky: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && isRestoreStatus(sql)
+          ? Promise.reject(new Error("unreadable"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(workBar({ local: flaky }));
+    expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
+    failing = true;
+    view.rerender(workBar({ local: flaky, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
+  });
+
+  it("keeps the counts of the newest read when an older one lands late", async () => {
+    const { db, executor } = openLocalDb();
+    await unsentScans(executor, 3);
+    const held = holdingFirstRead(executor, isUnsentCount);
+    const view = render(workBar({ local: held.executor }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    await unsentScans(executor, 1, PAIRING, 50);
+    view.rerender(workBar({ local: held.executor, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("4"));
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(shown("Не отправлено")).toBe("4");
+    expect(db.prepare("SELECT count(*) AS n FROM outbox").get()).toEqual({ n: 4 });
+  });
+
+  it("keeps the serials of the newest read when an older one lands late", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    const held = holdingFirstRead(executor, isSerialsRead);
+    const view = render(workBar({ local: held.executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    // The older read saw 2 000 left; the newest, after the floor wrote, sees 500: the chip.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
+    view.rerender(workBar({ local: held.executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeTruthy();
+  });
+
+  it("keeps the wait of the newest read when an older one lands late", async () => {
+    const { db, executor, head } = await waitingRecords();
+    const now = () => at(9, 53);
+    const held = holdingFirstRead(executor, isHeadRecord);
+    const view = render(workBar({ local: held.executor, factsFailure: "host", now }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    db.prepare("UPDATE outbox SET attempts = 7 WHERE id = ?").run(head);
+    view.rerender(workBar({ local: held.executor, factsFailure: "host", now, outboxVersion: 1 }));
+    expect(await screen.findByText(/попыток отправки: 7,/)).toBeTruthy();
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText(/попыток отправки: 7,/)).toBeTruthy();
+  });
+
+  it("does not show a wait read for a failure that has ended when it lands", async () => {
+    const { executor } = await waitingRecords();
+    const now = () => at(9, 53);
+    const held = holdingFirstRead(executor, isHeadRecord);
+    const view = render(workBar({ local: held.executor, factsFailure: "host", now }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    view.rerender(workBar({ local: held.executor, factsFailure: null, now }));
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/Самая старая запись/)).toBeNull();
+  });
+});
+
+describe("the scanner on the floor's status bar", () => {
+  /** The words of the scanner's chip. */
+  function shown(): string | null {
+    return document.querySelector('[data-chip="scanner"]')?.textContent ?? null;
+  }
+
+  function watching(...statuses: Array<"connected" | "disconnected">) {
+    return (
+      onSnapshot: (next: {
+        revision: number;
+        scanners: Array<{ port: string; baud: number; status: "connected" | "disconnected" }>;
+      }) => void,
+    ) => {
+      onSnapshot({
+        revision: 1,
+        scanners: statuses.map((status, index) => ({
+          port: `COM${index + 3}`,
+          baud: 9600,
+          status,
+        })),
+      });
+      return Promise.resolve(() => undefined);
+    };
+  }
+
+  it("says «Клавиатурный» with only the keyboard wedge", async () => {
+    render(bar({ local: await synced([ORG]) }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(shown()).toBe("Сканер готов");
+  });
+
+  it("follows the COM scanners the shell reports", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local, watchScanners: watching("connected") }));
+    await waitFor(() => expect(shown()).toBe("Сканер готов"));
+    view.rerender(bar({ local, watchScanners: watching("connected", "disconnected") }));
+    await waitFor(() => expect(shown()).toBe("Часть сканеров"));
+    view.rerender(bar({ local, watchScanners: watching("disconnected") }));
+    await waitFor(() => expect(shown()).toBe("Сканер не на связи"));
+  });
+});
+
+/** The bar's polite region of warnings. */
+function alerts(): HTMLElement {
+  const found = document.querySelector(".floor-status__alerts");
+  if (!(found instanceof HTMLElement)) throw new Error("no alerts region");
+  return found;
+}
+
+const GRACE_END = "2027-11-14T21:00:00Z";
+const EMERGENCY_END = "2027-11-23T06:00:00Z";
+
+describe("the license on the floor's status bar (plan ЛЦ-3)", () => {
+  it.each(["trial", "active", "expiring", "wrong_host"])(
+    "says nothing in the state %s",
+    async (state) => {
+      render(bar({ local: await synced([ORG]), license: deviceLicense(state, GRACE_END) }));
+      await screen.findByText("ООО «Атолл»");
+      expect(within(alerts()).queryByText(/лицензи|смены/i)).toBeNull();
+      expect(alerts().childElementCount).toBe(0);
+    },
+  );
+
+  it("says nothing for a host that sends no license", async () => {
+    render(bar({ local: await synced([ORG]), license: null }));
+    await screen.findByText("ООО «Атолл»");
+    expect(alerts().childElementCount).toBe(0);
+  });
+
+  it("tells everyone in the grace till when new shifts open, in a polite line, not an alert", async () => {
+    render(bar({ local: await synced([ORG]), license: deviceLicense("grace", GRACE_END) }));
+    const date = licenseDayMonth(lastMomentBefore(GRACE_END), null);
+    const shown = await within(alerts()).findByText(
+      `Лицензия площадки истекла. Новые смены откроются до ${date}. Сообщите администратору.`,
+    );
+    expect(shown.closest(".mk-alert")?.classList.contains("mk-alert--warn")).toBe(true);
+    expect(alerts().getAttribute("aria-live")).toBe("polite");
+    expect(within(alerts()).queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it.each([
+    [
+      "restricted",
+      "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+    ],
+    [
+      "trial_expired",
+      "Новые смены не открываются: пробный период закончился. Сообщите администратору.",
+    ],
+    [
+      "inn_mismatch",
+      "Новые смены не открываются: ИНН организации не совпадает с лицензией. Сообщите администратору.",
+    ],
+  ] as const)("says that no new shift opens in the state %s", async (state, text) => {
+    render(bar({ local: await synced([ORG]), license: deviceLicense(state) }));
+    const shown = await within(alerts()).findByText(text);
+    expect(shown.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
+    expect(within(alerts()).queryByRole("alert")).toBeNull();
+  });
+
+  it("says the running emergency extension till its end, and the plain restriction once it has passed by this PC's clock", async () => {
+    const local = await synced([ORG]);
+    const license = deviceLicense("restricted", null, EMERGENCY_END);
+    const view = render(bar({ local, license, now: () => new Date("2027-11-21T10:00:00Z") }));
+    const running = await within(alerts()).findByText(
+      `Лицензия площадки истекла: новые смены открываются по аварийному продлению до ${licenseMinute(EMERGENCY_END, null)}. Сообщите администратору.`,
+    );
+    expect(running.closest(".mk-alert")?.classList.contains("mk-alert--warn")).toBe(true);
+    view.rerender(bar({ local, license, now: () => new Date("2027-11-24T10:00:00Z") }));
+    const ended = await within(alerts()).findByText(
+      "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+    );
+    expect(ended.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
+    expect(within(alerts()).queryByText(/аварийному продлению/)).toBeNull();
+  });
+
+  it("changes the line by itself when the extension ends with the bar on screen", async () => {
+    const local = await synced([ORG]);
+    const until = new Date(Date.now() + 300).toISOString();
+    render(bar({ local, license: deviceLicense("trial_expired", null, until) }));
+    expect(await within(alerts()).findByText(/аварийному продлению/)).toBeTruthy();
+    expect(
+      await within(alerts()).findByText(
+        "Новые смены не открываются: пробный период закончился. Сообщите администратору.",
+        {},
+        { timeout: 3000 },
+      ),
+    ).toBeTruthy();
+    expect(within(alerts()).queryByText(/аварийному продлению/)).toBeNull();
+  });
+});
+
+describe("the header's chips (kit header: a glyph and a word on a tone, never a bare dot)", () => {
+  const operator = { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null } as const;
+
+  /** The words of every chip of the bar, in order, with their tones. */
+  function chips(): Array<[string, string | null, string]> {
+    return [...document.querySelectorAll("[data-chip]")].map((chip) => [
+      chip.getAttribute("data-chip") ?? "",
+      chip.getAttribute("data-tone"),
+      chip.textContent ?? "",
+    ]);
+  }
+
+  it("sign-in shows the link and the scanner, each with a glyph and its words", async () => {
+    const view = render(bar({ local: await synced([ORG]), link: ONLINE_LINK }));
+    await screen.findByText("Никто не вошёл");
+    expect(chips()).toEqual([
+      ["link", "ok", "Связь есть"],
+      ["scanner", "ok", "Сканер готов"],
+    ]);
+    for (const chip of view.container.querySelectorAll("[data-chip]")) {
+      expect(chip.querySelector("svg")).not.toBeNull();
+    }
+  });
+
+  it("the hub and the forms add the printer; «Принтер не задан» until the workstation has one", async () => {
+    render(bar({ local: await synced([ORG]), link: ONLINE_LINK, operator }));
+    await waitFor(() => expect(chips().map(([kind]) => kind)).toContain("printer"));
+    expect(chips()).toEqual([
+      ["link", "ok", "Связь есть"],
+      ["printer", "neutral", "Принтер не задан"],
+      ["scanner", "ok", "Сканер готов"],
+    ]);
+  });
+
+  it("the printer chip is ready with a printer set up, and an error while the shift's label failed", async () => {
+    const at = await printStation();
+    await closeBoxWithLabel(at);
+    const view = render(
+      bar({ local: at.local, link: ONLINE_LINK, operator, shiftId: at.shift.copy.id }),
+    );
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "printer")).toEqual([
+        "printer",
+        "ok",
+        "Принтер готов",
+      ]),
+    );
+    at.db.prepare("UPDATE floor_print_jobs SET state = 'failed', error_code = 'not_sent'").run();
+    view.rerender(
+      bar({
+        local: at.local,
+        link: ONLINE_LINK,
+        operator,
+        shiftId: at.shift.copy.id,
+        outboxVersion: 1,
+      }),
+    );
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "printer")).toEqual([
+        "printer",
+        "error",
+        "Принтер: ошибка",
+      ]),
+    );
+  });
+
+  it("the work screen adds the queue: quiet «Очередь 0», a warning with N, «Отклонено N» as an error", async () => {
+    const { db, executor } = openLocalDb();
+    const ids = await unsentScans(executor, 3);
+    render(workBar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "queue")).toEqual(["queue", "warn", "Очередь 3"]),
+    );
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'invalid_record', acked_at = '2026-10-08T06:20:00.000Z' WHERE id = ?",
+    ).run(ids[0] ?? "");
+    cleanup();
+    render(workBar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "rejected")).toEqual([
+        "rejected",
+        "error",
+        "Отклонено 1",
+      ]),
+    );
+    expect(chips().find(([kind]) => kind === "queue")).toEqual(["queue", "warn", "Очередь 2"]);
+  });
+
+  it("the work screen's healthy chips are glyphs with their words kept for a reader; a problem keeps its words", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    render(workBar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() => expect(chips().find(([kind]) => kind === "queue")?.[2]).toBe("Очередь 2"));
+    const form = (kind: string) =>
+      document.querySelector(`[data-chip="${kind}"]`)?.getAttribute("data-form");
+    expect(form("link")).toBe("icon");
+    expect(form("scanner")).toBe("icon");
+    // «Очередь 2» is a warning: it keeps its words on the eye as well.
+    expect(form("queue")).toBe("full");
+    expect(document.querySelector('[data-chip="link"] .station-visually-hidden')?.textContent).toBe(
+      "Связь есть",
+    );
+    cleanup();
+    render(bar({ local: executor, link: ONLINE_LINK, operator }));
+    expect(document.querySelector('[data-chip="link"]')?.getAttribute("data-form")).toBe("full");
+  });
+
+  it("the hub has no queue chip: the queue is the footer's button", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    render(bar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() => expect(chips().map(([kind]) => kind)).toContain("printer"));
+    expect(chips().map(([kind]) => kind)).not.toContain("queue");
+  });
+
+  it("a scanner that is off the link is an error with its words, a part of them a warning", async () => {
+    const local = await synced([ORG]);
+    const watching =
+      (...statuses: Array<"connected" | "disconnected">) =>
+      (
+        onSnapshot: (next: {
+          revision: number;
+          scanners: Array<{ port: string; baud: number; status: "connected" | "disconnected" }>;
+        }) => void,
+      ) => {
+        onSnapshot({
+          revision: 1,
+          scanners: statuses.map((status, i) => ({ port: `COM${i + 3}`, baud: 9600, status })),
+        });
+        return Promise.resolve(() => undefined);
+      };
+    const view = render(bar({ local, watchScanners: watching("disconnected") }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "scanner")).toEqual([
+        "scanner",
+        "error",
+        "Сканер не на связи",
+      ]),
+    );
+    view.rerender(bar({ local, watchScanners: watching("connected", "disconnected") }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "scanner")).toEqual([
+        "scanner",
+        "warn",
+        "Часть сканеров",
+      ]),
+    );
+  });
+
+  it("the link chip says «Связь слабая» while connecting and «Связи нет» offline, both amber", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local, link: { ...ONLINE_LINK, state: "connecting" } }));
+    expect(chips()[0]).toEqual(["link", "warn", "Связь слабая"]);
+    view.rerender(bar({ local, link: { ...ONLINE_LINK, state: "offline" } }));
+    expect(chips()[0]).toEqual(["link", "warn", "Связи нет"]);
+  });
+
+  it("keeps every control of the rail named and in the order of the design: sync, window mode, operator", async () => {
+    const { executor } = openLocalDb();
+    render(
+      bar({
+        local: executor,
+        operator,
+        onSwitchOperator: vi.fn(),
+        tools: {
+          retry: vi.fn(),
+          lastSyncedAt: null,
+          windowMode: null,
+          source: { subscribe: () => () => undefined } as never,
+          onMute: vi.fn(),
+        },
+      }),
+    );
+    const rail = await screen.findByRole("group", { name: "Действия станции" });
+    expect(
+      within(rail)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label") ?? button.textContent),
+    ).toEqual(["Синхронизация", "Сменить оператора"]);
+  });
+
+  it.each([
+    ["kiosk", "Выйти из полноэкранного режима"],
+    ["fullscreen", "Выйти из полноэкранного режима"],
+  ] as const)(
+    "puts the %s window mode between sync and the operator, on the sign-in and when signed in",
+    async (kind, name) => {
+      const { executor } = openLocalDb();
+      const tools = {
+        retry: vi.fn(),
+        lastSyncedAt: null,
+        windowMode: {
+          kind,
+          snapshot: { mode: "locked", pending: false, error: null },
+          enter: vi.fn(async () => undefined),
+          exit: vi.fn(async () => undefined),
+          clearError: vi.fn(),
+        },
+        source: { subscribe: () => () => undefined } as never,
+        onMute: vi.fn(),
+      } as const;
+      const names = async () =>
+        within(await screen.findByRole("group", { name: "Действия станции" }))
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+      const view = render(bar({ local: executor, tools }));
+      expect(await names()).toEqual(["Синхронизация", name]);
+      view.rerender(bar({ local: executor, operator, onSwitchOperator: vi.fn(), tools }));
+      expect(await names()).toEqual(["Синхронизация", name, "Сменить оператора"]);
+    },
+  );
+});

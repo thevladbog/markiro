@@ -1,0 +1,73 @@
+{
+  "items": [
+    {
+      "id": "a0000000-0000-4000-8000-000000000003",
+      "sscc": null,
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция на линии 1",
+      "openedAt": "2026-10-09T06:00:00.000Z",
+      "closedAt": null,
+      "disassembledAt": null,
+      "boxes": 0,
+      "units": 0,
+      "boxCountReported": null,
+      "disassembledBoxes": 0,
+      "shiftId": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+      "shiftNumber": "OCT26-004",
+      "productionDate": "2026-10-09",
+      "productId": "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f",
+      "productName": "Молоко 3,2% 0,9 л",
+      "lineId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "lineName": "Линия 2"
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000001",
+      "sscc": "146006820000000409",
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция на линии 1",
+      "openedAt": "2026-10-08T06:00:05.000Z",
+      "closedAt": "2026-10-08T06:00:41.000Z",
+      "disassembledAt": null,
+      "boxes": 1,
+      "units": 1,
+      "boxCountReported": 2,
+      "disassembledBoxes": 0,
+      "shiftId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "shiftNumber": "OCT26-003",
+      "productionDate": "2026-10-08",
+      "productId": "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f",
+      "productName": "Молоко 3,2% 0,9 л",
+      "lineId": "5f4e3d2c-1b0a-4f9e-8d7c-6b5a4f3e2d1c",
+      "lineName": "Линия 1"
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000002",
+      "sscc": "146006820000002403",
+      "deviceId": "8d0f7780-8536-41ef-a55c-f18fd2da1bf8",
+      "deviceName": "Станция на линии 2",
+      "openedAt": "2026-10-08T05:59:00.000Z",
+      "closedAt": "2026-10-08T06:00:09.000Z",
+      "disassembledAt": null,
+      "boxes": 1,
+      "units": 1,
+      "boxCountReported": 1,
+      "disassembledBoxes": 0,
+      "shiftId": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+      "shiftNumber": "OCT26-004",
+      "productionDate": "2026-10-09",
+      "productId": "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f",
+      "productName": "Молоко 3,2% 0,9 л",
+      "lineId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "lineName": "Линия 2"
+    }
+  ],
+  "nextCursor": "1791439209000~a0000000-0000-4000-8000-000000000002",
+  "stations": [
+    {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "name": "Станция на линии 1",
+      "revoked": false
+    },
+    { "id": "8d0f7780-8536-41ef-a55c-f18fd2da1bf8", "name": "Станция на линии 2", "revoked": true }
+  ]
+}

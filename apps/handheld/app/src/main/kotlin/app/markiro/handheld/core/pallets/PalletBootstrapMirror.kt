@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.pallets
 
+import app.markiro.handheld.core.backend.CloudBackend
+import app.markiro.handheld.core.backend.StationBackend
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
@@ -22,13 +24,22 @@ import java.io.IOException
  * not linger.
  */
 class PalletBootstrapMirror(
-    private val api: StationApi,
+    private val backend: StationBackend,
     private val db: HandheldDatabase,
     private val meta: MetaStore,
     private val blocks: SsccBlockApplier,
     private val registry: BoxRegistryMirror,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    constructor(
+        api: StationApi,
+        db: HandheldDatabase,
+        meta: MetaStore,
+        blocks: SsccBlockApplier,
+        registry: BoxRegistryMirror,
+        clock: () -> Long = System::currentTimeMillis,
+    ) : this(CloudBackend(api), db, meta, blocks, registry, clock)
+
     /** When the bootstrap last landed, feeding the mode's «данные на 10:42» stamp. */
     val stampAt: Flow<Long?> = db.metaDao().observe(MetaStore.PALLET_BOOTSTRAP_AT).map { it?.toLongOrNull() }
 
@@ -45,7 +56,7 @@ class PalletBootstrapMirror(
     }
 
     private suspend fun refreshOwned(): MirrorOutcome {
-        val bootstrap = api.palletBootstrap()
+        val bootstrap = backend.palletBootstrap()
         db.recovery.commit {
             db.palletProductDao().replaceAll(
                 bootstrap.products.map {

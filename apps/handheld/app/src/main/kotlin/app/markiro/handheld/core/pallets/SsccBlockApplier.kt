@@ -47,6 +47,7 @@ class SsccBlockApplier(private val pool: SsccPool) {
                 fromSerial = block.fromSerial,
                 toSerial = block.toSerial,
                 consumedThroughSerial = block.consumedThroughSerial,
+                blockId = block.blockId,
             ),
         )
     }

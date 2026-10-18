@@ -1,0 +1,68 @@
+{
+  "valid": [
+    {
+      "text": "markiro-host:1?h=10.0.0.5,192.168.1.10&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+      "canonical": true,
+      "parsed": {
+        "addresses": ["10.0.0.5", "192.168.1.10"],
+        "port": 45710,
+        "fingerprint": "abababababababababababababababababababababababababababababababab",
+        "code": "7K3MQ9XV2D"
+      }
+    },
+    {
+      "text": "markiro-host:1?h=&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+      "canonical": true,
+      "parsed": {
+        "addresses": [],
+        "port": 45710,
+        "fingerprint": "abababababababababababababababababababababababababababababababab",
+        "code": "7K3MQ9XV2D"
+      }
+    },
+    {
+      "text": "]d1markiro-host:1?h=10.0.0.5&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+      "canonical": false,
+      "parsed": {
+        "addresses": ["10.0.0.5"],
+        "port": 45710,
+        "fingerprint": "abababababababababababababababababababababababababababababababab",
+        "code": "7K3MQ9XV2D"
+      }
+    },
+    {
+      "text": "MARKIRO-HOST:1?H=10.0.0.5,192.168.1.10&P=45710&F=ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB&C=7k3mq9xv2d",
+      "canonical": false,
+      "parsed": {
+        "addresses": ["10.0.0.5", "192.168.1.10"],
+        "port": 45710,
+        "fingerprint": "abababababababababababababababababababababababababababababababab",
+        "code": "7K3MQ9XV2D"
+      }
+    },
+    {
+      "text": "  markiro-host:1?h=10.0.0.5&p=45710&f=abababababababababababababababababababababababababababababababab&c=7k3mq-9xv2d \n",
+      "canonical": false,
+      "parsed": {
+        "addresses": ["10.0.0.5"],
+        "port": 45710,
+        "fingerprint": "abababababababababababababababababababababababababababababababab",
+        "code": "7K3MQ9XV2D"
+      }
+    }
+  ],
+  "invalid": [
+    "",
+    "7K3MQ9XV2D",
+    "markiro-host:2?h=10.0.0.5&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.5&p=45710&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.5&p=45710&f=abab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.5&p=0&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.5&p=70000&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.256&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=010.0.0.5&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.5&h=10.0.0.6&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D",
+    "markiro-host:1?h=10.0.0.5&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2",
+    "markiro-host:1?h=10.0.0.5&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2U"
+  ]
+}

@@ -1,0 +1,661 @@
+/*
+ * Design kit 2026-10, step B: the floor controls of «Новая смена» — photo
+ * square, mode segment, switch card, numeric keypad and readout.
+ * docs/design-briefs/design-kit-2026-10.md §3–§4, «Накатка кита · шаг B».
+ *
+ * ONE layer (kit §3): the photo is one framed square, the keypad is keys on
+ * the screen's flat panel, the switch card is one L1 card. Colour comes only
+ * from @markiro/ui tokens (the kit names), so both themes follow `data-theme`.
+ * The rules sit under `:where(.floor-frame, .station-screen)` like the rest of
+ * the floor kit; the office never loads this file.
+ */
+
+/* ---- Photo square: a fixed square, the picture laid over it, contained. ---- */
+
+:where(.floor-frame, .station-screen) .floor-photo-square {
+  position: relative;
+  display: grid;
+  flex: none;
+  width: var(--floor-photo, 132px);
+  height: var(--floor-photo, 132px);
+  box-sizing: border-box;
+  overflow: hidden;
+  /* The face and the border's colour are the backing's (`data-photo-backing`). */
+  border: 1px solid transparent;
+  border-radius: 20px;
+  place-items: center;
+}
+
+/* The picture never takes part in the layout: absolute, the square's own size, whole. */
+:where(.floor-frame, .station-screen) .floor-photo-square > .product-photo {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  box-sizing: border-box;
+  padding: 6px;
+  object-fit: contain;
+}
+
+/* ---- Mode segment: a labelled radio group on the kit's `panel` track. ---- */
+
+:where(.floor-frame, .station-screen) .floor-mode {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+:where(.floor-frame, .station-screen) .floor-mode > p {
+  margin: 0;
+}
+
+:where(.floor-frame, .station-screen) .floor-mode__label {
+  color: var(--muted);
+  font: var(--floor-body-strong);
+}
+
+/* A line of its own height is kept, so the groups below never jump. */
+:where(.floor-frame, .station-screen) .floor-mode__hint {
+  min-height: 26px;
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+:where(.floor-frame, .station-screen) .floor-segmented > .floor-segmented__option {
+  display: flex;
+  flex: 1 1 0;
+  height: 64px;
+  min-width: 0;
+  padding: 0 12px;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--floor-r-ctl);
+  background: transparent;
+  color: var(--muted);
+  font: var(--floor-lg);
+  cursor: pointer;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen)
+  .floor-segmented
+  > .floor-segmented__option[aria-checked="true"] {
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+:where(.floor-frame, .station-screen) .floor-segmented > .floor-segmented__option:disabled {
+  color: var(--dis);
+  cursor: default;
+}
+
+:where(.floor-frame, .station-screen)
+  .floor-segmented
+  > .floor-segmented__option[aria-checked="true"]:disabled {
+  background: var(--panel);
+  color: var(--muted);
+  box-shadow: inset 0 0 0 2px var(--linectl);
+}
+
+:where(.floor-frame, .station-screen)
+  .floor-segmented
+  > .floor-segmented__option:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+:where(.floor-frame, .station-screen) .floor-segmented__check {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+/* ---- Switch card: ONE L1 card; on = a 2 px `fg` border, the check, the word. ---- */
+
+:where(.floor-frame, .station-screen) .floor-switch-card {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 88px;
+  box-sizing: border-box;
+  padding: 14px 20px;
+  column-gap: 20px;
+  row-gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid var(--line2);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card[aria-checked="true"] {
+  border-color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card > :not(.floor-switch-card__state) {
+  grid-column: 1;
+  min-width: 0;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__title {
+  font: var(--floor-lg);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__hint {
+  /* Two lines at most (the full text is the line's `title`): a longer hint never grows over the next row. */
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__detail {
+  overflow: hidden;
+  color: var(--fg);
+  font: var(--floor-body-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__state {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  gap: 6px;
+  justify-items: center;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__track {
+  display: flex;
+  width: 96px;
+  height: 52px;
+  box-sizing: border-box;
+  padding: 3px;
+  border: 1px solid var(--linectl);
+  border-radius: var(--r-round);
+  background: var(--panel);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__knob {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--muted2);
+  transition: transform 180ms var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__knob svg {
+  display: none;
+  width: 24px;
+  height: 24px;
+}
+
+:where(.floor-frame, .station-screen)
+  .floor-switch-card[aria-checked="true"]
+  .floor-switch-card__track {
+  border-color: var(--fg);
+  background: var(--fg);
+}
+
+:where(.floor-frame, .station-screen)
+  .floor-switch-card[aria-checked="true"]
+  .floor-switch-card__knob {
+  background: var(--bg);
+  color: var(--fg);
+  transform: translateX(44px);
+}
+
+:where(.floor-frame, .station-screen)
+  .floor-switch-card[aria-checked="true"]
+  .floor-switch-card__knob
+  svg {
+  display: block;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch-card__word {
+  font: var(--floor-body-strong);
+}
+
+/* ---- Numeric keypad: keys on the screen's flat panel, 72 px and up. ---- */
+
+:where(.floor-frame, .station-screen) .floor-keypad {
+  display: grid;
+  min-height: 0;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(72px, 1fr));
+}
+
+:where(.floor-frame, .station-screen) .floor-keypad__key {
+  display: grid;
+  min-width: 72px;
+  min-height: 72px;
+  padding: 0;
+  place-items: center;
+  /* `linectl`: the key's edge carries 3:1 on the screen's own colour (kit question 8). */
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--panel);
+  color: var(--fg);
+  font: 500 34px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-keypad__key--fn {
+  font: 600 20px/1 var(--font-ui);
+}
+
+:where(.floor-frame, .station-screen) .floor-keypad__key svg {
+  width: 34px;
+  height: 34px;
+}
+
+:where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+  background: var(--line);
+}
+
+:where(.floor-frame, .station-screen) .floor-keypad__key:disabled {
+  color: var(--dis);
+  cursor: default;
+}
+
+/* ---- Readout: a plain bordered field; 2 px `fg` only while it is the active one. ---- */
+
+:where(.floor-frame, .station-screen) .floor-readout {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: var(--floor-readout, 108px);
+  box-sizing: border-box;
+  padding: 10px 16px;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--bg);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout[data-active="true"] {
+  border-color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-readout[aria-invalid="true"] {
+  border-color: var(--err);
+  box-shadow: inset 0 0 0 1px var(--err);
+}
+
+:where(.floor-frame, .station-screen) .floor-readout:disabled {
+  background: var(--panel);
+  color: var(--dis);
+  cursor: default;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout__label {
+  display: flex;
+  min-width: 0;
+  gap: 16px;
+  justify-content: space-between;
+  color: var(--muted);
+  font: var(--floor-body-strong);
+  white-space: nowrap;
+}
+
+/* The label gives way to its note by an ellipsis, never the other way round or into it. */
+:where(.floor-frame, .station-screen) .floor-readout__label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout__label em {
+  flex: none;
+  color: var(--muted2);
+  font-style: normal;
+  font-weight: 400;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout__value {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: flex-end;
+  font: 600 var(--floor-readout-digits, 56px) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout__thin {
+  display: inline-block;
+  width: 0.22em;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout__empty {
+  color: var(--muted2);
+  font-weight: 400;
+}
+
+:where(.floor-frame, .station-screen) .floor-readout__unit {
+  color: var(--muted);
+  font: 500 22px/1 var(--font-ui);
+}
+
+/* ---- IpKeypad: the printer form's side panel, 380 px: a target segment, 113 x 64 keys, one 84 px action. ---- */
+
+:where(.floor-frame, .station-screen) .floor-mode__label--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad {
+  display: grid;
+  width: 380px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 12px;
+  gap: 8px;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad .floor-segmented {
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  border-radius: calc(var(--floor-r-ctl) + 4px);
+  background: var(--panel);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__keys {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__key {
+  display: grid;
+  min-width: 0;
+  height: 64px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--panel);
+  color: var(--fg);
+  font: 500 32px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__key--fn {
+  font: 600 20px/1 var(--font-ui);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__key:active {
+  transform: scale(var(--press-scale));
+  background: var(--line);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__action {
+  width: 100%;
+}
+
+/* ---- Entry field (the sign-in's number and PIN): label, 84 px field, an always-present line. ---- */
+
+:where(.floor-frame, .station-screen) .floor-entry {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__label {
+  color: var(--muted);
+  font: var(--floor-body-strong);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__box {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 84px;
+  box-sizing: border-box;
+  padding: 0 20px;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--bg);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__box:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__value {
+  min-width: 0;
+  overflow: hidden;
+  font: 600 44px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The caret is drawn, not blinking: nothing on this screen moves all day. */
+:where(.floor-frame, .station-screen)
+  .floor-entry[data-status="active"]
+  .floor-entry__value::after {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 44px;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+  background: var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__placeholder {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--muted2);
+  font: 400 28px/1.3 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A panel 1024 px wide: the placeholder's words («Введите заново») still fit the narrower field. */
+@media (max-width: 1100px) {
+  :where(.floor-frame, .station-screen) .floor-entry__placeholder {
+    font-size: 24px;
+  }
+}
+
+/* The dash of an empty active field sits before the caret, in the value's own face. */
+:where(.floor-frame, .station-screen)
+  .floor-entry[data-status="active"]
+  .floor-entry__value:empty
+  + .floor-entry__placeholder {
+  order: -1;
+  flex: none;
+  font: 400 44px/1.2 var(--font-mono);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-inline-start: auto;
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="accepted"] .floor-entry__icon {
+  color: var(--ok);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="active"] .floor-entry__box {
+  border-color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="error"] .floor-entry__box {
+  border-color: var(--err);
+  box-shadow: inset 0 0 0 1px var(--err);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="locked"] .floor-entry__box {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--dis);
+  cursor: default;
+}
+
+/* The label is text, not a disabled control: it keeps the readable `muted`. */
+:where(.floor-frame, .station-screen) .floor-entry[data-status="locked"] .floor-entry__label {
+  color: var(--muted);
+}
+
+/* A line of its own height is always kept, so the next field never jumps. */
+:where(.floor-frame, .station-screen) .floor-entry__hint {
+  min-height: 26px;
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="error"] .floor-entry__hint {
+  color: var(--err);
+}
+
+/* ---- Cyrillic keyboard: three flat rows of 64 px keys edged in `linectl`. ---- */
+
+:where(.floor-frame, .station-screen) .floor-cyrillic {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__row {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key {
+  display: grid;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--floor-cyrillic-key, 72px);
+  min-height: 64px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--panel);
+  color: var(--fg);
+  font: 600 28px/1 var(--font-ui);
+  cursor: pointer;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key--fn {
+  color: var(--muted);
+  font: 600 20px/1 var(--font-ui);
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key--erase {
+  flex-grow: 1.9;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key--space {
+  flex-grow: 2.5;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+  background: var(--line);
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key:disabled {
+  color: var(--dis);
+  cursor: default;
+}
+
+/* ---- Reduced motion: no scale and no travel; the press shows as a fill. ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.floor-frame, .station-screen) .floor-segmented__option,
+  :where(.floor-frame, .station-screen) .floor-switch-card,
+  :where(.floor-frame, .station-screen) .floor-switch-card__knob,
+  :where(.floor-frame, .station-screen) .floor-keypad__key,
+  :where(.floor-frame, .station-screen) .floor-ipkeypad__key,
+  :where(.floor-frame, .station-screen) .floor-cyrillic__key,
+  :where(.floor-frame, .station-screen) .floor-entry__box {
+    transition: none;
+  }
+
+  :where(.floor-frame, .station-screen) .floor-segmented__option:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-switch-card:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-ipkeypad__key:active,
+  :where(.floor-frame, .station-screen) .floor-cyrillic__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-entry__box:active:not(:disabled) {
+    transform: none;
+  }
+
+  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-ipkeypad__key:active,
+  :where(.floor-frame, .station-screen) .floor-cyrillic__key:active:not(:disabled) {
+    background: var(--fg);
+    color: var(--bg);
+  }
+}

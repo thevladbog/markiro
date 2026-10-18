@@ -1,0 +1,27 @@
+{
+  "codes": [
+    "invalid_record",
+    "payload_mismatch",
+    "unknown_shift",
+    "not_entered",
+    "gtin_mismatch",
+    "box_unknown",
+    "box_closed",
+    "box_already_closed",
+    "box_state",
+    "sscc_not_issued",
+    "sscc_taken",
+    "no_pallets",
+    "pallet_unknown",
+    "pallet_already_closed",
+    "pallet_state",
+    "subject_unknown",
+    "box_not_found",
+    "box_not_closed",
+    "box_on_pallet",
+    "product_mismatch",
+    "pallet_not_open",
+    "pallet_count_mismatch",
+    "feature_disabled"
+  ]
+}

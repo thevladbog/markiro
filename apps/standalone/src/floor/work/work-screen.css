@@ -1,0 +1,1175 @@
+/*
+ * The work screen of a shift, ported from the cloud station (apps/station/src/station.css,
+ * «.work-screen» through «.work-footer», design 2026-09-25 «лента смены»): the shift band
+ * across both columns, the open box beside the last scan and the shift's figures, the pallet
+ * strip under the box, the floor footer, and the overlays of the stops above the work.
+ * Colours, type and spacing come from @markiro/ui tokens, as in the cloud.
+ */
+
+/* The floor frame gives the screen its row under the status bar; the screen takes all of it. */
+.floor-frame > .work-screen {
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+/*
+ * The frame is `min-height: 100dvh`, so a taller screen would grow the page and scroll it. The work
+ * screen is a fixed-height grid: the frame is the window's height, the window never scrolls, and
+ * whatever cannot fit scrolls inside its own region (the history list).
+ */
+.standalone-screen:has(> .floor-frame > .work-screen) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.floor-frame:has(> .work-screen) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.work-screen {
+  /* The 84 px action row and the gap under it. */
+  --work-footer-h: calc(var(--control-floor-primary) + var(--sp-3));
+
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 1fr) var(--work-footer-h);
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.work-screen__content,
+.work-screen__work,
+.work-screen__instruments,
+.work-screen__primary,
+.work-screen__secondary,
+.work-instrument {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* No page scroll at 1280x800 or 1280x1024: the content fills its row and clips; a region that
+   cannot fit scrolls inside itself (the history list), never the screen. */
+.work-screen__content {
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  overflow: hidden;
+}
+
+.work-screen__work {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.work-screen__instruments {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  /* The one row is the region's height, never its content's: a long list scrolls inside. */
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.work-screen__primary,
+.work-screen__secondary {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* The box keeps the flexible row; the pallet strip takes its content height. */
+.work-screen__primary:has(> .pallet-strip) {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+/* The last scan takes the flexible row; the shift's figures their content height. */
+.work-screen__secondary {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* A box shift: the last scan and the figures take their content height, the history the rest. */
+.work-screen__instruments[data-layout="box"] > .work-screen__secondary {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+/* A validation shift: one card holds the last scan and, under it, the duplicate's steps. */
+.work-screen__instruments[data-layout="validation"] > .work-screen__primary {
+  padding: var(--sp-4);
+  gap: var(--sp-3);
+  grid-template-rows: minmax(0, 1fr) auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.work-screen__instruments[data-layout="validation"] > .work-screen__primary > .work-instrument {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.work-screen__hint {
+  margin: 0;
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+/* Words for a screen reader only. */
+.work-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.work-instrument {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+/*
+ * The product card is the kit's one gradient (`brand1` -> `brand3`, border `brandline`), the same for
+ * every product and themed light/dark; text on it uses `fg`/`muted` (13.1:1). The per-product hue
+ * of the cloud station (`--product-hue`, `useProductAccent`) no longer paints it.
+ */
+.work-shift-band {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  /* No padding on the photo's side: the photo takes the band's full height. */
+  padding: 0 var(--sp-4) 0 0;
+  gap: var(--sp-4);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: var(--r-card);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
+  background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
+  border: 1px solid var(--brandline);
+}
+
+/*
+ * The product's photo: a square as tall as the whole band (`aspect-ratio` over the stretched
+ * height), flush with its left edge, fitted whole (never cropped). Its backing is
+ * `data-photo-backing` (shifts/photo-backing.css): the band's own gradient behind a cut-out.
+ */
+.work-shift-band__photo {
+  position: relative;
+  display: grid;
+  min-width: 88px;
+  min-height: 88px;
+  align-self: stretch;
+  overflow: hidden;
+  aspect-ratio: 1;
+  place-items: center;
+}
+
+/* The picture is laid over the frame, so its natural size never sizes the band. */
+.work-shift-band__photo .product-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  object-fit: contain;
+}
+
+/* The photo slot's stand-in: the product has no photo on this station. */
+.work-shift-band__monogram {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--muted);
+  font: 700 44px/1 var(--font-ui);
+}
+
+.work-shift-band__copy {
+  display: grid;
+  min-width: 0;
+  padding-block: var(--sp-3);
+  gap: var(--sp-2);
+}
+
+.work-shift-band__copy h2 {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font: var(--floor-lg);
+  letter-spacing: -0.01em;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The chips wrap (station audit): in one row the counterparty's chip shrank to «для: ...» beside a
+   mode chip and the three counters; two rows still sit within the photo's 104 px. */
+.work-shift-band__chips {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* A chip keeps its words; only one wider than the band is cut (its full name is the title). */
+.work-shift-band__chip {
+  overflow: hidden;
+  flex: none;
+  max-width: 100%;
+  padding: 5px 14px;
+  border-radius: var(--r-round);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+  font: 600 16px/22px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-shift-band__chip[title] {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.work-shift-band__chip--mono {
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+/* The counters: the one accepted count, large, and the refused ones small beside it. */
+.work-shift-band__counters {
+  display: flex;
+  min-width: 0;
+  padding-block: var(--sp-3);
+  gap: var(--sp-2);
+  align-items: stretch;
+  font-variant-numeric: tabular-nums;
+}
+
+.work-shift-band__total,
+.work-shift-band__small {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  justify-items: center;
+  border-radius: var(--r-ctl);
+  text-align: center;
+}
+
+.work-shift-band__total {
+  min-width: 188px;
+  padding: var(--sp-2) var(--sp-4);
+  gap: 2px;
+  border: 1px solid var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.work-shift-band__small {
+  min-width: 84px;
+  padding: var(--sp-2);
+  gap: 2px;
+  border: 1px solid var(--line2);
+  background: transparent;
+}
+
+.work-shift-band__label {
+  margin: 0;
+  color: var(--muted);
+  font: 700 13px/18px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.work-shift-band__total .work-shift-band__label {
+  color: var(--ok-fg);
+}
+
+.work-shift-band__count {
+  margin: 0;
+  font: 600 56px/1 var(--font-mono);
+}
+
+.work-shift-band__small-count {
+  margin: 0;
+  color: var(--fg);
+  font: 600 36px/1 var(--font-mono);
+}
+
+.work-shift-band__planned,
+.work-shift-band__meta {
+  margin: 0;
+  font: 500 14px/18px var(--font-mono);
+  white-space: nowrap;
+}
+
+.work-shift-band__meta {
+  font-family: var(--font-ui);
+}
+
+.work-shift-band__bar {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ok-fg) 20%, transparent);
+}
+
+.work-shift-band__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ok-fg);
+}
+
+/* The open box: its title and count in one row, the places as cells, its action under them. */
+.work-box-fill {
+  display: grid;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(96px, 1fr) minmax(64px, auto);
+}
+
+.work-box-fill[data-grouped="true"] {
+  grid-template-rows: auto minmax(96px, 1fr) auto minmax(64px, auto);
+}
+
+/* The title on the left, the counter on the right edge of the block's header, on one baseline. */
+.work-box-fill__head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.work-box-fill__head h2 {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+.work-box-fill__count {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  font: var(--floor-counter-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* «Короб откроется с первым кодом»: words, not a count. */
+.work-box-fill__count[data-empty="true"] {
+  color: var(--fg-2);
+  font: var(--floor-body);
+  white-space: normal;
+}
+
+/* «5 из 12»: the numbers in the counter's face, the words (and the spaces) in the interface's. */
+.work-box-fill__count.work-of-count {
+  font: var(--floor-body);
+}
+
+.work-box-fill__count .work-of-count__number {
+  font: var(--floor-counter-sm);
+}
+
+.work-box-fill__count .work-of-count__word {
+  color: var(--fg-2);
+}
+
+.work-box-fill__grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: 5px;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  align-content: stretch;
+  justify-items: center;
+}
+
+.work-box-fill__grid[data-grouped="true"],
+.work-box-fill__grid[data-dense="true"] {
+  gap: 3px;
+}
+
+/* Ten or fewer places: one row of large numbered segments, readable from across the line. */
+.work-box-fill__grid[data-large="true"] {
+  gap: 8px;
+  justify-items: stretch;
+}
+
+.work-box-fill__grid[data-large="true"] .work-box-fill__cell {
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: auto;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--fg-3);
+  font: 700 clamp(20px, 2vw, 30px) / 1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="filled"] {
+  color: var(--fg-on-ok-solid);
+}
+
+.work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="next"] {
+  color: var(--fg-1);
+}
+
+/* The serial under the number: one monospace line, only where `cellSerialPlan` found room. */
+.work-box-fill__serial {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.work-box-fill__cell {
+  box-sizing: border-box;
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 2px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--surface-card);
+}
+
+.work-box-fill__cell[data-state="filled"] {
+  border-color: var(--ok-border);
+  background: var(--ok-solid);
+}
+
+.work-box-fill__cell[data-state="partial"] {
+  border-color: var(--ok-border);
+  background: linear-gradient(90deg, var(--ok-solid) 50%, var(--surface-card) 50%);
+}
+
+.work-box-fill__cell[data-state="next"] {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .work-box-fill__cell[data-latest="true"] {
+    animation: work-box-fill-accepted 150ms ease-out;
+  }
+}
+
+@keyframes work-box-fill-accepted {
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+.work-box-fill__grouped {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.work-box-fill__actions {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  gap: var(--sp-2);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-row: -2 / -1;
+  /* One height for the three: the tallest label's, never less than the 64 px touch target. */
+  align-items: stretch;
+}
+
+/*
+ * The three buttons under the cells are sized for a two-line label at the narrowest real width
+ * (a 1280 px panel at 125 % scaling is 1024 CSS px, a third of the box column is ~160 px): the
+ * kit's inline 64 px height gives way to `min-height`, the line is 24 px so two lines and the
+ * padding are 64 px exactly, the text is centred and balanced, and a word is never cut.
+ */
+.work-box-fill__actions .mk-btn {
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 64px !important;
+  /* 2 x 24 px of text, the padding and the 2 px border are 64 px. */
+  padding: calc(var(--sp-2) - 1px) var(--sp-2) !important;
+  box-sizing: border-box;
+  overflow: hidden;
+  line-height: 24px !important;
+  overflow-wrap: normal;
+  text-align: center;
+  text-wrap: balance;
+  white-space: normal;
+}
+
+/* The last scan: the verdict as one large word on its tone, readable from the line. */
+.work-scan-result {
+  display: grid;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.work-scan-result__head {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.work-scan-result h2,
+.work-facts h2,
+.work-unit-label h2 {
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+.work-scan-result__time {
+  color: var(--muted);
+  font: 500 18px/26px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-scan-result .work-screen__last {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  align-content: center;
+  justify-items: center;
+  gap: var(--sp-1);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--muted);
+  text-align: center;
+  box-shadow: none;
+}
+
+.work-scan-hero__word {
+  display: flex;
+  margin: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  font: 700 clamp(40px, 5vw, 60px) / 1.05 var(--font-ui);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.work-scan-hero__icon {
+  flex: none;
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.work-scan-hero__code {
+  margin: 0;
+  overflow: hidden;
+  max-width: 100%;
+  font: 500 28px/34px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The serial is the hero's code; the short GTIN stands small beneath it. */
+.work-scan-hero__code .scan-code {
+  justify-items: center;
+}
+
+.work-scan-hero__code .scan-code__serial {
+  font: 600 28px/32px var(--font-mono);
+}
+
+.work-scan-hero__detail {
+  margin: 0;
+  max-width: 100%;
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
+}
+
+.work-scan-result .work-screen__last[data-verdict="ok"] {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.work-scan-result .work-screen__last[data-verdict="duplicate"],
+.work-scan-result .work-screen__last[data-verdict="warn"] {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.work-scan-result .work-screen__last[data-verdict="error"] {
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/* An accepted scan lights the verdict for a moment (no overlay at the line's cadence). */
+.work-scan-result .work-screen__last--cue {
+  outline: 4px solid var(--ok-solid);
+  outline-offset: -4px;
+}
+
+/* A short window (1280×800): the verdict, the code and the line under it fit the hero's box (the code was cut). */
+@media (max-height: 900px) {
+  .work-scan-result .work-screen__last {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .work-scan-hero__word {
+    font-size: 44px;
+  }
+
+  .work-scan-hero__code {
+    font-size: 22px;
+    line-height: 24px;
+  }
+
+  .work-scan-hero__detail {
+    font-size: 16px;
+    line-height: 20px;
+  }
+}
+
+/* A box shift's hero sits above the history in the narrow column: word and code on one row. */
+.work-screen__instruments[data-layout="box"] .work-scan-result {
+  grid-template-rows: auto auto;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.work-screen__instruments[data-layout="box"] .work-screen__last {
+  display: flex;
+  padding: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  gap: 0 var(--sp-4);
+  align-items: center;
+  justify-content: center;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__word {
+  font-size: 36px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__code {
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__code .scan-code__serial {
+  font-size: 24px;
+  line-height: 28px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__detail {
+  flex-basis: 100%;
+  font-size: 16px;
+  line-height: 22px;
+}
+
+/* The shift's figures of a box shift, in the cloud journal's quality row style. */
+.work-facts {
+  display: grid;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
+}
+
+.work-facts dl {
+  display: grid;
+  margin: 0;
+  gap: var(--sp-1);
+}
+
+.work-facts dl > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  min-height: 40px;
+  padding-inline: var(--sp-2);
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+  border-left: 4px solid var(--linectl);
+  background: var(--panel);
+}
+
+.work-facts dt {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+/* A long value (the last box's SSCC) wraps under its term on a narrow screen, never cut. */
+.work-facts dd {
+  min-width: 0;
+  margin: 0 0 0 auto;
+  font: 600 20px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+/* The fixed floor action row: 84 px actions, never a scroll region, never the content. */
+.work-screen .station-floor-footer {
+  display: grid;
+  height: var(--work-footer-h);
+  min-height: var(--work-footer-h);
+  padding: 0 var(--sp-3) var(--sp-3);
+  box-sizing: border-box;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  border-top: 0;
+  background: transparent;
+}
+
+.work-footer__action.mk-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+/*
+ * A validation shift without labels has no «История этикеток»: its two actions keep the columns
+ * they have elsewhere (the operators' habit), the leave in the middle, the close on the right.
+ */
+.work-footer--two .work-footer__action:nth-child(1) {
+  grid-column: 2;
+}
+
+.work-footer--two .work-footer__action:nth-child(2) {
+  grid-column: 3;
+}
+
+/*
+ * The stops and notices of the line over the work (the cloud's «.work-screen__overlays»),
+ * and a stage of the work — the exceptions, the close, a label — over the instruments. The
+ * polite region is always on the page, so that what is put into it is announced, and never
+ * takes a tap itself: only its cards and its stage do.
+ */
+.work-screen__overlays {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  inset: 0 0 var(--work-footer-h);
+  padding: var(--sp-3);
+  overflow: hidden;
+  gap: var(--sp-3);
+  align-content: center;
+  justify-items: center;
+  pointer-events: none;
+}
+
+.work-screen__overlays > * {
+  position: relative;
+  z-index: 1;
+  width: min(720px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  pointer-events: auto;
+}
+
+/* A stage covers the instruments edge to edge, under the cards that may stand over it. */
+.work-screen__overlays > .work-screen__stage {
+  position: absolute;
+  z-index: 0;
+  display: grid;
+  width: auto;
+  max-height: none;
+  inset: 0;
+  padding: var(--sp-3);
+  overflow: auto;
+  gap: var(--sp-3);
+  align-content: start;
+  background: var(--surface-page);
+}
+
+/* Centred while it fits; a taller card starts at the top and scrolls, never cut off above. */
+.work-screen__overlays > .work-screen__stage[data-centred="true"] {
+  align-content: safe center;
+  justify-items: center;
+}
+
+.work-screen__overlays > .work-screen__stage[data-centred="true"] > * {
+  width: min(900px, 100%);
+}
+
+/* An overlay card: its title, its words and its row of floor actions. */
+.work-overlay {
+  padding: var(--sp-4) !important;
+  box-shadow: var(--shadow-overlay);
+}
+
+.work-overlay__title {
+  font: var(--floor-lg);
+}
+
+.work-overlay p,
+.work-overlay__body {
+  margin: 0;
+  font: var(--floor-body);
+}
+
+.work-overlay__body {
+  display: grid;
+  min-width: 0;
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+}
+
+.work-overlay__actions {
+  display: grid;
+  min-width: 0;
+  min-height: var(--control-floor);
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.work-overlay__actions .mk-btn {
+  min-width: 0 !important;
+  padding-inline: var(--sp-3) !important;
+}
+
+/* A line of progress in words («Закрываем короб…»), as a quiet card. */
+.work-overlay--note {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  font: var(--floor-body-strong);
+  text-align: center;
+}
+
+/* The leave in words: always on the page, nothing to see while it is empty. */
+.work-screen .work-screen__leaving {
+  position: absolute;
+  right: var(--sp-4);
+  bottom: calc(var(--work-footer-h) + var(--sp-1));
+  z-index: 4;
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+/* A refusal's flash never takes a tap: the buttons under it work. */
+.work-screen .work-screen__flash {
+  pointer-events: none;
+}
+
+@media (max-height: 880px) {
+  .work-shift-band {
+    padding: 0 var(--sp-3) 0 0;
+  }
+
+  /* Slimmer chips: when a wide band wraps them to two rows (a long counterparty, big counts) both still fit its height. */
+  .work-shift-band__chips {
+    gap: 6px;
+  }
+
+  .work-shift-band__chip {
+    padding: 2px 12px;
+    font: 600 15px/20px var(--font-ui);
+  }
+
+  .work-shift-band__copy,
+  /* Narrower counters give the title and the chips the room a validation band's three need. */
+  .work-shift-band__total {
+    min-width: 150px;
+  }
+
+  .work-shift-band__small {
+    min-width: 72px;
+  }
+
+  .work-shift-band__counters {
+    padding-block: var(--sp-2);
+  }
+
+  .work-shift-band__count {
+    font-size: 48px;
+  }
+
+  .work-shift-band__small-count {
+    font-size: 32px;
+  }
+}
+
+/*
+ * A label that waits takes the stage as the cloud's print dialogs do (BoxPrintRecovery,
+ * PalletClose, PrintVerification): the panel lays itself out (src/floor/print/label-panel.css).
+ */
+
+/* A very low window (a 1280x1024 panel at 150 % is ~680 CSS px high): the shift's figures give
+   the history panel the room its header needs; they are text, not touch targets. */
+@media (max-height: 760px) {
+  .work-facts {
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .work-facts dl > div {
+    min-height: 32px;
+  }
+}
+
+/*
+ * The compact work screen (a window up to 780 px high: the owner's terminal is a 1280x1024 panel at
+ * Windows 125 %, ~1024 x 640-720 CSS px). Nothing may clip or scroll the page, so the vertical rhythm
+ * shrinks as a whole: the 72 px action row (the primary's short-window size), a band of one title line
+ * and one row of chips, the open box with its three 64 px buttons, the pallet strip at the height of
+ * its own 64 px button, the last scan on one row, the figures as two slim rows, and the history takes
+ * the rest in whole rows (`scan-history.css`). Touch targets keep their 64 px; only text rows shrink.
+ */
+@media (max-height: 780px) {
+  .work-screen {
+    /* The short window's primary: 72 px, and the gap under it. */
+    --work-footer-h: calc(72px + var(--sp-2));
+  }
+
+  .work-screen__content {
+    padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  }
+
+  .work-screen__work,
+  .work-screen__instruments,
+  .work-screen__primary,
+  .work-screen__secondary {
+    gap: var(--sp-2);
+  }
+
+  .work-screen .station-floor-footer {
+    padding: 0 var(--sp-3) var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .work-screen .work-footer__action.mk-btn.floor-primary {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  /* The band: one title line, one row of chips, the photo a 72 px square at the least. */
+  .work-shift-band {
+    padding: 0 var(--sp-3) 0 0;
+    gap: var(--sp-3);
+  }
+
+  .work-shift-band__photo {
+    min-width: 72px;
+    min-height: 72px;
+  }
+
+  .work-shift-band__monogram {
+    font-size: 36px;
+  }
+
+  .work-shift-band__copy {
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .work-shift-band__copy h2 {
+    font: 600 22px/28px var(--font-ui);
+    -webkit-line-clamp: 1;
+  }
+
+  .work-shift-band__chips {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 6px;
+  }
+
+  .work-shift-band__chip {
+    padding: 2px 12px;
+    font: 600 15px/20px var(--font-ui);
+  }
+
+  /* The accepted count stays whole and large; the plan's percent and bar give their line up. */
+  .work-shift-band__counters {
+    padding-block: var(--sp-1);
+  }
+
+  .work-shift-band__total {
+    min-width: 150px;
+    padding: var(--sp-1) var(--sp-3);
+    gap: 0;
+  }
+
+  .work-shift-band__label {
+    font: 700 12px/16px var(--font-ui);
+  }
+
+  .work-shift-band__count {
+    font-size: 40px;
+  }
+
+  .work-shift-band__planned {
+    font: 500 14px/16px var(--font-mono);
+  }
+
+  .work-shift-band__bar,
+  .work-shift-band__meta {
+    display: none;
+  }
+
+  .work-shift-band__small {
+    min-width: 72px;
+    padding: var(--sp-1);
+  }
+
+  .work-shift-band__small-count {
+    font-size: 28px;
+  }
+
+  /* The open box: title and count on a slim row, the cells share the rest, the buttons keep 64 px. */
+  .work-box-fill {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+    grid-template-rows: auto minmax(72px, 1fr) minmax(64px, auto);
+  }
+
+  .work-box-fill[data-grouped="true"] {
+    grid-template-rows: auto minmax(72px, 1fr) auto minmax(64px, auto);
+  }
+
+  .work-box-fill__head h2 {
+    font: 600 20px/28px var(--font-ui);
+  }
+
+  .work-box-fill__count {
+    font: 600 32px/36px var(--font-mono);
+  }
+
+  .work-box-fill__count[data-empty="true"],
+  .work-box-fill__count.work-of-count {
+    font: var(--floor-body);
+  }
+
+  .work-box-fill__count .work-of-count__number {
+    font: 600 32px/36px var(--font-mono);
+  }
+
+  .work-box-fill__grid[data-large="true"] {
+    gap: 6px;
+  }
+
+  /* The last scan: the title and time on a slim row, the verdict and the code on one row. */
+  .work-screen__instruments[data-layout="box"] .work-scan-result {
+    padding: var(--sp-1) var(--sp-3) var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .work-scan-result__time {
+    font: 500 15px/20px var(--font-mono);
+  }
+
+  .work-scan-result h2 {
+    font: 600 16px/20px var(--font-ui);
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-screen__last {
+    padding: var(--sp-1) var(--sp-3);
+    gap: 0 var(--sp-3);
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__word {
+    font-size: 28px;
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__code .scan-code__serial {
+    font-size: 20px;
+    line-height: 24px;
+  }
+
+  .work-screen__instruments[data-layout="box"] .work-scan-hero__detail {
+    font-size: 15px;
+    line-height: 18px;
+  }
+
+  .work-scan-hero__code .scan-code__gtin {
+    font-size: 13px;
+    line-height: 14px;
+  }
+
+  /* The figures: two slim rows of text (not controls). */
+  .work-facts {
+    padding: var(--sp-1) var(--sp-3);
+    gap: 0;
+  }
+
+  .work-facts dl {
+    gap: 2px;
+  }
+
+  .work-facts dl > div {
+    min-height: 30px;
+    gap: var(--sp-2);
+  }
+
+  .work-facts dt {
+    font-size: 16px;
+    line-height: 22px;
+  }
+
+  .work-facts dd {
+    font-size: 18px;
+    line-height: 22px;
+  }
+}
+
+/*
+ * A stage that fills the window (the exceptions, the full scan history, the labels' history) is
+ * given the stage's whole height as its one track, so what it holds is laid out in that height —
+ * its list takes the rest and keeps its own scroll — instead of growing the stage past the window,
+ * where the buttons under the list would wait below the fold.
+ */
+.work-screen__overlays > .work-screen__stage:has(> .exception-flow),
+.work-screen__overlays > .work-screen__stage:has(> .scan-history--full),
+.work-screen__overlays > .work-screen__stage:has(> .unit-label-history) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+@media (max-height: 780px) {
+  .work-screen__overlays {
+    padding: var(--sp-1) var(--sp-3);
+  }
+
+  .work-screen__overlays > .work-screen__stage {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-2);
+  }
+}

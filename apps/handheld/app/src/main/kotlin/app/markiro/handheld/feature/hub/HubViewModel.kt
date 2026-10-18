@@ -18,7 +18,7 @@ import app.markiro.handheld.core.storage.InventoryTaskDao
 import app.markiro.handheld.core.storage.InventoryTaskEntity
 import app.markiro.handheld.core.storage.ShiftDao
 import app.markiro.handheld.core.storage.ShiftEntity
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.work.TeamRefresher
 import app.markiro.handheld.feature.work.TeamState
@@ -76,6 +76,12 @@ data class HubUi(
     val palletsPending: Int = 0,
     /** The entry «Продолжить» is going through, or how it was refused; the list's own states. */
     val dialog: app.markiro.handheld.feature.shift.ShiftDialog? = null,
+    /** A device paired with a host: no inventory and no write-off tiles (spec 8.7). */
+    val hostMode: Boolean = false,
+    /** The link with the host, text and icon on the hub; `null` before the first heartbeat and on a cloud device. */
+    val hostLink: app.markiro.handheld.core.host.HostLinkStatus? = null,
+    /** Records the host refused, kept for support: they are not [queue] (nothing is owed for them) but must be seen. */
+    val hostQuarantined: Int = 0,
 )
 
 sealed interface HubEvent {
@@ -101,7 +107,7 @@ class HubViewModel(
     private val config: DeviceConfigDao,
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
-    sync: SyncEngine,
+    sync: SyncDriver,
     shifts: ShiftDao,
     inventorySync: InventorySyncEngine,
     inventories: InventoryTaskDao,
@@ -125,6 +131,11 @@ class HubViewModel(
     },
     /** Null only in tests that never continue a shift. */
     private val shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository? = null,
+    /** The seam of the hub's counts; null only in tests that count through [api]. */
+    private val backend: app.markiro.handheld.core.backend.StationBackend? = null,
+    /** The host link and its refused records; absent in tests of the cloud's hub. */
+    hostLink: Flow<app.markiro.handheld.core.host.HostLinkStatus?> = flowOf(null),
+    hostQuarantined: Flow<Int> = flowOf(0),
 ) : ViewModel() {
     @Inject
     constructor(
@@ -133,7 +144,7 @@ class HubViewModel(
         config: DeviceConfigDao,
         session: SessionHolder,
         reachability: ReachabilityTracker,
-        sync: SyncEngine,
+        sync: SyncDriver,
         shifts: ShiftDao,
         inventorySync: InventorySyncEngine,
         inventories: InventoryTaskDao,
@@ -148,6 +159,9 @@ class HubViewModel(
         scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
         shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository,
         replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator,
+        backend: app.markiro.handheld.core.backend.StationBackend,
+        hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
+        hostOutbox: app.markiro.handheld.core.storage.HostOutboxDao,
     ) : this(
         recovery,
         api,
@@ -171,6 +185,9 @@ class HubViewModel(
         scannerLabel = { scannerLabel() },
         shiftRepository = shiftRepository,
         replacement = replacement,
+        backend = backend,
+        hostLink = hostLink.state.map { app.markiro.handheld.core.host.HostLinkStatus.of(it) },
+        hostQuarantined = hostOutbox.observeQuarantinedCount(),
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -226,6 +243,7 @@ class HubViewModel(
         printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission, dialog,
         palletPermission, memberships.observePendingCount(),
         replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null), replacement?.targetWaiting ?: flowOf(false),
+        hostLink, hostQuarantined,
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -241,18 +259,23 @@ class HubViewModel(
         val shiftDialog = values[12] as app.markiro.handheld.feature.shift.ShiftDialog?
         val canBuildPallets = values[13] as Boolean?
         val palletsPending = values[14] as Int
+        val link = if (cfg?.backend == "host") values[18] as app.markiro.handheld.core.host.HostLinkStatus? else null
         HubUi(
             printerConfigured = printer.missing.isEmpty() && printer.attention.isEmpty(),
             missingPrinterPurposes = printer.missing,
             printerAttentionPurposes = printer.attention,
             unprintedLabels = unprinted,
             organization = cfg?.organizationName.orEmpty(),
+            hostMode = cfg?.backend == "host",
             operatorName = ses.operator?.name.orEmpty(),
             lineName = cfg?.lineName,
             shifts = cfg?.shiftsCount,
             inventories = cfg?.inventoryCount,
             countsAt = cfg?.countsAt,
-            reachable = lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
+            // A host device is reachable as its heartbeat says: the cloud's reachability probe never sees the host's answers.
+            reachable = if (cfg?.backend == "host") link != null && link != app.markiro.handheld.core.host.HostLinkStatus.Offline && link != app.markiro.handheld.core.host.HostLinkStatus.CertificateChanged else lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
+            hostLink = link,
+            hostQuarantined = if (cfg?.backend == "host") values[19] as Int else 0,
             scannerLabel = scannerLabel(),
             // `pallet_memberships` is one of the sync engine's own channels, so
             // `syncState.pending` ALREADY counts every unsent membership. Adding
@@ -282,9 +305,15 @@ class HubViewModel(
         viewModelScope.launch { recovery.work {
             val current = config.get() ?: return@work
             val counts = runCatching {
-                val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
-                val tasks = api.inventoryTasks().items.size
-                shifts to tasks
+                val seam = backend
+                if (seam != null) {
+                    val counted = seam.hubCounts()
+                    counted.shifts to counted.inventories
+                } else {
+                    val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
+                    val tasks = api.inventoryTasks().items.size
+                    shifts to tasks
+                }
             }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else return@work }
             recovery.commit { config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now())) }
         }
@@ -343,4 +372,12 @@ class HubViewModel(
     }
 
     fun signOut() = session.signOut()
+
+    /**
+     * The host's certificate changed and the person chose to pair again: the credential is sealed exactly as a rejected key seals it (the queue
+     * and the data stay), and the shell goes to the pairing screen, which asks for the office's new fingerprint and a new code.
+     */
+    fun repairHostLink() {
+        viewModelScope.launch { runCatching { recovery.reject(recovery.token()) } }
+    }
 }

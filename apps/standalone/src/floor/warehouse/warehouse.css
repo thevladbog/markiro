@@ -1,0 +1,166 @@
+/*
+  «Повторная печать этикеток»: the frame of the screen and of its full-screen questions (the
+  templates' picker: .warehouse-panel, .warehouse-template-*, .label-template-*, ported from the
+  cloud station's station.css). The reprint's own zones, journal and detail are reprint.css.
+*/
+section.warehouse-reprint {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow: hidden;
+  /* A fixed, non-scrolling station screen (as the shift hub's): it never grows the page. */
+  contain: size;
+  gap: var(--sp-5);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: var(--fg-1);
+  outline: none;
+}
+
+section.warehouse-reprint--question {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* A question, in the cloud's full-screen dialog layout: title and «Отмена», the body, the answer. */
+.warehouse-picker {
+  min-height: 0;
+  height: 100%;
+  outline: none;
+}
+
+.warehouse-panel {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-page);
+}
+
+.warehouse-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.warehouse-panel__header h2 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.warehouse-panel__body {
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow-y: auto;
+}
+
+.warehouse-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+/* The templates: the kinds of label as tabs, the list beside the preview. */
+.warehouse-template-body {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.warehouse-template-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.warehouse-template-grid {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.label-template-choices {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+}
+
+.label-template-list {
+  display: flex;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-1);
+  overflow-y: auto;
+  flex-direction: column;
+  gap: var(--sp-3);
+  list-style: none;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.label-template-list > * {
+  flex-shrink: 0;
+}
+
+.label-template-empty {
+  margin: 0;
+  color: var(--fg-2);
+}
+
+.label-template-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.warehouse-label-preview {
+  display: grid;
+  margin: 0;
+  padding: var(--sp-5);
+  justify-items: center;
+  gap: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+}
+
+.warehouse-label-preview canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 2px solid var(--fg-3);
+  background: var(--floor-paper);
+}
+
+.warehouse-label-preview figcaption {
+  color: var(--fg-3);
+  text-align: center;
+}
+
+.warehouse-picker__summary {
+  min-width: 0;
+  margin: 0 auto 0 0;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}

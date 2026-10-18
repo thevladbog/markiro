@@ -1,0 +1,904 @@
+import { formatSsccHri, parseScannedSscc } from "@markiro/domain";
+import type { TFunction } from "i18next";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Alert, Button, Input } from "@markiro/ui";
+
+import {
+  DISASSEMBLE_REASONS,
+  OTHER_REASON,
+  REPRINT_REASONS,
+  type DisassembleReason,
+  type ReprintReason,
+} from "../exception-reasons.js";
+import { VIEW_GUARD_MS, type PanelSettings } from "../print/LabelPanel.js";
+import { printerFormatText } from "../print/printer-format.js";
+import { resolvePrinter, type PrinterProfile } from "../setup/workstation-settings.js";
+import { formatQuantity } from "../shifts/shift-text.js";
+import {
+  InvalidReasonError,
+  reasonWords,
+  type ClosedBox,
+  type ExceptionReason,
+} from "./box-exceptions.js";
+import "./exception-flow.css";
+import type { ClosedPallet } from "./pallet-exceptions.js";
+
+/** The four exceptions of a box (stage 2a spec §5.7.6) and the two of a pallet (plan ПЛ-Ц). */
+export type ExceptionAction =
+  "undo" | "clear" | "reprint" | "disassemble" | "pallet_reprint" | "pallet_disassemble";
+
+/**
+ * How an exception went, as the screen says it: done; a reprint whose new
+ * label now waits (the work screen shows it); nothing to take out; the box
+ * changed meanwhile; the box is no longer a closed box of the shift; its
+ * label still waits (also the answer, never on this screen, of an action whose
+ * screen a waiting label took while it queued); its label was made from another revision of the
+ * template than the shift holds now; the operator is leaving the shift; or
+ * this computer could not write. Nothing but `done` and `label` wrote
+ * anything the screen can count on (`failed` may have: the work screen
+ * tells the host all the same).
+ */
+export type ExceptionOutcome =
+  | { kind: "done"; action: ExceptionAction }
+  | { kind: "label" }
+  | { kind: "empty" }
+  | { kind: "stale" }
+  | { kind: "unavailable" }
+  | { kind: "label_waiting" }
+  | { kind: "template_changed" }
+  | { kind: "leaving" }
+  | { kind: "failed" };
+
+/** A reason of its action's list: a pallet's lists are a box's (plan ПЛ-Х). */
+type Reasoned =
+  | { action: "reprint" | "pallet_reprint"; reason: ExceptionReason<ReprintReason> }
+  | { action: "disassemble" | "pallet_disassemble"; reason: ExceptionReason<DisassembleReason> };
+
+type BoxAction = Reasoned["action"];
+
+/**
+ * What a reprint or a disassembly is done to: a closed box and its codes, or a
+ * closed pallet and its boxes (`quantity` counts what the subject holds).
+ */
+interface Subject {
+  id: string;
+  sscc: string;
+  quantity: number;
+}
+
+/** An action on a closed pallet (plan ПЛ-Ц). */
+function onPallet(action: BoxAction): boolean {
+  return action === "pallet_reprint" || action === "pallet_disassemble";
+}
+
+/** The list of reasons, and the words of them, an action takes. */
+function reasonKind(action: BoxAction): "reprint" | "disassemble" {
+  return action === "reprint" || action === "pallet_reprint" ? "reprint" : "disassemble";
+}
+
+type Stage =
+  | { kind: "actions" }
+  | { kind: "confirm_clear" }
+  | { kind: "target"; action: BoxAction; tail: string; note: "not_sscc" | "not_found" | null }
+  | { kind: "reason"; action: BoxAction; box: Subject }
+  | { kind: "words"; action: BoxAction; box: Subject; text: string; invalid: boolean }
+  | { kind: "confirm"; box: Subject; reasoned: Reasoned }
+  | { kind: "applying"; pallet: boolean }
+  | { kind: "result"; outcome: ExceptionOutcome; pallet: boolean };
+
+/**
+ * What the box choice made of a scan: the box is picked, the code is no SSCC,
+ * or no closed box of the shift has it. `null` — the choice is not open any
+ * more (a scan before it was, or after the box was picked): the screen refuses
+ * the scan as it refuses every scan while the work is stopped.
+ */
+export type BoxScanVerdict = "taken" | "not_sscc" | "not_found";
+
+/**
+ * The printers a reprint goes to, as the reprint's confirmation knows them: a
+ * box's label goes to the printer of «Короб», a pallet's to that of «Паллета».
+ */
+type ReprintPrinter =
+  | { kind: "loading" }
+  | { kind: "ready"; box: PrinterProfile | null; pallet: PrinterProfile | null }
+  | { kind: "failed" };
+
+/** The most boxes the list shows at once: more are found by the last digits of their SSCC. */
+export const MAX_LISTED_BOXES = 12;
+
+/** The longest tail of digits the pad takes: an SSCC has 18. */
+const MAX_TAIL = 18;
+
+/**
+ * The boxes — or the pallets (plan ПЛ-Ц) — whose SSCC ends with `tail`, the
+ * first `MAX_LISTED_BOXES` of them, and how many more.
+ */
+export function boxesByTail<Item extends { sscc: string }>(
+  boxes: readonly Item[],
+  tail: string,
+): { shown: Item[]; hidden: number } {
+  const matching = boxes.filter((box) => box.sscc.endsWith(tail));
+  return {
+    shown: matching.slice(0, MAX_LISTED_BOXES),
+    hidden: Math.max(0, matching.length - MAX_LISTED_BOXES),
+  };
+}
+
+/** The line that names the box or the pallet a reason is asked for. */
+function subjectKey(action: BoxAction): string {
+  return onPallet(action) ? "floor.exceptions.reason.pallet" : "floor.exceptions.reason.box";
+}
+
+/** The printer a reprint of `action` goes to: «Паллета» for a pallet, «Короб» for a box. */
+function printerOf(
+  printers: { box: PrinterProfile | null; pallet: PrinterProfile | null },
+  action: BoxAction,
+): PrinterProfile | null {
+  return onPallet(action) ? printers.pallet : printers.box;
+}
+
+const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
+
+/** The glyph of an action's card, as the cloud's `ExceptionActions` marks them. */
+const ACTION_GLYPHS: Record<ExceptionAction, string> = {
+  undo: "↩",
+  clear: "⌫",
+  reprint: "⎙",
+  disassemble: "✕",
+  pallet_reprint: "⎙",
+  pallet_disassemble: "✕",
+};
+
+/**
+ * The view a stage shows: the guard against a second tap and the focus follow
+ * a change of it, not the typing of a digit or of a word into the same view.
+ */
+function viewOf(stage: Stage): string {
+  switch (stage.kind) {
+    case "target":
+      return `target:${stage.action}`;
+    case "reason":
+    case "words":
+      return `${stage.kind}:${stage.action}:${stage.box.id}`;
+    case "confirm":
+      return `confirm:${stage.reasoned.action}:${stage.box.id}`;
+    case "result":
+      return `result:${stage.outcome.kind}`;
+    case "actions":
+    case "confirm_clear":
+    case "applying":
+      return stage.kind;
+  }
+}
+
+/**
+ * The words of an outcome. What a pallet's action could not do is said of the
+ * pallet (plan ПЛ-Ц); the rest — a template that changed, the leave, a failed
+ * write — is said the same of a box and of a pallet.
+ */
+function resultKey(outcome: ExceptionOutcome, pallet: boolean): string {
+  if (outcome.kind === "done") return `floor.exceptions.result.done.${outcome.action}`;
+  const ofPallet =
+    pallet &&
+    (outcome.kind === "stale" ||
+      outcome.kind === "unavailable" ||
+      outcome.kind === "label_waiting");
+  return ofPallet
+    ? `floor.exceptions.result.pallet.${outcome.kind}`
+    : `floor.exceptions.result.${outcome.kind}`;
+}
+
+/** What a view is called: the heading of the view and the name of the group the focus lands on. */
+function stageLabel(stage: Stage, t: TFunction): string {
+  switch (stage.kind) {
+    case "actions":
+      return t("floor.exceptions.choose");
+    case "confirm_clear":
+      return t("floor.exceptions.confirm.clear.title");
+    case "target":
+      return t(`floor.exceptions.target.title.${stage.action}`);
+    case "reason":
+      return t("floor.exceptions.reason.title");
+    case "words":
+      return t(`floor.exceptions.reasons.${reasonKind(stage.action)}.other`);
+    case "confirm":
+      return t(`floor.exceptions.confirm.${stage.reasoned.action}.title`);
+    case "applying":
+      return t("floor.exceptions.applying");
+    case "result":
+      return t(resultKey(stage.outcome, stage.pallet));
+  }
+}
+
+const realClock = () => performance.now();
+
+export interface ExceptionFlowProps {
+  /** Codes in the shift's open box: «Снять последний код» and «Очистить короб» need some. */
+  openItems: number;
+  /** The shift's closed boxes not taken apart, the last first; `null` while they are read. */
+  boxes: readonly ClosedBox[] | null;
+  onUndo: () => Promise<ExceptionOutcome>;
+  onClear: () => Promise<ExceptionOutcome>;
+  onReprint: (boxId: string, reason: ExceptionReason<ReprintReason>) => Promise<ExceptionOutcome>;
+  onDisassemble: (
+    boxId: string,
+    reason: ExceptionReason<DisassembleReason>,
+  ) => Promise<ExceptionOutcome>;
+  /**
+   * The shift's closed pallets not taken apart, the last first (plan ПЛ-Ц);
+   * `null` while they are read; absent for a shift without pallets, which
+   * offers no pallet's exception.
+   */
+  pallets?: readonly ClosedPallet[] | null;
+  onPalletReprint?: (
+    palletId: string,
+    reason: ExceptionReason<ReprintReason>,
+  ) => Promise<ExceptionOutcome>;
+  onPalletDisassemble?: (
+    palletId: string,
+    reason: ExceptionReason<DisassembleReason>,
+  ) => Promise<ExceptionOutcome>;
+  /**
+   * The workstation's settings: which printer «Короб» has now, the printer a
+   * reprint goes to (the same choice `reprintBox` makes), read when the
+   * exceptions open.
+   */
+  loadSettings: () => Promise<PanelSettings>;
+  /** The workstation setup, offered where no printer is assigned; absent where the floor gives none. */
+  onSetup?: () => void;
+  /**
+   * Hands the work screen the scan listener of the box choice (`null` — none):
+   * while a box is chosen a scan of its label picks it, and is never
+   * journalled. It answers what it made of the scan, so that the screen gives
+   * it its tone and its words, or `null` when the choice is not open.
+   */
+  registerScan: (listener: ((raw: string) => BoxScanVerdict | null) | null) => void;
+  /** A text field takes typing (`true`) or gives it back: a keyboard scanner's keys are not a scan then. */
+  onTextEntry: (active: boolean) => void;
+  /** Back to the work: never held, whatever the screen shows. */
+  onBack: () => void;
+  /**
+   * Opened from the open box's own button (the cloud's box instrument): «Снять
+   * последний код» runs at once, as its card does; «Очистить короб» opens on
+   * its confirmation. The same actions, words and confirmations as from the
+   * cards; «Назад» from the confirmation goes to the cards, as there.
+   */
+  start?: "undo" | "clear";
+  /** Milliseconds from a clock that does not go back; the guard after a change of view reads it. */
+  clock?: () => number;
+}
+
+/**
+ * The exceptions of the work screen (stage 2a spec §5.7.6, the cloud
+ * station's `ExceptionFlow`): take the last code out of the open box, clear
+ * it, print a closed box's label again, take a closed box apart. A closed
+ * box is chosen by a scan of its label or by the last digits of its SSCC on
+ * a pad of 64 px keys (a text field would take a keyboard scanner's keys); a
+ * reprint and a disassembly need a reason of their list, with words only for
+ * «Другая причина»; a clear, a reprint and a disassembly are confirmed, the
+ * box and its SSCC named, the button that destroys apart from «Назад»; a
+ * reprint names the printer «Короб» has now before it is confirmed (or says
+ * that none is assigned, and what follows), a disassembly says that it cannot
+ * be undone. Each
+ * action runs as the line's next piece of work, once, and says how it went.
+ * «Назад» is there at every step but while an action writes. A shift with
+ * pallets (plan ПЛ-Ц) prints a closed pallet's label again and takes a closed
+ * pallet apart the same way: chosen by a scan of its label or the last digits
+ * of its SSCC (several pallets that end alike are all listed, and none is
+ * taken for the operator), with a reason of the same lists, confirmed, a
+ * disassembly said to be final. A press is
+ * ignored for `VIEW_GUARD_MS` after the screen changed its view (the second
+ * tap of a gloved double tap lands on whatever the new view put under the
+ * finger), and the focus goes to the view itself, never to a button. It sits
+ * in the work screen's polite region, so its alerts have no role of their own.
+ */
+export function ExceptionFlow({
+  openItems,
+  boxes,
+  onUndo,
+  onClear,
+  onReprint,
+  onDisassemble,
+  pallets,
+  onPalletReprint,
+  onPalletDisassemble,
+  loadSettings,
+  onSetup,
+  registerScan,
+  onTextEntry,
+  onBack,
+  start,
+  clock = realClock,
+}: ExceptionFlowProps) {
+  const { t } = useTranslation();
+  const [stage, setStage] = useState<Stage>(
+    start === "clear"
+      ? { kind: "confirm_clear" }
+      : start === "undo"
+        ? { kind: "applying", pallet: false }
+        : { kind: "actions" },
+  );
+  const alive = useRef(true);
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  /** The closed boxes, or for a pallet's action the closed pallets, as subjects; `null` while they are read. */
+  const subjects = (action: BoxAction): Subject[] | null => {
+    if (onPallet(action)) {
+      return pallets === undefined || pallets === null
+        ? null
+        : pallets.map((pallet) => ({
+            id: pallet.id,
+            sscc: pallet.sscc,
+            quantity: pallet.boxCount,
+          }));
+    }
+    return boxes === null
+      ? null
+      : boxes.map((box) => ({ id: box.id, sscc: box.sscc, quantity: box.itemCount }));
+  };
+  // What a scan of the choice reads when it lands.
+  const current = useRef({ stage, subjects });
+  useLayoutEffect(() => {
+    current.current = { stage, subjects };
+  });
+
+  const choosing = stage.kind === "target";
+  useEffect(() => {
+    if (!choosing) return;
+    registerScan((raw) => {
+      const now = current.current.stage;
+      // Not the choice any more, though no render has said so yet: the screen refuses the scan.
+      if (now.kind !== "target") return null;
+      // The next stage is known at once, so that a second scan before the render finds the choice made.
+      const take = (next: Stage): void => {
+        current.current = { stage: next, subjects: current.current.subjects };
+        setStage(next);
+      };
+      const sscc = parseScannedSscc(raw);
+      if (sscc === null) {
+        take({ ...now, note: "not_sscc" });
+        return "not_sscc";
+      }
+      const box = current.current
+        .subjects(now.action)
+        ?.find((candidate) => candidate.sscc === sscc);
+      if (box === undefined) {
+        take({ ...now, note: "not_found" });
+        return "not_found";
+      }
+      take({ kind: "reason", action: now.action, box });
+      return "taken";
+    });
+    return () => registerScan(null);
+  }, [choosing, registerScan]);
+
+  // The printer a reprint goes to, read once when the exceptions open (the setup is another
+  // screen: nothing changes it while this one is up), the choice `reprintBox` makes.
+  const [reprintPrinter, setReprintPrinter] = useState<ReprintPrinter>({ kind: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    loadSettings().then(
+      (settings) => {
+        if (!cancelled) {
+          setReprintPrinter({
+            kind: "ready",
+            box: resolvePrinter(settings, "box"),
+            pallet: resolvePrinter(settings, "pallet"),
+          });
+        }
+      },
+      () => {
+        if (!cancelled) setReprintPrinter({ kind: "failed" });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSettings]);
+
+  // The words field takes the keyboard from the scanner while its view is up
+  // — and gives it back when the view goes, however it goes (a blur does not
+  // come when the field is removed by Enter).
+  const typing = stage.kind === "words";
+  useEffect(() => {
+    if (!typing) return;
+    return () => onTextEntry(false);
+  }, [typing, onTextEntry]);
+
+  // The view, its guard and its focus.
+  const view = viewOf(stage);
+  const viewChangedAt = useRef<number>(Number.NEGATIVE_INFINITY);
+  const viewRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    viewChangedAt.current = clock();
+  }, [view, clock]);
+  useEffect(() => {
+    viewRef.current?.focus();
+  }, [view]);
+
+  /** Props of a button: a press just after the view changed does nothing. */
+  const press = (action: () => void) => ({
+    onClick: () => {
+      const since = clock() - viewChangedAt.current;
+      if (since >= 0 && since < VIEW_GUARD_MS) return;
+      action();
+    },
+  });
+
+  // One action at a time: a second press before the first one's view is up does nothing.
+  const running = useRef(false);
+  const run = (work: () => Promise<ExceptionOutcome>, pallet = false) => {
+    if (running.current) return;
+    running.current = true;
+    setStage({ kind: "applying", pallet });
+    work().then(
+      (outcome) => {
+        running.current = false;
+        if (alive.current) setStage({ kind: "result", outcome, pallet });
+      },
+      () => {
+        running.current = false;
+        if (alive.current) setStage({ kind: "result", outcome: { kind: "failed" }, pallet });
+      },
+    );
+  };
+
+  // «Снять последний код» pressed under the box: the action runs once, on entry.
+  // The undo the latest render would run, read by the entry's effect.
+  const startUndo = useRef<() => void>(() => undefined);
+  useLayoutEffect(() => {
+    startUndo.current = () => run(onUndo);
+  });
+  const started = useRef(false);
+  useEffect(() => {
+    if (start !== "undo" || started.current) return;
+    started.current = true;
+    startUndo.current();
+  }, [start]);
+
+  const apply = (box: Subject, reasoned: Reasoned) => {
+    // A pallet's action the floor does not give is a pallet that is not there: nothing is done.
+    const missing = (): Promise<ExceptionOutcome> => Promise.resolve({ kind: "unavailable" });
+    run(() => {
+      switch (reasoned.action) {
+        case "reprint":
+          return onReprint(box.id, reasoned.reason);
+        case "disassemble":
+          return onDisassemble(box.id, reasoned.reason);
+        case "pallet_reprint":
+          return onPalletReprint?.(box.id, reasoned.reason) ?? missing();
+        case "pallet_disassemble":
+          return onPalletDisassemble?.(box.id, reasoned.reason) ?? missing();
+      }
+    }, onPallet(reasoned.action));
+  };
+
+  const pick = (action: BoxAction, box: Subject, code: string, text: string | null) => {
+    if (action === "reprint" || action === "pallet_reprint") {
+      const reason = REPRINT_REASONS.find((candidate) => candidate === code);
+      if (reason !== undefined) {
+        setStage({ kind: "confirm", box, reasoned: { action, reason: { code: reason, text } } });
+      }
+      return;
+    }
+    const reason = DISASSEMBLE_REASONS.find((candidate) => candidate === code);
+    if (reason !== undefined) {
+      setStage({ kind: "confirm", box, reasoned: { action, reason: { code: reason, text } } });
+    }
+  };
+
+  const back = (to: Stage | null) => (
+    <Button
+      size="floor"
+      variant="secondary"
+      {...press(() => (to === null ? onBack() : setStage(to)))}
+    >
+      {t("floor.exceptions.back")}
+    </Button>
+  );
+
+  const title = t("floor.exceptions.title");
+  const label = stageLabel(stage, t);
+  /** Where a reprint of `action` goes: the printer of its purpose, or the words that none is assigned. */
+  const printerLine = (action: BoxAction) => {
+    if (reprintPrinter.kind === "loading") return null;
+    const printer = reprintPrinter.kind === "failed" ? null : printerOf(reprintPrinter, action);
+    return (
+      <p>
+        {reprintPrinter.kind === "failed"
+          ? t("floor.print.target.unknown")
+          : printer === null
+            ? t(`floor.exceptions.confirm.${action}.noPrinter`)
+            : t("floor.print.target.label", {
+                name: printer.name,
+                language: printerFormatText(t, printer),
+                dpi: printer.dpi,
+              })}
+      </p>
+    );
+  };
+  /** An action's card: its glyph and name, and one line of what it does (the cloud's `ExceptionActions`). */
+  const actionCard = (action: ExceptionAction, disabled: boolean, onPress: () => void) => {
+    const name = t(`floor.exceptions.actions.${action}`);
+    const danger = action === "disassemble" || action === "pallet_disassemble";
+    return (
+      <Button
+        key={action}
+        size="floor"
+        variant="secondary"
+        className="exception-action"
+        data-action={action}
+        data-danger={danger ? "true" : undefined}
+        aria-label={name}
+        disabled={disabled}
+        {...press(onPress)}
+      >
+        <span className="exception-action__title">
+          <span aria-hidden="true" className="exception-action__glyph">
+            {ACTION_GLYPHS[action]}
+          </span>
+          {name}
+        </span>
+        <span className="exception-action__hint">{t(`floor.exceptions.hints.${action}`)}</span>
+      </Button>
+    );
+  };
+  const body = () => {
+    switch (stage.kind) {
+      case "actions": {
+        const closed = boxes ?? [];
+        const closedPallets = pallets ?? [];
+        const nothing =
+          openItems === 0 &&
+          boxes !== null &&
+          closed.length === 0 &&
+          pallets !== null &&
+          closedPallets.length === 0;
+        return (
+          <div className="exception-stage exception-stage--action">
+            <h3>{label}</h3>
+            {boxes === null && <p>{t("floor.exceptions.loading")}</p>}
+            {nothing && <p>{t("floor.exceptions.none")}</p>}
+            <div className="exception-actions">
+              {actionCard("undo", openItems === 0, () => run(onUndo))}
+              {/* The quantity it names is trusted once the numbers were read (`boxes` come after them). */}
+              {actionCard("clear", openItems === 0 || boxes === null, () =>
+                setStage({ kind: "confirm_clear" }),
+              )}
+              {actionCard("reprint", closed.length === 0, () =>
+                setStage({ kind: "target", action: "reprint", tail: "", note: null }),
+              )}
+              {actionCard("disassemble", closed.length === 0, () =>
+                setStage({ kind: "target", action: "disassemble", tail: "", note: null }),
+              )}
+              {pallets !== undefined && (
+                <>
+                  {actionCard("pallet_reprint", closedPallets.length === 0, () =>
+                    setStage({ kind: "target", action: "pallet_reprint", tail: "", note: null }),
+                  )}
+                  {actionCard("pallet_disassemble", closedPallets.length === 0, () =>
+                    setStage({
+                      kind: "target",
+                      action: "pallet_disassemble",
+                      tail: "",
+                      note: null,
+                    }),
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      }
+      case "confirm_clear":
+        return (
+          <div className="exception-stage exception-confirm">
+            <Alert tone="warn" role="presentation" className="exception-card" title={label}>
+              <p>
+                {t("floor.exceptions.confirm.clear.body", { quantity: formatQuantity(openItems) })}
+              </p>
+              <div className="standalone-form__actions exceptions__confirm">
+                {back({ kind: "actions" })}
+                <Button size="floor" variant="destructive" {...press(() => run(onClear))}>
+                  {t("floor.exceptions.confirm.clear.action")}
+                </Button>
+              </div>
+            </Alert>
+          </div>
+        );
+      case "target": {
+        const listed = subjects(stage.action);
+        const { shown, hidden } = boxesByTail(listed ?? [], stage.tail);
+        const type = (tail: string) => setStage({ ...stage, tail, note: null });
+        // A pallet's words: `floor.exceptions.target.pallet.*` (plan ПЛ-Ц).
+        const words = onPallet(stage.action)
+          ? "floor.exceptions.target.pallet"
+          : "floor.exceptions.target";
+        const digit = (value: string) => (
+          <Button
+            key={value}
+            size="floor"
+            variant="secondary"
+            className="sscc-search__key"
+            disabled={stage.tail.length >= MAX_TAIL}
+            {...press(() => type(stage.tail + value))}
+          >
+            {value}
+          </Button>
+        );
+        return (
+          <div className="exception-stage exception-stage--target" data-action={stage.action}>
+            <div className="exception-target__finder">
+              <div className="exception-target__scan">
+                <span aria-hidden="true" className="exception-target__scan-glyph">
+                  ⌖
+                </span>
+                <p>{t(`${words}.hint`)}</p>
+              </div>
+              {stage.note !== null && (
+                <Alert tone="error" role="presentation">
+                  <span role="alert">{t(`${words}.${stage.note}`)}</span>
+                </Alert>
+              )}
+              <div
+                className="sscc-search"
+                role="group"
+                aria-label={t("floor.exceptions.target.pad")}
+              >
+                <p
+                  className="sscc-search__field"
+                  data-empty={stage.tail === "" ? "true" : undefined}
+                >
+                  {stage.tail === ""
+                    ? t("floor.exceptions.target.tailEmpty")
+                    : t("floor.exceptions.target.tail", { tail: stage.tail })}
+                </p>
+                <div className="sscc-search__pad">
+                  {DIGITS.slice(0, 9).map(digit)}
+                  <Button
+                    size="floor"
+                    variant="secondary"
+                    className="sscc-search__key sscc-search__key--muted"
+                    aria-label={t("floor.exceptions.target.erase")}
+                    disabled={stage.tail === ""}
+                    {...press(() => type(stage.tail.slice(0, -1)))}
+                  >
+                    <span aria-hidden="true">⌫</span>
+                  </Button>
+                  {digit("0")}
+                </div>
+              </div>
+            </div>
+            <div className="shift-boxes">
+              <h3>{label}</h3>
+              {listed === null ? (
+                <p className="shift-boxes__empty">{t(`${words}.loading`)}</p>
+              ) : shown.length === 0 ? (
+                <p className="shift-boxes__empty">{t(`${words}.nothing`)}</p>
+              ) : (
+                <div className="shift-boxes__list">
+                  {shown.map((box) => (
+                    <Button
+                      key={box.id}
+                      size="floor"
+                      variant="secondary"
+                      className="shift-boxes__row"
+                      {...press(() => setStage({ kind: "reason", action: stage.action, box }))}
+                    >
+                      {t(`${words}.box`, {
+                        sscc: formatSsccHri(box.sscc),
+                        quantity: formatQuantity(box.quantity),
+                      })}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {hidden > 0 && (
+                <p className="shift-boxes__hidden">
+                  {t(`${words}.more`, { number: formatQuantity(hidden) })}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      }
+      case "reason": {
+        const kind = reasonKind(stage.action);
+        const reasons = kind === "reprint" ? REPRINT_REASONS : DISASSEMBLE_REASONS;
+        return (
+          <div className="exception-stage exception-stage--reason">
+            <h3>{label}</h3>
+            <p>{t(subjectKey(stage.action), { sscc: formatSsccHri(stage.box.sscc) })}</p>
+            <div className="exception-reasons">
+              {reasons.map((code) => (
+                <Button
+                  key={code}
+                  size="floor"
+                  variant="secondary"
+                  fullWidth
+                  {...press(() =>
+                    code === OTHER_REASON
+                      ? setStage({ ...stage, kind: "words", text: "", invalid: false })
+                      : pick(stage.action, stage.box, code, null),
+                  )}
+                >
+                  {t(`floor.exceptions.reasons.${kind}.${code}`)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        );
+      }
+      case "words": {
+        const next = () => {
+          try {
+            pick(stage.action, stage.box, OTHER_REASON, reasonWords(stage.text));
+          } catch (error) {
+            if (!(error instanceof InvalidReasonError)) throw error;
+            setStage({ ...stage, invalid: true });
+          }
+        };
+        return (
+          <div className="exception-stage exception-other-reason">
+            <h3>{label}</h3>
+            <p>{t(subjectKey(stage.action), { sscc: formatSsccHri(stage.box.sscc) })}</p>
+            <Input
+              size="floor"
+              label={t("floor.exceptions.words.label")}
+              hint={t("floor.exceptions.words.hint")}
+              value={stage.text}
+              {...(stage.invalid ? { error: t("floor.exceptions.words.invalid") } : {})}
+              onChange={(event) =>
+                setStage({ ...stage, text: event.currentTarget.value, invalid: false })
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  next();
+                }
+              }}
+              onFocus={() => onTextEntry(true)}
+              onBlur={() => onTextEntry(false)}
+            />
+            <div className="standalone-form__actions exceptions__confirm">
+              {back({ kind: "reason", action: stage.action, box: stage.box })}
+              <Button size="floor" {...press(next)}>
+                {t("floor.exceptions.words.next")}
+              </Button>
+            </div>
+          </div>
+        );
+      }
+      case "confirm": {
+        const { box, reasoned } = stage;
+        const kind = reasonKind(reasoned.action);
+        const reasonText =
+          reasoned.reason.text ?? t(`floor.exceptions.reasons.${kind}.${reasoned.reason.code}`);
+        return (
+          <div className="exception-stage exception-confirm">
+            <Alert
+              tone={kind === "disassemble" ? "error" : "warn"}
+              role="presentation"
+              className="exception-card"
+              title={label}
+            >
+              <p className="exception-confirm__sscc">
+                {t(`floor.exceptions.confirm.${reasoned.action}.body`, {
+                  sscc: formatSsccHri(box.sscc),
+                  quantity: formatQuantity(box.quantity),
+                })}
+              </p>
+              {kind === "disassemble" && (
+                <p>{t(`floor.exceptions.confirm.${reasoned.action}.final`)}</p>
+              )}
+              <p>{t("floor.exceptions.confirm.reason", { reason: reasonText })}</p>
+              {kind === "reprint" && printerLine(reasoned.action)}
+              <div className="standalone-form__actions exceptions__confirm">
+                {back({ kind: "reason", action: reasoned.action, box })}
+                {kind === "reprint" &&
+                  reprintPrinter.kind === "ready" &&
+                  printerOf(reprintPrinter, reasoned.action) === null &&
+                  onSetup !== undefined && (
+                    <Button size="floor" variant="secondary" {...press(onSetup)}>
+                      {t("floor.print.setup")}
+                    </Button>
+                  )}
+                <Button
+                  size="floor"
+                  variant={kind === "disassemble" ? "destructive" : "primary"}
+                  // A reprint is confirmed once the operator can see where it goes.
+                  disabled={kind === "reprint" && reprintPrinter.kind === "loading"}
+                  {...press(() => apply(box, reasoned))}
+                >
+                  {t(`floor.exceptions.confirm.${reasoned.action}.action`)}
+                </Button>
+              </div>
+            </Alert>
+          </div>
+        );
+      }
+      case "applying":
+        return (
+          <div className="exception-stage exception-result">
+            <h3>{label}</h3>
+          </div>
+        );
+      case "result": {
+        const { outcome } = stage;
+        const tone =
+          outcome.kind === "done" || outcome.kind === "label"
+            ? "ok"
+            : outcome.kind === "failed"
+              ? "error"
+              : "warn";
+        return (
+          <div className="exception-stage exception-result">
+            <Alert tone={tone} role="presentation" className="exception-card" title={label}>
+              {outcome.kind === "done" && outcome.action === "undo" && (
+                <p>{t("floor.exceptions.result.hint.undo")}</p>
+              )}
+              <div className="standalone-form__actions exception-result__actions">
+                <Button size="floor" {...press(onBack)}>
+                  {t("floor.exceptions.result.back")}
+                </Button>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  {...press(() => setStage({ kind: "actions" }))}
+                >
+                  {t("floor.exceptions.result.again")}
+                </Button>
+              </div>
+            </Alert>
+          </div>
+        );
+      }
+    }
+  };
+
+  // «Назад» in the header, as the cloud's flow has it, where a stage has no row of its own.
+  const headerBack =
+    stage.kind === "actions"
+      ? back(null)
+      : stage.kind === "target"
+        ? back({ kind: "actions" })
+        : stage.kind === "reason"
+          ? back({ kind: "target", action: stage.action, tail: "", note: null })
+          : null;
+  // The heading names the operation the operator is inside of, not the section of the app.
+  const operation =
+    stage.kind === "target" || stage.kind === "reason" || stage.kind === "words"
+      ? stage.action
+      : stage.kind === "confirm"
+        ? stage.reasoned.action
+        : stage.kind === "confirm_clear"
+          ? "clear"
+          : null;
+  const danger = operation === "disassemble" || operation === "pallet_disassemble";
+  const content = body();
+  return (
+    <section className="exception-flow" aria-label={title}>
+      <header className="exception-flow__header">
+        <h2 data-danger={danger ? "true" : undefined}>
+          {operation === null ? title : t(`floor.exceptions.actions.${operation}`)}
+        </h2>
+        <div className="exception-flow__controls">{headerBack}</div>
+      </header>
+      <div
+        className="exception-flow__stage"
+        role="group"
+        aria-label={label}
+        tabIndex={-1}
+        ref={viewRef}
+      >
+        {content}
+      </div>
+    </section>
+  );
+}

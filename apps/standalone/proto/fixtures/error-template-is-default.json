@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "the template is a default that the change would break",
+    "details": {
+      "constraint": "template_is_default",
+      "organizationDefault": true,
+      "categoryDefaults": [8, 15]
+    }
+  }
+}

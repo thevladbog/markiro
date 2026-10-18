@@ -55,9 +55,12 @@ import {
   type PalletPlacardQueryDto,
 } from "./dto";
 import { CodeSearchService } from "./code-search.service";
-import { renderBoxReportHtml } from "./box-report";
-import { renderPalletReportHtml } from "./pallet-report";
-import { renderPalletPlacardHtml, renderShiftPlacardsHtml } from "./pallet-placard";
+import {
+  renderBoxReportHtml,
+  renderPalletPlacardHtml,
+  renderPalletReportHtml,
+  renderShiftPlacardsHtml,
+} from "@markiro/domain";
 
 /**
  * Manager-only, entirely read-only module: classify a scanned/typed input

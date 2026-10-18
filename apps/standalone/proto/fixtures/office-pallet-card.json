@@ -1,0 +1,54 @@
+{
+  "id": "a0000000-0000-4000-8000-000000000001",
+  "sscc": "146006820000000409",
+  "shift": {
+    "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "number": "OCT26-003",
+    "status": "closed",
+    "productionDate": "2026-10-08",
+    "productName": "Молоко 3,2% 0,9 л",
+    "lineName": "Линия 1"
+  },
+  "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "deviceName": "Станция на линии 1",
+  "operatorName": "Анна Кузнецова",
+  "openedAt": "2026-10-08T06:00:05.000Z",
+  "closedAt": "2026-10-08T06:00:41.000Z",
+  "disassembledAt": null,
+  "boxes": 1,
+  "units": 1,
+  "boxCountReported": 2,
+  "disassembledBoxes": 1,
+  "printVerifiedAt": "2026-10-08T06:00:43.000Z",
+  "printSkippedAt": null,
+  "members": [
+    {
+      "id": "b0000000-0000-4000-8000-000000000002",
+      "sscc": "046006820000015017",
+      "closedAt": "2026-10-08T06:00:40.000Z",
+      "disassembledAt": "2026-10-08T06:00:50.000Z",
+      "units": 0
+    },
+    {
+      "id": "b0000000-0000-4000-8000-000000000001",
+      "sscc": "046006820000015000",
+      "closedAt": "2026-10-08T06:00:20.000Z",
+      "disassembledAt": null,
+      "units": 1
+    }
+  ],
+  "membersCapped": false,
+  "exceptions": [
+    {
+      "id": "e2000000-0000-4000-8000-000000000001",
+      "kind": "reprint",
+      "reasonCode": "damaged_label",
+      "reasonText": null,
+      "occurredAt": "2026-10-08T06:00:55.000Z",
+      "receivedAt": "2026-10-08T06:01:00Z",
+      "deviceName": "Станция на линии 1",
+      "operatorName": null
+    }
+  ],
+  "documents": []
+}

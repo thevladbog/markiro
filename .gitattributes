@@ -2,3 +2,18 @@
 # machine-generated (required for `db:generate` diffing — never hand-edited),
 # so collapse them in PR diffs and exclude them from language stats.
 packages/db/migrations/meta/*.json linguist-generated=true
+
+# Characterisation fixtures of the printable forms: the renderers emit trailing
+# spaces (an empty `${watermark}` slot) and every byte is the contract, so git
+# must neither flag nor convert them.
+packages/domain/test/fixtures/print-forms/*.html -whitespace -text
+
+# The standalone app's SQL migrations: `sqlx::migrate!` embeds each file and
+# records the checksum of its bytes, so a CRLF checkout (Windows with
+# core.autocrlf) would build a host or shell whose checksums differ from every
+# other build's, and refuse each other's databases and copies. The shared wire
+# fixtures stay byte-identical for every consumer as well.
+apps/standalone/host/migrations/*.sql text eol=lf
+apps/standalone/src-tauri/migrations/*.sql text eol=lf
+apps/standalone/proto/fixtures/*.json text eol=lf
+apps/standalone/src-tauri/tests/fixtures/*.json text eol=lf

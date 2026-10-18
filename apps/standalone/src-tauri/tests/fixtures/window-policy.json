@@ -1,0 +1,275 @@
+{
+  "$comment": "The window-mode decision of the owner's rule (2026-10-13): host and office PCs never lock; a station locks once configured (paired as a station with a line), except while an administrator's office session is open; `kiosk: false` in installation.json and the `--windowed` launch turn kiosk mode off on this PC. `permitted` is the shell's answer (src-tauri/src/window_policy.rs `kiosk_permitted`), `kiosk` the webview's decision (src/app/lockdown.ts `kioskDue`). Read by both sides' tests.",
+  "rows": [
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "none",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "administrator",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "other",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "none",
+      "permitted": true,
+      "kiosk": true
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "administrator",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "other",
+      "permitted": true,
+      "kiosk": true
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "none",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "administrator",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "other",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "none",
+      "permitted": true,
+      "kiosk": true
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "administrator",
+      "permitted": true,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "other",
+      "permitted": true,
+      "kiosk": true
+    },
+    {
+      "role": "host",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "host",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "administrator",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "host",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "other",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "host",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "host",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "administrator",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "host",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "other",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "office",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "office",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "administrator",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "office",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": false,
+      "office": "other",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "office",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "office",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "administrator",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "office",
+      "kioskSetting": true,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "other",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": false,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": true,
+      "configured": true,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": "station",
+      "kioskSetting": true,
+      "windowedLaunch": true,
+      "configured": true,
+      "office": "other",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": false,
+      "windowedLaunch": false,
+      "configured": true,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": true,
+      "configured": true,
+      "office": "none",
+      "permitted": false,
+      "kiosk": false
+    },
+    {
+      "role": null,
+      "kioskSetting": true,
+      "windowedLaunch": true,
+      "configured": true,
+      "office": "other",
+      "permitted": false,
+      "kiosk": false
+    }
+  ]
+}

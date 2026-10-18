@@ -119,7 +119,7 @@ import {
   type ShiftLabelTemplatePreviewDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
-import { renderShiftTaskFormHtml } from "./shift-task-form";
+import { renderShiftTaskFormHtml } from "@markiro/domain";
 import { PalletSheetNodeDocument } from "../label-templates/dto";
 
 function sheetCaller(req: RequestWithTenant): PalletSheetCaller {

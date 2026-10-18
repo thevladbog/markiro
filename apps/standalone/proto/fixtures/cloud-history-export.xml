@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<unit_pack document_id="70000000-0000-4000-8000-000000000002" VerForm="1.03" file_date_time="2026-10-17T12:00:00.000Z" action_id="30" version="1">
+    <Document operation_date_time="2026-10-16T11:30:00.123Z" document_number="OCT26-007/S">
+        <organisation>
+            <id_info>
+                <LP_info org_name="Example" LP_TIN="7701234567" />
+            </id_info>
+        </organisation>
+        <pack_content>
+            <pack_code>00046006820000000013</pack_code>
+            <cis>010460068200001321SERIAL</cis>
+        </pack_content>
+        <pack_content>
+            <pack_code>00046006820000000044</pack_code>
+            <cis>010460068200001321REPORT4</cis>
+        </pack_content>
+        <pack_content>
+            <pack_code>00046006820000000020</pack_code>
+            <cis>010460068200001321REPORT2</cis>
+        </pack_content>
+        <pack_content>
+            <pack_code>00146006820000000010</pack_code>
+            <cis>00046006820000000013</cis>
+        </pack_content>
+        <pack_content>
+            <pack_code>00146006820000000034</pack_code>
+            <cis>00046006820000000044</cis>
+        </pack_content>
+    </Document>
+</unit_pack>

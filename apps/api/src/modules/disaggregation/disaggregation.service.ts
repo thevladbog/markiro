@@ -7,7 +7,13 @@ import {
 } from "@nestjs/common";
 import { and, count, desc, eq, gte, ilike, inArray, isNull, or, sql, sum } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatSsccWithAi, parseScannedSscc } from "@markiro/domain";
+import {
+  formatSsccWithAi,
+  parseScannedSscc,
+  type DisaggregationReportBox,
+  type DisaggregationReportCode,
+  type DisaggregationReportData,
+} from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
 import { OrgProfileService } from "../org-profile/org-profile.service";
@@ -23,11 +29,6 @@ import type {
   UpdateDocumentDto,
 } from "./dto";
 import { resolveLineTargets } from "./line-validation";
-import type {
-  DisaggregationReportBox,
-  DisaggregationReportCode,
-  DisaggregationReportData,
-} from "./report";
 
 const PAGE_SIZE = 50;
 

@@ -1,0 +1,51 @@
+{
+  "statements": {
+    "accepted": [
+      "SELECT id, name FROM ref_lines WHERE archived = ?",
+      "WITH live AS (SELECT * FROM ref_lines) SELECT count(*) FROM live;",
+      "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_rev', ?)",
+      "SELECT created_at, begin_date, dropped FROM events",
+      "SELECT CASE WHEN archived = 1 THEN 'a' END FROM ref_lines"
+    ],
+    "refused": [
+      "",
+      "   ",
+      "SELECT 1; SELECT 2",
+      "SELECT 1 -- note",
+      "SELECT /* note */ 1",
+      "BEGIN",
+      "commit",
+      "ROLLBACK",
+      "END",
+      "end transaction",
+      "END;",
+      "SAVEPOINT a",
+      "RELEASE a",
+      "PRAGMA journal_mode",
+      "ATTACH 'other.db' AS other",
+      "DETACH other",
+      "VACUUM",
+      "CREATE TABLE extra (x)",
+      "DROP TABLE ref_lines",
+      "ALTER TABLE ref_lines ADD COLUMN x",
+      "REINDEX",
+      "ANALYZE"
+    ]
+  },
+  "queries": {
+    "accepted": [
+      "select 1",
+      "  WITH live AS (SELECT 1) SELECT * FROM live",
+      "SELECT CASE WHEN archived = 1 THEN 'a' END FROM ref_lines"
+    ],
+    "refused": [
+      "INSERT INTO t VALUES (1)",
+      "UPDATE t SET x = 1",
+      "DELETE FROM t",
+      "REPLACE INTO t VALUES (1)",
+      "VALUES (1)",
+      "(SELECT 1)"
+    ]
+  }
+}

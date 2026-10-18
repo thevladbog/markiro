@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
+import { closeFixturePool, dropFixtureDatabase, tolerateAdminShutdown } from "./fixture-pool";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, afterEach, beforeAll, expect, vi } from "vitest";
 import type { DeviceReplacementReadinessRequest } from "@markiro/platform-contracts";
@@ -28,6 +29,8 @@ export function replacementExecutionHarness(): ReturnType<typeof executionFixtur
   const maintenance = createDb(url.toString());
   url.pathname = `/${name}`;
   const connection: ReturnType<typeof createDb> = createDb(url.toString());
+  tolerateAdminShutdown(maintenance.pool);
+  tolerateAdminShutdown(connection.pool);
   const db = connection.db;
   let created = false;
   afterEach(() => {
@@ -40,9 +43,9 @@ export function replacementExecutionHarness(): ReturnType<typeof executionFixtur
     await migrate(db, { migrationsFolder: join(__dirname, "../../../../packages/db/migrations") });
   }, 120_000);
   afterAll(async () => {
-    await connection.pool.end();
-    if (created) await maintenance.pool.query(`DROP DATABASE "${name}"`);
-    await maintenance.pool.end();
+    await closeFixturePool(connection.pool);
+    if (created) await dropFixtureDatabase(maintenance.pool, name);
+    await closeFixturePool(maintenance.pool);
   });
   return { ...executionFixtures(db), connection };
 }

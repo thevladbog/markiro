@@ -206,6 +206,8 @@
   background: transparent;
   color: var(--fg-3);
   font: 600 14px/20px var(--font-ui);
+  /* A tab is never an underlined link, whatever element it is drawn on. */
+  text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -326,6 +328,11 @@
   }
 }
 
+.mk-btn--ghost:hover:not(:disabled),
+.mk-btn--ghost:active:not(:disabled) {
+  background: var(--surface-panel) !important;
+}
+
 .mk-btn--warning-outline:hover:not(:disabled),
 .mk-btn--warning-outline:active:not(:disabled) {
   background: var(--warn-bg) !important;
@@ -363,6 +370,13 @@
 
 .mk-file-drop[data-disabled="true"] {
   cursor: not-allowed;
+}
+
+.mk-row-action-menu__item:hover:not(:disabled),
+.mk-row-action-menu__item:focus-visible {
+  background: var(--surface-panel) !important;
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .mk-select__item[data-highlighted] {
@@ -1120,4 +1134,63 @@
   border-color: var(--cat-steel-border);
   background: var(--cat-steel-bg);
   color: var(--cat-steel-fg);
+}
+
+/* Slider: the native range control in the kit's colours and a 40 px touch height. */
+.mk-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  accent-color: var(--fg-1);
+  cursor: pointer;
+}
+
+.mk-slider:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.mk-slider:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-2);
+}
+
+/* Button, variant "plain": a reset only (no fill, rule, padding or ink of its own); the app's class draws it. */
+.mk-btn--plain {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+
+/*
+ * The 2026-10 office sizing, opt-in (kit §Changes: office controls 44, radii 16/20): inside an element with
+ * this class the controls are 44 px (36 compact) and the field, button and alert radius is 16, the dialog
+ * and card radius 20, and a card carries no shadow (one hairline layer). The components draw all of that
+ * from tokens, so redefining the tokens here changes only this subtree; the cloud apps (admin, saas-admin,
+ * kiosk, station) never carry the class and keep 40/32 and 8/12. Overlays (dialogs, panels, select lists)
+ * are portalled to the document body, outside any subtree, so the standalone office puts the class on
+ * `<html>` while it is open (`:root.mk-kit-2026` outranks the token defaults on `:root`).
+ */
+.mk-kit-2026,
+:root.mk-kit-2026 {
+  --control-md: 44px;
+  --control-sm: 36px;
+  --r-2: 16px;
+  --r-3: 20px;
+  --shadow-1: none;
+  --shadow-2: none;
+  /* The label of a solid error button is the kit's `onerr`, not a literal white (2.6:1 on the dark coral). */
+  --mk-btn-destructive-fg: var(--fg-on-err-solid);
+}
+
+/* A field with a wrong value: a 2 px rule in the error colour (the message carries the word «Ошибка ·»). */
+.mk-kit-2026 .mk-input--error {
+  --mk-input-border: 2px solid var(--err-solid);
 }

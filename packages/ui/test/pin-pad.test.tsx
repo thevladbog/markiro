@@ -5,6 +5,14 @@ import { PinPad } from "../src/components/PinPad.js";
 afterEach(cleanup);
 
 describe("PinPad", () => {
+  it("marks the group so the floor can restyle its keys (kit keypad)", () => {
+    render(<PinPad value="" onChange={() => undefined} size="floor" />);
+    expect(screen.getByRole("group").className).toBe("mk-pinpad mk-pinpad--floor");
+    cleanup();
+    render(<PinPad value="" onChange={() => undefined} />);
+    expect(screen.getByRole("group").className).toBe("mk-pinpad");
+  });
+
   it("appends the pressed digit", () => {
     const onChange = vi.fn();
     render(<PinPad value="12" onChange={onChange} />);

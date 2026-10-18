@@ -1,0 +1,155 @@
+import { QueryClientProvider } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { createMemoryRouter, RouterProvider } from "react-router";
+
+import type { SyncState } from "../app/shell.js";
+import type { HostStatus } from "../host/protocol.js";
+import { OfficeFilesProvider, TAURI_OFFICE_FILES } from "./exports/office-files-context.js";
+import type { OfficeFilesApi } from "./exports/office-files.js";
+import {
+  FRAME_PRINT_FORM,
+  FormPrinterProvider,
+  type PrintForm,
+} from "./forms/form-printer-context.js";
+import type { HostUpdateOffer } from "../update/host-offer.js";
+import { UpdateOfferProvider } from "../update/offer-context.js";
+import type { UpdatesApi } from "../update/updates-api.js";
+import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
+import { LicenseDismissalsProvider } from "./info/license/LicenseNotices.js";
+import { OfficeLinkProvider } from "./office-link.js";
+import { createOfficeQueryClient, officeKeys } from "./office-query.js";
+import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
+import { officeRoutes } from "./routes.js";
+import {
+  BROWSER_LABEL_RENDERING,
+  LabelRenderingProvider,
+  type LabelRendering,
+} from "./templates/label-rendering.js";
+import { ThisDeviceProvider } from "./this-device.js";
+import { WindowModeProvider, type WindowMode } from "./window-mode.js";
+
+export interface OfficeProps {
+  session: OfficeSessionValue;
+  /** The link to the host, shown in the header; `null` before the first status. */
+  link?: HostStatus | null;
+  /** The reference sync, shown in the header with the link; `null` outside the app. */
+  sync?: SyncState | null;
+  /**
+   * The latest revision the host announced (`null` before the first). When
+   * it changes, the signed-in user is read again, so a new name or role
+   * shows without a new sign-in. Open pages are not reloaded under the user.
+   */
+  hostRevision?: number | null;
+  /**
+   * The device this office runs on (`DeviceStatus.deviceId`): «Устройства»
+   * marks its row and asks more before it revokes itself. `null` outside
+   * the app.
+   */
+  deviceId?: string | null;
+  /**
+   * How the office draws labels (the template editor's preview): the
+   * webview's canvas and fonts by default; a test passes its own.
+   */
+  labels?: LabelRendering;
+  /**
+   * Where the office saves its files (exports, plan ЧЗ): the shell's
+   * commands by default; a test passes its own.
+   */
+  files?: OfficeFilesApi;
+  /**
+   * How the office prints a form (plan О-Ф): a hidden frame of its own
+   * window by default; a test passes its own.
+   */
+  printForm?: PrintForm;
+  /**
+   * Kiosk mode, for the administrator's «Оконный режим» in the header;
+   * `null` (the default) shows no such control.
+   */
+  windowMode?: WindowMode | null;
+  /** The page the office opens on: the overview by default; a test may open another. */
+  initialPath?: string;
+  /** The update the host offers this PC (plan ОБН-3); none outside the app. */
+  updateOffer?: HostUpdateOffer;
+  /** The shell's update commands (plan ОБН-3); a test passes its own. */
+  updates?: UpdatesApi;
+}
+
+const NO_UPDATE: HostUpdateOffer = { kind: "none" };
+
+/**
+ * The office: an in-memory router (a desktop window has no address bar) and
+ * a query cache, both living exactly as long as one session — `App` mounts
+ * `Office` with the session token as its key.
+ */
+export function Office({
+  session,
+  link = null,
+  sync = null,
+  hostRevision = null,
+  deviceId = null,
+  labels = BROWSER_LABEL_RENDERING,
+  files = TAURI_OFFICE_FILES,
+  printForm = FRAME_PRINT_FORM,
+  windowMode = null,
+  initialPath = "/",
+  updateOffer = NO_UPDATE,
+  updates = TAURI_UPDATES,
+}: OfficeProps) {
+  const { t } = useTranslation();
+  // The word that opens a field's error message (`list.css` draws it before the text): dialogs and
+  // drawers sit in the body, outside the office's own element, so the variable is set on the root.
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--mk-error-prefix",
+      JSON.stringify(t("office.common.errorPrefix")),
+    );
+    return () => {
+      document.documentElement.style.removeProperty("--mk-error-prefix");
+    };
+  }, [t]);
+  const [router] = useState(() =>
+    createMemoryRouter(officeRoutes, { initialEntries: [initialPath] }),
+  );
+  const [queryClient] = useState(createOfficeQueryClient);
+  const shownRevision = useRef(hostRevision);
+  useEffect(() => {
+    if (shownRevision.current === hostRevision) return;
+    shownRevision.current = hostRevision;
+    // The user's name and role follow the host at once. Pages read fresh
+    // data whenever they open (`staleTime` 0); an open page is not reloaded
+    // under the user, so a form keeps what was typed and a save over a newer
+    // record meets `stale_revision` instead of losing the edits silently.
+    void session.refreshUser().catch(() => undefined);
+    // A phase of the license changes with a revision of its own (license spec
+    // §8.2): the band, «Обзор» and «Лицензия» read it again.
+    void queryClient.invalidateQueries({ queryKey: officeKeys.license });
+  }, [hostRevision, session, queryClient]);
+  const officeLink = useMemo(() => ({ status: link, sync }), [link, sync]);
+  return (
+    <QueryClientProvider client={queryClient}>
+      <OfficeSessionProvider value={session}>
+        <OfficeLinkProvider value={officeLink}>
+          <ThisDeviceProvider deviceId={deviceId}>
+            <LabelRenderingProvider value={labels}>
+              <OfficeFilesProvider value={files}>
+                <FormPrinterProvider value={printForm}>
+                  <WindowModeProvider value={windowMode}>
+                    {/* The license's warnings hidden for this session: the band's and «Обзор»'s. */}
+                    <LicenseDismissalsProvider>
+                      <UpdatesProvider value={updates}>
+                        <UpdateOfferProvider value={updateOffer}>
+                          <RouterProvider router={router} />
+                        </UpdateOfferProvider>
+                      </UpdatesProvider>
+                    </LicenseDismissalsProvider>
+                  </WindowModeProvider>
+                </FormPrinterProvider>
+              </OfficeFilesProvider>
+            </LabelRenderingProvider>
+          </ThisDeviceProvider>
+        </OfficeLinkProvider>
+      </OfficeSessionProvider>
+    </QueryClientProvider>
+  );
+}

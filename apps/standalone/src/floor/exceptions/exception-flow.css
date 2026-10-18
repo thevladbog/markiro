@@ -1,0 +1,423 @@
+/*
+ * The exceptions of the work screen, ported from the cloud station
+ * (apps/station/src/station.css, «.exception-flow» through «.shift-boxes»): the
+ * operation's name and «Назад» in a 64 px header, the stage centred under it —
+ * the action cards in two columns, the finder (scan hint, typed tail, digit pad)
+ * beside the list of closed boxes, the reasons in two columns. Every control
+ * stays a 64 px floor button (@markiro/ui), as the standalone floor requires.
+ */
+.exception-flow {
+  display: grid;
+  width: 100%;
+  min-height: 100%;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  gap: var(--sp-3);
+  grid-template-rows: 64px minmax(0, 1fr);
+}
+
+.exception-flow__header {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.exception-flow__header h2,
+.exception-stage h3 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.exception-flow__header h2[data-danger="true"] {
+  color: var(--err-fg);
+}
+
+.exception-flow__controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+
+/* The focus lands on the stage by code (each change of view), not by Tab. */
+.exception-flow__stage:focus {
+  outline: none;
+}
+
+/* The stage sits in the middle of what the header leaves; the target picker takes all of it. */
+.exception-flow__stage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  align-content: center;
+}
+
+.exception-flow__stage:has(> .exception-stage--target) {
+  align-content: start;
+}
+
+.work-screen__stage > .exception-flow {
+  min-height: 100%;
+  padding: 0;
+}
+
+.exception-stage {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-content: center;
+}
+
+.exception-stage--action,
+.exception-stage--reason,
+.exception-confirm,
+.exception-result,
+.exception-other-reason {
+  width: min(900px, 100%);
+  margin-inline: auto;
+}
+
+.exception-stage--action > h3,
+.exception-stage--reason > h3,
+.exception-result > h3 {
+  text-align: center;
+}
+
+.exception-stage p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.exception-stage--action > p,
+.exception-stage--reason > p {
+  text-align: center;
+}
+
+/* Every card the same height, whatever its hint wraps to. */
+.exception-actions {
+  display: grid;
+  width: 100%;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(112px, 1fr);
+}
+
+/* An action card: a floor button that holds its name and a line of what it does. */
+.exception-action.mk-btn {
+  display: grid !important;
+  min-height: 112px !important;
+  height: auto !important;
+  padding: var(--sp-4) !important;
+  gap: var(--sp-2) !important;
+  align-content: center;
+  justify-content: stretch !important;
+  justify-items: start;
+  /* The border colour is the kit's (`line2`, floor-kit.css): a `--line` here made the cards fainter than every other button. */
+  border-radius: var(--floor-r-card) !important;
+  text-align: left;
+}
+
+.exception-action__title {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  font: 700 20px/24px var(--font-ui);
+}
+
+.exception-action__glyph {
+  color: var(--fg-3);
+  font-size: 22px;
+}
+
+.exception-action__hint {
+  color: var(--fg-3);
+  font: 400 15px/20px var(--font-ui);
+}
+
+.exception-action[data-danger="true"]:not(:disabled) {
+  border-color: var(--err-border) !important;
+  background: var(--err-bg) !important;
+}
+
+.exception-action[data-danger="true"]:not(:disabled) .exception-action__title,
+.exception-action[data-danger="true"]:not(:disabled) .exception-action__glyph {
+  color: var(--err-fg);
+}
+
+/*
+ * The target picker: the finder column (scan hint, typed tail, digit pad) beside
+ * the list. Scanning and typing are two ways to the same box, both on screen.
+ */
+.exception-stage--target {
+  gap: var(--sp-4);
+  grid-template-columns: minmax(320px, 460px) minmax(0, 1fr);
+  align-content: start;
+}
+
+.exception-target__finder {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.exception-target__scan {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3);
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--floor-r-ctl);
+}
+
+.exception-target__scan-glyph {
+  color: var(--fg-3);
+  font-size: 28px;
+}
+
+.sscc-search {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+}
+
+/* What is typed, in the field's frame: digits in mono, the empty field's words quiet. */
+.sscc-search__field {
+  margin: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  /* The kit's active field: a 2 px `fg` border (it was the blue accent ring, and a red one for the destructive actions). */
+  border: 2px solid var(--fg);
+  border-radius: var(--floor-r-ctl);
+  background: var(--surface-card);
+  color: var(--fg-1) !important;
+  font: 600 22px/30px var(--font-mono) !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sscc-search__field[data-empty="true"] {
+  color: var(--fg-3) !important;
+  font: 400 16px/30px var(--font-ui) !important;
+  white-space: normal;
+}
+
+.sscc-search__pad {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sscc-search__key.mk-btn {
+  min-width: 0 !important;
+  padding: 0 !important;
+  font: 600 28px/1 var(--font-ui) !important;
+}
+
+.sscc-search__key--muted.mk-btn {
+  color: var(--fg-2) !important;
+}
+
+/* The closed boxes (or pallets) that end with the digits. */
+.shift-boxes {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.shift-boxes h3 {
+  margin: 0 0 var(--sp-1);
+  font: var(--floor-title);
+}
+
+.shift-boxes__list {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.shift-boxes__row.mk-btn {
+  width: 100%;
+  font-family: var(--font-mono) !important;
+}
+
+.shift-boxes__empty {
+  display: grid;
+  min-height: 128px;
+  place-items: center;
+  text-align: center;
+}
+
+.shift-boxes__hidden {
+  color: var(--fg-3) !important;
+  font: 400 15px/20px var(--font-ui) !important;
+}
+
+/* The reasons in two columns; «Другая причина» across both. */
+.exception-reasons {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.exception-reasons > :last-child {
+  grid-column: 1 / -1;
+}
+
+/* A confirmation or a result: one card in the middle, its words at floor size. */
+.exception-card {
+  padding: var(--sp-5) !important;
+}
+
+.exception-card > div > span:first-child {
+  font: var(--floor-title) !important;
+}
+
+.exception-card p {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--floor-body);
+}
+
+.exception-confirm__sscc {
+  font: var(--floor-body-strong) !important;
+}
+
+.exception-card .standalone-form__actions {
+  margin-top: var(--sp-3);
+}
+
+/* The button that destroys stays at the far end of its row, apart from «Назад». */
+.exceptions__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.exception-result__actions {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .exception-stage--target {
+    gap: var(--sp-3);
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  }
+
+  .sscc-search__key.mk-btn {
+    font: 600 24px/1 var(--font-ui) !important;
+  }
+
+  .exception-actions {
+    grid-auto-rows: minmax(84px, 1fr);
+  }
+
+  .exception-action.mk-btn {
+    min-height: 84px !important;
+  }
+
+  .exception-action__title {
+    font: 700 17px/22px var(--font-ui);
+  }
+
+  .exception-action__hint {
+    font: 400 13px/18px var(--font-ui);
+  }
+}
+
+/*
+ * A window up to 780 px high (the terminal's ~640-720 CSS px): the picker's finder takes a wider
+ * column so its digit pad is two rows of six 64 px keys instead of four rows of three, the typed
+ * tail is a slim line, and the list of boxes keeps the rest of the stage in whole 64 px rows and
+ * its own scroll (more boxes than fit: the digits narrow the list, as the screen says). The
+ * header, the pad and «Назад» are always in view.
+ */
+@media (max-height: 780px) {
+  .exception-flow {
+    gap: var(--sp-2);
+  }
+
+  .exception-flow__stage:has(> .exception-stage--target) {
+    align-content: stretch;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .exception-stage {
+    gap: var(--sp-2);
+  }
+
+  .exception-stage--target {
+    min-height: 0;
+    gap: var(--sp-3);
+    grid-template-columns: minmax(440px, 500px) minmax(0, 1fr);
+    align-content: stretch;
+  }
+
+  .exception-target__finder {
+    gap: var(--sp-2);
+  }
+
+  .exception-target__scan {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .exception-target__scan-glyph {
+    font-size: 24px;
+  }
+
+  .sscc-search {
+    gap: var(--sp-2);
+  }
+
+  .sscc-search__field {
+    padding: var(--sp-2) var(--sp-3);
+    font: 600 20px/28px var(--font-mono) !important;
+  }
+
+  .sscc-search__field[data-empty="true"] {
+    font: 400 15px/20px var(--font-ui) !important;
+  }
+
+  .sscc-search__pad {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .shift-boxes {
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .shift-boxes h3 {
+    margin: 0;
+    font: 600 22px/28px var(--font-ui);
+  }
+
+  .shift-boxes__list {
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+  }
+
+  .shift-boxes__empty {
+    min-height: 64px;
+  }
+
+  .exception-card {
+    padding: var(--sp-3) var(--sp-4) !important;
+  }
+
+  .exception-actions {
+    gap: var(--sp-2);
+  }
+}

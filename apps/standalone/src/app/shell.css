@@ -1,0 +1,2497 @@
+/* Standalone shell layout; colours and type come from @markiro/ui tokens. */
+.standalone-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+
+.standalone-card {
+  width: min(560px, 100%);
+}
+
+/* A card whose row of floor buttons needs the room of three labels (the network pairing). */
+.standalone-card--wide {
+  width: min(800px, 100%);
+}
+
+.standalone-card p {
+  margin: 0 0 16px;
+}
+
+.standalone-probing {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+
+/* The floor: the status bar across the top, the screen centred below it. */
+.floor-frame {
+  align-self: stretch;
+  justify-self: stretch;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+}
+
+.floor-frame > .standalone-card {
+  place-self: center;
+}
+
+.floor-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.floor-status__identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 0;
+}
+
+.floor-status__item dt {
+  color: var(--fg-2);
+}
+
+.floor-status__item dd {
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+.floor-status__health {
+  display: grid;
+  gap: 8px;
+}
+
+.floor-status__alerts {
+  display: grid;
+  gap: 8px;
+}
+
+.floor-sign-in {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.floor-sign-in__results {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.floor-sign-in__prompt {
+  font-size: 18px;
+}
+
+.floor-sign-in__readout {
+  min-height: 40px;
+  font-size: 28px;
+  letter-spacing: 0.2em;
+}
+
+.floor-sign-in__message {
+  min-height: 64px;
+}
+
+/* Several messages at once (the shift list): one under the other, apart. */
+.floor-sign-in__message--stack {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.line-select {
+  display: grid;
+  gap: 8px;
+}
+
+/* One line for the link, then one for each warning about the local copies. */
+.host-status {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.host-status__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.host-status__reason {
+  color: var(--fg-2);
+}
+
+.standalone-fingerprint-label {
+  color: var(--fg-2);
+}
+
+.standalone-fingerprint {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+/*
+ * The one-column grids of the office's dialogs and pages: an implicit track is
+ * `auto`, which grows to its widest item's max-content, so one long selected
+ * value (a product group, a counterparty) made the whole dialog scroll
+ * sideways. `minmax(0, 1fr)` lets a field shrink to the dialog and its Select
+ * ellipsize the value instead.
+ */
+.standalone-form,
+.shift-duplicate,
+.product-gtin,
+.product-gtin__notes,
+.product-photo-field,
+.category-scope,
+.office-stack,
+.template-import__source,
+.template-import__options,
+.template-import__analysis,
+.pairing-code {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.standalone-form {
+  display: grid;
+  gap: 16px;
+}
+
+.standalone-form p {
+  margin: 0;
+  font: var(--text-body);
+}
+
+/* «Печать дубликата» of the shift dialog (plan РЕЖ part B): a titled group of its fields. */
+.shift-duplicate {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-duplicate h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+/* The section's closing note, in the size and tone of a field's hint. */
+.shift-duplicate__note {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+/*
+ * A row of buttons: each label stays on one line (a 64px floor button with two
+ * lines of text looks broken), and a row that does not fit wraps by whole buttons.
+ */
+.standalone-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.standalone-form__actions > button {
+  white-space: nowrap;
+}
+
+.standalone-wizard__step,
+.standalone-wizard__note {
+  color: var(--fg-2);
+}
+
+/*
+ * A line's name and its remove button: the button stays level with the field
+ * even when an error or a hint grows under the field, which `align-items: end`
+ * would follow. 22px is the field's label (16px) and the gap under it (6px).
+ */
+.standalone-wizard__line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.standalone-wizard__line > .mk-icon-button {
+  margin-top: 22px;
+}
+
+.standalone-wizard__review {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.standalone-wizard__review div {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+}
+
+.standalone-wizard__review dt {
+  color: var(--fg-2);
+}
+
+.standalone-wizard__review dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+/*
+ * The shell is as tall as the window and never taller: the menu and the top bar stay in view and
+ * the page scrolls inside `.office-shell__content`, which is what lets a list's table pin its
+ * heading and its pagination bar inside a card of the room that is left (`list.css`).
+ */
+.office-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+
+/*
+ * The office menu (design 2026-10): one style for every entry, an icon and a name at one height
+ * (`--menu-item-h`, the single token that flips 40 to the kit's 44), the active entry filled with
+ * `fg`. It stays in view while the page scrolls and scrolls by itself when the window is lower than
+ * the list. 272 px open, 76 px (icons only) collapsed; the window collapses it below 1366 px.
+ */
+.office-menu {
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--sidebar-w);
+  height: 100vh;
+  max-height: 100vh;
+  padding: 12px;
+  overflow: hidden auto;
+  background: var(--surface-card);
+  border-right: 1px solid var(--line);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.office-menu--collapsed {
+  width: var(--sidebar-w-collapsed);
+}
+
+.office-menu__brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 5px;
+}
+
+.office-menu__wordmark {
+  font: 600 22px/1 var(--font-mono);
+  letter-spacing: -0.5px;
+}
+
+.office-menu--collapsed .office-menu__wordmark {
+  display: none;
+}
+
+.office-menu__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.office-menu__section {
+  padding: 10px 14px 2px;
+  color: var(--fg-3);
+  font: 600 11px/12px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Collapsed: the group's name gives way to a small gap, so the groups still read apart. */
+.office-menu--collapsed .office-menu__section {
+  height: 8px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.office-menu--collapsed .office-menu__section > span {
+  display: none;
+}
+
+/* One hairline sets the settings block apart; it is the only difference between the halves. */
+.office-menu__rule {
+  height: 0;
+  margin: 8px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.office-menu__link {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--menu-item-h);
+  padding: 0 14px;
+  border-radius: var(--r-ctl);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+  text-decoration: none;
+  outline: none;
+}
+
+.office-menu__link:hover {
+  background: var(--surface-panel);
+  color: var(--fg-1);
+}
+
+.office-menu__link:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.office-menu__link--active,
+.office-menu__link--active:hover {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 700;
+}
+
+.office-menu__link .office-icon {
+  flex: none;
+}
+
+.office-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Collapsed: the name stays for a screen reader, out of sight (the tooltip is the link's `title`). */
+.office-menu--collapsed .office-menu__link {
+  justify-content: center;
+  padding: 0;
+}
+
+.office-menu--collapsed .office-menu__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.office-shell__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * The top bar: the menu toggle and the crumbs at the left, the link and sync chips, the theme
+ * selector and the person at the right. It wraps onto a second line in a narrow window.
+ */
+.office-header {
+  box-sizing: border-box;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-height: 64px;
+  padding: 8px 32px 8px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.office-header__lead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.office-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-3);
+  font: 500 14px/20px var(--font-ui);
+}
+
+.office-crumbs li {
+  display: inline-flex;
+  align-items: center;
+}
+
+.office-crumbs__page {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--fg-1);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * The top bar's controls are the design's 48 px with radius 16: the shared `Button` draws its height
+ * and radius from `--control-md` and `--r-2`, so the bar redefines the two for its own subtree (no
+ * `!important` against the button's inline style). The icon buttons take the same 48.
+ */
+.office-header__actions {
+  --control-md: 48px;
+  --r-2: 16px;
+}
+
+/* A chip: an icon and a word on a tinted pill. The state is the icon and the word, never the tint alone. */
+.office-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  font: 600 12px/16px var(--font-ui);
+  white-space: nowrap;
+}
+
+.office-chip--ok {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.office-chip--warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.office-chip--info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.office-chip--error {
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/* The link chip is a button (it opens the details): 40 px to hit, the pill drawn inside it. */
+.host-dot__button {
+  justify-content: center;
+  min-height: 40px;
+  border-radius: 12px;
+  color: var(--fg-1);
+}
+
+.theme-switcher {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--surface-panel);
+}
+
+.theme-switcher > .theme-switcher__option {
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  color: var(--fg-2);
+}
+
+.theme-switcher > .theme-switcher__option:hover:not(.theme-switcher__option--on) {
+  background: var(--surface-card);
+  color: var(--fg-1);
+}
+
+.theme-switcher > .theme-switcher__option--on,
+.theme-switcher > .theme-switcher__option--on:hover {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.user-menu {
+  position: relative;
+}
+
+/* The secondary look, drawn here (the trigger is a plain button): rule, card fill, the bar's 48 px and radius. */
+.user-menu__trigger {
+  gap: 10px;
+  min-height: var(--control-md);
+  padding: 0 12px 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: 600 14px/1 var(--font-ui);
+}
+
+/* An initials avatar: a circle on the category tone its person's name fixes (the kit's four). */
+.user-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font: 600 12px/1 var(--font-mono);
+}
+
+.user-avatar--20 {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.user-avatar--24 {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.user-avatar--40 {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.user-avatar--48 {
+  width: 48px;
+  height: 48px;
+  font-size: 16px;
+}
+
+.user-avatar--96 {
+  width: 96px;
+  height: 96px;
+  font-size: 32px;
+}
+
+/* A photo fills the same circle; the hairline keeps a pale picture from dissolving into the page. */
+.user-avatar--photo {
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  background: var(--surface-panel);
+}
+
+.user-avatar--violet {
+  background: var(--cat-violet-bg);
+  color: var(--cat-violet-fg);
+}
+
+.user-avatar--teal {
+  background: var(--cat-teal-bg);
+  color: var(--cat-teal-fg);
+}
+
+.user-avatar--magenta {
+  background: var(--cat-magenta-bg);
+  color: var(--cat-magenta-fg);
+}
+
+.user-avatar--steel {
+  background: var(--cat-steel-bg);
+  color: var(--cat-steel-fg);
+}
+
+.user-menu__who {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+}
+
+.user-menu__name {
+  font: 600 14px/18px var(--font-ui);
+}
+
+.user-menu__role {
+  color: var(--fg-3);
+  font: 400 12px/16px var(--font-ui);
+}
+
+/* The only shadowed layer of the bar: an overlay (one layer, kit level L2). */
+.user-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-overlay-popover, 30);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.user-menu__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.user-menu__identity-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.user-menu__identity-name {
+  font: 600 14px/20px var(--font-ui);
+}
+
+.user-menu__identity-meta {
+  color: var(--fg-3);
+  font: 400 12px/16px var(--font-ui);
+}
+
+.user-menu__panel > .user-menu__item {
+  gap: 12px;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+  text-align: left;
+}
+
+.user-menu__panel > .user-menu__item:hover {
+  background: var(--surface-panel);
+}
+
+/*
+ * The page is one column as wide as the window leaves it, never as wide as its widest child
+ * (`min-width: 0` on every child: a table scrolls inside its own card instead of pushing the page
+ * sideways). The column scrolls by itself; its parts keep their height (`flex: none`) except a
+ * list's card, which shrinks to the room that is left (`list.css`).
+ */
+.office-shell__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: 16px;
+  padding: 24px 32px;
+  overflow: auto;
+}
+
+.office-shell__content > * {
+  flex: none;
+  min-width: 0;
+}
+
+/* A page header's title and buttons wrap; the buttons stay together at the right. */
+.office-shell__content .mk-page-header {
+  flex-wrap: wrap;
+}
+
+.office-shell__content .mk-page-header > div:not(.mk-page-header__titles) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Focus lands on the page container only programmatically, after a menu navigation. */
+.office-shell__content:focus {
+  outline: none;
+}
+
+.office-note {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+/* Export notes can name a rejected product whose original name has no word boundaries. */
+.cloud-import-notes {
+  overflow-wrap: anywhere;
+}
+
+/* Content actions belong to their section; form submission rows keep their end alignment. */
+.office-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.office-section-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+.office-section-intro > :is(h3, h4) {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.office-disclosure > summary {
+  padding-block: var(--sp-2);
+  cursor: pointer;
+}
+
+.office-disclosure[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+
+.office-disclosure > summary:focus-visible,
+.office-source-nav > a:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.office-source-nav {
+  display: flex;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  max-width: 100%;
+  padding: var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface-panel);
+}
+
+.office-source-nav > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  text-decoration: none;
+}
+
+.office-source-nav > a:hover {
+  color: var(--fg-1);
+  background: var(--surface-card);
+}
+
+.office-source-nav > a[aria-current="page"] {
+  color: var(--fg-on-inverse);
+  background: var(--surface-inverse);
+  font-weight: 600;
+}
+
+.update-packages,
+.update-release-notes {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  overflow-wrap: anywhere;
+}
+
+.update-packages {
+  list-style: none;
+  padding: 0;
+}
+
+.update-packages__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.update-report > .mk-badge {
+  justify-self: start;
+}
+
+.update-progress {
+  margin: 0;
+}
+
+.update-progress:empty {
+  display: none;
+}
+
+.update-stage > [aria-live]:empty {
+  display: none;
+}
+
+/* «Обновление» through the host (plan ОБН-3): the history, the notes and the upload. */
+.update-history,
+.update-notes {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0 0 0 var(--sp-2);
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.update-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/*
+ * The rhythm of the office page. The page's own parts (header, notices, filter
+ * bar, cards) sit one sp-4 apart (`.office-shell__content`); the parts of a card
+ * sit the same distance apart, so a note above a table, the table, its pager
+ * and the note under it never touch, and every card reads alike.
+ */
+:is(.office-shell__content, .mk-side-panel) .mk-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+
+/*
+ * The buttons of a table row start where their column's heading starts (the
+ * columns are left-aligned), and stay on one line: at most two buttons, or one
+ * and the «⋯» menu (`RowActionMenu`), so a row is as tall as one button.
+ */
+.office-shell__content .mk-table .mk-row-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}
+
+/* A paragraph of a card has no browser margin on top of the card's gap. */
+:is(.office-shell__content, .mk-side-panel) .mk-card__body > p {
+  margin: 0;
+  font: var(--text-body);
+}
+
+/* A table in a card: the card's own gap is the space around it. */
+:is(.office-shell__content, .mk-side-panel) .mk-card__body > .mk-table,
+:is(.office-shell__content, .mk-side-panel) .mk-card__body > .office-paged {
+  min-width: 0;
+}
+
+/*
+ * A filter bar, on the page and in a drawer: its controls in one grid of equal tracks, their tops
+ * on one line (a hint or an error under a field hangs below it and moves nothing in its row); a
+ * button beside the fields starts level with their inputs, and a text field takes two tracks. The
+ * same grid everywhere, so the controls of one form never wrap into rows of different widths.
+ */
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  align-items: start;
+  gap: var(--sp-4) var(--sp-3);
+}
+
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-field {
+  min-width: 0;
+}
+
+/*
+ * On a page and in a drawer alike the bar's result is the count at the right edge, on the row of the
+ * controls: the same place as a list card's «Найдено», level with the inputs (a 16 px label and its
+ * 6 px gap: 22 px down) and 44 px high, its text centred on that row.
+ */
+.office-shell__content .mk-filter-bar,
+.mk-side-panel .mk-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.office-shell__content .mk-filter-bar__result,
+.mk-side-panel .mk-filter-bar__result {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin-top: 22px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* A bar with nothing to say about its result takes no room; its live region stays in the page. */
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__result:empty {
+  min-height: 0;
+}
+
+/*
+ * 22px is a label (16px) and the gap under it (6px): the button's top is the input's top, not the
+ * bottom of the tallest field (a hint under one would pull it down).
+ */
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-btn {
+  justify-self: start;
+  margin-top: 22px;
+}
+
+/*
+ * The search field, a text input of a bar, gets the room its placeholder needs: two tracks. In a
+ * drawer (a narrower column of four tracks) the text inputs of a filter form are one track each,
+ * so they and the form's buttons share a row.
+ */
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
+  grid-column: span 2;
+}
+
+.mk-side-panel .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
+  grid-column: span 1;
+}
+
+/*
+ * A table is a scroll region of its own, never wider than its card. Its edges say so: a shade
+ * where more lies beyond (it goes with the scroll), a thin scrollbar, and the ring the keyboard
+ * gives the region it focuses (arrow keys scroll it).
+ */
+.office-shell .mk-table__scroll,
+.mk-side-panel .mk-table__scroll {
+  --scroll-cover: var(--surface-card);
+  --scroll-shade: color-mix(in srgb, var(--fg-3) 40%, transparent);
+  background:
+    linear-gradient(to right, var(--scroll-cover) 30%, transparent) left center / 40px 100%
+      no-repeat local,
+    linear-gradient(to left, var(--scroll-cover) 30%, transparent) right center / 40px 100%
+      no-repeat local,
+    linear-gradient(to right, var(--scroll-shade), transparent) left center / 14px 100% no-repeat
+      scroll,
+    linear-gradient(to left, var(--scroll-shade), transparent) right center / 14px 100% no-repeat
+      scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.office-shell .mk-table__scroll:focus-visible,
+.mk-side-panel .mk-table__scroll:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* A table and its pagination: one block, the pagination a step under the table. */
+.office-paged {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/*
+ * The foot of a table: what is shown at the left, then the page size and the pages at the right;
+ * all of one height (a control is 40 px), wrapping by whole groups in a narrow drawer.
+ */
+/*
+ * A date reads on one line («10 октября 2026»): the value never wraps, and a date field in a filter
+ * bar is wide enough for the value, the calendar icon and the clear button beside it.
+ */
+.mk-date-picker__trigger > span:first-child {
+  white-space: nowrap;
+}
+
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-date-picker {
+  min-width: 212px;
+}
+
+.office-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.office-pagination__range {
+  margin: 0 auto 0 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.office-pagination__size {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-pagination__size .mk-field {
+  width: 88px;
+}
+
+.office-pagination__pages {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.office-pagination__page {
+  min-width: 112px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* The page chooser: a compact number field, as tall as the buttons around it. */
+.office-pagination__jump {
+  width: 72px;
+}
+
+.office-pagination__jump .mk-input input {
+  min-width: 0;
+  text-align: center;
+}
+
+/* A page's table of contents: plain links to its sections' anchors in a row. */
+/* The anchors of «Информация» as the kit's segments (a link each, not a tab list: the page reads as a whole). */
+.office-toc {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 4px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-panel);
+  list-style: none;
+}
+
+.office-toc a {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+  text-decoration: none;
+}
+
+.office-toc a:hover {
+  background: color-mix(in srgb, var(--fg-1) 8%, transparent);
+  color: var(--fg-1);
+}
+
+.office-toc a[aria-current="location"] {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 600;
+}
+
+.office-toc a:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* The license section (plan ЛЦ-3): its parts one under another, each feature as its name and a word. */
+.license-part {
+  display: grid;
+  gap: 8px;
+}
+
+.license-part h3,
+.license-part h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.license-features {
+  display: grid;
+  gap: 6px;
+  max-width: 480px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.license-features li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.license-features__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.license-features__state {
+  border-radius: var(--r-sm);
+}
+
+.license-features__state:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Why a feature is off, on the page under its row (the tooltip repeats it). */
+.license-features__why {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+/*
+  The license's band above the office's pages (plan ЛЦ-3): a polite region on
+  the screen from the start; empty, it takes no room.
+*/
+.office-banner {
+  display: grid;
+  gap: 8px;
+  padding: 16px 32px 0;
+}
+
+.floor-update {
+  margin-top: var(--sp-3);
+}
+
+/* The link in a banner's sentence stays whole: it moves to the next line rather than breaking in two. */
+.office-banner .mk-alert__text a {
+  white-space: nowrap;
+}
+
+/*
+ * One axis for the icon, the text and the button, in every tone: the alert is a centred row, so a
+ * single line and a wrapped one both keep the three level (the shared alert top-aligns them).
+ */
+.office-banner .mk-alert {
+  align-items: center;
+  /* The shared alert draws its padding and radius from these (no `!important`). */
+  --mk-alert-pad: 14px 20px;
+  --r-2: var(--r-ctl);
+}
+
+.office-banner .mk-alert__icon {
+  align-self: center;
+}
+
+.office-banner .mk-alert__action {
+  display: flex;
+  align-self: center;
+  align-items: center;
+}
+
+.office-banner:empty {
+  position: absolute;
+  width: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* A product's name, and its print name on a quieter second line when it differs. */
+.product-name {
+  display: grid;
+}
+
+.product-name__print,
+.product-name__photo {
+  color: var(--fg-2);
+}
+
+/* A shift's cell of several lines: a name, its counterparty, its status and its marks. */
+.shift-cell {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.shift-cell__quiet {
+  color: var(--fg-2);
+}
+
+/* The files an export, a form or a card kept on the host, with «Скачать» for each. */
+.stored-files {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.stored-files__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stored-files__name {
+  overflow-wrap: anywhere;
+}
+
+.stored-files__parts {
+  display: grid;
+  gap: 6px;
+}
+
+.stored-files__result {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+/* What a download ended with: a sentence that wraps by words, never a banner in a narrow cell. */
+.stored-files__note {
+  margin: 0;
+  font: var(--text-body-sm);
+  overflow-wrap: anywhere;
+}
+
+.stored-files__note--ok {
+  color: var(--ok-fg);
+}
+
+.stored-files__note--error {
+  color: var(--err-fg);
+}
+
+/* A warning of a cell: a sentence that wraps by words, with its mark; never a tall chip. */
+.shift-cell__warn {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--warn-fg);
+  font: var(--text-body-sm);
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.shift-cell__warn > :first-child {
+  font-weight: 700;
+}
+
+/* The note under the close reason: the hint, or the refusal in the error tone, as `Input` writes them. */
+.shift-note {
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.shift-note--error {
+  color: var(--err-fg);
+}
+
+/*
+ * The parts of an office page that is not one card (the card of a shift, the
+ * code search): one under another. It had been `.shift-card`, a name the
+ * station's shift card (below) also takes, with its own padding and gap.
+ */
+.office-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-card__back {
+  justify-self: start;
+}
+
+.shift-card__section {
+  display: grid;
+  gap: 8px;
+}
+
+.shift-card__section > h2 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+/* A template's name, and the «Типовой» tag of a stock template beside it. */
+.template-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A template's thumbnail: a fixed box on the panel tone, the label as white stock inside it. */
+.template-thumb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  background: var(--surface-panel);
+  border-radius: var(--r-1);
+}
+
+.template-thumb__label {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+}
+
+/* The organization's print logo as the printer draws it: dots, not smoothed, on paper white. */
+.org-logo-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 96px;
+  image-rendering: pixelated;
+  background: var(--paper);
+}
+
+/* Two columns on a wide window: the data at the left, the logo at the right; one column below 1100 px. */
+.office-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.office-split--even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .office-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.office-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/*
+ * The office's cards are the kit's one layer: radius 24, a hairline, no shadow (the shadow is off in the
+ * kit scope), the title seated at the top with no divider under it. The card draws these from tokens.
+ */
+.office-shell {
+  --r-3: var(--r-card);
+  --mk-card-pad: 24px;
+  --mk-card-head-pad: 20px 24px 0;
+  --mk-card-head-rule: 0;
+}
+
+.org-logo-card .mk-card__body {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.org-logo-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.org-logo-card__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.org-logo-card__intro {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* Paper is paper in both themes: literal white, the logo printed black on it. */
+.org-logo-paper {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: #ffffff;
+  color: #17161a;
+}
+
+.org-logo-paper__none {
+  margin: 0;
+  color: #17161a;
+  font: var(--text-body-sm);
+  text-align: center;
+}
+
+/* An A4 sheet's preview: the page shrunk to the dialog's width. */
+.sheet-preview {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+}
+
+/* A template's categories: the choice, the search and a list of groups that scrolls. */
+.category-scope {
+  display: grid;
+  gap: 12px;
+}
+
+.category-scope__list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+/* A product's photo in its dialog (plan ТОВ): the JPEG the host keeps, shrunk to fit. */
+.product-photo-field {
+  display: grid;
+  gap: 8px;
+}
+
+/* The section's title and hint as a field's label and hint (`@markiro/ui` Field). */
+.product-photo-field__title {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+
+.product-photo-field__hint {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.product-photo-field__preview {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+/* The photo's card at the top of the product's drawer: the frame, then the buttons and the limits. */
+.product-photo-field__card {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.product-photo-field__frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 160px;
+  height: 160px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+
+.product-photo-field__empty {
+  padding: 8px;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+  text-align: center;
+}
+
+.product-photo-field__actions {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+/*
+ * The office's open select lists wrap a long option (a product group, a
+ * counterparty) instead of cutting it: the closed control ellipsizes and
+ * carries the whole text as its tooltip. The shared Select keeps ellipsis for
+ * the cloud apps; this is the standalone's choice (owner feedback, beta 3).
+ */
+.mk-select__content .mk-select__item {
+  padding-block: 6px;
+}
+
+.mk-select__content .mk-select__item .mk-select__item-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+/* The drawer's title: two lines at most, the whole name in its tooltip. */
+.entity-drawer__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* A product's thumbnail in the list: a small frame, empty for a product with no photo. */
+.product-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+
+.product-thumb__image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* The GTIN field, and under it what the dialog says about a valid GTIN. */
+.product-gtin,
+.product-gtin__notes {
+  display: grid;
+  gap: 4px;
+}
+
+/* An operator's badges: revoked ones stay listed, dimmed, as the record of what was issued. */
+.badge-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.badge-list__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.badge-list__item:last-child {
+  border-bottom: 0;
+}
+
+.badge-list__label {
+  font-weight: 600;
+}
+
+.badge-list__item--revoked {
+  color: var(--fg-2);
+}
+
+.badge-list__name {
+  display: grid;
+}
+
+.badge-list__date {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* The matrix at the left, its code at the right (the kit's pairing dialog); one column in a narrow window. */
+.pairing-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+
+.pairing-code__side {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pairing-code__label {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* The card's paper, A4 and A5 side by side (the group draws its direction and gap from these). */
+.pairing-card-paper {
+  --mk-radio-dir: row;
+  --mk-radio-gap: 24px;
+}
+
+/* The SVG has only a viewBox: the box gives it a size, and a light quiet zone in both themes. */
+.pairing-code__matrix {
+  width: 148px;
+  height: 148px;
+  padding: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.pairing-code__matrix svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pairing-code__digits {
+  font: var(--text-h1);
+  font-family: var(--font-mono);
+  font-size: 40px;
+  line-height: 44px;
+  letter-spacing: 0.08em;
+}
+
+/* The import dialog: the code and its check beside the fields a layout can print. */
+.template-import {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.template-import__source,
+.template-import__options,
+.template-import__analysis {
+  display: grid;
+  gap: 12px;
+}
+
+.template-import__options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-import__code {
+  min-height: 240px;
+}
+
+.template-import__warnings,
+.template-import__issues {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.template-import__fields {
+  display: grid;
+  gap: 8px;
+}
+
+.template-import__fields h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.template-import__field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-import__field span {
+  display: grid;
+}
+
+/* The template editor: its cards, off together while a save is on its way. */
+.template-editor__fields {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.template-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.template-editor__size {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The layout's preview: the label as white stock at its own size, its notes under it. */
+.template-preview {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 0;
+}
+
+.template-preview__label {
+  max-width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+}
+
+/* The size dialog's width and height side by side. */
+.template-size {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* The shifts of the line: cards one under another, each with its 64 px action. */
+.shift-list {
+  width: min(720px, 100%);
+}
+
+.shift-list__cards {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.shift-card p {
+  margin: 0;
+}
+
+.shift-card__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shift-card__number {
+  font: var(--floor-lg);
+}
+
+.shift-card__product {
+  font: var(--floor-body-strong);
+}
+
+.shift-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.shift-card__hint {
+  color: var(--fg-2);
+}
+
+/* A new shift: the template choice and the production date's two steps. */
+.new-shift__choice,
+.new-shift__date {
+  display: grid;
+  gap: 8px;
+}
+
+/* The work screen of a shift: the box and the shift in big numbers, the last
+   scan in words, and the 64 px actions under them. */
+.work-screen {
+  width: min(880px, 100%);
+}
+
+.work-screen__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.work-screen__facts dt {
+  color: var(--fg-2);
+}
+
+.work-screen__facts dd {
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+.work-screen__last {
+  min-height: 64px;
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+/* The focus lands here by code (after a message is answered), not by Tab. */
+.work-screen__last:focus {
+  outline: none;
+}
+
+/* An accepted scan lights the line for a moment: no overlay, so the counts and the buttons stay
+   in sight and under the finger. The words of the line and the tone say the rest. */
+.work-screen__last--cue {
+  background: var(--ok-bg);
+  box-shadow: 0 0 0 4px var(--ok-bg);
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .work-screen__last {
+    transition:
+      background-color 250ms ease-out,
+      box-shadow 250ms ease-out;
+  }
+}
+
+/* A refusal's flash never takes a tap: the buttons under it work. */
+.work-screen__flash {
+  pointer-events: none;
+}
+
+/* The stops of the line, in a polite region that is on the screen from the start. */
+.work-screen__alerts {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__confirm {
+  display: grid;
+  gap: 16px;
+}
+
+/* The label the work stopped for (plan 2a7): its check or its recovery, with
+   the buttons in rows that wrap at 1024 px and the reasons of a reprint as a
+   grid of 64 px buttons. */
+.work-screen__label p {
+  margin: 0 0 8px;
+}
+
+.work-screen__label .standalone-form__actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.work-screen__label .work-screen__reasons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+/* The exceptions of the work screen (plan 2a8): the steps under one heading,
+   the last digits of a box's SSCC typed on a pad of 64 px keys, the choices
+   (actions, boxes, reasons) as a grid that wraps at 1024 px, and the button
+   that destroys at the far end of its row, apart from «Назад». */
+.exceptions {
+  display: grid;
+  gap: 16px;
+}
+
+.exceptions h3,
+.exceptions h4,
+.exceptions p {
+  margin: 0;
+}
+
+.exceptions__view {
+  display: grid;
+  gap: 16px;
+}
+
+.exceptions__view p {
+  margin-bottom: 8px;
+}
+
+.exceptions__choices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.exceptions__pad {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+}
+
+.exceptions__confirm {
+  justify-content: space-between;
+  gap: 48px;
+}
+
+/* The summary of a shift's close (plan 2a8): its numbers, the six reasons
+   as a grid, and the way back to the work. */
+.work-screen__close {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__close h3,
+.work-screen__close p {
+  margin: 0;
+}
+
+.work-screen__close-reasons {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+/* The workstation setup (plan 2a7): one printer a row, its actions under it. */
+.workstation-setup {
+  width: min(880px, 100%);
+}
+
+.workstation-setup__list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workstation-setup__list li {
+  display: grid;
+  gap: 8px;
+}
+
+.workstation-setup__editor h3 {
+  margin: 0;
+}
+
+/* A live region is in the page even when empty: no gap for it then. */
+.workstation-setup__live:empty {
+  margin-top: -16px;
+}
+
+.work-screen__leaving {
+  margin: 0;
+}
+
+.work-screen__waiting {
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+/*
+  A region that announces the copies' warnings to a screen reader is on the
+  page before any warning; empty, it takes no room in the page's grid.
+*/
+.backup-alerts {
+  display: grid;
+  gap: 16px;
+}
+
+.backup-alerts:empty {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* The warehouse reprint (plan СКЛ): reason buttons in a row, the template list beside its preview. */
+.warehouse {
+  width: min(960px, 100%);
+}
+
+.warehouse__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.warehouse__templates {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.warehouse-picker__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  gap: 16px;
+  align-items: start;
+}
+
+.warehouse-picker__list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.warehouse-picker__preview {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.warehouse-picker__preview canvas {
+  border: 1px solid var(--line-strong);
+  background: #ffffff;
+}
+
+/* The shift's drawer over «Смены»: wider than the panel's own size, so a table of boxes fits; the
+   whole window on a narrow one (the kit's panel does the same below its breakpoint). */
+.mk-side-panel.shift-drawer {
+  --mk-panel-width: min(960px, 92vw);
+}
+
+@media (max-width: 1100px) {
+  .mk-side-panel.shift-drawer {
+    --mk-panel-width: 100vw;
+  }
+}
+
+.shift-totals {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+/* The status and its marks across the drawer's head, not one under another as in a narrow cell. */
+.shift-drawer .office-stack > .shift-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A grid track would grow to the widest table: the table scrolls in its own region instead. */
+.shift-drawer .office-stack,
+.shift-drawer .shift-card__section {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* «Поиск кодов»: the quick periods under the filters, one row. */
+.code-period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* «Обзор»: cards in a grid that wraps by whole cards, a card never narrower than 320 px. */
+/*
+ * «Обзор» (design 2026-10): the cards are L1 layers — a hairline, a large radius, no shadow. The
+ * shifts card is two thirds wide with the devices beside it; the rest are a third each. Below
+ * 1100 px the grid is two columns, below 720 one.
+ */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.overview-grid > .overview-card {
+  grid-column: span 2;
+}
+
+.overview-grid > .overview-card--shifts {
+  grid-column: span 4;
+}
+
+@media (max-width: 1100px) {
+  .overview-grid > .overview-card,
+  .overview-grid > .overview-card--shifts {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 720px) {
+  .overview-grid > .overview-card,
+  .overview-grid > .overview-card--shifts {
+    grid-column: span 6;
+  }
+}
+
+.overview-planned {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.overview-planned__title {
+  margin: 0;
+  color: var(--fg-3);
+  font: 600 11px/12px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.overview-list--quiet {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.overview-shift {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: baseline;
+}
+
+.overview-shift__what {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-shift__progress {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.overview-bar {
+  flex: 1;
+  min-width: 80px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.overview-bar__fill {
+  display: block;
+  height: 100%;
+  background: var(--ok-solid);
+}
+
+.overview-device-kind {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.overview-figure {
+  margin: 0;
+  font: 600 32px/1.1 var(--font-mono);
+}
+
+/*
+ * The office sign-in (design 2026-10): the whole window on the page colour, the logo at the top
+ * left, the link chip and the theme selector at the top right, ONE card in the middle (the form,
+ * then the recent users under a hairline), the host's address under it. One layer: no orbs, no
+ * second frame. A window lower than the card scrolls inside itself.
+ */
+.office-login {
+  position: fixed;
+  inset: 0;
+  overflow: hidden auto;
+  display: grid;
+  place-items: start center;
+  padding: 112px 24px 32px;
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.office-login__top {
+  position: absolute;
+  top: 16px;
+  left: 32px;
+  right: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.office-login__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.office-login__wordmark {
+  font: 600 22px/1 var(--font-mono);
+  letter-spacing: -0.5px;
+}
+
+.office-login__tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.office-login__content {
+  display: grid;
+  justify-items: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 440px;
+}
+
+.office-login__card {
+  box-sizing: border-box;
+  display: grid;
+  gap: 24px;
+  width: 100%;
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+}
+
+.office-login__main {
+  display: grid;
+  gap: 12px;
+}
+
+.office-login__product {
+  margin: 0;
+  color: var(--fg-3);
+  font: 400 13px/18px var(--font-mono);
+}
+
+.office-login__title {
+  margin: 0;
+  font: var(--text-h1);
+}
+
+.office-login__form {
+  gap: 16px;
+}
+
+/* A refused sign-in marks both fields (a 2 px rule), and the alert above them says why. */
+.office-login__form[data-failed] .mk-input {
+  --mk-input-border: 2px solid var(--err-solid);
+}
+
+.office-login .office-login__ghost {
+  align-self: center;
+}
+
+.office-login__recent {
+  display: grid;
+  gap: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.office-login__recent-title {
+  margin: 0;
+  color: var(--fg-3);
+  font: 600 11px/12px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.office-login__recent-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.office-login .office-login__recent-pick {
+  width: 100%;
+  min-height: 52px;
+  gap: 12px;
+  padding: 0 8px;
+  border-radius: 14px;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+}
+
+.office-login .office-login__recent-pick:hover {
+  background: var(--surface-panel);
+}
+
+.office-login .office-login__recent-pick--selected {
+  background: var(--surface-panel);
+}
+
+.office-login__avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: 600 12px/1 var(--font-mono);
+}
+
+.office-login__recent-pick--selected .office-login__avatar {
+  background: var(--surface-card);
+}
+
+.office-login__recent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-login__go {
+  color: var(--fg-3);
+}
+
+.office-login__check {
+  flex: none;
+  color: var(--ok-fg);
+}
+
+.office-login .office-login__clear {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 13px/16px var(--font-ui);
+}
+
+.office-login__footer {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.office-login__address {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 12px;
+}
+
+.theme-switcher .theme-switcher__option:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* A low window (the smallest is 960 x 600): a tighter card; the recent users' note goes. */
+@media (max-height: 700px) {
+  .office-login {
+    padding-top: 80px;
+  }
+
+  .office-login__card {
+    padding: 24px 32px;
+    gap: 16px;
+  }
+
+  .office-login__recent .office-note {
+    display: none;
+  }
+}
+
+.overview-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+/* The greeting is the page's subtitle: it hugs the title above it. */
+.office-shell__content .mk-page-header + .overview-who {
+  margin-top: -12px;
+}
+
+/* A product row: the photo frame, then the name and under it the print name. */
+.product-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.product-cell > .product-thumb {
+  flex: none;
+}
+
+.product-name__full {
+  font-weight: 600;
+}
+
+/* A shift's product line, its quiet second line, and a figure cell aligned to the end. */
+.shift-cell__name {
+  font-weight: 600;
+}
+
+.shift-cell__sub {
+  font: var(--text-body-sm);
+}
+
+.shift-cell--end {
+  justify-items: end;
+}
+
+.shift-cell--end > .shift-cell__quiet {
+  font: var(--text-body-sm);
+}
+
+/* The export formats as rows divided by hairlines (the kit's export dialog), one choice among them. */
+.export-formats {
+  --mk-radio-gap: 0;
+}
+
+.export-formats [role="radiogroup"] > div {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.export-formats [role="radiogroup"] > div:last-child {
+  border-bottom: 0;
+}

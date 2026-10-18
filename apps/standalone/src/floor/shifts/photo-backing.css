@@ -1,0 +1,18 @@
+/*
+ * What stands behind a product's photo (`photoBacking`, ProductPhoto.tsx): the kit's one brand
+ * gradient (the work band's, `brand1` -> `brand3`, line `brandline`) behind a cut-out or the
+ * monogram, nothing visible behind a photo that has its own background. Every frame of a product
+ * (the work band, the shift card, the new shift's square) sets `data-photo-backing`; none of them
+ * paints its own face, so a transparent photo never lands on a flat grey.
+ */
+:where(.floor-frame, .station-screen) [data-photo-backing="gradient"] {
+  border-color: var(--brandline);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
+  background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
+}
+
+:where(.floor-frame, .station-screen) [data-photo-backing="none"] {
+  border-color: transparent;
+  background: transparent;
+}

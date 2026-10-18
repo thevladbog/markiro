@@ -1,0 +1,123 @@
+/*
+ * The status bar's rail of actions, forked from the cloud station
+ * (apps/station/src/station.css: `.station-status-actions`, `.station-rail-button`,
+ * `.operator-switch-control`): the right of the one-row header, every
+ * control 64 px high (the floor's touch target), its caption on one line.
+ */
+.station-status-actions {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: stretch;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.station-status-actions > * {
+  min-height: 64px;
+  flex: none;
+}
+
+.operator-switch-control {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: end;
+}
+
+.station-rail-button {
+  min-height: 64px;
+  padding-inline: var(--sp-3) !important;
+  white-space: nowrap;
+}
+
+.operator-switch-control__confirmation {
+  max-width: 760px;
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--floor-body);
+}
+
+/*
+ * «Оконный режим» (beta 3): the cloud station's glyph (a window with the
+ * corner arrow pointing out or in), an icon button of the rail, and the
+ * error that stays under it until it is dismissed.
+ */
+.floor-window-control {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: end;
+}
+
+.floor-window-control__glyph {
+  position: relative;
+  display: inline-block;
+  width: 22px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid currentcolor;
+  border-radius: 2px;
+}
+
+.floor-window-control__glyph::after {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  content: "";
+  border-top: 2px solid currentcolor;
+  border-right: 2px solid currentcolor;
+}
+
+.floor-window-control__glyph--locked::after {
+  right: 2px;
+  bottom: 2px;
+  transform: rotate(135deg);
+}
+
+.floor-window-control__glyph--windowed::after {
+  top: 2px;
+  right: 2px;
+  transform: rotate(-45deg);
+}
+
+.floor-window-control__error {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  /* The parent is one 64 px button wide: without this the box shrank to 230 px and the button overlapped the words. */
+  width: max-content;
+  max-width: min(420px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-3);
+  gap: var(--sp-3);
+  border: 2px solid var(--err);
+  border-radius: var(--floor-r-ctl);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-2);
+  color: var(--fg-1);
+  font: var(--floor-body);
+  align-items: center;
+}
+
+.station-rail-button--icon {
+  width: 64px;
+  min-width: 64px;
+  padding: 0 !important;
+}
+
+/* The sync button (beta 3): the glyph, and a dot while the panel has something to explain. */
+.floor-sync-button {
+  position: relative;
+}
+
+.floor-sync-button__dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--surface-panel);
+  border-radius: 50%;
+  background: var(--warn-solid);
+}

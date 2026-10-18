@@ -1,0 +1,6 @@
+# Cargo workspace build output
+/target/
+# Tauri-generated capability schemas, regenerated on every build
+/src-tauri/gen/schemas
+# The host binary the installer build copies in as the Tauri sidecar
+/src-tauri/binaries/

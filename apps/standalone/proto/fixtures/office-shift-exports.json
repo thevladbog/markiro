@@ -1,0 +1,73 @@
+{
+  "items": [
+    {
+      "id": 42,
+      "recordedAt": "2026-10-08T07:30:00Z",
+      "userName": "Иван Петров",
+      "formatId": "shift_xml_gismt_aggregation_pallets",
+      "formatVersion": 1,
+      "maxLines": 2,
+      "palletId": null,
+      "documentId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+      "partCount": 3,
+      "codeCount": 3,
+      "boxCount": 2,
+      "palletCount": 1,
+      "openPalletSuppressedBoxCount": 1,
+      "files": [
+        {
+          "id": "7a1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8",
+          "batchId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+          "partNo": 1,
+          "kind": "shift_export",
+          "targetType": "shift",
+          "targetId": "c0000000-0000-4000-8000-000000000001",
+          "shiftId": "c0000000-0000-4000-8000-000000000001",
+          "formatId": "shift_xml_gismt_aggregation_pallets",
+          "formatVersion": 1,
+          "fileName": "Отчет об агрегации паллет_1.xml",
+          "mediaType": "application/xml; charset=utf-8",
+          "sizeBytes": 18342,
+          "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "generator": "markiro-autonom 0f3a9c1b2",
+          "createdAt": "2026-10-08T07:30:00Z",
+          "userName": "Иван Петров"
+        },
+        {
+          "id": "8b2d3e4f-5061-4b72-9c83-a4b5c6d7e8f9",
+          "batchId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+          "partNo": 2,
+          "kind": "shift_export",
+          "targetType": "shift",
+          "targetId": "c0000000-0000-4000-8000-000000000001",
+          "shiftId": "c0000000-0000-4000-8000-000000000001",
+          "formatId": "shift_xml_gismt_aggregation_pallets",
+          "formatVersion": 1,
+          "fileName": "Отчет об агрегации паллет_2.xml",
+          "mediaType": "application/xml; charset=utf-8",
+          "sizeBytes": 9120,
+          "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+          "generator": "markiro-autonom 0f3a9c1b2",
+          "createdAt": "2026-10-08T07:30:00Z",
+          "userName": null
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "recordedAt": "2026-10-08T07:10:00Z",
+      "userName": null,
+      "formatId": "pallet_xml_gismt_aggregation",
+      "formatVersion": 1,
+      "maxLines": null,
+      "palletId": "a0000000-0000-4000-8000-000000000001",
+      "documentId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+      "partCount": 1,
+      "codeCount": 0,
+      "boxCount": 1,
+      "palletCount": 1,
+      "openPalletSuppressedBoxCount": 0,
+      "files": []
+    }
+  ]
+}

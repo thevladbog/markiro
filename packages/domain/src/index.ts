@@ -258,6 +258,12 @@ export {
   InventoryDocumentGenerationError,
   isParticipantInn,
 } from "./inventory/index.js";
+export { GismtDisaggregationError, renderGismtDisaggregationXml } from "./gismt-disaggregation.js";
+export type {
+  GismtDisaggregationErrorCode,
+  GismtDisaggregationInput,
+  RenderedGismtDisaggregation,
+} from "./gismt-disaggregation.js";
 export type {
   InventoryDocumentGeneratedPart,
   InventoryDocumentGenerationErrorCode,
@@ -391,6 +397,41 @@ export * from "./offline-grants/jws.js";
 export * from "./offline-grants/clock.js";
 export * from "./offline-grants/decision.js";
 export * from "./offline-grants/budgets.js";
+
+export type { ReportCode, ReportOrg } from "./print-forms/contents-report.js";
+export { renderBoxReportHtml } from "./print-forms/box-report.js";
+export type { BoxReportCode, BoxReportData } from "./print-forms/box-report.js";
+export { renderPalletReportHtml } from "./print-forms/pallet-report.js";
+export type { PalletReportBox, PalletReportData } from "./print-forms/pallet-report.js";
+export {
+  renderPalletPlacardHtml,
+  renderShiftPlacardsHtml,
+  summarizeByProductionDate,
+} from "./print-forms/pallet-placard.js";
+export type {
+  PalletPlacardBox,
+  PalletPlacardData,
+  PlacardDateRow,
+  PlacardFormat,
+} from "./print-forms/pallet-placard.js";
+export { renderPairingCardFragment, renderPairingCardHtml } from "./print-forms/pairing-card.js";
+export type { PairingCardData, PairingCardFormat } from "./print-forms/pairing-card.js";
+export { renderShiftTaskFormHtml } from "./print-forms/shift-task-form.js";
+export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
+// The chrome helpers stay grouped under one name: `escapeHtml`, `formatInteger`
+// and friends are generic names that should not crowd the package root, and
+// contents-report.ts has a different `escapeHtml` of its own.
+export * as taskFormChrome from "./print-forms/task-form-chrome.js";
+export {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
+  renderDisaggregationReportHtml,
+} from "./print-forms/disaggregation-report.js";
+export type {
+  DisaggregationReportBox,
+  DisaggregationReportCode,
+  DisaggregationReportData,
+  DisaggregationReportLine,
+} from "./print-forms/disaggregation-report.js";
 
 export {
   createLabelRenderPlan,

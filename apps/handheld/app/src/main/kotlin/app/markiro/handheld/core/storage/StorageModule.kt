@@ -22,7 +22,7 @@ object StorageModule {
             .addMigrations(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
                 MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
-                MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
+                MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
             )
             .build().also { db -> db.grants.sample = { app.markiro.handheld.core.grants.AndroidGrantClock.sample(context) } }
 
@@ -102,6 +102,12 @@ object StorageModule {
     fun palletLabelTemplateDao(db: HandheldDatabase): PalletLabelTemplateDao = db.palletLabelTemplateDao()
 
     @Provides
+    fun operatorBadgeDao(db: HandheldDatabase): OperatorBadgeDao = db.operatorBadgeDao()
+
+    @Provides
+    fun hostOutboxDao(db: HandheldDatabase): HostOutboxDao = db.hostOutboxDao()
+
+    @Provides
     @Singleton
     fun metaStore(db: HandheldDatabase): MetaStore = MetaStore(db)
 
@@ -111,7 +117,7 @@ object StorageModule {
 
     @Provides
     @Singleton
-    fun rosterStore(dao: OperatorDao, recovery: DeviceRecovery): RosterStore = RosterStore(dao, recovery)
+    fun rosterStore(dao: OperatorDao, recovery: DeviceRecovery, badges: OperatorBadgeDao): RosterStore = RosterStore(dao, recovery, badges)
 
     @Provides
     fun roster(store: RosterStore): OperatorRoster = store

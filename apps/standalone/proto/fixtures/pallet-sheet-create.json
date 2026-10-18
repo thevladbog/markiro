@@ -1,0 +1,6 @@
+{
+  "name": "Палета А4 · вертикальная",
+  "presetKey": "pallet-a4-portrait",
+  "enabled": true,
+  "spec": { "schemaVersion": 2, "kind": "pallet_sheet", "dpi": 300 }
+}

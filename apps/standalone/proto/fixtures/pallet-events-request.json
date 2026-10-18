@@ -1,0 +1,68 @@
+{
+  "records": [
+    {
+      "id": "e1000000-0000-4000-8000-000000000001",
+      "kind": "warehouse_pallet_opened",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "productId": "9f0e1d2c-3b4a-4958-8776-655443322110",
+        "openedAt": "2026-10-08T07:00:00.000Z"
+      }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000002",
+      "kind": "pallet_box_added",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "boxSscc": "046006820000015000",
+        "addedAt": "2026-10-08T07:00:05.000Z"
+      }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000003",
+      "kind": "pallet_box_added",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "boxSscc": "046006820000015017",
+        "addedAt": "2026-10-08T07:00:09.000Z"
+      }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000004",
+      "kind": "pallet_box_removed",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "boxSscc": "046006820000015017",
+        "removedAt": "2026-10-08T07:00:14.000Z"
+      }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000005",
+      "kind": "warehouse_pallet_closed",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "sscc": "146006820000000409",
+        "blockId": "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+        "serial": 40,
+        "openedAt": "2026-10-08T07:00:00.000Z",
+        "closedAt": "2026-10-08T07:01:00.000Z",
+        "boxCount": 1
+      }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000006",
+      "kind": "warehouse_pallet_label",
+      "operatorId": null,
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "outcome": "verified",
+        "at": "2026-10-08T07:01:20.000Z"
+      }
+    }
+  ]
+}

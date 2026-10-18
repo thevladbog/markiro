@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -39,7 +40,13 @@ import app.markiro.handheld.feature.inventory.InventoryListViewModel
 import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
 import app.markiro.handheld.feature.inventory.InventoryWorkScreen
 import app.markiro.handheld.feature.inventory.InventoryWorkViewModel
+import app.markiro.handheld.feature.pairing.HostPairingCallbacks
+import app.markiro.handheld.feature.pairing.HostPairingScreen
+import app.markiro.handheld.feature.pairing.HostPairingViewModel
 import app.markiro.handheld.feature.pairing.PairingCallbacks
+import app.markiro.handheld.feature.pairing.PairingSource
+import app.markiro.handheld.feature.pairing.PairingSourceScreen
+import app.markiro.handheld.feature.pairing.PairingSourceViewModel
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingViewModel
 import app.markiro.handheld.core.label.PrinterLanguage
@@ -124,6 +131,7 @@ object Routes {
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
     const val LABEL_QUEUE = "label-queue"
+    const val HOST_QUEUE = "host-queue"
     const val EXCEPTIONS = "exceptions/{shiftId}"
     const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
     const val PALLET_DISASSEMBLE = "exceptions/{shiftId}/pallet-disassemble"
@@ -155,12 +163,19 @@ object Routes {
 @Composable
 fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: RosterRefresher, preferences: AppPreferences) {
     val start by shell.start.collectAsStateWithLifecycle()
+    val recovery by shell.recoveryState.collectAsStateWithLifecycle()
+    val restartReady by shell.datasetRestartReady.collectAsStateWithLifecycle()
+    val datasetFailed by shell.datasetResetFailed.collectAsStateWithLifecycle()
     val dark = when (preferences.theme) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     MarkiroTheme(dark = dark) {
+        if (recovery.phase == app.markiro.handheld.core.storage.RecoveryPhase.DATASET_RESET_PENDING) {
+            DatasetResetScreen(restartReady, datasetFailed, shell::retryDatasetReset)
+            return@MarkiroTheme
+        }
         val first = start ?: return@MarkiroTheme
         val nav = rememberNavController()
         val sessionState by session.state.collectAsStateWithLifecycle()
@@ -195,19 +210,48 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             modifier = Modifier.fillMaxSize().background(MarkiroTheme.colors.surfacePage).safeDrawingPadding(),
         ) {
             composable(Routes.PAIRING) {
-                val vm: PairingViewModel = hiltViewModel()
-                val state by vm.state.collectAsStateWithLifecycle()
-                PairingScreen(
-                    state,
-                    PairingCallbacks(
-                        onDigit = vm::onDigit,
-                        onBackspace = vm::onBackspace,
-                        onConfirm = vm::onConfirm,
-                        onServerUrl = vm::onServerUrl,
-                        onRetry = vm::retry,
-                        onDone = { nav.navigate(Routes.SIGN_IN) { popUpTo(0) } },
-                    ),
-                )
+                val sourceVm: PairingSourceViewModel = hiltViewModel()
+                val resolved by sourceVm.source.collectAsStateWithLifecycle()
+                var chosen by rememberSaveable { mutableStateOf<PairingSource?>(null) }
+                when (chosen ?: resolved) {
+                    PairingSource.LOADING -> Unit
+                    PairingSource.CHOOSE -> PairingSourceScreen(
+                        onCloud = { chosen = PairingSource.CLOUD },
+                        onHost = { chosen = PairingSource.HOST },
+                    )
+                    PairingSource.CLOUD -> {
+                        val vm: PairingViewModel = hiltViewModel()
+                        val state by vm.state.collectAsStateWithLifecycle()
+                        PairingScreen(
+                            state,
+                            PairingCallbacks(
+                                onDigit = vm::onDigit,
+                                onBackspace = vm::onBackspace,
+                                onConfirm = vm::onConfirm,
+                                onServerUrl = vm::onServerUrl,
+                                onRetry = vm::retry,
+                                onDone = { nav.navigate(Routes.SIGN_IN) { popUpTo(0) } },
+                            ),
+                        )
+                    }
+                    PairingSource.HOST -> {
+                        val vm: HostPairingViewModel = hiltViewModel()
+                        val state by vm.state.collectAsStateWithLifecycle()
+                        HostPairingScreen(
+                            state,
+                            HostPairingCallbacks(
+                                onAddress = vm::onAddress,
+                                onCode = vm::onCode,
+                                onContinue = vm::onContinue,
+                                onMatch = vm::onFingerprintConfirmed,
+                                onNoMatch = vm::onFingerprintRejected,
+                                onRetry = vm::onRetry,
+                                onRetrySync = vm::onRetrySync,
+                                onDone = { nav.navigate(Routes.SIGN_IN) { popUpTo(0) } },
+                            ),
+                        )
+                    }
+                }
             }
             composable(Routes.SIGN_IN) {
                 val vm: SignInViewModel = hiltViewModel()
@@ -258,6 +302,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onContinueShift = { vm.continueShift() },
                     onSignOut = vm::signOut,
                     onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                    onHostQueue = { nav.navigate(Routes.HOST_QUEUE) },
+                    onRepairHost = vm::repairHostLink,
                     onDismissDialog = vm::dismissDialog,
                 )
             }
@@ -559,6 +605,30 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onResolveUnknown = vm::resolveUnknown,
                         onReroute = vm::reroute,
                         onManagePrinters = { nav.navigate(Routes.PRINTER_GRAPH) },
+                    ),
+                )
+            }
+            composable(Routes.HOST_QUEUE) {
+                val vm: app.markiro.handheld.feature.settings.HostQueueViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val context = androidx.compose.ui.platform.LocalContext.current
+                LaunchedEffect(Unit) {
+                    // The record goes out as text through the system's share sheet: the app keeps no file provider path for it.
+                    vm.exports.collect { export ->
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_SUBJECT, export.fileName)
+                            putExtra(android.content.Intent.EXTRA_TEXT, export.text)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(send, context.getString(R.string.host_queue_support_title)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+                app.markiro.handheld.feature.settings.HostQueueScreen(
+                    state,
+                    app.markiro.handheld.feature.settings.HostQueueCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onSendNow = vm::sendNow,
+                        onSupport = vm::exportForSupport,
                     ),
                 )
             }

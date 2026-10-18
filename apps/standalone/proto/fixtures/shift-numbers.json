@@ -1,0 +1,33 @@
+{
+  "monthKeys": [
+    { "date": "2026-10-08", "monthKey": "OCT26" },
+    { "date": "2026-01-01", "monthKey": "JAN26" },
+    { "date": "2029-12-31", "monthKey": "DEC29" },
+    { "date": "2028-02-29", "monthKey": "FEB28" },
+    { "date": "2000-02-29", "monthKey": "FEB00" },
+    { "date": "2099-07-15", "monthKey": "JUL99" },
+    { "date": "0024-02-29", "monthKey": "FEB24" },
+    { "date": "2026-02-29", "monthKey": null },
+    { "date": "1900-02-29", "monthKey": null },
+    { "date": "2026-04-31", "monthKey": null },
+    { "date": "2026-01-00", "monthKey": null },
+    { "date": "2026-13-01", "monthKey": null },
+    { "date": "2026-00-10", "monthKey": null },
+    { "date": "2026-8-1", "monthKey": null },
+    { "date": "20261008", "monthKey": null },
+    { "date": " 2026-10-08", "monthKey": null },
+    { "date": "2026-10-08 ", "monthKey": null },
+    { "date": "2026-10-08\n", "monthKey": null },
+    { "date": "2026-10-08T00:00:00Z", "monthKey": null },
+    { "date": "２０２６-10-08", "monthKey": null },
+    { "date": "garbage", "monthKey": null },
+    { "date": "", "monthKey": null }
+  ],
+  "numbers": [
+    { "monthKey": "AUG26", "seq": 3, "createdFrom": "office", "number": "AUG26-003" },
+    { "monthKey": "JAN27", "seq": 42, "createdFrom": "office", "number": "JAN27-042" },
+    { "monthKey": "OCT26", "seq": 4, "createdFrom": "station", "number": "OCT26-004/S" },
+    { "monthKey": "AUG26", "seq": 1234, "createdFrom": "office", "number": "AUG26-1234" },
+    { "monthKey": "DEC29", "seq": 1, "createdFrom": "station", "number": "DEC29-001/S" }
+  ]
+}

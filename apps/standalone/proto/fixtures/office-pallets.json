@@ -1,0 +1,16 @@
+[
+  {
+    "id": "a0000000-0000-4000-8000-000000000001",
+    "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "sscc": "146006820000000409",
+    "openedAt": "2026-10-08T06:06:01.118Z",
+    "closedAt": "2026-10-08T06:20:44.650Z",
+    "disassembledAt": null,
+    "boxes": 1,
+    "units": 2,
+    "boxCountReported": 1,
+    "disassembledBoxes": 0,
+    "printVerifiedAt": "2026-10-08T06:20:51.300Z",
+    "printSkippedAt": null
+  }
+]

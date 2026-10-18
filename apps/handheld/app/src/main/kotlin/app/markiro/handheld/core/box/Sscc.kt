@@ -55,4 +55,11 @@ object Sscc {
         }
         return body.takeIf { it.length == 18 && it.all(Char::isDigit) }
     }
+
+    /** The serial an SSCC of issuer prefix `gs1Prefix` carries, or null when the 18 digits are not of that prefix. */
+    fun serialOf(sscc: String, gs1Prefix: String): Long? {
+        if (sscc.length != 18 || !sscc.all(Char::isDigit) || !PREFIX.matches(gs1Prefix)) return null
+        if (sscc.substring(1, 1 + gs1Prefix.length) != gs1Prefix) return null
+        return sscc.substring(1 + gs1Prefix.length, 17).toLongOrNull()
+    }
 }

@@ -1,0 +1,6 @@
+{
+  "kind": "station",
+  "name": "Станция линии 1",
+  "appVersion": "0.1.0",
+  "capabilities": ["validation-dm-duplicate-v1"]
+}

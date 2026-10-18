@@ -23,7 +23,9 @@ import {
   Pager,
   RadioGroup,
   RowActions,
+  RowActionMenu,
   Select,
+  Slider,
   StatusChip,
   Table,
 } from "../src/components/index.js";
@@ -113,6 +115,14 @@ describe("Admin page layout", () => {
 });
 
 describe("Button", () => {
+  it("draws the ghost variant without a fill or a visible rule", () => {
+    render(<Button variant="ghost">Quiet</Button>);
+    const ghost = screen.getByRole("button", { name: "Quiet" });
+    expect(ghost.className).toContain("mk-btn--ghost");
+    expect(ghost.style.background).toBe("transparent");
+    expect(ghost.style.border).toContain("transparent");
+  });
+
   it("keeps the office control minimum height while allowing wrapped labels to grow", () => {
     const { rerender } = render(
       <Button variant="primary" size="md">
@@ -595,6 +605,17 @@ describe("Select", () => {
     expect(getComputedStyle(optionText!).whiteSpace).toBe("nowrap");
   });
 
+  it("keeps the full text of a long value as a tooltip of the closed control and its items", async () => {
+    const user = userEvent.setup();
+    const longLabel = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
+    render(<Select label="Группа" options={[{ value: "15", label: longLabel }]} value="15" />);
+
+    const trigger = screen.getByRole("combobox", { name: "Группа" });
+    expect(trigger.getAttribute("title")).toBe(longLabel);
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: longLabel }).getAttribute("title")).toBe(longLabel);
+  });
+
   it("selects the next enabled option with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -614,6 +635,30 @@ describe("Select", () => {
     await user.keyboard("{Enter}");
 
     expect(onValueChange).toHaveBeenCalledWith("Вода");
+  });
+
+  it("says so when the searchable filter matches no option, and starts afresh at the next opening", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select
+        label="Категория"
+        searchable
+        searchLabel="Поиск категории"
+        searchEmptyLabel="Ничего не найдено"
+        options={["Соки", "Нектары"]}
+      />,
+    );
+    const trigger = screen.getByRole("combobox", { name: "Категория" });
+    await user.click(trigger);
+    await user.type(screen.getByRole("searchbox", { name: "Поиск категории" }), "яблоко");
+    expect(screen.getByRole("status").textContent).toBe("Ничего не найдено");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+
+    await user.keyboard("{Escape}");
+    await user.click(trigger);
+    expect(screen.getByRole("searchbox", { name: "Поиск категории" })).toHaveProperty("value", "");
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("edits a searchable select filter with selection, caret movement and paste", async () => {
@@ -927,6 +972,41 @@ describe("shared control styles", () => {
     expect(document.getElementById(select.getAttribute("aria-describedby")!)?.textContent).toBe(
       "Unavailable",
     );
+  });
+});
+
+describe("Select at the floor size with `custom`", () => {
+  it("renders the product's own list in touch dimensions, never a native select", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const { container } = render(
+      <Select
+        custom
+        searchable
+        size="floor"
+        label="Port"
+        options={[
+          { value: "", label: "Choose" },
+          { value: "COM3", label: "COM3" },
+          { value: "COM7", label: "COM7" },
+        ]}
+        value=""
+        onValueChange={onValueChange}
+      />,
+    );
+
+    expect(container.querySelector("select")).toBeNull();
+    const trigger = screen.getByRole("combobox", { name: "Port" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.style.height).toBe("var(--control-floor)");
+    expect(trigger.style.font).toBe("var(--floor-body)");
+    expect(screen.getByText("Port").style.font).toBe("var(--floor-body-strong)");
+
+    await user.click(trigger);
+    const option = await screen.findByRole("option", { name: "COM7" });
+    expect(option.style.minHeight).toBe("var(--control-floor)");
+    await user.click(option);
+    expect(onValueChange).toHaveBeenCalledWith("COM7");
   });
 });
 
@@ -1452,7 +1532,172 @@ describe("геометрия тега", () => {
   });
 });
 
+describe("Table (fill)", () => {
+  const columns = [
+    { key: "name", title: "Название" },
+    { key: "actions", title: "Действия", stickyEnd: true },
+  ];
+
+  it("keeps its old look without `fill`: no pinned heading, the padding and border from the tokens' fallbacks", () => {
+    render(<Table columns={columns} rows={[{ name: "A", actions: "x" }]} />);
+    const heading = screen.getByRole("columnheader", { name: "Название" });
+    expect(heading.style.position).toBe("");
+    expect(heading.style.padding).toContain("var(--table-th-py, 10px)");
+    expect(screen.getByRole("cell", { name: "A" }).style.padding).toContain(
+      "var(--table-td-py, 11px)",
+    );
+  });
+
+  it("pins the heading to the top of an internally scrolling body and fills its parent", () => {
+    const { container } = render(
+      <Table fill columns={columns} rows={[{ name: "A", actions: "x" }]} />,
+    );
+    const root = container.querySelector(".mk-table") as HTMLElement;
+    expect(root.style.display).toBe("flex");
+    expect(root.style.flexDirection).toBe("column");
+    expect(root.style.minHeight).toBe("0px");
+    const scroll = container.querySelector(".mk-table__scroll") as HTMLElement;
+    expect(scroll.style.overflow).toBe("auto");
+    expect(scroll.style.minHeight).toBe("0px");
+    const heading = screen.getByRole("columnheader", { name: "Название" });
+    expect(heading.style.position).toBe("sticky");
+    expect(heading.style.top).toBe("0px");
+    // The pinned action column's heading sits above the scrolling headings.
+    const actions = screen.getByRole("columnheader", { name: "Действия" });
+    expect(actions.style.position).toBe("sticky");
+    expect(actions.style.top).toBe("0px");
+    expect(Number(actions.style.zIndex)).toBeGreaterThan(Number(heading.style.zIndex));
+  });
+
+  it("marks the heading, the rows and the cells with classes the office styles", () => {
+    const { container } = render(<Table columns={columns} rows={[{ name: "A", actions: "x" }]} />);
+    expect(container.querySelector("th.mk-table__th")).not.toBeNull();
+    expect(container.querySelector("tbody tr.mk-table__row")).not.toBeNull();
+    expect(container.querySelector("td.mk-table__td")).not.toBeNull();
+  });
+});
+
 describe("Table", () => {
+  it("sorts by the keyboard from a sortable header, which says its order, and leaves a control inside a clickable row alone", () => {
+    const onSort = vi.fn();
+    const onRowClick = vi.fn();
+    render(
+      <Table
+        columns={[
+          { key: "n", title: "Номер", sortable: true },
+          { key: "act", title: "Действие", render: () => <button type="button">Открыть</button> },
+        ]}
+        rows={[{ n: "1" }]}
+        sortKey="n"
+        sortDir="desc"
+        onSort={onSort}
+        onRowClick={onRowClick}
+      />,
+    );
+    const header = screen.getByRole("columnheader", { name: "Номер" });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    expect(screen.getByRole("columnheader", { name: "Действие" }).hasAttribute("tabindex")).toBe(
+      false,
+    );
+    fireEvent.keyDown(header, { key: "Enter" });
+    fireEvent.keyDown(header, { key: " " });
+    expect(onSort).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("cell", { name: "1" }));
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("pins a column to the right edge of the scrolling table, heading and cells alike", () => {
+    render(
+      <Table
+        columns={[
+          { key: "name", title: "Название" },
+          { key: "actions", title: "Действия", stickyEnd: true },
+        ]}
+        rows={[{ name: "Линия 1", actions: "Изменить" }]}
+      />,
+    );
+
+    for (const element of [
+      screen.getByRole("columnheader", { name: "Действия" }),
+      screen.getByRole("cell", { name: "Изменить" }),
+    ]) {
+      expect(element.style.position).toBe("sticky");
+      expect(element.style.right).toBe("0px");
+    }
+    expect(screen.getByRole("cell", { name: "Линия 1" }).style.position).toBe("");
+  });
+
+  it("centres an end-pinned actions column under its heading and fits it to its content", () => {
+    render(
+      <Table
+        columns={[
+          { key: "name", title: "Название" },
+          { key: "actions", title: "Действия", stickyEnd: true },
+          { key: "note", title: "Заметка", stickyEnd: true, align: "right" },
+        ]}
+        rows={[{ name: "Линия 1", actions: "Изменить", note: "n" }]}
+      />,
+    );
+    const heading = screen.getByRole("columnheader", { name: "Действия" });
+    expect(heading.style.textAlign).toBe("center");
+    expect(heading.style.width).toBe("1px");
+    expect(screen.getByRole("cell", { name: "Изменить" }).style.textAlign).toBe("center");
+    // An explicit alignment still wins; an ordinary column stays at the left.
+    expect(screen.getByRole("cell", { name: "n" }).style.textAlign).toBe("right");
+    expect(screen.getByRole("cell", { name: "Линия 1" }).style.textAlign).toBe("left");
+  });
+
+  it("holds a column at its minimum width, heading and cells alike", () => {
+    render(
+      <Table
+        columns={[{ key: "name", title: "Название", wrap: true, minWidth: 180 }]}
+        rows={[{ name: "Молоко 3,2% 0,9 л" }]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Название" }).style.minWidth).toBe("180px");
+    expect(screen.getByRole("cell", { name: "Молоко 3,2% 0,9 л" }).style.minWidth).toBe("180px");
+  });
+
+  it("wraps a wrapping column by words and never letter by letter", () => {
+    render(
+      <Table
+        columns={[
+          { key: "line", title: "Линия", wrap: true },
+          { key: "date", title: "Дата" },
+        ]}
+        rows={[{ line: "Линия 1 — розлив", date: "13.10.2026" }]}
+      />,
+    );
+
+    // `anywhere` would make the column's minimum width one character.
+    expect(screen.getByRole("cell", { name: "Линия 1 — розлив" }).style.overflowWrap).toBe(
+      "break-word",
+    );
+    expect(screen.getByRole("cell", { name: "13.10.2026" }).style.whiteSpace).toBe("nowrap");
+  });
+
+  it("keeps headings on one line unless the column asks for a wrapping heading", () => {
+    render(
+      <Table
+        columns={[
+          { key: "login", title: "Табельный номер", wrapTitle: true },
+          { key: "name", title: "Полное имя" },
+        ]}
+        rows={[{ login: "001", name: "Иван" }]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Табельный номер" }).style.whiteSpace).toBe(
+      "normal",
+    );
+    expect(screen.getByRole("columnheader", { name: "Полное имя" }).style.whiteSpace).toBe(
+      "nowrap",
+    );
+  });
+
   it("renders an overflow-x:auto wrapper and font-mono nowrap numeric cells", () => {
     const { container } = render(
       <Table
@@ -1550,5 +1795,132 @@ describe("инвариант словаря фаз", () => {
     for (const phase of PHASES) {
       expect(allowed.has(PHASE_TONE[phase])).toBe(true);
     }
+  });
+});
+
+describe("RowActionMenu", () => {
+  function menu(onSelect = vi.fn()) {
+    render(
+      <RowActionMenu
+        label="Действия: Иван"
+        items={[
+          { key: "pin", label: "Сменить PIN", ariaLabel: "Сменить PIN оператора Иван", onSelect },
+          { key: "off", label: "Выключить", destructive: true, onSelect: vi.fn() },
+        ]}
+      />,
+    );
+    return onSelect;
+  }
+
+  it("opens a labelled menu with the actions as items, the destructive one set apart", async () => {
+    const user = userEvent.setup();
+    menu();
+    const trigger = screen.getByRole("button", { name: "Действия: Иван" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(screen.queryByRole("menu")).toBeNull();
+    await user.click(trigger);
+    expect(screen.getByRole("menu", { name: "Действия: Иван" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Сменить PIN оператора Иван" })).toBeTruthy();
+    const destructive = screen.getByRole("menuitem", { name: "Выключить" });
+    expect(destructive.getAttribute("data-destructive")).toBe("true");
+    expect(screen.getByRole("separator")).toBeTruthy();
+  });
+
+  it("is keyboard operable: arrows move, Enter chooses and closes, Escape returns to the button", async () => {
+    const user = userEvent.setup();
+    const onSelect = menu();
+    const trigger = screen.getByRole("button", { name: "Действия: Иван" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const first = await screen.findByRole("menuitem", { name: "Сменить PIN оператора Иван" });
+    await waitFor(() => expect(document.activeElement).toBe(first));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Выключить" }));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(first);
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    await user.click(trigger);
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
+describe("Slider", () => {
+  it("is a named range with the value, bounds and step, and reports a change as a number", () => {
+    const onValueChange = vi.fn();
+    render(
+      <Slider
+        aria-label="Масштаб"
+        min={1}
+        max={4}
+        step={0.25}
+        value={2}
+        onValueChange={onValueChange}
+      />,
+    );
+    const slider = screen.getByRole("slider", { name: "Масштаб" }) as HTMLInputElement;
+    expect(slider.min).toBe("1");
+    expect(slider.max).toBe("4");
+    expect(slider.step).toBe("0.25");
+    expect(slider.value).toBe("2");
+    fireEvent.change(slider, { target: { value: "3.25" } });
+    expect(onValueChange).toHaveBeenCalledWith(3.25);
+  });
+
+  it("can be disabled", () => {
+    render(
+      <Slider aria-label="x" min={0} max={1} value={0} disabled onValueChange={() => undefined} />,
+    );
+    expect((screen.getByRole("slider") as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe("Button, variant plain", () => {
+  it("takes no inline look, so an app's class can draw it without !important", () => {
+    render(<Button variant="plain">Пункт</Button>);
+    const button = screen.getByRole("button", { name: "Пункт" });
+    expect(button.className).toContain("mk-btn--plain");
+    for (const property of [
+      "padding",
+      "background",
+      "border",
+      "border-radius",
+      "font",
+      "min-height",
+      "gap",
+    ]) {
+      expect(button.style.getPropertyValue(property)).toBe("");
+    }
+    expect(button.style.display).toBe("inline-flex");
+  });
+
+  it("keeps the other variants' inline shape as it was", () => {
+    render(<Button>Сохранить</Button>);
+    const button = screen.getByRole("button", { name: "Сохранить" });
+    expect(button.style.padding).toBe("0px 16px");
+    expect(button.style.borderRadius).toBe("var(--r-2)");
+  });
+});
+
+describe("the 2026 office sizing is opt-in", () => {
+  it("is defined only under .mk-kit-2026, as tokens", () => {
+    const block = /\.mk-kit-2026\s*\{([^}]*)\}/.exec(componentStyles)?.[1] ?? "";
+    expect(block).toContain("--control-md: 44px");
+    expect(block).toContain("--control-sm: 36px");
+    expect(block).toContain("--r-2: 16px");
+    expect(block).toContain("--r-3: 20px");
+    expect(block).toContain("--shadow-1: none");
+  });
+
+  it("leaves the shared defaults the cloud apps use", () => {
+    expect(tokenStyles).toMatch(/--control-md:\s*40px/);
+    expect(tokenStyles).toMatch(/--control-sm:\s*32px/);
+    expect(tokenStyles).toMatch(/--r-2:\s*8px/);
+    expect(tokenStyles).toMatch(/--r-3:\s*12px/);
   });
 });

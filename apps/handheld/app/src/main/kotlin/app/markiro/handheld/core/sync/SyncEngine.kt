@@ -70,7 +70,7 @@ class SyncEngine(
     private val clock: () -> Long = System::currentTimeMillis,
     private val heartbeatMs: Long = HEARTBEAT_MS,
     private val backoff: Backoff = Backoff(),
-) {
+) : SyncDriver {
     private val nudges = Channel<Unit>(Channel.CONFLATED)
     private val drainMutex = Mutex()
     private val started = AtomicBoolean(false)
@@ -115,7 +115,7 @@ class SyncEngine(
         db.palletMembershipRemovalDao().observePendingCount(),
     ) { counts -> counts.sum() }
 
-    val state: StateFlow<SyncState> =
+    override val state: StateFlow<SyncState> =
         combine(pending, db.conflictDao().count(), lastSuccess, now) { owed, conflicts, last, at ->
             val since = last ?: startedAt
             SyncState(pending = owed, lastSuccessAt = last, stuck = owed > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
@@ -147,7 +147,7 @@ class SyncEngine(
         }
     }
 
-    fun start() {
+    override fun start() {
         if (!started.compareAndSet(false, true)) return
         scope.launch {
             lastSuccess.value = meta.get(MetaStore.SYNC_LAST_SUCCESS_AT)?.toLongOrNull()
@@ -166,7 +166,7 @@ class SyncEngine(
     }
 
     /** A recorded scan, a regained network or the heartbeat; cheap and safe from any thread. */
-    fun nudge() {
+    override fun nudge() {
         nudges.trySend(Unit)
     }
 
@@ -176,7 +176,9 @@ class SyncEngine(
     }
 
     /** Sends every pending batch, then closes, then reconciles conflicts. False on the first failure. */
-    suspend fun drainAll(): Boolean = drainMutex.withLock {
+    override suspend fun drainAll(): Boolean = drainMutex.withLock {
+        // A device paired with a host is `HostSyncEngine`'s: this engine reads the same Room rows and must never send them to the cloud.
+        if (config.get()?.backend == "host") return@withLock true
         while (true) {
             when (drainOnce()) {
                 Step.SENT -> continue

@@ -29,7 +29,7 @@ class ValidationMigrationTest {
 
     private fun upgradeFrom(version: Int) = runTest {
         val context=ApplicationProvider.getApplicationContext<Context>(); val name="validation-${UUID.randomUUID()}.db"
-        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20).build()
+        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).build()
         val raw="010460068200001321legacy\u001d93CRYPTO"; val km=KmCodec.canonicalize(raw); val hash=KmCodec.hash(km)
         val savedTemplate="""{ "dpi":203, "caption":"Кега", "elements":[{"literal":"^FNC1"}] }"""
         val shift=ShiftEntityFixtures.bundled("s1").copy(validationPrintMode="duplicate_dm", allowPreviouslyAcceptedCodes=version >= 12, duplicateTemplate=savedTemplate, duplicateTemplateDigest="a".repeat(64), duplicatePolicyRevision="legacy-revision", duplicateVerification="required")
@@ -86,6 +86,7 @@ class ValidationMigrationTest {
                 sqlite.execSQL("DROP TABLE pallet_exceptions")
                 sqlite.execSQL("CREATE TABLE `pallet_exceptions` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, `palletId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `terminalId` TEXT, `operatorId` TEXT, `reason` TEXT NOT NULL, `occurredAt` TEXT NOT NULL)")
             }
+            removeDatasetColumnsForHistoricalFixture(sqlite)
             sqlite.version=version; old.close()
             for(restart in 0..1) {
                 val db=open(); db.initializeRecoveryForTest()

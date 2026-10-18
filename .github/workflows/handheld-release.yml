@@ -44,7 +44,7 @@ concurrency:
 
 jobs:
   authorize:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/standalone/pilot-mvp' && inputs.publish == false && inputs.action == 'release')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -63,11 +63,20 @@ jobs:
           OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
           RELEASE_ACTOR: ${{ github.actor }}
           RELEASE_OWNER: ${{ github.repository_owner }}
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+          RELEASE_ACTION: ${{ inputs.action }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/main"
           test "$RELEASE_ACTOR" = "$RELEASE_OWNER"
           test "$OWNER_CONFIRMATION" = "BUILD-HANDHELD-RELEASE"
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            :
+          elif [[ "$GITHUB_REF" == "refs/heads/standalone/pilot-mvp" ]]; then
+            test "$RELEASE_PUBLISH" = "false"
+            test "$RELEASE_ACTION" = "release"
+          else
+            exit 1
+          fi
 
       # The version is computed from what the channel actually serves, never
       # typed. `versionCode` especially: typed by hand it is a repeat waiting to
@@ -82,14 +91,16 @@ jobs:
         id: version
         shell: bash
         env:
-          CHANNEL: ${{ inputs.channel }}
+          # Pilot artifacts must upgrade an installed stable APK too. An empty
+          # beta channel would instead restart versionCode at 1.
+          CHANNEL: ${{ github.ref == 'refs/heads/standalone/pilot-mvp' && 'stable' || inputs.channel }}
           BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
           node tools/handheld-release/resolve.mjs
 
   release:
-    if: github.ref == 'refs/heads/main' && inputs.action != 'sync-download'
+    if: (github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/standalone/pilot-mvp' && inputs.publish == false && inputs.action == 'release')) && inputs.action != 'sync-download'
     needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -166,7 +177,11 @@ jobs:
             echo "### Markiro ТСД $VERSION_NAME (${{ needs.authorize.outputs.version_code }})"
             echo
             echo "- source: \`$GITHUB_SHA\`"
+            echo "- branch: \`$GITHUB_REF_NAME\`"
             echo "- sha256: \`$(shasum -a 256 "$APK" | cut -d' ' -f1)\`"
+            if [[ "$GITHUB_REF" == "refs/heads/standalone/pilot-mvp" ]]; then
+              echo '- standalone pilot artifact only; no cloud stable channel publication'
+            fi
             echo
             echo 'Signing certificate:'
             echo '```'

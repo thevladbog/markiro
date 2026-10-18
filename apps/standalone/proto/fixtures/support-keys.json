@@ -1,0 +1,14 @@
+{
+  "keys": [
+    {
+      "kid": "sup-d11c3182",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "gLLpqyLayK8VxCJ5O9tkrI5aIUIM3Vv5jvifO-zX56o",
+        "y": "F655LKle4gaUEdNf1mV0JYhzqQhCQsWTi_FBTTGNwm0"
+      }
+    }
+  ],
+  "retiredKids": []
+}

@@ -1,0 +1,667 @@
+/*
+ * The office's list layer (design 2026-10, phase 2): one L1 card per list holding its filters, its
+ * table (heading pinned, rows scrolling) and its pagination bar (pinned); icon row actions with
+ * tooltips and the «Ещё» menu; the segmented control; the list's states; the tooltip. Tokens only.
+ * Hairlines carry the structure; the only shadows are the overlays (tooltip, menu).
+ */
+
+/* A table of the office: rows 56 px, a 44 px heading, set from the tokens the shared Table reads. */
+.office-shell {
+  --table-th-py: 13px;
+  --table-td-py: 8px;
+  --table-row-h: 56px;
+  --table-th-fg: var(--fg-1);
+  --table-th-case: none;
+  --table-th-tracking: 0;
+  --table-th-weight: 600;
+}
+
+/*
+ * The pinned layout contract. The card is as tall as its content and no taller (`flex: 0 1 auto`,
+ * no height and no floor of its own: a one-row list is one row and its pager, never stretched to
+ * the page's bottom) and shrinks to the room the window leaves it. Only then does its table
+ * (`Table fill`) scroll its rows inside, under a heading that stays; the table's own floor
+ * (`--office-table-floor`, set from the row count: `fill-model.ts`) keeps a low window from
+ * crushing it (the page scrolls instead). The pagination bar sits directly under the table and is
+ * not part of that scroll.
+ */
+.office-shell__content > .office-list-card {
+  flex: 0 1 auto;
+}
+
+/* ListCard measures fixed filters/notes/footer plus the bounded table floor. A fixed 320px
+ * minimum lost the rows when filters wrapped, and intrinsic min-content expands long tables. */
+
+.office-shell__content > .office-list-card:not(:has(.mk-table)):not(:has(.office-list-body)),
+.office-shell__content > .office-list-card:not(:last-child) {
+  flex-shrink: 0;
+}
+
+.office-list-card {
+  --table-border: 0;
+  --table-radius: 0;
+  --table-bg: transparent;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: var(--office-list-min-height, 0px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+}
+
+.office-list-card .office-paged {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 0;
+  min-height: var(--office-paged-min-height, 0px);
+}
+
+.office-list-card .office-paged > .mk-table {
+  flex: 0 1 auto;
+  min-height: var(--office-table-floor, 0px);
+}
+
+.office-list-card .office-paged > :not(.mk-table) {
+  flex: none;
+}
+
+/* The heading is pinned inside the scrolling body and cut off by a hairline; the rows are divided by hairlines. */
+.office-list-card .mk-table__th {
+  border-bottom: 1px solid var(--line);
+}
+
+.office-list-card .mk-table__row:first-child {
+  --mk-table-row-rule: 0;
+}
+
+.office-list-card .mk-table__row[tabindex]:hover {
+  background: color-mix(in srgb, var(--surface-panel) 55%, transparent);
+}
+
+.office-list-card .mk-table__row[tabindex]:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/*
+ * A table inside an ordinary card (counters, copies, sheets of a document, a card's files) has no frame
+ * of its own: the card is the one layer, the heading is cut off by a hairline and the rows are divided
+ * by hairlines, as in a list card. Without this the table's own frame sat inside the card's (two frames).
+ */
+.office-shell .mk-card {
+  --table-border: 0;
+  --table-radius: 0;
+  --table-bg: transparent;
+}
+
+.office-shell .mk-card .mk-table__th {
+  border-bottom: 1px solid var(--line);
+}
+
+.office-shell .mk-card .mk-table__row:first-child {
+  --mk-table-row-rule: 0;
+}
+
+/* ---- Filters ---- */
+
+/*
+ * THE filter bar (one rule for every list page). A grid of two columns: the fields at the left, the
+ * aside at the right. Every control hangs from one top line: a field's label row is 22 px (a 16 px
+ * label and the 6 px gap under it) and every control is 44 px, so the bottoms line up too; a hint or
+ * an error under a field hangs below it and moves nothing. The aside (the buttons, then the count)
+ * starts level with the inputs (22 px down) and is one 44 px row, its items centred on it, the count
+ * last at the right edge. A narrow window stacks the aside under the fields.
+ */
+.office-list-filters {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px 16px;
+  padding: 16px;
+}
+
+.office-list-filters__fields {
+  display: flex;
+  /* Zero basis: the fields wrap inside the room beside the aside, not under it. */
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 16px;
+  min-width: 0;
+}
+
+.office-list-filters__fields > .mk-field {
+  flex: 0 1 220px;
+  min-width: 180px;
+}
+
+/* The search field takes the room a placeholder needs. */
+.office-list-filters__fields > .mk-field:has(> .mk-input) {
+  flex: 1 1 320px;
+  max-width: 420px;
+}
+
+.office-list-filters__aside {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  min-height: 44px;
+  margin-top: 22px;
+}
+
+.office-list-filters__found {
+  order: 3;
+  margin: 0;
+  /* A fixed room, right-aligned: the buttons before the count do not move as the number grows. */
+  min-width: 14ch;
+  color: var(--fg-2);
+  font: 400 13px/18px var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.office-list-filters__found:empty {
+  display: none;
+}
+
+/* A segmented control in a bar is as tall as the inputs beside it (44 px): the 40 px segments in a 2 px track. */
+.office-list-filters .office-segmented {
+  box-sizing: border-box;
+  height: 44px;
+  padding: 2px;
+}
+
+@media (max-width: 900px) {
+  .office-list-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .office-list-filters__aside {
+    flex-wrap: wrap;
+    margin-top: 0;
+    justify-content: flex-start;
+  }
+}
+
+/*
+ * A period on one line: «с — по» in one group under its own label. Each picker is wide enough for
+ * «10 октября 2026» and its icons (the date never wraps; the min-width of office-polish-3 stays).
+ */
+.office-range {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.office-range__label {
+  /* The same label as a field's (`mk-field`): one weight and one 16 px row across the bar. */
+  color: var(--fg-2);
+  font: var(--text-caption);
+  line-height: 16px;
+}
+
+.office-range__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.office-range__row > .mk-date-picker {
+  flex: 0 0 auto;
+  min-width: 212px;
+}
+
+.office-range__dash {
+  align-self: center;
+  color: var(--fg-3);
+}
+
+/* ---- Pagination bar (pinned under the table) ---- */
+
+.office-list-card .office-pagination {
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-card);
+}
+
+.office-pagination__pages {
+  gap: 4px;
+}
+
+.office-pagination__jump-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-pagination__jump-label {
+  white-space: nowrap;
+}
+
+/* ---- Row actions: icon buttons of 40 px and the «Ещё» menu ---- */
+
+.office-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.office-row-menu__anchor {
+  display: inline-flex;
+}
+
+.office-row-actions .mk-icon-button:focus-visible,
+.office-pagination .mk-icon-button:focus-visible,
+.office-row-menu__item:focus-visible,
+.office-segmented__item:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.office-tooltip {
+  position: fixed;
+  z-index: 450;
+  box-sizing: border-box;
+  max-width: 320px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+  color: var(--fg-1);
+  font: var(--text-body-sm);
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+.office-tooltip[data-below="true"] {
+  transform: none;
+}
+
+.office-row-menu {
+  position: fixed;
+  z-index: 430;
+  box-sizing: border-box;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.office-row-menu__item {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.office-row-menu__item:hover:not(:disabled) {
+  background: var(--surface-panel);
+}
+
+.office-row-menu__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.office-row-menu__item[data-destructive="true"] {
+  color: var(--err-fg);
+}
+
+.office-row-menu__rule {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+
+/* ---- Segmented control ---- */
+
+.office-segmented {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 4px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-panel);
+  max-width: 100%;
+}
+
+.office-segmented--fill {
+  display: flex;
+}
+
+.office-segmented__item {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.office-segmented__item:hover:not(:disabled):not(.office-segmented__item--selected) {
+  color: var(--fg-1);
+  background: color-mix(in srgb, var(--fg-1) 8%, transparent);
+}
+
+/* The selected segment: a fill, a check (drawn by the component) and a heavier weight. */
+.office-segmented__item.office-segmented__item--selected,
+.office-segmented__item.office-segmented__item--selected:hover:not(:disabled) {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 600;
+}
+
+.office-segmented__item:disabled {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+
+/* ---- List states ---- */
+
+.office-list-state {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-height: 160px;
+  padding: 24px 16px;
+  color: var(--fg-2);
+}
+
+.office-list-state .mk-empty-state {
+  padding: 32px 16px;
+}
+
+.office-list-state .mk-empty-state > svg {
+  color: var(--fg-2);
+}
+
+.office-list-error {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 16px 20px;
+  border: 1px solid var(--err-border);
+  border-radius: 16px;
+  background: var(--err-bg);
+  color: var(--err-fg);
+  text-align: left;
+}
+
+.office-list-error__text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+  color: var(--fg-1);
+  font: var(--text-body);
+}
+
+.office-list-error__text > strong {
+  font-weight: 600;
+}
+
+.office-list-error .mk-btn {
+  flex: none;
+}
+
+.office-list-state--loading {
+  display: block;
+  padding: 0;
+}
+
+.office-skeleton__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+  height: 56px;
+  padding: 0 16px;
+  border-top: 1px solid var(--line);
+}
+
+.office-skeleton__row:first-child {
+  border-top: 0;
+}
+
+.office-skeleton__tile,
+.office-skeleton__bar {
+  display: block;
+  background: var(--surface-panel);
+}
+
+.office-skeleton__tile {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-sm);
+}
+
+.office-skeleton__lines {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 6px;
+}
+
+.office-skeleton__bar {
+  width: 240px;
+  max-width: 60%;
+  height: 10px;
+  border-radius: 6px;
+}
+
+.office-skeleton__bar--short {
+  width: 160px;
+}
+
+.office-skeleton__bar--pill {
+  flex: none;
+  width: 120px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.office-skeleton__word {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-2);
+  font: var(--text-body);
+  text-align: left;
+}
+
+.office-skeleton__spin {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line-strong);
+  border-right-color: var(--fg-1);
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .office-skeleton__spin {
+    animation: office-spin 700ms linear infinite;
+  }
+}
+
+@keyframes office-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- A heading with more than one sort: «Даты» sorts by production date or by the shift's date ---- */
+
+.office-th-sorts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.office-sort-toggle {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-2);
+  font: 500 12px/16px var(--font-ui);
+}
+
+.office-sort-toggle[aria-pressed="true"] {
+  background: var(--surface-panel);
+  border-color: var(--line-strong);
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.office-sort-toggle:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Note lines inside the card, between the filters and the table: side by side while they fit. */
+.office-list-notes {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  padding: 0 16px 12px;
+}
+
+.office-list-note {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-list-note:empty {
+  display: none;
+}
+
+/* The search form is the card's first row; its body (a prompt, a state, one code's card) scrolls by itself. */
+.office-list-form {
+  flex: none;
+}
+
+.office-list-body {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-height: 160px;
+  padding: 16px;
+  overflow: auto;
+}
+
+/* A note at the foot of a card (a read-only role's reminder), under the table. */
+.office-list-foot {
+  flex: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* The drawer's footer says in a word and a glyph, in the warning tone, that something is unsaved. */
+.entity-drawer__dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--warn-fg);
+  font: 600 13px/18px var(--font-ui);
+}
+
+/*
+ * A field with a wrong value (kit): a 2 px border in the error colour, and its message starts with
+ * a glyph and the word «Ошибка ·» (the word comes from i18n through `--mk-error-prefix`, set once by
+ * the office), so the error is never colour alone. The message itself stays the field's own text.
+ */
+.mk-field > span[id$="-error"] {
+  font-weight: 500;
+}
+
+.mk-field > span[id$="-error"]::before {
+  content: "⚠ " var(--mk-error-prefix, "");
+}
+
+.office-list-filters--panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.office-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 16px;
+  min-width: 0;
+}
+
+.office-filter-row > .mk-field:has(> .mk-input) {
+  flex: 1 1 320px;
+  max-width: 760px;
+}
+
+/* The buttons and the count at the end of a row. */
+.office-filter-row__end {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-left: auto;
+}
+
+/* The buttons beside a search field start level with its input, not with the hint under it (a label is 16 px and its gap 6). */
+.office-filter-row__end--top {
+  align-self: flex-start;
+  min-height: 44px;
+  margin-top: 22px;
+}
+
+/* The count at the end of a row: level with the controls (the 22 px label row), at the right edge. */
+.office-filter-row > .office-list-filters__found {
+  align-self: flex-start;
+  box-sizing: border-box;
+  margin-top: 22px;
+  line-height: 44px;
+  min-height: 44px;
+}

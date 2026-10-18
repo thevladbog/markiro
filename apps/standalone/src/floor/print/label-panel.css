@@ -1,0 +1,240 @@
+/*
+  The label that waits for a decision, in the cloud station's full-screen print dialogs
+  (apps/station/src/ui/BoxPrintRecovery.tsx, components/PalletClose.tsx,
+  ui/PrintVerification.tsx; station.css .box-print-recovery, .pallet-close,
+  .print-verification*): the title and its main action across the top, the words and the SSCC
+  in large digits in the middle, the other actions at the bottom right. It fills the work
+  screen's label stage (fb-work's .work-screen__label-stage), so the screen's own footer with
+  «Выйти из смены» stays below it. Tokens only.
+*/
+
+/* The stage gives the panel all of its room, edge to edge, instead of centring a card. */
+.work-screen__overlays > .work-screen__stage.work-screen__label-stage[data-centred] {
+  padding: 0;
+  align-content: stretch;
+  justify-items: stretch;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.work-screen__overlays > .work-screen__stage.work-screen__label-stage[data-centred] > * {
+  width: auto;
+}
+
+.work-screen__label-stage > .work-screen__waiting {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-5) 0;
+}
+
+.label-panel-root {
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  outline: none;
+}
+
+.label-panel {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.label-panel__header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.label-panel__header h2 {
+  min-width: 0;
+  margin: 0;
+  font: var(--floor-title);
+  overflow-wrap: anywhere;
+}
+
+.label-panel__header > button {
+  flex-shrink: 0;
+}
+
+.label-panel__body {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow-y: auto;
+  align-content: safe center;
+  justify-items: center;
+  gap: var(--sp-4);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.label-panel__body > p,
+.label-panel__stage > p {
+  max-width: 64ch;
+  margin: 0;
+}
+
+.label-panel__body > .mk-alert {
+  width: min(640px, 100%);
+}
+
+.label-panel__target {
+  color: var(--fg-2);
+}
+
+.label-panel__message {
+  font: var(--floor-body-strong);
+}
+
+.label-panel__note {
+  font: var(--floor-body-strong);
+  color: var(--err-fg);
+}
+
+/* The SSCC as the cloud shows it: a quiet caption over large mono digits. */
+.label-panel__sscc {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.label-panel__sscc strong {
+  font-family: var(--font-mono);
+  font-size: clamp(28px, 4vw, 52px);
+  line-height: 1.1;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.label-panel__choices {
+  display: grid;
+  width: min(720px, 100%);
+  gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.label-panel__footer {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+/* Waiting for the scan (or for the printer): the cloud's green dot beside the words. */
+.label-panel__waiting {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.label-panel__waiting > span {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ok-solid);
+  box-shadow: 0 0 0 6px var(--ok-bg);
+}
+
+/* The check of a printed label: the cloud's PrintVerification card in the middle. */
+.label-panel--verify .label-panel__header {
+  justify-content: center;
+  text-align: center;
+}
+
+.label-panel__stage {
+  display: grid;
+  width: min(760px, 100%);
+  min-width: 0;
+  padding: clamp(24px, 4vh, 44px) clamp(28px, 5vw, 64px);
+  place-items: center;
+  gap: clamp(12px, 2vh, 20px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.label-panel__scanner {
+  position: relative;
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  border: 2px solid var(--line-strong);
+  border-radius: 22px;
+  background: var(--surface-page);
+}
+
+.label-panel__scanner::before,
+.label-panel__scanner::after {
+  position: absolute;
+  width: 28px;
+  height: 18px;
+  border: solid var(--fg-2);
+  content: "";
+}
+
+.label-panel__scanner::before {
+  top: 18px;
+  border-width: 3px 0 0 3px;
+}
+
+.label-panel__scanner::after {
+  bottom: 18px;
+  border-width: 0 3px 3px 0;
+}
+
+.label-panel__scanner > span {
+  width: 42px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--err-solid);
+}
+
+.label-panel__instruction {
+  color: var(--fg-2);
+  text-wrap: balance;
+}
+
+@media (max-height: 760px) {
+  .label-panel__body {
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+  }
+
+  .label-panel__stage {
+    padding-block: 18px;
+    gap: 10px;
+  }
+
+  .label-panel__scanner {
+    width: 56px;
+    height: 56px;
+  }
+}
+
+/* The grouped SSCC of the check fits its card, as the cloud's `--floor-counter-sm`. */
+.label-panel--verify .label-panel__sscc strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: clamp(26px, 3.2vw, 44px);
+  letter-spacing: 0.025em;
+  text-overflow: ellipsis;
+}

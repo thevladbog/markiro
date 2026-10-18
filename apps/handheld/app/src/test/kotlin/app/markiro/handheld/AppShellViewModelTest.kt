@@ -11,6 +11,8 @@ import app.markiro.handheld.core.network.PairResponse
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.DeviceRecovery
+import app.markiro.handheld.core.storage.DeviceRecoveryEntity
+import app.markiro.handheld.core.storage.MetaEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InMemoryCredentialStore
 import app.markiro.handheld.core.storage.RecoveryPhase
@@ -161,6 +163,29 @@ class AppShellViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         assertNull(credential.read())
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun failedDatasetStartupDefersNavigationUntilRetryCanUseRetainedPairing() = runTest {
+        val host = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+        val origin = "https://192.168.1.10:45710"
+        val pin = "ab".repeat(32)
+        credential.write("synthetic-key")
+        db.deviceConfigDao().upsert(paired.copy(tenantId = host, serverUrl = origin, backend = "host", hostId = host, pinSha256 = pin))
+        db.deviceRecoveryDao().put(DeviceRecoveryEntity(serverOrigin = origin, tenantId = host, deviceId = paired.deviceId,
+            kind = paired.kind, generation = 1, phase = RecoveryPhase.DATASET_RESET_PENDING.name, pinSha256 = pin,
+            datasetResetEpoch = "8b134f46-5501-4ba2-931e-fde1e7251951"))
+        db.metaDao().put(MetaEntity("old", "business"))
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER refuse_dataset_purge BEFORE DELETE ON meta BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END")
+        val shell = vm()
+        shell.datasetResetFailed.first { it }
+        advanceUntilIdle()
+        assertNull(shell.start.value)
+        db.openHelper.writableDatabase.execSQL("DROP TRIGGER refuse_dataset_purge")
+        shell.retryDatasetReset()
+        assertEquals(StartDestination.SIGN_IN, shell.start.first { it != null })
+        assertEquals("synthetic-key", credential.read())
+        assertEquals(RecoveryPhase.ACTIVE, recovery.current().phase)
     }
 
 }

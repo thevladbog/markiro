@@ -1,0 +1,284 @@
+//! Secrets: random device keys and session tokens, their stored hashes, and
+//! the PBKDF2 PHC format for office passwords, shared with `@markiro/domain`
+//! (`crypto/phc.ts`).
+
+use std::num::NonZeroU32;
+use std::sync::OnceLock;
+
+use aws_lc_rs::digest::{digest, SHA256};
+use aws_lc_rs::pbkdf2;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::Engine;
+use markiro_proto::Secret;
+
+const KEY_BYTES: usize = 32;
+
+/// A new device key or session token: 32 random bytes, base64url.
+pub fn random_key() -> String {
+    let mut bytes = [0u8; KEY_BYTES];
+    aws_lc_rs::rand::fill(&mut bytes).expect("the system random generator is available");
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// What the database stores for a key or a token: lower-case hex SHA-256.
+/// Keys are 256-bit random values, so an unsalted hash is enough.
+pub fn key_hash(key: &str) -> String {
+    digest(&SHA256, key.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Iterations for office passwords, verified only on the host, so it can
+/// afford more work than a kiosk tablet. PINs and badges keep the domain's
+/// 100 000.
+pub const PASSWORD_ITERATIONS: u32 = 600_000;
+const SALT_BYTES: usize = 16;
+const DIGEST_BYTES: usize = 32;
+/// The domain's floor: a tampered verifier must not cheapen the work.
+pub const MIN_ITERATIONS: u32 = 10_000;
+/// The ceiling. A station verifies a PIN or a badge with the count its hash
+/// carries, so more work than this could stall a sign-in; ten times the
+/// domain's 100 000 leaves room to raise the default, and office passwords
+/// (600 000) fit under it too.
+pub const MAX_ITERATIONS: u32 = 1_000_000;
+/// Iterations of a badge verifier: exactly the domain's `PHC_ITERATIONS`, as
+/// the cloud hashes badges (`hashBadgeWithSalt` in apps/api), so one badge
+/// code under the site's salt always gives one PHC string.
+pub const BADGE_ITERATIONS: u32 = 100_000;
+
+// The host must accept the hashes it makes itself: `parse_phc` refuses a count
+// outside `MIN_ITERATIONS..=MAX_ITERATIONS`, so raising `PASSWORD_ITERATIONS`
+// past the ceiling (or lowering it under the floor) would make every new
+// password hash unreadable, and a badge's fixed count must stay readable too.
+const _: () = assert!(
+    PASSWORD_ITERATIONS >= MIN_ITERATIONS && PASSWORD_ITERATIONS <= MAX_ITERATIONS,
+    "PASSWORD_ITERATIONS must lie within MIN_ITERATIONS..=MAX_ITERATIONS"
+);
+const _: () = assert!(
+    BADGE_ITERATIONS >= MIN_ITERATIONS && BADGE_ITERATIONS <= MAX_ITERATIONS,
+    "BADGE_ITERATIONS must lie within MIN_ITERATIONS..=MAX_ITERATIONS"
+);
+
+/// A parsed `pbkdf2$sha256$<iterations>$<salt>$<digest>` string.
+pub struct Phc {
+    pub iterations: u32,
+    salt: Vec<u8>,
+    digest: Vec<u8>,
+}
+
+impl Phc {
+    /// The decoded salt: 16 bytes.
+    pub fn salt(&self) -> &[u8] {
+        &self.salt
+    }
+}
+
+/// Parse a PHC string in the `@markiro/domain` format: canonical standard
+/// base64 with padding, a 16-byte salt and a 32-byte digest. Stricter than
+/// `parsePhc` on the iteration count, which must be plain ASCII digits
+/// without a leading zero, within `MIN_ITERATIONS..=MAX_ITERATIONS`: a padded
+/// `0100000` would be a second spelling of `100000`, which the unique index
+/// over a badge's text cannot see.
+pub fn parse_phc(text: &str) -> Option<Phc> {
+    let mut parts = text.split('$');
+    let (Some("pbkdf2"), Some("sha256"), Some(iterations), Some(salt), Some(digest), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        return None;
+    };
+    // `u32::parse` takes "0100000", and a station's `Number()` reads it as
+    // 100000 too, so a leading zero is refused here, at the source.
+    if iterations.starts_with('0') || !iterations.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let iterations: u32 = iterations.parse().ok()?;
+    if !(MIN_ITERATIONS..=MAX_ITERATIONS).contains(&iterations) {
+        return None;
+    }
+    Some(Phc {
+        iterations,
+        salt: decode_canonical(salt, SALT_BYTES)?,
+        digest: decode_canonical(digest, DIGEST_BYTES)?,
+    })
+}
+
+fn decode_canonical(text: &str, expected_bytes: usize) -> Option<Vec<u8>> {
+    let bytes = STANDARD.decode(text).ok()?;
+    (bytes.len() == expected_bytes && STANDARD.encode(&bytes) == text).then_some(bytes)
+}
+
+/// Encode a password with a given salt and iteration count: the same
+/// deterministic computation `hash_password` runs with a fresh random salt.
+/// Factored out so a test can prove this host reproduces an
+/// independently-generated PHC string byte for byte.
+fn hash_password_with_salt(password: &str, salt: &[u8; SALT_BYTES], iterations: u32) -> String {
+    let mut digest = [0u8; DIGEST_BYTES];
+    pbkdf2::derive(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        NonZeroU32::new(iterations).expect("non-zero"),
+        salt,
+        password.as_bytes(),
+        &mut digest,
+    );
+    format!(
+        "pbkdf2$sha256${iterations}${}${}",
+        STANDARD.encode(salt),
+        STANDARD.encode(digest)
+    )
+}
+
+/// Hash a password for storage with a fresh random salt.
+pub fn hash_password(password: &str) -> String {
+    let mut salt = [0u8; SALT_BYTES];
+    aws_lc_rs::rand::fill(&mut salt).expect("the system random generator is available");
+    hash_password_with_salt(password, &salt, PASSWORD_ITERATIONS)
+}
+
+/// [`hash_password`] off the async threads: PBKDF2 at 600 000 iterations
+/// takes a noticeable fraction of a second. Call it before `begin_write`.
+pub async fn hash_password_blocking(password: Secret) -> Result<String, tokio::task::JoinError> {
+    tokio::task::spawn_blocking(move || hash_password(password.expose())).await
+}
+
+/// Constant-time check of `password` against a stored PHC string; a
+/// malformed verifier never matches.
+pub fn verify_password(phc: &str, password: &str) -> bool {
+    let Some(parsed) = parse_phc(phc) else {
+        return false;
+    };
+    let iterations = NonZeroU32::new(parsed.iterations).expect("parse_phc enforces the floor");
+    pbkdf2::verify(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        iterations,
+        &parsed.salt,
+        password.as_bytes(),
+        &parsed.digest,
+    )
+    .is_ok()
+}
+
+/// A verifier for a password nobody has: an unknown login costs the same as
+/// a wrong password.
+pub fn dummy_password_phc() -> &'static str {
+    static DUMMY: OnceLock<String> = OnceLock::new();
+    DUMMY.get_or_init(|| hash_password("markiro: no such office user"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keys_are_43_base64url_characters_and_distinct() {
+        let first = random_key();
+        let second = random_key();
+        assert_eq!(first.len(), 43);
+        assert!(first
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn key_hash_is_hex_sha256() {
+        assert_eq!(
+            key_hash(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    /// Computed independently with Python's `hashlib.pbkdf2_hmac`.
+    const REFERENCE: &str =
+        "pbkdf2$sha256$10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=";
+
+    #[test]
+    fn verifies_an_independently_computed_phc() {
+        assert!(verify_password(REFERENCE, "correct horse battery"));
+        assert!(!verify_password(REFERENCE, "correct horse batterY"));
+    }
+
+    #[test]
+    fn hashes_round_trip_in_the_domain_format() {
+        let phc = hash_password("пароль-сотрудника");
+        let parts: Vec<&str> = phc.split('$').collect();
+        assert_eq!(parts[..3], ["pbkdf2", "sha256", "600000"]);
+        assert_eq!(parts[3].len(), 24);
+        assert_eq!(parts[4].len(), 44);
+        assert!(verify_password(&phc, "пароль-сотрудника"));
+        assert!(!verify_password(&phc, "другой пароль"));
+    }
+
+    /// Spec §6: the host and `@markiro/domain` read each other's PHC strings.
+    #[test]
+    fn shares_the_phc_format_with_the_domain() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/phc-password.json")).unwrap();
+        let text = |key: &str| fixture[key].as_str().unwrap().to_owned();
+        assert!(verify_password(&text("passwordPhc"), &text("password")));
+        assert!(verify_password(&text("pinPhc"), &text("pin")));
+        assert_eq!(parse_phc(&text("pinPhc")).unwrap().iterations, 100_000);
+    }
+
+    /// The host's own PBKDF2 encoder reproduces the fixture's
+    /// independently-computed PHC string byte for byte, not merely a string
+    /// this same encoder would also accept.
+    #[test]
+    fn hash_password_with_salt_reproduces_the_fixture_phc_string() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/phc-password.json")).unwrap();
+        let password = fixture["password"].as_str().unwrap();
+        let expected_phc = fixture["passwordPhc"].as_str().unwrap();
+        let salt: [u8; SALT_BYTES] = parse_phc(expected_phc)
+            .unwrap()
+            .salt
+            .try_into()
+            .expect("the fixture salt is 16 bytes");
+        assert_eq!(
+            hash_password_with_salt(password, &salt, 600_000),
+            expected_phc
+        );
+    }
+
+    #[test]
+    fn the_iteration_count_is_bounded_on_both_sides() {
+        let phc = |iterations: u32| {
+            format!("pbkdf2$sha256${iterations}$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=")
+        };
+        let iterations = |iterations: u32| parse_phc(&phc(iterations)).map(|phc| phc.iterations);
+        assert_eq!(iterations(10_000), Some(10_000));
+        assert_eq!(iterations(1_000_000), Some(1_000_000));
+        assert_eq!(iterations(9_999), None);
+        assert_eq!(iterations(1_000_001), None);
+        assert_eq!(iterations(u32::MAX), None);
+    }
+
+    #[test]
+    fn malformed_verifiers_never_match() {
+        for bad in [
+            "pbkdf2$sha256$9999$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$1000001$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$10000$bWFya2lyby1zdGFuZGFsbw$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha1$10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$+10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            // A zero-padded count reads as 100 000 but is a second spelling of
+            // the same verifier: the badge index compares the text.
+            "pbkdf2$sha256$0100000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$000000100000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            // Overflows u32, and an empty field.
+            "pbkdf2$sha256$4294967296$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=$x",
+            "",
+        ] {
+            assert!(parse_phc(bad).is_none(), "{bad}");
+            assert!(!verify_password(bad, "correct horse battery"), "{bad}");
+        }
+    }
+}

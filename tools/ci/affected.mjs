@@ -13,10 +13,17 @@ export const HEAVY_JOBS = Object.freeze([
   "signer_rust",
   "signer_windows_build",
   "handheld_android",
+  "standalone_rust",
+  "standalone_windows_build",
+  "standalone_app_tests",
 ]);
 
 const signerJobs = ["signer_rust", "signer_windows_build"];
 const stationJobs = ["station_rust", "station_windows_build"];
+const standaloneJobs = ["standalone_rust", "standalone_windows_build"];
+// The standalone webview's Vitest suite has a runner of its own: inside
+// verify-app-tests it pushed that job past its wall-clock budget.
+const standaloneAppTests = "standalone_app_tests";
 
 const appJobs = Object.freeze({
   api: ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
@@ -27,13 +34,23 @@ const appJobs = Object.freeze({
 });
 
 const sharedJobs = Object.freeze({
-  ui: ["verify_static", "verify_app_tests", "production_bundle", ...stationJobs, ...signerJobs],
+  ui: [
+    "verify_static",
+    "verify_app_tests",
+    "production_bundle",
+    ...stationJobs,
+    ...signerJobs,
+    ...standaloneJobs,
+    standaloneAppTests,
+  ],
   domain: [
     "verify_static",
     "verify_api_tests",
     "verify_app_tests",
     "production_bundle",
     ...stationJobs,
+    ...standaloneJobs,
+    standaloneAppTests,
   ],
   db: [
     "verify_static",
@@ -164,6 +181,37 @@ function jobsForPath(path) {
     return ["verify_static", "verify_app_tests", "production_bundle", ...stationJobs];
   }
 
+  // Host and shell crates run only the Rust jobs; everything else in the app
+  // (webview, protocol fixtures read by the webview, the host, the shell and the Android app, package files) also runs
+  // the JavaScript gates: the static checks and the app's own Vitest job
+  // (verify-app-tests leaves the standalone suite out). Two directories inside the shell crate are also
+  // inputs to the webview's Vitest suite, so they must run both: sqlx
+  // migrations under `src-tauri/migrations/` are applied to node:sqlite by
+  // `test/support/local-db.ts`, and the SQL-rule fixtures under
+  // `src-tauri/tests/fixtures/` (`local-sql.json`) are asserted by both a
+  // Rust unit test and `test/local-executor.test.ts`.
+  if (path.startsWith("apps/standalone/")) {
+    // The handheld's unit tests read these files (`apps/handheld/app/build.gradle.kts` adds the directory to the test
+    // resources): a changed wire fixture must run its Kotlin consumers, or a protocol change passes with Android untested.
+    if (path.startsWith("apps/standalone/proto/fixtures/")) {
+      return ["verify_static", ...standaloneJobs, standaloneAppTests, "handheld_android"];
+    }
+    if (
+      path.startsWith("apps/standalone/src-tauri/migrations/") ||
+      path.startsWith("apps/standalone/src-tauri/tests/fixtures/")
+    ) {
+      return ["verify_static", ...standaloneJobs, standaloneAppTests];
+    }
+    if (
+      path.startsWith("apps/standalone/host/") ||
+      path.startsWith("apps/standalone/src-tauri/") ||
+      /^apps\/standalone\/Cargo\.(?:toml|lock)$/u.test(path)
+    ) {
+      return standaloneJobs;
+    }
+    return ["verify_static", ...standaloneJobs, standaloneAppTests];
+  }
+
   // The Android app is a Gradle project outside the pnpm workspace: only its own job runs.
   if (path.startsWith("apps/handheld/")) return ["handheld_android"];
 
@@ -175,9 +223,17 @@ function jobsForPath(path) {
 
   if (path.startsWith("tools/signer-release/")) return signerJobs;
   if (path.startsWith("tools/station-release/")) return stationJobs;
+  // The installer's contracts and smoke test run in the standalone Windows job.
+  if (path.startsWith("tools/standalone-release/")) return standaloneJobs;
   // Node contracts for the Android release, so they run in the Node job -- the
   // handheld job is Gradle-only and has no pnpm.
   if (path.startsWith("tools/handheld-release/")) return ["verify_static"];
+  // The cloud → standalone export (plan IMP): its pure tests run in the Node
+  // job, its SQL against the migrated cloud schema in the API job.
+  if (path.startsWith("tools/standalone-export/")) return ["verify_static", "verify_api_tests"];
+  // The maker's decrypting tool: its Node contract (verify_static) and the webview's
+  // round-trip test, which opens a token with it (the app tests).
+  if (path.startsWith("tools/standalone-support/")) return ["verify_static", standaloneAppTests];
   if (path.startsWith("tools/production-browser/")) {
     return ["production_bundle"];
   }

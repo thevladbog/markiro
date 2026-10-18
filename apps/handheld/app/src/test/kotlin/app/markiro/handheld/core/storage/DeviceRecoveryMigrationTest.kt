@@ -18,7 +18,7 @@ class DeviceRecoveryMigrationTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private fun database(name: String) = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
         .allowMainThreadQueries()
-        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20).build()
+        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).build()
 
     /**
      * Turns the file Room just built at the CURRENT version back into a real v7
@@ -83,6 +83,7 @@ class DeviceRecoveryMigrationTest {
                     old.outboxDao().insert(OutboxEntity(shiftId = "s1", raw = "exact\u001dscan", verdict = "invalid", scannedAt = "2026-09-11T00:00:00Z", operatorId = "op", codeHash = null, gtin14 = null, serial = null))
                     old.openHelper.writableDatabase.let(::rewindToVersionSeven)
                     listOf("grant_state","grant_tokens","grant_counters","grant_evidence","grant_task_bindings","grant_task_provenance").forEach { old.openHelper.writableDatabase.execSQL("DROP TABLE $it") }
+                    removeDatasetColumnsForHistoricalFixture(old.openHelper.writableDatabase)
                     old.openHelper.writableDatabase.version = 7
                 }
                 database(name).useDb { upgraded ->

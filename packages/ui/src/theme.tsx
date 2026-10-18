@@ -34,6 +34,19 @@ export function ThemeProvider({
   useEffect(() => {
     const effectiveTheme = theme === "system" ? resolveSystemTheme() : theme;
     updateDocumentTheme(effectiveTheme);
+    if (theme !== "system" || typeof window === "undefined") return;
+
+    // «System» follows the operating system live, also while the app runs.
+    let query: MediaQueryList;
+    try {
+      query = window.matchMedia("(prefers-color-scheme: dark)");
+    } catch {
+      return;
+    }
+    if (typeof query.addEventListener !== "function") return;
+    const onChange = () => updateDocumentTheme(resolveSystemTheme());
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
   }, [theme]);
 
   useEffect(() => {

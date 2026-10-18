@@ -35,7 +35,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.storage.ShiftEntity
 import app.markiro.handheld.core.util.Iso
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.shift.ShiftRepository
 import app.markiro.handheld.feature.shift.BoxSerialTopUp
@@ -191,6 +191,8 @@ data class WorkUi(
     val validation: ValidationUi? = null,
     /** The scanner chip's text, the same one the hub shows; empty falls back to a generic label. */
     val scannerLabel: String = "",
+    /** A device paired with a host: box and pallet exceptions (undo, clear, disassembly, reprint) are not carried to the host yet (plan step 1b). */
+    val hostMode: Boolean = false,
     /**
      * Why the open box, sitting at capacity, could not be closed -- held here
      * so the reason stays on the work screen after the full-screen refusal is
@@ -217,7 +219,7 @@ class WorkViewModel(
     private val recorder: ScanRecorder,
     scans: ScanEvents,
     private val signals: SignalPort,
-    private val sync: SyncEngine,
+    private val sync: SyncDriver,
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
     private val team: TeamRefresher,
@@ -246,7 +248,7 @@ class WorkViewModel(
         recorder: ScanRecorder,
         scans: ScanEvents,
         signaller: Signaller,
-        sync: SyncEngine,
+        sync: SyncDriver,
         session: SessionHolder,
         reachability: ReachabilityTracker,
         team: TeamRefresher,
@@ -378,6 +380,7 @@ class WorkViewModel(
         palletConfirmState,
         validationUi,
         boxRefusal,
+        db.deviceConfigDao().observe(),
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
@@ -406,6 +409,7 @@ class WorkViewModel(
             validation = if (shift?.validationPrintMode == "duplicate_dm") values[13] as ValidationUi else null,
             scannerLabel = scannerLabel(),
             boxRefusal = values[14] as CloseResult?,
+            hostMode = (values[15] as app.markiro.handheld.core.storage.DeviceConfigEntity?)?.backend == "host",
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 

@@ -1,0 +1,15 @@
+# Common rules for every beta-feedback agent (apps/standalone, «Markiro Автоном»)
+
+Context: the owner started testing the first beta on Windows and sent feedback. Each stream below fixes one part. Product is Russian-language, desktop (mouse and keyboard, NOT touch) for the office app; the station UI is touch.
+
+Setup (do exactly this, absolute paths only, never `cd`):
+
+1. `git -C /tmp/claude/wt/integ worktree add /tmp/claude/wt/<NAME> -b claude/<NAME> claude/integration` (NAME is given in your task).
+2. Clone dependencies with APFS clones from /tmp/claude/wt/integ into your worktree: `cp -c -R -P` for `node_modules`, `apps/standalone/node_modules`, and each `packages/*/node_modules` and `packages/*/dist` that exists (destination = the same relative path under your worktree, absolute). Do NOT copy `apps/standalone/target` unless you must run cargo (then copy it too, it is big).
+3. Run pnpm as `pnpm --dir /tmp/claude/wt/<NAME> --config.verifyDepsBeforeRun=false ...`; cargo as `cargo --offline --locked --manifest-path ...`. Loopback-binding tests (host integration tests) need the sandbox disabled; plain Vitest does not.
+
+Rules: never `git stash`; never push; never touch the plans checkout /Users/thevladbog/PRSOME/q/.claude/worktrees/ecstatic-swirles-7f0ae8 except the report file named in your task; read apps/standalone/AGENTS.md and the root AGENTS.md first; i18n: every user-visible string goes through apps/standalone/src/i18n/ru.json (and en.json if the app has one — check); reuse @markiro/ui components and tokens only (no ad-hoc CSS systems); keep accessibility (keyboard, focus, labels); TDD for behaviour changes (failing test first); Zod/proto fixture parity if you touch the wire; migrations: new file only, never edit applied ones. Do not weaken or delete existing assertions to get green; if a pre-existing test must change because the product decision changed, say so in the report.
+Quality gates before you finish: focused tests, then `pnpm ... --filter @markiro/standalone test` (full Vitest of the package), typecheck, lint, prettier --check on the files you touched, `git diff --check`. For Rust changes also `cargo test` of the touched crate (and `cargo fmt --check`, clippy if the repo uses it).
+Commits: scoped, explicit paths, each ending with exactly one line `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+Visual changes: verify in a real browser. Start the webview dev server (apps/standalone has a Vite dev config — check package.json scripts and .claude/launch.json conventions; the host API can be mocked as the existing Vitest/Playwright fixtures do) and take a screenshot with the browser tools, OR if that is impossible say so explicitly. Never claim a visual result you did not see.
+Report: write it to the file named in your task (Russian, concise: what the owner reported, root cause, what changed with file paths, tests added/changed and results, what you could NOT verify, open questions for the owner). Return only: branch, last commit sha, one-line test summary, report path.

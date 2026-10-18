@@ -54,6 +54,15 @@ interface PalletProductDao {
 
     @Query("SELECT COUNT(*) FROM pallet_products")
     suspend fun count(): Int
+
+    @androidx.room.Upsert
+    suspend fun upsert(row: PalletProductEntity)
+
+    @Query("DELETE FROM pallet_products WHERE id = :id")
+    suspend fun delete(id: String)
+
+    @Query("SELECT * FROM pallet_products")
+    suspend fun all(): List<PalletProductEntity>
 }
 
 @Dao
@@ -72,6 +81,15 @@ interface PalletPermissionDao {
 
     @Query("SELECT * FROM pallet_permissions WHERE employeeId = :employeeId")
     suspend fun get(employeeId: String): PalletPermissionEntity?
+
+    @androidx.room.Upsert
+    suspend fun upsert(row: PalletPermissionEntity)
+
+    @Query("DELETE FROM pallet_permissions WHERE employeeId = :id")
+    suspend fun delete(id: String)
+
+    @Query("SELECT * FROM pallet_permissions")
+    suspend fun all(): List<PalletPermissionEntity>
 
     @Query("SELECT * FROM pallet_permissions WHERE employeeId = :employeeId")
     fun observe(employeeId: String): Flow<PalletPermissionEntity?>
@@ -93,4 +111,7 @@ interface PalletLabelTemplateDao {
 
     @Query("SELECT * FROM pallet_label_templates WHERE `key` = :key")
     suspend fun get(key: String): PalletLabelTemplateEntity?
+
+    @Query("SELECT * FROM pallet_label_templates")
+    suspend fun all(): List<PalletLabelTemplateEntity>
 }

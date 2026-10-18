@@ -19,6 +19,9 @@ export type { ComboboxOption, ComboboxProps } from "./Combobox.js";
 export { Checkbox } from "./Checkbox.js";
 export type { CheckboxProps } from "./Checkbox.js";
 
+export { Slider } from "./Slider.js";
+export type { SliderProps } from "./Slider.js";
+
 export { RadioGroup } from "./RadioGroup.js";
 export type { RadioGroupOption, RadioGroupProps } from "./RadioGroup.js";
 
@@ -118,3 +121,6 @@ export type { SectionHeaderProps } from "./SectionHeader.js";
 
 export { RadioCard } from "./RadioCard.js";
 export type { RadioCardProps } from "./RadioCard.js";
+
+export { RowActionMenu } from "./RowActionMenu.js";
+export type { RowActionItem, RowActionMenuProps } from "./RowActionMenu.js";

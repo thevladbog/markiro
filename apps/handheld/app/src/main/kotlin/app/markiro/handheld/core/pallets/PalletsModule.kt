@@ -3,7 +3,7 @@ package app.markiro.handheld.core.pallets
 import app.markiro.handheld.core.box.ClosePallet
 import app.markiro.handheld.core.box.PalletLock
 import app.markiro.handheld.core.box.SsccPool
-import app.markiro.handheld.core.network.StationApi
+import app.markiro.handheld.core.backend.StationBackend
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import dagger.Module
@@ -17,8 +17,8 @@ import javax.inject.Singleton
 object PalletsModule {
     @Provides
     @Singleton
-    fun boxRegistryMirror(api: StationApi, db: HandheldDatabase, meta: MetaStore): BoxRegistryMirror =
-        BoxRegistryMirror(api, db, meta)
+    fun boxRegistryMirror(backend: StationBackend, db: HandheldDatabase, meta: MetaStore): BoxRegistryMirror =
+        BoxRegistryMirror(backend, db, meta)
 
     @Provides
     @Singleton
@@ -27,12 +27,12 @@ object PalletsModule {
     @Provides
     @Singleton
     fun palletBootstrapMirror(
-        api: StationApi,
+        backend: StationBackend,
         db: HandheldDatabase,
         meta: MetaStore,
         blocks: SsccBlockApplier,
         registry: BoxRegistryMirror,
-    ): PalletBootstrapMirror = PalletBootstrapMirror(api, db, meta, blocks, registry)
+    ): PalletBootstrapMirror = PalletBootstrapMirror(backend, db, meta, blocks, registry)
 
     /**
      * A singleton for the reason `PalletLock` itself is one: opening, filling
