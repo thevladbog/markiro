@@ -22,11 +22,18 @@ async function temporary(t) {
   return dir;
 }
 async function zipBytes(dir, entries, patch = "") {
-  const script = `import json,sys,zipfile,stat\nentries=json.loads(sys.argv[2])\nwith zipfile.ZipFile(sys.argv[1], 'w', compression=zipfile.ZIP_DEFLATED) as z:\n for e in entries:\n  i=zipfile.ZipInfo(e['name']); i.compress_type=zipfile.ZIP_DEFLATED\n  i.external_attr=e.get('mode', stat.S_IFREG | 0o600)<<16\n  z.writestr(i, e['text'])\n${patch}`;
+  const script = `import json,sys,zipfile,stat\nwith open(sys.argv[2], encoding='utf-8') as source: entries=json.load(source)\nwith zipfile.ZipFile(sys.argv[1], 'w', compression=zipfile.ZIP_DEFLATED) as z:\n for e in entries:\n  i=zipfile.ZipInfo(e['name']); i.compress_type=zipfile.ZIP_DEFLATED\n  i.external_attr=e.get('mode', stat.S_IFREG | 0o600)<<16\n  z.writestr(i, e['text'])\n${patch}`;
   const file = join(dir, "fixture.zip");
-  await exec("python3", ["-I", "-c", script, file, JSON.stringify(entries)], {
-    maxBuffer: 2 * 1024 * 1024,
-  });
+  const input = join(dir, "fixture-entries.json");
+  // Oversized-entry fixtures exceed Linux's limit for a single process argument.
+  await fs.writeFile(input, JSON.stringify(entries), { flag: "wx", mode: 0o600 });
+  try {
+    await exec("python3", ["-I", "-c", script, file, input], {
+      maxBuffer: 2 * 1024 * 1024,
+    });
+  } finally {
+    await fs.unlink(input);
+  }
   return fs.readFile(file);
 }
 function entries(value = release()) {
