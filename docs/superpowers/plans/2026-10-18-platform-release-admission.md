@@ -81,7 +81,7 @@ existing Docker CLI; no new npm dependencies.
 
 ## Delivery gates
 
-- [ ] Independent task and whole-branch review, covering all source in this slice.
+- [x] Independent task and whole-branch review, covering all source in this slice.
 - [ ] Refresh main, inspect complete three-dot diff, push and open/attach PR.
 - [ ] Main CI for PR #732 completes, dispatch the protected publisher and respect
       its required environment approval; do not substitute prior-SHA CI.
