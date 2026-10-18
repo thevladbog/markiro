@@ -7,8 +7,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:net";
-import { request as httpsRequest } from "node:https";
-import { Readable } from "node:stream";
+import { createLocalHttpsRequest } from "./local-https-request.mjs";
 import { readProtectedEnv } from "./preflight.mjs";
 import { smokePlatform } from "./smoke.mjs";
 import { browserSmoke } from "./browser-smoke.mjs";
@@ -119,32 +118,7 @@ async function compose(...extra) {
     );
   }
 }
-function request(host, path, init = {}) {
-  return new Promise((resolveResponse, reject) => {
-    const req = httpsRequest(
-      {
-        hostname: "127.0.0.1",
-        port: httpsPort,
-        servername: host,
-        path,
-        method: init.method ?? "GET",
-        headers: { Host: host, ...init.headers },
-        rejectUnauthorized: false,
-        timeout: 10000,
-      },
-      (incoming) =>
-        resolveResponse(
-          new Response(Readable.toWeb(incoming), {
-            status: incoming.statusCode,
-            headers: incoming.headers,
-          }),
-        ),
-    );
-    req.on("error", reject);
-    req.on("timeout", () => req.destroy(new Error("local smoke timeout")));
-    req.end();
-  });
-}
+
 const evidence = {
   project,
   sourceSha: sha,
@@ -173,10 +147,16 @@ try {
   await compose("run", "--rm", "migrate");
   evidence.checks.push("migration twice");
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "--no-deps", "api", "edge");
-  // Caddy has no healthcheck; retry only its readiness, never contract failures.
+  // Caddy has no healthcheck; its task-local CA may still be initializing.
+  // Retry only CA/TLS readiness, never the HTTP contract checks below.
   let ready = false;
+  let request;
   for (let i = 0; i < 30; i++) {
     try {
+      const ca = (
+        await compose("exec", "-T", "edge", "cat", "/data/caddy/pki/authorities/local/root.crt")
+      ).stdout;
+      request = createLocalHttpsRequest({ port: httpsPort, ca });
       await (await request("saas-admin.localhost", "/login")).arrayBuffer();
       ready = true;
       break;
@@ -185,6 +165,7 @@ try {
     }
   }
   assert.ok(ready, "edge TLS readiness");
+  evidence.checks.push("edge certificate and hostname verified against task-local Caddy CA");
   evidence.httpChecks = await smokePlatform({ request, sourceSha: sha });
   evidence.checks.push("edge HTTP positive and negative contracts");
   await compose(
