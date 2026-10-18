@@ -13,6 +13,8 @@ import {
 import { Spinner } from "@markiro/ui";
 
 import { PlatformAuthBoundary } from "./auth/PlatformAuthBoundary.js";
+import { IS_PLATFORM_ONLY } from "./server-profile.js";
+import { ServerProfileNotice } from "./components/ServerProfileNotice.js";
 import { SUPPORT_CHAT_ENABLED } from "./features.js";
 import { AppShell } from "./layout/AppShell.js";
 const ActivatePlatformUser = lazy(() =>
@@ -209,7 +211,7 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/billing-requests" element={<BillingRequestsPage />} />
         <Route path="/billing-requests/:requestId" element={<BillingRequestsPage />} />
-        {SUPPORT_CHAT_ENABLED ? (
+        {SUPPORT_CHAT_ENABLED || IS_PLATFORM_ONLY ? (
           <>
             <Route path="/support" element={<SupportEpisodesPage />} />
             <Route path="/support/:episodeId" element={<SupportEpisodePage />} />
@@ -221,7 +223,16 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/billing/new" element={<LegacyBillingRedirect target="new" />} />
         <Route path="/billing/:invoiceId" element={<LegacyBillingRedirect target="detail" />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
-        <Route path="/national-catalog" element={<NationalCatalogPage />} />
+        <Route
+          path="/national-catalog"
+          element={
+            IS_PLATFORM_ONLY ? (
+              <ServerProfileNotice kind="nationalCatalog" />
+            ) : (
+              <NationalCatalogPage />
+            )
+          }
+        />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/reports" element={<ReportsPage />} />

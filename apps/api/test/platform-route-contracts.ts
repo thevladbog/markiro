@@ -1173,3 +1173,18 @@ export const CURRENT_SAAS_ROUTES = [
 export const CURRENT_SAAS_ROUTE_KEYS = CURRENT_SAAS_ROUTES.map(
   ({ method, path }) => `${method.toUpperCase()} ${path}`,
 ).sort();
+
+/** The platform-only runtime preserves commercial/history routes, excluding old device and catalog operations. */
+export const PLATFORM_ONLY_ROUTE_KEYS = [
+  ...CURRENT_SAAS_ROUTES.filter(
+    ({ path }) =>
+      !path.includes("/offline-grants/") &&
+      !path.includes("/device-licensing") &&
+      !path.includes("/national-catalog/"),
+  ).map(({ method, path }) => `${method.toUpperCase()} ${path}`),
+  // Existing billing-profile aliases mounted by the complete application.
+  "GET /platform/billing/operator-profile",
+  "GET /platform/billing/tenants/{tenantId}/profile",
+  "PUT /platform/billing/operator-profile",
+  "PUT /platform/billing/tenants/{tenantId}/profile",
+].sort();

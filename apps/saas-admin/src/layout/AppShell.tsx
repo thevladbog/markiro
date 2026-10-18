@@ -8,6 +8,7 @@ import type { PlatformCapability } from "@markiro/platform-contracts";
 import { usePlatformPrincipal } from "../auth/PlatformAuthBoundary.js";
 import { useAuthClient } from "../auth/client.js";
 import { MarkiroLogo } from "../components/MarkiroLogo.js";
+import { IS_PLATFORM_ONLY } from "../server-profile.js";
 import { SUPPORT_CHAT_ENABLED } from "../features.js";
 import i18n from "../i18n/index.js";
 import { NavigationGuardProvider, useNavigationGuard } from "./NavigationGuard.js";
@@ -52,7 +53,7 @@ function AppShellContent() {
           "billing.read",
           item("billing-requests", t("shell.billingRequests"), "/billing-requests"),
         ),
-        ...(SUPPORT_CHAT_ENABLED
+        ...(SUPPORT_CHAT_ENABLED || IS_PLATFORM_ONLY
           ? when("billing.read", item("support", t("shell.supportEpisodes"), "/support"))
           : []),
       ],
@@ -81,10 +82,12 @@ function AppShellContent() {
       label: t("shell.groups.platform"),
       items: [
         ...when("diagnostics.read", item("monitoring", t("shell.monitoring"), "/monitoring")),
-        ...when(
-          "catalog.read",
-          item("national-catalog", t("shell.nationalCatalog"), "/national-catalog"),
-        ),
+        ...(!IS_PLATFORM_ONLY
+          ? when(
+              "catalog.read",
+              item("national-catalog", t("shell.nationalCatalog"), "/national-catalog"),
+            )
+          : []),
         ...when("reports.read", item("reports", t("shell.reports"), "/reports")),
         ...when("audit.read", item("audit", t("shell.audit"), "/audit")),
         ...when("platformTeam.write", item("team", t("shell.team"), "/team")),

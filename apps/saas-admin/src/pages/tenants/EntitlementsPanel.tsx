@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PlatformCapability } from "@markiro/platform-contracts";
 import { Alert, Button, Card } from "@markiro/ui";
+import { ServerProfileNotice } from "../../components/ServerProfileNotice.js";
 import { getTenantEntitlements } from "./api.js";
 import { EntitlementSnapshotView } from "./EntitlementSnapshotView.js";
 import { EntitlementSourceForm } from "./EntitlementSourceForm.js";
@@ -45,6 +46,7 @@ export function EntitlementsPanel({
               </Button>
             </Alert>
           ) : null}
+          <ServerProfileNotice kind="cloudUsage" />
           <EntitlementSnapshotView snapshot={query.data.snapshot} />
           {canWrite ? (
             <Card>

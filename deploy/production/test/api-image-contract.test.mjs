@@ -128,6 +128,7 @@ test("Docker build context excludes local state while retaining required build i
     "!packages/platform-contracts/",
     "!packages/platform-contracts/**",
     "!packages/legal-documents/**",
+    "!deploy/production/working-device-compatibility.mjs",
     "!packages/db/migrations/**",
     "!deploy/production/yandex-cloud-ca.pem",
   ]) {

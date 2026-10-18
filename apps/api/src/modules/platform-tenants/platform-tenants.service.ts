@@ -1,4 +1,5 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { SERVER_PROFILE, assertLegacyOperation, type ServerProfile } from "../../server-profile";
+import { ConflictException, Inject, Injectable, Optional, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { countWorkingDeviceUsage } from "../../subscriptions/working-device-assignments";
@@ -79,6 +80,7 @@ export class PlatformTenantsService {
     @Inject(DB) private readonly db: Db,
     private readonly provisioning: TenantProvisioningService,
     private readonly subscriptions: SubscriptionLifecycleService,
+    @Optional() @Inject(SERVER_PROFILE) private readonly profile: ServerProfile = "legacy",
   ) {}
 
   create(actor: PlatformPrincipal, input: ProvisionTenantDto): Promise<CreateTenantResult> {
@@ -364,6 +366,7 @@ export class PlatformTenantsService {
     actor: PlatformPrincipal,
     tenantId: string,
   ): Promise<RenewTenantActivationResult> {
+    assertLegacyOperation(this.profile);
     const [owner] = await this.db
       .select({
         tenantName: schema.organization.name,

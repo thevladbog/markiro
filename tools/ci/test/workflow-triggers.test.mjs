@@ -89,6 +89,7 @@ test("production image publication runs only for deployable image and release in
       "packages/ui/**",
       "compose.production.yml",
       "deploy/production/**",
+      "deploy/platform/**",
       "deploy/yandex/**",
       "tools/production-browser/**",
     ],

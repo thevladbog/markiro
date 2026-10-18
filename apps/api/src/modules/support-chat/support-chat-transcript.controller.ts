@@ -62,7 +62,7 @@ export class SupportChatTranscriptReader {
     tenantId: string | null,
     query: QueryInput,
   ): Promise<SupportTranscriptPage> {
-    this.support.requireEnabled();
+    this.support.requireReadable();
     const [episode] = await this.db
       .select()
       .from(schema.supportChatEpisodes)

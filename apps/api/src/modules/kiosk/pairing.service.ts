@@ -8,7 +8,7 @@ import {
 import { and, asc, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { loadEnv } from "../../env";
+import { requireLegacyEnv } from "../../env";
 import { generateDeviceToken, hashDeviceToken, hashPairingCode } from "../../pickup/device-token";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import type { PairKioskResultDto } from "../pickup-orders/dto";
@@ -68,7 +68,7 @@ export class PairingService {
    */
   async issueCode(tenantId: string, kioskId: string): Promise<IssuePairingCodeResultDto> {
     const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
-    const pepper = loadEnv().PAIRING_CODE_PEPPER;
+    const pepper = requireLegacyEnv().PAIRING_CODE_PEPPER;
     for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
       const code = mintPairingCode();
       const codeHash = hashPairingCode(code, pepper);
@@ -202,7 +202,7 @@ export class PairingService {
     now: Date,
     auditContext: KioskPairAuditContext,
   ): Promise<PairKioskResultDto> {
-    const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
+    const codeHash = hashPairingCode(code, requireLegacyEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
       .select({
         id: schema.kioskPairingCodes.id,

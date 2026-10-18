@@ -3032,5 +3032,15 @@
     "loading": "Loading device selections…",
     "loadError": "Could not load device selections.",
     "blank": "Start a blank selection"
+  },
+  "serverProfile": {
+    "cabinet": "The cloud cabinet has been retired. Owner creation, cabinet grants and activation emails are unavailable in this profile.",
+    "nationalCatalog": "National Catalog is unavailable in this profile. The cloud integration has been retired.",
+    "grants": "Cloud Station grants have been retired. The commercial catalog and standalone offline licenses remain available.",
+    "support": "Saved support history remains available. New proposals are unavailable; staff with write permission can retry transcript synchronization.",
+    "cloudUsage": "Cloud usage figures are historical: used quantities in the snapshot reflect saved cloud data. Commercial entitlements and limits remain in effect. Actual standalone figures, report source and timestamp are available separately in Diagnostics; without a report they are unknown.",
+    "devices": "Cloud device management has been retired. Standalone sites and offline license issuance are available below.",
+    "productionReports": "Production reports contain historical cloud data and do not describe current standalone activity. Actual standalone figures, report source and timestamp are available in tenant diagnostics; without a report they are unknown. Commercial reports reflect platform operations.",
+    "createNotice": "Tenant without a cabinet: no owner, activation email or demo is created. Standalone sites and offline licenses are available. You send invoices and acts yourself."
   }
 }

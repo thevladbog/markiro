@@ -237,6 +237,8 @@ function jobsForPath(path) {
   if (path.startsWith("tools/production-browser/")) {
     return ["production_bundle"];
   }
+  // Portable platform preparation owns the same mandatory bundle gate.
+  if (path.startsWith("deploy/platform/")) return ["production_bundle"];
   if (path.startsWith("deploy/") || path.startsWith("infra/")) {
     return ["production_bundle"];
   }

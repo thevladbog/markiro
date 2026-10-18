@@ -1,0 +1,4357 @@
+{
+  "version": 1,
+  "project": "markiro-compact-load-2ec8551813",
+  "startedAt": "2026-10-18T11:57:01.073Z",
+  "kind": "local-synthetic-derived-runtime",
+  "smoke": false,
+  "phases": {
+    "warmup": {
+      "users": 5,
+      "durationMs": 60056.433125,
+      "throughput": 48.97060725998618,
+      "interactive": {
+        "count": 2941,
+        "failures": 0,
+        "p50": 12.56,
+        "p95": 26.22,
+        "p99": 61.35,
+        "statuses": {
+          "200": 2936,
+          "201": 5
+        }
+      },
+      "operations": {
+        "report-create": {
+          "count": 5,
+          "failures": 0,
+          "p50": 120.06,
+          "p95": 125.24,
+          "p99": 125.24,
+          "statuses": {
+            "201": 5
+          }
+        },
+        "license-preview": {
+          "count": 130,
+          "failures": 0,
+          "p50": 19.18,
+          "p95": 52.67,
+          "p99": 108.73,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "license-issue": {
+          "count": 130,
+          "failures": 0,
+          "p50": 15.07,
+          "p95": 81.14,
+          "p99": 98.08,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "license-download": {
+          "count": 130,
+          "failures": 0,
+          "p50": 6.05,
+          "p95": 21.39,
+          "p99": 42.51,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "diagnostics-ingest": {
+          "count": 130,
+          "failures": 0,
+          "p50": 8.38,
+          "p95": 29.88,
+          "p99": 94.82,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "tenant-detail": {
+          "count": 425,
+          "failures": 0,
+          "p50": 18.21,
+          "p95": 27.35,
+          "p99": 30.94,
+          "statuses": {
+            "200": 425
+          }
+        },
+        "site-list": {
+          "count": 380,
+          "failures": 0,
+          "p50": 10.77,
+          "p95": 23.72,
+          "p99": 29.71,
+          "statuses": {
+            "200": 380
+          }
+        },
+        "license-history": {
+          "count": 425,
+          "failures": 0,
+          "p50": 13.05,
+          "p95": 25.29,
+          "p99": 28.1,
+          "statuses": {
+            "200": 425
+          }
+        },
+        "diagnostics-detail": {
+          "count": 385,
+          "failures": 0,
+          "p50": 13.77,
+          "p95": 22.08,
+          "p99": 24.07,
+          "statuses": {
+            "200": 385
+          }
+        },
+        "diagnostics-statistics": {
+          "count": 421,
+          "failures": 0,
+          "p50": 11.31,
+          "p95": 23.24,
+          "p99": 35,
+          "statuses": {
+            "200": 421
+          }
+        },
+        "tenant-list": {
+          "count": 380,
+          "failures": 0,
+          "p50": 13.72,
+          "p95": 22.67,
+          "p99": 24.09,
+          "statuses": {
+            "200": 380
+          }
+        }
+      }
+    },
+    "steady": {
+      "users": 5,
+      "durationMs": 180082.242958,
+      "throughput": 49.36078013018281,
+      "interactive": {
+        "count": 8889,
+        "failures": 0,
+        "p50": 11.82,
+        "p95": 27.43,
+        "p99": 35.4,
+        "statuses": {
+          "200": 8884,
+          "201": 5
+        }
+      },
+      "operations": {
+        "report-create": {
+          "count": 5,
+          "failures": 0,
+          "p50": 50.65,
+          "p95": 53.04,
+          "p99": 53.04,
+          "statuses": {
+            "201": 5
+          }
+        },
+        "license-preview": {
+          "count": 390,
+          "failures": 0,
+          "p50": 12.17,
+          "p95": 32.7,
+          "p99": 62.41,
+          "statuses": {
+            "200": 390
+          }
+        },
+        "license-issue": {
+          "count": 390,
+          "failures": 0,
+          "p50": 12.72,
+          "p95": 21.51,
+          "p99": 63.03,
+          "statuses": {
+            "200": 390
+          }
+        },
+        "license-download": {
+          "count": 390,
+          "failures": 0,
+          "p50": 4.86,
+          "p95": 8.84,
+          "p99": 13.6,
+          "statuses": {
+            "200": 390
+          }
+        },
+        "diagnostics-ingest": {
+          "count": 390,
+          "failures": 0,
+          "p50": 6.92,
+          "p95": 14.3,
+          "p99": 26.49,
+          "statuses": {
+            "200": 390
+          }
+        },
+        "tenant-detail": {
+          "count": 1286,
+          "failures": 0,
+          "p50": 13.88,
+          "p95": 26.53,
+          "p99": 29.22,
+          "statuses": {
+            "200": 1286
+          }
+        },
+        "site-list": {
+          "count": 1155,
+          "failures": 0,
+          "p50": 14.08,
+          "p95": 27.91,
+          "p99": 35.4,
+          "statuses": {
+            "200": 1155
+          }
+        },
+        "license-history": {
+          "count": 1285,
+          "failures": 0,
+          "p50": 18.75,
+          "p95": 32.62,
+          "p99": 42.8,
+          "statuses": {
+            "200": 1285
+          }
+        },
+        "diagnostics-detail": {
+          "count": 1155,
+          "failures": 0,
+          "p50": 8.68,
+          "p95": 21.7,
+          "p99": 27.93,
+          "statuses": {
+            "200": 1155
+          }
+        },
+        "diagnostics-statistics": {
+          "count": 1285,
+          "failures": 0,
+          "p50": 8.03,
+          "p95": 22.54,
+          "p99": 25.34,
+          "statuses": {
+            "200": 1285
+          }
+        },
+        "tenant-list": {
+          "count": 1158,
+          "failures": 0,
+          "p50": 11.56,
+          "p95": 22.46,
+          "p99": 24.63,
+          "statuses": {
+            "200": 1158
+          }
+        }
+      }
+    },
+    "burst": {
+      "users": 10,
+      "durationMs": 60101.25229200005,
+      "throughput": 102.89303074676764,
+      "interactive": {
+        "count": 6184,
+        "failures": 0,
+        "p50": 6.05,
+        "p95": 25.61,
+        "p99": 75.19,
+        "statuses": {
+          "200": 6174,
+          "201": 10
+        }
+      },
+      "operations": {
+        "report-create": {
+          "count": 10,
+          "failures": 0,
+          "p50": 31.3,
+          "p95": 38.05,
+          "p99": 38.05,
+          "statuses": {
+            "201": 10
+          }
+        },
+        "license-preview": {
+          "count": 270,
+          "failures": 0,
+          "p50": 9.84,
+          "p95": 57.42,
+          "p99": 79.24,
+          "statuses": {
+            "200": 270
+          }
+        },
+        "license-issue": {
+          "count": 270,
+          "failures": 0,
+          "p50": 12.42,
+          "p95": 52.75,
+          "p99": 116.46,
+          "statuses": {
+            "200": 270
+          }
+        },
+        "license-download": {
+          "count": 270,
+          "failures": 0,
+          "p50": 4.78,
+          "p95": 28.27,
+          "p99": 62.78,
+          "statuses": {
+            "200": 270
+          }
+        },
+        "diagnostics-ingest": {
+          "count": 270,
+          "failures": 0,
+          "p50": 7.12,
+          "p95": 46.06,
+          "p99": 66.05,
+          "statuses": {
+            "200": 270
+          }
+        },
+        "tenant-detail": {
+          "count": 896,
+          "failures": 0,
+          "p50": 6.85,
+          "p95": 21.91,
+          "p99": 128.39,
+          "statuses": {
+            "200": 896
+          }
+        },
+        "site-list": {
+          "count": 805,
+          "failures": 0,
+          "p50": 5,
+          "p95": 22.33,
+          "p99": 83.5,
+          "statuses": {
+            "200": 805
+          }
+        },
+        "license-history": {
+          "count": 895,
+          "failures": 0,
+          "p50": 11.67,
+          "p95": 30.29,
+          "p99": 53,
+          "statuses": {
+            "200": 895
+          }
+        },
+        "diagnostics-detail": {
+          "count": 802,
+          "failures": 0,
+          "p50": 4.58,
+          "p95": 12.48,
+          "p99": 69.32,
+          "statuses": {
+            "200": 802
+          }
+        },
+        "diagnostics-statistics": {
+          "count": 890,
+          "failures": 0,
+          "p50": 4.24,
+          "p95": 12.55,
+          "p99": 34.05,
+          "statuses": {
+            "200": 890
+          }
+        },
+        "tenant-list": {
+          "count": 806,
+          "failures": 0,
+          "p50": 5.6,
+          "p95": 15.93,
+          "p99": 59.4,
+          "statuses": {
+            "200": 806
+          }
+        }
+      }
+    },
+    "recovery": {
+      "users": 5,
+      "durationMs": 60040.13541699998,
+      "throughput": 49.36697726302533,
+      "interactive": {
+        "count": 2964,
+        "failures": 0,
+        "p50": 8.49,
+        "p95": 38.7,
+        "p99": 83.65,
+        "statuses": {
+          "200": 2959,
+          "201": 5
+        }
+      },
+      "operations": {
+        "report-create": {
+          "count": 5,
+          "failures": 0,
+          "p50": 13.85,
+          "p95": 14.34,
+          "p99": 14.34,
+          "statuses": {
+            "201": 5
+          }
+        },
+        "license-preview": {
+          "count": 130,
+          "failures": 0,
+          "p50": 10.36,
+          "p95": 74.13,
+          "p99": 180.04,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "license-issue": {
+          "count": 130,
+          "failures": 0,
+          "p50": 12.05,
+          "p95": 89.3,
+          "p99": 119.02,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "license-download": {
+          "count": 130,
+          "failures": 0,
+          "p50": 4.94,
+          "p95": 33.91,
+          "p99": 55.94,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "diagnostics-ingest": {
+          "count": 130,
+          "failures": 0,
+          "p50": 7.2,
+          "p95": 39.35,
+          "p99": 52.64,
+          "statuses": {
+            "200": 130
+          }
+        },
+        "tenant-detail": {
+          "count": 430,
+          "failures": 0,
+          "p50": 9.28,
+          "p95": 28.96,
+          "p99": 79,
+          "statuses": {
+            "200": 430
+          }
+        },
+        "site-list": {
+          "count": 385,
+          "failures": 0,
+          "p50": 8.07,
+          "p95": 26.7,
+          "p99": 44.73,
+          "statuses": {
+            "200": 385
+          }
+        },
+        "license-history": {
+          "count": 428,
+          "failures": 0,
+          "p50": 25.2,
+          "p95": 55.74,
+          "p99": 84.29,
+          "statuses": {
+            "200": 428
+          }
+        },
+        "diagnostics-detail": {
+          "count": 386,
+          "failures": 0,
+          "p50": 5.05,
+          "p95": 23.4,
+          "p99": 88.53,
+          "statuses": {
+            "200": 386
+          }
+        },
+        "diagnostics-statistics": {
+          "count": 425,
+          "failures": 0,
+          "p50": 4.82,
+          "p95": 18.99,
+          "p99": 54.19,
+          "statuses": {
+            "200": 425
+          }
+        },
+        "tenant-list": {
+          "count": 385,
+          "failures": 0,
+          "p50": 6.79,
+          "p95": 19.02,
+          "p99": 21.16,
+          "statuses": {
+            "200": 385
+          }
+        }
+      }
+    }
+  },
+  "checks": [
+    "HTTPS edge certificate verified against task-local Caddy CA",
+    "PostgreSQL verify-full TLS positive; wrong hostname, untrusted CA and plaintext rejected",
+    "running cgroup aggregate 2 CPU / 2752 MiB",
+    "10 production HTTP sign-in/password/TOTP verified sessions; unverified principal denied",
+    "license file hash/replay, encrypted diagnostics durable ingestion, cross-tenant resource denial",
+    "durable writes exact counts; nonempty report CSV/metadata/hash/tenant scope; creator isolation; drained report queue"
+  ],
+  "samples": [
+    {
+      "at": "2026-10-18T11:58:07.719Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 5,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 7859380,
+            "user_usec": 7090546,
+            "system_usec": 768833,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 169,
+            "nr_throttled": 16,
+            "throttled_usec": 2308835,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 387252224,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 2602881,
+            "user_usec": 1527880,
+            "system_usec": 1075001,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 189,
+            "nr_throttled": 26,
+            "throttled_usec": 259679,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 142401536,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 146915,
+            "user_usec": 97125,
+            "system_usec": 49789,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 65,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 17649664,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.01%",
+          "memory": "330.1MiB / 1.5GiB",
+          "memoryPercent": "21.49%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.00%",
+          "memory": "36.73MiB / 1GiB",
+          "memoryPercent": "3.59%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "13.68MiB / 192MiB",
+          "memoryPercent": "7.12%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:58:16.164Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 10146394,
+            "user_usec": 9186868,
+            "system_usec": 959525,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 256,
+            "nr_throttled": 16,
+            "throttled_usec": 2308835,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 448499712,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 3566521,
+            "user_usec": 2223839,
+            "system_usec": 1342682,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 276,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 147025920,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 327199,
+            "user_usec": 220552,
+            "system_usec": 106647,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 152,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 17559552,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.01%",
+          "memory": "387.2MiB / 1.5GiB",
+          "memoryPercent": "25.21%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.00%",
+          "memory": "39.67MiB / 1GiB",
+          "memoryPercent": "3.87%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "13.6MiB / 192MiB",
+          "memoryPercent": "7.08%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:58:24.085Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 12031988,
+            "user_usec": 10935634,
+            "system_usec": 1096353,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 338,
+            "nr_throttled": 18,
+            "throttled_usec": 2677619,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 481869824,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 4282455,
+            "user_usec": 2737985,
+            "system_usec": 1544469,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 357,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 142331904,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 451333,
+            "user_usec": 314577,
+            "system_usec": 136755,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 231,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 17858560,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.02%",
+          "memory": "419.2MiB / 1.5GiB",
+          "memoryPercent": "27.29%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "39.23MiB / 1GiB",
+          "memoryPercent": "3.83%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "13.99MiB / 192MiB",
+          "memoryPercent": "7.29%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:58:31.997Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 13489360,
+            "user_usec": 12259284,
+            "system_usec": 1230075,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 417,
+            "nr_throttled": 18,
+            "throttled_usec": 2677619,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 482148352,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 4992839,
+            "user_usec": 3249245,
+            "system_usec": 1743594,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 436,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 142688256,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 566026,
+            "user_usec": 388488,
+            "system_usec": 177537,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 310,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18018304,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.02%",
+          "memory": "422.4MiB / 1.5GiB",
+          "memoryPercent": "27.50%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "39.25MiB / 1GiB",
+          "memoryPercent": "3.83%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.04MiB / 192MiB",
+          "memoryPercent": "7.31%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:58:40.067Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 15162878,
+            "user_usec": 13821220,
+            "system_usec": 1341658,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 496,
+            "nr_throttled": 19,
+            "throttled_usec": 2728026,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 483856384,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 5733237,
+            "user_usec": 3765816,
+            "system_usec": 1967420,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 516,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 143298560,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 702690,
+            "user_usec": 492657,
+            "system_usec": 210032,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 389,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18034688,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.02%",
+          "memory": "424.1MiB / 1.5GiB",
+          "memoryPercent": "27.61%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "39.88MiB / 1GiB",
+          "memoryPercent": "3.89%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.04MiB / 192MiB",
+          "memoryPercent": "7.31%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:58:47.949Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 16652770,
+            "user_usec": 15190980,
+            "system_usec": 1461790,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 577,
+            "nr_throttled": 19,
+            "throttled_usec": 2728026,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 486088704,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 6550971,
+            "user_usec": 4347569,
+            "system_usec": 2203401,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 596,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 144367616,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 839361,
+            "user_usec": 584050,
+            "system_usec": 255310,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 469,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18182144,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.02%",
+          "memory": "426.2MiB / 1.5GiB",
+          "memoryPercent": "27.75%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "40.2MiB / 1GiB",
+          "memoryPercent": "3.93%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.09MiB / 192MiB",
+          "memoryPercent": "7.34%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:58:55.864Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 18021634,
+            "user_usec": 16410111,
+            "system_usec": 1611522,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 656,
+            "nr_throttled": 19,
+            "throttled_usec": 2728026,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 507408384,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 7246951,
+            "user_usec": 4847887,
+            "system_usec": 2399063,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 675,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 144977920,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 955268,
+            "user_usec": 664472,
+            "system_usec": 290795,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 546,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18231296,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.02%",
+          "memory": "443.7MiB / 1.5GiB",
+          "memoryPercent": "28.89%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "40.39MiB / 1GiB",
+          "memoryPercent": "3.94%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.12MiB / 192MiB",
+          "memoryPercent": "7.36%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:03.625Z",
+      "phase": "warmup",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 19642339,
+            "user_usec": 17919898,
+            "system_usec": 1722441,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 734,
+            "nr_throttled": 21,
+            "throttled_usec": 2863357,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 508649472,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 7941438,
+            "user_usec": 5328652,
+            "system_usec": 2612785,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 754,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 130310144,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1073356,
+            "user_usec": 741795,
+            "system_usec": 331560,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 623,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18243584,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.02%",
+          "memory": "454MiB / 1.5GiB",
+          "memoryPercent": "29.56%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "40.27MiB / 1GiB",
+          "memoryPercent": "3.93%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.14MiB / 192MiB",
+          "memoryPercent": "7.37%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:11.585Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 3,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 21198665,
+            "user_usec": 19331644,
+            "system_usec": 1867021,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 813,
+            "nr_throttled": 21,
+            "throttled_usec": 2863357,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 507506688,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 8782901,
+            "user_usec": 5938461,
+            "system_usec": 2844440,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 833,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 129191936,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1204450,
+            "user_usec": 828785,
+            "system_usec": 375664,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 702,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18284544,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.03%",
+          "memory": "454.4MiB / 1.5GiB",
+          "memoryPercent": "29.59%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "40.77MiB / 1GiB",
+          "memoryPercent": "3.98%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.16MiB / 192MiB",
+          "memoryPercent": "7.37%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:19.569Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 22558002,
+            "user_usec": 20575377,
+            "system_usec": 1982624,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 892,
+            "nr_throttled": 21,
+            "throttled_usec": 2863357,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 509870080,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 9560176,
+            "user_usec": 6520439,
+            "system_usec": 3039736,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 912,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 129318912,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1322248,
+            "user_usec": 905141,
+            "system_usec": 417107,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 780,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18169856,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.03%",
+          "memory": "456.6MiB / 1.5GiB",
+          "memoryPercent": "29.72%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "41.06MiB / 1GiB",
+          "memoryPercent": "4.01%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.17MiB / 192MiB",
+          "memoryPercent": "7.38%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:27.560Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 24345635,
+            "user_usec": 22225921,
+            "system_usec": 2119713,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 972,
+            "nr_throttled": 23,
+            "throttled_usec": 3565345,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 514052096,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 10301650,
+            "user_usec": 7059075,
+            "system_usec": 3242574,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 992,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 124276736,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1448675,
+            "user_usec": 988729,
+            "system_usec": 459945,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 861,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18321408,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.03%",
+          "memory": "462.3MiB / 1.5GiB",
+          "memoryPercent": "30.10%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "41.05MiB / 1GiB",
+          "memoryPercent": "4.01%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.18MiB / 192MiB",
+          "memoryPercent": "7.39%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:35.655Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 25760937,
+            "user_usec": 23528258,
+            "system_usec": 2232679,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1052,
+            "nr_throttled": 23,
+            "throttled_usec": 3565345,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 513916928,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 10999322,
+            "user_usec": 7568323,
+            "system_usec": 3430999,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1072,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 107212800,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1565335,
+            "user_usec": 1067724,
+            "system_usec": 497611,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 941,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18345984,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.03%",
+          "memory": "462.5MiB / 1.5GiB",
+          "memoryPercent": "30.11%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "41.05MiB / 1GiB",
+          "memoryPercent": "4.01%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.2MiB / 192MiB",
+          "memoryPercent": "7.40%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:43.595Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 27465750,
+            "user_usec": 25095979,
+            "system_usec": 2369771,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1133,
+            "nr_throttled": 24,
+            "throttled_usec": 3915359,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 514048000,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 11761543,
+            "user_usec": 8113414,
+            "system_usec": 3648129,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1152,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 108544000,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1689322,
+            "user_usec": 1165657,
+            "system_usec": 523665,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1021,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18374656,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.03%",
+          "memory": "462.8MiB / 1.5GiB",
+          "memoryPercent": "30.13%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.01%",
+          "memory": "41.18MiB / 1GiB",
+          "memoryPercent": "4.02%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.21MiB / 192MiB",
+          "memoryPercent": "7.40%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:51.618Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 28931292,
+            "user_usec": 26463605,
+            "system_usec": 2467687,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1212,
+            "nr_throttled": 24,
+            "throttled_usec": 3915359,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 514314240,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 12506898,
+            "user_usec": 8643855,
+            "system_usec": 3863042,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1232,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 108568576,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1811734,
+            "user_usec": 1258652,
+            "system_usec": 553081,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1099,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18382848,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.04%",
+          "memory": "463.1MiB / 1.5GiB",
+          "memoryPercent": "30.15%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.19MiB / 1GiB",
+          "memoryPercent": "4.02%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.23MiB / 192MiB",
+          "memoryPercent": "7.41%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T11:59:59.518Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 30505758,
+            "user_usec": 27905465,
+            "system_usec": 2600293,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1292,
+            "nr_throttled": 24,
+            "throttled_usec": 3915359,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 514584576,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 13295626,
+            "user_usec": 9196565,
+            "system_usec": 4099060,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1312,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 109248512,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 1936900,
+            "user_usec": 1343043,
+            "system_usec": 593857,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1180,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18382848,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.04%",
+          "memory": "463.3MiB / 1.5GiB",
+          "memoryPercent": "30.17%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.19MiB / 1GiB",
+          "memoryPercent": "4.02%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.25MiB / 192MiB",
+          "memoryPercent": "7.42%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:07.444Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 32218185,
+            "user_usec": 29484777,
+            "system_usec": 2733407,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1371,
+            "nr_throttled": 25,
+            "throttled_usec": 4167065,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 514531328,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 14015381,
+            "user_usec": 9717180,
+            "system_usec": 4298201,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1391,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 109662208,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2057953,
+            "user_usec": 1420370,
+            "system_usec": 637583,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1257,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18300928,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.04%",
+          "memory": "463.3MiB / 1.5GiB",
+          "memoryPercent": "30.16%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.22MiB / 1GiB",
+          "memoryPercent": "4.03%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.26MiB / 192MiB",
+          "memoryPercent": "7.43%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:15.339Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 33982621,
+            "user_usec": 31119462,
+            "system_usec": 2863159,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1451,
+            "nr_throttled": 26,
+            "throttled_usec": 4307925,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 514621440,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 14747716,
+            "user_usec": 10247302,
+            "system_usec": 4500414,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1470,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 110071808,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2177449,
+            "user_usec": 1500422,
+            "system_usec": 677027,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1336,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18370560,
+          "peakBytes": 18845696
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.04%",
+          "memory": "463.3MiB / 1.5GiB",
+          "memoryPercent": "30.16%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.29MiB / 1GiB",
+          "memoryPercent": "4.03%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.28MiB / 192MiB",
+          "memoryPercent": "7.44%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:23.172Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 35427887,
+            "user_usec": 32436095,
+            "system_usec": 2991792,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1529,
+            "nr_throttled": 26,
+            "throttled_usec": 4307925,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 515211264,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 15519312,
+            "user_usec": 10808942,
+            "system_usec": 4710369,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1549,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 111042560,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2298237,
+            "user_usec": 1588844,
+            "system_usec": 709392,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1414,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18501632,
+          "peakBytes": 18857984
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.04%",
+          "memory": "463.9MiB / 1.5GiB",
+          "memoryPercent": "30.20%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.39MiB / 1GiB",
+          "memoryPercent": "4.04%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.29MiB / 192MiB",
+          "memoryPercent": "7.44%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:31.174Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 36864373,
+            "user_usec": 33773076,
+            "system_usec": 3091296,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1608,
+            "nr_throttled": 26,
+            "throttled_usec": 4307925,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 515420160,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 16223406,
+            "user_usec": 11339633,
+            "system_usec": 4883773,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1628,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 110940160,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2413600,
+            "user_usec": 1669127,
+            "system_usec": 744473,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1494,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18583552,
+          "peakBytes": 18944000
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.05%",
+          "memory": "464MiB / 1.5GiB",
+          "memoryPercent": "30.21%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.32MiB / 1GiB",
+          "memoryPercent": "4.03%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.3MiB / 192MiB",
+          "memoryPercent": "7.45%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:39.293Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 38581352,
+            "user_usec": 35363851,
+            "system_usec": 3217500,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1689,
+            "nr_throttled": 28,
+            "throttled_usec": 4376854,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 515432448,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 16944405,
+            "user_usec": 11862806,
+            "system_usec": 5081599,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1708,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 111882240,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2532738,
+            "user_usec": 1746640,
+            "system_usec": 786097,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1574,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18558976,
+          "peakBytes": 19017728
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.05%",
+          "memory": "464.2MiB / 1.5GiB",
+          "memoryPercent": "30.22%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "41.38MiB / 1GiB",
+          "memoryPercent": "4.04%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.31MiB / 192MiB",
+          "memoryPercent": "7.45%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:47.189Z",
+      "phase": "steady",
+      "connections": 10,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 40062529,
+            "user_usec": 36696790,
+            "system_usec": 3365738,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1769,
+            "nr_throttled": 28,
+            "throttled_usec": 4376854,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 516341760,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 17679965,
+            "user_usec": 12383440,
+            "system_usec": 5296524,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1788,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 109031424,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2645538,
+            "user_usec": 1821295,
+            "system_usec": 824242,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1654,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18595840,
+          "peakBytes": 19017728
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.05%",
+          "memory": "465MiB / 1.5GiB",
+          "memoryPercent": "30.28%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "38.49MiB / 1GiB",
+          "memoryPercent": "3.76%",
+          "pids": "15"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.32MiB / 192MiB",
+          "memoryPercent": "7.46%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:00:55.143Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 41618171,
+            "user_usec": 38127731,
+            "system_usec": 3490440,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1848,
+            "nr_throttled": 30,
+            "throttled_usec": 4658769,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518213632,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 18370230,
+            "user_usec": 12879062,
+            "system_usec": 5491167,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1868,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 112058368,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2751167,
+            "user_usec": 1889525,
+            "system_usec": 861641,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1732,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18669568,
+          "peakBytes": 19017728
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.05%",
+          "memory": "466.7MiB / 1.5GiB",
+          "memoryPercent": "30.38%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "40.59MiB / 1GiB",
+          "memoryPercent": "3.96%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.32MiB / 192MiB",
+          "memoryPercent": "7.46%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:03.039Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 43174546,
+            "user_usec": 39541687,
+            "system_usec": 3632859,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1927,
+            "nr_throttled": 30,
+            "throttled_usec": 4658769,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518275072,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 19106114,
+            "user_usec": 13416615,
+            "system_usec": 5689499,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1947,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 112463872,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2871050,
+            "user_usec": 1967956,
+            "system_usec": 903093,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1811,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18587648,
+          "peakBytes": 19042304
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.05%",
+          "memory": "466.8MiB / 1.5GiB",
+          "memoryPercent": "30.39%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "40.5MiB / 1GiB",
+          "memoryPercent": "3.96%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.33MiB / 192MiB",
+          "memoryPercent": "7.46%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:11.079Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 44715271,
+            "user_usec": 40955730,
+            "system_usec": 3759540,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2008,
+            "nr_throttled": 30,
+            "throttled_usec": 4658769,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 519057408,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 19858338,
+            "user_usec": 13972044,
+            "system_usec": 5886293,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2027,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 113242112,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 2991817,
+            "user_usec": 2045089,
+            "system_usec": 946728,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1892,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18604032,
+          "peakBytes": 19050496
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.06%",
+          "memory": "467.5MiB / 1.5GiB",
+          "memoryPercent": "30.44%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.02%",
+          "memory": "40.79MiB / 1GiB",
+          "memoryPercent": "3.98%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.33MiB / 192MiB",
+          "memoryPercent": "7.46%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:18.976Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 46493095,
+            "user_usec": 42600120,
+            "system_usec": 3892975,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2087,
+            "nr_throttled": 31,
+            "throttled_usec": 5019512,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 519118848,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 20626400,
+            "user_usec": 14526772,
+            "system_usec": 6099628,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2106,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 114106368,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 3109414,
+            "user_usec": 2125336,
+            "system_usec": 984077,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 1971,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18501632,
+          "peakBytes": 19050496
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.06%",
+          "memory": "467.6MiB / 1.5GiB",
+          "memoryPercent": "30.44%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "40.91MiB / 1GiB",
+          "memoryPercent": "4.00%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.33MiB / 192MiB",
+          "memoryPercent": "7.46%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:26.798Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 47897728,
+            "user_usec": 43884417,
+            "system_usec": 4013310,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2165,
+            "nr_throttled": 31,
+            "throttled_usec": 5019512,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 519016448,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 21334150,
+            "user_usec": 15035301,
+            "system_usec": 6298848,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2185,
+            "nr_throttled": 27,
+            "throttled_usec": 308972,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 114429952,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 3236612,
+            "user_usec": 2214550,
+            "system_usec": 1022061,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2049,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18632704,
+          "peakBytes": 19116032
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.06%",
+          "memory": "467.6MiB / 1.5GiB",
+          "memoryPercent": "30.44%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "41.03MiB / 1GiB",
+          "memoryPercent": "4.01%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.35MiB / 192MiB",
+          "memoryPercent": "7.47%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:35.528Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 49860518,
+            "user_usec": 45708568,
+            "system_usec": 4151949,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2246,
+            "nr_throttled": 33,
+            "throttled_usec": 5724212,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 519049216,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 22161071,
+            "user_usec": 15622636,
+            "system_usec": 6538435,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2267,
+            "nr_throttled": 28,
+            "throttled_usec": 316229,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 115150848,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 3396132,
+            "user_usec": 2326390,
+            "system_usec": 1069741,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2134,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18874368,
+          "peakBytes": 19251200
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.06%",
+          "memory": "467.6MiB / 1.5GiB",
+          "memoryPercent": "30.44%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "40.99MiB / 1GiB",
+          "memoryPercent": "4.00%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.42MiB / 192MiB",
+          "memoryPercent": "7.51%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:43.657Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 52153433,
+            "user_usec": 47835348,
+            "system_usec": 4318085,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2333,
+            "nr_throttled": 33,
+            "throttled_usec": 5724212,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 519409664,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 23156808,
+            "user_usec": 16318737,
+            "system_usec": 6838070,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2353,
+            "nr_throttled": 28,
+            "throttled_usec": 316229,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 115937280,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 3546214,
+            "user_usec": 2423673,
+            "system_usec": 1122541,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2218,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18825216,
+          "peakBytes": 19283968
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.07%",
+          "memory": "467.8MiB / 1.5GiB",
+          "memoryPercent": "30.46%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "41.31MiB / 1GiB",
+          "memoryPercent": "4.03%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.56MiB / 192MiB",
+          "memoryPercent": "7.58%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:51.534Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 54147688,
+            "user_usec": 49708094,
+            "system_usec": 4439593,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2413,
+            "nr_throttled": 36,
+            "throttled_usec": 6318225,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520065024,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 23927787,
+            "user_usec": 16863827,
+            "system_usec": 7063959,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2432,
+            "nr_throttled": 28,
+            "throttled_usec": 316229,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 116432896,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 3685517,
+            "user_usec": 2519444,
+            "system_usec": 1166073,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2297,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18829312,
+          "peakBytes": 19283968
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.07%",
+          "memory": "468.4MiB / 1.5GiB",
+          "memoryPercent": "30.50%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "41.04MiB / 1GiB",
+          "memoryPercent": "4.01%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.56MiB / 192MiB",
+          "memoryPercent": "7.58%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:01:59.549Z",
+      "phase": "steady",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 55746705,
+            "user_usec": 51191703,
+            "system_usec": 4555001,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2493,
+            "nr_throttled": 36,
+            "throttled_usec": 6318225,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520073216,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 24715875,
+            "user_usec": 17426653,
+            "system_usec": 7289222,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2512,
+            "nr_throttled": 28,
+            "throttled_usec": 316229,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 116834304,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 3819349,
+            "user_usec": 2611072,
+            "system_usec": 1208277,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2376,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 18841600,
+          "peakBytes": 19292160
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.07%",
+          "memory": "468.5MiB / 1.5GiB",
+          "memoryPercent": "30.50%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "41.1MiB / 1GiB",
+          "memoryPercent": "4.01%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.00%",
+          "memory": "14.58MiB / 192MiB",
+          "memoryPercent": "7.59%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:07.853Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 10,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 57988529,
+            "user_usec": 53253137,
+            "system_usec": 4735391,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2574,
+            "nr_throttled": 38,
+            "throttled_usec": 7032027,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520454144,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 25782539,
+            "user_usec": 18176071,
+            "system_usec": 7606467,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2594,
+            "nr_throttled": 30,
+            "throttled_usec": 331025,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 118480896,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 4017240,
+            "user_usec": 2744507,
+            "system_usec": 1272732,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2458,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19292160,
+          "peakBytes": 19415040
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.07%",
+          "memory": "468.6MiB / 1.5GiB",
+          "memoryPercent": "30.51%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "41.64MiB / 1GiB",
+          "memoryPercent": "4.07%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "14.6MiB / 192MiB",
+          "memoryPercent": "7.60%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:15.651Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 6,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 61234846,
+            "user_usec": 56228630,
+            "system_usec": 5006215,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2654,
+            "nr_throttled": 40,
+            "throttled_usec": 7157912,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 517492736,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 27274455,
+            "user_usec": 19275664,
+            "system_usec": 7998790,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2674,
+            "nr_throttled": 31,
+            "throttled_usec": 332895,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 130772992,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 4277908,
+            "user_usec": 2919461,
+            "system_usec": 1358447,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2537,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19574784,
+          "peakBytes": 19816448
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.08%",
+          "memory": "468.9MiB / 1.5GiB",
+          "memoryPercent": "30.53%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.03%",
+          "memory": "41.62MiB / 1GiB",
+          "memoryPercent": "4.06%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "14.96MiB / 192MiB",
+          "memoryPercent": "7.79%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:23.479Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 2,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 64005363,
+            "user_usec": 58809654,
+            "system_usec": 5195709,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2732,
+            "nr_throttled": 44,
+            "throttled_usec": 7665791,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518553600,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 28484131,
+            "user_usec": 20147764,
+            "system_usec": 8336367,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2751,
+            "nr_throttled": 34,
+            "throttled_usec": 359419,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 132456448,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 4493155,
+            "user_usec": 3077188,
+            "system_usec": 1415967,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2614,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19464192,
+          "peakBytes": 19841024
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.08%",
+          "memory": "469.9MiB / 1.5GiB",
+          "memoryPercent": "30.59%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "41.76MiB / 1GiB",
+          "memoryPercent": "4.08%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "14.98MiB / 192MiB",
+          "memoryPercent": "7.80%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:31.260Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 66649289,
+            "user_usec": 61272696,
+            "system_usec": 5376593,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2810,
+            "nr_throttled": 46,
+            "throttled_usec": 7776973,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518619136,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 29649567,
+            "user_usec": 21019957,
+            "system_usec": 8629609,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2830,
+            "nr_throttled": 35,
+            "throttled_usec": 371162,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 133537792,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 4708536,
+            "user_usec": 3223675,
+            "system_usec": 1484861,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2693,
+            "nr_throttled": 2,
+            "throttled_usec": 135284,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19390464,
+          "peakBytes": 19841024
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.08%",
+          "memory": "470MiB / 1.5GiB",
+          "memoryPercent": "30.60%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "41.65MiB / 1GiB",
+          "memoryPercent": "4.07%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "14.99MiB / 192MiB",
+          "memoryPercent": "7.81%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:39.143Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 69520637,
+            "user_usec": 63916665,
+            "system_usec": 5603972,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2888,
+            "nr_throttled": 49,
+            "throttled_usec": 8118499,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518676480,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 30921302,
+            "user_usec": 21915984,
+            "system_usec": 9005318,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2908,
+            "nr_throttled": 35,
+            "throttled_usec": 371162,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 135168000,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 4986623,
+            "user_usec": 3421287,
+            "system_usec": 1565335,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2771,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19640320,
+          "peakBytes": 20103168
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.09%",
+          "memory": "470MiB / 1.5GiB",
+          "memoryPercent": "30.60%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "41.62MiB / 1GiB",
+          "memoryPercent": "4.06%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.01MiB / 192MiB",
+          "memoryPercent": "7.82%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:46.931Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 72186846,
+            "user_usec": 66391945,
+            "system_usec": 5794900,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2967,
+            "nr_throttled": 51,
+            "throttled_usec": 8478842,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518979584,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 32049618,
+            "user_usec": 22730908,
+            "system_usec": 9318709,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2986,
+            "nr_throttled": 35,
+            "throttled_usec": 371162,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 136302592,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 5197011,
+            "user_usec": 3570185,
+            "system_usec": 1626826,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2850,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 20013056,
+          "peakBytes": 20107264
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.09%",
+          "memory": "470.1MiB / 1.5GiB",
+          "memoryPercent": "30.60%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "41.67MiB / 1GiB",
+          "memoryPercent": "4.07%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.02MiB / 192MiB",
+          "memoryPercent": "7.82%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:02:54.744Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 74567816,
+            "user_usec": 68566019,
+            "system_usec": 6001796,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3044,
+            "nr_throttled": 52,
+            "throttled_usec": 8501683,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 518905856,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 33167259,
+            "user_usec": 23552920,
+            "system_usec": 9614338,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3064,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 137420800,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 5404110,
+            "user_usec": 3703489,
+            "system_usec": 1700621,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 2927,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19857408,
+          "peakBytes": 20230144
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.09%",
+          "memory": "470.1MiB / 1.5GiB",
+          "memoryPercent": "30.60%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "42.25MiB / 1GiB",
+          "memoryPercent": "4.13%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.03MiB / 192MiB",
+          "memoryPercent": "7.83%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:02.526Z",
+      "phase": "burst",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 77014463,
+            "user_usec": 70838252,
+            "system_usec": 6176210,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3123,
+            "nr_throttled": 53,
+            "throttled_usec": 8846989,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 519716864,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 34273541,
+            "user_usec": 24338995,
+            "system_usec": 9934546,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3142,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 138854400,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 5591538,
+            "user_usec": 3838596,
+            "system_usec": 1752941,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3005,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19718144,
+          "peakBytes": 20447232
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.10%",
+          "memory": "471.3MiB / 1.5GiB",
+          "memoryPercent": "30.68%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "41.7MiB / 1GiB",
+          "memoryPercent": "4.07%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.04MiB / 192MiB",
+          "memoryPercent": "7.83%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:10.478Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 3,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 79238192,
+            "user_usec": 72899376,
+            "system_usec": 6338815,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3201,
+            "nr_throttled": 55,
+            "throttled_usec": 9224457,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520814592,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 35198665,
+            "user_usec": 25028149,
+            "system_usec": 10170515,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3221,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 140554240,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 5748980,
+            "user_usec": 3945875,
+            "system_usec": 1803104,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3085,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19836928,
+          "peakBytes": 20447232
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.10%",
+          "memory": "472.1MiB / 1.5GiB",
+          "memoryPercent": "30.73%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.04%",
+          "memory": "41.88MiB / 1GiB",
+          "memoryPercent": "4.09%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.04MiB / 192MiB",
+          "memoryPercent": "7.83%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:20.685Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 82208633,
+            "user_usec": 75613682,
+            "system_usec": 6594951,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3300,
+            "nr_throttled": 55,
+            "throttled_usec": 9224457,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520470528,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 36757827,
+            "user_usec": 26085154,
+            "system_usec": 10672672,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3321,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 141742080,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 5972619,
+            "user_usec": 4095646,
+            "system_usec": 1876972,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3186,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19869696,
+          "peakBytes": 20447232
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.10%",
+          "memory": "471.7MiB / 1.5GiB",
+          "memoryPercent": "30.71%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.05%",
+          "memory": "41.85MiB / 1GiB",
+          "memoryPercent": "4.09%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.04MiB / 192MiB",
+          "memoryPercent": "7.83%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:29.147Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 84884670,
+            "user_usec": 78097347,
+            "system_usec": 6787323,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3385,
+            "nr_throttled": 59,
+            "throttled_usec": 9892426,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520798208,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 37593101,
+            "user_usec": 26665264,
+            "system_usec": 10927836,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3405,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 142331904,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 6132978,
+            "user_usec": 4197984,
+            "system_usec": 1934994,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3269,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19828736,
+          "peakBytes": 20590592
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.11%",
+          "memory": "471.9MiB / 1.5GiB",
+          "memoryPercent": "30.72%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.05%",
+          "memory": "41.91MiB / 1GiB",
+          "memoryPercent": "4.09%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.05MiB / 192MiB",
+          "memoryPercent": "7.84%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:37.027Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 86763910,
+            "user_usec": 79828961,
+            "system_usec": 6934949,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3467,
+            "nr_throttled": 59,
+            "throttled_usec": 9892426,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520478720,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 38532269,
+            "user_usec": 27326412,
+            "system_usec": 11205857,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3487,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 143597568,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 6258239,
+            "user_usec": 4274526,
+            "system_usec": 1983712,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3349,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19714048,
+          "peakBytes": 20590592
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.11%",
+          "memory": "471.8MiB / 1.5GiB",
+          "memoryPercent": "30.71%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.05%",
+          "memory": "41.9MiB / 1GiB",
+          "memoryPercent": "4.09%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.06MiB / 192MiB",
+          "memoryPercent": "7.84%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:44.886Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 88721650,
+            "user_usec": 81658979,
+            "system_usec": 7062670,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3546,
+            "nr_throttled": 61,
+            "throttled_usec": 10411113,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520843264,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 39284925,
+            "user_usec": 27828749,
+            "system_usec": 11456176,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3566,
+            "nr_throttled": 36,
+            "throttled_usec": 398042,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 144605184,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 6389428,
+            "user_usec": 4354538,
+            "system_usec": 2034889,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3428,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19861504,
+          "peakBytes": 20590592
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.11%",
+          "memory": "472MiB / 1.5GiB",
+          "memoryPercent": "30.73%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.05%",
+          "memory": "41.92MiB / 1GiB",
+          "memoryPercent": "4.09%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.07MiB / 192MiB",
+          "memoryPercent": "7.85%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:03:54.048Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 91075849,
+            "user_usec": 83834187,
+            "system_usec": 7241661,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3636,
+            "nr_throttled": 61,
+            "throttled_usec": 10411113,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 520949760,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 40429703,
+            "user_usec": 28634752,
+            "system_usec": 11794951,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3656,
+            "nr_throttled": 37,
+            "throttled_usec": 446896,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 145424384,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 6571310,
+            "user_usec": 4478676,
+            "system_usec": 2092633,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3519,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 19865600,
+          "peakBytes": 20590592
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.11%",
+          "memory": "471.8MiB / 1.5GiB",
+          "memoryPercent": "30.72%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.05%",
+          "memory": "42.02MiB / 1GiB",
+          "memoryPercent": "4.10%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.07MiB / 192MiB",
+          "memoryPercent": "7.85%",
+          "pids": "9"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-18T12:04:01.952Z",
+      "phase": "recovery",
+      "connections": 11,
+      "queue": {
+        "pending": 0,
+        "failed": 0
+      },
+      "cgroups": {
+        "api": {
+          "cpu": {
+            "usage_usec": 93220238,
+            "user_usec": 85828539,
+            "system_usec": 7391698,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3717,
+            "nr_throttled": 63,
+            "throttled_usec": 10884730,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 521089024,
+          "peakBytes": 586186752
+        },
+        "postgres": {
+          "cpu": {
+            "usage_usec": 41209533,
+            "user_usec": 29162060,
+            "system_usec": 12047473,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3736,
+            "nr_throttled": 37,
+            "throttled_usec": 446896,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 146448384,
+          "peakBytes": 152342528
+        },
+        "edge": {
+          "cpu": {
+            "usage_usec": 6708292,
+            "user_usec": 4568272,
+            "system_usec": 2140020,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 3599,
+            "nr_throttled": 3,
+            "throttled_usec": 195741,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          },
+          "currentBytes": 20226048,
+          "peakBytes": 20590592
+        }
+      },
+      "services": [
+        {
+          "service": "api",
+          "cpu": "0.12%",
+          "memory": "472.2MiB / 1.5GiB",
+          "memoryPercent": "30.74%",
+          "pids": "12"
+        },
+        {
+          "service": "postgres",
+          "cpu": "0.05%",
+          "memory": "41.88MiB / 1GiB",
+          "memoryPercent": "4.09%",
+          "pids": "16"
+        },
+        {
+          "service": "edge",
+          "cpu": "0.01%",
+          "memory": "15.08MiB / 192MiB",
+          "memoryPercent": "7.85%",
+          "pids": "9"
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "rowCount": 300,
+      "readyMs": 3936,
+      "bytes": 4127,
+      "sha256": "36f82ab44a9ca370d58f4b37a7806d06b9950ec04b9deac30c3b8d54036a2d07",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 5701,
+      "bytes": 4127,
+      "sha256": "8f4a93d654dd83c5558aae400d5417c00a8d68241912d16bccc1fbb7a2b33f2c",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 7684,
+      "bytes": 4127,
+      "sha256": "8984ff592e364ecda31ffd8e0c138674bf8f86fe0d8f6f71b042d13ff8c42e68",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 11685,
+      "bytes": 4127,
+      "sha256": "fc52dfee0ddd724948a733d639aacef2ce7cc8d94d8972cb1757a3097255fdc2",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 9680,
+      "bytes": 4128,
+      "sha256": "38970754e0a5bdd487625af53b10d99bd883c64c60788545273452b2182e4c73",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 3694,
+      "bytes": 4128,
+      "sha256": "9b9a1b9caf4d08cced30de0330cfddadbf74490e05fc27f8ba70b5c498726c6f",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 5698,
+      "bytes": 4127,
+      "sha256": "53781ec24dc47aa3d153a38312fb9396a455cd701b70b0b10a48e5075bb6ecb4",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 9680,
+      "bytes": 4127,
+      "sha256": "fe46f30ab5b0e7946046756b353f08ea41908193ed948548dedf960fff323492",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 7697,
+      "bytes": 4127,
+      "sha256": "68176e07144a781c709a99dc6ac47c095d95354b3f11b2bffb015ffd378e963c",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 11677,
+      "bytes": 4128,
+      "sha256": "7d741a8892de4318b62caf9551059f604b02162c6b9085a56918842521318b96",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 3702,
+      "bytes": 4126,
+      "sha256": "aaa7d12b0413825df0183801f2de654b3eba0f5a86ad18e8da9975e337dacaf6",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 5703,
+      "bytes": 4127,
+      "sha256": "ea6e8116991e663399413b1aa7d74444f53b982aeeb2599dbb2097993a1e728f",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 7697,
+      "bytes": 4127,
+      "sha256": "d046cc58af6375814e04fbcfafa16e327555b958576937cf3ee1ed904a7e650b",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 9693,
+      "bytes": 4127,
+      "sha256": "c265880b395deb6094428cc8e5d6825fde52bdfc21815f7375e5308180e42a3c",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 11692,
+      "bytes": 4127,
+      "sha256": "49fb2658e1e61c1735b2255d950501ea06aa2797fc4e05e745579c71d4bab8a3",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 13685,
+      "bytes": 4127,
+      "sha256": "f41b36820698cb5ebbdca713eee39aa4d41909e54bb69af0eb220c8db1250d25",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 15718,
+      "bytes": 4127,
+      "sha256": "f4b25b467f654802d61151561fafe7106f060be2ff30753b847cac8d7e0d14ba",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 17690,
+      "bytes": 4127,
+      "sha256": "7b3c48b8c4de6e33c2f19db2ceedd9f764421a5a40b4153529c5f7b224f42c9e",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 19704,
+      "bytes": 4127,
+      "sha256": "4c2b4b891edec10f892e5cac5a460eb92f044ff457c96893df3522b4c8587804",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 21681,
+      "bytes": 4127,
+      "sha256": "f1641dee158bae8170d7da822442881245c08253d94839ed4d2795526e3065cb",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 5612,
+      "bytes": 4127,
+      "sha256": "2972fb62dadd0b923d9d43cf8ced6eb3731060ab9fc2883573c4a1aeaf5aa286",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 7626,
+      "bytes": 4127,
+      "sha256": "6b54bd9685505f0f0935a51f253fc42414b53d93ff67136e127e59f0917bafe1",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 3612,
+      "bytes": 4127,
+      "sha256": "3b6b29aaea78ea8b033dd08d3a97189a9c5e9d96f14b5516a67607807b0f6d07",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 11759,
+      "bytes": 4128,
+      "sha256": "7576d2f395096efa30c4fc4604cc4922b28eb7ecd61c2d386c2d64ab4d2a3a11",
+      "validatedRows": 300
+    },
+    {
+      "rowCount": 300,
+      "readyMs": 9613,
+      "bytes": 4127,
+      "sha256": "a38abd656532f247d661a469ce24e734318a953d9f0a0d4671c63336c7173bde",
+      "validatedRows": 300
+    }
+  ],
+  "cleanup": true,
+  "apiImage": {
+    "id": "sha256:4ed76d3ef01dd21ad424fd8c2fe459bb60a7d009398ea748d31e7f669994948d",
+    "architecture": "arm64",
+    "provenance": "local derived host dist; not exact release image"
+  },
+  "edgeImage": {
+    "id": "sha256:a71dfdb905c14ca92a57a973e7f8d55f8f062e96ff03cc8b0cf487401ace7d3a",
+    "architecture": "arm64",
+    "provenance": "local derived host dist; not exact release image"
+  },
+  "sourceSha": "68070da5f4cb1e2a54e1eca3d7ca223d1ff993d1",
+  "sourceFiles": {
+    "apps/api/src/main.ts": "b29d45eb11e35d1eca66ab0fcab68f2f53ec7709b8c029ff1e07ff3edf26a81d",
+    "apps/api/src/jobs/platform-jobs.service.ts": "d73f5c362fb893b4ead0f6efb72c6104a83ca90d9d2a7936c1a2abee7f4dc433",
+    "apps/api/dist/main.js": "16c3c75e094185caca325a05bb38abde9bb66a66ba5db70ae803059aed41d31f",
+    "deploy/platform/compose.compact.yml": "95a2e36e6f967d26d97fb625f071a4bd8d15fea1da1b321d1c59b0f6634db21a",
+    "deploy/platform/load/compact-load.mjs": "325e648d472a6b1fbe49b12fb7a324163872892a57189570f0c428c03f324e6d",
+    "deploy/platform/load/core.mjs": "28d9b7720ec3091f9346d788ec6d65064e41830b023ac154da4196f24582f546"
+  },
+  "host": {
+    "memoryBytes": 3791695872,
+    "cpus": 6
+  },
+  "seed": {
+    "users": 10,
+    "tenants": 100,
+    "agreements": 3000
+  },
+  "database": {
+    "version": "PostgreSQL 17.11 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "maxConnections": "32",
+    "sharedBuffers": "256MB",
+    "fsync": "on",
+    "fullPageWrites": "on",
+    "synchronousCommit": "on",
+    "sizeBytes": 25122483
+  },
+  "tls": {
+    "valid": "accepted",
+    "wrong-host": "ERR_TLS_CERT_ALTNAME_INVALID",
+    "untrusted": "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "plaintext": "28000"
+  },
+  "quotas": {
+    "api": {
+      "cpu": 1.25,
+      "memoryBytes": 1610612736,
+      "cgroup": "125000 100000\n1610612736\nlow 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "restarts": 0,
+      "oomKilled": false,
+      "final": {
+        "restarts": 0,
+        "oomKilled": false,
+        "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+      }
+    },
+    "postgres": {
+      "cpu": 0.5,
+      "memoryBytes": 1073741824,
+      "cgroup": "50000 100000\n1073741824\nlow 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "restarts": 0,
+      "oomKilled": false,
+      "final": {
+        "restarts": 0,
+        "oomKilled": false,
+        "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+      }
+    },
+    "edge": {
+      "cpu": 0.25,
+      "memoryBytes": 201326592,
+      "cgroup": "25000 100000\n201326592\nlow 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "restarts": 0,
+      "oomKilled": false,
+      "final": {
+        "restarts": 0,
+        "oomKilled": false,
+        "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+      }
+    }
+  },
+  "writes": {
+    "licenses": 930,
+    "diagnostics": 930,
+    "reports": 25,
+    "notReady": 0
+  },
+  "auditMismatches": 0,
+  "acceptance": [],
+  "passed": true,
+  "finishedAt": "2026-10-18T12:04:32.232Z",
+  "requestCount": 21143,
+  "requestFailures": 0
+}

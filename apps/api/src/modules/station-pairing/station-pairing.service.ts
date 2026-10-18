@@ -18,7 +18,7 @@ import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { schema, type Auth, type Db } from "@markiro/db";
 import type { AuthSetup } from "../../auth/auth.setup";
 import { AUTH, DB, DB_POOL } from "../../auth/auth.module";
-import { loadEnv } from "../../env";
+import { requireLegacyEnv } from "../../env";
 import { hashPairingCode } from "../../pickup/device-token";
 import { PairAttemptsService } from "../device-pairing/pair-attempts.service";
 import {
@@ -177,7 +177,7 @@ export class StationPairingService {
             ),
           );
         const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
-        const pepper = loadEnv().PAIRING_CODE_PEPPER;
+        const pepper = requireLegacyEnv().PAIRING_CODE_PEPPER;
         for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
           const code = mintPairingCode();
           const codeHash = hashPairingCode(code, pepper);
@@ -235,7 +235,7 @@ export class StationPairingService {
     auditContext: StationPairAuditContext,
     options: RedeemOptions,
   ): Promise<PairStationResultDto> {
-    const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
+    const codeHash = hashPairingCode(code, requireLegacyEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
       .select({
         purpose: schema.stationPairingCodes.purpose,
@@ -371,7 +371,10 @@ export class StationPairingService {
               ? { id: station.lineId, name: station.lineName }
               : null,
         },
-        credential: { apiKey: targetPairing.key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
+        credential: {
+          apiKey: targetPairing.key.key,
+          serverUrl: requireLegacyEnv().BETTER_AUTH_URL,
+        },
         ...(options.replacementBoundary && targetPairing.replacement
           ? { replacement: targetPairing.replacement }
           : {}),
@@ -529,7 +532,7 @@ export class StationPairingService {
             ? { id: station.lineId, name: station.lineName }
             : null,
       },
-      credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
+      credential: { apiKey: key.key, serverUrl: requireLegacyEnv().BETTER_AUTH_URL },
       ...(replacement ? { replacement } : {}),
       operators,
       ...(options.includeSubscription

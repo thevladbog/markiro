@@ -13,6 +13,8 @@ import {
   StatusChip,
 } from "@markiro/ui";
 
+import { IS_PLATFORM_ONLY } from "../../server-profile.js";
+import { ServerProfileNotice } from "../../components/ServerProfileNotice.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
 import {
@@ -109,8 +111,11 @@ export function TenantPage() {
   const detail = tenant.data;
   const cabinetEnabled = detail.tenant.cabinetAccess === "enabled";
   const canGrant =
-    principal.role !== "accountant" && principal.capabilities.includes("tenants.write");
+    !IS_PLATFORM_ONLY &&
+    principal.role !== "accountant" &&
+    principal.capabilities.includes("tenants.write");
   const canRenew =
+    !IS_PLATFORM_ONLY &&
     principal.role !== "accountant" &&
     principal.capabilities.includes("tenants.write") &&
     detail.ownerActivation !== null &&
@@ -172,7 +177,7 @@ export function TenantPage() {
             : t("tenants.detail.offline.grantedNoDemo", grantedNotice.offlineAssignments)}
         </Alert>
       ) : null}
-      {detail.subscriptionStatus === "pending_activation" ? (
+      {!IS_PLATFORM_ONLY && detail.subscriptionStatus === "pending_activation" ? (
         <Alert tone="warn">{t("tenants.detail.pendingActivation")}</Alert>
       ) : null}
 
@@ -236,7 +241,9 @@ export function TenantPage() {
                   </dd>
                 </div>
               </dl>
-              {cabinetEnabled ? (
+              {IS_PLATFORM_ONLY ? (
+                <ServerProfileNotice kind="cabinet" />
+              ) : cabinetEnabled ? (
                 <section className="owner-activation" aria-labelledby="owner-activation-title">
                   <h3 id="owner-activation-title">{t("tenants.detail.activation.title")}</h3>
                   {detail.ownerActivation ? (

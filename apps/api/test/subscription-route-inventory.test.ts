@@ -2,7 +2,7 @@ import { PublicApiGuard, PUBLIC_API_SCOPE } from "../src/modules/public-api/publ
 import type { Type } from "@nestjs/common";
 import { RequestMethod } from "@nestjs/common";
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
-import { ModulesContainer, Reflector } from "@nestjs/core";
+import { MetadataScanner, ModulesContainer, Reflector } from "@nestjs/core";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -1025,12 +1025,13 @@ function joinPath(controllerPath: string, handlerPath: string): string {
 
 function registeredRoutes(container: ModulesContainer): RegisteredRoute[] {
   const routes: RegisteredRoute[] = [];
+  const scanner = new MetadataScanner();
   for (const module of container.values()) {
     for (const wrapper of module.controllers.values()) {
       const controller = wrapper.metatype as Type<unknown> | undefined;
       if (!controller) continue;
       const prototype = controller.prototype as Record<string, (...args: never[]) => unknown>;
-      for (const handlerName of Object.getOwnPropertyNames(prototype)) {
+      for (const handlerName of scanner.getAllMethodNames(prototype)) {
         if (handlerName === "constructor") continue;
         const handler = prototype[handlerName];
         if (!handler) continue;

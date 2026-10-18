@@ -1,8 +1,10 @@
+import { SERVER_PROFILE, assertLegacyOperation, type ServerProfile } from "../../server-profile";
 import {
   ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
 } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
@@ -23,6 +25,7 @@ export class SupportChatProposalsService {
     @Inject(DB) private readonly db: Db,
     private readonly support: SupportChatService,
     private readonly audit: PlatformAuditService,
+    @Optional() @Inject(SERVER_PROFILE) private readonly profile: ServerProfile = "legacy",
   ) {}
 
   async propose(
@@ -30,6 +33,7 @@ export class SupportChatProposalsService {
     episodeId: string,
     input: { title: string; summary: string; idempotencyKey: string },
   ): Promise<SupportProposal> {
+    assertLegacyOperation(this.profile);
     this.support.requireEnabled();
     if (!actor.capabilities.includes("billing.write") || !actor.twoFactorReady)
       throw new ForbiddenException("Insufficient platform permissions");

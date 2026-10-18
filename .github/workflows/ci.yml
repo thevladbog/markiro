@@ -475,6 +475,8 @@ jobs:
           pnpm --filter @markiro/legal-documents build
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
+      - name: Verify portable platform preparation contracts
+        run: node --test deploy/platform/test/*.test.mjs
       - name: Generate masked test-only environment
         run: |
           set -euo pipefail
@@ -548,6 +550,10 @@ jobs:
             --file deploy/production/edge.Dockerfile \
             --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" \
             .
+      - name: Build local platform-only edge preparation image
+        run: >-
+          docker build --file deploy/platform/edge.Dockerfile
+          --tag "ghcr.io/thevladbog/markiro-platform-edge:${{ github.sha }}" .
       - name: Verify landing browser and Lighthouse release gates
         run: |
           pnpm test:landing:browser
@@ -584,6 +590,19 @@ jobs:
         run: >-
           docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
           -f deploy/production/compose.ci.yml down --volumes --remove-orphans
+
+      - name: Verify isolated platform-only preparation stack
+        env:
+          MARKIRO_SOURCE_SHA: ${{ github.sha }}
+          PLATFORM_CI_EVIDENCE_DIR: ${{ runner.temp }}/platform-preparation-evidence
+        run: node deploy/platform/ci-stack.mjs --local-ci
+      - name: Preserve platform preparation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-preparation-evidence
+          path: ${{ runner.temp }}/platform-preparation-evidence
+          if-no-files-found: ignore
 
   station-rust:
     needs: classify-changes

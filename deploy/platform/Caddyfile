@@ -1,0 +1,307 @@
+{
+	email {$ACME_EMAIL}
+	http_port 8080
+	https_port 8443
+	auto_https disable_redirects
+}
+
+(standard_api_transport) {
+	transport http {
+		response_header_timeout 30s
+		read_timeout 60s
+		write_timeout 60s
+	}
+}
+
+(common_headers) {
+	encode zstd gzip
+
+	header {
+		defer
+		-Server
+		X-Markiro-Release-Sha "{$MARKIRO_RELEASE_SHA}"
+		X-Markiro-Server-Profile "platform-only"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
+
+(application_csp) {
+	header {
+		defer
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: {$S3_PUBLIC_ORIGIN}; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'"
+	}
+}
+
+(landing_csp) {
+	header {
+		defer
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'"
+	}
+}
+
+(saas_admin_routes) {
+	root * /srv/saas-admin
+	route {
+		@platformAuth path /api/platform-auth/*
+		handle @platformAuth {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@platformApi path /api/platform/*
+		handle @platformApi {
+			uri strip_prefix /api
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@platformReserved path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /signer-agent /signer-agent/* /platform /platform/* /health* /openapi.json /docs*
+		handle @platformReserved {
+			respond 404
+		}
+
+		@saasAdminAssets path /assets/*
+		handle @saasAdminAssets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		@saasAdminSpa method GET HEAD
+		handle @saasAdminSpa {
+			header Cache-Control "no-cache"
+			try_files {path} /index.html
+			file_server
+		}
+
+		respond 404
+	}
+}
+
+(landing_routes) {
+	root * /srv/landing
+	route {
+		@landingDemo {
+			method POST
+			path /api/demo-requests
+		}
+		handle @landingDemo {
+			request_body {
+				max_size 4KB
+			}
+			uri strip_prefix /api
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@landingReserved path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /signer-agent /signer-agent/* /platform /platform/* /health* /openapi.json /docs*
+		handle @landingReserved {
+			respond 404
+		}
+
+		@landingAssets {
+			path /assets/*
+			method GET HEAD
+		}
+		handle @landingAssets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		# Canonical URL form is the trailing-slash directory URL (verification
+		# routes under /d/ are the exception and carry no trailing slash).
+		@landingIndexFile {
+			method GET HEAD
+			path_regexp landingIndexFile ^(.*/)index\.html$
+		}
+		handle @landingIndexFile {
+			redir * {re.landingIndexFile.1}{http.request.uri.prefixed_query} 308
+		}
+
+		@landingVerificationSlash {
+			method GET HEAD
+			path_regexp landingVerificationSlash ^(/d/.+)/$
+		}
+		handle @landingVerificationSlash {
+			redir * {re.landingVerificationSlash.1}{http.request.uri.prefixed_query} 308
+		}
+
+		@landingDirectory {
+			method GET HEAD
+			not path /d/*
+			not path */
+			file {path}/index.html
+		}
+		handle @landingDirectory {
+			redir * {path}/{http.request.uri.prefixed_query} 308
+		}
+
+		@landingPolicy {
+			path /robots.txt /sitemap.xml /llms.txt
+			method GET HEAD
+		}
+		handle @landingPolicy {
+			header Cache-Control "public, max-age=300"
+			file_server
+		}
+
+		@landingFullText {
+			path /llms-full.txt
+			method GET HEAD
+		}
+		handle @landingFullText {
+			header Cache-Control "public, max-age=300"
+			header X-Robots-Tag "noindex"
+			file_server
+		}
+
+		@landingMarkdown {
+			method GET HEAD
+			path_regexp landingMarkdown \.md$
+		}
+		handle @landingMarkdown {
+			header Cache-Control "public, max-age=300"
+			header Content-Type "text/markdown; charset=utf-8"
+			header X-Robots-Tag "noindex"
+			file_server
+		}
+
+		@landingStatic {
+			method GET HEAD
+			path_regexp landingStatic ^/(?:images/.+|brand/.+|legal/files/.+|og-[^/]+\.jpg|favicon\.svg|apple-touch-icon\.png|site(?:\.en)?\.webmanifest)$
+		}
+		handle @landingStatic {
+			header Cache-Control "public, max-age=86400"
+			file_server
+		}
+
+		@legacyLegalPd01 {
+			method GET HEAD
+			path_regexp legacyLegalPd01 ^/d/MKR-PD-01/2026\.08\.01/2026-08-15$
+		}
+		handle @legacyLegalPd01 {
+			redir * /d/MKR-PD-01/2026.08/01/15.08.2026 308
+		}
+
+		@legacyLegalPd02 {
+			method GET HEAD
+			path_regexp legacyLegalPd02 ^/d/MKR-PD-02/2026\.08\.01/2026-08-15$
+		}
+		handle @legacyLegalPd02 {
+			redir * /d/MKR-PD-02/2026.08/01/15.08.2026 308
+		}
+
+		@legacyLegalDpa01 {
+			method GET HEAD
+			path_regexp legacyLegalDpa01 ^/d/MKR-DPA-01/2026\.08\.01/2026-08-15$
+		}
+		handle @legacyLegalDpa01 {
+			redir * /d/MKR-DPA-01/2026.08/01/15.08.2026 308
+		}
+
+		@legacyLegalBrd01 {
+			method GET HEAD
+			path_regexp legacyLegalBrd01 ^/d/MKR-BRD-01/2026\.08\.01/2026-08-15$
+		}
+		handle @legacyLegalBrd01 {
+			redir * /d/MKR-BRD-01/2026.08/01/15.08.2026 308
+		}
+
+		@landingDocument {
+			file {path} {path}/index.html
+			method GET HEAD
+		}
+		handle @landingDocument {
+			header Cache-Control "no-cache"
+			try_files {path} {path}/index.html
+			file_server
+		}
+
+		@landingMissing method GET HEAD
+		handle @landingMissing {
+			header Cache-Control "no-cache"
+			rewrite * /404.html
+			file_server {
+				status 404
+			}
+		}
+
+		respond 404
+	}
+}
+
+(retired_routes) {
+	route {
+		@retiredMachine path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /signer-agent /signer-agent/* /shifts /shifts/* /products /products/* /lines /lines/* /health* /docs* /openapi.json
+		handle @retiredMachine {
+			header Content-Type "application/json"
+			respond `{"code":"LEGACY_SERVICE_RETIRED","message":"This online service has been retired."}` 410
+		}
+		@retiredBrowser {
+			method GET HEAD
+			header Accept *text/html*
+		}
+		handle @retiredBrowser {
+			root * /srv/retired
+			rewrite * /index.html
+			file_server {
+				status 410
+			}
+		}
+		header Content-Type "application/json"
+		respond `{"code":"LEGACY_SERVICE_RETIRED","message":"This online service has been retired."}` 410
+	}
+}
+
+http://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8080 {
+	@safe method GET HEAD
+	redir @safe https://{$MARKIRO_SAAS_ADMIN_DOMAIN}{uri} 308
+	respond 404
+}
+
+http://{$MARKIRO_LANDING_DOMAIN}:8080 {
+	@safe method GET HEAD
+	redir @safe https://{$MARKIRO_LANDING_DOMAIN}{uri} 308
+	respond 404
+}
+
+https://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8443 {
+	import common_headers
+	import application_csp
+	import saas_admin_routes
+}
+
+https://{$MARKIRO_LANDING_DOMAIN}:8443 {
+	import common_headers
+	import landing_csp
+	import landing_routes
+}
+
+http://{$MARKIRO_RETIRED_ADMIN_DOMAIN}:8080 {
+	import common_headers
+	import application_csp
+	import retired_routes
+}
+
+https://{$MARKIRO_RETIRED_ADMIN_DOMAIN}:8443 {
+	import common_headers
+	import application_csp
+	import retired_routes
+}
+
+http://{$MARKIRO_RETIRED_KIOSK_DOMAIN}:8080 {
+	import common_headers
+	import application_csp
+	import retired_routes
+}
+
+https://{$MARKIRO_RETIRED_KIOSK_DOMAIN}:8443 {
+	import common_headers
+	import application_csp
+	import retired_routes
+}

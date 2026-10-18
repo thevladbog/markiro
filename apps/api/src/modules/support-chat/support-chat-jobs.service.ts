@@ -1,8 +1,10 @@
+import { SERVER_PROFILE, type ServerProfile } from "../../server-profile";
 import {
   ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
 } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
@@ -27,6 +29,7 @@ export class SupportChatJobsService {
     private readonly repository: SupportChatRepository,
     private readonly chatwoot: ChatwootClient,
     private readonly authorization: AuthorizationService,
+    @Optional() @Inject(SERVER_PROFILE) private readonly profile: ServerProfile = "legacy",
   ) {}
 
   /** Best-effort transport; the immutable job row is still due after a lost wake. */
@@ -37,14 +40,16 @@ export class SupportChatJobsService {
       .from(schema.supportChatJobs)
       .where(
         and(
-          or(
-            inArray(schema.supportChatJobs.kind, ["import", "reconcile"]),
-            and(
-              eq(schema.supportChatJobs.kind, "send"),
-              eq(schema.supportChatJobs.state, "pending"),
-              isNull(schema.supportChatJobs.attemptToken),
-            ),
-          ),
+          this.profile === "platform-only"
+            ? eq(schema.supportChatJobs.kind, "import")
+            : or(
+                inArray(schema.supportChatJobs.kind, ["import", "reconcile"]),
+                and(
+                  eq(schema.supportChatJobs.kind, "send"),
+                  eq(schema.supportChatJobs.state, "pending"),
+                  isNull(schema.supportChatJobs.attemptToken),
+                ),
+              ),
           or(
             and(
               inArray(schema.supportChatJobs.state, ["pending", "failed"]),
@@ -78,6 +83,7 @@ export class SupportChatJobsService {
       .where(eq(schema.supportChatJobs.id, jobId));
     if (!job || job.state === "completed") return false;
     if (job.kind === "import") return this.sync.run(job.id);
+    if (this.profile === "platform-only") return false;
     const found = await this.repository.episodeById(job.episodeId);
     if (
       !found ||

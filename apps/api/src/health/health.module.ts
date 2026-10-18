@@ -1,3 +1,4 @@
+import type { JobsReadiness } from "../jobs/platform-jobs.contract";
 import { Global, Module, type DynamicModule } from "@nestjs/common";
 
 import type { AuthSetup } from "../auth/auth.setup";
@@ -21,7 +22,7 @@ export class HealthModule {
           inject: [DB_POOL, PgBossService, MailTransportService, ObjectStorageService],
           useFactory: (
             pool: AuthSetup["pool"],
-            jobs: PgBossService,
+            jobs: JobsReadiness,
             mail: MailTransportService,
             storage: ObjectStorageService,
           ) =>

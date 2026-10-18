@@ -145,82 +145,89 @@ describe("MailJobsService delivery claim", () => {
     expect(transport.send).toHaveBeenCalledWith(expect.anything(), "platform@example.test");
   });
 
-  it("decrypts, validates, renders, and sends a landing notification with Reply-To intact", async () => {
-    const crypto = new MailCryptoService(Buffer.alloc(32, 9));
-    const encrypted = crypto.encrypt(DELIVERY_ID, {
-      kind: "landing-demo-notification",
-      locale: "en",
-      requestId: "11111111-1111-4111-8111-111111111111",
-      receivedAt: "2026-08-14T12:00:00.000Z",
-      sourcePath: "/en/",
-      consentVersion: CONSENT_VERSION_AT_LIMIT,
-      recipientName: "Ada",
-      company: "Factory",
-      email: "ada@example.test",
-      phone: "+12025550114",
-    });
-    const { pool } = fakePool(({ text }) => {
-      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
-      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
-        return {
-          rows: [
-            {
-              id: DELIVERY_ID,
-              tenantId: null,
-              userId: null,
-              recipient: "hello@v-b.tech",
-              kind: "landing-demo-notification",
-              sourceId: null,
-              attemptCount: 1,
-              ...encrypted,
-            },
-          ],
-        };
-      }
-      return {};
-    });
-    const transport = {
-      verify: vi.fn(async () => true),
-      send: vi.fn(async () => undefined),
-    };
-    const renderer = vi.fn(async () => ({
-      subject: "subject",
-      html: "<p>body</p>",
-      text: "body",
-      replyTo: "ada@example.test",
-    }));
-    const service = new MailJobsService(
-      pool,
-      crypto,
-      transport,
-      renderer,
-      () => "33333333-3333-4333-8333-333333333333",
-    );
-
-    await service.processDelivery(DELIVERY_ID);
-
-    expect(renderer).toHaveBeenCalledWith({
-      kind: "landing-demo-notification",
-      locale: "en",
-      requestId: "11111111-1111-4111-8111-111111111111",
-      receivedAt: new Date("2026-08-14T12:00:00.000Z"),
-      sourcePath: "/en/",
-      consentVersion: CONSENT_VERSION_AT_LIMIT,
-      recipientName: "Ada",
-      company: "Factory",
-      email: "ada@example.test",
-      phone: "+12025550114",
-    });
-    expect(transport.send).toHaveBeenCalledWith(
-      {
+  it.each(["legacy", "platform-only"] as const)(
+    "decrypts, validates, renders, and sends a landing notification with Reply-To intact (%s)",
+    async (profile) => {
+      const crypto = new MailCryptoService(Buffer.alloc(32, 9));
+      const encrypted = crypto.encrypt(DELIVERY_ID, {
+        kind: "landing-demo-notification",
+        locale: "en",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        receivedAt: "2026-08-14T12:00:00.000Z",
+        sourcePath: "/en/",
+        consentVersion: CONSENT_VERSION_AT_LIMIT,
+        recipientName: "Ada",
+        company: "Factory",
+        email: "ada@example.test",
+        phone: "+12025550114",
+      });
+      const { pool } = fakePool(({ text }) => {
+        if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+        if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+          return {
+            rows: [
+              {
+                id: DELIVERY_ID,
+                tenantId: null,
+                platformUserId: null,
+                publicRequestId: "11111111-1111-4111-8111-111111111111",
+                userId: null,
+                recipient: "hello@v-b.tech",
+                kind: "landing-demo-notification",
+                sourceId: null,
+                attemptCount: 1,
+                ...encrypted,
+              },
+            ],
+          };
+        }
+        return {};
+      });
+      const transport = {
+        verify: vi.fn(async () => true),
+        send: vi.fn(async () => undefined),
+      };
+      const renderer = vi.fn(async () => ({
         subject: "subject",
         html: "<p>body</p>",
         text: "body",
         replyTo: "ada@example.test",
-      },
-      "hello@v-b.tech",
-    );
-  });
+      }));
+      const service = new MailJobsService(
+        pool,
+        crypto,
+        transport,
+        renderer,
+        () => "33333333-3333-4333-8333-333333333333",
+        undefined,
+        { profile, platformOrigin: "https://saas.example", platformAuthUrl: "https://api.example" },
+      );
+
+      await service.processDelivery(DELIVERY_ID);
+
+      expect(renderer).toHaveBeenCalledWith({
+        kind: "landing-demo-notification",
+        locale: "en",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        receivedAt: new Date("2026-08-14T12:00:00.000Z"),
+        sourcePath: "/en/",
+        consentVersion: CONSENT_VERSION_AT_LIMIT,
+        recipientName: "Ada",
+        company: "Factory",
+        email: "ada@example.test",
+        phone: "+12025550114",
+      });
+      expect(transport.send).toHaveBeenCalledWith(
+        {
+          subject: "subject",
+          html: "<p>body</p>",
+          text: "body",
+          replyTo: "ada@example.test",
+        },
+        "hello@v-b.tech",
+      );
+    },
+  );
 
   it.each([
     ["blank", " "],
@@ -246,6 +253,8 @@ describe("MailJobsService delivery claim", () => {
             {
               id: DELIVERY_ID,
               tenantId: null,
+              platformUserId: null,
+              publicRequestId: "11111111-1111-4111-8111-111111111111",
               userId: null,
               recipient: "hello@v-b.tech",
               kind: "landing-demo-notification",
@@ -677,4 +686,118 @@ describe("mail failure classification", () => {
       transient: false,
     });
   });
+});
+
+describe("platform-only recovered delivery policy", () => {
+  it.each([
+    ["tenant-owner-activation", "https://admin.example/activate", null, false],
+    ["password-reset", "https://admin.example/reset-password", null, false],
+    ["password-reset", "https://saas.example/reset-password", null, false],
+    ["password-reset", "https://evil.example/reset-password", "platform-1", false],
+    ["password-reset", "https://saas.example/unrelated", "platform-1", false],
+    ["email-verification", "https://admin.example/verify-email", "platform-1", false],
+    ["platform-user-activation", "https://saas.example/activate", "platform-1", true],
+    ["password-reset", "https://saas.example/reset-password", "platform-1", true],
+    [
+      "email-verification",
+      "https://api.example/api/platform-auth/verify-email",
+      "platform-1",
+      true,
+    ],
+  ])(
+    "consumes %s with strict ownership and destination (%s)",
+    async (kind, actionUrl, platformUserId, allowed) => {
+      const crypto = new MailCryptoService(Buffer.alloc(32, 9));
+      const encrypted = crypto.encrypt(DELIVERY_ID, {
+        kind,
+        actionUrl,
+        recipientName: "User",
+        expiresInMinutes: 60,
+      });
+      const { pool, calls } = fakePool(({ text }) => {
+        if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+        if (
+          text.includes("RETURNING") &&
+          text.includes("email_deliveries") &&
+          !text.includes("WITH canceled")
+        )
+          return {
+            rows: [
+              {
+                id: DELIVERY_ID,
+                tenantId: null,
+                userId: platformUserId ? null : "cabinet-user",
+                platformUserId,
+                recipient: "user@example.test",
+                kind,
+                sourceId: null,
+                attemptCount: 1,
+                ...encrypted,
+              },
+            ],
+          };
+        return {};
+      });
+      const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+      const service = new MailJobsService(
+        pool,
+        crypto,
+        transport,
+        async () => ({ subject: "test", text: "test", html: "test" }),
+        undefined,
+        undefined,
+        {
+          profile: "platform-only",
+          platformOrigin: "https://saas.example",
+          platformAuthUrl: "https://api.example",
+        },
+      );
+      await service.processDelivery(DELIVERY_ID);
+      expect(transport.send).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      if (!allowed) {
+        const cancel = calls.find((call) => call.text.includes("server_profile_disabled"));
+        expect(cancel?.text).toContain("platform_audit_events");
+        expect(cancel?.text).toContain("status = 'canceled'");
+        expect(cancel?.values).toEqual([DELIVERY_ID]);
+      }
+    },
+  );
+});
+
+it("cancels a recovered cabinet reset even when its old encrypted payload is missing", async () => {
+  const { pool, calls } = fakePool(({ text }) => {
+    if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+    if (text.includes("RETURNING") && !text.includes("WITH canceled"))
+      return {
+        rows: [
+          {
+            id: DELIVERY_ID,
+            kind: "password-reset",
+            userId: "old-user",
+            tenantId: null,
+            platformUserId: null,
+            encryptedPayload: null,
+            payloadNonce: null,
+            payloadTag: null,
+          },
+        ],
+      };
+    return {};
+  });
+  const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+  await new MailJobsService(
+    pool,
+    new MailCryptoService(Buffer.alloc(32, 9)),
+    transport,
+    undefined,
+    undefined,
+    undefined,
+    {
+      profile: "platform-only",
+      platformOrigin: "https://saas.example",
+      platformAuthUrl: "https://api.example",
+    },
+  ).processDelivery(DELIVERY_ID);
+  expect(calls.some((call) => call.text.includes("server_profile_disabled"))).toBe(true);
+  expect(transport.send).not.toHaveBeenCalled();
 });

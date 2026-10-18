@@ -5,7 +5,7 @@ import { schema, type Db } from "@markiro/db";
 import type { PairStationResultDto } from "./dto";
 import type { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { lockGrantFacts } from "../device-grants/grant-admission";
-import { loadEnv } from "../../env";
+import { requireLegacyEnv } from "../../env";
 import { PAIR_CODE_MAX_ATTEMPTS } from "../device-pairing/pairing-policy";
 import { replacementDigest } from "../device-licensing/device-replacement-facts";
 const invalid = () => new UnauthorizedException({ code: "PAIR_INVALID" });
@@ -224,7 +224,7 @@ export async function redeemReplacementRecovery(input: {
       line:
         station.lineId && station.lineName ? { id: station.lineId, name: station.lineName } : null,
     },
-    credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
+    credential: { apiKey: key.key, serverUrl: requireLegacyEnv().BETTER_AUTH_URL },
     operators: [],
     recovery,
   };

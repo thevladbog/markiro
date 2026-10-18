@@ -9,7 +9,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { DB_POOL } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
-import { loadEnv } from "../src/env";
+import { loadEnv, requireLegacyEnv } from "../src/env";
 import { hashDeviceToken, hashPairingCode } from "../src/pickup/device-token";
 import { PairAttemptsService } from "../src/modules/device-pairing/pair-attempts.service";
 import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
@@ -177,7 +177,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     const env = loadEnv();
     setup = setupAuth(env);
     db = setup.db;
-    pairingCodePepper = env.PAIRING_CODE_PEPPER;
+    pairingCodePepper = requireLegacyEnv(env).PAIRING_CODE_PEPPER;
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],

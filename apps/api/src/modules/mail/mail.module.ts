@@ -35,7 +35,12 @@ export class MailModule {
             pool: AuthSetup["pool"],
             crypto: MailCryptoService,
             transport: MailTransportService,
-          ) => new MailJobsService(pool, crypto, transport),
+          ) =>
+            new MailJobsService(pool, crypto, transport, undefined, undefined, undefined, {
+              profile: env.SERVER_PROFILE,
+              platformOrigin: env.SAAS_ADMIN_ORIGIN,
+              platformAuthUrl: env.PLATFORM_AUTH_URL,
+            }),
         },
         {
           provide: MailRetentionService,

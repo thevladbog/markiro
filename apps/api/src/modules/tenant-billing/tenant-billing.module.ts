@@ -11,14 +11,14 @@ import {
 @Global()
 @Module({})
 export class TenantBillingModule {
-  static forRoot(adminOrigin: string): DynamicModule {
+  static forRoot(adminOrigin: string, platformOnly = false): DynamicModule {
     return {
       module: TenantBillingModule,
-      controllers: [TenantBillingController],
+      controllers: platformOnly ? [] : [TenantBillingController],
       providers: [
-        TenantBillingReadService,
-        TenantBillingRequestsService,
-        TenantBillingOffersService,
+        ...(platformOnly
+          ? []
+          : [TenantBillingReadService, TenantBillingRequestsService, TenantBillingOffersService]),
         TenantBillingNotificationsService,
         { provide: TENANT_BILLING_ADMIN_ORIGIN, useValue: adminOrigin },
       ],

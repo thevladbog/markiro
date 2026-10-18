@@ -1,3 +1,4 @@
+import type { PlatformReportQueue } from "../jobs/platform-jobs.contract";
 import {
   BadRequestException,
   ConflictException,
@@ -33,7 +34,7 @@ export class PlatformReportsService {
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
     private readonly storage: ObjectStorageService,
-    private readonly jobs: PgBossService,
+    @Inject(PgBossService) private readonly jobs: PlatformReportQueue,
   ) {}
 
   async create(principal: PlatformPrincipal, raw: unknown) {

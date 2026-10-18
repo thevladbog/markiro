@@ -403,3 +403,20 @@ test("Android gate verifies original signed and budget fixture byte parity befor
     /cmp .*offline-grant-budgets-v1\.json .*offline-grant-budgets-v1\.json/,
   );
 });
+
+test("platform preparation builds its own edge and runs only after legacy cleanup", () => {
+  const job = workflow.jobs["production-bundle"];
+  const contracts = stepByName(job, "Verify portable platform preparation contracts");
+  const build = stepByName(job, "Build local platform-only edge preparation image");
+  const stack = stepByName(job, "Verify isolated platform-only preparation stack");
+  const cleanup = stepByName(job, "Remove production-bundle containers and volumes");
+  assert.equal(contracts.run, "node --test deploy/platform/test/*.test.mjs");
+  assert.match(build.run, /deploy\/platform\/edge\.Dockerfile/u);
+  assert.match(build.run, /markiro-platform-edge/u);
+  assert.doesNotMatch(build.run, /--push|docker push/u);
+  assert.equal(stack.run, "node deploy/platform/ci-stack.mjs --local-ci");
+  assert.equal(stack.env.MARKIRO_SOURCE_SHA, "${{ github.sha }}");
+  assert.ok(job.steps.indexOf(stack) > job.steps.indexOf(cleanup));
+  assert.ok(job.steps.indexOf(build) > job.steps.indexOf(contracts));
+  assert.equal(stepByName(job, "Preserve platform preparation evidence").if, "always()");
+});

@@ -2,7 +2,7 @@ import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
 import { rateLimit } from "express-rate-limit";
 import { buildAuth, createDb, schema, type Auth } from "@markiro/db";
-import { sessionAllowedOrigins, type Env } from "../env";
+import { sessionAllowedOrigins, requireLegacyEnv, type Env } from "../env";
 import { MailCryptoService } from "../modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
 
@@ -15,7 +15,8 @@ import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
 type DbConnection = ReturnType<typeof createDb>;
 
 /** Builds the DB pool + Better Auth instance from validated env. */
-export function setupAuth(env: Env): DbConnection & { auth: Auth } {
+export function setupAuth(rawEnv: Env): DbConnection & { auth: Auth } {
+  const env = requireLegacyEnv(rawEnv);
   const { db, pool } = createDb(env.DATABASE_URL);
   const mailDelivery = new MailDeliveryService(
     new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY),

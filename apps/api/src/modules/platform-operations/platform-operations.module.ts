@@ -6,7 +6,10 @@ import type { Env } from "../../env";
 import { ReadinessService } from "../../health/readiness.service";
 import { PlatformDadataModule } from "../platform-dadata/platform-dadata.module";
 import { PlatformDadataService } from "../platform-dadata/platform-dadata.service";
-import { PlatformOperationsController } from "./platform-operations.controller";
+import {
+  PlatformOperationsController,
+  PlatformOperationsReadController,
+} from "./platform-operations.controller";
 import {
   DrizzlePlatformOperationsRepository,
   PLATFORM_OPERATIONS_REPOSITORY,
@@ -19,7 +22,11 @@ export class PlatformOperationsModule {
     return {
       module: PlatformOperationsModule,
       imports: [PlatformDadataModule.forRoot(env)],
-      controllers: [PlatformOperationsController],
+      controllers: [
+        env.SERVER_PROFILE === "platform-only"
+          ? PlatformOperationsReadController
+          : PlatformOperationsController,
+      ],
       providers: [
         {
           provide: PLATFORM_OPERATIONS_REPOSITORY,

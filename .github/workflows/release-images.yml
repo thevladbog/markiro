@@ -26,6 +26,7 @@ on:
       - packages/ui/**
       - compose.production.yml
       - deploy/production/**
+      - deploy/platform/**
       - deploy/yandex/**
       - tools/production-browser/**
 
@@ -82,6 +83,8 @@ jobs:
           pnpm --filter @markiro/legal-documents build
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
+      - name: Verify portable platform preparation contracts
+        run: node --test deploy/platform/test/*.test.mjs
       - name: Generate masked test-only environment
         env:
           LANDING_DEMO_SUBMISSION_ENABLED: ${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED == 'true' && 'true' || 'false' }}
