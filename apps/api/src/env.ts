@@ -154,10 +154,11 @@ const storageEndpointSchema = z.url().transform((value, ctx) => {
 
 const EnvSchema = z
   .object({
+    SERVER_PROFILE: z.enum(["legacy", "platform-only"]).default("legacy"),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DATABASE_URL: z.string().min(1),
-    BETTER_AUTH_SECRET: z.string().min(16),
-    BETTER_AUTH_URL: z.url(),
+    BETTER_AUTH_SECRET: z.string().min(16).optional(),
+    BETTER_AUTH_URL: z.url().optional(),
     OFFLINE_GRANT_ORIGIN: z.string().optional(),
     OFFLINE_GRANT_KID: z.string().optional(),
     OFFLINE_GRANT_PRIVATE_KEY_PEM: z.string().optional(),
@@ -216,7 +217,7 @@ const EnvSchema = z
     // holding one redeem every still-live pairing code directly, bypassing the
     // HTTP rate limiter entirely. Rotating this value invalidates every
     // outstanding pairing code -- acceptable, since they live only 15 minutes.
-    PAIRING_CODE_PEPPER: z.string().min(16),
+    PAIRING_CODE_PEPPER: z.string().min(16).optional(),
     // Express `trust proxy` hop count (see main.ts). Defaults to 0 (direct
     // exposure / dev / tests) rather than `true`, which would trust a
     // left-most, attacker-supplied X-Forwarded-For entry.
@@ -295,6 +296,16 @@ const EnvSchema = z
     NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1).default(15_000),
   })
   .superRefine((env, ctx) => {
+    if (env.SERVER_PROFILE === "legacy") {
+      for (const name of [
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "PAIRING_CODE_PEPPER",
+      ] as const) {
+        if (!env[name])
+          ctx.addIssue({ code: "custom", path: [name], message: "required in legacy profile" });
+      }
+    }
     if (env.SUPPORT_CHAT_ENABLED) {
       for (const name of [
         "SUPPORT_CHATWOOT_BASE_URL",
@@ -524,4 +535,23 @@ export function kioskAllowedOrigins(env: Env): string[] {
  */
 export function stationAllowedOrigins(env: Env): string[] {
   return [...new Set([env.ADMIN_ORIGIN, ...(env.STATION_ORIGIN ? [env.STATION_ORIGIN] : [])])];
+}
+
+/** Legacy-only consumers must never invent credentials for disabled surfaces. */
+export function requireLegacyEnv(
+  env: Env = loadEnv(),
+): Env & { BETTER_AUTH_SECRET: string; BETTER_AUTH_URL: string; PAIRING_CODE_PEPPER: string } {
+  if (
+    env.SERVER_PROFILE !== "legacy" ||
+    !env.BETTER_AUTH_SECRET ||
+    !env.BETTER_AUTH_URL ||
+    !env.PAIRING_CODE_PEPPER
+  )
+    throw new Error("Legacy server configuration is unavailable");
+  return {
+    ...env,
+    BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
+    BETTER_AUTH_URL: env.BETTER_AUTH_URL,
+    PAIRING_CODE_PEPPER: env.PAIRING_CODE_PEPPER,
+  };
 }

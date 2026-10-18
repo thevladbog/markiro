@@ -1,3 +1,4 @@
+import { platformErrorSchema } from "@markiro/platform-contracts";
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
@@ -55,6 +56,7 @@ export class PlatformCatalogController {
   @PlatformApiProtectedCreated({
     body: platformOfflineGrantPolicyContracts.create.body,
     response: platformOfflineGrantPolicyContracts.create.response,
+    errors: [{ status: 410, schema: platformErrorSchema }],
   })
   @RequirePlatformCapabilities("catalog.write")
   async createLifecyclePolicy(
@@ -74,6 +76,7 @@ export class PlatformCatalogController {
   @PlatformApiProtectedOk({
     body: platformOfflineGrantPolicyContracts.approve.body,
     response: platformOfflineGrantPolicyContracts.approve.response,
+    errors: [{ status: 410, schema: platformErrorSchema }],
   })
   @RequirePlatformCapabilities("catalog.write")
   async approveLifecyclePolicy(

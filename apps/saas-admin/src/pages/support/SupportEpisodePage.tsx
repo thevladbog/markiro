@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 import { Alert, Button, Card, Input, Spinner, Textarea } from "@markiro/ui";
 import type { SupportEpisodeView } from "@markiro/platform-contracts";
+import { IS_PLATFORM_ONLY } from "../../server-profile.js";
+import { ServerProfileNotice } from "../../components/ServerProfileNotice.js";
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getSupportEpisode, proposeSupportRequest, retrySupportSync } from "./api.js";
@@ -14,7 +16,8 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
   const principal = usePlatformPrincipal();
   const client = useQueryClient();
   const canRead = principal.capabilities.includes("billing.read");
-  const canWrite = principal.capabilities.includes("billing.write");
+  const canRetrySync = principal.capabilities.includes("billing.write");
+  const canPropose = !IS_PLATFORM_ONLY && principal.capabilities.includes("billing.write");
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [error, setError] = useState(false);
@@ -68,7 +71,7 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
     }
   }
   async function propose() {
-    if (!canWrite || !title.trim() || !summary.trim() || busy) return;
+    if (!canPropose || !title.trim() || !summary.trim() || busy) return;
     const intent =
       proposalIntent.current?.title === title && proposalIntent.current.summary === summary
         ? proposalIntent.current
@@ -92,7 +95,7 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
     }
   }
   async function retry() {
-    if (!canWrite || busy) return;
+    if (!canRetrySync || busy) return;
     setBusy(true);
     setError(false);
     try {
@@ -110,6 +113,7 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
     <section className="catalog-page platform-support-page">
       <Link to="/support">{t("support.back")}</Link>
       <h1>{t("support.episode")}</h1>
+      <ServerProfileNotice kind="support" />
       {query.isPending ? <Spinner label={t("support.loading")} /> : null}
       {query.isError ? (
         <Alert tone="error">
@@ -168,7 +172,7 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
             </Alert>
           ) : null}
           {query.data.sync.state === "error" &&
-          canWrite &&
+          canRetrySync &&
           query.data.sync.errorCode !== "consent_notice_unknown" ? (
             <Button disabled={busy} onClick={() => void retry()}>
               {t("support.retrySync")}
@@ -180,7 +184,7 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
               <p>{t(`support.proposal.${query.data.proposal.state}`)}</p>
             </Card>
           ) : null}
-          {query.data.proposal?.state !== "accepted" && canWrite && !query.data.request ? (
+          {query.data.proposal?.state !== "accepted" && canPropose && !query.data.request ? (
             <form
               onSubmit={(event) => {
                 event.preventDefault();

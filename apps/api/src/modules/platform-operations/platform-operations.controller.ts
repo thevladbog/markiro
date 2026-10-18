@@ -35,11 +35,8 @@ function requirePlatformPrincipal(request: RequestWithPlatformPrincipal): Platfo
 
 @ApiTags("platform-operations")
 @Controller("platform/operations")
-export class PlatformOperationsController {
-  constructor(
-    private readonly operations: PlatformOperationsService,
-    private readonly nationalCatalogSchemas: NationalCatalogSchemaService,
-  ) {}
+export class PlatformOperationsReadController {
+  constructor(private readonly operations: PlatformOperationsService) {}
 
   @Get("overview")
   @ApiOperation({
@@ -66,6 +63,17 @@ export class PlatformOperationsController {
       platformOperationsContracts.monitoring.response,
       await this.operations.monitoring(),
     );
+  }
+}
+
+@ApiTags("platform-operations")
+@Controller("platform/operations")
+export class PlatformOperationsController extends PlatformOperationsReadController {
+  constructor(
+    operations: PlatformOperationsService,
+    private readonly nationalCatalogSchemas: NationalCatalogSchemaService,
+  ) {
+    super(operations);
   }
 
   @Post("national-catalog/schema-refresh")

@@ -1,7 +1,9 @@
+import { SERVER_PROFILE, type ServerProfile } from "../../server-profile";
 import {
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
@@ -23,7 +25,12 @@ export class SupportChatService {
     private readonly authorization: AuthorizationService,
     @Inject(SUPPORT_CHAT_ENABLED) private readonly enabled: boolean,
     @Inject(CHATWOOT_CONFIG) private readonly config: ChatwootConfig | null,
+    @Optional() @Inject(SERVER_PROFILE) private readonly profile: ServerProfile = "legacy",
   ) {}
+
+  requireReadable(): void {
+    if (this.profile === "legacy") this.requireEnabled();
+  }
 
   requireEnabled(): void {
     if (!this.enabled || !this.config)

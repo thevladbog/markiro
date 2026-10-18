@@ -1,5 +1,6 @@
+import { SERVER_PROFILE, assertLegacyOperation, type ServerProfile } from "../../server-profile";
 import { randomBytes, randomUUID } from "node:crypto";
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Optional, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
@@ -59,6 +60,7 @@ export class TenantProvisioningService {
     private readonly mail: MailDeliveryService,
     private readonly audit: PlatformAuditService,
     @Inject(TENANT_OWNER_ACTIVATION_BASE_URL) private readonly adminOrigin: string,
+    @Optional() @Inject(SERVER_PROFILE) private readonly profile: ServerProfile = "legacy",
   ) {}
 
   async provision(
@@ -66,6 +68,8 @@ export class TenantProvisioningService {
     options: TenantProvisioningOptions = {},
   ): Promise<TenantProvisioningResult> {
     const input = provisionTenantSchema.parse(rawInput);
+    if (input.cabinetAccess !== "none" || options.renewActivation)
+      assertLegacyOperation(this.profile);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
         return await this.db.transaction((tx) => this.provisionInTransaction(tx, input, options));
@@ -334,6 +338,7 @@ export class TenantProvisioningService {
       createToken?: () => string;
     },
   ): Promise<GrantCabinetAccessResult> {
+    assertLegacyOperation(this.profile);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
         return await this.db.transaction((tx) =>

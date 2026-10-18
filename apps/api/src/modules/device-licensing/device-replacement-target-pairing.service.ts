@@ -28,7 +28,7 @@ import {
   workingAssignment,
 } from "../../subscriptions/working-device-assignments";
 import { hashPairingCode } from "../../pickup/device-token";
-import { loadEnv } from "../../env";
+import { requireLegacyEnv } from "../../env";
 import { mintPairingCode, PAIRING_TTL_MS } from "../device-pairing/pairing-policy";
 
 const conflict = () => new ConflictException({ code: "device_replacement_request_conflict" });
@@ -130,7 +130,7 @@ export class DeviceReplacementTargetPairingService {
             tenantId,
             stationDeviceId: target.id,
             purpose: "normal",
-            codeHash: hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER),
+            codeHash: hashPairingCode(code, requireLegacyEnv().PAIRING_CODE_PEPPER),
             expiresAt,
             issuedByUserId: authority.id,
           })

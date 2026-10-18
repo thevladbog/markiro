@@ -1,3 +1,4 @@
+import { ServerProfileModule } from "./server-profile";
 import { DeviceGrantsModule } from "./modules/device-grants/device-grants.module";
 import { PlatformGrantReadinessModule } from "./modules/device-grants/platform-grant-readiness.module";
 import { PlatformStandaloneLicensesModule } from "./modules/standalone-licenses/platform-standalone-licenses.module";
@@ -91,17 +92,53 @@ export class AppModule {
    * keeping liveness tests independent from external infrastructure.
    */
   static forRoot(
-    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & {
-      platformAuth?: PlatformAuth;
-      databaseUrl: string;
-      env?: Env;
-    },
+    setup: Pick<AuthSetup, "db" | "pool"> &
+      Partial<Pick<AuthSetup, "auth">> & {
+        platformAuth?: PlatformAuth;
+        databaseUrl: string;
+        env?: Env;
+      },
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
     const supportChatModule = SupportChatModule.forRoot(env);
+    if (env.SERVER_PROFILE === "platform-only") {
+      if (!setup.platformAuth) throw new Error("Platform auth is required for platform-only");
+      return {
+        module: AppModule,
+        imports: [
+          ServerProfileModule.forRoot(env.SERVER_PROFILE),
+          PlatformHttpModule,
+          AuthModule.forRoot({ db: setup.db, pool: setup.pool }),
+          PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
+          PlatformStandaloneLicensesModule.forRoot(env),
+          PlatformCatalogModule,
+          PlatformEntitlementsModule,
+          PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
+          PlatformReportsModule,
+          PlatformAgreementsModule,
+          PlatformOffersModule,
+          BillingProfilesModule,
+          BillingAccountsModule,
+          BillingModule,
+          BillingPaymentsModule,
+          BillingActsModule,
+          PlatformBillingRequestsModule,
+          PlatformOperationsModule.forRoot(env),
+          PlatformServicePeriodsModule,
+          SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
+          TenantBillingModule.forRoot(env.ADMIN_ORIGIN, true),
+          supportChatModule,
+          JobsModule.forRoot(setup.databaseUrl, env, supportChatModule),
+          DemoRequestsModule.forRoot(env),
+          StorageModule.forRoot(env),
+          HealthModule.forRoot(),
+        ],
+      };
+    }
     return {
       module: AppModule,
       imports: [
+        ServerProfileModule.forRoot(env.SERVER_PROFILE),
         PlatformHttpModule,
         AuthModule.forRoot(setup),
         DeviceGrantsModule.forRoot(env),

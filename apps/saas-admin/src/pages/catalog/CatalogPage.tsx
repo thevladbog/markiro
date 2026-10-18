@@ -16,6 +16,8 @@ import {
   type TagPhase,
 } from "@markiro/ui";
 
+import { IS_PLATFORM_ONLY } from "../../server-profile.js";
+import { ServerProfileNotice } from "../../components/ServerProfileNotice.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { getDefaultDemoPlan, listCatalogVersions, type CatalogVersionDto } from "./api.js";
@@ -154,19 +156,21 @@ export function CatalogPage() {
         actionsLabel={t("catalog.actionsLabel")}
         actions={
           <>
-            <Button
-              variant="secondary"
-              onClick={() =>
-                pageGuard.requestProtectedAction(() => {
-                  setSelectedId(null);
-                  setCreating(false);
-                  setDrawerDirty(false);
-                  setPoliciesOpen(true);
-                })
-              }
-            >
-              {t("catalog.offlinePolicies.open")}
-            </Button>
+            {IS_PLATFORM_ONLY ? null : (
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  pageGuard.requestProtectedAction(() => {
+                    setSelectedId(null);
+                    setCreating(false);
+                    setDrawerDirty(false);
+                    setPoliciesOpen(true);
+                  })
+                }
+              >
+                {t("catalog.offlinePolicies.open")}
+              </Button>
+            )}
             {principal.capabilities.includes("catalog.write") ? (
               <Button
                 onClick={() =>
@@ -184,6 +188,7 @@ export function CatalogPage() {
           </>
         }
       />
+      <ServerProfileNotice kind="grants" />
       <section className="commerce-ledger catalog-frame" aria-labelledby="catalog-ledger-title">
         <header className="commerce-ledger__header">
           <div>
@@ -280,7 +285,7 @@ export function CatalogPage() {
           />
         </CatalogDrawer>
       ) : null}
-      {policiesOpen ? (
+      {!IS_PLATFORM_ONLY && policiesOpen ? (
         <CatalogDrawer
           title={t("catalog.offlinePolicies.title")}
           dirty={drawerDirty}

@@ -1,3 +1,4 @@
+import { PlatformJobsService } from "./platform-jobs.service";
 import {
   Global,
   Inject,
@@ -1225,6 +1226,22 @@ export class JobsModule {
     env: Env,
     supportChatModule?: DynamicModule,
   ): DynamicModule {
+    if (env.SERVER_PROFILE === "platform-only")
+      return {
+        module: JobsModule,
+        imports: [
+          MailModule.forRoot(env),
+          PlatformAuditModule,
+          ...(supportChatModule && env.SUPPORT_CHAT_ENABLED ? [supportChatModule] : []),
+        ],
+        providers: [
+          { provide: PG_CONNECTION_STRING, useValue: connectionString },
+          { provide: PgBossService, useClass: PlatformJobsService },
+          PlatformReportRunnerService,
+          PlatformReportSourceService,
+        ],
+        exports: [PgBossService],
+      };
     return {
       module: JobsModule,
       imports: [

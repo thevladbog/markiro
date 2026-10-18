@@ -1,0 +1,47 @@
+# Test-only overlay: local images, synthetic credentials, loopback ports.
+# Never select this overlay for deployment or treat its digests as published.
+services:
+  migrate:
+    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_SOURCE_SHA:?required}
+  api:
+    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_SOURCE_SHA:?required}
+  edge:
+    image: ghcr.io/thevladbog/markiro-platform-edge:${MARKIRO_SOURCE_SHA:?required}
+    ports: !override
+      - "127.0.0.1:${PLATFORM_CI_HTTP_PORT:?required}:8080"
+      - "127.0.0.1:${PLATFORM_CI_HTTPS_PORT:?required}:8443"
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: markiro
+      POSTGRES_PASSWORD: platform-ci-only
+      POSTGRES_DB: markiro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "markiro", "-d", "markiro"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+  mailpit:
+    image: axllent/mailpit:v1.30.0
+    environment:
+      MP_DATABASE: /tmp/mailpit.db
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+  seaweedfs:
+    image: docker.io/chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    environment:
+      AWS_ACCESS_KEY_ID: markiro
+      AWS_SECRET_ACCESS_KEY: platform-ci-only
+      S3_BUCKET: markiro-private
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'test "$$(curl -sS -o /dev/null -w ''%{http_code}'' http://127.0.0.1:8333/$${S3_BUCKET}/healthcheck)" = 403',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20

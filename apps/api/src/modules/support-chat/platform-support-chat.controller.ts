@@ -1,3 +1,4 @@
+import { platformErrorSchema } from "@markiro/platform-contracts";
 import {
   Body,
   Controller,
@@ -56,7 +57,7 @@ export class PlatformSupportChatController {
       limit?: number;
     },
   ) {
-    this.support.requireEnabled();
+    this.support.requireReadable();
     const limit = query.limit ?? 50;
     const [after] = query.cursor
       ? await this.db
@@ -117,7 +118,7 @@ export class PlatformSupportChatController {
     @Query(new ZodValidationPipe(platformSupportChatContracts.episode.query))
     query: { cursor?: string; limit?: number },
   ) {
-    this.support.requireEnabled();
+    this.support.requireReadable();
     const linked = await this.repository.episodeById(params.id);
     if (!linked) throw new NotFoundException();
     return parsePlatformResponse(
@@ -132,6 +133,7 @@ export class PlatformSupportChatController {
   @PlatformApiProtectedCreated({
     body: platformSupportChatContracts.proposal.body,
     response: platformSupportChatContracts.proposal.response,
+    errors: [{ status: 410, schema: platformErrorSchema }],
   })
   @RequirePlatformCapabilities("billing.write")
   async propose(

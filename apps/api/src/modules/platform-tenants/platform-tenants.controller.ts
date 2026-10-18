@@ -1,3 +1,4 @@
+import { platformErrorSchema } from "@markiro/platform-contracts";
 import { Body, Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
@@ -53,6 +54,7 @@ export class PlatformTenantsController {
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.create.body,
     response: platformTenantContracts.create.response,
+    errors: [{ status: 410, schema: platformErrorSchema }],
   })
   @RequirePlatformCapabilities("tenants.write")
   async create(
@@ -92,7 +94,10 @@ export class PlatformTenantsController {
     summary: "Renew the tenant owner activation link",
     description: "Issues a fresh activation token for the tenant owner account.",
   })
-  @PlatformApiProtectedOk({ response: platformTenantContracts.renewActivation.response })
+  @PlatformApiProtectedOk({
+    response: platformTenantContracts.renewActivation.response,
+    errors: [{ status: 410, schema: platformErrorSchema }],
+  })
   @RequirePlatformCapabilities("tenants.write")
   async renewActivation(
     @Req() request: RequestWithPlatformPrincipal,
@@ -113,6 +118,7 @@ export class PlatformTenantsController {
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.grantCabinetAccess.body,
     response: platformTenantContracts.grantCabinetAccess.response,
+    errors: [{ status: 410, schema: platformErrorSchema }],
   })
   @RequirePlatformCapabilities("tenants.write")
   async grantCabinetAccess(

@@ -1,3 +1,5 @@
+import { AuthorizationService } from "../../authorization/authorization.service";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { Module, type DynamicModule } from "@nestjs/common";
 import type { Env } from "../../env";
 import { ChatwootClient, CHATWOOT_CONFIG, chatwootConfigFromEnv } from "./chatwoot.client";
@@ -22,12 +24,16 @@ export class SupportChatModule {
     return {
       module: SupportChatModule,
       controllers: [
-        SupportChatController,
+        ...(env.SERVER_PROFILE === "legacy"
+          ? [SupportChatController, SupportChatTranscriptController]
+          : []),
         PlatformSupportChatController,
-        SupportChatTranscriptController,
         PlatformSupportChatTranscriptController,
       ],
       providers: [
+        ...(env.SERVER_PROFILE === "platform-only"
+          ? [AuthorizationService, SecurityAuditService]
+          : []),
         SupportChatRepository,
         ChatwootClient,
         SupportChatDeliveryService,

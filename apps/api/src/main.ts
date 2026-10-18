@@ -1,6 +1,7 @@
 import { palletSourcesBodyParser } from "./modules/station-warehouse-reprint/pallet-body-parser";
 import "reflect-metadata";
 import { grantEvidenceBodyParser } from "./modules/device-grants/evidence-body-parser";
+import { createDb } from "@markiro/db";
 import express, { type Express } from "express";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -8,7 +9,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
 import { corsDelegate } from "./cors";
-import { loadEnv } from "./env";
+import { loadEnv, type Env } from "./env";
 import {
   CABINET_SESSION_SECURITY,
   KIOSK_TOKEN_SECURITY,
@@ -24,16 +25,21 @@ import { addPlatformSessionSecurity } from "./platform-http/platform-openapi";
 
 const logger = new Logger("bootstrap");
 
-async function bootstrap() {
-  const env = loadEnv();
-  const setup = setupAuth(env);
+export async function createApplication(env: Env) {
+  // Platform auth shares this pool. Leave room for the queue pool and LISTEN client.
+  const setup =
+    env.SERVER_PROFILE === "platform-only"
+      ? { ...createDb(env.DATABASE_URL, { max: 6 }), auth: undefined }
+      : setupAuth(env);
   const platformSetup = setupPlatformAuth(env, setup.db);
 
   // Better Auth needs the raw request body, so the Nest body parser is
   // disabled and express.json() is installed AFTER the auth handler below.
   const app = await NestFactory.create(
     AppModule.forRoot({
-      ...setup,
+      db: setup.db,
+      pool: setup.pool,
+      ...(setup.auth ? { auth: setup.auth } : {}),
       platformAuth: platformSetup.platformAuth,
       databaseUrl: env.DATABASE_URL,
       env,
@@ -75,18 +81,22 @@ async function bootstrap() {
     );
   }
 
-  mountAuth(server, setup.auth);
+  if (setup.auth) mountAuth(server, setup.auth);
   mountPlatformAuth(server, platformSetup.platformAuth);
   // `/1c_exchange` is excluded here, not merely by relying on
   // `ensureContentType` (exchange.module.ts) to run first: see
   // `excludeExchangeRoute`'s own comment for why registration order alone
   // cannot be trusted to keep a mismatched `Content-Type: application/json`
   // request out of this parser.
-  server.use(grantEvidenceBodyParser);
-  server.use(stationScansBodyParser);
-  server.use(palletSourcesBodyParser);
-  server.use(nationalCatalogBodyParser);
-  server.use(excludeExchangeRoute(express.json()));
+  if (env.SERVER_PROFILE === "legacy") {
+    server.use(grantEvidenceBodyParser);
+    server.use(stationScansBodyParser);
+    server.use(palletSourcesBodyParser);
+    server.use(nationalCatalogBodyParser);
+    server.use(excludeExchangeRoute(express.json()));
+  } else {
+    server.use(express.json());
+  }
 
   // Without this, SIGINT/SIGTERM kill the process directly and Nest never
   // runs onModuleDestroy — so PgBossService.onModuleDestroy (boss.stop())
@@ -96,77 +106,97 @@ async function bootstrap() {
   // process-exit mode reports hook success as 0 and hook failure as 1.
   app.enableShutdownHooks([], { useProcessExit: true });
 
-  const doc = SwaggerModule.createDocument(
-    app,
-    addPlatformSessionSecurity(
-      new DocumentBuilder()
-        .setTitle("Markiro API")
-        .setVersion("0.1")
-        .setDescription(
-          [
-            "HTTP API for the Markiro marking suite: the admin cabinet, production",
-            "stations, pickup kiosks, 1C/CommerceML exchange, and the platform",
-            "back office.",
-            "",
-            "Authentication depends on the caller:",
-            "- **Cabinet** routes use the Better Auth session cookie issued by `/api/auth/*` (not part of this document).",
-            "- **Public integrations** use a scoped public `x-api-key` on `/public/v1/*` (production edge: `/api/public/v1/*`).",
-            "- **Station** routes use the `x-api-key` header issued once during station pairing.",
-            "- **Kiosk** routes use the `x-kiosk-token` header issued once during kiosk pairing.",
-            "- **Signer agent** routes use the `x-signer-token` header issued once during agent pairing.",
-            "- **Platform** back-office routes use a separate platform session cookie.",
-          ].join("\n"),
-        )
-        .addCookieAuth(
-          (await setup.auth.$context).authCookies.sessionToken.name,
-          {
-            type: "apiKey",
-            in: "cookie",
-            description: "Cabinet session cookie issued by Better Auth (`/api/auth/*`).",
-          },
-          CABINET_SESSION_SECURITY,
-        )
-        .addApiKey(
-          {
-            type: "apiKey",
-            name: "x-api-key",
-            in: "header",
-            description: "Public integration key with explicit scopes; no cabinet cookie.",
-          },
-          "publicApiKey",
-        )
-        .addApiKey(
-          {
-            type: "apiKey",
-            in: "header",
-            name: "x-api-key",
-            description: "Station device API key revealed once during station pairing.",
-          },
-          STATION_API_KEY_SECURITY,
-        )
-        .addApiKey(
-          {
-            type: "apiKey",
-            in: "header",
-            name: "x-kiosk-token",
-            description: "Kiosk device token revealed once during kiosk pairing.",
-          },
-          KIOSK_TOKEN_SECURITY,
-        )
-        .addApiKey(
-          {
-            type: "apiKey",
-            in: "header",
-            name: "x-signer-token",
-            description: "Signer agent secret revealed once during agent pairing.",
-          },
-          SIGNER_AGENT_TOKEN_SECURITY,
-        ),
-      (await platformSetup.platformAuth.$context).authCookies.sessionToken.name,
-    ).build(),
-  );
+  const platformCookie = (await platformSetup.platformAuth.$context).authCookies.sessionToken.name;
+  const doc = setup.auth
+    ? SwaggerModule.createDocument(
+        app,
+        addPlatformSessionSecurity(
+          new DocumentBuilder()
+            .setTitle("Markiro API")
+            .setVersion("0.1")
+            .setDescription(
+              [
+                "HTTP API for the Markiro marking suite: the admin cabinet, production",
+                "stations, pickup kiosks, 1C/CommerceML exchange, and the platform",
+                "back office.",
+                "",
+                "Authentication depends on the caller:",
+                "- **Cabinet** routes use the Better Auth session cookie issued by `/api/auth/*` (not part of this document).",
+                "- **Public integrations** use a scoped public `x-api-key` on `/public/v1/*` (production edge: `/api/public/v1/*`).",
+                "- **Station** routes use the `x-api-key` header issued once during station pairing.",
+                "- **Kiosk** routes use the `x-kiosk-token` header issued once during kiosk pairing.",
+                "- **Signer agent** routes use the `x-signer-token` header issued once during agent pairing.",
+                "- **Platform** back-office routes use a separate platform session cookie.",
+              ].join("\n"),
+            )
+            .addCookieAuth(
+              (await setup.auth.$context).authCookies.sessionToken.name,
+              {
+                type: "apiKey",
+                in: "cookie",
+                description: "Cabinet session cookie issued by Better Auth (`/api/auth/*`).",
+              },
+              CABINET_SESSION_SECURITY,
+            )
+            .addApiKey(
+              {
+                type: "apiKey",
+                name: "x-api-key",
+                in: "header",
+                description: "Public integration key with explicit scopes; no cabinet cookie.",
+              },
+              "publicApiKey",
+            )
+            .addApiKey(
+              {
+                type: "apiKey",
+                in: "header",
+                name: "x-api-key",
+                description: "Station device API key revealed once during station pairing.",
+              },
+              STATION_API_KEY_SECURITY,
+            )
+            .addApiKey(
+              {
+                type: "apiKey",
+                in: "header",
+                name: "x-kiosk-token",
+                description: "Kiosk device token revealed once during kiosk pairing.",
+              },
+              KIOSK_TOKEN_SECURITY,
+            )
+            .addApiKey(
+              {
+                type: "apiKey",
+                in: "header",
+                name: "x-signer-token",
+                description: "Signer agent secret revealed once during agent pairing.",
+              },
+              SIGNER_AGENT_TOKEN_SECURITY,
+            ),
+          (await platformSetup.platformAuth.$context).authCookies.sessionToken.name,
+        ).build(),
+      )
+    : SwaggerModule.createDocument(
+        app,
+        addPlatformSessionSecurity(
+          new DocumentBuilder()
+            .setTitle("Markiro Platform API")
+            .setVersion("0.1")
+            .setDescription(
+              "Offline-product control plane: platform administration, licensing, diagnostics and landing enquiries.",
+            ),
+          platformCookie,
+        ).build(),
+      );
   app.use("/openapi.json", (_req: unknown, res: { json(b: unknown): void }) => res.json(doc));
   mountOpenApiDocs(server);
+  return app;
+}
+
+async function bootstrap() {
+  const env = loadEnv();
+  const app = await createApplication(env);
   await app.listen(env.PORT);
 }
-void bootstrap();
+if (require.main === module) void bootstrap();

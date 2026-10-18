@@ -1,9 +1,11 @@
+import { SERVER_PROFILE, assertLegacyOperation, type ServerProfile } from "../../server-profile";
 import { assertCatalogCommercialCompatibility } from "../../platform-http/commercial-catalog-compatibility";
 import {
   BadRequestException,
   ConflictException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
 } from "@nestjs/common";
 import { and, desc, eq, or, sql } from "drizzle-orm";
@@ -67,6 +69,7 @@ export class PlatformCatalogService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
+    @Optional() @Inject(SERVER_PROFILE) private readonly profile: ServerProfile = "legacy",
   ) {}
 
   async listOfflineGrantPolicies(
@@ -103,6 +106,7 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     input: CreateOfflineGrantPolicy,
   ): Promise<OfflineGrantPolicyRecord> {
+    assertLegacyOperation(this.profile);
     const payload = { offlineGrant: input.offlineGrant };
     try {
       return await this.db.transaction(async (tx) => {
@@ -148,6 +152,7 @@ export class PlatformCatalogService {
     id: string,
     input: ApproveOfflineGrantPolicy,
   ): Promise<OfflineGrantPolicyRecord> {
+    assertLegacyOperation(this.profile);
     try {
       return await this.db.transaction(async (tx) => {
         const [current] = await tx

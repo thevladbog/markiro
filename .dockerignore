@@ -33,10 +33,15 @@
 !packages/db/migrations/**
 !deploy/
 !deploy/production/
+!deploy/platform/
+!deploy/platform/Caddyfile
+!deploy/platform/edge-entrypoint.sh
+!deploy/platform/retired.html
 !deploy/production/Caddyfile
 !deploy/production/Caddyfile.alb
 !deploy/production/edge-entrypoint.sh
 !deploy/production/healthcheck.mjs
+!deploy/production/working-device-compatibility.mjs
 !deploy/production/verify-legal-artifacts.mjs
 !deploy/production/legal-artifacts-attestation.json
 !deploy/production/cli-main.mjs

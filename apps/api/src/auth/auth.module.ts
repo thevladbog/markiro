@@ -44,16 +44,18 @@ class AuthPoolCloser implements OnModuleDestroy {
 @Global()
 @Module({})
 export class AuthModule {
-  static forRoot(setup: Pick<AuthSetup, "auth" | "db" | "pool">): DynamicModule {
+  static forRoot(
+    setup: Pick<AuthSetup, "db" | "pool"> & Partial<Pick<AuthSetup, "auth">>,
+  ): DynamicModule {
     return {
       module: AuthModule,
       providers: [
-        { provide: AUTH, useValue: setup.auth },
+        ...(setup.auth ? [{ provide: AUTH, useValue: setup.auth }] : []),
         { provide: DB, useValue: setup.db },
         { provide: DB_POOL, useValue: setup.pool },
         AuthPoolCloser,
       ],
-      exports: [AUTH, DB, DB_POOL],
+      exports: [...(setup.auth ? [AUTH] : []), DB, DB_POOL],
     };
   }
 }

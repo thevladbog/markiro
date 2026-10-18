@@ -7,6 +7,8 @@ import { Navigate, useNavigate } from "react-router";
 
 import { Alert, Button, Card, Checkbox, Input, SectionHeader } from "@markiro/ui";
 
+import { IS_PLATFORM_ONLY } from "../../server-profile.js";
+import { ServerProfileNotice } from "../../components/ServerProfileNotice.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { createTenant, createTenantInputSchema, type CreateTenantInput } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
@@ -26,7 +28,9 @@ export function CreateTenantPanel() {
   const [submitErrorKey, setSubmitErrorKey] = useState<string | null>(null);
   const form = useForm<CreateTenantInput>({
     resolver: zodResolver(createTenantInputSchema),
-    defaultValues: { tenantName: "", tenantSlug: "", email: "", cabinetAccess: "enabled" },
+    defaultValues: IS_PLATFORM_ONLY
+      ? { tenantName: "", tenantSlug: "", cabinetAccess: "none" }
+      : { tenantName: "", tenantSlug: "", email: "", cabinetAccess: "enabled" },
   });
   const cabinetEnabled = form.watch("cabinetAccess") !== "none";
   const create = useMutation({ mutationFn: createTenant });
@@ -67,9 +71,14 @@ export function CreateTenantPanel() {
         eyebrow="TENANTS / PROVISION"
         title={t("tenants.createForm.title")}
         description={t(
-          cabinetEnabled ? "tenants.createForm.demoNotice" : "tenants.createForm.offlineNotice",
+          IS_PLATFORM_ONLY
+            ? "serverProfile.createNotice"
+            : cabinetEnabled
+              ? "tenants.createForm.demoNotice"
+              : "tenants.createForm.offlineNotice",
         )}
       />
+      <ServerProfileNotice kind="cabinet" />
       <Card className="tenant-create-card">
         <div className="tenant-create-intro">
           <h2>
@@ -99,12 +108,14 @@ export function CreateTenantPanel() {
               : {})}
             {...form.register("tenantSlug")}
           />
-          <Checkbox
-            label={t("tenants.createForm.cabinetAccess")}
-            hint={t("tenants.createForm.cabinetAccessHint")}
-            checked={cabinetEnabled}
-            onCheckedChange={setCabinetAccess}
-          />
+          {IS_PLATFORM_ONLY ? null : (
+            <Checkbox
+              label={t("tenants.createForm.cabinetAccess")}
+              hint={t("tenants.createForm.cabinetAccessHint")}
+              checked={cabinetEnabled}
+              onCheckedChange={setCabinetAccess}
+            />
+          )}
           {cabinetEnabled ? (
             <Input
               label={t("tenants.createForm.email")}

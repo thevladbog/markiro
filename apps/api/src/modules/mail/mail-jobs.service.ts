@@ -1,3 +1,4 @@
+import type { ServerProfile } from "../../server-profile";
 import { randomUUID } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import { renderEmail, type EmailTemplateInput, type RenderedEmail } from "@markiro/email";
@@ -49,6 +50,8 @@ interface OutboxRow {
 }
 
 interface DeliveryRow {
+  platformUserId: string | null;
+  publicRequestId: string | null;
   id: string;
   tenantId: string | null;
   userId: string | null;
@@ -179,6 +182,11 @@ export class MailJobsService {
     private readonly renderer: MailRenderer = renderEmail,
     private readonly createId: IdFactory = randomUUID,
     private readonly clock: Clock = () => new Date(),
+    private readonly policy: {
+      profile: ServerProfile;
+      platformOrigin: string;
+      platformAuthUrl: string;
+    } = { profile: "legacy", platformOrigin: "", platformAuthUrl: "" },
   ) {}
 
   async dispatchOutbox(queue: MailQueue): Promise<number> {
@@ -241,6 +249,21 @@ export class MailJobsService {
       if (!delivery) return;
 
       if (
+        this.policy.profile === "platform-only" &&
+        (delivery.tenantId ||
+          delivery.userId ||
+          ![
+            "platform-user-activation",
+            "password-reset",
+            "email-verification",
+            "landing-demo-notification",
+            "landing-demo-confirmation",
+          ].includes(delivery.kind))
+      ) {
+        await this.cancelDisabledDelivery(client, delivery.id);
+        return;
+      }
+      if (
         delivery.kind === "organization-invitation" &&
         !(await this.sourceIsValid(client, delivery))
       ) {
@@ -249,7 +272,7 @@ export class MailJobsService {
       }
 
       let template: EmailTemplateInput;
-      let rendered: RenderedEmail;
+      let rendered: RenderedEmail | null;
       if (!delivery.encryptedPayload || !delivery.payloadNonce || !delivery.payloadTag) {
         await this.markPermanentFailure(client, delivery.id, {
           category: "data_integrity",
@@ -269,7 +292,11 @@ export class MailJobsService {
             }),
           ),
         );
-        rendered = await this.renderer(template);
+        rendered =
+          this.policy.profile === "platform-only" &&
+          !this.platformDeliveryAllowed(delivery, template)
+            ? null
+            : await this.renderer(template);
       } catch {
         await this.markPermanentFailure(client, delivery.id, {
           category: "message",
@@ -280,6 +307,10 @@ export class MailJobsService {
         return;
       }
 
+      if (rendered === null) {
+        await this.cancelDisabledDelivery(client, delivery.id);
+        return;
+      }
       if (!(await this.sourceIsValid(client, delivery, template))) {
         await this.cancelInvalidDelivery(client, delivery.id);
         return;
@@ -386,7 +417,7 @@ export class MailJobsService {
         "WHERE id = $1::uuid",
         "  AND (status IN ('queued', 'retrying')",
         "       OR (status = 'sending' AND attempt_deadline < now()))",
-        'RETURNING id::text, tenant_id AS "tenantId", user_id AS "userId",',
+        'RETURNING id::text, tenant_id AS "tenantId", user_id AS "userId", platform_user_id AS "platformUserId", public_request_id AS "publicRequestId",',
         '          recipient, kind, source_id AS "sourceId", attempt_count AS "attemptCount",',
         '          encrypted_payload AS "encryptedPayload",',
         '          payload_nonce AS "payloadNonce", payload_tag AS "payloadTag"',
@@ -517,6 +548,52 @@ export class MailJobsService {
     }
     const result = await client.query<{ valid: boolean }>(query, values);
     return result.rows[0]?.valid === true;
+  }
+
+  private platformDeliveryAllowed(delivery: DeliveryRow, template: EmailTemplateInput): boolean {
+    if (delivery.kind !== template.kind || delivery.tenantId || delivery.userId) return false;
+    if (
+      template.kind === "landing-demo-notification" ||
+      template.kind === "landing-demo-confirmation"
+    )
+      return Boolean(delivery.publicRequestId) && !delivery.platformUserId;
+    if (!delivery.platformUserId || delivery.publicRequestId || !("actionUrl" in template))
+      return false;
+    const url = new URL(template.actionUrl);
+    if (url.username || url.password) return false;
+    const platformOrigin = new URL(this.policy.platformOrigin).origin;
+    const authOrigin = new URL(this.policy.platformAuthUrl).origin;
+    if (template.kind === "platform-user-activation")
+      return url.origin === platformOrigin && url.pathname === "/activate";
+    if (template.kind === "password-reset")
+      return (
+        (url.origin === platformOrigin && url.pathname === "/reset-password") ||
+        (url.origin === authOrigin &&
+          /^\/api\/platform-auth\/reset-password\/[^/]+$/.test(url.pathname))
+      );
+    if (template.kind === "email-verification")
+      return url.origin === authOrigin && url.pathname === "/api/platform-auth/verify-email";
+    return false;
+  }
+
+  private async cancelDisabledDelivery(client: MailPgClient, deliveryId: string): Promise<void> {
+    // One statement records the terminal transition and its audit event atomically.
+    // The row retains ownership/kind/source metadata; sensitive expired payloads follow existing retention semantics.
+    await client.query(
+      `WITH canceled AS (
+      UPDATE email_deliveries SET status = 'canceled',
+        encrypted_payload = null, payload_nonce = null, payload_tag = null,
+        attempt_id = null, attempt_deadline = null,
+        error_category = 'policy', error_code = 'server_profile_disabled', error_text = 'server_profile_disabled',
+        terminal_at = now(), updated_at = now()
+      WHERE id = $1::uuid AND status = 'sending'
+      RETURNING id, tenant_id, kind
+    ) INSERT INTO platform_audit_events (action, outcome, tenant_id, target_type, target_id, reason, before, after)
+      SELECT 'mail.delivery.canceled', 'success', tenant_id, 'email_delivery', id::text,
+        'server_profile_disabled', jsonb_build_object('status', 'sending', 'kind', kind),
+        jsonb_build_object('status', 'canceled', 'serverProfile', 'platform-only') FROM canceled`,
+      [deliveryId],
+    );
   }
 
   private async cancelInvalidDelivery(client: MailPgClient, deliveryId: string): Promise<void> {

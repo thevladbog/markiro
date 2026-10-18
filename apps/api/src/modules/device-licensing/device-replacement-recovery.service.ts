@@ -42,7 +42,7 @@ import {
 import { replacementDigest } from "./device-replacement-facts";
 import { replacementPreparationProjection } from "./device-replacement-readiness-projection";
 import { hashPairingCode } from "../../pickup/device-token";
-import { loadEnv } from "../../env";
+import { requireLegacyEnv } from "../../env";
 import { mintPairingCode, PAIRING_TTL_MS } from "../device-pairing/pairing-policy";
 
 const executions = schema.workingDeviceReplacementExecutions;
@@ -115,7 +115,7 @@ export class DeviceReplacementRecoveryService {
             tenantId,
             stationDeviceId: execution.deviceId,
             purpose: "replacement_recovery",
-            codeHash: hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER),
+            codeHash: hashPairingCode(code, requireLegacyEnv().PAIRING_CODE_PEPPER),
             expiresAt,
             issuedByUserId: authority.id,
           })

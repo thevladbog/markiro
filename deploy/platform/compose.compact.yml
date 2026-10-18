@@ -1,0 +1,140 @@
+# Optional production composition: compose.yml + compose.compact.yml.
+# Offline preparation only: see the runbook before any future host operation.
+x-compact-logging: &compact-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-postgres-ca: &postgres-ca
+  type: bind
+  source: ${MARKIRO_POSTGRES_CA_FILE:?MARKIRO_POSTGRES_CA_FILE is required}
+  target: /run/markiro-postgres/ca.crt
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  migrate:
+    mem_limit: 512m
+    cpus: 1.5
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=384"
+    volumes:
+      - *postgres-ca
+    networks: [default, database]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *compact-logging
+
+  api:
+    mem_limit: 1536m
+    cpus: 1.25
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    volumes:
+      - *postgres-ca
+    networks: [default, database]
+    logging: *compact-logging
+
+  edge:
+    mem_limit: 192m
+    cpus: 0.25
+    logging: *compact-logging
+
+  postgres:
+    # Pin an approved official PG17 image digest for the target architecture.
+    image: postgres:17-alpine@${MARKIRO_POSTGRES_IMAGE_DIGEST:?MARKIRO_POSTGRES_IMAGE_DIGEST is required}
+    restart: unless-stopped
+    user: "70:70"
+    mem_limit: 1024m
+    cpus: 0.5
+    shm_size: 256m
+    environment:
+      POSTGRES_DB: markiro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/markiro-postgres/password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=peer"
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/markiro-postgres/server.crt
+      - -c
+      - ssl_key_file=/run/markiro-postgres/server.key
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - max_connections=32
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - autovacuum_work_mem=32MB
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - min_wal_size=80MB
+      - -c
+      - fsync=on
+      - -c
+      - full_page_writes=on
+      - -c
+      - synchronous_commit=on
+    networks:
+      database:
+        aliases: [db.private]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ./postgres/pg_hba.conf
+        target: /etc/postgresql/pg_hba.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MARKIRO_POSTGRES_SERVER_CERT_FILE:?MARKIRO_POSTGRES_SERVER_CERT_FILE is required}
+        target: /run/markiro-postgres/server.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MARKIRO_POSTGRES_SERVER_KEY_FILE:?MARKIRO_POSTGRES_SERVER_KEY_FILE is required}
+        target: /run/markiro-postgres/server.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MARKIRO_POSTGRES_PASSWORD_FILE:?MARKIRO_POSTGRES_PASSWORD_FILE is required}
+        target: /run/markiro-postgres/password
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "markiro"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 20s
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/run/postgresql:rw,noexec,nosuid,size=16m,uid=70,gid=70
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *compact-logging
+
+networks:
+  database:
+    internal: true
+
+volumes:
+  postgres-data:

@@ -10,7 +10,7 @@ import {
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { loadEnv } from "../../env";
+import { requireLegacyEnv } from "../../env";
 import { generateDeviceToken, hashDeviceToken, hashPairingCode } from "../../pickup/device-token";
 import {
   mintPairingCode,
@@ -164,7 +164,7 @@ export class SignerAgentsService {
     userId: string,
   ): Promise<IssueSignerPairingCodeResultDto> {
     const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
-    const pepper = loadEnv().PAIRING_CODE_PEPPER;
+    const pepper = requireLegacyEnv().PAIRING_CODE_PEPPER;
     for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
       const code = mintPairingCode();
       const codeHash = hashPairingCode(code, pepper);
@@ -376,7 +376,7 @@ export class SignerAgentsService {
     hostname: string,
     appVersion: string,
   ): Promise<{ tenantId: string; dto: PairSignerAgentResultDto }> {
-    const pepper = loadEnv().PAIRING_CODE_PEPPER;
+    const pepper = requireLegacyEnv().PAIRING_CODE_PEPPER;
     const codeHash = hashPairingCode(code, pepper);
     const rows = await this.db
       .select({

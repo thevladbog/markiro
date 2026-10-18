@@ -22,6 +22,7 @@ import {
   type PlatformReportInput,
 } from "@markiro/platform-contracts";
 
+import { ServerProfileNotice } from "../../components/ServerProfileNotice.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listTenants } from "../tenants/api.js";
 import { createReport, downloadReport, listReportOptions, listReports } from "./api.js";
@@ -251,6 +252,7 @@ export function ReportsPage() {
         title={t("reports.title")}
         description={t("reports.description")}
       />
+      <ServerProfileNotice kind="productionReports" />
       <form
         className="report-form"
         onSubmit={(event) => {

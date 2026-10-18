@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "project": "markiro-compact-load-12fef4d1da",
+  "startedAt": "2026-10-18T11:43:42.043Z",
+  "finishedAt": "2026-10-18T11:43:52.323Z",
+  "passed": false,
+  "cleanup": true,
+  "error": "Injected failure after task-owned services started"
+}
