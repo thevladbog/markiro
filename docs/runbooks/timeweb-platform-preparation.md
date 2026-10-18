@@ -381,3 +381,74 @@ credentials masked and out of arguments. The image archive is large; hash
 verification streams bytes. Use a fresh isolated Docker daemon for an independent
 `load` check. Publication is registry evidence only; it proves no target restore,
 Timeweb capacity, DNS/TLS, SMTP delivery or production installation.
+
+## Read-only release admission
+
+After the protected publisher has completed successfully, select its exact full
+lowercase source SHA, numeric run ID, attempt and release artifact ID. Admission
+requires Node 24+, Python 3 (standard-library `zipfile`), and Docker CLI with
+`manifest inspect --verbose`. Set `GH_TOKEN` through the operator's protected
+process environment with repository Actions read access. Do not put it in command
+arguments. Private GHCR images require existing local Docker authentication.
+Admission never logs in or changes that configuration.
+
+```bash
+node deploy/platform/admit-release.mjs SOURCE_SHA RUN_ID ATTEMPT ARTIFACT_ID OUTPUT_FILE
+```
+
+Replace each positional placeholder with the selected value. `OUTPUT_FILE` must
+not exist and its parent directory must already exist. The repository is fixed to
+`thevladbog/markiro`. The selected publisher must be a successful manual `main`
+run of `release-platform-images.yml`; both `build` and `publish` must have succeeded
+in that exact attempt. A newer rerun invalidates an older attempt selection.
+Admission also revalidates the exact successful main-push CI run and attempt
+recorded by the publisher.
+
+The verifier binds artifact metadata to the selected run, source, branch and
+repository IDs, checks its SHA256 against the downloaded ZIP, and reads exactly
+`platform-manifest.json` and `release-evidence.json`. ZIP archives are limited to
+1 MiB, each member to 256 KiB. Extra entries, links, directories, encryption,
+traversal, corrupt CRCs and truncated members fail admission. HTTP reads have
+30-second timeouts; JSON responses are capped at 2 MiB with at most 100 pages of
+100 jobs. Signed HTTPS download redirects receive no GitHub credentials and are
+limited to four blob requests. Temporary archives use a private directory and
+are removed before the output record is created.
+
+Registry confirmation is mandatory for both immutable digest references. The
+only Docker operation is `docker manifest inspect --verbose REFERENCE`, bounded
+to 60 seconds and 1 MiB of output. The parser uses the
+[Docker CLI 29.6.1 ImageManifest shape](https://github.com/docker/cli/blob/v29.6.1/cli/manifest/types/types.go):
+`Ref`, `Descriptor.digest`, `Descriptor.platform`, and exactly one of
+`SchemaV2Manifest` or `OCIManifest`. It requires Linux amd64, the exact requested
+repository/digest, and a config digest equal to the captured image ID. Verbose
+indexes are arrays and are rejected, including single-member indexes. The older
+top-level `Digest`/`Platform` example on Docker's documentation page is not the
+supported shape. A future CLI output change fails closed and requires review.
+
+Success exclusively creates a regular mode-0600 JSON file with exactly:
+
+- `version: 1`, `kind: "platform-release-admission"`, and
+  `repository: "thevladbog/markiro"`;
+- `manifest` and `verified`: the validated original platform manifest and verified
+  image evidence, including their original publisher and CI identities;
+- `artifact: { id, sha256 }`: canonical artifact ID and lowercase ZIP SHA256;
+- `publisher: { runId, runAttempt }` and `ci: { runId, runAttempt }`: canonical
+  decimal strings checked against GitHub;
+- `registry.api` and `registry.edge`, each exactly
+  `{ reference, imageId, platform: "linux/amd64" }`.
+
+This record is verification evidence, not a signature, deployment authorization,
+restore proof, capacity acceptance or proof that any host is running the images.
+The verifier does not pull/load/push images or contact a deployment host. Running
+its tests does not satisfy live admission of an actual protected publication.
+
+Failures print only a phase (`input`, `output`, `publisher`, `artifact`, `archive`,
+`evidence`, `ci`, `registry` or `cleanup`) and produce no new success record.
+Existing output files are preserved. For `input`/`output`, correct the selection
+or choose a new output path. For GitHub/evidence/archive failures, inspect the
+selected protected publisher and its immutable artifacts through authenticated
+operator tooling; do not edit evidence or substitute another attempt's files.
+For `registry`, check existing registry access and the supported Docker output
+shape separately. Resolve the cause and rerun with the same explicit identities,
+or select a newly completed publication. Never treat a failed admission as
+permission to provision, deploy or change DNS.
