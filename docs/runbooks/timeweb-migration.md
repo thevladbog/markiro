@@ -57,10 +57,12 @@ Refresh these observations before execution; they are not current-state guarante
 
 ## Isolated restore and exact-release rehearsal
 
-- [ ] Restore a fresh immutable source backup into new database resources with API,
-      edge, all old writers and worker processes off. Compare migrations, tenants,
-      licenses, audit history, constraints, sequences, ownership and ACL; do not
-      repair failures by destructively rewriting history or applied migrations.
+- [ ] Restore a fresh immutable source backup into new database resources with only
+      the target API, edge, restored writers and worker processes off. Source
+      production remains writable throughout rehearsal until the separately
+      approved final freeze and cutover. Compare migrations, tenants, licenses,
+      audit history, constraints, sequences, ownership and ACL; do not repair
+      failures by destructively rewriting history or applied migrations.
 - [ ] Stage private S3 independently. Inventory/copy object versions, bytes, hashes,
       content types and access policy; verify signed downloads and private denial.
       Preserve existing Station/download artifacts and signed release URLs. Moving
