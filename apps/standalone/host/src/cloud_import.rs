@@ -192,7 +192,10 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
 
     let mut ids = HashSet::new();
     let mut keys = HashSet::new();
-    let mut lines = Vec::with_capacity(payload.lines.len());
+    // Grow only after validation: a body may contain millions of short invalid
+    // rows within its byte limit. Reserving from their count amplifies memory
+    // use even when the first row is refused. The same applies to each list below.
+    let mut lines = Vec::new();
     for (index, line) in payload.lines.iter().enumerate() {
         unique_id(&mut ids, &format!("payload.lines.{index}.id"), &line.id)?;
         let field = format!("payload.lines.{index}.name");
@@ -208,7 +211,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
     }
 
     let mut ids = HashSet::new();
-    let mut counterparties = Vec::with_capacity(payload.counterparties.len());
+    let mut counterparties = Vec::new();
     for (index, each) in payload.counterparties.iter().enumerate() {
         unique_id(
             &mut ids,
@@ -232,7 +235,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
         counterparties.iter().map(|each| each.id.as_str()).collect();
 
     let mut ids = HashSet::new();
-    let mut templates = Vec::with_capacity(payload.templates.len());
+    let mut templates = Vec::new();
     let mut scopes: HashMap<&str, Scope> = HashMap::new();
     for (index, each) in payload.templates.iter().enumerate() {
         let field = |name: &str| format!("payload.templates.{index}.{name}");
@@ -298,7 +301,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
         }
     }
     let mut slots = HashSet::new();
-    let mut categories = Vec::with_capacity(defaults.categories.len());
+    let mut categories = Vec::new();
     for (index, each) in defaults.categories.iter().enumerate() {
         let field = format!("payload.templateDefaults.categories.{index}");
         if !slots.insert((each.chz_product_group_code, each.purpose)) {
@@ -329,7 +332,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
 
     let mut ids = HashSet::new();
     let mut gtins_in_use = HashSet::new();
-    let mut products = Vec::with_capacity(payload.products.len());
+    let mut products = Vec::new();
     for (index, each) in payload.products.iter().enumerate() {
         let field = |name: &str| format!("payload.products.{index}.{name}");
         unique_id(&mut ids, &field("id"), &each.id)?;
@@ -419,7 +422,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
 
     let mut ids = HashSet::new();
     let mut logins = HashSet::new();
-    let mut operators = Vec::with_capacity(payload.operators.len());
+    let mut operators = Vec::new();
     for (index, each) in payload.operators.iter().enumerate() {
         let field = |name: &str| format!("payload.operators.{index}.{name}");
         unique_id(&mut ids, &field("id"), &each.id)?;
@@ -446,7 +449,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
     let operator_ids: HashSet<&str> = operators.iter().map(|each| each.id.as_str()).collect();
     let mut ids = HashSet::new();
     let mut hashes = HashSet::new();
-    let mut badges = Vec::with_capacity(payload.badges.len());
+    let mut badges = Vec::new();
     for (index, each) in payload.badges.iter().enumerate() {
         let field = |name: &str| format!("payload.badges.{index}.{name}");
         unique_id(&mut ids, &field("id"), &each.id)?;
@@ -475,7 +478,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
     }
 
     let mut keys = HashSet::new();
-    let mut sscc_counters = Vec::with_capacity(payload.sscc_counters.len());
+    let mut sscc_counters = Vec::new();
     for (index, each) in payload.sscc_counters.iter().enumerate() {
         let field = |name: &str| format!("payload.ssccCounters.{index}.{name}");
         if each.extension > 1 {
@@ -511,7 +514,7 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
     }
 
     let mut months = HashSet::new();
-    let mut shift_number_counters = Vec::with_capacity(payload.shift_number_counters.len());
+    let mut shift_number_counters = Vec::new();
     for (index, each) in payload.shift_number_counters.iter().enumerate() {
         let field = |name: &str| format!("payload.shiftNumberCounters.{index}.{name}");
         if !is_month_key(&each.month_key) {
