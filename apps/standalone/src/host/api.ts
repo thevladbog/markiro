@@ -3,6 +3,15 @@ import {
   type StandaloneActivationRequest,
 } from "@markiro/domain";
 import { z } from "zod";
+import {
+  codeRegistryPath,
+  codeRegistryPageSchema,
+  codeRegistryCardSchema,
+  type CodeRegistryQuery,
+  type CodeRegistryPage,
+  type CodeRegistryCard,
+  type CodeRegistrySource,
+} from "./code-registry.js";
 
 import {
   backupStateSchema,
@@ -516,6 +525,12 @@ export interface HostApi {
    * One page of the placements of codes the criteria find, newest scan
    * first («Поиск кодов»); every office role. At least one criterion.
    */
+  searchCodeRegistry: (token: string, query: CodeRegistryQuery) => Promise<CodeRegistryPage>;
+  getCodeRegistryCard: (
+    token: string,
+    codeHash: string,
+    source?: CodeRegistrySource,
+  ) => Promise<CodeRegistryCard>;
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
@@ -1400,6 +1415,22 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: NO_CONTENT,
       });
+    },
+    searchCodeRegistry: (token, query) =>
+      client.request("GET", codeRegistryPath(query), {
+        officeToken: token,
+        schema: codeRegistryPageSchema,
+      }),
+    getCodeRegistryCard: (token, codeHash, source) => {
+      if (!/^[0-9a-f]{64}$/.test(codeHash))
+        return Promise.reject(new RangeError("not a code hash"));
+      if (source !== undefined && !["all", "local", "cloud"].includes(source))
+        return Promise.reject(new RangeError("not a registry source"));
+      return client.request(
+        "GET",
+        `/v1/office/code-registry/${codeHash}${source === undefined ? "" : `?source=${source}`}`,
+        { officeToken: token, schema: codeRegistryCardSchema },
+      );
     },
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {

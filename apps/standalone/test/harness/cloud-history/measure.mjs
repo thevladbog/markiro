@@ -226,7 +226,10 @@ try {
       .getByText("История перенесена. Работа разрешена после завершения импорта.", { exact: true })
       .waitFor();
     await page.screenshot({ path: resolve(out, "01-import-complete.png"), fullPage: true });
-    await page.getByRole("link", { name: "Смены", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Разделы офиса" })
+      .getByRole("link", { name: "Смены", exact: true })
+      .click();
     await page.getByRole("link", { name: "Облачная история", exact: true }).click();
     await page.getByRole("link", { name: shift.number, exact: true }).click();
     await page

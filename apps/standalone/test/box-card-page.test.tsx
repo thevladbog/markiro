@@ -225,7 +225,13 @@ describe("the card of a box (plan КРТ)", () => {
 
   it("opens a code's own card from its link in the composition", async () => {
     const value = packSession();
-    value.api.getCodeCard.mockResolvedValue(CODE_CARD);
+    value.api.getCodeRegistryCard.mockResolvedValue({
+      codeHash: CODE_CARD.codeHash,
+      local: CODE_CARD,
+      cloud: [],
+      cloudCapped: false,
+      currentOwner: null,
+    });
     await boxCard(value);
     const hash = BOX_CARD.items[2]?.codeHash ?? "";
     fireEvent.click(
@@ -233,7 +239,11 @@ describe("the card of a box (plan КРТ)", () => {
     );
     await screen.findByRole("heading", { name: "Поиск кодов", level: 1 });
     await waitFor(() =>
-      expect(value.api.getCodeCard).toHaveBeenCalledWith("office-session-token", hash),
+      expect(value.api.getCodeRegistryCard).toHaveBeenCalledWith(
+        "office-session-token",
+        hash,
+        "all",
+      ),
     );
   });
 

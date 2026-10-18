@@ -1526,7 +1526,19 @@ uploaded again; generate a new snapshot, possibly from the same restored copy.
 Cloud UI routes are `/cloud-shifts`, `/cloud-shifts/:id`, `/cloud-boxes/:id` and
 `/cloud-pallets/:id`, reached from the source links under «Смены». Do not cast an
 imported object to `OfficeShift` or synthesize a template, device or scan. Native
-`/codes` remains a local journal. `CloudOrigin` branches on NIL device provenance:
+`/v1/office/codes` remains a local-only API for older clients. The office `/codes`
+page uses additive `/v1/office/code-registry` search/card routes for local journals
+and completed cloud snapshots, with an All / Local / From cloud filter. Never
+cast cloud provenance to a native scan: missing identity and metadata remain null,
+owner-only rows outside the report window stay searchable without dead object
+links, and frozen timestamps retain their source zone. Global current ownership
+is independent of the display filter. Search pages compact indexed match keys
+before batch hydration (50 rows, global 10,000 cap); cloud cards cap occurrences
+at 1,000 and signal truncation. Existing accepted imports require no reimport.
+GTIN search falls back to the validated canonical AI 01 prefix when a flat-only
+record lacks its separate GTIN field; an expression index supports that read key.
+This does not rewrite frozen snapshots or populate their nullable metadata.
+`CloudOrigin` branches on NIL device provenance:
 it links only after the dedicated cloud object resolves, otherwise keeps the
 original number/pack provenance as text. Imported disaggregation lines carry
 `cloudHistory:true`; their writes require the current administrator, while native

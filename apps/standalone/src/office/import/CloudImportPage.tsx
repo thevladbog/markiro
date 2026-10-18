@@ -572,7 +572,7 @@ function CloudImportContent({
             {view.notes.length === 0 ? (
               <p className="office-note">{t("office.cloudImport.noNotes")}</p>
             ) : (
-              <ul>
+              <ul className="cloud-import-notes">
                 {view.notes.map((note, index) => (
                   <li key={index}>{note}</li>
                 ))}

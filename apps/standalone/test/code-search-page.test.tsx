@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { canonicalizeKm, kmHash } from "@markiro/domain";
 
+import type { CodeRegistryCard, CodeRegistryPage } from "../src/host/code-registry.js";
 import { HostError } from "../src/host/client.js";
 import type { OfficeShift } from "../src/host/protocol.js";
 import type { OfficeCodeCard, OfficeCodePage } from "../src/host/code-search.js";
@@ -23,7 +24,21 @@ function fixture<T>(name: string): T {
   return JSON.parse(readFileSync(new URL(`../proto/fixtures/${name}`, testModuleUrl), "utf8")) as T;
 }
 
-const PAGE = fixture<OfficeCodePage>("office-code-page.json");
+const LOCAL_PAGE = fixture<OfficeCodePage>("office-code-page.json");
+const PAGE: CodeRegistryPage = {
+  ...LOCAL_PAGE,
+  items: LOCAL_PAGE.items.map((item) => ({ source: "local", item })),
+};
+function registryCard(local: OfficeCodeCard): CodeRegistryCard {
+  const owner = local.placements.find((item) => item.scanId === local.ownerScanId);
+  return {
+    codeHash: local.codeHash,
+    local,
+    cloud: [],
+    cloudCapped: false,
+    currentOwner: owner === undefined ? null : { source: "local", item: owner },
+  };
+}
 const CARD = fixture<OfficeCodeCard>("office-code-card.json");
 const VALIDATION_CARD = fixture<OfficeCodeCard>("office-code-card-validation.json");
 const GS = "\u001d";
@@ -69,7 +84,7 @@ describe("«Поиск кодов» in the office", () => {
   it("is open to a technologist", async () => {
     freezeToday();
     const value = session(TECHNOLOGIST);
-    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
     await openSearch(value);
     await screen.findByText("Найдено: 2");
   });
@@ -77,20 +92,21 @@ describe("«Поиск кодов» in the office", () => {
   it("opens on the last seven days of the organization's zone, newest first, and says so", async () => {
     freezeToday();
     const value = session();
-    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
     value.api.listShifts.mockResolvedValue([
       { ...ACTIVE_SHIFT, status: "closed", number: "OCT26-001" },
       ACTIVE_SHIFT,
     ]);
     await openSearch(value);
     await screen.findByText("Найдено: 2");
-    expect(screen.getByText(/история облака при переносе не переносится/)).toBeTruthy();
+    expect(screen.getByText(/Местные сканы и импортированная история облака/)).toBeTruthy();
     // 2026-10-03 … 2026-10-09 in the site's zone (UTC+3), the later midnight excluded.
-    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
+    expect(value.api.searchCodeRegistry).toHaveBeenCalledWith("office-session-token", {
+      source: "all",
       fromMs: Date.parse("2026-10-02T21:00:00.000Z"),
       toMs: Date.parse("2026-10-09T21:00:00.000Z"),
     });
-    expect(value.api.getCodeCard).not.toHaveBeenCalled();
+    expect(value.api.getCodeRegistryCard).not.toHaveBeenCalled();
     expect(screen.getByRole("radio", { name: "7 дней" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: "Сегодня" }).getAttribute("aria-checked")).toBe(
       "false",
@@ -105,13 +121,14 @@ describe("«Поиск кодов» in the office", () => {
   it("switches the period with the quick chips: today, 30 days, all the time, 7 days again", async () => {
     freezeToday();
     const value = session();
-    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
     await openSearch(value);
     await screen.findByText("Найдено: 2");
-    const lastCall = () => value.api.searchCodes.mock.calls.at(-1)?.[1];
+    const lastCall = () => value.api.searchCodeRegistry.mock.calls.at(-1)?.[1];
     fireEvent.click(screen.getByRole("radio", { name: "Сегодня" }));
     await waitFor(() =>
       expect(lastCall()).toEqual({
+        source: "all",
         fromMs: Date.parse("2026-10-08T21:00:00.000Z"),
         toMs: Date.parse("2026-10-09T21:00:00.000Z"),
       }),
@@ -119,6 +136,7 @@ describe("«Поиск кодов» in the office", () => {
     fireEvent.click(screen.getByRole("radio", { name: "30 дней" }));
     await waitFor(() =>
       expect(lastCall()).toEqual({
+        source: "all",
         fromMs: Date.parse("2026-09-09T21:00:00.000Z"),
         toMs: Date.parse("2026-10-09T21:00:00.000Z"),
       }),
@@ -127,11 +145,12 @@ describe("«Поиск кодов» in the office", () => {
       "true",
     );
     fireEvent.click(screen.getByRole("radio", { name: "Всё время" }));
-    await waitFor(() => expect(lastCall()).toEqual({ fromMs: 0 }));
+    await waitFor(() => expect(lastCall()).toEqual({ source: "all", fromMs: 0 }));
     expect(screen.getByTestId("code-period-note").textContent).toContain("Период: всё время");
     fireEvent.click(screen.getByRole("radio", { name: "7 дней" }));
     await waitFor(() =>
       expect(lastCall()).toEqual({
+        source: "all",
         fromMs: Date.parse("2026-10-02T21:00:00.000Z"),
         toMs: Date.parse("2026-10-09T21:00:00.000Z"),
       }),
@@ -141,7 +160,7 @@ describe("«Поиск кодов» in the office", () => {
   it("says which period found nothing, and offers all the time", async () => {
     freezeToday();
     const value = session();
-    value.api.searchCodes.mockResolvedValue({ ...PAGE, items: [], total: 0 });
+    value.api.searchCodeRegistry.mockResolvedValue({ ...PAGE, items: [], total: 0 });
     await openSearch(value);
     await screen.findByText("Ничего не найдено");
     expect(
@@ -152,7 +171,7 @@ describe("«Поиск кодов» in the office", () => {
   it("does not narrow an explicit search to the default days", async () => {
     freezeToday();
     const value = session();
-    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
     await openSearch(value);
     await screen.findByText("Найдено: 2");
     fireEvent.change(screen.getByLabelText("Код, GTIN, SSCC или номер смены"), {
@@ -164,7 +183,8 @@ describe("«Поиск кодов» in the office", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Найти" }));
     await waitFor(() =>
-      expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+      expect(value.api.searchCodeRegistry).toHaveBeenLastCalledWith("office-session-token", {
+        source: "all",
         sscc: "046006820000015000",
       }),
     );
@@ -172,20 +192,21 @@ describe("«Поиск кодов» in the office", () => {
 
   it("opens a scanned code's card by its hash: its full text, where it is, every box and its history", async () => {
     const value = session();
-    value.api.getCodeCard.mockResolvedValue(CARD);
+    value.api.getCodeRegistryCard.mockResolvedValue(registryCard(CARD));
     await openSearch(value);
     search(KM);
     await screen.findByText("010460068200001321S000002<GS>93Tail");
-    expect(value.api.getCodeCard).toHaveBeenCalledWith(
+    expect(value.api.getCodeRegistryCard).toHaveBeenCalledWith(
       "office-session-token",
       kmHash(canonicalizeKm(KM)),
+      "all",
     );
     // Only the default period was searched; a code is asked for by its card.
     expect(
-      value.api.searchCodes.mock.calls.every(([, query]) => query.codeHash === undefined),
+      value.api.searchCodeRegistry.mock.calls.every(([, query]) => query.codeHash === undefined),
     ).toBe(true);
     // The code goes to the host as its hash only.
-    expect(JSON.stringify(value.api.getCodeCard.mock.calls)).not.toContain("S000002");
+    expect(JSON.stringify(value.api.getCodeRegistryCard.mock.calls)).not.toContain("S000002");
     // The scan that owns it now is in a closed box.
     expect(screen.queryByText("Свободен: ни в одном коробе")).toBeNull();
     expect(screen.getAllByText("В коробе").length).toBeGreaterThan(0);
@@ -216,10 +237,12 @@ describe("«Поиск кодов» in the office", () => {
     const value = session();
     const [, accepted] = CARD.events;
     if (accepted?.type !== "scan") throw new Error("the fixture's second event is a scan");
-    value.api.getCodeCard.mockResolvedValue({
-      ...CARD,
-      events: [{ ...accepted, placed: false }],
-    });
+    value.api.getCodeRegistryCard.mockResolvedValue(
+      registryCard({
+        ...CARD,
+        events: [{ ...accepted, placed: false }],
+      }),
+    );
     await openSearch(value);
     search(KM);
     const history = (await screen.findByRole("heading", { name: "История" })).parentElement;
@@ -234,7 +257,7 @@ describe("«Поиск кодов» in the office", () => {
 
   it("shows a validation shift's code without a box (plan РЕЖ): «—» for the box, no open box", async () => {
     const value = session();
-    value.api.getCodeCard.mockResolvedValue(VALIDATION_CARD);
+    value.api.getCodeRegistryCard.mockResolvedValue(registryCard(VALIDATION_CARD));
     await openSearch(value);
     search(KM);
     await screen.findByText("010460068200001321S000017<GS>93Tail");
@@ -270,23 +293,25 @@ describe("«Поиск кодов» in the office", () => {
 
   it("says a code the host never saw is not here, with why", async () => {
     const value = session();
-    value.api.getCodeCard.mockRejectedValue(
+    value.api.searchCodeRegistry.mockResolvedValue({ ...PAGE, items: [], total: 0 });
+    value.api.getCodeRegistryCard.mockRejectedValue(
       new HostError({ kind: "api", code: "not_found", message: "no scan", status: 404 }),
     );
     await openSearch(value);
     search(KM);
-    await screen.findByText("Этот код на площадке не сканировали");
-    expect(screen.getByText(/Коды из облака сюда не переносятся/)).toBeTruthy();
+    await screen.findByText("Код не найден в выбранном источнике");
+    expect(screen.getByText(/Поиск выполняется в выбранном источнике/)).toBeTruthy();
   });
 
   it("lists what an SSCC finds and opens a row's code in a drawer", async () => {
     const value = session();
-    value.api.searchCodes.mockResolvedValue(PAGE);
-    value.api.getCodeCard.mockResolvedValue(CARD);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
+    value.api.getCodeRegistryCard.mockResolvedValue(registryCard(CARD));
     await openSearch(value);
     search("(00)046006820000015000");
     await screen.findByText("Найдено: 2");
-    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
+    expect(value.api.searchCodeRegistry).toHaveBeenCalledWith("office-session-token", {
+      source: "all",
       sscc: "046006820000015000",
     });
     const table = screen.getByRole("table");
@@ -300,9 +325,10 @@ describe("«Поиск кодов» in the office", () => {
     fireEvent.click(rows[0] as HTMLElement);
     const drawer = await screen.findByRole("dialog", { name: "Карточка кода" });
     await within(drawer).findByText("010460068200001321S000002<GS>93Tail");
-    expect(value.api.getCodeCard).toHaveBeenCalledWith(
+    expect(value.api.getCodeRegistryCard).toHaveBeenCalledWith(
       "office-session-token",
-      PAGE.items[0]?.codeHash,
+      PAGE.items[0]?.item.codeHash,
+      "all",
     );
     fireEvent.keyDown(drawer, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -310,7 +336,7 @@ describe("«Поиск кодов» in the office", () => {
 
   it("links the box and the pallet of a code's placements to their cards (plan КРТ)", async () => {
     const value = session();
-    value.api.getCodeCard.mockResolvedValue(CARD);
+    value.api.getCodeRegistryCard.mockResolvedValue(registryCard(CARD));
     await openSearch(value);
     search(KM);
     await screen.findByText("010460068200001321S000002<GS>93Tail");
@@ -324,22 +350,23 @@ describe("«Поиск кодов» in the office", () => {
   it("refuses what is no criterion without asking the host", async () => {
     const value = session();
     await openSearch(value);
-    await waitFor(() => expect(value.api.searchCodes).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(value.api.searchCodeRegistry).toHaveBeenCalledTimes(1));
     search("молоко");
     await screen.findByText(/Это не код маркировки, не GTIN, не SSCC и не номер смены/);
-    expect(value.api.searchCodes).toHaveBeenCalledTimes(1);
+    expect(value.api.searchCodeRegistry).toHaveBeenCalledTimes(1);
   });
 
   it("sends a GTIN with the period's days as the organization's midnights", async () => {
     freezeToday();
     const value = session();
-    value.api.searchCodes.mockResolvedValue({ ...PAGE, items: [], total: 0 });
+    value.api.searchCodeRegistry.mockResolvedValue({ ...PAGE, items: [], total: 0 });
     await openSearch(value);
     pickDate("Сканирован с", "8 октября 2026");
     pickDate("по", "9 октября 2026");
     search("4600682000013");
     await screen.findByText("Ничего не найдено");
-    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
+    expect(value.api.searchCodeRegistry).toHaveBeenCalledWith("office-session-token", {
+      source: "all",
       gtin: "04600682000013",
       fromMs: Date.parse("2026-10-07T21:00:00.000Z"),
       toMs: Date.parse("2026-10-09T21:00:00.000Z"),
@@ -349,14 +376,15 @@ describe("«Поиск кодов» in the office", () => {
   it("searches a period alone", async () => {
     freezeToday();
     const value = session();
-    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
     await openSearch(value);
     pickDate("Сканирован с", "8 октября 2026");
     fireEvent.click(screen.getByRole("button", { name: "Найти" }));
     await screen.findByText("Найдено: 2");
     // The other end stays the default's: today.
     await waitFor(() =>
-      expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+      expect(value.api.searchCodeRegistry).toHaveBeenLastCalledWith("office-session-token", {
+        source: "all",
         fromMs: Date.parse("2026-10-07T21:00:00.000Z"),
         toMs: Date.parse("2026-10-09T21:00:00.000Z"),
       }),
@@ -365,25 +393,29 @@ describe("«Поиск кодов» in the office", () => {
 
   it("searches by a shift's number typed in any case", async () => {
     const value = session();
-    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.searchCodeRegistry.mockResolvedValue(PAGE);
     await openSearch(value);
     search("oct26-3");
     await screen.findByText("Найдено: 2");
-    expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+    expect(value.api.searchCodeRegistry).toHaveBeenLastCalledWith("office-session-token", {
+      source: "all",
       shift: "OCT26-3",
     });
   });
 
   /** The host's page `page` of 50 placements out of 10 000, as the host answers a capped search. */
   function cappedPages(value: FakeOfficeSession) {
-    const [first] = PAGE.items;
+    const [first] = LOCAL_PAGE.items;
     if (first === undefined) throw new Error("the fixture has no placements");
-    value.api.searchCodes.mockImplementation(async (_token, query) => {
+    value.api.searchCodeRegistry.mockImplementation(async (_token, query) => {
       const page = query.page ?? 1;
       return {
         items: Array.from({ length: 50 }, (_, index) => ({
-          ...first,
-          scanId: `d0000000-0000-4000-8000-${String((page - 1) * 50 + index + 1).padStart(12, "0")}`,
+          source: "local" as const,
+          item: {
+            ...first,
+            scanId: `d0000000-0000-4000-8000-${String((page - 1) * 50 + index + 1).padStart(12, "0")}`,
+          },
         })),
         page,
         pageCount: 200,
@@ -407,14 +439,15 @@ describe("«Поиск кодов» in the office", () => {
     expect(within(pager()).getByText("Страница 1 из 1 000")).toBeTruthy();
     expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(11);
     // The second page of ten is inside the host's first page of fifty.
-    const asked = value.api.searchCodes.mock.calls.length;
+    const asked = value.api.searchCodeRegistry.mock.calls.length;
     fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
     expect(await screen.findByText("Показано 11–20 из 10 000")).toBeTruthy();
-    expect(value.api.searchCodes).toHaveBeenCalledTimes(asked);
+    expect(value.api.searchCodeRegistry).toHaveBeenCalledTimes(asked);
     // The last page of ten is the host's last page of fifty.
     fireEvent.click(within(pager()).getByRole("button", { name: "Последняя страница" }));
     expect(await screen.findByText("Показано 9 991–10 000 из 10 000")).toBeTruthy();
-    expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+    expect(value.api.searchCodeRegistry).toHaveBeenLastCalledWith("office-session-token", {
+      source: "all",
       gtin: "04600682000013",
       page: 200,
     });
@@ -430,7 +463,8 @@ describe("«Поиск кодов» in the office", () => {
     await waitFor(() =>
       expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(101),
     );
-    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
+    expect(value.api.searchCodeRegistry).toHaveBeenCalledWith("office-session-token", {
+      source: "all",
       gtin: "04600682000013",
       page: 2,
     });
@@ -446,7 +480,7 @@ describe("«Поиск кодов» in the office", () => {
 
   it("explains a failed search and tries again", async () => {
     const value = session();
-    value.api.searchCodes
+    value.api.searchCodeRegistry
       .mockRejectedValueOnce(
         new HostError({ kind: "transport", code: "unreachable", message: "x" }),
       )

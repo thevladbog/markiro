@@ -17,9 +17,11 @@ describe("the parts of «Поиск кодов» (plan КРТ)", () => {
     expect(within(tabs).getByRole("tab", { name: "Коды" }).getAttribute("aria-selected")).toBe(
       "true",
     );
-    expect(screen.getByRole("link", { name: "Поиск кодов" }).getAttribute("aria-current")).toBe(
-      "page",
-    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Разделы офиса" }))
+        .getByRole("link", { name: "Поиск кодов" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 
   it("keep the menu item lit on the boxes, the pallets and a card", async () => {
@@ -28,18 +30,22 @@ describe("the parts of «Поиск кодов» (plan КРТ)", () => {
     for (const tab of ["Короба", "Паллеты"] as const) {
       chooseTab(tab);
       await screen.findByRole("tab", { name: tab, selected: true });
-      expect(screen.getByRole("link", { name: "Поиск кодов" }).getAttribute("aria-current")).toBe(
-        "page",
-      );
+      expect(
+        within(screen.getByRole("navigation", { name: "Разделы офиса" }))
+          .getByRole("link", { name: "Поиск кодов" })
+          .getAttribute("aria-current"),
+      ).toBe("page");
     }
     await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
     fireEvent.click(
       screen.getAllByRole("link", { name: "(00)146006820000000409" })[0] as HTMLElement,
     );
     await screen.findByRole("heading", { name: "Паллета (00)146006820000000409" });
-    expect(screen.getByRole("link", { name: "Поиск кодов" }).getAttribute("aria-current")).toBe(
-      "page",
-    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Разделы офиса" }))
+        .getByRole("link", { name: "Поиск кодов" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 
   it("move with the arrow keys, and the tab found on the next page has the focus", async () => {

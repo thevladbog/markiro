@@ -219,6 +219,8 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/office/boxes/{id}"),
     ("GET", "/v1/office/pallets"),
     ("GET", "/v1/office/pallets/{id}"),
+    ("GET", "/v1/office/code-registry"),
+    ("GET", "/v1/office/code-registry/{code_hash}"),
     ("GET", "/v1/office/codes"),
     ("GET", "/v1/office/codes/{code_hash}"),
     ("GET", "/v1/office/backups"),

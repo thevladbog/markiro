@@ -175,13 +175,20 @@ export interface CodeCardViewProps {
   format: FormatInstant;
   /** The heading level of the card's parts: under a page's `h1`, or a drawer's `h2`. */
   headingLevel: "h2" | "h3";
+  /** Unified registry renders identity and ownership across both sources once. */
+  showSummary?: boolean;
 }
 
 /**
  * A code's card: what it is, where it is now, every box it was put into and
  * its history, as the host's facts tell them.
  */
-export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardViewProps) {
+export function CodeCardView({
+  card,
+  format,
+  headingLevel: Heading,
+  showSummary = true,
+}: CodeCardViewProps) {
   const { t } = useTranslation();
   const owner = card.placements.find((placement) => placement.scanId === card.ownerScanId);
   const columns: TableColumn<OfficeCodeItem>[] = [
@@ -230,43 +237,45 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
   ];
   return (
     <div className="office-stack">
-      <DefinitionGrid
-        items={[
-          {
-            id: "code",
-            term: t("office.codeSearch.card.code"),
-            description: codeText(card),
-            mono: true,
-          },
-          {
-            id: "canonical",
-            term: t("office.codeSearch.card.canonical"),
-            description: canonicalText(card.canonical),
-            mono: true,
-          },
-          {
-            id: "product",
-            term: t("office.codeSearch.card.product"),
-            description:
-              owner?.productName ?? card.placements[0]?.productName ?? t("office.common.none"),
-          },
-          {
-            id: "now",
-            term: t("office.codeSearch.card.now"),
-            description:
-              owner === undefined ? (
-                t("office.codeSearch.card.free")
-              ) : (
-                <span className="shift-cell">
-                  <PlacementChip state={owner.state} />
-                  <span className="shift-cell__quiet">
-                    <BoxText item={owner} />
+      {showSummary && (
+        <DefinitionGrid
+          items={[
+            {
+              id: "code",
+              term: t("office.codeSearch.card.code"),
+              description: codeText(card),
+              mono: true,
+            },
+            {
+              id: "canonical",
+              term: t("office.codeSearch.card.canonical"),
+              description: canonicalText(card.canonical),
+              mono: true,
+            },
+            {
+              id: "product",
+              term: t("office.codeSearch.card.product"),
+              description:
+                owner?.productName ?? card.placements[0]?.productName ?? t("office.common.none"),
+            },
+            {
+              id: "now",
+              term: t("office.codeSearch.card.now"),
+              description:
+                owner === undefined ? (
+                  t("office.codeSearch.card.free")
+                ) : (
+                  <span className="shift-cell">
+                    <PlacementChip state={owner.state} />
+                    <span className="shift-cell__quiet">
+                      <BoxText item={owner} />
+                    </span>
                   </span>
-                </span>
-              ),
-          },
-        ]}
-      />
+                ),
+            },
+          ]}
+        />
+      )}
       <section className="shift-card__section">
         <Heading>{t("office.codeSearch.card.placements")}</Heading>
         <PagedTable

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, DatePicker } from "@markiro/ui";
@@ -13,7 +13,55 @@ import { datePickerTexts } from "../shifts/shift-text.js";
  * (the pinned layout contract: `.office-list-card` shrinks and bounds its table).
  */
 export function ListCard({ children }: { children: ReactNode }) {
-  return <section className="office-list-card">{children}</section>;
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const card = ref.current;
+    if (card === null) return;
+    const measure = () => {
+      const heightOf = (element: Element): number => {
+        if (element.classList.contains("office-paged")) {
+          const height = [...element.children].reduce((sum, child) => sum + heightOf(child), 0);
+          if (element instanceof HTMLElement)
+            element.style.setProperty("--office-paged-min-height", `${height}px`);
+          return height;
+        }
+        if (element.classList.contains("mk-table")) {
+          const floor =
+            Number.parseFloat(getComputedStyle(element).getPropertyValue("--office-table-floor")) ||
+            0;
+          return element.querySelector(".office-list-state") ? Math.max(floor, 204) : floor;
+        }
+        if (element.classList.contains("office-list-body")) return 160;
+        return element.getBoundingClientRect().height;
+      };
+      const height = [...card.children].reduce((sum, child) => sum + heightOf(child), 2);
+      const value = `${height}px`;
+      if (card.style.getPropertyValue("--office-list-min-height") !== value)
+        card.style.setProperty("--office-list-min-height", value);
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    const observe = () => {
+      observer?.disconnect();
+      observer?.observe(card);
+      for (const element of card.querySelectorAll(
+        ".office-list-filters, .office-list-notes, .office-list-form, .office-pagination, .office-list-state",
+      ))
+        observer?.observe(element);
+      measure();
+    };
+    const mutations = new MutationObserver(observe);
+    mutations.observe(card, { childList: true, subtree: true });
+    observe();
+    return () => {
+      observer?.disconnect();
+      mutations.disconnect();
+    };
+  }, []);
+  return (
+    <section ref={ref} className="office-list-card">
+      {children}
+    </section>
+  );
 }
 
 export interface ListFiltersProps {

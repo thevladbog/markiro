@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "markiro-host"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "aws-lc-rs",
  "axum",
@@ -2534,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "markiro-proto"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
@@ -2545,7 +2545,7 @@ dependencies = [
 
 [[package]]
 name = "markiro-standalone"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "markiro-host",

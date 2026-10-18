@@ -31,5 +31,6 @@ export function fillEngaged(contentPx: number, availablePx: number): boolean {
 
 /** The table's inline style for `rowCount` rows: its floor as the custom property `list.css` reads. */
 export function tableFloorStyle(rowCount: number): CSSProperties {
-  return { "--office-table-floor": `${tableFloorPx(rowCount)}px` } as CSSProperties;
+  const floor = tableFloorPx(rowCount);
+  return { "--office-table-floor": `${floor}px`, minHeight: floor } as CSSProperties;
 }

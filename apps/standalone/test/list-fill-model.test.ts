@@ -6,9 +6,14 @@ import {
   TABLE_FLOOR_PX,
   fillEngaged,
   tableFloorPx,
+  tableFloorStyle,
 } from "../src/office/list/fill-model.js";
 
 describe("the list's fill / shrink decision", () => {
+  it("overrides Table fill's inline zero floor with the bounded visible-row floor", () => {
+    expect(tableFloorStyle(3)).toEqual({ "--office-table-floor": "212px", minHeight: 212 });
+    expect(tableFloorStyle(30)).toEqual({ "--office-table-floor": "268px", minHeight: 268 });
+  });
   it("never asks for more than the rows themselves need, so a short list has no empty room under its last row", () => {
     expect(tableFloorPx(0)).toBe(HEADING_PX);
     expect(tableFloorPx(1)).toBe(HEADING_PX + ROW_PX);

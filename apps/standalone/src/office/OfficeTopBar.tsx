@@ -1,10 +1,12 @@
 import { useTranslation } from "react-i18next";
+import { Fragment } from "react";
+import { Link } from "react-router";
 
 import { IconButton, Button } from "@markiro/ui";
 
 import { HostStatusDot } from "../app/HostStatusDot.js";
 import type { OfficeUser } from "../host/protocol.js";
-import { crumbsFor } from "./nav-groups.js";
+import { crumbsFor, crumbTrail } from "./nav-groups.js";
 import { OfficeIcon } from "./OfficeIcon.js";
 import { syncChipModel, useLastSyncTime } from "./sync-chip.js";
 import { ThemeSwitcher } from "./ThemeSwitcher.js";
@@ -15,6 +17,7 @@ import { useOfficeLink } from "./office-link.js";
 export interface OfficeTopBarProps {
   user: OfficeUser;
   pathname: string;
+  search?: string;
   menuCollapsed: boolean;
   menuId: string;
   onToggleMenu: () => void;
@@ -35,6 +38,7 @@ export interface OfficeTopBarProps {
 export function OfficeTopBar({
   user,
   pathname,
+  search = "",
   menuCollapsed,
   menuId,
   onToggleMenu,
@@ -49,6 +53,7 @@ export function OfficeTopBar({
   const doneAt = useLastSyncTime(link.sync);
   const sync = syncChipModel(link.sync, doneAt);
   const crumbs = crumbsFor(pathname);
+  const trail = crumbTrail(pathname, search);
   return (
     <header className="office-header">
       <div className="office-header__lead">
@@ -65,12 +70,22 @@ export function OfficeTopBar({
           <nav aria-label={t("office.header.crumbs")} className="office-crumbs">
             <ol>
               <li>{t(crumbs.sectionKey)}</li>
-              <li aria-hidden="true" className="office-crumbs__sep">
-                <OfficeIcon name="caretRight" size={14} />
-              </li>
-              <li aria-current="page" className="office-crumbs__page">
-                {t(crumbs.labelKey)}
-              </li>
+              {trail.map((crumb, index) => (
+                <Fragment key={`${crumb.labelKey}-${index}`}>
+                  <li aria-hidden="true" className="office-crumbs__sep">
+                    <OfficeIcon name="caretRight" size={14} />
+                  </li>
+                  {crumb.to === undefined ? (
+                    <li aria-current="page" className="office-crumbs__page">
+                      {t(crumb.labelKey)}
+                    </li>
+                  ) : (
+                    <li>
+                      <Link to={crumb.to}>{t(crumb.labelKey)}</Link>
+                    </li>
+                  )}
+                </Fragment>
+              ))}
             </ol>
           </nav>
         )}

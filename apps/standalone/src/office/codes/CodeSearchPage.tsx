@@ -14,33 +14,36 @@ import {
 } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
+import type { HostApi } from "../../host/api.js";
+import { CODE_PAGE_SIZE, CODE_SEARCH_CAP } from "../../host/code-search.js";
+import type {
+  CodeRegistryItem,
+  CodeRegistryPage,
+  CodeRegistrySource,
+} from "../../host/code-registry.js";
 import {
-  CODE_PAGE_SIZE,
-  CODE_SEARCH_CAP,
-  type OfficeCodeItem,
-  type OfficeCodePage,
-} from "../../host/code-search.js";
+  CodeRegistryCardView,
+  SourceChip,
+  RegistryState,
+  RegistryShift,
+  CloudPack,
+  cloudInstant,
+  registryCodeText,
+  registryKey,
+} from "./CodeRegistryCard.js";
 import { civilToday, isCivilDate } from "../../lib/civil-date.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { DateRange, FilterGroup, FilterPanel, FilterRow, ListCard } from "../list/ListCard.js";
 import { Segmented } from "../list/Segmented.js";
+import { tableFloorStyle } from "../list/fill-model.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { PaginationBar } from "../paging/PaginationBar.js";
 import { usePageSize } from "../paging/page-size.js";
 import { useHostWindowRows } from "../paging/use-host-window.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { civilDateLabel } from "../shifts/shift-list.js";
-import {
-  boxLabel,
-  CodeCardView,
-  codeText,
-  instantFormat,
-  palletLabel,
-  PlacementChip,
-  ShiftLink,
-  type FormatInstant,
-} from "./CodeCard.js";
+import { boxLabel, instantFormat, palletLabel, type FormatInstant } from "./CodeCard.js";
 import {
   classifySearchInput,
   DEFAULT_PRESET,
@@ -59,8 +62,14 @@ const COUNT = new Intl.NumberFormat("ru");
 
 /** The query keys of the search: a page of one query, one code's card. */
 const codeKeys = {
-  page: (query: unknown) => ["office", "codes", "page", query],
-  card: (codeHash: string) => ["office", "codes", "card", codeHash],
+  page: (query: unknown) => ["office", "code-registry", "page", query],
+  card: (codeHash: string, source: CodeRegistrySource) => [
+    "office",
+    "code-registry",
+    "card",
+    codeHash,
+    source,
+  ],
 } as const;
 
 /**
@@ -75,6 +84,7 @@ function askedOf(params: URLSearchParams): {
   /** `?period=all`: every scan day, asked for on purpose. */
   all: boolean;
   page: number;
+  source: CodeRegistrySource;
 } {
   const codeHash = params.get("codeHash");
   const gtin = params.get("gtin");
@@ -93,6 +103,12 @@ function askedOf(params: URLSearchParams): {
   const page = Number(params.get("page"));
   return {
     input,
+    source:
+      params.get("source") === "cloud"
+        ? "cloud"
+        : params.get("source") === "local"
+          ? "local"
+          : "all",
     from: isCivilDate(from) ? from : "",
     to: isCivilDate(to) ? to : "",
     all: params.get("period") === "all",
@@ -120,8 +136,10 @@ function paramsOf(
   to: string,
   page: number,
   all = false,
+  source: CodeRegistrySource = "all",
 ): URLSearchParams {
   const params = new URLSearchParams();
+  if (source !== "all") params.set("source", source);
   if (input.kind === "code") params.set("codeHash", input.codeHash);
   if (input.kind === "gtin") params.set("gtin", input.gtin14);
   if (input.kind === "sscc") params.set("sscc", input.sscc);
@@ -151,14 +169,36 @@ function isNotFound(error: unknown): boolean {
   return error instanceof HostError && error.code === "not_found";
 }
 
+class RegistryUnavailable extends Error {}
+
+/** A legacy host and a missing code both answer 404; the collection distinguishes them. */
+async function readRegistryCard(
+  api: HostApi,
+  token: string,
+  hash: string,
+  source: CodeRegistrySource,
+) {
+  try {
+    return await api.getCodeRegistryCard(token, hash, source);
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+    try {
+      await api.searchCodeRegistry(token, { codeHash: hash, source });
+    } catch (probeError) {
+      if (isNotFound(probeError)) throw new RegistryUnavailable();
+      throw probeError;
+    }
+    throw error;
+  }
+}
+
 /**
  * «Поиск кодов» (the owner's beta feedback; the cloud admin's code search
  * for one site): a code of marking, a GTIN, a box's or a pallet's SSCC or a
  * shift's number, and a period of scan days, find where codes were put. A
  * code opens its card at once; any other search lists the placements and a
- * row opens its code's card. Only what the stations of this site sent is
- * here: the cloud's history does not move with the transfer. Every role
- * reads it; times are in the organization's zone, as on a shift's card.
+ * row opens its code's card. Local journals and accepted imported snapshots
+ * share the search, with explicit provenance and original source timezones.
  */
 export function CodeSearchPage() {
   const { t } = useTranslation();
@@ -191,8 +231,10 @@ export function CodeSearchPage() {
   // `?page=` is the office's page.
   const [pageSize, setPageSize] = usePageSize("code-search");
   const askedPage = Math.min(asked.page, Math.ceil(CODE_SEARCH_CAP / pageSize));
-  const hostQuery = (hostPage: number) =>
-    searchQuery(asked.input, applied.from, applied.to, zone, hostPage, asked.all);
+  const hostQuery = (hostPage: number) => {
+    const query = searchQuery(asked.input, applied.from, applied.to, zone, hostPage, asked.all);
+    return query === null ? null : { ...query, source: asked.source };
+  };
   const query = hostQuery(1);
   const activeShifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) =>
     api.listShifts(token),
@@ -200,11 +242,11 @@ export function CodeSearchPage() {
   const activeShift = activeShifts.data?.find((shift) => shift.status === "active") ?? null;
   const codeHash = asked.input.kind === "code" ? asked.input.codeHash : null;
   const card = useOfficeQuery(
-    codeKeys.card(codeHash ?? ""),
-    (api, token) => api.getCodeCard(token, codeHash ?? ""),
+    codeKeys.card(codeHash ?? "", asked.source),
+    (api, token) => readRegistryCard(api, token, codeHash ?? "", asked.source),
     { enabled: codeHash !== null },
   );
-  const window = useHostWindowRows<OfficeCodeItem, OfficeCodePage>({
+  const window = useHostWindowRows<CodeRegistryItem, CodeRegistryPage>({
     page: askedPage,
     pageSize,
     hostSize: CODE_PAGE_SIZE,
@@ -212,7 +254,7 @@ export function CodeSearchPage() {
     read: (api, token, hostPage) => {
       const next = hostQuery(hostPage);
       if (next === null) throw new Error("no search");
-      return api.searchCodes(token, next);
+      return api.searchCodeRegistry(token, next);
     },
     enabled: zoneReady && query !== null && codeHash === null,
   });
@@ -231,7 +273,7 @@ export function CodeSearchPage() {
     // No criterion and no days: every day, on purpose (the host wants one of them).
     const everything = input.kind === "empty" && from === "" && to === "";
     setEdit(null);
-    setParams(paramsOf(input, from, to, 1, everything));
+    setParams(paramsOf(input, from, to, 1, everything, asked.source));
   };
   const choosePreset = (preset: PeriodPreset) => {
     const input = classifySearchInput(text);
@@ -242,7 +284,7 @@ export function CodeSearchPage() {
     setInputError(false);
     const period = presetPeriod(preset, today);
     setEdit(null);
-    setParams(paramsOf(input, period.from, period.to, 1, preset === "all"));
+    setParams(paramsOf(input, period.from, period.to, 1, preset === "all", asked.source));
   };
   const reset = () => {
     setText("");
@@ -252,47 +294,65 @@ export function CodeSearchPage() {
   };
   const activePreset = presetOf(shown, today);
 
-  const columns: TableColumn<OfficeCodeItem>[] = [
+  const columns: TableColumn<CodeRegistryItem>[] = [
+    { key: "code", title: t("office.codeSearch.table.code"), mono: true, render: registryCodeText },
     {
-      key: "code",
-      title: t("office.codeSearch.table.code"),
-      mono: true,
-      render: (item) => codeText(item),
+      key: "source",
+      title: t("office.codeSearch.sources.label"),
+      render: (row) => <SourceChip source={row.source} />,
     },
-    { key: "productName", title: t("office.codeSearch.table.product") },
+    {
+      key: "productName",
+      title: t("office.codeSearch.table.product"),
+      render: (row) => row.item.productName ?? t("office.common.none"),
+    },
     {
       key: "state",
       title: t("office.codeSearch.table.state"),
-      render: (item) => <PlacementChip state={item.state} />,
+      render: (row) => <RegistryState row={row} />,
     },
     {
       key: "box",
       title: t("office.codeSearch.table.box"),
       mono: true,
-      render: (item) => boxLabel(item, t),
+      render: (row) =>
+        row.source === "local" ? boxLabel(row.item, t) : <CloudPack item={row.item} kind="box" />,
     },
     {
       key: "pallet",
       title: t("office.codeSearch.table.pallet"),
       mono: true,
-      render: (item) => palletLabel(item, t),
+      render: (row) =>
+        row.source === "local" ? (
+          palletLabel(row.item, t)
+        ) : (
+          <CloudPack item={row.item} kind="pallet" />
+        ),
     },
     {
       key: "shift",
       title: t("office.codeSearch.table.shift"),
-      render: (item) => <ShiftLink item={item} />,
+      render: (row) => <RegistryShift row={row} />,
     },
-    { key: "lineName", title: t("office.codeSearch.table.line") },
+    {
+      key: "lineName",
+      title: t("office.codeSearch.table.line"),
+      render: (row) => row.item.lineName ?? t("office.common.none"),
+    },
     {
       key: "scannedAt",
       title: t("office.codeSearch.table.scannedAt"),
       mono: true,
-      render: (item) => format(item.scannedAt),
+      render: (row) =>
+        row.source === "local" ? format(row.item.scannedAt) : cloudInstant(row.item),
     },
     {
       key: "operatorName",
       title: t("office.codeSearch.table.operator"),
-      render: (item) => item.operatorName ?? t("office.common.none"),
+      render: (row) =>
+        row.source === "local"
+          ? (row.item.operatorName ?? t("office.common.none"))
+          : t("office.common.none"),
     },
   ];
 
@@ -303,6 +363,8 @@ export function CodeSearchPage() {
     if (codeHash !== null) {
       if (card.isPending) return body(<PageLoading />);
       if (card.isError) {
+        if (card.error instanceof RegistryUnavailable)
+          return body(<EmptyState title={t("office.codeSearch.hostUpdateRequired")} />);
         return body(
           isNotFound(card.error) ? (
             <EmptyState title={t("office.codeSearch.codeNotFound")} hint={notHere} />
@@ -311,7 +373,7 @@ export function CodeSearchPage() {
           ),
         );
       }
-      return body(<CodeCardView card={card.data} format={format} headingLevel="h2" />);
+      return body(<CodeRegistryCardView card={card.data} format={format} headingLevel="h2" />);
     }
     if (query === null) {
       return body(
@@ -325,6 +387,8 @@ export function CodeSearchPage() {
     const periodNote = applied.from === "" && applied.to === "" ? null : periodSentence(t, applied);
     if (page.isPending) return body(<PageLoading />);
     if (page.isError) {
+      if (isNotFound(page.error))
+        return body(<EmptyState title={t("office.codeSearch.hostUpdateRequired")} />);
       return body(<LoadError error={page.error} onRetry={() => void page.refetch()} />);
     }
     if (page.data.total === 0) {
@@ -355,10 +419,11 @@ export function CodeSearchPage() {
       <div className="office-paged">
         <Table
           fill
+          style={tableFloorStyle(rows.length)}
           columns={columns}
           rows={rows}
-          getRowKey={(item) => item.scanId}
-          onRowClick={(item) => setSelected(item.codeHash)}
+          getRowKey={registryKey}
+          onRowClick={(item) => setSelected(item.item.codeHash)}
           empty={t("office.codeSearch.pastLastPage")}
           scrollLabel={t("office.codeSearch.table.label")}
         />
@@ -371,10 +436,12 @@ export function CodeSearchPage() {
           total={window.reachable}
           pageCount={window.pageCount}
           hasNext={shown < window.pageCount}
-          onPage={(next) => setParams(paramsOf(asked.input, asked.from, asked.to, next, asked.all))}
+          onPage={(next) =>
+            setParams(paramsOf(asked.input, asked.from, asked.to, next, asked.all, asked.source))
+          }
           onPageSize={(size) => {
             setPageSize(size);
-            setParams(paramsOf(asked.input, asked.from, asked.to, 1, asked.all));
+            setParams(paramsOf(asked.input, asked.from, asked.to, 1, asked.all, asked.source));
           }}
         />
       </div>
@@ -404,6 +471,22 @@ export function CodeSearchPage() {
           noValidate
         >
           <FilterPanel label={t("office.codeSearch.filters")}>
+            <FilterRow>
+              <FilterGroup label={t("office.codeSearch.sources.label")}>
+                <Segmented
+                  label={t("office.codeSearch.sources.label")}
+                  value={asked.source}
+                  options={(["all", "local", "cloud"] as const).map((id) => ({
+                    id,
+                    label: t(`office.codeSearch.sources.${id}`),
+                  }))}
+                  onChange={(source) => {
+                    setSelected(null);
+                    setParams(paramsOf(asked.input, asked.from, asked.to, 1, asked.all, source));
+                  }}
+                />
+              </FilterGroup>
+            </FilterRow>
             <FilterRow>
               <Input
                 mono
@@ -489,24 +572,36 @@ export function CodeSearchPage() {
         closeLabel={t("office.common.close")}
         onClose={() => setSelected(null)}
       >
-        {selected !== null && <SelectedCard codeHash={selected} format={format} />}
+        {selected !== null && (
+          <SelectedCard codeHash={selected} format={format} source={asked.source} />
+        )}
       </Drawer>
     </>
   );
 }
 
-function SelectedCard({ codeHash, format }: { codeHash: string; format: FormatInstant }) {
+function SelectedCard({
+  codeHash,
+  format,
+  source,
+}: {
+  codeHash: string;
+  format: FormatInstant;
+  source: CodeRegistrySource;
+}) {
   const { t } = useTranslation();
-  const card = useOfficeQuery(codeKeys.card(codeHash), (api, token) =>
-    api.getCodeCard(token, codeHash),
+  const card = useOfficeQuery(codeKeys.card(codeHash, source), (api, token) =>
+    readRegistryCard(api, token, codeHash, source),
   );
   if (card.isPending) return <PageLoading />;
   if (card.isError) {
+    if (card.error instanceof RegistryUnavailable)
+      return <EmptyState title={t("office.codeSearch.hostUpdateRequired")} />;
     return isNotFound(card.error) ? (
       <EmptyState title={t("office.codeSearch.codeNotFound")} />
     ) : (
       <LoadError error={card.error} onRetry={() => void card.refetch()} />
     );
   }
-  return <CodeCardView card={card.data} format={format} headingLevel="h3" />;
+  return <CodeRegistryCardView card={card.data} format={format} headingLevel="h3" />;
 }

@@ -1,10 +1,10 @@
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import { cn } from "@markiro/ui";
 
-import type { NavGroup } from "./nav-groups.js";
+import { menuPathFor, type NavGroup } from "./nav-groups.js";
 import { OfficeBrandMark } from "./OfficeBrand.js";
 import { OfficeIcon } from "./OfficeIcon.js";
 
@@ -19,11 +19,12 @@ export interface OfficeSidebarProps {
  * The office menu: one style for every entry (an icon and a name, one height from
  * `--menu-item-h`), the active one filled; the groups named in small capitals and the settings
  * block set apart by one hairline rule. Collapsed it is icons only (76 px): the names stay in the
- * document for a screen reader and show as a tooltip. No `end` on the links: a section stays
- * marked on its own sub-pages («Шаблоны» on `/templates/new`); «Обзор» (`/`) matches only `/`.
+ * document for a screen reader and show as a tooltip. A section stays marked on its sub-pages
+ * («Шаблоны» on `/templates/new`); «Обзор» matches only `/`, cloud history belongs to «Смены».
  */
 export function OfficeSidebar({ groups, collapsed, id }: OfficeSidebarProps) {
   const { t } = useTranslation();
+  const pathname = menuPathFor(useLocation().pathname);
   return (
     <nav
       id={id}
@@ -43,20 +44,23 @@ export function OfficeSidebar({ groups, collapsed, id }: OfficeSidebarProps) {
                 <span>{t(group.sectionKey)}</span>
               </li>
             )}
-            {group.items.map((item) => (
-              <li key={item.to}>
-                <NavLink
-                  to={item.to}
-                  title={collapsed ? t(item.labelKey) : undefined}
-                  className={({ isActive }) =>
-                    cn("office-menu__link", isActive && "office-menu__link--active")
-                  }
-                >
-                  <OfficeIcon name={item.icon} />
-                  <span className="office-menu__label">{t(item.labelKey)}</span>
-                </NavLink>
-              </li>
-            ))}
+            {group.items.map((item) => {
+              const active =
+                pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`));
+              return (
+                <li key={item.to}>
+                  <Link
+                    to={item.to}
+                    title={collapsed ? t(item.labelKey) : undefined}
+                    className={cn("office-menu__link", active && "office-menu__link--active")}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <OfficeIcon name={item.icon} />
+                    <span className="office-menu__label">{t(item.labelKey)}</span>
+                  </Link>
+                </li>
+              );
+            })}
           </Fragment>
         ))}
       </ul>

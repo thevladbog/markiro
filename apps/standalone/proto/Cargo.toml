@@ -1,6 +1,6 @@
 [package]
 name = "markiro-proto"
-version = "0.1.1"
+version = "1.0.0"
 description = "Wire contract between the Markiro standalone host and its devices"
 edition = "2021"
 license-file = "../../../LICENSE"

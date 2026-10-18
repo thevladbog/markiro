@@ -141,26 +141,28 @@ function Versions({
         scrollLabel={t("office.about.update.devices.table")}
         empty={t("office.about.update.devices.empty")}
       />
-      <h4>{t("office.about.update.history.title")}</h4>
-      {status.history.length === 0 ? (
-        <p className="office-note">{t("office.about.update.history.empty")}</p>
-      ) : (
-        <ul className="update-history">
-          {status.history.map((item, index) => (
-            // Equal entries can repeat (one second, one actor): the order is the identity.
-            <li key={`${index}:${item.at}:${item.action}:${item.actor ?? ""}`}>
-              {format(item.at)} —{" "}
-              {t(historyActionKey(item.action, i18n), {
-                actor: item.actor ?? "—",
-                version: item.version ?? item.to ?? "",
-                from: item.from ?? "",
-                to: item.to ?? "",
-              })}
-              {item.result === "ok" ? "" : ` (${t("office.about.update.history.failed")})`}
-            </li>
-          ))}
-        </ul>
-      )}
+      <section className="office-section-intro">
+        <h4>{t("office.about.update.history.title")}</h4>
+        {status.history.length === 0 ? (
+          <p className="office-note">{t("office.about.update.history.empty")}</p>
+        ) : (
+          <ul className="update-history">
+            {status.history.map((item, index) => (
+              // Equal entries can repeat (one second, one actor): the order is the identity.
+              <li key={`${index}:${item.at}:${item.action}:${item.actor ?? ""}`}>
+                {format(item.at)} —{" "}
+                {t(historyActionKey(item.action, i18n), {
+                  actor: item.actor ?? "—",
+                  version: item.version ?? item.to ?? "",
+                  from: item.from ?? "",
+                  to: item.to ?? "",
+                })}
+                {item.result === "ok" ? "" : ` (${t("office.about.update.history.failed")})`}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </>
   );
 }

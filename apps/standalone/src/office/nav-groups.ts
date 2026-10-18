@@ -47,7 +47,7 @@ export function navGroups(role: OfficeRole): NavGroup[] {
  * menu has none.
  */
 export function crumbsFor(pathname: string): { sectionKey: string; labelKey: string } | null {
-  if (/^\/cloud-(shifts|boxes|pallets)(?:\/|$)/.test(pathname)) pathname = "/shifts";
+  pathname = menuPathFor(pathname);
   let best: OfficeNavItem | null = null;
   for (const item of OFFICE_NAV) {
     const matches =
@@ -57,4 +57,51 @@ export function crumbsFor(pathname: string): { sectionKey: string; labelKey: str
     if (matches && (best === null || item.to.length > best.to.length)) best = item;
   }
   return best === null ? null : { sectionKey: best.sectionKey, labelKey: best.labelKey };
+}
+
+/** Imported cards belong to Production / Shifts throughout menu and breadcrumb navigation. */
+export function menuPathFor(pathname: string): string {
+  return /^\/cloud-(shifts|boxes|pallets)(?:\/|$)/.test(pathname) ? "/shifts" : pathname;
+}
+
+export interface OfficeCrumb {
+  labelKey: string;
+  to?: string;
+}
+
+/** Parent links use actual routes; the current card never needs fabricated source metadata. */
+export function crumbTrail(pathname: string, search = ""): OfficeCrumb[] {
+  if (/^\/cloud-(shifts|boxes|pallets)(?:\/|$)/.test(pathname)) {
+    const parent = [{ labelKey: "office.nav.shifts", to: "/shifts" }];
+    if (pathname === "/cloud-shifts") return [...parent, { labelKey: "office.cloudShifts.cloud" }];
+    const card = pathname.startsWith("/cloud-boxes/")
+      ? "box"
+      : pathname.startsWith("/cloud-pallets/")
+        ? "pallet"
+        : "shift";
+    return [
+      ...parent,
+      { labelKey: "office.cloudShifts.cloud", to: "/cloud-shifts" },
+      { labelKey: `office.header.cards.${card}` },
+    ];
+  }
+  if (pathname === "/shifts" && new URLSearchParams(search).has("shift")) {
+    return [
+      { labelKey: "office.nav.shifts", to: "/shifts" },
+      { labelKey: "office.header.cards.shift" },
+    ];
+  }
+  if (/^\/codes\/(?:box|pallet)\//.test(pathname)) {
+    const box = pathname.startsWith("/codes/box/");
+    return [
+      { labelKey: "office.nav.codeSearch", to: "/codes" },
+      {
+        labelKey: `office.registry.${box ? "boxes" : "pallets"}`,
+        to: `/codes/${box ? "boxes" : "pallets"}`,
+      },
+      { labelKey: `office.header.cards.${box ? "box" : "pallet"}` },
+    ];
+  }
+  const page = crumbsFor(pathname);
+  return page === null ? [] : [{ labelKey: page.labelKey }];
 }

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
-import { Alert, Button, Card, DefinitionGrid, Input, PageHeader, Select, Table } from "@markiro/ui";
+import { Alert, Button, Card, DefinitionGrid, PageHeader, Select, Table } from "@markiro/ui";
 import type { CloudShiftQuery } from "../../host/api.js";
 import type { CloudPalletRows } from "../../host/cloud-history-read.js";
 import type { ShiftExportRecord } from "../../host/protocol.js";
@@ -20,6 +20,9 @@ import { runCloudPalletExport } from "../exports/run-export.js";
 import { CloudFormDialog, type CloudFormTarget } from "../forms/CloudFormDialog.js";
 import { instantFormat } from "../codes/CodeCard.js";
 import { civilDateLabel } from "./shift-list.js";
+import { DateRange, ListCard, ListFilters } from "../list/ListCard.js";
+import { ListEmpty, ListNothing, ListSkeleton } from "../list/ListStates.js";
+import { tableFloorStyle } from "../list/fill-model.js";
 
 const ExportDialog = lazy(() =>
   import("../exports/ExportDialog.js").then((module) => ({ default: module.ExportDialog })),
@@ -37,7 +40,7 @@ const cloudDate = (date: string | null) => (date === null ? "—" : civilDateLab
 export function ShiftSourceLinks({ cloud = false }: { cloud?: boolean }) {
   const { t } = useTranslation();
   return (
-    <nav aria-label={t("office.cloudShifts.source")} className="standalone-form__actions">
+    <nav aria-label={t("office.cloudShifts.source")} className="office-source-nav">
       <Link aria-current={!cloud ? "page" : undefined} to="/shifts">
         {t("office.cloudShifts.native")}
       </Link>
@@ -53,6 +56,8 @@ export function CloudShifts() {
   const result = useOfficeQuery(officeKeys.cloudShiftList(query), (api, token) =>
     api.listCloudShifts(token, query),
   );
+  const filtered = Boolean(query.from || query.to || query.mode);
+  const reset = () => setQuery({ page: 1 });
   return (
     <>
       <PageHeader
@@ -60,19 +65,16 @@ export function CloudShifts() {
         description={t("office.cloudShifts.description")}
       />
       <ShiftSourceLinks cloud />
-      <Card>
-        <div className="standalone-form__actions">
-          <Input
-            type="date"
-            label={t("office.shifts.period.from")}
-            value={query.from ?? ""}
-            onChange={(event) => setQuery({ ...query, from: event.target.value, page: 1 })}
-          />
-          <Input
-            type="date"
-            label={t("office.shifts.period.to")}
-            value={query.to ?? ""}
-            onChange={(event) => setQuery({ ...query, to: event.target.value, page: 1 })}
+      <ListCard>
+        <ListFilters label={t("office.shifts.filters")} onReset={filtered ? reset : undefined}>
+          <DateRange
+            label={t("office.shifts.period.productionLabel")}
+            fromLabel={t("office.shifts.period.from")}
+            toLabel={t("office.shifts.period.to")}
+            from={query.from ?? ""}
+            to={query.to ?? ""}
+            onFrom={(from) => setQuery({ ...query, from, page: 1 })}
+            onTo={(to) => setQuery({ ...query, to, page: 1 })}
           />
           <Select
             label={t("office.cloudShifts.mode")}
@@ -90,14 +92,19 @@ export function CloudShifts() {
               )
             }
           />
-        </div>
+        </ListFilters>
         {result.isPending ? (
-          <PageLoading />
+          <ListSkeleton />
         ) : result.isError ? (
-          <CloudReadError error={result.error} retry={() => void result.refetch()} />
+          <div className="office-list-state">
+            <CloudReadError error={result.error} retry={() => void result.refetch()} />
+          </div>
         ) : (
-          <>
+          <div className="office-paged">
             <Table
+              fill
+              style={tableFloorStyle(result.data.items.length)}
+              scrollLabel={t("office.cloudShifts.cloud")}
               columns={[
                 {
                   key: "number",
@@ -109,6 +116,8 @@ export function CloudShifts() {
                 {
                   key: "product",
                   title: t("office.shifts.table.productAndPrint"),
+                  wrap: true,
+                  minWidth: 220,
                   render: (row) => row.shift.productName ?? t("office.common.none"),
                 },
                 {
@@ -119,6 +128,8 @@ export function CloudShifts() {
                 {
                   key: "line",
                   title: t("office.shifts.table.line"),
+                  wrap: true,
+                  minWidth: 110,
                   render: (row) => row.shift.lineName ?? t("office.common.none"),
                 },
                 {
@@ -129,34 +140,44 @@ export function CloudShifts() {
               ]}
               rows={result.data.items}
               getRowKey={(row) => row.shift.id}
-              empty={t("office.cloudShifts.empty")}
+              empty={
+                filtered ? (
+                  <ListNothing onReset={reset} />
+                ) : (
+                  <ListEmpty icon="calendarCheck" title={t("office.cloudShifts.empty")} />
+                )
+              }
             />
-            <div className="standalone-form__actions">
-              <Button
-                variant="secondary"
-                disabled={result.data.page <= 1}
-                onClick={() => setQuery({ ...query, page: result.data.page - 1 })}
-              >
-                {t("office.cloudShifts.previous")}
-              </Button>
-              <span>
-                {t("office.cloudShifts.page", {
-                  page: result.data.page,
-                  total: result.data.pageCount,
-                  count: result.data.total,
-                })}
-              </span>
-              <Button
-                variant="secondary"
-                disabled={result.data.page >= result.data.pageCount}
-                onClick={() => setQuery({ ...query, page: result.data.page + 1 })}
-              >
-                {t("office.cloudShifts.next")}
-              </Button>
-            </div>
-          </>
+            {result.data.total > 0 && (
+              <nav className="office-pagination" aria-label={t("office.shifts.pager")}>
+                <span className="office-pagination__range">
+                  {t("office.cloudShifts.page", {
+                    page: result.data.page,
+                    total: result.data.pageCount,
+                    count: result.data.total,
+                  })}
+                </span>
+                <div className="office-pagination__pages">
+                  <Button
+                    variant="secondary"
+                    disabled={result.data.page <= 1}
+                    onClick={() => setQuery({ ...query, page: result.data.page - 1 })}
+                  >
+                    {t("office.cloudShifts.previous")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={result.data.page >= result.data.pageCount}
+                    onClick={() => setQuery({ ...query, page: result.data.page + 1 })}
+                  >
+                    {t("office.cloudShifts.next")}
+                  </Button>
+                </div>
+              </nav>
+            )}
+          </div>
         )}
-      </Card>
+      </ListCard>
     </>
   );
 }

@@ -64,6 +64,7 @@ export function OfficeShell() {
           <OfficeTopBar
             user={session.user}
             pathname={location.pathname}
+            search={location.search}
             menuCollapsed={collapsed}
             menuId={menuId}
             onToggleMenu={() => setMenuOverride(!collapsed)}

@@ -292,6 +292,12 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     })),
     searchCodes: vi.fn<HostApi["searchCodes"]>(() => unexpected("searchCodes")),
     getCodeCard: vi.fn<HostApi["getCodeCard"]>(() => unexpected("getCodeCard")),
+    searchCodeRegistry: vi.fn<HostApi["searchCodeRegistry"]>(() =>
+      unexpected("searchCodeRegistry"),
+    ),
+    getCodeRegistryCard: vi.fn<HostApi["getCodeRegistryCard"]>(() =>
+      unexpected("getCodeRegistryCard"),
+    ),
     getBoxCard: vi.fn<HostApi["getBoxCard"]>(() => unexpected("getBoxCard")),
     getPalletCard: vi.fn<HostApi["getPalletCard"]>(() => unexpected("getPalletCard")),
     listPallets: vi.fn<HostApi["listPallets"]>(() => unexpected("listPallets")),

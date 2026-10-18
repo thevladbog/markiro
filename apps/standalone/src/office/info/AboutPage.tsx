@@ -48,7 +48,7 @@ export function AboutPage() {
         </ul>
       </nav>
       {sections.map(({ id, Component }) => (
-        <div key={id} id={id} tabIndex={-1}>
+        <div key={id} id={id} tabIndex={-1} className="office-stack">
           <Component />
         </div>
       ))}

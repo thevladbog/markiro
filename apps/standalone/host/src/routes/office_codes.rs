@@ -17,6 +17,8 @@
 //! criteria are bound, never written into it. A search counts at most
 //! [`CODE_SEARCH_CAP`] matches; a search that matches more is narrowed.
 
+pub mod registry;
+
 use std::collections::HashMap;
 
 use axum::extract::State;
@@ -82,12 +84,10 @@ macro_rules! narrowed {
     };
 }
 
-/// A search query's rows: the placement, its box and pallet, the shift with
-/// its product and line, the station and the operator, newest scan first.
-macro_rules! items {
-    ($from:literal, $driver:literal) => {
-        concat!(
-            "SELECT s.id AS scan_id, s.code_hash, s.gtin14, s.serial, s.scanned_at, \
+// Shared native projection: both legacy search and bounded registry hydration.
+macro_rules! item_columns {
+    () => {
+        "SELECT s.id AS scan_id, s.code_hash, s.gtin14, s.serial, s.scanned_at, \
              i.removed_at, CASE WHEN i.scan_id IS NULL \
              THEN (SELECT MIN(c.detected_at) FROM code_conflicts c \
                    WHERE c.code_hash = s.code_hash AND c.loser_scan_id = s.id) \
@@ -98,7 +98,16 @@ macro_rules! items {
              sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
              sh.status AS shift_status, sh.production_date, pr.name AS product_name, \
              l.name AS line_name, s.device_id, d.name AS device_name, \
-             op.name AS operator_name ",
+             op.name AS operator_name "
+    };
+}
+
+/// A search query's rows: the placement, its box and pallet, the shift with
+/// its product and line, the station and the operator, newest scan first.
+macro_rules! items {
+    ($from:literal, $driver:literal) => {
+        concat!(
+            item_columns!(),
             $from,
             " JOIN shifts sh ON sh.id = s.shift_id JOIN products pr ON pr.id = sh.product_id \
              JOIN lines l ON l.id = sh.line_id JOIN devices d ON d.id = s.device_id \
@@ -121,6 +130,19 @@ macro_rules! count {
             $driver,
             narrowed!(),
             " LIMIT ?8)"
+        )
+    };
+}
+
+// The registry pages compact keys through the same proven placement predicates.
+macro_rules! registry_keys {
+    ($from:literal, $driver:literal) => {
+        concat!(
+            "SELECT 'local' AS source, s.id AS key, julianday(s.scanned_at) AS at ",
+            $from,
+            " WHERE ",
+            $driver,
+            narrowed!()
         )
     };
 }
@@ -185,6 +207,15 @@ macro_rules! drivers {
 pub const ITEMS_SQL: [(&str, &str); 6] = drivers!(items);
 /// The counts of each driver, in [`Driver`]'s order.
 pub const COUNT_SQL: [(&str, &str); 6] = drivers!(count);
+const REGISTRY_KEYS_SQL: [(&str, &str); 6] = drivers!(registry_keys);
+const REGISTRY_HYDRATE_SQL: &str = concat!(
+    item_columns!(),
+    " FROM scans s LEFT JOIN box_items i ON i.scan_id=s.id LEFT JOIN boxes b ON b.id=i.box_id \
+     JOIN shifts sh ON sh.id=s.shift_id JOIN products pr ON pr.id=sh.product_id \
+     JOIN lines l ON l.id=sh.line_id JOIN devices d ON d.id=s.device_id \
+     LEFT JOIN pallets p ON p.id=b.pallet_id LEFT JOIN operators op ON op.id=s.operator_id \
+     WHERE s.id IN (SELECT value FROM json_each(?1))"
+);
 
 /// Every scan of a code, whatever its verdict, oldest first; `placed` says
 /// it took the code: into a box, or without one in a validation shift.

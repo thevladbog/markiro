@@ -8,6 +8,10 @@ import { z } from "zod";
 import { ThemeProvider } from "@markiro/ui";
 import fixture from "../../../proto/fixtures/cloud-history-read.json";
 import importSummary from "../../../proto/fixtures/cloud-import-summary.json";
+import registryPage from "../../../proto/fixtures/code-registry-page.json";
+import registryCard from "../../../proto/fixtures/code-registry-card.json";
+import nativeShift from "../../../proto/fixtures/office-shift.json";
+import updateStatus from "../../../proto/fixtures/office-update-status.json";
 import { createHostApi } from "../../../src/host/api.js";
 import { HostError, type HostClient } from "../../../src/host/client.js";
 import {
@@ -23,6 +27,18 @@ import { Office } from "../../../src/office/Office.js";
 import type { OfficeFilesApi } from "../../../src/office/exports/office-files.js";
 import { ACTIVE_LICENSE } from "../../support/license.js";
 import { HEALTHY_BACKUPS } from "../../support/backups.js";
+import { observation } from "../../support/fixtures.js";
+import { AboutProvider } from "../../../src/office/info/about-context.js";
+import { UpdateShellProvider } from "../../../src/office/info/update-context.js";
+import {
+  UpdateShellError,
+  type UpdateShell,
+  type VerifiedReport,
+} from "../../../src/office/info/update-shell.js";
+
+const parameters = new URLSearchParams(location.search);
+const layout = parameters.has("layout");
+const empty = parameters.has("empty");
 
 // Controlled memory transport; actual Office, client schemas, renderer and stored-file checksum reader.
 const request = cloudHistoryImportRequestSchema.parse(fixture.request);
@@ -41,7 +57,17 @@ const pallets = fixture.palletSources.map((row) =>
     organization: { ...row.organization, timeZone: sourceZone },
   }),
 );
-let state: CloudHistoryImportState | null = null;
+let state: CloudHistoryImportState | null =
+  layout && parameters.get("layout") !== "import"
+    ? cloudHistoryImportStateSchema.parse({
+        batchId: request.manifest.checksum,
+        source: request.manifest.source,
+        status: "complete",
+        receivedIndices: [0],
+        totalParts: 1,
+        counts: request.manifest.counts,
+      })
+    : null;
 const stored = new Map<string, { file: ExportFile; contentBase64: string }>();
 const metrics = {
   routes: [] as string[],
@@ -116,7 +142,23 @@ const client: HostClient = {
     const parts = url.pathname.split("/");
     const id = parts[4] ?? "";
     let answer: unknown;
-    if (path === "/v1/office/org") answer = org;
+    if (url.pathname === "/v1/office/code-registry") {
+      if (parameters.has("registry-error"))
+        throw new HostError({
+          kind: "api",
+          code: "unavailable",
+          status: 503,
+          message: "controlled unavailable",
+        });
+      const source = url.searchParams.get("source") ?? "all";
+      const items = empty
+        ? []
+        : registryPage.items.filter((row) => source === "all" || row.source === source);
+      answer = { ...registryPage, items, total: items.length, page: 1, pageCount: 1 };
+    } else if (parts[3] === "code-registry") answer = registryCard;
+    else if (url.pathname === "/v1/office/update-status") answer = updateStatus;
+    else if (layout && url.pathname === "/v1/office/shifts") answer = [nativeShift];
+    else if (path === "/v1/office/org") answer = org;
     else if (path === "/v1/office/license") answer = ACTIVE_LICENSE;
     else if (path === "/v1/office/backups") answer = HEALTHY_BACKUPS;
     else if (path === "/v1/office/me") answer = user;
@@ -181,12 +223,29 @@ const client: HostClient = {
     } else if (url.pathname === "/v1/office/cloud-shifts")
       answer = {
         items:
-          state?.status === "complete"
-            ? request.part.payload.shifts
-                .filter((row) => row.inWindow)
-                .map((row) => shiftCard(row.id))
+          state?.status === "complete" && !empty
+            ? parameters.has("long-list")
+              ? Array.from({ length: 30 }, (_, index) => ({
+                  ...shiftCard(request.part.payload.shifts[0]!.id),
+                  shift: {
+                    ...request.part.payload.shifts[0]!,
+                    id: `a1710000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+                    number: `OCT26-${String(index + 100)}`,
+                  },
+                }))
+              : parameters.has("short-list")
+                ? [shiftCard(request.part.payload.shifts[0]!.id)]
+                : request.part.payload.shifts
+                    .filter((row) => row.inWindow)
+                    .map((row) => shiftCard(row.id))
             : [],
-        total: request.part.payload.shifts.filter((row) => row.inWindow).length,
+        total: empty
+          ? 0
+          : parameters.has("long-list")
+            ? 30
+            : parameters.has("short-list")
+              ? 1
+              : request.part.payload.shifts.filter((row) => row.inWindow).length,
         page: 1,
         pageCount: 1,
       };
@@ -300,6 +359,66 @@ const files: OfficeFilesApi = {
   getExportsFolder: async () => ({ path: null, default: null }),
   setExportsFolder: async () => ({ path: null, default: null }),
 };
+const manifest: VerifiedReport["manifest"] = {
+  v: 1,
+  product: "markiro-standalone",
+  version: "1.0.0",
+  channel: "stable",
+  releasedAt: "2026-10-18T09:00:00Z",
+  sourceSha: "a".repeat(40),
+  installer: {
+    name: "markiro-standalone-1.0.0-windows-x86_64-setup.exe",
+    sha256: "d".repeat(64),
+    sizeBytes: 123456789,
+  },
+  protocol: 6,
+  minProtocol: 1,
+  minUpgradeFrom: "0.1.0",
+  notes: Array.from(
+    { length: 30 },
+    (_, index) =>
+      `${index + 1}. Перенесённые коды доступны в общем поиске; сохранены исходные сведения о сменах, коробах и владельцах кодов. Дополнительная строка проверяет перенос длинного текста.`,
+  ),
+};
+const packagePath =
+  "C:\\Users\\Администратор производства\\Documents\\Markiro\\Обновления\\Архив проверенных выпусков для установки на производственных станциях\\markiro-standalone-1.0.0.update.jws";
+const updateShell: UpdateShell = {
+  scan: async () => {
+    if (parameters.has("update-error"))
+      throw new UpdateShellError("storage", "controlled storage failure");
+    return [
+      {
+        path: packagePath,
+        fileName: "markiro-standalone-1.0.0.update.jws",
+        place: "documents",
+        manifest,
+        problem: null,
+      },
+      {
+        path: "E:\\broken.update.jws",
+        fileName: "broken.update.jws",
+        place: "removable",
+        manifest: null,
+        problem: "manifest_signature",
+      },
+    ];
+  },
+  verify: async () => ({
+    path: packagePath,
+    kid: "upd-2026-10",
+    manifest,
+    installed: "1.0.0",
+    installerPath: packagePath.replace(".update.jws", "-windows-x86_64-setup.exe"),
+    comparison: "same",
+    refusal: null,
+    confirmations: ["reinstall"],
+    host: { version: "1.0.0", protocol: 6, minProtocol: 1 },
+  }),
+  install: async () => undefined,
+  outcome: async () => ({ kind: "updated", from: "0.1.1", to: "1.0.0" }),
+  dismissOutcome: async () => undefined,
+  openFolder: async () => undefined,
+};
 const root = document.getElementById("root");
 if (root === null) throw new Error("harness root");
 const harnessRoot = createRoot(root);
@@ -307,22 +426,38 @@ let generation = 0;
 function renderHarness() {
   harnessRoot.render(
     <StrictMode>
-      <ThemeProvider defaultTheme="dark">
-        <Office
-          key={generation}
-          session={{
-            user,
-            api,
-            call: (operation) => operation("controlled-fixture-session"),
-            logout: async () => undefined,
-            refreshUser: async () => undefined,
+      <ThemeProvider defaultTheme={parameters.get("theme") === "light" ? "light" : "dark"}>
+        <AboutProvider
+          value={{
+            appVersion: async () => "1.0.0",
+            installRole: async () => "host",
+            pairing: async () => null,
+            hello: async () => ({
+              ...observation(true),
+              hello: { ...observation(true).hello, version: "1.0.0" },
+            }),
+            system: async () => ({ os: "Windows 11", arch: "x64", webview: "WebView2 130" }),
+            openLink: async () => undefined,
           }}
-          files={files}
-          printForm={() => {
-            metrics.printed++;
-          }}
-          initialPath={new URLSearchParams(location.search).get("start") ?? "/import"}
-        />
+        >
+          <UpdateShellProvider value={updateShell}>
+            <Office
+              key={generation}
+              session={{
+                user,
+                api,
+                call: (operation) => operation("controlled-fixture-session"),
+                logout: async () => undefined,
+                refreshUser: async () => undefined,
+              }}
+              files={files}
+              printForm={() => {
+                metrics.printed++;
+              }}
+              initialPath={new URLSearchParams(location.search).get("start") ?? "/import"}
+            />
+          </UpdateShellProvider>
+        </AboutProvider>
       </ThemeProvider>
     </StrictMode>,
   );

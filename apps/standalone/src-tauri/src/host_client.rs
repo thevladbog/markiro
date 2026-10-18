@@ -589,6 +589,8 @@ mod tests {
             "/v1/office/sscc/counters/460068200/0",
             "/v1/office/import/history",
             "/v1/office/cloud-shifts?page=2",
+            "/v1/office/code-registry?source=cloud&fromMs=0",
+            "/v1/office/code-registry/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?source=all",
             "/v1/office/cloud-shifts/abc/export-source",
             "/v1/office/cloud-shifts/abc/boxes",
             "/v1/office/cloud-shifts/abc/pallets",

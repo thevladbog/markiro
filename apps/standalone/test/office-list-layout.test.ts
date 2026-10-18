@@ -55,19 +55,16 @@ describe("the list card (pinned layout contract)", () => {
     const card = declarations(".office-list-card");
     expect(card).toContain("display: flex");
     expect(card).toContain("flex-direction: column");
-    expect(card).toContain("min-height: 0");
+    expect(card).toContain("min-height: var(--office-list-min-height, 0px)");
     expect(card).toContain("overflow: hidden");
     expect(card).not.toMatch(/(^|[;\s])height:/);
   });
 
-  it("floors only a card that is already taller than the floor, and never squeezes a card of filters alone", () => {
-    const floored = declarations(
-      ".office-shell__content > .office-list-card:has(.mk-table__row:nth-child(4))",
+  it("uses each card's measured filters, rows and footer instead of a fixed minimum that can hide rows", () => {
+    expect(declarations(".office-list-card")).toContain(
+      "min-height: var(--office-list-min-height, 0px)",
     );
-    expect(floored).toContain("min-height: 320px");
-    expect(
-      declarations(".office-shell__content > .office-list-card:has(.office-list-body)"),
-    ).toContain("min-height: 320px");
+    expect(source).not.toContain("min-height: 320px");
     expect(
       declarations(
         ".office-shell__content > .office-list-card:not(:has(.mk-table)):not(:has(.office-list-body))",
@@ -94,7 +91,9 @@ describe("the list card (pinned layout contract)", () => {
 
   it("keeps the pagination bar directly under the table and the filters out of its scroll", () => {
     expect(declarations(".office-list-card .office-paged")).toContain("flex: 0 1 auto");
-    expect(declarations(".office-list-card .office-paged")).toContain("min-height: 0");
+    expect(declarations(".office-list-card .office-paged")).toContain(
+      "min-height: var(--office-paged-min-height, 0px)",
+    );
     expect(declarations(".office-list-card .office-paged > :not(.mk-table)")).toContain(
       "flex: none",
     );

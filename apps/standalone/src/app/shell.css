@@ -416,6 +416,7 @@
  */
 .office-header {
   box-sizing: border-box;
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -435,6 +436,7 @@
 
 .office-crumbs ol {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 0;
@@ -743,18 +745,137 @@
   font: var(--text-body);
 }
 
+/* Export notes can name a rejected product whose original name has no word boundaries. */
+.cloud-import-notes {
+  overflow-wrap: anywhere;
+}
+
+/* Content actions belong to their section; form submission rows keep their end alignment. */
+.office-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.office-section-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+.office-section-intro > :is(h3, h4) {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.office-disclosure > summary {
+  padding-block: var(--sp-2);
+  cursor: pointer;
+}
+
+.office-disclosure[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+
+.office-disclosure > summary:focus-visible,
+.office-source-nav > a:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.office-source-nav {
+  display: flex;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  max-width: 100%;
+  padding: var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface-panel);
+}
+
+.office-source-nav > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  text-decoration: none;
+}
+
+.office-source-nav > a:hover {
+  color: var(--fg-1);
+  background: var(--surface-card);
+}
+
+.office-source-nav > a[aria-current="page"] {
+  color: var(--fg-on-inverse);
+  background: var(--surface-inverse);
+  font-weight: 600;
+}
+
+.update-packages,
+.update-release-notes {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  overflow-wrap: anywhere;
+}
+
+.update-packages {
+  list-style: none;
+  padding: 0;
+}
+
+.update-packages__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.update-report > .mk-badge {
+  justify-self: start;
+}
+
+.update-progress {
+  margin: 0;
+}
+
+.update-progress:empty {
+  display: none;
+}
+
+.update-stage > [aria-live]:empty {
+  display: none;
+}
+
 /* «Обновление» through the host (plan ОБН-3): the history, the notes and the upload. */
 .update-history,
 .update-notes {
+  display: grid;
+  gap: var(--sp-2);
   margin: 0;
   padding: 0 0 0 var(--sp-2);
   list-style: none;
+  overflow-wrap: anywhere;
 }
 
 .update-stage {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  align-items: flex-start;
+  min-width: 0;
 }
 
 /*
@@ -891,6 +1012,7 @@
 /* A table and its pagination: one block, the pagination a step under the table. */
 .office-paged {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3);
   min-width: 0;
 }

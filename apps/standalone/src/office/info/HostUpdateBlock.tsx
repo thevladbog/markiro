@@ -70,7 +70,9 @@ export function HostUpdateBlock() {
     <Card title={t("office.about.update.host.title")} titleAs="h3">
       <p>{offerText(offer, appVersion, t)}</p>
       {offer.kind === "available" && user.role === "admin" && (
-        <Button onClick={() => setOpen(true)}>{t("office.about.update.host.open")}</Button>
+        <div className="office-actions">
+          <Button onClick={() => setOpen(true)}>{t("office.about.update.host.open")}</Button>
+        </div>
       )}
       {dialogOffer !== null && user.role === "admin" && (
         <UpdateFromHostDialog

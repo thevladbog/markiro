@@ -29,18 +29,8 @@
   flex: 0 1 auto;
 }
 
-/*
- * What keeps the card itself from being crushed (its own `overflow: hidden` lets the window's
- * shortage squeeze it below its children). The floor goes only where it cannot stretch a short
- * list: a table of four rows or more is already taller than it, and so is a search card with its
- * body (the filter rows and 160 px of body). A card of filters alone is never squeezed at all, nor
- * is a card with another section under it (the page scrolls instead); a card of one to three rows
- * has no floor, it is as tall as those rows.
- */
-.office-shell__content > .office-list-card:has(.mk-table__row:nth-child(4)),
-.office-shell__content > .office-list-card:has(.office-list-body) {
-  min-height: 320px;
-}
+/* ListCard measures fixed filters/notes/footer plus the bounded table floor. A fixed 320px
+ * minimum lost the rows when filters wrapped, and intrinsic min-content expands long tables. */
 
 .office-shell__content > .office-list-card:not(:has(.mk-table)):not(:has(.office-list-body)),
 .office-shell__content > .office-list-card:not(:last-child) {
@@ -55,7 +45,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 0;
+  min-height: var(--office-list-min-height, 0px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-card);
@@ -67,7 +57,7 @@
   flex: 0 1 auto;
   flex-direction: column;
   gap: 0;
-  min-height: 0;
+  min-height: var(--office-paged-min-height, 0px);
 }
 
 .office-list-card .office-paged > .mk-table {

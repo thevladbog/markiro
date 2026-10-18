@@ -295,13 +295,15 @@ function UpdateFromFile() {
 
   const busy = checking !== null || preparing || phase !== null;
   return (
-    <section aria-labelledby="update-from-file">
-      <h3 id="update-from-file">{t("office.about.update.fromFile")}</h3>
-      <p className="office-note">{t("office.about.update.hint")}</p>
-      <div>
+    <section aria-labelledby="update-from-file" className="office-stack update-from-file">
+      <div className="office-section-intro">
+        <h3 id="update-from-file">{t("office.about.update.fromFile")}</h3>
+        <p className="office-note">{t("office.about.update.hint")}</p>
+      </div>
+      <div className="office-actions">
         <Button variant="secondary" loading={packages.isFetching} disabled={busy} onClick={search}>
           {t("office.about.update.search")}
-        </Button>{" "}
+        </Button>
         <Button variant="secondary" onClick={() => void openFolder()}>
           {t("office.about.update.openFolder")}
         </Button>
@@ -323,9 +325,9 @@ function UpdateFromFile() {
       ) : packages.data.length === 0 ? (
         <p className="office-note">{t("office.about.update.none")}</p>
       ) : (
-        <ul aria-label={t("office.about.update.found")}>
+        <ul className="update-packages" aria-label={t("office.about.update.found")}>
           {packages.data.map((found) => (
-            <li key={found.path}>
+            <li key={found.path} className="update-packages__item">
               <span>{found.fileName}</span>{" "}
               <span>
                 (
@@ -377,7 +379,7 @@ function UpdateFromFile() {
       ) : null}
       {/* A polite live region without the status role: the page's loading
           spinner is the one status there (test/about-page.test.tsx waits for it to go). */}
-      <p aria-live="polite">
+      <p className="update-progress office-note" aria-live="polite">
         {checking !== null
           ? t("office.about.update.checking")
           : phase !== null
@@ -441,53 +443,57 @@ function ReportCard({
     },
   ];
   return (
-    <div>
+    <div className="office-stack update-report">
       <Alert tone="ok">{t("office.about.update.signed")}</Alert>
       {report.manifest.channel === "beta" ? (
         <Badge tone="warn">{t("office.about.update.beta")}</Badge>
       ) : null}
       <DefinitionGrid items={facts} />
       {report.manifest.notes.length > 0 ? (
-        <>
+        <section className="office-section-intro">
           <h4>{t("office.about.update.notes")}</h4>
-          <ul>
+          <ul className="update-release-notes">
             {report.manifest.notes.map((note, index) => (
               <li key={`${index}:${note}`}>{note}</li>
             ))}
           </ul>
-        </>
+        </section>
       ) : null}
       {refusal === null ? null : <Alert tone="error">{refusal}</Alert>}
-      <StageToHostButton manifestPath={report.path} />
       {refusal === null && !roleKnown ? (
         <Alert tone="warn">{t("office.about.update.roleUnknown")}</Alert>
       ) : null}
-      <Button
-        variant="primary"
-        disabled={refusal !== null || !roleKnown || busy}
-        onClick={onInstall}
-      >
-        {t("office.about.update.install")}
-      </Button>
-      <details>
+      <div className="office-actions">
+        <Button
+          variant="primary"
+          disabled={refusal !== null || !roleKnown || busy}
+          onClick={onInstall}
+        >
+          {t("office.about.update.install")}
+        </Button>
+        <StageToHostButton manifestPath={report.path} />
+      </div>
+      <details className="office-disclosure">
         <summary>{t("office.about.update.manual")}</summary>
-        <p className="office-note">{t("office.about.update.manualHint")}</p>
-        <DefinitionGrid
-          items={[
-            {
-              id: "installerPath",
-              term: t("office.about.update.installerPath"),
-              description: report.installerPath,
-              mono: true,
-            },
-            {
-              id: "installerSha256",
-              term: t("office.about.update.installerSha256"),
-              description: report.manifest.installer.sha256,
-              mono: true,
-            },
-          ]}
-        />
+        <div className="office-stack">
+          <p className="office-note">{t("office.about.update.manualHint")}</p>
+          <DefinitionGrid
+            items={[
+              {
+                id: "installerPath",
+                term: t("office.about.update.installerPath"),
+                description: report.installerPath,
+                mono: true,
+              },
+              {
+                id: "installerSha256",
+                term: t("office.about.update.installerSha256"),
+                description: report.manifest.installer.sha256,
+                mono: true,
+              },
+            ]}
+          />
+        </div>
       </details>
     </div>
   );

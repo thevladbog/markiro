@@ -277,6 +277,7 @@ pub mod shift_close_reasons {
 pub mod backup;
 pub mod cloud_history;
 pub mod cloud_import;
+pub mod code_registry;
 pub mod code_search;
 pub mod disaggregation;
 pub mod export_files;
