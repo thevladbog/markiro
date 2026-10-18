@@ -63,6 +63,7 @@ This deliberately separates safety primitives from the future command orchestrat
 - Create: `deploy/platform/test/host-state.test.mjs`
 - Modify: `deploy/platform/test/host-fixtures.mjs`
 - Modify: `docs/superpowers/specs/2026-10-18-timeweb-host-delivery-design.md` (accurate implemented/pending status only)
+- Modify: `docs/runbooks/timeweb-platform-preparation.md` (library safety contract and explicit pending host gates)
 
 **Interfaces:**
 
