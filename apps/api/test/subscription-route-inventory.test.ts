@@ -569,6 +569,21 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/warehouse-reprint/lookup (StationWarehouseReprintController.lookup)",
       "POST /station/warehouse-reprint/event-batches (StationWarehouseReprintController.receive)",
       "GET /station/warehouse-reprint/templates (StationWarehouseReprintController.templates)",
+      "GET /station/warehouse-reprint/source-capabilities (StationWarehouseReprintController.sourceCapabilities)",
+      "POST /station/warehouse-reprint/label-facts (StationWarehouseReprintController.receiveFacts)",
+      "POST /station/warehouse-reprint/pallet-sources (StationWarehouseReprintController.palletSources)",
+      "POST /station/warehouse-reprint/pallet-lookup (StationWarehouseReprintController.palletLookup)",
+      "POST /station/warehouse-reprint/pallet-events (StationWarehouseReprintController.palletEvents)",
+      "GET /station/warehouse-reprint/pallet-templates-v2 (StationWarehouseReprintController.palletTemplatesV2)",
+      "POST /station/warehouse-reprint/pallet-lookup-v2 (StationWarehouseReprintController.palletLookupV2)",
+      "POST /station/warehouse-reprint/lookup-v3 (StationWarehouseReprintController.unifiedLookup)",
+      "POST /station/warehouse-reprint/pallet-data-v3 (StationWarehouseReprintController.palletDataV3)",
+      "POST /station/warehouse-reprint/pallet-renderings-v3 (StationWarehouseReprintController.palletRenderingsV3)",
+      "POST /station/warehouse-reprint/pallet-events-v3 (StationWarehouseReprintController.palletEventsV3)",
+
+      "POST /station/warehouse-reprint/pallet-renderings-v2 (StationWarehouseReprintController.palletRenderingsV2)",
+      "POST /station/warehouse-reprint/pallet-events-v2 (StationWarehouseReprintController.palletEventsV2)",
+      "POST /station/warehouse-reprint/pallet-production-resolutions (StationWarehouseReprintController.palletProductionResolutions)",
       "POST /station/grants/v1/evidence/scans (DeviceGrantsController.evidenceScans)",
       "POST /station/grants/v1/evidence/shift-closures (DeviceGrantsController.evidenceShiftClose)",
       "POST /station/grants/v1/evidence/inventories/:id/event-batches (DeviceGrantsController.evidenceInventoryEvents)",
@@ -915,6 +930,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformCatalogController.archive": platform(
     "platform catalog mutation uses the isolated platform principal and capability policy",
+  ),
+  "PlatformCatalogController.setOfflineAvailability": platform(
+    "offline availability of a catalog item uses the isolated platform principal, the catalog write capability and a platform_admin role check",
   ),
   "PlatformCatalogController.approveLifecyclePolicy": platform(
     "offline grant lifecycle approval uses the isolated platform principal and catalog write capability",

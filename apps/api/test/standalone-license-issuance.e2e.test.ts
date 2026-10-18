@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { createDb, schema } from "@markiro/db";
-import { verifyStandaloneLicense } from "@markiro/domain";
+import { standaloneLicensePayloadV1Schema, verifyStandaloneLicense } from "@markiro/domain";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
@@ -18,7 +18,6 @@ import {
   createManagedSubscription,
   createOrganization,
   createPublishedAddon,
-  createPublishedPlan,
 } from "./support/subscription-fixtures";
 import {
   activationRequest,
@@ -146,6 +145,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
     expect(preview.next).toEqual({
       sequence: 1,
       source: "subscription",
+      sourceAssignments: null,
       plan: "subscription",
       planVersionId: f.planVersionId,
       entitlementRevision: preview.expected.entitlementRevision,
@@ -265,6 +265,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
         replaces: null,
         source: "subscription",
         offlineTerms: null,
+        sourceAssignments: null,
         plan: "subscription",
         planVersionId: f.planVersionId,
         entitlementRevision: preview.next.entitlementRevision,
@@ -818,8 +819,23 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
   });
 });
 
-/** A tenant without a cabinet, its organization INN and one registered site (owner decision 2026-10-13). */
-async function offlineSiteFor() {
+type OfflineAssignments = {
+  plan?: {
+    maxLines: number | null;
+    maxStations: number | null;
+    maxKiosks: number | null;
+    maxCabinetUsers: number | null;
+  };
+  endsAt?: Date | null;
+  addonLines?: { increment: number; quantity: number; endsAt?: Date | null };
+};
+
+/** A tenant without a cabinet, its organization INN, one site and its direct assignments (spec 2026-10-16). */
+async function offlineSiteFor(
+  assign: OfflineAssignments = {
+    plan: { maxLines: 1, maxStations: 2, maxKiosks: 0, maxCabinetUsers: 3 },
+  },
+) {
   clock = new Date();
   const admin = await platformActor(db);
   const tenantId = await createTenantWithoutCabinet(db);
@@ -832,14 +848,41 @@ async function offlineSiteFor() {
     request,
     acknowledgedWarnings: [],
   });
-  const planVersionId = await createPublishedPlan(db, {
-    maxLines: 1,
-    maxStations: 2,
-    maxKiosks: 0,
-    maxCabinetUsers: 3,
-    palletsEnabled: true,
-  });
-  return { admin, tenantId, site, planVersionId };
+  let subscriptionId = "";
+  let planVersionId = "";
+  let addonVersionId = "";
+  let addonId = "";
+  if (assign.plan) {
+    const managed = await createManagedSubscription(db, {
+      tenantId,
+      status: "active",
+      startsAt: new Date(clock.getTime() - 60_000),
+      endsAt: assign.endsAt === undefined ? null : assign.endsAt,
+      ...assign.plan,
+    });
+    subscriptionId = managed.subscriptionId;
+    planVersionId = managed.planVersionId;
+    if (assign.addonLines) {
+      addonVersionId = await createPublishedAddon(db, [
+        { entitlementKey: "lines", increment: assign.addonLines.increment },
+      ]);
+      const [addon] = await db
+        .insert(schema.subscriptionAddons)
+        .values({
+          tenantId,
+          subscriptionId,
+          addonVersionId,
+          quantity: assign.addonLines.quantity,
+          startsAt: new Date(clock.getTime() - 60_000),
+          endsAt: assign.addonLines.endsAt ?? null,
+          status: "active",
+          source: "manual",
+        })
+        .returning({ id: schema.subscriptionAddons.id });
+      addonId = addon!.id;
+    }
+  }
+  return { admin, tenantId, site, subscriptionId, planVersionId, addonVersionId, addonId };
 }
 
 async function cloudFootprint(tenantId: string) {
@@ -893,171 +936,342 @@ async function cloudFootprint(tenantId: string) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)(
-  "offline licenses for a tenant without a cabinet (owner decision 2026-10-13)",
+  "offline licenses from the assignments of a tenant without a cabinet (spec 2026-10-16)",
   () => {
-    it("issues a file from offline terms — a plan version and a term — with an exact audit row and no cloud access", async () => {
-      const f = await offlineSiteFor();
-      const offline = { planVersionId: f.planVersionId, termDays: 200 };
+    it("issues a file from the plan and add-on assignments with an exact journal row and audit", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 2, maxStations: 3, maxKiosks: 0, maxCabinetUsers: 5 },
+        addonLines: { increment: 3, quantity: 2 },
+        endsAt: null,
+      });
       const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
         graceDays: null,
-        offline,
+        offline: null,
       });
-      const validUntil = new Date(clock.getTime() + 200 * DAY).toISOString();
-      expect(preview.next).toEqual({
+      const assignments = [
+        { kind: "plan", id: f.subscriptionId, catalogVersionId: f.planVersionId },
+        { kind: "addon", id: f.addonId, catalogVersionId: f.addonVersionId },
+      ];
+      expect(preview.next).toMatchObject({
         sequence: 1,
-        source: "offline",
+        source: "offline_assignments",
         plan: "subscription",
         planVersionId: f.planVersionId,
-        entitlementRevision: "0",
-        validFrom: clock.toISOString(),
-        validUntil,
-        validUntilReason: "offline_term",
+        validUntil: new Date(clock.getTime() + 365 * DAY).toISOString(),
+        validUntilReason: "one_year_cap",
         graceDays: 14,
-        customer: { name: `Offline tenant ${f.tenantId}`, inn: "7707083893" },
-        rights: {
-          quotas: { lines: 1, stations: 2, kiosks: 0, cabinetUsers: 3 },
-          features: { ...NO_FEATURES, pallets: true },
-        },
+        rights: { quotas: { lines: 8, stations: 3, kiosks: 0, cabinetUsers: 5 } },
+        sourceAssignments: assignments,
       });
-      expect(preview.warnings).toEqual(UNMAPPED);
-      expect(preview.expected).toEqual({
-        entitlementRevision: "0",
-        previousSequence: 0,
-        boundaryAt: null,
-        termsDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      });
+      expect(preview.next.entitlementRevision).not.toBe("0");
+      expect(preview.warnings).toEqual(
+        expect.arrayContaining([{ code: "feature_unmapped", feature: "handheld" }]),
+      );
 
       const requestId = randomUUID();
       const file = await issuance.confirm(f.admin, f.tenantId, f.site.id, {
         requestId,
         graceDays: null,
-        offline,
+        offline: null,
         expected: preview.expected,
       });
       expect(await verifyStandaloneLicense(file.compact, trustedKeyset())).toMatchObject({
         ok: true,
         license: {
           tenantId: f.tenantId,
-          siteId: f.site.id,
           plan: "subscription",
           planVersionId: f.planVersionId,
-          entitlementRevision: "0",
-          validFrom: clock.getTime(),
-          validUntil: clock.getTime() + 200 * DAY,
-          graceDays: 14,
-          quotas: { lines: 1, stations: 2, kiosks: 0, cabinetUsers: 3 },
+          entitlementRevision: preview.next.entitlementRevision,
+          quotas: { lines: 8, stations: 3, kiosks: 0, cabinetUsers: 5 },
         },
       });
-      expect(file.issuance).toMatchObject({ source: "offline", validUntilReason: "offline_term" });
+      const [row] = await issuedRows(f.tenantId);
+      expect(row).toMatchObject({
+        source: "offline_assignments",
+        validUntilReason: "one_year_cap",
+        sourceAssignments: assignments,
+      });
       const issued = (await auditRows(db, f.tenantId)).filter(
-        (row) => row.action === "standalone_license.issued",
+        (entry) => entry.action === "standalone_license.issued",
       );
-      expect(issued).toEqual([
-        {
-          actorPlatformUserId: f.admin.userId,
-          actorRole: "platform_admin",
-          tenantId: f.tenantId,
-          action: "standalone_license.issued",
-          outcome: "success",
-          targetType: "standalone_license",
-          targetId: file.issuance.licenseId,
-          reason: null,
-          requestId,
-          before: null,
-          after: {
-            siteId: f.site.id,
-            hostId: f.site.hostId,
-            licenseId: file.issuance.licenseId,
-            sequence: 1,
-            previousSequence: 0,
-            replaces: null,
-            source: "offline",
-            offlineTerms: offline,
-            plan: "subscription",
-            planVersionId: f.planVersionId,
-            entitlementRevision: "0",
-            validFrom: clock.toISOString(),
-            validUntil,
-            validUntilReason: "offline_term",
-            graceDays: 14,
-            kid: "test-lic-api",
-            sha256: file.sha256,
-            customer: preview.next.customer,
-            quotas: preview.next.rights.quotas,
-            features: preview.next.rights.features,
-            warnings: UNMAPPED,
-          },
+      expect(issued).toHaveLength(1);
+      expect(issued[0]).toMatchObject({
+        actorPlatformUserId: f.admin.userId,
+        actorRole: "platform_admin",
+        tenantId: f.tenantId,
+        action: "standalone_license.issued",
+        outcome: "success",
+        targetType: "standalone_license",
+        targetId: file.issuance.licenseId,
+        reason: null,
+        requestId,
+        before: null,
+        after: {
+          source: "offline_assignments",
+          offlineTerms: null,
+          sourceAssignments: assignments,
+          entitlementRevision: preview.next.entitlementRevision,
+          validUntilReason: "one_year_cap",
+          quotas: { lines: 8, stations: 3, kiosks: 0, cabinetUsers: 5 },
         },
-      ]);
-      expect(await cloudFootprint(f.tenantId)).toEqual({
-        cabinetAccess: "none",
-        subscriptions: [],
-        members: [],
-        invitations: [],
-        addons: [],
-        sources: [],
-        revisions: [],
-        devices: [],
-        assignments: [],
       });
+      // Issuing changes nothing in the cloud: no cabinet, no new subscription rows, no documents.
+      const footprint = await cloudFootprint(f.tenantId);
+      expect(footprint.cabinetAccess).toBe("none");
+      expect(footprint.subscriptions).toEqual([{ id: f.subscriptionId }]);
+      expect(footprint.members).toEqual([]);
+      const documents = await db
+        .select({ id: schema.invoices.id })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.tenantId, f.tenantId));
+      expect(documents).toEqual([]);
 
-      // The same request replays the file; other terms under the same request id conflict.
+      // The same request replays the file for the assignments source too.
       expect(
         await issuance.confirm(f.admin, f.tenantId, f.site.id, {
           requestId,
           graceDays: null,
-          offline,
+          offline: null,
           expected: preview.expected,
         }),
       ).toEqual(file);
-      for (const other of [
-        { ...offline, termDays: 100 },
-        { ...offline, planVersionId: randomUUID() },
-        null,
-      ]) {
-        expect(
-          await httpRefusal(
-            issuance.confirm(f.admin, f.tenantId, f.site.id, {
-              requestId,
-              graceDays: null,
-              offline: other,
-              expected: preview.expected,
-            }),
-          ),
-        ).toEqual({ status: 409, body: { code: "standalone_license_request_conflict" } });
-      }
-      expect(await issuedRows(f.tenantId)).toHaveLength(1);
     });
 
-    it("requires offline terms, refuses a plan version that is not a published plan, and never a cloud path", async () => {
-      const f = await offlineSiteFor();
+    it("ends the file with the assignment when it has an end date", async () => {
+      const endsAt = new Date(Date.now() + 90 * DAY);
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt,
+      });
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.validUntil).toBe(endsAt.toISOString());
+      expect(preview.next.validUntilReason).toBe("subscription_end");
+    });
+
+    it("cuts the file where an add-on ends and the rights shrink", async () => {
+      const addonEnds = new Date(Date.now() + 30 * DAY);
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+        addonLines: { increment: 2, quantity: 1, endsAt: addonEnds },
+      });
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.validUntil).toBe(addonEnds.toISOString());
+      expect(preview.next.validUntilReason).toBe("entitlement_reduction");
+    });
+
+    it("refuses a tenant without a current plan assignment, also after it has expired", async () => {
+      const bare = await offlineSiteFor({});
+      expect(
+        await httpRefusal(
+          issuance.preview(bare.admin, bare.tenantId, bare.site.id, {
+            graceDays: null,
+            offline: null,
+          }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_assignments_required" } });
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      await db
+        .update(schema.tenantSubscriptions)
+        .set({ status: "expired", endsAt: new Date(clock.getTime() - 1_000) })
+        .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
       expect(
         await httpRefusal(
           issuance.preview(f.admin, f.tenantId, f.site.id, { graceDays: null, offline: null }),
         ),
-      ).toEqual({ status: 409, body: { code: "standalone_license_offline_terms_required" } });
-      const unknown = randomUUID();
-      const retired = await createPublishedPlan(db, {
-        maxLines: 1,
-        maxStations: 1,
-        maxKiosks: 0,
-        maxCabinetUsers: 1,
+      ).toEqual({ status: 409, body: { code: "standalone_license_assignments_required" } });
+      expect(await issuedRows(f.tenantId)).toEqual([]);
+    });
+
+    it("refuses a trial assignment of a tenant without a cabinet", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
       });
       await db
-        .update(schema.catalogItemVersions)
-        .set({ status: "retired" })
-        .where(eq(schema.catalogItemVersions.id, retired));
-      const addon = await createPublishedAddon(db, [{ entitlementKey: "stations", increment: 1 }]);
-      for (const planVersionId of [unknown, addon, retired]) {
-        expect(
-          await httpRefusal(
-            issuance.preview(f.admin, f.tenantId, f.site.id, {
-              graceDays: null,
-              offline: { planVersionId, termDays: 30 },
-            }),
-          ),
-        ).toEqual({ status: 409, body: { code: "standalone_license_offline_plan_unavailable" } });
-      }
+        .update(schema.tenantSubscriptions)
+        .set({ status: "trial" })
+        .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+      expect(
+        await httpRefusal(
+          issuance.preview(f.admin, f.tenantId, f.site.id, { graceDays: null, offline: null }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_assignments_required" } });
+    });
+
+    it("refuses a stale preview when an assignment changes before confirmation", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      const addonVersionId = await createPublishedAddon(db, [
+        { entitlementKey: "lines", increment: 1 },
+      ]);
+      await db.insert(schema.subscriptionAddons).values({
+        tenantId: f.tenantId,
+        subscriptionId: f.subscriptionId,
+        addonVersionId,
+        quantity: 1,
+        startsAt: new Date(clock.getTime() - 60_000),
+        status: "active",
+        source: "manual",
+      });
+      expect(
+        await httpRefusal(
+          issuance.confirm(f.admin, f.tenantId, f.site.id, {
+            requestId: randomUUID(),
+            graceDays: null,
+            offline: null,
+            expected: preview.expected,
+          }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_preview_stale" } });
+      expect(await issuedRows(f.tenantId)).toEqual([]);
+    });
+
+    it("names only the assignments that contribute at the issuance instant", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 2, maxStations: 3, maxKiosks: 0, maxCabinetUsers: 5 },
+        endsAt: null,
+        addonLines: { increment: 3, quantity: 2 },
+      });
+      // Not yet started: the entitlement projection ignores it until it starts.
+      const futureVersionId = await createPublishedAddon(db, [
+        { entitlementKey: "lines", increment: 7 },
+      ]);
+      await db.insert(schema.subscriptionAddons).values({
+        tenantId: f.tenantId,
+        subscriptionId: f.subscriptionId,
+        addonVersionId: futureVersionId,
+        quantity: 1,
+        startsAt: new Date(clock.getTime() + 10 * DAY),
+        status: "scheduled",
+        source: "manual",
+      });
+      // Past its end but not yet materialized by the status job: still `active` in the row.
+      const endedVersionId = await createPublishedAddon(db, [
+        { entitlementKey: "lines", increment: 11 },
+      ]);
+      await db.insert(schema.subscriptionAddons).values({
+        tenantId: f.tenantId,
+        subscriptionId: f.subscriptionId,
+        addonVersionId: endedVersionId,
+        quantity: 1,
+        startsAt: new Date(clock.getTime() - 2 * DAY),
+        endsAt: new Date(clock.getTime() - 60_000),
+        status: "active",
+        source: "manual",
+      });
+      const contributing = [
+        { kind: "plan", id: f.subscriptionId, catalogVersionId: f.planVersionId },
+        { kind: "addon", id: f.addonId, catalogVersionId: f.addonVersionId },
+      ];
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.sourceAssignments).toEqual(contributing);
+      expect(preview.next.rights.quotas.lines).toBe(8);
+
+      const requestId = randomUUID();
+      const file = await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+        requestId,
+        graceDays: null,
+        offline: null,
+        expected: preview.expected,
+      });
+      const [row] = await issuedRows(f.tenantId);
+      expect(row).toMatchObject({ source: "offline_assignments", sourceAssignments: contributing });
+      const issued = (await auditRows(db, f.tenantId)).filter(
+        (entry) => entry.action === "standalone_license.issued",
+      );
+      expect(issued).toHaveLength(1);
+      expect(issued[0]).toMatchObject({
+        actorPlatformUserId: f.admin.userId,
+        actorRole: "platform_admin",
+        tenantId: f.tenantId,
+        action: "standalone_license.issued",
+        outcome: "success",
+        targetType: "standalone_license",
+        targetId: file.issuance.licenseId,
+        requestId,
+        after: {
+          source: "offline_assignments",
+          sourceAssignments: contributing,
+          quotas: { lines: 8 },
+        },
+      });
+    });
+
+    it("issues a plan with 64 add-ons: 65 references are the journal's whole capacity", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 64 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.sourceAssignments).toHaveLength(65);
+      expect(preview.next.rights.quotas.lines).toBe(65);
+      await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected: preview.expected,
+      });
+      const [row] = await issuedRows(f.tenantId);
+      expect(row?.sourceAssignments).toHaveLength(65);
+    });
+
+    it("refuses 66 references with a clear code, in the preview and the confirmation, and writes nothing", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 65 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const refusal = { status: 409, body: { code: "standalone_assignment_limit_reached" } };
+      expect(
+        await httpRefusal(
+          issuance.preview(f.admin, f.tenantId, f.site.id, { graceDays: null, offline: null }),
+        ),
+      ).toEqual(refusal);
       expect(
         await httpRefusal(
           issuance.confirm(f.admin, f.tenantId, f.site.id, {
@@ -1072,40 +1286,37 @@ describe.skipIf(!process.env.DATABASE_URL)(
             },
           }),
         ),
-      ).toEqual({ status: 409, body: { code: "standalone_license_offline_terms_required" } });
+      ).toEqual(refusal);
       expect(await issuedRows(f.tenantId)).toEqual([]);
+    });
 
-      const cloud = await siteFor();
-      expect(
-        await httpRefusal(
-          issuance.preview(cloud.admin, cloud.tenantId, cloud.site.id, {
-            graceDays: null,
-            offline: { planVersionId: cloud.planVersionId, termDays: 30 },
-          }),
-        ),
-      ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
-      const cloudPreview = await issuance.preview(cloud.admin, cloud.tenantId, cloud.site.id, {
+    it("does not cap a tenant with a cabinet: it names no assignments, however many add-ons it has", async () => {
+      const f = await siteFor({ endsAt: null });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 65 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
         graceDays: null,
         offline: null,
       });
-      expect(
-        await httpRefusal(
-          issuance.confirm(cloud.admin, cloud.tenantId, cloud.site.id, {
-            requestId: randomUUID(),
-            graceDays: null,
-            offline: { planVersionId: cloud.planVersionId, termDays: 30 },
-            expected: cloudPreview.expected,
-          }),
-        ),
-      ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
+      expect(preview.next).toMatchObject({ source: "subscription", sourceAssignments: null });
+      expect(preview.next.rights.quotas.lines).toBe(67);
     });
 
-    it("refuses the offline file when the tenant got a cabinet between preview and confirmation", async () => {
+    it("refuses the previewed file when the tenant got a cabinet before confirmation", async () => {
       const f = await offlineSiteFor();
-      const offline = { planVersionId: f.planVersionId, termDays: 30 };
       const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
         graceDays: null,
-        offline,
+        offline: null,
       });
       await db
         .update(schema.organization)
@@ -1116,59 +1327,162 @@ describe.skipIf(!process.env.DATABASE_URL)(
           issuance.confirm(f.admin, f.tenantId, f.site.id, {
             requestId: randomUUID(),
             graceDays: null,
-            offline,
+            offline: null,
             expected: preview.expected,
           }),
         ),
-      ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
+      ).toEqual({ status: 409, body: { code: "standalone_license_preview_stale" } });
       expect(await issuedRows(f.tenantId)).toEqual([]);
     });
 
-    it("refuses offline terms or a sequence other than the preview's", async () => {
+    it("refuses the removed offline terms and keeps replaying an offline issuance made before", async () => {
       const f = await offlineSiteFor();
-      const offline = { planVersionId: f.planVersionId, termDays: 90 };
-      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+      const offline = { planVersionId: f.planVersionId, termDays: 30 };
+      expect(
+        await httpRefusal(
+          issuance.preview(f.admin, f.tenantId, f.site.id, { graceDays: null, offline }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_offline_terms_removed" } });
+
+      // A row of the removed manual path, as the journal holds it from before.
+      const legacyRequestId = randomUUID();
+      const legacyId = randomUUID();
+      const legacyPayload = standaloneLicensePayloadV1Schema.parse({
+        version: 1,
+        licenseId: legacyId,
+        sequence: 1,
+        issuer: STANDALONE_TEST_ISSUER,
+        tenantId: f.tenantId,
+        siteId: f.site.id,
+        hostId: f.site.hostId,
+        customer: { name: "Офлайн-клиент", inn: "7707083893" },
+        plan: "subscription",
+        planVersionId: f.planVersionId,
+        entitlementRevision: "0",
+        issuedAt: clock.getTime(),
+        validFrom: clock.getTime(),
+        validUntil: clock.getTime() + 30 * DAY,
+        graceDays: 14,
+        quotas: { lines: 1, stations: 2, kiosks: 0, cabinetUsers: 3 },
+        features: NO_FEATURES,
+        replaces: null,
+      });
+      await db.insert(schema.standaloneLicenseIssuances).values({
+        id: legacyId,
+        tenantId: f.tenantId,
+        siteId: f.site.id,
+        sequence: 1,
+        requestId: legacyRequestId,
+        hostId: f.site.hostId,
+        source: "offline",
+        plan: "subscription",
+        planVersionId: f.planVersionId,
+        entitlementRevision: 0n,
+        payload: legacyPayload,
+        compact: "legacy.compact.value",
+        sha256: "c".repeat(64),
+        kid: "test-lic-api",
+        graceDays: 14,
+        issuedAt: clock,
+        validFrom: clock,
+        validUntil: new Date(clock.getTime() + 30 * DAY),
+        validUntilReason: "offline_term",
+        issuedByPlatformUserId: f.admin.userId,
+      });
+      await db
+        .update(schema.standaloneSites)
+        .set({ lastIssuedSequence: 1 })
+        .where(eq(schema.standaloneSites.id, f.site.id));
+      const [summary] = (await issuance.listIssuances(f.admin, f.tenantId, f.site.id)).items;
+      expect(summary).toMatchObject({
+        source: "offline",
+        validUntilReason: "offline_term",
+        entitlementRevision: "0",
+        sourceAssignments: null,
+      });
+      const replay = await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+        requestId: legacyRequestId,
         graceDays: null,
         offline,
+        expected: {
+          entitlementRevision: "0",
+          previousSequence: 0,
+          boundaryAt: null,
+          termsDigest: "d".repeat(64),
+        },
       });
-      const other = await createPublishedPlan(db, {
-        maxLines: 9,
-        maxStations: 9,
-        maxKiosks: 0,
-        maxCabinetUsers: 9,
-      });
-      for (const [terms, expected] of [
-        [{ ...offline, termDays: 365 }, preview.expected],
-        [{ ...offline, planVersionId: other }, preview.expected],
-        [offline, { ...preview.expected, previousSequence: 1 }],
-      ] as const) {
-        expect(
-          await httpRefusal(
-            issuance.confirm(f.admin, f.tenantId, f.site.id, {
-              requestId: randomUUID(),
-              graceDays: null,
-              offline: terms,
-              expected,
-            }),
-          ),
-        ).toEqual({ status: 409, body: { code: "standalone_license_preview_stale" } });
-      }
-      expect(await issuedRows(f.tenantId)).toEqual([]);
+      expect(replay.issuance.licenseId).toBe(legacyId);
+      expect(
+        await httpRefusal(
+          issuance.confirm(f.admin, f.tenantId, f.site.id, {
+            requestId: legacyRequestId,
+            graceDays: null,
+            offline: null,
+            expected: {
+              entitlementRevision: "0",
+              previousSequence: 0,
+              boundaryAt: null,
+              termsDigest: "d".repeat(64),
+            },
+          }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_request_conflict" } });
     });
 
-    it("denies support and accountant the offline path too", async () => {
-      const f = await offlineSiteFor();
-      for (const actor of [
-        await platformActor(db, "support"),
-        await platformActor(db, "accountant"),
-      ]) {
+    it("keeps tenants apart and denies roles without the capability", async () => {
+      const a = await offlineSiteFor();
+      const b = await offlineSiteFor();
+      expect(
+        await httpRefusal(issuance.listIssuances(a.admin, a.tenantId, b.site.id)),
+      ).toMatchObject({ status: 404 });
+      for (const role of ["support", "accountant"] as const) {
+        const actor = await platformActor(db, role);
         await expect(
-          issuance.preview(actor, f.tenantId, f.site.id, {
-            graceDays: null,
-            offline: { planVersionId: f.planVersionId, termDays: 30 },
-          }),
+          issuance.preview(actor, a.tenantId, a.site.id, { graceDays: null, offline: null }),
         ).rejects.toBeInstanceOf(ForbiddenException);
       }
+    });
+
+    it("does not read another tenant's assignments", async () => {
+      const a = await offlineSiteFor({
+        plan: { maxLines: 7, maxStations: 7, maxKiosks: 0, maxCabinetUsers: 7 },
+        endsAt: null,
+      });
+      const b = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      const preview = await issuance.preview(b.admin, b.tenantId, b.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.rights.quotas).toEqual({
+        lines: 1,
+        stations: 1,
+        kiosks: 0,
+        cabinetUsers: 1,
+      });
+      expect(preview.next.sourceAssignments).toEqual([
+        { kind: "plan", id: b.subscriptionId, catalogVersionId: b.planVersionId },
+      ]);
+      expect(a.subscriptionId).not.toBe(b.subscriptionId);
+    });
+
+    it("issues from the subscription path once the tenant has a cabinet, with the same rights", async () => {
+      const f = await offlineSiteFor();
+      await db
+        .update(schema.organization)
+        .set({ cabinetAccess: "enabled" })
+        .where(eq(schema.organization.id, f.tenantId));
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next).toMatchObject({
+        source: "subscription",
+        sourceAssignments: null,
+        rights: { quotas: { lines: 1, stations: 2, kiosks: 0, cabinetUsers: 3 } },
+      });
     });
   },
 );

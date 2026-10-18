@@ -12,6 +12,7 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
+import { termContains } from "./subscription-term";
 import {
   SubscriptionEntitlementsInvalidException,
   SubscriptionFeatureDisabledException,
@@ -514,7 +515,7 @@ export class EntitlementsService {
 function isEffectiveAt(row: SubscriptionRow, at: Date): boolean {
   if (!inCandidateStatus(row.status)) return false;
   if (row.status === "scheduled" && row.startsAt === null) return false;
-  return (row.startsAt === null || row.startsAt <= at) && (row.endsAt === null || row.endsAt > at);
+  return termContains(row, at);
 }
 
 function inCandidateStatus(status: SubscriptionRow["status"]): boolean {

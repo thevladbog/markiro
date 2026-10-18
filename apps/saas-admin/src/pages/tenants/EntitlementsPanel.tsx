@@ -31,14 +31,18 @@ export function EntitlementsPanel({
       ) : !query.data ? (
         <Alert tone="error">
           {t("entitlements.loadError")}
-          <Button onClick={() => void query.refetch()}>{t("entitlements.retry")}</Button>
+          <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
+            {t("entitlements.retry")}
+          </Button>
         </Alert>
       ) : (
         <>
           {query.isError ? (
             <Alert tone="error">
               {t("entitlements.loadError")}
-              <Button onClick={() => void query.refetch()}>{t("entitlements.retry")}</Button>
+              <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
+                {t("entitlements.retry")}
+              </Button>
             </Alert>
           ) : null}
           <EntitlementSnapshotView snapshot={query.data.snapshot} />

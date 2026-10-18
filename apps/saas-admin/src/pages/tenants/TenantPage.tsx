@@ -15,7 +15,12 @@ import {
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
-import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
+import {
+  getTenant,
+  renewOwnerActivation,
+  tenantIdSchema,
+  type GrantCabinetAccessResult,
+} from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
 import { TenantDiagnosticsPanel } from "./TenantDiagnosticsPanel.js";
 import { GrantCabinetAccessPanel } from "./GrantCabinetAccessPanel.js";
@@ -39,7 +44,7 @@ export function TenantPage() {
     enabled: validTenantId.success,
   });
   const [renewOpen, setRenewOpen] = useState(false);
-  const [grantedNotice, setGrantedNotice] = useState(false);
+  const [grantedNotice, setGrantedNotice] = useState<GrantCabinetAccessResult | null>(null);
   const [renewMessage, setRenewMessage] = useState<{
     tone: "ok" | "error";
     key: string;
@@ -160,7 +165,13 @@ export function TenantPage() {
           {t(cabinetEnabled ? "tenants.detail.createdPending" : "tenants.detail.offline.created")}
         </Alert>
       ) : null}
-      {grantedNotice ? <Alert tone="ok">{t("tenants.detail.offline.granted")}</Alert> : null}
+      {grantedNotice ? (
+        <Alert tone="ok">
+          {grantedNotice.demoCreated
+            ? t("tenants.detail.offline.granted")
+            : t("tenants.detail.offline.grantedNoDemo", grantedNotice.offlineAssignments)}
+        </Alert>
+      ) : null}
       {detail.subscriptionStatus === "pending_activation" ? (
         <Alert tone="warn">{t("tenants.detail.pendingActivation")}</Alert>
       ) : null}
@@ -264,23 +275,28 @@ export function TenantPage() {
                 <GrantCabinetAccessPanel
                   tenantId={detail.tenant.id}
                   canGrant={canGrant}
-                  onGranted={() => setGrantedNotice(true)}
+                  offlineAssignments={{
+                    plans:
+                      (detail.currentSubscription ? 1 : 0) + (detail.scheduledSubscription ? 1 : 0),
+                    addons: detail.activeAddons.length + detail.scheduledAddons.length,
+                  }}
+                  onGranted={setGrantedNotice}
                 />
               )}
             </div>
           </Card>
 
-          {cabinetEnabled ? (
-            <SubscriptionPanel
-              detail={detail}
-              canDirectAssign={canDirectAssign}
-              capabilities={principal.capabilities}
-              financialVisible={financialVisible}
-              accountant={principal.role === "accountant"}
-            />
-          ) : (
+          {cabinetEnabled ? null : (
             <Alert tone="info">{t("tenants.detail.offline.documentsNotice")}</Alert>
           )}
+          <SubscriptionPanel
+            detail={detail}
+            canDirectAssign={canDirectAssign}
+            capabilities={principal.capabilities}
+            financialVisible={financialVisible}
+            accountant={principal.role === "accountant"}
+            offlineTenant={!cabinetEnabled}
+          />
         </div>
       ) : activeTab === "equipment" ? (
         <div id="tenant-equipment-panel" role="tabpanel" className="tenant-tab-panel">

@@ -50,7 +50,9 @@ export function SupportEpisodesPage() {
       {query.isError ? (
         <Alert tone="error">
           {t("support.loadError")}{" "}
-          <Button onClick={() => void query.refetch()}>{t("support.retry")}</Button>
+          <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
+            {t("support.retry")}
+          </Button>
         </Alert>
       ) : null}
       {query.data?.items.length === 0 ? <p>{t("support.empty")}</p> : null}

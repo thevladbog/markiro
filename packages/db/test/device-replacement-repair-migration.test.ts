@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runRuntimeMigrations } from "../src/runtime-migrate.js";
+import { closeFixturePool } from "./support/close-pool.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 it("registers forward repair scheduling metadata after 0172", async () => {
@@ -125,8 +126,8 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement repair forward migration
     });
   }, 120_000);
   afterAll(async () => {
-    await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    await closeFixturePool(pool);
+    if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });

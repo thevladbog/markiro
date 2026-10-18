@@ -129,7 +129,7 @@ describe("NewShift shared label selection and preview", () => {
       () => true,
     );
     await openPicker("box");
-    expect(h.previewReads).toHaveLength(1);
+    await waitFor(() => expect(h.previewReads).toHaveLength(1));
     h.rerender(<NewShift {...h.props} isCurrent={() => true} />);
     h.rerender(<NewShift {...h.props} isCurrent={() => true} />);
     expect(h.previewReads).toHaveLength(1);
@@ -147,6 +147,7 @@ describe("NewShift shared label selection and preview", () => {
       () => true,
     );
     await openPicker("box");
+    await waitFor(() => expect(h.previewReads).toHaveLength(1));
     h.rerender(<NewShift {...h.props} isCurrent={() => false} />);
     await act(async () =>
       pending.resolve({ id: options[0]?.id, name: "Retired response", purpose: "box", spec }),

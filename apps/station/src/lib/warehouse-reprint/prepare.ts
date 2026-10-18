@@ -38,8 +38,17 @@ export async function renderWarehouseLabel(
       !template.chzProductGroupCodes.includes(source.chzProductGroupCode))
   )
     throw new Error("WAREHOUSE_TEMPLATE_GROUP");
-  if (source.unavailableFields.some((field) => labelTemplateUsesField(template.spec, field)))
-    throw new Error("WAREHOUSE_SOURCE_FIELDS");
+  const missing = source.unavailableFields.find((field) =>
+    labelTemplateUsesField(template.spec, field),
+  );
+  if (missing)
+    throw new Error(
+      missing === "date"
+        ? "WAREHOUSE_SOURCE_DATE"
+        : missing === "expiry"
+          ? "WAREHOUSE_SOURCE_EXPIRY"
+          : "WAREHOUSE_SOURCE_FIELDS",
+    );
   const fields = { ...source.fields };
   if (printerMode(printer) === "windows_driver") {
     const bytes = encodeMonoRaster(

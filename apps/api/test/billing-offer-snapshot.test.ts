@@ -239,6 +239,7 @@ describe("platform invoice response boundary", () => {
             invoiceId: "31111111-1111-4111-8111-111111111111",
             revision: 1,
             format: "pdf",
+            printVariant: "clean",
             status: "ready",
             objectKey: "tenants/redacted/invoices/redacted/r1.pdf",
           },
@@ -253,7 +254,7 @@ describe("platform invoice response boundary", () => {
     expect(storage.presignRead).toHaveBeenCalledWith(
       "tenants/redacted/invoices/redacted/r1.pdf",
       300,
-      { downloadFilename: "invoice-31111111-1111-4111-8111-111111111111.pdf" },
+      { downloadFilename: "invoice-31111111-1111-4111-8111-111111111111-r1-clean.pdf" },
     );
   });
 

@@ -1,3 +1,4 @@
+import { buildPalletSheetPresets } from "@markiro/domain";
 import { randomUUID } from "node:crypto";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -167,5 +168,61 @@ describe.skipIf(!databaseUrl)("pallet sheet migration", () => {
       code: "23503",
       constraint: "shifts_tenant_pallet_sheet_template_fk",
     });
+  });
+  it("refreshes only untouched presets and provides separate standards for edited or disabled originals", async () => {
+    const refresh = await readFile(
+      new URL("../migrations/0191_pallet_sheet_preset_refresh.sql", import.meta.url),
+      "utf8",
+    );
+    await pool.query(
+      "INSERT INTO organization(id,name,slug,created_at) VALUES('refresh','Refresh','refresh',now())",
+    );
+    await pool.query(seedSql);
+    const originals = await pool.query<{ id: string; seed_key: string; spec: unknown }>(
+      "SELECT id,seed_key,spec FROM label_templates WHERE tenant_id='refresh'",
+    );
+    const portrait = originals.rows.find((r) => r.seed_key === "pallet-a4-portrait");
+    if (!portrait) throw new Error("Missing portrait");
+    await pool.query(
+      "UPDATE label_templates SET name='My landscape',spec=jsonb_set(spec,'{custom}', 'true'::jsonb),revision=2 WHERE tenant_id='refresh' AND seed_key='pallet-a4-landscape'",
+    );
+    await pool.query(
+      "UPDATE label_templates SET enabled=false WHERE tenant_id='refresh' AND seed_key='pallet-a4-two-a5'",
+    );
+    const preserved = await pool.query(
+      "SELECT id,name,spec,enabled,revision FROM label_templates WHERE tenant_id='refresh' AND seed_key<>'pallet-a4-portrait' ORDER BY seed_key",
+    );
+    await pool.query(refresh);
+    expect(
+      (await pool.query("SELECT id,spec,revision FROM label_templates WHERE id=$1", [portrait.id]))
+        .rows,
+    ).toEqual([{ id: portrait.id, spec: buildPalletSheetPresets()[0]?.spec, revision: 2 }]);
+    expect(
+      (
+        await pool.query(
+          "SELECT id,name,spec,enabled,revision FROM label_templates WHERE tenant_id='refresh' AND seed_key IN ('pallet-a4-landscape','pallet-a4-two-a5') ORDER BY seed_key",
+        )
+      ).rows,
+    ).toEqual(preserved.rows);
+    const alternatives = await pool.query<{ seed_key: string; spec: unknown }>(
+      "SELECT seed_key,spec FROM label_templates WHERE tenant_id='refresh' AND seed_key LIKE '%-2026-10' ORDER BY seed_key",
+    );
+    expect(alternatives.rows).toEqual(
+      buildPalletSheetPresets()
+        .filter((p) => p.key !== "pallet-a4-portrait")
+        .map((p) => ({ seed_key: p.key + "-2026-10", spec: p.spec }))
+        .sort((a, b) => a.seed_key.localeCompare(b.seed_key)),
+    );
+    const before = await pool.query(
+      "SELECT id,name,spec,revision FROM label_templates WHERE tenant_id='refresh' ORDER BY seed_key",
+    );
+    await pool.query(refresh);
+    expect(
+      (
+        await pool.query(
+          "SELECT id,name,spec,revision FROM label_templates WHERE tenant_id='refresh' ORDER BY seed_key",
+        )
+      ).rows,
+    ).toEqual(before.rows);
   });
 });

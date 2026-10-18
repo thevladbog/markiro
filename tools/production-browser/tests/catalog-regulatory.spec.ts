@@ -63,6 +63,14 @@ async function installApi(page: Page, group: number, readonly = false) {
     const path = new URL(request.url()).pathname;
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories", "/api/shifts?status=active"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     // Support chat is disabled in these unrelated screen scenarios.
     if (request.method() === "GET" && path === "/api/support-chat/episodes") {
       return route.fulfill({

@@ -44,7 +44,7 @@ it("denies incompatible purpose/group, unknown DPI and missing historical fields
       p,
       raster,
     ),
-  ).rejects.toThrow("WAREHOUSE_SOURCE_FIELDS");
+  ).rejects.toThrow("WAREHOUSE_SOURCE_DATE");
 });
 it("rejects group and purpose mismatches even with recomputed valid template digest", async () => {
   const source = warehouseBoxSource();

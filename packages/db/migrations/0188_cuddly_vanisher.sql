@@ -1,0 +1,3 @@
+ALTER TABLE "pallet_reprint_events" ADD COLUMN "status" text DEFAULT 'accepted' NOT NULL;--> statement-breakpoint
+CREATE INDEX "pallet_reprint_events_job_idx" ON "pallet_reprint_events" USING btree ("tenant_id","device_id","job_id");--> statement-breakpoint
+ALTER TABLE "pallet_reprint_events" ADD CONSTRAINT "pallet_reprint_events_status_check" CHECK ("pallet_reprint_events"."status" IN ('accepted','conflict'));

@@ -394,8 +394,13 @@ function importedRunCount(state: ChzExportState | undefined): number {
  */
 const CHZ_EXPORT_POLL_INTERVAL_MS = 10_000;
 
-export function useInventories(): UseQueryResult<Inventory[]> {
-  return useQuery({ queryKey: INVENTORIES_QUERY_KEY, queryFn: listInventories });
+export function useInventories(enabled = true): UseQueryResult<Inventory[]> {
+  return useQuery({ queryKey: INVENTORIES_QUERY_KEY, queryFn: listInventories, enabled });
+}
+
+export function useActiveInventoryCount(enabled = true): number {
+  const { data } = useInventories(enabled);
+  return data?.filter((inventory) => inventory.status === "running").length ?? 0;
 }
 
 export function useInventory(id: string): UseQueryResult<InventoryDetail> {

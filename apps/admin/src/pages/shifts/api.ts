@@ -256,11 +256,20 @@ function postCloseShift(id: string, reason: string): Promise<ShiftDto> {
 }
 
 /** `GET /shifts` -- the active tenant's shifts, optionally filtered by status/period/line. */
-export function useShifts(params: ListShiftsParams = {}): UseQueryResult<ShiftDto[]> {
+export function useShifts(
+  params: ListShiftsParams = {},
+  enabled = true,
+): UseQueryResult<ShiftDto[]> {
   return useQuery({
     queryKey: shiftsQueryKey(params),
     queryFn: () => fetchShifts(params),
+    enabled,
   });
+}
+
+export function useActiveShiftCount(enabled = true): number {
+  const { data } = useShifts({ status: "active" }, enabled);
+  return data?.length ?? 0;
 }
 
 /**

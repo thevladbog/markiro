@@ -118,7 +118,7 @@ describe("pallets registry", () => {
     stubRegistryFetch(() => ({ items: [WAREHOUSE_PALLET, PRODUCTION_PALLET] }));
     renderRegistry();
 
-    expect(await screen.findByRole("tab", { name: "Паллеты" })).toBeDefined();
+    expect(await screen.findByRole("tab", { name: "Палеты" })).toBeDefined();
     const table = within(await screen.findByRole("table"));
     const warehouseLink = table.getByRole("link", { name: "(00)104600682000000019" });
     expect(warehouseLink.getAttribute("href")).toBe("/codes/pallet/pal-w1");
@@ -134,8 +134,8 @@ describe("pallets registry", () => {
     renderRegistry();
     const user = userEvent.setup();
 
-    expect(await screen.findByText("Паллет по этим условиям нет")).toBeDefined();
-    await user.click(screen.getByRole("combobox", { name: "Вид паллеты" }));
+    expect(await screen.findByText("Палет по этим условиям нет")).toBeDefined();
+    await user.click(screen.getByRole("combobox", { name: "Вид палеты" }));
     await user.click(await screen.findByRole("option", { name: "Складские" }));
     await user.click(screen.getByRole("combobox", { name: "Товар" }));
     await user.click(await screen.findByRole("option", { name: "Молоко 1л" }));
@@ -269,7 +269,7 @@ describe("warehouse pallet card", () => {
     // Only the two boxes' own shift links exist -- no shift link for the
     // pallet header, since this warehouse pallet is not tied to any shift.
     expect(screen.getAllByRole("link", { name: /SEP26/ })).toHaveLength(2);
-    const boxes = within(screen.getByRole("region", { name: "Короба на паллете" }));
+    const boxes = within(screen.getByRole("region", { name: "Короба на палете" }));
     expect(boxes.getByText("SEP26-001")).toBeDefined();
     expect(boxes.getByText("SEP26-004")).toBeDefined();
   });
@@ -281,7 +281,7 @@ describe("warehouse pallet card", () => {
 
     const rejections = within(await screen.findByRole("region", { name: "Отказано в постановке" }));
     expect(rejections.getByText("(00)123460682000000103")).toBeDefined();
-    expect(rejections.getByText("Уже на другой паллете")).toBeDefined();
+    expect(rejections.getByText("Уже на другой палете")).toBeDefined();
     expect(rejections.getByText("(00)104600682000000002")).toBeDefined();
     expect(rejections.getByText("Короб не найден")).toBeDefined();
   });
@@ -290,7 +290,7 @@ describe("warehouse pallet card", () => {
 const PALLET_FORMAT = {
   id: "pallet_xml_gismt_aggregation",
   version: 1,
-  label: "[XML][ГИСМТ] Агрегация паллеты",
+  label: "[XML][ГИСМТ] Агрегация палеты",
   extension: "xml",
   mimeType: "application/xml; charset=utf-8",
 };
@@ -323,7 +323,7 @@ const READY_EXPORT = {
       physicalLineCount: 12,
       codeCount: 0,
       boxCount: 2,
-      filename: "Молоко_2026-09-17_паллета_00104600682000000019_2_коробов.xml",
+      filename: "Молоко_2026-09-17_палета_00104600682000000019_2_коробов.xml",
       mimeType: "application/xml; charset=utf-8",
       byteSize: 512,
       sha256: "0".repeat(64),
@@ -344,8 +344,8 @@ describe("pallet exports section", () => {
       return { items: [] };
     });
 
-    const section = within(await screen.findByRole("region", { name: "Отчёты паллеты" }));
-    expect(await section.findByText("Отчёты для этой паллеты ещё не формировались.")).toBeDefined();
+    const section = within(await screen.findByRole("region", { name: "Отчёты палеты" }));
+    expect(await section.findByText("Отчёты для этой палеты ещё не формировались.")).toBeDefined();
     await user.click(section.getByRole("button", { name: "Сформировать отчёт" }));
 
     await waitFor(() => {
@@ -359,15 +359,15 @@ describe("pallet exports section", () => {
       expect(body).not.toHaveProperty("maxLines");
     });
     expect(await section.findByText("Готов")).toBeDefined();
-    expect(section.getByText(/паллета_00104600682000000019/)).toBeDefined();
+    expect(section.getByText(/палета_00104600682000000019/)).toBeDefined();
     expect(section.getByText("2 коробов")).toBeDefined();
   });
 
   it("explains instead of offering the export while the pallet is not closed", async () => {
     renderCard({ ...WAREHOUSE_CARD, status: "open", closedAt: null });
 
-    const section = within(await screen.findByRole("region", { name: "Отчёты паллеты" }));
-    expect(section.getByText("Отчёт доступен после закрытия паллеты.")).toBeDefined();
+    const section = within(await screen.findByRole("region", { name: "Отчёты палеты" }));
+    expect(section.getByText("Отчёт доступен после закрытия палеты.")).toBeDefined();
     expect(section.queryByRole("button", { name: "Сформировать отчёт" })).toBeNull();
   });
 });
@@ -419,17 +419,17 @@ describe("pallet placard from the card", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "Ярлык" }));
-    const dialog = within(await screen.findByRole("dialog", { name: "Ярлык паллеты" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Ярлык палеты" }));
     expect(dialog.getByRole("radio", { name: "A4" }).getAttribute("aria-checked")).toBe("true");
     await user.click(dialog.getByRole("button", { name: "Открыть" }));
     expect(openMock).toHaveBeenCalledTimes(1);
     expect(String(openMock.mock.calls[0]?.[0])).toMatch(
       /^\/api\/code-search\/pallets\/pal-w1\/placard\?format=a4&timeZone=/,
     );
-    expect(screen.queryByRole("dialog", { name: "Ярлык паллеты" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Ярлык палеты" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Ярлык" }));
-    const again = within(await screen.findByRole("dialog", { name: "Ярлык паллеты" }));
+    const again = within(await screen.findByRole("dialog", { name: "Ярлык палеты" }));
     await user.click(again.getByRole("radio", { name: "A5" }));
     await user.click(again.getByRole("button", { name: "Открыть" }));
     expect(String(openMock.mock.calls[1]?.[0])).toContain("/placard?format=a5&timeZone=");

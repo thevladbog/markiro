@@ -10,6 +10,7 @@ import {
   grantCabinetAccess,
   grantCabinetAccessInputSchema,
   type GrantCabinetAccessInput,
+  type GrantCabinetAccessResult,
 } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
 import { useUnsavedChanges } from "./useUnsavedChanges.js";
@@ -17,11 +18,14 @@ import { useUnsavedChanges } from "./useUnsavedChanges.js";
 export function GrantCabinetAccessPanel({
   tenantId,
   canGrant,
+  offlineAssignments,
   onGranted,
 }: {
   tenantId: string;
   canGrant: boolean;
-  onGranted?: () => void;
+  /** Live direct assignments the grant leaves in force (spec 2026-10-16). */
+  offlineAssignments?: { plans: number; addons: number };
+  onGranted?: (result: GrantCabinetAccessResult) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -61,11 +65,11 @@ export function GrantCabinetAccessPanel({
   const submit = form.handleSubmit(async (values) => {
     setErrorKey(null);
     try {
-      await grant.mutateAsync(values);
+      const result = await grant.mutateAsync(values);
       form.reset();
       returnFocus.current = true;
       setOpen(false);
-      onGranted?.();
+      onGranted?.(result);
       // The prefix covers this tenant's detail and every list page.
       await queryClient.invalidateQueries({ queryKey: ["platform", "tenants"] });
     } catch (error) {
@@ -86,6 +90,11 @@ export function GrantCabinetAccessPanel({
       ) : null}
       {canGrant && open ? (
         <form className="tenant-create-form" noValidate onSubmit={(event) => void submit(event)}>
+          {offlineAssignments && offlineAssignments.plans + offlineAssignments.addons > 0 ? (
+            <Alert tone="warn">
+              {t("tenants.detail.offline.assignmentsWarning", offlineAssignments)}
+            </Alert>
+          ) : null}
           {errorKey ? <Alert tone="error">{t(errorKey)}</Alert> : null}
           <Input
             label={t("tenants.detail.offline.email")}

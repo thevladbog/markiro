@@ -1,8 +1,19 @@
+import { productLabelBytesDigest } from "@markiro/domain";
+import { attemptProductionPalletPrint } from "../lib/warehouse-reprint/production-pallet-printing.js";
+import {
+  readProductionPalletFields,
+  retainPalletClosureSource,
+  retainProductionPalletSource,
+} from "../lib/warehouse-reprint/pallet-sources.js";
 import { printerMode } from "../lib/printer-routing.js";
 import type { PalletPrintErrorCode } from "../lib/pallets.js";
 import { printPalletSheet } from "../lib/pallet-sheet-printing.js";
 import { preparePalletSheet } from "../lib/pallet-sheet-print-snapshot.js";
-import { loadOrganizationBranding, loadThermalLabelLogo } from "../lib/organization-branding.js";
+import {
+  parseOrganizationBranding,
+  loadOrganizationBranding,
+  loadThermalLabelLogo,
+} from "../lib/organization-branding.js";
 import { readShiftExecutionProjection } from "../lib/offline-grants/semantic.js";
 import { tauriWindowsPrinting } from "../lib/hardware.js";
 import { rasterizeDriverText } from "../lib/rasterizer.js";
@@ -732,14 +743,27 @@ export function WorkScreen({
             isCurrent: () => !credentialGeneration.sealed,
             prepare: async () => {
               const { scope } = await readShiftExecutionProjection(exec, shiftId);
-              const template = scope.shift.palletSheetTemplateSnapshot;
-              if (!template) throw new Error("Sheet template unavailable");
-              const branding = await loadOrganizationBranding({
+              const retained = await retainPalletClosureSource(
                 exec,
-                tenantId,
-                generation: credentialGeneration,
-                isCurrent: () => !credentialGeneration.sealed,
-              });
+                ownerDigest,
+                result.sscc,
+                "a4",
+                true,
+              ).catch(() => null);
+              const template =
+                retained?.rendering.kind === "a4"
+                  ? retained.rendering.template
+                  : scope.shift.palletSheetTemplateSnapshot;
+              if (!template) throw new Error("Sheet template unavailable");
+              const branding =
+                retained?.rendering.kind === "a4"
+                  ? parseOrganizationBranding(retained.rendering.brandingJson)
+                  : await loadOrganizationBranding({
+                      exec,
+                      tenantId,
+                      generation: credentialGeneration,
+                      isCurrent: () => !credentialGeneration.sealed,
+                    });
               if (!branding) throw new Error("Sheet branding unavailable");
               if (bound.target.kind !== "usb" || !tauriWindowsPrinting.getWindowsPageGeometry)
                 throw new Error("Sheet printer unavailable");
@@ -747,13 +771,16 @@ export function WorkScreen({
                 bound.target.printer,
                 { mode: "a4_sheet", orientation: template.spec.page.orientation },
               );
-              return preparePalletSheet(
+              const captured = await readProductionPalletFields(exec, result.sscc, result);
+              const prepared = await preparePalletSheet(
                 {
                   profile: bound,
                   template,
                   branding,
                   geometry,
-                  facts: {
+                  facts: (retained?.rendering.kind === "a4"
+                    ? retained.rendering.facts
+                    : captured?.facts) ?? {
                     sscc: result.sscc,
                     boxCount: result.boxCount,
                     itemCount: result.itemCount,
@@ -767,6 +794,28 @@ export function WorkScreen({
                 },
                 rasterizeDriverText,
               );
+              await retainProductionPalletSource(
+                exec,
+                ownerDigest,
+                result.sscc,
+                {
+                  kind: "a4",
+                  rendererVersion: "pallet-sheet-v1",
+                  template: prepared.renderSnapshot.template,
+                  facts: prepared.renderSnapshot.facts,
+                  brandingJson: prepared.renderSnapshot.brandingJson,
+                },
+                {
+                  scope: key.scope,
+                  attemptId: key.attemptId,
+                  bytesDigest: productLabelBytesDigest(prepared.bytes),
+                  geometryFingerprint: geometry.fingerprint,
+                },
+                true,
+              ).catch(() => {
+                console.warn("station: pallet reprint source unavailable");
+              });
+              return prepared;
             },
           }),
         );
@@ -802,7 +851,8 @@ export function WorkScreen({
         lease.release();
       }
     }
-    return attemptBoxPrint({
+    const captured = await readProductionPalletFields(exec, result.sscc, result);
+    const thermalInput: Parameters<typeof attemptBoxPrint>[0] = {
       ...(credentialGeneration
         ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
         : {}),
@@ -820,7 +870,7 @@ export function WorkScreen({
           : {}),
       },
       template: palletLabelSpecRef.current,
-      fields: fieldsForClosedPallet(result),
+      fields: captured?.fields ?? fieldsForClosedPallet(result),
       printing: currentPrinting
         ? {
             ...currentPrinting,
@@ -832,7 +882,19 @@ export function WorkScreen({
           dpi,
           ...(logo ? { logo } : {}),
         }),
-    });
+    };
+    if (credentialGeneration && tenantId) {
+      const owner = await credentialGenerationOwnership(credentialGeneration);
+      if (!owner) return { kind: "failed" as const, code: "persistence_failed" as const };
+      return attemptProductionPalletPrint({
+        ...thermalInput,
+        generation: credentialGeneration,
+        owner,
+        tenantId,
+        sscc: result.sscc,
+      });
+    }
+    return attemptBoxPrint(thermalInput);
   }
 
   /**

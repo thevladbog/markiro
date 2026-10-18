@@ -8,6 +8,7 @@ import {
   platformOfflineGrantPolicyContracts,
   platformUuidSchema,
   type ApproveOfflineGrantPolicy,
+  type CatalogOfflineAvailabilityBody,
   type CreateOfflineGrantPolicy,
 } from "@markiro/platform-contracts";
 import {
@@ -340,6 +341,25 @@ export class PlatformCatalogController {
     return parsePlatformResponse(
       platformCatalogContracts.archiveItem.response,
       await this.catalog.archive(request.platformPrincipal!, id),
+    );
+  }
+
+  @Patch("items/:id/offline-availability")
+  @ApiOperation({ summary: "Mark a catalog item as available to tenants without a cabinet" })
+  @PlatformApiProtectedOk({
+    body: platformCatalogContracts.setOfflineAvailability.body,
+    response: platformCatalogContracts.setOfflineAvailability.response,
+  })
+  @RequirePlatformCapabilities("catalog.write")
+  async setOfflineAvailability(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+    @Body(new ZodValidationPipe(platformCatalogContracts.setOfflineAvailability.body))
+    body: CatalogOfflineAvailabilityBody,
+  ) {
+    return parsePlatformResponse(
+      platformCatalogContracts.setOfflineAvailability.response,
+      await this.catalog.setOfflineAvailability(request.platformPrincipal!, id, body),
     );
   }
 }

@@ -50,6 +50,7 @@ const response = {
   id,
   catalogItemId: id,
   catalogItemCode: "basic",
+  offlineAvailable: false,
   kind: "plan",
   version: 1,
   status: "draft",
@@ -211,8 +212,10 @@ describe("strict negotiated commercial V3", () => {
       descriptionEn: _en,
       publishedAt: _at,
       publishedByPlatformUserId: _by,
+      offlineAvailable: _offline,
       ...base
     } = response;
+    void _offline;
     void _plan;
     void _ru;
     void _en;

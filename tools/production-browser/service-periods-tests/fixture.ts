@@ -13,6 +13,7 @@ export const monthlyService = catalogVersionV4Schema.parse({
   id: "61111111-1111-4111-8111-111111111181",
   catalogItemId: "51111111-1111-4111-8111-111111111181",
   catalogItemCode: "monthly-support",
+  offlineAvailable: false,
   documentNameRu: "Абонентское сопровождение",
   documentNameEn: "Monthly support",
   subject: "service",

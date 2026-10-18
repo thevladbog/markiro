@@ -1,0 +1,2 @@
+ALTER TABLE "invoice_documents" DROP CONSTRAINT "invoice_documents_invoice_revision_format_uq";--> statement-breakpoint
+ALTER TABLE "invoice_documents" ADD CONSTRAINT "invoice_documents_invoice_revision_format_variant_uq" UNIQUE("invoice_id","revision","format","print_variant");

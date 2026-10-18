@@ -48,7 +48,7 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
         const phase = licensePhase(site, now);
         return (
           <span className="standalone-license-cell">
-            <StatusChip phase={phase} label={t(`tenants.detail.standalone.phase.${phase}`)} />{" "}
+            <StatusChip phase={phase} label={t(`tenants.detail.standalone.phase.${phase}`)} wrap />{" "}
             {site.latestIssuance ? (
               <span>
                 {t("tenants.detail.standalone.licenseLine", {
@@ -104,7 +104,7 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
         <Alert
           tone="error"
           action={
-            <Button variant="secondary" onClick={() => void query.refetch()}>
+            <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
               {t("tenants.detail.standalone.retry")}
             </Button>
           }
@@ -116,8 +116,8 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
           {!query.data.signingConfigured ? (
             <Alert tone="info">{t("tenants.detail.standalone.signingUnavailable")}</Alert>
           ) : null}
-          {query.data.issuanceSource === "offline" ? (
-            <Alert tone="info">{t("tenants.detail.standalone.offlineTenant")}</Alert>
+          {query.data.issuanceSource === "offline_assignments" ? (
+            <Alert tone="info">{t("tenants.detail.standalone.assignmentsTenant")}</Alert>
           ) : null}
           {query.data.sites
             .filter((site) => licensePhase(site, now) === "attention")

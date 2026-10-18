@@ -1,3 +1,4 @@
+import { PalletDeliveryRecovery } from "../ui/warehouse-reprint/PalletDeliveryRecovery.js";
 import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -46,6 +47,7 @@ export function WarehouseReprint(props: WarehouseReprintProps) {
   const { state, work } = useWarehouseReprint(options, props.onFloorWorkRegister);
   return <WarehouseReprintView {...props} state={state} work={work} />;
 }
+
 export function WarehouseReprintView(
   props: WarehouseReprintProps & {
     state: WarehouseWorkState;
@@ -63,10 +65,14 @@ export function WarehouseReprintView(
       | "reprint"
       | "sendPrepared"
       | "acknowledgeHistory"
+      | "resolveOriginal"
     >;
   },
 ) {
   const { t } = useTranslation();
+  const [originalResolution, setOriginalResolution] = useState<"confirmed" | "skipped" | null>(
+    null,
+  );
   const [picker, setPicker] = useState(false);
   const [manual, setManual] = useState(false);
   const [manualValue, setManualValue] = useState("");
@@ -93,6 +99,7 @@ export function WarehouseReprintView(
     ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(state.job.state);
   useEffect(() => {
     if (
+      originalResolution ||
       picker ||
       reasonDialog ||
       repeatDialog ||
@@ -108,6 +115,7 @@ export function WarehouseReprintView(
     });
   }, [
     props.source,
+    originalResolution,
     picker,
     reasonDialog,
     repeatDialog,
@@ -158,6 +166,26 @@ export function WarehouseReprintView(
           {t(`warehouse.errors.${state.error}`, {
             defaultValue: t("warehouse.errors.WAREHOUSE_OPERATION_FAILED"),
           })}
+          {state.palletDiagnostic?.originDeviceId === props.deviceId &&
+          !["sending", "prepared"].includes(state.palletDiagnostic.kind) ? (
+            <div className="warehouse-recovery-actions">
+              <Button
+                size="floor"
+                disabled={state.busy}
+                onClick={() => setOriginalResolution("confirmed")}
+              >
+                {t("warehouse.pallet.resolveConfirm")}
+              </Button>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={state.busy}
+                onClick={() => setOriginalResolution("skipped")}
+              >
+                {t("warehouse.pallet.resolveSkip")}
+              </Button>
+            </div>
+          ) : null}
           {props.onSetup && state.error.includes("PRINTER") ? (
             <Button size="floor" onClick={() => props.onSetup?.()}>
               {t("warehouse.setupPrinter")}
@@ -190,11 +218,21 @@ export function WarehouseReprintView(
               </fieldset>
               <Button
                 size="floor"
-                disabled={!editable || !session?.unitTemplate || !session.boxTemplate}
+                disabled={
+                  !editable ||
+                  !session?.unitTemplate ||
+                  !session.boxTemplate ||
+                  (state.palletCatalog != null && !session.palletTemplate)
+                }
                 onClick={() => {
                   if (session)
                     void work
-                      .configure(reason, session.unitTemplate, session.boxTemplate)
+                      .configure(
+                        reason,
+                        session.unitTemplate,
+                        session.boxTemplate,
+                        session.palletTemplate ?? null,
+                      )
                       .then(() => work.start());
                 }}
               >
@@ -212,8 +250,14 @@ export function WarehouseReprintView(
             <WindowsDeliveryStatus
               exec={props.exec}
               scope={state.job.printScope}
-              purpose={state.job.kind === "box" ? "box" : "duplicate"}
-              jobId={state.job.jobId}
+              purpose={
+                state.job.kind === "pallet"
+                  ? "pallet"
+                  : state.job.kind === "box"
+                    ? "box"
+                    : "duplicate"
+              }
+              jobId={state.job.kind === "pallet" ? state.job.identity : state.job.jobId}
               revision={state.job.updatedAt}
             />
           ) : null}
@@ -290,6 +334,7 @@ export function WarehouseReprintView(
           <p>{t("warehouse.sentCount")}</p>
           <p>{t("warehouse.unitSelected", { name: session?.unitTemplate?.name ?? "—" })}</p>
           <p>{t("warehouse.boxSelected", { name: session?.boxTemplate?.name ?? "—" })}</p>
+          <p>{t("warehouse.palletSelected", { name: session?.palletTemplate?.name ?? "—" })}</p>
           <Button
             size="floor"
             variant="secondary"
@@ -322,6 +367,21 @@ export function WarehouseReprintView(
           {t("warehouse.finishSession")}
         </Button>
       </footer>
+      {originalResolution && state.palletDiagnostic ? (
+        <PalletDeliveryRecovery
+          diagnostic={state.palletDiagnostic}
+          outcome={originalResolution}
+          source={props.source}
+          busy={state.busy}
+          error={state.error}
+          onClose={() => setOriginalResolution(null)}
+          onResolve={(raw, value) => {
+            void work
+              .resolveOriginal(originalResolution, raw, value)
+              .then(() => setOriginalResolution(null));
+          }}
+        />
+      ) : null}
       {finishDialog ? (
         <FullScreenDialog
           open
@@ -455,7 +515,12 @@ export function WarehouseReprintView(
               onClick={() => {
                 if (session)
                   void work
-                    .configure(reason, session.unitTemplate, session.boxTemplate)
+                    .configure(
+                      reason,
+                      session.unitTemplate,
+                      session.boxTemplate,
+                      session.palletTemplate ?? null,
+                    )
                     .then(() => {
                       setReasonDialog(false);
                       setReason(null);
@@ -496,11 +561,16 @@ export function WarehouseReprintView(
           boxLanguage={resolvePrinter(props.hardwareConfig, "box")?.language ?? null}
           unitDpi={resolvePrinter(props.hardwareConfig, "duplicate")?.dpi ?? null}
           boxDpi={resolvePrinter(props.hardwareConfig, "box")?.dpi ?? null}
+          palletCatalog={state.palletCatalog ?? null}
+          palletTemplate={session?.palletTemplate ?? null}
+          palletPaper={
+            resolvePrinter(props.hardwareConfig, "pallet")?.paper === "a4" ? "a4" : "thermal"
+          }
           unitTemplate={session?.unitTemplate ?? null}
           boxTemplate={session?.boxTemplate ?? null}
           onCancel={() => setPicker(false)}
-          onApply={(unit, box) => {
-            void work.configure(reason, unit, box).then(() => setPicker(false));
+          onApply={(unit, box, pallet) => {
+            void work.configure(reason, unit, box, pallet ?? null).then(() => setPicker(false));
           }}
         />
       ) : null}

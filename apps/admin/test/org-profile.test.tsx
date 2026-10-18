@@ -120,7 +120,7 @@ const LABEL_TEMPLATES = [
   },
   {
     id: "44444444-4444-4444-8444-444444444444",
-    name: "Паллета 100×150",
+    name: "Палета 100×150",
     purpose: "pallet" as const,
     widthMm: 100,
     heightMm: 150,
@@ -132,7 +132,7 @@ const LABEL_TEMPLATES = [
   },
   {
     id: "tpl-pallet-beer",
-    name: "Паллета пиво",
+    name: "Палета пиво",
     purpose: "pallet" as const,
     widthMm: 100,
     heightMm: 150,
@@ -1125,15 +1125,15 @@ describe("OrgProfilePage pallet defaults", () => {
 
     const profileCard = await cardOf("Профиль организации");
     const selector = await within(profileCard).findByRole("combobox", {
-      name: "Шаблон этикетки паллеты по умолчанию",
+      name: "Шаблон этикетки палеты по умолчанию",
     });
     expect(selector.textContent).toContain("Не выбран");
     openSelect(selector);
     expect(await screen.findByRole("option", { name: "Не выбран" })).toBeDefined();
-    expect(screen.getByRole("option", { name: "Паллета 100×150" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "Палета 100×150" })).toBeDefined();
     fireEvent.keyDown(document.activeElement ?? selector, { key: "Escape" });
     expect(
-      screen.getByRole("link", { name: "Открыть библиотеку шаблонов паллет" }).getAttribute("href"),
+      screen.getByRole("link", { name: "Открыть библиотеку шаблонов палет" }).getAttribute("href"),
     ).toBe("/labels");
   });
 
@@ -1158,7 +1158,7 @@ describe("OrgProfilePage pallet defaults", () => {
     const profileCard = await cardOf("Профиль организации");
     await chooseSelectOption(
       await within(profileCard).findByRole("combobox", {
-        name: "Шаблон этикетки паллеты по умолчанию",
+        name: "Шаблон этикетки палеты по умолчанию",
       }),
       palletTemplate.name,
     );
@@ -1208,7 +1208,7 @@ describe("OrgProfilePage pallet defaults", () => {
 
     const profileCard = await cardOf("Профиль организации");
     const selector = await within(profileCard).findByRole("combobox", {
-      name: "Шаблон этикетки паллеты по умолчанию",
+      name: "Шаблон этикетки палеты по умолчанию",
     });
     await waitFor(() => expect(selector.textContent).toContain(palletTemplate.name));
     await chooseSelectOption(selector, "Не выбран");
@@ -1246,13 +1246,13 @@ describe("OrgProfilePage pallet defaults", () => {
 
     const profileCard = await cardOf("Профиль организации");
     const selector = await within(profileCard).findByRole("combobox", {
-      name: "Шаблон этикетки паллеты по умолчанию",
+      name: "Шаблон этикетки палеты по умолчанию",
     });
     await waitFor(() => expect(selector.textContent).toContain("Недоступный шаблон (удалён)"));
     const save = within(profileCard).getByRole("button", { name: "Сохранить" });
     expect(save).toHaveProperty("disabled", true);
     expect(
-      within(profileCard).getByRole("button", { name: "Обновить шаблоны паллет" }),
+      within(profileCard).getByRole("button", { name: "Обновить шаблоны палет" }),
     ).toBeDefined();
 
     const palletTemplate = LABEL_TEMPLATES.find(
@@ -1268,13 +1268,13 @@ describe("OrgProfilePage pallet defaults", () => {
     renderPage();
     const profileCard = await cardOf("Профиль организации");
     const select = await within(profileCard).findByRole("combobox", {
-      name: "Шаблон этикетки паллеты по умолчанию",
+      name: "Шаблон этикетки палеты по умолчанию",
     });
     openSelect(select);
-    expect(await screen.findByRole("option", { name: "Паллета 100×150" })).toBeDefined();
-    // Excluded: scoped to a category ("Паллета пиво"), and both box templates
+    expect(await screen.findByRole("option", { name: "Палета 100×150" })).toBeDefined();
+    // Excluded: scoped to a category ("Палета пиво"), and both box templates
     // -- a box template must never be offered as a pallet default.
-    expect(screen.queryByRole("option", { name: "Паллета пиво" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Палета пиво" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Короб 100 × 75" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Пиво 58×40" })).toBeNull();
   });
@@ -1291,7 +1291,7 @@ describe("OrgProfilePage pallet defaults", () => {
     // The seeded stock pallet template (migration 0137) must never be
     // offered as the organisation's BOX default, even though it is enabled
     // and universal (chzProductGroupCodes: null) -- only its purpose differs.
-    expect(screen.queryByRole("option", { name: "Паллета 100×150" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Палета 100×150" })).toBeNull();
   });
 
   it("saves a category pallet default chosen from eligible templates", async () => {
@@ -1315,17 +1315,17 @@ describe("OrgProfilePage pallet defaults", () => {
 
     const profileCard = await cardOf("Профиль организации");
     const beerSelect = await within(profileCard).findByRole("combobox", {
-      name: "Пиво — паллета",
+      name: "Пиво — палета",
     });
-    await chooseSelectOption(beerSelect, "Паллета пиво");
-    expect(beerSelect.textContent).toContain("Паллета пиво");
+    await chooseSelectOption(beerSelect, "Палета пиво");
+    expect(beerSelect.textContent).toContain("Палета пиво");
 
     const milkSelect = within(profileCard).getByRole("combobox", {
-      name: "Молочная продукция — паллета",
+      name: "Молочная продукция — палета",
     });
     openSelect(milkSelect);
-    expect(await screen.findByRole("option", { name: "Паллета 100×150" })).toBeDefined();
-    expect(screen.queryByRole("option", { name: "Паллета пиво" })).toBeNull();
+    expect(await screen.findByRole("option", { name: "Палета 100×150" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "Палета пиво" })).toBeNull();
     fireEvent.keyDown(document.activeElement ?? milkSelect, { key: "Escape" });
 
     fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
@@ -1354,7 +1354,7 @@ describe("OrgProfilePage pallet defaults", () => {
     const profileCard = await cardOf("Профиль организации");
     expect(
       await within(profileCard).findByText(
-        "Назначьте товарам категории в каталоге, чтобы задать шаблон паллеты для категории.",
+        "Назначьте товарам категории в каталоге, чтобы задать шаблон палеты для категории.",
       ),
     ).toBeDefined();
   });

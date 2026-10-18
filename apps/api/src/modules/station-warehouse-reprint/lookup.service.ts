@@ -1,3 +1,4 @@
+import { unitLabelFactsSchema, unitLabelFactsUnavailableFields } from "@markiro/domain";
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -114,6 +115,42 @@ export class WarehouseLookupService {
         } catch (error) {
           if (!(error instanceof DomainError)) throw error;
           return { status: "unavailable", code: "incomplete_km" };
+        }
+        const [historical] = await tx
+          .select()
+          .from(schema.unitLabelFacts)
+          .where(
+            and(
+              eq(schema.unitLabelFacts.tenantId, tenantId),
+              eq(schema.unitLabelFacts.shiftId, row.shift.id),
+              eq(schema.unitLabelFacts.codeHash, scan.codeHash),
+              eq(schema.unitLabelFacts.acceptedAt, row.code.scannedAt),
+            ),
+          );
+        if (historical) {
+          const fact = unitLabelFactsSchema.parse(historical.fact);
+          if (
+            fact.digest !== historical.digest ||
+            fact.shiftId !== row.shift.id ||
+            fact.codeHash !== scan.codeHash ||
+            new Date(fact.acceptedAt).getTime() !== row.code.scannedAt.getTime() ||
+            fact.fields["product.gtin"] !== row.code.gtin14
+          )
+            throw new BadRequestException({ code: "WAREHOUSE_SOURCE_CORRUPT" });
+          return {
+            status: "found",
+            repair: null,
+            source: source({
+              kind: "unit",
+              sourceId: scan.codeHash,
+              identity: scan.codeHash,
+              productName: fact.fields["product.name"],
+              chzProductGroupCode: row.product.chzProductGroupCode,
+              fields: { ...fact.fields, "km.code": row.code.canonicalRaw },
+              unavailableFields: unitLabelFactsUnavailableFields(fact),
+              sourceShiftId: row.shift.id,
+            }),
+          };
         }
         const unavailable: LabelField[] = ["expiry", "operator", "counterparty.name"];
         if (row.shift.productionDate === null) unavailable.push("date");

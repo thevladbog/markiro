@@ -1,3 +1,7 @@
+import {
+  beginProductionPalletDelivery,
+  finishProductionPalletDelivery,
+} from "./warehouse-reprint/production-delivery.js";
 import { productLabelBytesDigest, productLabelValueDigest } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
 import { tauriWindowsPrinting, type WindowsPrinting } from "./hardware.js";
@@ -6,6 +10,7 @@ import {
   dispatchWindowsDelivery,
   preparePrintDelivery,
   recoverPrintDeliveries,
+  readPrintDelivery,
   resolvePrintDelivery,
   type DeliveryKey,
   type PrintDeliveryRow,
@@ -134,15 +139,39 @@ export async function printPalletSheet(input: {
       jobId: previous.job_id,
       attemptId: previous.attempt_id,
     });
-  await dispatchWindowsDelivery(
+  const claim = await beginProductionPalletDelivery(
     exec,
-    key,
-    profile,
-    prepared.bytes,
-    hardware,
-    input.isCurrent,
-    undefined,
-    snapshot,
+    input.owner.ownerDigest,
+    key.jobId,
+    key.attemptId,
+    productLabelBytesDigest(prepared.bytes),
   );
+  try {
+    await dispatchWindowsDelivery(
+      exec,
+      key,
+      profile,
+      prepared.bytes,
+      hardware,
+      input.isCurrent,
+      undefined,
+      snapshot,
+    );
+  } catch (error) {
+    const delivery = await readPrintDelivery(exec, key);
+    await finishProductionPalletDelivery(
+      exec,
+      input.owner.ownerDigest,
+      key.jobId,
+      claim,
+      delivery?.state === "sent"
+        ? "sent"
+        : delivery?.state === "failed_before_send"
+          ? "failed_before_send"
+          : "delivery_unknown",
+    );
+    throw error;
+  }
+  await finishProductionPalletDelivery(exec, input.owner.ownerDigest, key.jobId, claim, "sent");
   return prepared.bytes;
 }

@@ -79,14 +79,14 @@ describe("analyzeImport", () => {
 
   it("passes a wrapper name through and reports a purpose mismatch as a warning", () => {
     const outcome = analyzeImport({
-      source: JSON.stringify({ name: "Паллета 58×40", purpose: "pallet", spec: JSON_SPEC }),
+      source: JSON.stringify({ name: "Палета 58×40", purpose: "pallet", spec: JSON_SPEC }),
       format: "json",
       dpi: 203,
       purpose: "box",
     });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.analysis.name).toBe("Паллета 58×40");
+    expect(outcome.analysis.name).toBe("Палета 58×40");
     expect(outcome.analysis.result.warnings).toEqual([
       expect.objectContaining({ code: "PURPOSE_MISMATCH", source: 'purpose: "pallet"' }),
     ]);

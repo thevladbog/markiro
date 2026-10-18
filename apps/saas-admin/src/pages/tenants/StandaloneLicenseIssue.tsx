@@ -1,15 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Combobox, Input, Modal, type ComboboxOption } from "@markiro/ui";
-import type {
-  StandaloneIssuanceSource,
-  StandaloneOfflineTerms,
-  StandaloneSite,
-} from "@markiro/platform-contracts";
+import { Link } from "react-router";
+import { Alert, Button, Input, Modal } from "@markiro/ui";
+import type { StandaloneIssuanceSource, StandaloneSite } from "@markiro/platform-contracts";
 
 import { ApiRequestError } from "../../api/client.js";
-import { listAssignableCatalogVersions } from "./api.js";
 import { confirmStandaloneLicense, previewStandaloneLicense } from "./standalone-api.js";
 import { saveLicenseFile } from "./standalone-download.js";
 import {
@@ -17,14 +13,18 @@ import {
   standaloneSitesKey,
   standaloneWarningText,
 } from "./standalone-format.js";
+import {
+  assignmentsDiffer,
+  StandaloneAssignmentsSummary,
+  tenantAssignmentsKey,
+  useTenantAssignments,
+} from "./StandaloneAssignmentsSummary.js";
 import { StandaloneLicenseComparison } from "./StandaloneLicenseComparison.js";
-
-const MAX_OFFLINE_TERM_DAYS = 365;
 
 /**
  * Spec §6.2 steps 2–3: preview «before → after», then confirm and download the
- * `.mklic`. A tenant without a cabinet issues from the «Офлайн» terms — a
- * published plan and a term of 1-365 days (owner decision 2026-10-13).
+ * `.mklic`. The rights of a tenant without a cabinet are its direct plan and
+ * add-on assignments (spec 2026-10-16); the manual offline terms are gone.
  */
 export function StandaloneLicenseIssue({
   tenantId,
@@ -37,36 +37,14 @@ export function StandaloneLicenseIssue({
   source: StandaloneIssuanceSource;
   onClose: () => void;
 }) {
-  const { t, i18n } = useTranslation();
-  const offlinePath = source === "offline";
-  const [planVersionId, setPlanVersionId] = useState("");
-  const [term, setTerm] = useState(String(MAX_OFFLINE_TERM_DAYS));
-  const termDays = Number(term.trim());
-  const termValid =
-    term.trim() !== "" &&
-    Number.isInteger(termDays) &&
-    termDays >= 1 &&
-    termDays <= MAX_OFFLINE_TERM_DAYS;
-  const catalog = useQuery({
-    queryKey: ["platform", "catalog", "assignable"],
-    queryFn: listAssignableCatalogVersions,
-    enabled: offlinePath,
-  });
-  const english = i18n.resolvedLanguage?.startsWith("en") ?? false;
-  const planOptions: ComboboxOption[] = (catalog.data?.items ?? [])
-    .filter((item) => item.kind === "plan" && item.status === "published")
-    .map((item) => ({
-      value: item.id,
-      label: `${english ? item.nameEn : item.nameRu} · ${item.catalogItemCode ?? "—"} · ${t(
-        "tenants.detail.standalone.issue.offline.version",
-        { version: item.version },
-      )}`,
-      keywords: [item.nameRu, item.nameEn, item.catalogItemCode ?? ""],
-    }));
-  const offline: StandaloneOfflineTerms | null =
-    offlinePath && planVersionId !== "" && termValid ? { planVersionId, termDays } : null;
-  const termsReady = !offlinePath || offline !== null;
+  const { t } = useTranslation();
+  const assignmentsPath = source === "offline_assignments";
   const translate = (key: string, options: Record<string, unknown> = {}) => t(key, options);
+  const changeRightsLink = (
+    <Link to={`/tenants/${tenantId}#tenant-subscription`}>
+      {t("tenants.detail.standalone.assignments.change")}
+    </Link>
+  );
   const queryClient = useQueryClient();
   const [grace, setGrace] = useState("");
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
@@ -75,19 +53,33 @@ export function StandaloneLicenseIssue({
   const graceValid =
     graceDays === null || (Number.isInteger(graceDays) && graceDays >= 0 && graceDays <= 60);
   const preview = useMutation({
-    mutationFn: () => previewStandaloneLicense(tenantId, site.id, { graceDays, offline }),
+    mutationFn: () => previewStandaloneLicense(tenantId, site.id, { graceDays, offline: null }),
     onSuccess: () => {
       setRequestId(crypto.randomUUID());
       setIssuedSequence(null);
+      // Compare the preview with the tenant as it is now, not with an older read.
+      if (assignmentsPath)
+        void queryClient.invalidateQueries({ queryKey: tenantAssignmentsKey(tenantId) });
     },
   });
+  const tenant = useTenantAssignments(tenantId, assignmentsPath);
+  const previewed = assignmentsPath ? (preview.data?.next.sourceAssignments ?? null) : null;
+  // After the refetch the card must show what the API will issue from; until then, or
+  // when it cannot be read, the server's terms digest still refuses a moved preview.
+  const assignmentsChanged =
+    previewed !== null &&
+    tenant.data !== undefined &&
+    !tenant.isFetching &&
+    !tenant.isError &&
+    assignmentsDiffer(previewed, tenant.data, new Date(preview.data?.next.validFrom ?? 0));
+  const awaitingAssignments = previewed !== null && tenant.isFetching;
   const confirm = useMutation({
     mutationFn: () => {
       if (!preview.data) throw new Error("preview required");
       return confirmStandaloneLicense(tenantId, site.id, {
         requestId,
         graceDays,
-        offline,
+        offline: null,
         expected: preview.data.expected,
       });
     },
@@ -105,17 +97,19 @@ export function StandaloneLicenseIssue({
   return (
     <Modal
       open
+      className="standalone-license-dialog"
+      width={720}
       title={t("tenants.detail.standalone.issue.title", { name: site.name })}
       onClose={onClose}
       closeLabel={t("tenants.detail.standalone.issue.cancel")}
       footer={
-        <>
+        <div className="standalone-license-dialog__actions">
           <Button variant="secondary" onClick={onClose}>
             {t("tenants.detail.standalone.issue.cancel")}
           </Button>
           <Button
             variant="secondary"
-            disabled={!graceValid || !termsReady || preview.isPending}
+            disabled={!graceValid || preview.isPending}
             onClick={() => {
               confirm.reset();
               preview.mutate();
@@ -123,49 +117,25 @@ export function StandaloneLicenseIssue({
           >
             {t("tenants.detail.standalone.issue.preview")}
           </Button>
-          <Button disabled={!preview.data || confirm.isPending} onClick={() => confirm.mutate()}>
+          <Button
+            disabled={
+              !preview.data || confirm.isPending || assignmentsChanged || awaitingAssignments
+            }
+            onClick={() => confirm.mutate()}
+          >
             {t("tenants.detail.standalone.issue.confirm")}
           </Button>
-        </>
+        </div>
       }
     >
-      {offlinePath ? (
-        <fieldset className="standalone-offline-terms">
-          <legend>{t("tenants.detail.standalone.issue.offline.title")}</legend>
-          <p>{t("tenants.detail.standalone.issue.offline.hint")}</p>
-          <Combobox
-            label={t("tenants.detail.standalone.issue.offline.plan")}
-            options={planOptions}
-            value={planVersionId}
-            loading={catalog.isPending}
-            onValueChange={(value) => {
-              setPlanVersionId(value);
-              preview.reset();
-            }}
-            placeholder={t("tenants.detail.standalone.issue.offline.planPlaceholder")}
-            searchPlaceholder={t("tenants.detail.standalone.issue.offline.planPlaceholder")}
-            emptyText={t("tenants.detail.standalone.issue.offline.planEmpty")}
-            loadingText={t("tenants.detail.standalone.issue.offline.planLoading")}
-          />
-          {catalog.isError ? (
-            <Alert tone="error" role="alert">
-              {t("tenants.detail.standalone.issue.offline.catalogError")}
-            </Alert>
-          ) : null}
-          <Input
-            label={t("tenants.detail.standalone.issue.offline.termDays")}
-            hint={t("tenants.detail.standalone.issue.offline.termHint")}
-            inputMode="numeric"
-            value={term}
-            onChange={(event) => {
-              setTerm(event.target.value);
-              preview.reset();
-            }}
-            {...(termValid
-              ? {}
-              : { error: t("tenants.detail.standalone.issue.offline.termInvalid") })}
-          />
-        </fieldset>
+      {assignmentsPath ? (
+        <StandaloneAssignmentsSummary
+          tenantId={tenantId}
+          detail={tenant.data}
+          isError={tenant.isError}
+          previewed={previewed}
+          changed={assignmentsChanged}
+        />
       ) : null}
       <Input
         label={t("tenants.detail.standalone.issue.graceDays")}
@@ -184,14 +154,20 @@ export function StandaloneLicenseIssue({
         </Alert>
       ) : null}
       {preview.isError ? (
-        <Alert tone="error" role="alert">
-          {t(standaloneErrorKey(preview.error))}
-        </Alert>
+        <>
+          <Alert tone="error" role="alert">
+            {t(standaloneErrorKey(preview.error))}
+          </Alert>
+          {needsAssignments(preview.error) ? changeRightsLink : null}
+        </>
       ) : null}
       {confirm.isError ? (
-        <Alert tone="error" role="alert">
-          {t(standaloneErrorKey(confirm.error))}
-        </Alert>
+        <>
+          <Alert tone="error" role="alert">
+            {t(standaloneErrorKey(confirm.error))}
+          </Alert>
+          {needsAssignments(confirm.error) ? changeRightsLink : null}
+        </>
       ) : null}
       {preview.data ? (
         <>
@@ -213,5 +189,11 @@ export function StandaloneLicenseIssue({
         </>
       ) : null}
     </Modal>
+  );
+}
+
+function needsAssignments(error: unknown): boolean {
+  return (
+    error instanceof ApiRequestError && error.code === "standalone_license_assignments_required"
   );
 }

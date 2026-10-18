@@ -38,7 +38,9 @@ export function SupportTranscript({ requestId }: { requestId: string }) {
       {query.isError ? (
         <Alert tone="error">
           {t("support.loadError")}{" "}
-          <Button onClick={() => void query.refetch()}>{t("support.retry")}</Button>
+          <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
+            {t("support.retry")}
+          </Button>
         </Alert>
       ) : null}
       {current && !query.isError && current.sync.state !== "healthy" ? (
@@ -80,7 +82,9 @@ export function SupportTranscript({ requestId }: { requestId: string }) {
       {query.isFetchNextPageError ? (
         <Alert tone="error">
           {t("support.loadError")}{" "}
-          <Button onClick={() => void query.fetchNextPage()}>{t("support.retry")}</Button>
+          <Button size="compact" variant="secondary" onClick={() => void query.fetchNextPage()}>
+            {t("support.retry")}
+          </Button>
         </Alert>
       ) : null}
     </section>

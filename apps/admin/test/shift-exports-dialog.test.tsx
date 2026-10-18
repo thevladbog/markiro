@@ -217,10 +217,10 @@ describe("ShiftExportsDialog", () => {
     expect(within(dialog).getByText("2 коробов")).toBeDefined();
     // Pallets are named only where the document covers them: the export
     // header, the part that holds the pallet -- and not the part without one.
-    expect(within(dialog).getByText("1 паллет")).toBeDefined();
+    expect(within(dialog).getByText("1 палет")).toBeDefined();
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
     expect(
-      within(dialog).getByText("2 строк · 2 кодов · 1 коробов · 1 паллет · 42 Б"),
+      within(dialog).getByText("2 строк · 2 кодов · 1 коробов · 1 палет · 42 Б"),
     ).toBeDefined();
     expect(within(dialog).getByText("1 строк · 1 кодов · 1 коробов · 24 Б")).toBeDefined();
 

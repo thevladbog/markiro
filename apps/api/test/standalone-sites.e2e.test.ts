@@ -301,7 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
     expect(await sites.list(admin, tenantId)).toEqual({
       tenantId,
       signingConfigured: true,
-      issuanceSource: "offline",
+      issuanceSource: "offline_assignments",
       sites: [site],
     });
     const [tenant] = await db

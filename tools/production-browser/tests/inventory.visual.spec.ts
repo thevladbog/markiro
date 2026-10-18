@@ -1123,9 +1123,8 @@ for (const locale of LOCALES) {
       if (path === "/api/profile") return json(route, PROFILE);
       if (path === "/api/access/me") return json(route, ACCESS);
       if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
-
-      if (scenario === "list" && path === "/api/inventories") {
-        return json(route, { items: [inventoryRow] });
+      if (route.request().method() === "GET" && path + url.search === "/api/shifts?status=active") {
+        return json(route, { items: [] });
       }
 
       if (scenario === "create") {
@@ -1206,6 +1205,14 @@ for (const locale of LOCALES) {
         "closedDocumentsHistory",
         "closedCompletion",
       ];
+      if (route.request().method() === "GET" && path === "/api/inventories") {
+        const row = RUNNING_SCENARIOS.includes(scenario)
+          ? { ...inventoryRow07, status: "running", activeSnapshotId: SNAPSHOT_ID_07 }
+          : CLOSED_SCENARIOS.includes(scenario)
+            ? { ...inventoryRow07, status: "closed", activeSnapshotId: SNAPSHOT_ID_07 }
+            : inventoryRow;
+        return json(route, { items: scenario === "create" ? [] : [row] });
+      }
       if (RUNNING_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID_07}`) {
         // The detail response carries its own live tallies, so each running
         // scenario answers with the ones matching its own progress payload.

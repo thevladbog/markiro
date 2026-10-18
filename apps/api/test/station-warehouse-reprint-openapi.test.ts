@@ -39,6 +39,32 @@ describe.skipIf(!ready)("warehouse print OpenAPI", () => {
           },
         },
       });
+      for (const route of [
+        "pallet-sources",
+        "pallet-lookup",
+        "pallet-events",
+        "label-facts",
+        "pallet-lookup-v2",
+        "lookup-v3",
+        "pallet-data-v3",
+        "pallet-renderings-v3",
+        "pallet-events-v3",
+
+        "pallet-renderings-v2",
+        "pallet-events-v2",
+        "pallet-production-resolutions",
+      ]) {
+        const endpoint = document.paths[`/station/warehouse-reprint/${route}`]?.post;
+        expect(endpoint?.security).toEqual([{ stationApiKey: [] }]);
+        expect(endpoint?.requestBody).toMatchObject({
+          content: {
+            "application/json": { schema: { type: "object", additionalProperties: false } },
+          },
+        });
+      }
+      expect(
+        document.paths["/station/warehouse-reprint/pallet-templates-v2"]?.get?.security,
+      ).toEqual([{ stationApiKey: [] }]);
       expect(document.paths["/station/warehouse-reprint/templates"]?.get?.security).toEqual([
         { stationApiKey: [] },
       ]);

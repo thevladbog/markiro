@@ -647,6 +647,27 @@ describe("invoice commercial lifecycle", () => {
     expect(pdfTarget.opener).toBeNull();
   });
 
+  it("shows both clean and signed documents in the same revision without a variant selector", async () => {
+    installApi({
+      initialDocuments: [
+        ...readyDocuments.map((document) => ({ ...document, printVariant: "clean" })),
+        ...readyDocuments.map((document, index) => ({
+          ...document,
+          id:
+            index === 0
+              ? "98111111-1111-4111-8111-111111111111"
+              : "99111111-1111-4111-8111-111111111111",
+          printVariant: "signed",
+        })),
+      ],
+    });
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+    await screen.findByRole("heading", { name: "Печатные формы" });
+    expect(screen.getAllByRole("button", { name: "Скачать PDF" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Открыть HTML" })).toHaveLength(2);
+    expect(screen.queryByRole("checkbox", { name: "Добавить подпись и печать" })).toBeNull();
+  });
+
   it("keeps an earlier ready revision available when the latest revision failed", async () => {
     installApi({
       initialDocuments: [
@@ -799,36 +820,29 @@ describe("invoice commercial lifecycle", () => {
     ).toBe(true);
   });
 
-  it("requests a signed invoice revision only after an explicit operator choice", async () => {
+  it("requests invoice generation without a manual variant choice", async () => {
     const api = installApi({ initialDocuments: [failedHtmlDocument] });
     const user = userEvent.setup();
     renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
 
     await user.click(await screen.findByRole("button", { name: "Повторить формирование" }));
-    const signedPrint = screen.getByRole("checkbox", { name: "Добавить подпись и печать" });
-    expect(signedPrint.hasAttribute("disabled")).toBe(false);
-    await user.click(signedPrint);
+    expect(screen.queryByRole("checkbox", { name: "Добавить подпись и печать" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Сформировать новую версию" }));
 
     await waitFor(() => expect(api.calls()).toHaveLength(1));
-    expect(api.calls()[0]?.body).toEqual({ printVariant: "signed" });
+    expect(api.calls()[0]?.body).toEqual({ printVariant: "clean" });
   });
 
-  it("allows choosing a signed invoice form without duplicating the server seller check", async () => {
+  it("leaves seller signature eligibility to the server", async () => {
     installApi({
       sellerSnapshot: {
         ...invoiceBase.sellerSnapshot,
         inn: "7700000000",
       },
     });
-    const user = userEvent.setup();
     renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
-
-    const signedPrint = await screen.findByRole("checkbox", {
-      name: "Добавить подпись и печать",
-    });
-    expect(signedPrint.hasAttribute("disabled")).toBe(false);
-    await user.click(signedPrint);
-    expect(signedPrint.getAttribute("aria-checked")).toBe("true");
+    await screen.findByRole("heading", { name: "Печатные формы" });
+    expect(screen.queryByRole("checkbox", { name: "Добавить подпись и печать" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Скачать PDF" })).toBeDefined();
   });
 });

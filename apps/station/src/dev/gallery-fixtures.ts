@@ -28,6 +28,7 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
 
 export const WAREHOUSE_GALLERY_STATE_IDS = [
   "warehouse-reprint-ready",
+  "warehouse-reprint-ready-a4",
   "warehouse-reprint-setup",
   "warehouse-reprint-lookup",
   "warehouse-reprint-unknown",

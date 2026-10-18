@@ -40,6 +40,7 @@ const plan = {
   id: "21111111-1111-4111-8111-111111111111",
   catalogItemId: "31111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-basic",
+  offlineAvailable: false,
   documentNameRu: null,
   documentNameEn: null,
   subject: null,
@@ -85,6 +86,7 @@ const addon = {
   id: "22222222-1111-4111-8111-111111111111",
   catalogItemId: "32222222-1111-4111-8111-111111111111",
   catalogItemCode: "addon-lines",
+  offlineAvailable: false,
   kind: "addon",
   nameRu: "Дополнительные линии",
   nameEn: "Extra lines",
@@ -99,6 +101,7 @@ const service = {
   id: "23333333-1111-4111-8111-111111111111",
   catalogItemId: "33333333-1111-4111-8111-111111111111",
   catalogItemCode: "service-launch",
+  offlineAvailable: false,
   kind: "service",
   nameRu: "Запуск",
   nameEn: "Launch",
@@ -257,6 +260,45 @@ describe("DocumentComposer", () => {
     expect(screen.getByText("plan-basic · v3 · Год")).toBeDefined();
     expect(screen.getByText("plan-basic · v3 · legacy-unit")).toBeDefined();
     expect(screen.getByText("service-launch · v3 · service-unit")).toBeDefined();
+  });
+
+  it("offers a tenant without a cabinet services and offline-flagged items only", async () => {
+    await i18n.changeLanguage("ru");
+    const offlineTenant = { ...tenant, cabinetAccess: "none" } satisfies TenantListItem;
+    const flaggedPlan = {
+      ...plan,
+      id: "24444444-1111-4111-8111-111111111111",
+      catalogItemCode: "plan-standalone",
+      nameRu: "Автоном",
+      offlineAvailable: true,
+    } satisfies CatalogVersion;
+    const user = userEvent.setup();
+    renderComposer({
+      tenants: [offlineTenant],
+      catalog: [plan, flaggedPlan, addon, service],
+      initialDraft: {
+        tenantId: offlineTenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [],
+      },
+    });
+    await user.click(screen.getByRole("combobox", { name: "Добавить позицию" }));
+    expect(screen.getByRole("option", { name: /Автоном · plan-standalone/ })).toBeDefined();
+    expect(screen.getByRole("option", { name: /service-launch/ })).toBeDefined();
+    expect(screen.queryByRole("option", { name: /plan-basic/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /addon-lines/ })).toBeNull();
+  });
+
+  it("keeps the whole catalog for a tenant with a cabinet", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    renderComposer({
+      initialDraft: { tenantId: tenant.id, applicationMode: "automatic", date: "", lines: [] },
+    });
+    await user.click(screen.getByRole("combobox", { name: "Добавить позицию" }));
+    expect(screen.getByRole("option", { name: /plan-basic/ })).toBeDefined();
+    expect(screen.getByRole("option", { name: /addon-lines/ })).toBeDefined();
   });
 
   it("keeps frozen offer VAT in an invoice preview and disables source line editing", async () => {

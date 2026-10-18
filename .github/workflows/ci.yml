@@ -82,7 +82,10 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_static == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Successful runs 27.09-16.10.2026: median 10.8 min, longest 13.5 min. A
+    # 15-minute budget left 1.5 minutes, so one slow runner cancelled the job
+    # after its steps were green. 20 keeps a hung job bounded.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -126,7 +129,9 @@ jobs:
     # The db+api matrix finished all seven tasks in 29:08 on run 36059314055,
     # but the 30-minute job budget cancelled the runner after its green summary
     # because checkout, install, and migrations count toward the same budget.
-    timeout-minutes: 40
+    # Successful runs 27.09-16.10.2026 took a median of 32.8 and at most 38.8
+    # minutes, so 40 left 1.2 minutes; 50 restores about 30% headroom.
+    timeout-minutes: 50
     services:
       postgres:
         image: postgres:17-alpine
@@ -184,7 +189,9 @@ jobs:
     # a hosted runner as of 2026-09-18; at 15 the job was cut off after every
     # step had already passed (shown as "cancelled"). A wall-clock budget for
     # the whole job, not a test timeout.
-    timeout-minutes: 25
+    # Successful runs 27.09-16.10.2026: median 17.4, longest 22.9 minutes, so 25
+    # left 2.1 minutes; 30 restores about 30% headroom.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -307,7 +314,10 @@ jobs:
     # redesign adds about 3 more (image build +48s, landing browser and
     # Lighthouse gates +91s) and was cancelled at 45.1 minutes in the last step
     # of run 36310376201, so the budget moves to 60 minutes.
-    timeout-minutes: 60
+    # Successful runs 27.09-16.10.2026 took a median of 47.9 and at most 51.8
+    # minutes (the browser contracts keep growing), leaving 8 minutes; 70
+    # restores about 35% headroom over the longest run.
+    timeout-minutes: 70
     env:
       COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}
@@ -355,6 +365,8 @@ jobs:
         run: |
           pnpm turbo run build --filter='@markiro/station^...'
           pnpm test:station-inventory:browser
+      - name: Verify the production Station startup
+        run: pnpm test:station-startup:browser
       - name: Verify the inventory admin gallery contract
         run: |
           pnpm turbo run build --filter='@markiro/admin^...'

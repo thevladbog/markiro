@@ -108,12 +108,21 @@ export const catalogItems = pgTable(
     nameEn: text("name_en").notNull(),
     kind: catalogItemKind("kind").notNull(),
     status: catalogItemStatus("status").notNull().default("active"),
+    /**
+     * Spec 2026-10-16: a plan or add-on a tenant without a cabinet may be
+     * assigned. On the item, not the version: published versions are immutable.
+     */
+    offlineAvailable: boolean("offline_available").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("catalog_items_code_uq").on(table.code),
     unique("catalog_items_id_kind_uq").on(table.id, table.kind),
+    check(
+      "catalog_items_offline_kind_check",
+      sql`${table.offlineAvailable} = false or ${table.kind} in ('plan', 'addon')`,
+    ),
   ],
 );
 

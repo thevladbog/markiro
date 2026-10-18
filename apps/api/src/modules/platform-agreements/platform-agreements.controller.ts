@@ -28,6 +28,16 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import { AgreementDocumentsService, MAX_ATTACHMENT_BYTES } from "./agreement-documents.service";
 import { PlatformAgreementsService } from "./platform-agreements.service";
 
+/**
+ * Browsers send the multipart file name as raw UTF-8. Busboy reads an
+ * unmarked parameter as latin1 by default, which turned a Cyrillic name into
+ * mojibake before it was stored.
+ */
+export const AGREEMENT_ATTACHMENT_UPLOAD_OPTIONS = {
+  limits: { fileSize: MAX_ATTACHMENT_BYTES },
+  defParamCharset: "utf8",
+} as const;
+
 const contracts = platformAgreementContracts;
 const idPipe = new ZodValidationPipe(contracts.detail.params);
 
@@ -185,7 +195,7 @@ export class PlatformAgreementsController {
   }
 
   @Post(":id/attachments")
-  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_ATTACHMENT_BYTES } }))
+  @UseInterceptors(FileInterceptor("file", AGREEMENT_ATTACHMENT_UPLOAD_OPTIONS))
   @ApiOperation({ summary: "Attach a signed copy or a related file" })
   @PlatformApiProtectedCreated({ response: contracts.attachments.upload.response })
   @RequirePlatformCapabilities("agreements.write")

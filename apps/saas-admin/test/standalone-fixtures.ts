@@ -46,6 +46,7 @@ export const STANDALONE_ISSUANCE = standaloneIssuanceSummarySchema.parse({
   issuedAt: "2099-10-01T09:00:00.000Z",
   issuedByPlatformUserId: "fixture-admin",
   replaces: null,
+  sourceAssignments: null,
   customer: CUSTOMER,
   rights: RIGHTS,
 });
@@ -102,6 +103,7 @@ export const STANDALONE_PREVIEW = standaloneIssuancePreviewSchema.parse({
     validUntil: "2100-10-01T09:00:00.000Z",
     validUntilReason: "entitlement_reduction",
     graceDays: 14,
+    sourceAssignments: null,
     customer: CUSTOMER,
     rights: {
       quotas: { ...RIGHTS.quotas, stations: 5 },

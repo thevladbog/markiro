@@ -34,5 +34,12 @@ export * from "./schema/public-api.js";
 export * from "./schema/device-grants.js";
 export * from "./schema/device-grant-activations.js";
 export * from "./schema/service-periods.js";
+
+export * from "./schema/label-facts.js";
+
+export * from "./schema/pallet-label-sources.js";
+
+export * from "./schema/pallet-reprint-renderings.js";
+export * from "./schema/pallet-production-resolutions.js";
 export * from "./schema/standalone-licenses.js";
 export * from "./schema/standalone-support-diagnostics.js";

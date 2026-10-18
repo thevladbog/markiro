@@ -14,12 +14,12 @@ describe("семантика тегов поиска по коду", () => {
    * «Открыт» у короба и «Активна» у смены — одно понятие. Раньше короб был
    * синим с глифом синхронизации, а смена зелёной с галочкой.
    */
-  it("выравнивает открытый короб и открытую паллету по фазе active", () => {
+  it("выравнивает открытый короб и открытую палету по фазе active", () => {
     expect(BOX_STATUS_TO_PHASE.open).toBe("active");
     expect(PALLET_STATUS_TO_PHASE.open).toBe("active");
   });
 
-  it("даёт закрытому коробу и паллете тон завершения", () => {
+  it("даёт закрытому коробу и палете тон завершения", () => {
     expect(BOX_STATUS_TO_PHASE.closed).toBe("done");
     expect(PALLET_STATUS_TO_PHASE.closed).toBe("done");
   });
@@ -29,7 +29,7 @@ describe("семантика тегов поиска по коду", () => {
     expect(PALLET_STATUS_TO_PHASE.disassembled).toBe("dismantled");
   });
 
-  it("не оставляет ни одному виду паллеты серый тон", () => {
+  it("не оставляет ни одному виду палеты серый тон", () => {
     const tones = Object.values(PALLET_KIND_TO_TONE);
     expect(new Set(tones).size).toBe(tones.length);
     for (const tone of tones) {
@@ -42,7 +42,7 @@ describe("семантика тегов поиска по коду", () => {
    * и warehouse могли бы поменяться тонами местами и тест остался бы
    * зелёным. Закрепляем точную пару.
    */
-  it("закрепляет точную пару вид паллеты -> тон", () => {
+  it("закрепляет точную пару вид палеты -> тон", () => {
     expect(PALLET_KIND_TO_TONE.production).toBe("violet");
     expect(PALLET_KIND_TO_TONE.warehouse).toBe("teal");
   });

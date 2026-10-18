@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
@@ -17,6 +17,8 @@ import type { PlatformPrincipal } from "../../platform-auth/platform-access-poli
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { GrantCabinetAccessDto, GrantCabinetAccessResult } from "@markiro/platform-contracts";
 import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
+import { transitionSubscriptionStatus } from "../../subscriptions/subscription-status-transition";
+import { termContains, termEnded } from "../../subscriptions/subscription-term";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
 import { activationIdentifier } from "../tenant-owner-activation/token";
 import { provisionTenantSchema, type ProvisionTenantDto, type ProvisionTenantInput } from "./dto";
@@ -306,7 +308,7 @@ export class TenantProvisioningService {
    * - The timeline lock is the first lock every subscription lifecycle path
    *   takes, and none of them takes an e-mail or slug lock, so waiting for it
    *   while holding those cannot close a cycle. Holding it makes the licence
-   *   guard (`assertKindAllowedForTenant`) see either `none` or the committed
+   *   guard (`assertCatalogAllowedForTenant`) see either `none` or the committed
    *   `enabled`, never a switch between its check and its write, and puts the
    *   demo insert under the same lock as every other timeline write. It is
    *   keyed by tenant id, so two grants for one tenant serialize on it too.
@@ -388,9 +390,47 @@ export class TenantProvisioningService {
     if (tenant.cabinetAccess !== "none") {
       throw new ConflictException({ code: "cabinet_access_already_enabled" });
     }
-    // Never null: without a default demo this throws before any write.
-    const demo = await this.lockDefaultDemo(tx, false);
-    if (!demo) throw new ConflictException({ code: "default_demo_not_configured" });
+    // One current subscription per tenant (`tenant_subscriptions_one_current_uq`):
+    // an offline plan assignment already is that subscription, so no demo is added
+    // and no default demo is required (spec 2026-10-16). The timeline lock held
+    // above makes this read stable against a concurrent assignment. "Current" is
+    // judged by the term, as the entitlements are: a row still `trial`/`active`
+    // after its end, before the status job has run, is settled as expired here
+    // (the same transition the job writes) so it neither counts as an assignment
+    // nor blocks the demo through the one-current index.
+    const stored = await tx
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, tenantId),
+          inArray(schema.tenantSubscriptions.status, [
+            "pending_activation",
+            "trial",
+            "active",
+            "scheduled",
+          ]),
+        ),
+      );
+    let current = false;
+    for (const row of stored) {
+      if (row.status === "scheduled") {
+        // A successor whose start has arrived is effective already (as `resolve` reads it)
+        // and the status job will activate it: a demo here would hold the one-current index.
+        if (
+          row.startsAt !== null &&
+          termContains({ startsAt: row.startsAt, endsAt: null }, operationAt)
+        )
+          current = true;
+      } else if (row.status !== "pending_activation" && termEnded(row, operationAt))
+        await transitionSubscriptionStatus(tx, row, "expired", row.endsAt!, "term_ended");
+      else current = true;
+    }
+    const offlineAssignments = await this.countOfflineAssignments(tx, tenantId, operationAt);
+    // Without a current subscription the default demo is required: this throws
+    // before any write when none is configured.
+    const demo = current ? null : await this.lockDefaultDemo(tx, false);
+    if (!current && !demo) throw new ConflictException({ code: "default_demo_not_configured" });
 
     const owner = await this.provisionOwner(tx, {
       tenantId,
@@ -408,13 +448,15 @@ export class TenantProvisioningService {
     // Inserted directly, as provisioning does, not through plan assignment:
     // the licence guard is for operator-assigned licences, and this demo is
     // part of the cabinet being granted.
-    const subscriptionId = await this.insertPendingDemo(tx, {
-      tenantId,
-      demo,
-      operationAt,
-      createId,
-      actor: options.actor,
-    });
+    const subscriptionId = demo
+      ? await this.insertPendingDemo(tx, {
+          tenantId,
+          demo,
+          operationAt,
+          createId,
+          actor: options.actor,
+        })
+      : null;
     await this.audit.record(tx, {
       actorPlatformUserId: options.actor.userId,
       actorRole: options.actor.role,
@@ -430,8 +472,10 @@ export class TenantProvisioningService {
         ownerUserId: owner.user.id,
         deliveryId: owner.deliveryId,
         subscriptionId,
-        subscriptionStatus: "pending_activation",
-        planVersionId: demo.versionId,
+        subscriptionStatus: demo ? "pending_activation" : null,
+        planVersionId: demo?.versionId ?? null,
+        demoCreated: demo !== null,
+        offlineAssignments,
       },
       requestId: null,
     });
@@ -440,7 +484,55 @@ export class TenantProvisioningService {
       userId: owner.user.id,
       memberId: owner.memberId,
       deliveryId: owner.deliveryId,
+      offlineAssignments,
+      demoCreated: demo !== null,
     };
+  }
+
+  /** Live plan and add-on assignments the grant leaves in force (spec 2026-10-16). */
+  private async countOfflineAssignments(tx: ProvisionTransaction, tenantId: string, at: Date) {
+    const [plans] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tenantSubscriptions)
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, tenantId),
+          inArray(schema.tenantSubscriptions.status, [
+            "pending_activation",
+            "trial",
+            "active",
+            "scheduled",
+          ]),
+        ),
+      );
+    // Add-ons count only under a parent that is itself in force (the projection reads an
+    // add-on only through the current subscription): a qualifying status and no end yet.
+    const [addons] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.subscriptionAddons)
+      .innerJoin(
+        schema.tenantSubscriptions,
+        and(
+          eq(schema.tenantSubscriptions.tenantId, schema.subscriptionAddons.tenantId),
+          eq(schema.tenantSubscriptions.id, schema.subscriptionAddons.subscriptionId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.subscriptionAddons.tenantId, tenantId),
+          inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+          inArray(schema.tenantSubscriptions.status, [
+            "pending_activation",
+            "trial",
+            "active",
+            "scheduled",
+          ]),
+          // Past its end but not yet settled by the status job: not in force (add-on or parent).
+          or(isNull(schema.subscriptionAddons.endsAt), gt(schema.subscriptionAddons.endsAt, at)),
+          or(isNull(schema.tenantSubscriptions.endsAt), gt(schema.tenantSubscriptions.endsAt, at)),
+        ),
+      );
+    return { plans: plans?.count ?? 0, addons: addons?.count ?? 0 };
   }
 
   /**

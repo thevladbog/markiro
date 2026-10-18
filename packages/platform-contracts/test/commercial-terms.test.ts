@@ -83,6 +83,7 @@ describe("commercial V2 boundaries", () => {
       id: "11111111-1111-4111-8111-111111111111",
       catalogItemId: "21111111-1111-4111-8111-111111111111",
       catalogItemCode: "basic",
+      offlineAvailable: false,
       kind: "plan",
       version: 1,
       status: "draft",

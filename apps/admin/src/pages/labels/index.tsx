@@ -250,6 +250,7 @@ export function LabelTemplatesPage() {
 
       {canWrite ? (
         <div className="label-sheet-presets">
+          <p>{t("pages.labels.sheet.presetHint")}</p>
           {buildPalletSheetPresets().map((preset) => (
             <Link key={preset.key} to={`/labels/new?format=pallet_sheet_v2&preset=${preset.key}`}>
               {preset.name}

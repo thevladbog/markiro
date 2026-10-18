@@ -13,7 +13,7 @@
 
 ## Ограниченная диагностика Deploy production
 
-При остановке workflow доверять только последней строке вида `MARKIRO_DEPLOY_FAILURE <stage>`. В публичном контракте допустимы ровно девять stage; сообщение не содержит причину, имена файлов, идентификаторы секретов, значения окружения или удалённый вывод. Значения секретов нельзя добавлять в команды, логи, issue, комментарии workflow или отчёты даже при ручном разборе.
+При остановке workflow доверять только последней строке вида `MARKIRO_DEPLOY_FAILURE <stage>`. В публичном контракте допустимы ровно девять stage; сообщение не содержит причину, имена файлов, идентификаторы секретов, значения окружения или удалённый вывод. Единственное исключение — стадия `smoke`: перед строкой стадии может стоять одна строка `MARKIRO_SMOKE_FAILURE <сообщение>` (не более 200 печатных ASCII-символов, без переводов строки). Её формирует только `deploy/production/smoke.mjs` из собственных постоянных проверок (путь маршрута, происхождение публичного домена, код ошибки сети вроде `ECONNRESET`, класс `TimeoutError`); всё, что похоже на секрет, заменяется на `message withheld`. Строка стадии остаётся последней. Значения секретов нельзя добавлять в команды, логи, issue, комментарии workflow или отчёты даже при ручном разборе.
 
 Порядок стадий и ограниченное действие оператора:
 
@@ -23,7 +23,7 @@
 4. `MARKIRO_DEPLOY_FAILURE reconcile-host` — проверить утверждённый host contract и состояние reconciliation unit, не обходя его ad-hoc командами. После восстановления контракта повторно запустить тот же failed deployment.
 5. `MARKIRO_DEPLOY_FAILURE runtime-env` — проверить доступ VM service account к metadata и Lockbox и состояние штатного materialization unit. Не читать и не печатать payload; после восстановления доступа повторно запустить тот же failed deployment.
 6. `MARKIRO_DEPLOY_FAILURE prepare` — проверить наличие образов для того же release SHA, job-scoped registry access и обезличенный результат preparation/migration. Не переносить registry credentials в issue или постоянные файлы; повторно запустить тот же failed deployment.
-7. `MARKIRO_DEPLOY_FAILURE smoke` — сохранить предыдущий active release, проверить readiness и точные публичные routes по production smoke runbook. После устранения причины повторно запустить тот же failed deployment; новый образ без отдельного решения не собирать.
+7. `MARKIRO_DEPLOY_FAILURE smoke` — сохранить предыдущий active release, сначала прочитать строку `MARKIRO_SMOKE_FAILURE` над ней (если есть) — она называет сорвавшуюся проверку; затем проверить readiness и точные публичные routes по production smoke runbook. Проверка `/openapi.json` имеет собственный дедлайн 30 с и один повтор после отмены по таймауту, остальные проверки — 5 с. После устранения причины повторно запустить тот же failed deployment; новый образ без отдельного решения не собирать.
 8. `MARKIRO_DEPLOY_FAILURE finalize` — сверить candidate и active release по точному SHA и проверить штатный finalize contract. Не редактировать release record вручную; повторно запустить тот же failed deployment.
 9. `MARKIRO_DEPLOY_FAILURE rollback` — автоматическое восстановление не подтверждено. Остановить повторные запуски, сохранить предыдущий active release и запросить отдельное одобрение на ручное восстановление; не удалять candidate, release records или durable data.
 

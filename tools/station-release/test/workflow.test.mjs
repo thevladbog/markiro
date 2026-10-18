@@ -703,6 +703,76 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
       "POST",
       "content-type,x-api-key,x-station-capabilities",
     ],
+    [
+      "/station/warehouse-reprint/source-capabilities",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/label-facts",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-sources",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-lookup",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-events",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-templates-v2",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/lookup-v3",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-data-v3",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-renderings-v3",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-events-v3",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-lookup-v2",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-renderings-v2",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-events-v2",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/pallet-production-resolutions",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
     ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/planning-config", "GET", "content-type,x-api-key,x-station-capabilities"],

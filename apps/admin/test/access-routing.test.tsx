@@ -252,7 +252,7 @@ it("allows operations readers to open production lines and forbids users without
 
 it("opens the pallets registry for operations readers and forbids users without read access", async () => {
   const reader = renderAccessRoute("/pallets", OPERATIONS_READ_ONLY);
-  expect(await screen.findByRole("tab", { name: "Паллеты" })).toBeDefined();
+  expect(await screen.findByRole("tab", { name: "Палеты" })).toBeDefined();
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
   reader.unmount();
 

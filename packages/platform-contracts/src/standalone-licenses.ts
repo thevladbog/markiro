@@ -127,12 +127,17 @@ const planSchema = z.enum(["demo", "subscription"]);
 
 /**
  * Owner decision 2026-10-13: a tenant without a cabinet gets offline licenses
- * only. Its rights come from offline terms the operator enters per issuance —
- * a published catalog plan version (quotas and features) and a term of 1-365
- * days from the issuance; no unlimited term. A tenant with a cabinet keeps the
- * subscription-derived path. Nothing of it reaches the cloud entitlements.
+ * only, and nothing of it reaches the cloud entitlements. Owner decision
+ * 2026-10-16: their rights are the tenant's direct plan and add-on assignments
+ * (`offline_assignments`); the manual offline terms (`offline`) are removed and
+ * their journal rows are read-only history. A tenant with a cabinet keeps the
+ * subscription-derived path.
  */
-export const STANDALONE_ISSUANCE_SOURCES = ["subscription", "offline"] as const;
+export const STANDALONE_ISSUANCE_SOURCES = [
+  "subscription",
+  "offline",
+  "offline_assignments",
+] as const;
 export const standaloneIssuanceSourceSchema = z.enum(STANDALONE_ISSUANCE_SOURCES);
 export type StandaloneIssuanceSource = z.infer<typeof standaloneIssuanceSourceSchema>;
 export const STANDALONE_OFFLINE_TERM_MAX_DAYS = 365;
@@ -144,15 +149,55 @@ export const standaloneOfflineTermsSchema = z
   .strict();
 export type StandaloneOfflineTerms = z.infer<typeof standaloneOfflineTermsSchema>;
 
-/** An offline file is a paid plan whose term the operator set; a cloud file never is. */
+/**
+ * Spec 2026-10-16: a tenant without a cabinet is issued from its direct plan and
+ * add-on assignments (`offline_assignments`), through the same rights snapshot
+ * as the subscription path; the assignments the file was issued from are named.
+ */
+export const standaloneAssignmentRefSchema = z
+  .object({
+    kind: z.enum(["plan", "addon"]),
+    id: platformUuidSchema,
+    catalogVersionId: platformUuidSchema,
+  })
+  .strict();
+export type StandaloneAssignmentRef = z.infer<typeof standaloneAssignmentRefSchema>;
+/**
+ * The issuance journal names at most this many assignments: the plan and up to
+ * `STANDALONE_ASSIGNMENT_REFS_MAX - 1` add-ons. The migration's `jsonb_array_length`
+ * bound is the same number; assignment creation for a tenant without a cabinet
+ * refuses the add-on that would exceed it, so issuance can always be journalled.
+ */
+export const STANDALONE_ASSIGNMENT_REFS_MAX = 65;
+export const standaloneAssignmentRefsSchema = z
+  .array(standaloneAssignmentRefSchema)
+  .min(1)
+  .max(STANDALONE_ASSIGNMENT_REFS_MAX);
+
+/**
+ * `offline` rows (the removed manual terms) are paid plans with the offline
+ * term reason and no assignments; `offline_assignments` rows are paid plans
+ * with named assignments and a derived term; a cloud file has neither.
+ */
 function sourceMatchesReason(value: {
   source: StandaloneIssuanceSource;
   plan: "demo" | "subscription";
   validUntilReason: z.infer<typeof validUntilReasonSchema>;
+  sourceAssignments: unknown[] | null;
 }): boolean {
-  return value.source === "offline"
-    ? value.validUntilReason === "offline_term" && value.plan === "subscription"
-    : value.validUntilReason !== "offline_term";
+  if (value.source === "offline")
+    return (
+      value.validUntilReason === "offline_term" &&
+      value.plan === "subscription" &&
+      value.sourceAssignments === null
+    );
+  if (value.source === "offline_assignments")
+    return (
+      value.validUntilReason !== "offline_term" &&
+      value.plan === "subscription" &&
+      value.sourceAssignments !== null
+    );
+  return value.validUntilReason !== "offline_term" && value.sourceAssignments === null;
 }
 
 export const standaloneIssuanceSummarySchema = z
@@ -174,6 +219,7 @@ export const standaloneIssuanceSummarySchema = z
     issuedAt: platformTimestampSchema,
     issuedByPlatformUserId: platformUserIdSchema,
     replaces: platformUuidSchema.nullable(),
+    sourceAssignments: standaloneAssignmentRefsSchema.nullable(),
     customer: customerSchema,
     rights: standaloneLicenseRightsSchema,
   })
@@ -208,7 +254,7 @@ export const standaloneSiteListSchema = z
   .object({
     tenantId: standaloneOpaqueIdSchema,
     signingConfigured: z.boolean(),
-    /** Which path this tenant's files take: `offline` for a tenant without a cabinet. */
+    /** Which path this tenant's files take: `offline_assignments` for a tenant without a cabinet. */
     issuanceSource: standaloneIssuanceSourceSchema,
     sites: z.array(standaloneSiteSchema).max(500),
   })
@@ -323,6 +369,7 @@ export const standaloneIssuancePreviewSchema = z
         validUntil: platformTimestampSchema,
         validUntilReason: validUntilReasonSchema,
         graceDays: graceDaysSchema,
+        sourceAssignments: standaloneAssignmentRefsSchema.nullable(),
         customer: customerSchema,
         rights: standaloneLicenseRightsSchema,
       })

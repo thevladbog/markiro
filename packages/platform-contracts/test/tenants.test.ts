@@ -3,6 +3,7 @@ import {
   assignableCatalogResponseSchema,
   createTenantResponseSchema,
   createTenantSchema,
+  grantCabinetAccessResponseSchema,
   grantCabinetAccessSchema,
   platformTenantContracts,
   platformTenantV2Contracts,
@@ -173,6 +174,7 @@ describe("platform tenant contracts", () => {
       items: [
         {
           ...assignablePlanVersion,
+          offlineAvailable: false,
           descriptionRu: null,
           descriptionEn: null,
           publishedAt: "2026-08-11 18:08:42.158",
@@ -183,6 +185,7 @@ describe("platform tenant contracts", () => {
           id: ADDON_VERSION_ID,
           catalogItemId: "71111111-1111-4111-8111-111111111111",
           catalogItemCode: "addon-station",
+          offlineAvailable: false,
           kind: "addon",
           version: 2,
           status: "published",
@@ -421,6 +424,26 @@ describe("grantCabinetAccessSchema", () => {
   it("normalises the e-mail and rejects unknown keys", () => {
     expect(grantCabinetAccessSchema.parse({ email: " A@B.co " })).toEqual({ email: "a@b.co" });
     expect(grantCabinetAccessSchema.safeParse({ email: "a@b.co", extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("grantCabinetAccessResponseSchema offline assignments", () => {
+  const base = {
+    tenantId: "t1",
+    userId: "u",
+    memberId: "m",
+    deliveryId: "6f1b5ea0-0000-4000-8000-000000000004",
+  };
+
+  it("describes the offline assignments a cabinet grant left in place", () => {
+    expect(
+      grantCabinetAccessResponseSchema.safeParse({
+        ...base,
+        offlineAssignments: { plans: 1, addons: 2 },
+        demoCreated: false,
+      }).success,
+    ).toBe(true);
+    expect(grantCabinetAccessResponseSchema.safeParse(base).success).toBe(false);
   });
 });
 

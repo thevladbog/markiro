@@ -403,10 +403,11 @@ export const invoiceDocuments = pgTable(
   },
   (table) => [
     unique("invoice_documents_tenant_id_uq").on(table.tenantId, table.id),
-    unique("invoice_documents_invoice_revision_format_uq").on(
+    unique("invoice_documents_invoice_revision_format_variant_uq").on(
       table.invoiceId,
       table.revision,
       table.format,
+      table.printVariant,
     ),
     foreignKey({
       name: "invoice_documents_tenant_invoice_fk",

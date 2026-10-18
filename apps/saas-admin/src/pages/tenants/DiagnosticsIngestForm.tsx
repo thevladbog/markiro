@@ -52,6 +52,7 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
           id={fieldId}
           label={t(`${prefix}.label`)}
           className="diagnostics-ingest__text mono"
+          style={{ fontFamily: "var(--font-mono)" }}
           rows={6}
           value={text}
           readOnly={ingest.isPending}
@@ -73,7 +74,12 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
         <Alert
           tone="warn"
           action={
-            <Button variant="secondary" disabled={ingest.isPending} onClick={() => submit(true)}>
+            <Button
+              size="compact"
+              variant="secondary"
+              disabled={ingest.isPending}
+              onClick={() => submit(true)}
+            >
               {t(`${prefix}.confirmUnboundAction`)}
             </Button>
           }

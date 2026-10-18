@@ -1,6 +1,6 @@
 /**
  * Admin pallet card (06d) -- the read-only counterpart of `./BoxCard.tsx` one
- * aggregation level up, reached from a box card's «На паллете» link and from
+ * aggregation level up, reached from a box card's «На палете» link and from
  * the shift panel's pallet table. Shows the pallet's identity, its shift,
  * terminal and line, a COLLAPSED list of its member boxes (one row each,
  * linking on to that box's own card rather than inlining its codes -- a

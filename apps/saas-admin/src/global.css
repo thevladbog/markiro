@@ -471,8 +471,14 @@ textarea {
 .saas-admin .mk-input,
 .saas-admin .mk-input__control,
 .saas-admin .mk-select__control,
+.saas-admin .mk-combobox__trigger,
 .saas-admin textarea {
   min-height: 44px !important;
+}
+
+/* A retry action inside an alert is secondary to the message. */
+.saas-admin .mk-alert .mk-btn {
+  min-height: 36px !important;
 }
 
 .mk-confirm-dialog .mk-btn {
@@ -834,7 +840,7 @@ textarea {
 
 .catalog-page {
   display: grid;
-  gap: 16px;
+  gap: var(--stack-page);
 }
 
 .catalog-page .mk-section-header__actions > a,
@@ -1235,6 +1241,20 @@ textarea {
 .table-link small {
   color: var(--fg-3);
   font: var(--text-meta);
+}
+
+.table-name-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.catalog-offline-availability {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
 }
 
 .invoice-detail-page {
@@ -1649,6 +1669,7 @@ textarea {
 .version-panel__header {
   min-height: 72px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -1664,6 +1685,23 @@ textarea {
 .version-panel__header-actions,
 .form-actions {
   display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.version-panel__header-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.version-panel__header-actions > * {
+  flex-shrink: 0;
+}
+
+.version-panel__tags {
+  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -1883,7 +1921,7 @@ textarea {
 .tenant-detail-page,
 .subscription-panel {
   display: grid;
-  gap: 16px;
+  gap: var(--stack-page);
   scroll-margin-top: calc(var(--mk-workspace-header-height) + 24px);
 }
 
@@ -2112,7 +2150,7 @@ textarea {
 .tenant-tab-panel {
   min-width: 0;
   display: grid;
-  gap: 16px;
+  gap: var(--sp-5);
 }
 
 .tenant-overview-grid,
@@ -2372,6 +2410,13 @@ textarea {
   font: var(--text-body-sm);
 }
 
+/* The live region stays in the DOM for announcements; while it is empty it
+   must not add a blank band (min-height plus the card's block gap). */
+.tenant-operation-status:empty {
+  min-height: 0;
+  margin-top: calc(-1 * var(--stack-block));
+}
+
 .tenant-operation-status [data-tone="ok"] {
   color: var(--ok-fg);
 }
@@ -2489,6 +2534,114 @@ textarea {
    min-width 0 its table's min-content width widens the whole tab on a phone. */
 .standalone-sites-panel {
   min-width: 0;
+}
+
+.standalone-sites-panel > .mk-card__body,
+.standalone-license-dialog > div,
+.standalone-license-dialog .mk-table {
+  min-width: 0;
+}
+
+.standalone-sites-panel .mk-table__scroll:focus-visible,
+.standalone-license-dialog .mk-table__scroll:focus-visible,
+.tenant-diagnostics .mk-table__scroll:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-w));
+}
+
+.standalone-site-actions,
+.standalone-license-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.standalone-license-cell {
+  min-width: 180px;
+}
+
+.standalone-site-actions {
+  min-width: 230px;
+}
+
+.standalone-assignments {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.standalone-assignments h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.standalone-assignments ul {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.standalone-assignments a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  justify-self: start;
+}
+
+.standalone-license-dialog__actions {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.standalone-license-dialog__actions .mk-btn,
+.standalone-site-actions .mk-btn {
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.standalone-license-dialog > div:first-child > button {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.standalone-license-dialog .mk-badge {
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  line-height: 1.35;
+  overflow-wrap: normal;
+}
+
+@media (max-width: 680px) {
+  .standalone-sites-panel > .mk-card__header {
+    flex-wrap: wrap;
+  }
+
+  .standalone-site-actions {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 230px;
+  }
+
+  .standalone-license-cell {
+    max-width: 220px;
+  }
+
+  .standalone-license-dialog__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .equipment-registry {
@@ -2709,6 +2862,10 @@ textarea {
     align-items: stretch;
   }
 
+  .tenant-detail-page .mk-section-header__actions > .mk-tag {
+    justify-self: start;
+  }
+
   .tenant-detail-page .mk-section-header__actions > a {
     justify-content: center;
     text-align: center;
@@ -2821,7 +2978,7 @@ textarea {
   }
 
   .app-main {
-    padding: 18px 14px;
+    padding: 20px 16px 32px;
   }
 
   .status-rail {
@@ -3500,11 +3657,13 @@ textarea {
 
 .tenant-detail-tabs {
   display: flex;
+  flex-wrap: wrap;
   border: 1px solid var(--line);
   background: var(--surface-card);
 }
 
 .tenant-detail-tabs button {
+  flex-shrink: 0;
   min-height: 52px;
   display: inline-flex;
   align-items: center;
@@ -4288,32 +4447,296 @@ textarea {
   margin-bottom: var(--sp-2);
 }
 
-/* The agreements forms had no layout of their own, so every field sat flush
-   against the next one. Same grid and gap as the rest of the commerce pages. */
+/* ---- Vertical rhythm tokens ---------------------------------------------
+   --stack-page: between top-level sections of a page.
+   --stack-block: between stacked blocks inside a card or panel.
+   --panel-pad: inner padding shared by cards, panels and alerts placed in them. */
+.saas-admin {
+  --stack-page: var(--sp-6);
+  --stack-block: var(--sp-4);
+  --panel-pad: var(--sp-5);
+}
+
+/* ---- Shared page rhythm ------------------------------------------------
+   Pages are a column of sections 24px apart; content inside a card or a
+   filter row is 16px apart. Pages that stack their own children (.catalog-page
+   and the cards inside it) inherit this instead of repeating margins. */
+.page-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-4) var(--sp-5);
+}
+
+.page-filters > * {
+  min-width: 0;
+}
+
+.page-filters > :not(.mk-checkbox):not(.mk-btn) {
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+
+.catalog-page > .mk-tag,
+.catalog-page > .mk-status-chip {
+  justify-self: start;
+}
+
+.saas-admin .mk-card__body {
+  display: grid;
+  gap: var(--stack-block);
+  min-width: 0;
+}
+
+.saas-admin .mk-card__body > p,
+.saas-admin .mk-card__body > h3 {
+  margin: 0;
+}
+
+.saas-admin .mk-card__header {
+  min-height: 56px;
+  flex-wrap: wrap;
+}
+
+/* ---- Agreements -------------------------------------------------------- */
+.agreement-muted {
+  color: var(--fg-3);
+}
+
+.agreement-tenant-link {
+  color: var(--fg-1);
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.agreement-tenant-link:hover {
+  text-decoration-color: currentColor;
+}
+
 .agreement-form {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-6);
+  max-width: 1080px;
 }
 
-.agreement-form h3 {
-  margin: 8px 0 0;
-}
-
-.agreement-requisites {
+.agreement-form__row {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-6);
+}
+
+.agreement-requisites,
+.agreement-panel {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.agreement-panel > p {
+  margin: 0;
+}
+
+.agreement-panel__note {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.agreement-panel__value {
+  color: var(--fg-1);
+  font: var(--text-h3);
+  overflow-wrap: anywhere;
+}
+
+.agreement-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.agreement-group + .agreement-group,
+.agreement-summary__group + .agreement-summary__group {
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.agreement-group__title {
+  margin: 0;
+  padding: 0;
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agreement-group__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+}
+
+.agreement-group__grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.agreement-group__wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.agreement-group__grid > * {
+  min-width: 0;
+}
+
+.agreement-summary {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.agreement-summary__group {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.agreement-summary__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agreement-facts {
+  background: var(--surface-card);
 }
 
 .agreement-transitions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
+}
+
+.agreement-link-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-1);
+  text-decoration: none;
+  font: 600 13px/1 var(--font-ui);
+}
+
+.agreement-link-button:hover {
+  background: var(--surface-panel);
+}
+
+.agreement-docs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+}
+
+.agreement-docs__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4);
+}
+
+.agreement-docs__item + .agreement-docs__item {
+  border-top: 1px solid var(--line);
+}
+
+.agreement-docs__main {
+  min-width: 0;
+  flex: 1 1 260px;
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-1);
+}
+
+.agreement-docs__name {
+  color: var(--fg-1);
+  font: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.agreement-docs__meta {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.agreement-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.agreement-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.agreement-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+.agreement-layout__main,
+.agreement-layout__side {
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-6);
+}
+
+@media (min-width: 1100px) {
+  .agreement-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  /* The side column is first in the DOM (status and tenant are what an
+     operator acts on) but sits on the right on a wide screen. */
+  .agreement-layout__side {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .agreement-layout__main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .agreement-group__grid,
+  .agreement-summary__grid,
+  .agreement-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tenant-diagnostics {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+}
+
+.tenant-diagnostics > *,
+.diagnostics-host,
+.tenant-diagnostics .mk-card__body,
+.tenant-diagnostics .mk-table {
+  min-width: 0;
 }
 
 .tenant-diagnostics__header {
@@ -4344,6 +4767,7 @@ textarea {
 .diagnostics-hosts {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -4354,7 +4778,7 @@ textarea {
 }
 
 .diagnostics-facts {
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
 }
 
 .diagnostics-features {
@@ -4381,9 +4805,15 @@ textarea {
   justify-items: start;
 }
 
-.diagnostics-ingest__text {
-  font-family: var(--font-mono);
-  min-height: 140px;
+.diagnostics-ingest .mk-field {
+  min-width: 0;
+  width: 100%;
+}
+
+.saas-admin .diagnostics-ingest__text {
+  /* Override the app-wide 44px control minimum. */
+  min-height: 160px !important;
+  resize: vertical;
 }
 
 .diagnostics-ingest__counter,
@@ -4401,7 +4831,7 @@ textarea {
 
 .diagnostics-bars {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: 16px;
   margin-top: 16px;
   overflow-x: auto;
@@ -4467,4 +4897,52 @@ textarea {
 
 .diagnostics-bars__swatch--muted {
   background: var(--fg-3);
+}
+
+/* ---- Alerts and loading text placed straight into a panel ----------------
+   A panel (header plus body, no inner wrapper) gives its children no padding,
+   so an alert there touched the border. Same inset as the panel header. */
+.payments-panel > .mk-alert,
+.payment-match-card > .mk-alert,
+.overview-panel > .mk-alert,
+.commerce-ledger > .mk-alert,
+.commerce-detail-panel > .mk-alert,
+.platform-action-panel > .mk-alert {
+  margin: var(--stack-block) var(--panel-pad);
+}
+
+.payments-panel > p:not(.payments-empty) {
+  margin: 0;
+  padding: var(--panel-pad);
+  color: var(--fg-2);
+}
+
+.payment-match-list:empty {
+  display: none;
+}
+
+/* Offers filters: one baseline for every control, quiet helper text. */
+p.offer-muted {
+  margin: 0;
+  font: var(--text-body-sm);
+}
+
+/* Addon cards use the same header band and inset as every other card. */
+.tenant-section {
+  padding: 0;
+}
+
+.tenant-section > h2 {
+  margin: 0;
+  padding: 14px var(--panel-pad);
+  border-bottom: 1px solid var(--line);
+  font: var(--text-h3);
+}
+
+.tenant-section > :not(h2) {
+  margin: var(--panel-pad);
+}
+
+.subscription-grid {
+  align-items: start;
 }

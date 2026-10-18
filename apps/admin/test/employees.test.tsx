@@ -270,7 +270,7 @@ describe("EmployeePickupPolicySection", () => {
     renderPickupPolicy();
     const user = userEvent.setup();
 
-    const checkbox = screen.getByRole("checkbox", { name: "Сборка паллет на ТСД" });
+    const checkbox = screen.getByRole("checkbox", { name: "Сборка палет на ТСД" });
     expect(checkbox.getAttribute("aria-checked")).toBe("false");
     await user.click(checkbox);
     expect(checkbox.getAttribute("aria-checked")).toBe("true");

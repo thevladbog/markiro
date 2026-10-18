@@ -527,7 +527,7 @@ describe("offer editor route", () => {
     expect(screen.getByDisplayValue("15000.00")).toBeDefined();
   });
 
-  it("explains that a tenant without a cabinet can be offered services only", async () => {
+  it("explains that a tenant without a cabinet can be offered services and offline-flagged items only", async () => {
     installOfferEditorApi({
       createStatus: 409,
       createCode: "catalog_kind_not_allowed_for_offline_tenant",
@@ -540,7 +540,7 @@ describe("offer editor route", () => {
     await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "У тенанта нет кабинета: ему можно продать только услуги.",
+      "У клиента нет кабинета: ему можно продать услуги и позиции, помеченные как доступные офлайн-клиентам.",
     );
   });
 

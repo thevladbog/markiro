@@ -347,7 +347,7 @@ it("distinguishes pallet templates from box templates", async () => {
   ];
   stubFetch(items);
   renderPage();
-  expect(await screen.findByText("Паллета")).toBeDefined();
+  expect(await screen.findByText("Палета")).toBeDefined();
   expect(screen.getByText("Короб")).toBeDefined();
   expect(screen.queryByText("Дубликат товара")).toBeNull();
 });

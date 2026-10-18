@@ -45,6 +45,7 @@ async function fixture() {
   let catalogCalls = 0;
   const client: StationClient = {
     get: async <T,>(path: string) => {
+      if (path.endsWith("source-capabilities")) return { protocols: [] } as T;
       if (path === "/shifts/box-label-templates")
         return { items: [], defaultBoxLabelTemplateId: null, defaultSource: null } as T;
       catalogCalls += 1;

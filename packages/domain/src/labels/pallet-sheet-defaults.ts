@@ -40,25 +40,40 @@ function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheet
     "header",
     [
       {
-        id: "logo",
-        kind: "organization_logo",
-        source: "organization",
-        fallback: "markiro",
-        maxHeightMm: small ? 12 : 16,
+        ...row(
+          "brand",
+          [
+            {
+              id: "logo",
+              kind: "organization_logo",
+              source: "organization",
+              fallback: "markiro",
+              maxHeightMm: small ? 12 : 16,
+            },
+            {
+              id: "org-name",
+              kind: "field",
+              field: "organization.name",
+              fontSizePt: small ? 11 : 16,
+              maxLines: 3,
+              bold: true,
+            },
+          ],
+          small ? 3 : 5,
+        ),
+        grow: 1,
       },
-      stack("organization", [
-        {
-          id: "org-name",
-          kind: "field",
-          field: "organization.name",
-          fontSizePt: small ? 11 : 16,
-          maxLines: 2,
-          bold: true,
-        },
-        { id: "label-title", kind: "text", text: "ПАЛЕТА", fontSizePt: 8 },
-      ]),
+      {
+        id: "label-title",
+        kind: "text",
+        text: "ПАЛЕТА",
+        fontSizePt: small ? 12 : 18,
+        bold: true,
+        align: "right",
+        widthMm: small ? 24 : 36,
+      },
     ],
-    2,
+    small ? 3 : 5,
   );
   const product: SheetNode = {
     id: "product",

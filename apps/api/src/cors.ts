@@ -60,6 +60,18 @@ function isStationRequest(req: Request): boolean {
         path === "/station/validation-occurrences/status" ||
         path === "/station/scans" ||
         path === "/station/warehouse-reprint/lookup" ||
+        path === "/station/warehouse-reprint/label-facts" ||
+        path === "/station/warehouse-reprint/pallet-sources" ||
+        path === "/station/warehouse-reprint/pallet-lookup" ||
+        path === "/station/warehouse-reprint/pallet-events" ||
+        path === "/station/warehouse-reprint/pallet-lookup-v2" ||
+        path === "/station/warehouse-reprint/lookup-v3" ||
+        path === "/station/warehouse-reprint/pallet-data-v3" ||
+        path === "/station/warehouse-reprint/pallet-renderings-v3" ||
+        path === "/station/warehouse-reprint/pallet-events-v3" ||
+        path === "/station/warehouse-reprint/pallet-renderings-v2" ||
+        path === "/station/warehouse-reprint/pallet-events-v2" ||
+        path === "/station/warehouse-reprint/pallet-production-resolutions" ||
         path === "/station/warehouse-reprint/event-batches" ||
         path === "/station/shift-closures" ||
         path === "/station/device-replacement-intent/v1/acknowledge" ||
@@ -68,7 +80,9 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" &&
       (path === "/station/identity" ||
         path === "/station/operators" ||
+        path === "/station/warehouse-reprint/pallet-templates-v2" ||
         path === "/station/warehouse-reprint/templates" ||
+        path === "/station/warehouse-reprint/source-capabilities" ||
         path === "/station/branding" ||
         path === "/station/device-replacement-intent/v1")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||

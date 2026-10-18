@@ -1305,6 +1305,48 @@
       "breakpoints": true
     },
     {
+      "idx": 186,
+      "version": "7",
+      "when": 1791750811277,
+      "tag": "0186_noisy_forge",
+      "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 1791756221331,
+      "tag": "0187_brave_lord_tyger",
+      "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 1791770697737,
+      "tag": "0188_cuddly_vanisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1791771458523,
+      "tag": "0189_purple_donald_blake",
+      "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 1791807816627,
+      "tag": "0190_sudden_thena",
+      "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1791842819866,
+      "tag": "0191_pallet_sheet_preset_refresh",
+      "breakpoints": true
+    },
+    {
       "idx": 192,
       "version": "7",
       "when": 1791873360951,
@@ -1323,6 +1365,20 @@
       "version": "7",
       "when": 1792046534553,
       "tag": "0194_standalone_support_diagnostics",
+      "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "7",
+      "when": 1792140919535,
+      "tag": "0195_offline_catalog_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1792204487634,
+      "tag": "0196_invoice_document_variants",
       "breakpoints": true
     }
   ]

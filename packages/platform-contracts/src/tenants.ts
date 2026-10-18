@@ -238,6 +238,7 @@ export const assignableCatalogVersionSchema = z
     id: platformUuidSchema,
     catalogItemId: platformUuidSchema,
     catalogItemCode: z.string().min(1).max(128),
+    offlineAvailable: z.boolean(),
     kind: catalogKindSchema,
     version: z.number().int().positive(),
     status: catalogStatusSchema,
@@ -312,6 +313,13 @@ export const grantCabinetAccessResponseSchema = z.object({
   userId: z.string().min(1).max(128),
   memberId: z.string().min(1).max(128),
   deliveryId: platformUuidSchema,
+  /** Offline assignments left in force by the grant (spec 2026-10-16). */
+  offlineAssignments: z.object({
+    plans: z.number().int().min(0),
+    addons: z.number().int().min(0),
+  }),
+  /** False when a current subscription already exists and no demo was added. */
+  demoCreated: z.boolean(),
 });
 
 export const renewTenantActivationResponseSchema = z.object({

@@ -39,9 +39,9 @@ const KNOWN_ERRORS = new Set([
   "standalone_license_signing_unavailable",
   "standalone_license_request_conflict",
   "standalone_license_grace_invalid",
-  "standalone_license_offline_terms_required",
-  "standalone_license_offline_not_allowed",
-  "standalone_license_offline_plan_unavailable",
+  "standalone_license_assignments_required",
+  "standalone_license_offline_terms_removed",
+  "standalone_assignment_limit_reached",
 ]);
 
 export function standaloneErrorKey(error: unknown): string {

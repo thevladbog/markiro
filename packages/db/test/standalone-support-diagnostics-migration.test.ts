@@ -74,8 +74,11 @@ describe.skipIf(!databaseUrl)("standalone support diagnostics tables (plan ДИ�
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
-    expect(journal.entries.at(-1)?.tag).toBe("0194_standalone_support_diagnostics");
-    journal.entries.pop();
+    const diagnosticsIndex = journal.entries.findIndex(
+      (entry) => entry.tag === "0194_standalone_support_diagnostics",
+    );
+    expect(diagnosticsIndex).toBeGreaterThanOrEqual(0);
+    journal.entries.splice(diagnosticsIndex);
     writeFileSync(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: scratch });
     const before = await pool.query("SELECT to_regclass('standalone_support_diagnostics') AS t");

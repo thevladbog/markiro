@@ -2,7 +2,11 @@ import {
   factualObservation,
   preview,
 } from "../../../apps/saas-admin/test/device-replacement-fixtures.js";
-import { STANDALONE_SITE_LIST } from "../../../apps/saas-admin/test/standalone-fixtures.js";
+import {
+  STANDALONE_PREVIEW,
+  STANDALONE_SITE_ID,
+  STANDALONE_SITE_LIST,
+} from "../../../apps/saas-admin/test/standalone-fixtures.js";
 import type {
   DeviceReplacementPreparation,
   DeviceRetentionInspection,
@@ -14,6 +18,7 @@ import {
   platformDeviceReplacementContracts,
   platformDeviceLicensingContracts,
   platformTenantV3Contracts,
+  standaloneIssuancePreviewSchema,
 } from "../../../packages/platform-contracts/src/index.js";
 
 export const TENANT_ID = "81111111-1111-4111-8111-111111111111";
@@ -34,6 +39,128 @@ const tenant = platformTenantV3Contracts.detail.response.parse({
   scheduledAddons: [],
   usage: { cabinetUsers: 5, kiosks: 1, lines: 3, stations: 5 },
   events: [],
+});
+
+const ASSIGNED_PLAN_VERSION_ID = "92111111-1111-4111-8111-111111111111";
+const ASSIGNED_SUBSCRIPTION_ID = "b1111111-1111-4111-8111-111111111111";
+
+/** A tenant without a cabinet and its direct assignments: a plan and an add-on (spec 2026-10-16). */
+const offlineTenant = platformTenantV3Contracts.detail.response.parse({
+  tenant: {
+    id: TENANT_ID,
+    name: "Первый завод",
+    slug: "first-factory",
+    cabinetAccess: "none",
+    createdAt: "2026-08-09T08:00:00.000Z",
+  },
+  subscriptionStatus: "unmanaged",
+  ownerActivation: null,
+  currentSubscription: {
+    commercialPeriod: null,
+    id: ASSIGNED_SUBSCRIPTION_ID,
+    tenantId: TENANT_ID,
+    planVersionId: ASSIGNED_PLAN_VERSION_ID,
+    status: "active",
+    startsAt: "2026-08-08T08:00:00.000Z",
+    endsAt: null,
+    source: "manual",
+    createdByPlatformUserId: "fixture-admin",
+    createdAt: "2026-08-09T08:00:00.000Z",
+    updatedAt: "2026-08-10T08:00:00.000Z",
+    planVersion: {
+      id: ASSIGNED_PLAN_VERSION_ID,
+      catalogItemId: "21111111-1111-4111-8111-111111111111",
+      catalogItemCode: "plan-standalone",
+      documentNameRu: null,
+      documentNameEn: null,
+      subject: null,
+      sellerPolicyRevision: null,
+      lifecyclePolicyId: null,
+      kind: "plan",
+      version: 1,
+      status: "published",
+      nameRu: "Автоном",
+      nameEn: "Standalone",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "15000.00",
+      vatRateBps: 2000,
+      vatIncluded: true,
+      entitlements: {
+        maxLines: 2,
+        maxStations: 3,
+        maxKiosks: 0,
+        maxCabinetUsers: 5,
+        labelEditorEnabled: true,
+        publicApiEnabled: false,
+        palletsEnabled: true,
+        chzIntegrationEnabled: false,
+        inventoryEnabled: false,
+        commerceMlEnabled: false,
+        handheldEnabled: false,
+        customLogoEnabled: false,
+        demoDurationDays: null,
+      },
+    },
+  },
+  scheduledSubscription: null,
+  activeAddons: [
+    {
+      id: "e1111111-1111-4111-8111-111111111111",
+      commercialPeriod: null,
+      subscriptionId: ASSIGNED_SUBSCRIPTION_ID,
+      addonVersionId: "93111111-1111-4111-8111-111111111111",
+      quantity: 2,
+      startsAt: "2026-08-11T08:00:00.000Z",
+      endsAt: "2099-01-01T00:00:00.000Z",
+      status: "active",
+      source: "manual",
+      addonVersion: {
+        id: "93111111-1111-4111-8111-111111111111",
+        catalogItemId: "71111111-1111-4111-8111-111111111111",
+        catalogItemCode: "addon-station",
+        documentNameRu: null,
+        documentNameEn: null,
+        subject: null,
+        sellerPolicyRevision: null,
+        lifecyclePolicyId: null,
+        kind: "addon",
+        version: 1,
+        status: "published",
+        nameRu: "Дополнительная станция",
+        nameEn: "Extra station",
+        unit: "station",
+        billingMode: "recurring",
+        billingPeriod: "month",
+        unitPrice: "2500.00",
+        vatRateBps: 2000,
+        vatIncluded: true,
+        effects: [{ entitlementKey: "stations", quotaIncrement: 1, featureEnabled: false }],
+      },
+    },
+  ],
+  scheduledAddons: [],
+  usage: { cabinetUsers: 0, kiosks: 0, lines: 0, stations: 0 },
+  events: [],
+});
+
+const assignmentsPreview = standaloneIssuancePreviewSchema.parse({
+  ...STANDALONE_PREVIEW,
+  next: {
+    ...STANDALONE_PREVIEW.next,
+    source: "offline_assignments",
+    validUntilReason: "one_year_cap",
+    sourceAssignments: [
+      { kind: "plan", id: ASSIGNED_SUBSCRIPTION_ID, catalogVersionId: ASSIGNED_PLAN_VERSION_ID },
+      {
+        kind: "addon",
+        id: "e1111111-1111-4111-8111-111111111111",
+        catalogVersionId: "93111111-1111-4111-8111-111111111111",
+      },
+    ],
+  },
+  expected: { ...STANDALONE_PREVIEW.expected, boundaryAt: null },
 });
 
 const devicePool = platformDeviceLicensingContracts.inspect.response.parse({
@@ -93,6 +220,7 @@ const devicePool = platformDeviceLicensingContracts.inspect.response.parse({
 
 function makeFixture() {
   return {
+    offlineAssignments: false,
     replacementPreviewBlocked: false,
     replacementDrainRefused: false,
     refusedDrainAttempts: 0,
@@ -142,7 +270,7 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           twoFactorReady: true,
         };
       } else if (url.pathname === `/api/platform/tenants/${TENANT_ID}` && method === "GET") {
-        json = tenant;
+        json = fixture.offlineAssignments ? offlineTenant : tenant;
       } else if (
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing` &&
         method === "GET"
@@ -162,7 +290,16 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
         url.pathname === `/api/platform/tenants/${TENANT_ID}/standalone-sites` &&
         method === "GET"
       ) {
-        json = STANDALONE_SITE_LIST;
+        json = fixture.offlineAssignments
+          ? { ...STANDALONE_SITE_LIST, issuanceSource: "offline_assignments" }
+          : STANDALONE_SITE_LIST;
+      } else if (
+        fixture.offlineAssignments &&
+        url.pathname ===
+          `/api/platform/tenants/${TENANT_ID}/standalone-sites/${STANDALONE_SITE_ID}/issuances/preview` &&
+        method === "POST"
+      ) {
+        json = assignmentsPreview;
       } else if (
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing/retention` &&
         method === "GET"

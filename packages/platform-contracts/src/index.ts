@@ -192,6 +192,8 @@ export {
   addonEffectSchema,
   archiveCatalogItemResponseSchema,
   catalogItemParamsSchema,
+  catalogOfflineAvailabilityBodySchema,
+  catalogOfflineAvailabilityResponseSchema,
   catalogItemReferenceSchema,
   catalogMachineCodeParamsSchema,
   catalogMachineCodeSchema,
@@ -209,6 +211,8 @@ export {
 export type {
   AddonEffect,
   ArchiveCatalogItemResponse,
+  CatalogOfflineAvailabilityBody,
+  CatalogOfflineAvailabilityResponse,
   CatalogVersion,
   CatalogVersionCreate,
   CatalogVersionListResponse,

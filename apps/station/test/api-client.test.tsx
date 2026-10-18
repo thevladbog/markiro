@@ -69,7 +69,7 @@ describe("createStationClient", () => {
     expect(url).toBe("http://localhost:3000/shifts");
     expect((init!.headers as Record<string, string>)["x-api-key"]).toBe("mk_key");
     expect((init!.headers as Record<string, string>)["x-station-capabilities"]).toBe(
-      "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,thermal-label-branding-v1,validation-dm-duplicate-v1,validation-reprocessing-v1,warehouse-label-reprint-v1",
+      "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,thermal-label-branding-v1,validation-dm-duplicate-v1,validation-reprocessing-v1,warehouse-label-reprint-v1,warehouse-label-facts-v1",
     );
     expect(onReachabilityChange).toHaveBeenCalledOnce();
     expect(onReachabilityChange).toHaveBeenLastCalledWith("reachable");
@@ -827,7 +827,7 @@ describe("redeemStationPairing", () => {
     expect(init?.headers).toEqual({
       "Content-Type": "application/json",
       "x-station-capabilities":
-        "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,thermal-label-branding-v1,validation-dm-duplicate-v1,validation-reprocessing-v1,warehouse-label-reprint-v1",
+        "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,thermal-label-branding-v1,validation-dm-duplicate-v1,validation-reprocessing-v1,warehouse-label-reprint-v1,warehouse-label-facts-v1",
     });
   });
 

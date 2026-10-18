@@ -9,7 +9,12 @@ import {
 } from "@markiro/platform-contracts";
 
 import { diagnosticsKey, getDiagnostic, getDiagnosticsHistory } from "./diagnostics-api.js";
-import { monthRow, quotaText, useDiagnosticsDate } from "./diagnostics-format.js";
+import {
+  diagnosticLicenseState,
+  monthRow,
+  quotaText,
+  useDiagnosticsDate,
+} from "./diagnostics-format.js";
 
 function DiagnosticDetail({ tenantId, id }: { tenantId: string; id: string }) {
   const { t } = useTranslation();
@@ -47,7 +52,7 @@ function DiagnosticDetail({ tenantId, id }: { tenantId: string; id: string }) {
         </div>
         <div>
           <dt>{t(`${prefix}.overview.license`)}</dt>
-          <dd>{license === null ? noValue : license.state}</dd>
+          <dd title={license?.state}>{diagnosticLicenseState(t, license?.state ?? null)}</dd>
         </div>
       </dl>
       {license === null ? null : (
@@ -133,7 +138,15 @@ export function DiagnosticsHistory({ tenantId }: { tenantId: string }) {
       mono: true,
       render: (row) => row.hostVersion ?? noValue,
     },
-    { key: "license", title: t(`${prefix}.license`), render: (row) => row.licenseState ?? noValue },
+    {
+      key: "license",
+      title: t(`${prefix}.license`),
+      render: (row) => (
+        <span title={row.licenseState ?? undefined}>
+          {diagnosticLicenseState(t, row.licenseState)}
+        </span>
+      ),
+    },
     {
       key: "open",
       title: t(`${prefix}.open`),
@@ -157,7 +170,7 @@ export function DiagnosticsHistory({ tenantId }: { tenantId: string }) {
         <Alert
           tone="error"
           action={
-            <Button variant="secondary" onClick={() => void query.refetch()}>
+            <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
               {t("tenants.detail.diagnostics.retry")}
             </Button>
           }

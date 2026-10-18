@@ -15,9 +15,11 @@ import {
   standaloneLicensePayloadV1Schema,
 } from "@markiro/domain";
 import {
+  STANDALONE_ASSIGNMENT_REFS_MAX,
   standaloneIssuanceListSchema,
   standaloneIssuancePreviewSchema,
   type PlatformPrincipal,
+  type StandaloneAssignmentRef,
   type StandaloneIssuanceConfirm,
   type StandaloneIssuanceList,
   type StandaloneIssuanceSource,
@@ -31,6 +33,7 @@ import {
 import { DB } from "../../auth/auth.module";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import { signCompactJws } from "../../signing/compact-jws";
+import { sourceActiveAt } from "../../subscriptions/entitlement-projection";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import {
@@ -46,10 +49,8 @@ import {
   type StandaloneLicenseSigningConfiguration,
 } from "./standalone-license-keyset";
 import {
-  exportPlanRights,
   exportStandaloneRights,
   licenseValidity,
-  offlineValidity,
   type LicenseValidity,
 } from "./standalone-license-rights";
 import { postgresFailure, standaloneTransaction } from "./standalone-license-transaction";
@@ -64,8 +65,6 @@ import { resolveCustomerInn, usageWarnings } from "./standalone-inn-check";
 
 /** Spec §6.2: 14 grace days by default for a subscription, 0 for a demo (plan Д6). */
 export const DEFAULT_SUBSCRIPTION_GRACE_DAYS = 14;
-/** An offline file carries no cloud entitlement revision (owner decision 2026-10-13). */
-const OFFLINE_ENTITLEMENT_REVISION = "0";
 const DAY_MS = 86_400_000;
 const stale = () => new ConflictException({ code: "standalone_license_preview_stale" });
 
@@ -111,11 +110,7 @@ function plainName(value: string): string {
  * What the operator saw in the preview, apart from the instants (they are the
  * confirmation's own): confirmation refuses a file whose terms moved (plan Д7).
  */
-function termsDigest(
-  draft: IssuanceDraft,
-  hostId: string,
-  offline: StandaloneOfflineTerms | null,
-): string {
+function termsDigest(draft: IssuanceDraft, hostId: string): string {
   const canonical = JSON.stringify([
     draft.source,
     draft.plan,
@@ -126,15 +121,20 @@ function termsDigest(
     draft.customer.inn,
     STANDALONE_QUOTA_KEYS.map((key) => draft.rights.quotas[key]),
     STANDALONE_FEATURE_KEYS.map((key) => draft.rights.features[key]),
-    offline === null ? null : [offline.planVersionId, offline.termDays],
+    draft.sourceAssignments?.map((ref) => [ref.kind, ref.id, ref.catalogVersionId]) ?? null,
     draft.validity.reason,
   ]);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
-/** The same request id must carry the same terms to replay its file. */
+/**
+ * The same request id must carry the same terms to replay its file. The removed
+ * manual offline terms still replay a row issued from them (owner decision
+ * 2026-10-16: the journal is history), but are refused for a new issuance.
+ */
 function sameTerms(row: StandaloneIssuanceRow, offline: StandaloneOfflineTerms | null): boolean {
-  if (offline === null) return row.source === "subscription";
+  if (offline === null)
+    return row.source === "subscription" || row.source === "offline_assignments";
   return (
     row.source === "offline" &&
     row.planVersionId === offline.planVersionId &&
@@ -152,6 +152,8 @@ interface IssuanceDraft {
   graceDays: number;
   customer: { name: string; inn: string };
   rights: StandaloneLicenseRights;
+  /** The plan and add-on rows the rights were read from; set only for `offline_assignments`. */
+  sourceAssignments: StandaloneAssignmentRef[] | null;
   warnings: StandaloneIssuanceWarning[];
 }
 
@@ -194,6 +196,7 @@ export class StandaloneLicenseIssuanceService {
             validUntil: draft.validity.validUntil.toISOString(),
             validUntilReason: draft.validity.reason,
             graceDays: draft.graceDays,
+            sourceAssignments: draft.sourceAssignments,
             customer: draft.customer,
             rights: draft.rights,
           },
@@ -202,7 +205,7 @@ export class StandaloneLicenseIssuanceService {
             entitlementRevision: draft.entitlementRevision,
             previousSequence: site.lastIssuedSequence,
             boundaryAt: draft.validity.boundaryAt?.toISOString() ?? null,
-            termsDigest: termsDigest(draft, site.hostId, body.offline),
+            termsDigest: termsDigest(draft, site.hostId),
           },
         });
       },
@@ -250,7 +253,7 @@ export class StandaloneLicenseIssuanceService {
           body.expected.entitlementRevision !== draft.entitlementRevision ||
           body.expected.previousSequence !== site.lastIssuedSequence ||
           body.expected.boundaryAt !== boundaryAt ||
-          body.expected.termsDigest !== termsDigest(draft, site.hostId, body.offline)
+          body.expected.termsDigest !== termsDigest(draft, site.hostId)
         )
           throw stale();
         const sequence = site.lastIssuedSequence + 1;
@@ -311,6 +314,7 @@ export class StandaloneLicenseIssuanceService {
             validFrom: now,
             validUntil: draft.validity.validUntil,
             validUntilReason: draft.validity.reason,
+            sourceAssignments: draft.sourceAssignments,
             replacesId: draft.previous?.id ?? null,
             issuedByPlatformUserId: user.id,
           })
@@ -343,7 +347,8 @@ export class StandaloneLicenseIssuanceService {
             previousSequence: site.lastIssuedSequence,
             replaces: draft.previous?.id ?? null,
             source: draft.source,
-            offlineTerms: body.offline,
+            offlineTerms: null,
+            sourceAssignments: draft.sourceAssignments,
             plan: draft.plan,
             planVersionId: draft.planVersionId,
             entitlementRevision: draft.entitlementRevision,
@@ -441,10 +446,17 @@ export class StandaloneLicenseIssuanceService {
     now: Date,
   ): Promise<IssuanceDraft> {
     const source = issuanceSourceFor(tenant.cabinetAccess);
-    const terms =
-      source === "offline"
-        ? await this.offlineTerms(tx, body.offline, now)
-        : await this.subscriptionTerms(tx, site.tenantId, body.offline, now);
+    // The manual offline terms are removed: an old client's request is refused, not guessed at.
+    if (body.offline !== null)
+      throw new ConflictException({ code: "standalone_license_offline_terms_removed" });
+    const terms = await this.assignmentTerms(
+      tx,
+      site.tenantId,
+      now,
+      source === "offline_assignments"
+        ? "standalone_license_assignments_required"
+        : "standalone_license_subscription_required",
+    );
     const grace = body.graceDays ?? (terms.plan === "demo" ? 0 : DEFAULT_SUBSCRIPTION_GRACE_DAYS);
     if (terms.plan === "demo" && grace !== 0)
       throw new BadRequestException({ code: "standalone_license_grace_invalid" });
@@ -477,6 +489,7 @@ export class StandaloneLicenseIssuanceService {
       graceDays: grace,
       customer: { name: plainName(inns.billingName ?? tenant.name), inn: customerInn.inn },
       rights: terms.rights,
+      sourceAssignments: source === "offline_assignments" ? terms.sourceAssignments : null,
       warnings: [
         ...customerInn.warnings,
         ...usageWarnings(terms.rights, siteUsage(site)),
@@ -488,21 +501,45 @@ export class StandaloneLicenseIssuanceService {
     };
   }
 
-  /** A tenant with a cabinet: the rights and term come from its cloud subscription (spec §6.2). */
-  private async subscriptionTerms(
+  /**
+   * The rights and term come from the tenant's current plan and add-on
+   * assignments, read through the entitlement snapshot (spec §6.2); for a tenant
+   * with a cabinet that is its subscription, for one without (spec 2026-10-16)
+   * its direct assignments. A tenant without a cabinet never gets a demo file:
+   * a trial is not an assignment it can have.
+   */
+  private async assignmentTerms(
     tx: SubscriptionTransaction,
     tenantId: string,
-    offline: StandaloneOfflineTerms | null,
     now: Date,
+    missingCode:
+      "standalone_license_subscription_required" | "standalone_license_assignments_required",
   ) {
-    if (offline !== null)
-      throw new ConflictException({ code: "standalone_license_offline_not_allowed" });
     const snapshotAt = await this.entitlements.loadSnapshotTimeline(tenantId, tx);
     const first = (await snapshotAt(now)).snapshot;
     const subscription = first.current.subscription;
-    if (first.current.access !== "managed" || !subscription)
-      throw new ConflictException({ code: "standalone_license_subscription_required" });
+    if (
+      first.current.access !== "managed" ||
+      !subscription ||
+      (missingCode === "standalone_license_assignments_required" && subscription.status === "trial")
+    )
+      throw new ConflictException({ code: missingCode });
     const exported = exportStandaloneRights(first);
+    // Only what the entitlement projection counts at this instant: the same predicate
+    // as the rights, so an add-on that has not started or has ended is not named.
+    const asOf = new Date(first.asOf);
+    const sourceAssignments = first.sources.flatMap((source): StandaloneAssignmentRef[] =>
+      (source.kind === "plan" || source.kind === "addon") && sourceActiveAt(source, asOf)
+        ? [{ kind: source.kind, id: source.id, catalogVersionId: source.versionId }]
+        : [],
+    );
+    // The journal holds a bounded list (only for the assignments path; a cloud file names none); assignment creation enforces the same bound, so this
+    // is a defence for rows that predate it, and answers with a code rather than a 500.
+    if (
+      missingCode === "standalone_license_assignments_required" &&
+      sourceAssignments.length > STANDALONE_ASSIGNMENT_REFS_MAX
+    )
+      throw new ConflictException({ code: "standalone_assignment_limit_reached" });
     return {
       plan: subscription.status === "trial" ? ("demo" as const) : ("subscription" as const),
       planVersionId: subscription.planVersionId,
@@ -514,59 +551,7 @@ export class StandaloneLicenseIssuanceService {
       }),
       rights: exported.rights,
       unmapped: exported.unmapped,
-    };
-  }
-
-  /**
-   * A tenant without a cabinet (owner decision 2026-10-13): the operator's
-   * offline terms — a published catalog plan version and a term of 1-365 days
-   * from the issuance. Reads the catalog only; it never touches the tenant's
-   * subscriptions, cabinet or cloud entitlements.
-   */
-  private async offlineTerms(
-    tx: SubscriptionTransaction,
-    offline: StandaloneOfflineTerms | null,
-    now: Date,
-  ) {
-    if (offline === null)
-      throw new ConflictException({ code: "standalone_license_offline_terms_required" });
-    const [plan] = await tx
-      .select({
-        maxLines: schema.planEntitlements.maxLines,
-        maxStations: schema.planEntitlements.maxStations,
-        maxKiosks: schema.planEntitlements.maxKiosks,
-        maxCabinetUsers: schema.planEntitlements.maxCabinetUsers,
-        labelEditorEnabled: schema.planEntitlements.labelEditorEnabled,
-        publicApiEnabled: schema.planEntitlements.publicApiEnabled,
-        palletsEnabled: schema.planEntitlements.palletsEnabled,
-        chzIntegrationEnabled: schema.planEntitlements.chzIntegrationEnabled,
-        inventoryEnabled: schema.planEntitlements.inventoryEnabled,
-        commerceMlEnabled: schema.planEntitlements.commerceMlEnabled,
-        handheldEnabled: schema.planEntitlements.handheldEnabled,
-        customLogoEnabled: schema.planEntitlements.customLogoEnabled,
-      })
-      .from(schema.catalogItemVersions)
-      .innerJoin(
-        schema.planEntitlements,
-        eq(schema.planEntitlements.catalogVersionId, schema.catalogItemVersions.id),
-      )
-      .where(
-        and(
-          eq(schema.catalogItemVersions.id, offline.planVersionId),
-          eq(schema.catalogItemVersions.kind, "plan"),
-          eq(schema.catalogItemVersions.status, "published"),
-        ),
-      )
-      .limit(1);
-    if (!plan) throw new ConflictException({ code: "standalone_license_offline_plan_unavailable" });
-    const exported = exportPlanRights(plan);
-    return {
-      plan: "subscription" as const,
-      planVersionId: offline.planVersionId,
-      entitlementRevision: OFFLINE_ENTITLEMENT_REVISION,
-      validity: offlineValidity(now, offline.termDays),
-      rights: exported.rights,
-      unmapped: exported.unmapped,
+      sourceAssignments,
     };
   }
 }

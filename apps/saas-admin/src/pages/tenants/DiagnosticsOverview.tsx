@@ -8,7 +8,14 @@ import {
 } from "@markiro/platform-contracts";
 
 import { diagnosticsKey, getDiagnosticsOverview } from "./diagnostics-api.js";
-import { daysAgo, quotaText, STALE_DAYS, useDiagnosticsDate } from "./diagnostics-format.js";
+import {
+  daysAgo,
+  diagnosticLicensePlan,
+  diagnosticLicenseState,
+  quotaText,
+  STALE_DAYS,
+  useDiagnosticsDate,
+} from "./diagnostics-format.js";
 
 type Host = StandaloneDiagnosticsOverview["hosts"][number];
 
@@ -84,8 +91,10 @@ function HostCard({ host, latest }: { host: Host; latest: string | null }) {
               noValue
             ) : (
               <>
-                <code>{license.state}</code>
-                {license.plan === null ? "" : `, ${license.plan}`}
+                <span title={license.state}>{diagnosticLicenseState(t, license.state)}</span>
+                {license.plan === null ? null : (
+                  <span title={license.plan}>{`, ${diagnosticLicensePlan(t, license.plan)}`}</span>
+                )}
                 {license.validUntil === null
                   ? ""
                   : `, ${t(`${prefix}.validUntil`)} ${formatDate(license.validUntil)}`}
@@ -157,7 +166,7 @@ export function DiagnosticsOverview({
       <Alert
         tone="error"
         action={
-          <Button variant="secondary" onClick={() => void query.refetch()}>
+          <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
             {t("tenants.detail.diagnostics.retry")}
           </Button>
         }

@@ -1,12 +1,12 @@
 import { BarcodeIcon } from "../BarcodeIcon.js";
 import { useTranslation } from "react-i18next";
-import type { WarehouseJobView } from "../../lib/warehouse-reprint/types.js";
+import type { UnifiedJobView } from "../../lib/warehouse-reprint/work.js";
 export function ReprintStatus({
   job,
   duplicate,
   verification,
 }: {
-  job: WarehouseJobView | null;
+  job: UnifiedJobView | null;
   duplicate: boolean;
   verification: boolean;
 }) {
@@ -25,7 +25,14 @@ export function ReprintStatus({
         <div className="warehouse-result">
           <strong>{job.productName}</strong>
           <span>
-            {t(job.kind === "box" ? "warehouse.box" : "warehouse.unit")} · {job.identity}
+            {t(
+              job.kind === "pallet"
+                ? "warehouse.palletTab"
+                : job.kind === "box"
+                  ? "warehouse.box"
+                  : "warehouse.unit",
+            )}{" "}
+            · {job.identity}
           </span>
           <small>
             {job.templateName} · {job.printerName}

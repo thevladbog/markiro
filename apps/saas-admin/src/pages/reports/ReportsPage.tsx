@@ -520,6 +520,7 @@ export function ReportsPage() {
             <span>{t("reports.createError")}</span>
             {deliveryAttempt ? (
               <Button
+                size="compact"
                 type="button"
                 variant="secondary"
                 onClick={() => create.mutate(deliveryAttempt)}

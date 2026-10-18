@@ -374,7 +374,7 @@ export async function readSealedWorkSummary(
     `SELECT
        (SELECT COUNT(*) FROM outbox) AS scans,
        (SELECT COUNT(*) FROM inventory_outbox) AS inventory_scans,
-       (SELECT COUNT(*) FROM product_label_outbox)+(SELECT COUNT(*) FROM warehouse_reprint_events WHERE receive_status='pending') AS product_labels,
+       (SELECT COUNT(*) FROM product_label_outbox)+(SELECT COUNT(*) FROM warehouse_reprint_events WHERE receive_status='pending')+(SELECT COUNT(*) FROM unit_label_facts WHERE receive_status='pending')+(SELECT COUNT(*) FROM warehouse_pallet_sources WHERE receive_status='pending' OR (receive_status='accepted' AND COALESCE(json_extract(production_delivery_json,'$.sequence'),0)>production_delivery_acked_sequence))+(SELECT COUNT(*) FROM warehouse_pallet_events WHERE receive_status='pending') AS product_labels,
        (SELECT COUNT(*) FROM boxes_mirror
          WHERE closed_at IS NOT NULL AND (acked_at IS NULL OR
            (disassembled_at IS NULL AND sscc IS NOT NULL AND confirmed_revision<reconciliation_revision))) AS boxes,
@@ -382,9 +382,13 @@ export async function readSealedWorkSummary(
        (SELECT COUNT(*) FROM shift_close_outbox)+
        (SELECT COUNT(*) FROM offline_grant_inventory_leave_intents WHERE left_at IS NULL) AS closes,
        (SELECT COUNT(*) FROM conflicts_mirror)+(SELECT COUNT(*) FROM inventory_conflicts_mirror) AS conflicts,
-       (SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined')+(SELECT COUNT(*) FROM warehouse_reprint_events WHERE receive_status='quarantined') AS quarantined_labels,
+       (SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined')+(SELECT COUNT(*) FROM warehouse_reprint_events WHERE receive_status='quarantined')+(SELECT COUNT(*) FROM unit_label_facts WHERE receive_status='conflict')+(SELECT COUNT(*) FROM warehouse_pallet_sources WHERE receive_status='conflict')+(SELECT COUNT(*) FROM warehouse_pallet_events WHERE receive_status='conflict') AS quarantined_labels,
        (SELECT COUNT(*) FROM product_label_jobs WHERE json_extract(projection_json,'$.attemptState') IN ('sending','delivery_unknown'))+
-       (SELECT COUNT(*) FROM inventory_repack_print_attempts WHERE state='printing')+(SELECT COUNT(*) FROM warehouse_reprint_jobs WHERE state IN ('prepared','sending','delivery_unknown','failed_before_send')) AS unknown_prints`,
+       (SELECT COUNT(*) FROM inventory_repack_print_attempts WHERE state='printing')+(SELECT COUNT(*) FROM warehouse_reprint_jobs WHERE state IN ('prepared','sending','delivery_unknown','failed_before_send'))+(SELECT COUNT(*) FROM warehouse_pallet_jobs WHERE state IN ('prepared','sending','delivery_unknown','failed_before_send'))+
+       (SELECT COUNT(*) FROM warehouse_pallet_sources source WHERE json_extract(source.production_delivery_json,'$.state')='delivery_unknown'
+         AND NOT EXISTS(SELECT 1 FROM pallets_mirror pallet WHERE pallet.sscc=source.sscc
+           AND (julianday(pallet.print_verified_at)>=julianday(json_extract(source.production_delivery_json,'$.occurredAt'))
+             OR julianday(pallet.print_skipped_at)>=julianday(json_extract(source.production_delivery_json,'$.occurredAt'))))) AS unknown_prints`,
   );
   if (!rows[0]) throw new Error("Recovery summary unavailable");
   const scans = rows[0]?.scans ?? 0;
