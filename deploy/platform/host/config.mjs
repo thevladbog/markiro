@@ -197,12 +197,16 @@ export async function snapshotHostConfig({ root, candidateId, envFile, manifest 
     return { path, sha256: createHash("sha256").update(actual).digest("hex"), interpolation };
   } catch (error) {
     // Never remove a pre-existing candidate or an uncertain published write.
-    if (candidateCreated && !error.durabilityUncertain) {
-      if (snapshotWritten) await unlink(path).catch(() => {});
-      await rmdir(candidate).catch(() => {});
-      await syncPrivateDirectory(dirname(candidate)).catch(() => {});
+    let durabilityUncertain = error.durabilityUncertain === true;
+    if (candidateCreated && !durabilityUncertain) {
+      const cleanupFailed = () => {
+        durabilityUncertain = true;
+      };
+      if (snapshotWritten) await unlink(path).catch(cleanupFailed);
+      await rmdir(candidate).catch(cleanupFailed);
+      await syncPrivateDirectory(dirname(candidate)).catch(cleanupFailed);
     }
-    throw privateFileError(error.durabilityUncertain === true);
+    throw privateFileError(durabilityUncertain);
   }
 }
 

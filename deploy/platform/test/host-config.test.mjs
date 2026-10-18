@@ -403,3 +403,78 @@ test("PG bind paths reject symlink ancestors, nonregular files and oversized inp
     await assert.rejects(snapshotHostConfig({ ...f, candidateId: randomUUID() }), safeError);
   }
 });
+
+test("snapshot cleanup failures preserve durability uncertainty and sanitized errors", async (t) => {
+  for (const phase of ["unlink", "rmdir", "directory"]) {
+    await t.test(phase, async (t) => {
+      const f = await privateFixture(t);
+      // Existing preflight accepts this address; final interpolation validation
+      // rejects the control character after publishing the snapshot.
+      await f.writeEnv({ ...f.env, ACME_EMAIL: `ops${String.fromCharCode(1)}@markiro.app` });
+      const candidate = join(f.root, "candidates", f.candidateId);
+      const snapshot = join(candidate, "runtime.env");
+      const source = `
+        import fs from "node:fs/promises";
+        import { syncBuiltinESMExports } from "node:module";
+        const phase = ${JSON.stringify(phase)};
+        let injected = false;
+        let parentSyncs = 0;
+        const originalOpen = fs.open;
+        const originalUnlink = fs.unlink;
+        const originalRmdir = fs.rmdir;
+        const failure = () => {
+          injected = true;
+          throw new Error(${JSON.stringify(sentinel)});
+        };
+        fs.open = async (...args) => {
+          const handle = await originalOpen(...args);
+          if (phase === "directory" && args[0] === ${JSON.stringify(join(f.root, "candidates"))}) {
+            const originalSync = handle.sync.bind(handle);
+            handle.sync = async () => {
+              if (++parentSyncs === 2) failure();
+              await originalSync();
+            };
+          }
+          return handle;
+        };
+        fs.unlink = async (...args) => {
+          if (phase === "unlink" && args[0] === ${JSON.stringify(snapshot)}) failure();
+          return originalUnlink(...args);
+        };
+        fs.rmdir = async (...args) => {
+          if (phase === "rmdir" && args[0] === ${JSON.stringify(candidate)}) failure();
+          return originalRmdir(...args);
+        };
+        syncBuiltinESMExports();
+        const { snapshotHostConfig } = await import(${JSON.stringify(new URL("../host/config.mjs", import.meta.url).href)});
+        const exists = async (path) => {
+          try { await fs.lstat(path); return true; }
+          catch (error) { if (error.code === "ENOENT") return false; throw error; }
+        };
+        try {
+          await snapshotHostConfig(${JSON.stringify({ root: f.root, candidateId: f.candidateId, envFile: f.envFile, manifest: f.manifest })});
+          process.exitCode = 1;
+        } catch (error) {
+          console.log(JSON.stringify({
+            message: error.message, code: error.code,
+            durabilityUncertain: error.durabilityUncertain, injected,
+            candidateExists: await exists(${JSON.stringify(candidate)}),
+            snapshotExists: await exists(${JSON.stringify(snapshot)}),
+          }));
+        }
+      `;
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", source], {
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, "");
+      const error = JSON.parse(result.stdout);
+      assert.equal(error.injected, true);
+      assert.equal(error.code, "ERR_HOST_PRIVATE_FILE");
+      assert.equal(error.durabilityUncertain, true);
+      assert.equal(error.candidateExists, phase !== "directory");
+      assert.equal(error.snapshotExists, phase === "unlink");
+      assert.doesNotMatch(error.message, /DO-NOT-LEAK|markiro-host-|\/private\//);
+    });
+  }
+});
