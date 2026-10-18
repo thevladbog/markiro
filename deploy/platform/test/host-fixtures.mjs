@@ -1,10 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digest, release } from "./admission-fixtures.mjs";
 
 export function hostEnv(manifest, root) {
+  const databaseUrl = new URL("postgresql://db.private/markiro");
+  databaseUrl.username = "test";
+  databaseUrl.password = randomBytes(24).toString("hex");
+  databaseUrl.searchParams.set("sslmode", "verify-full");
   return {
     SERVER_PROFILE: "platform-only",
     VITE_SERVER_PROFILE: "platform-only",
@@ -19,7 +23,7 @@ export function hostEnv(manifest, root) {
     SAAS_ADMIN_ORIGIN: "https://saas-admin.markiro.app",
     PLATFORM_AUTH_URL: "https://saas-admin.markiro.app",
     LANDING_ORIGIN: "https://markiro.app",
-    DATABASE_URL: "postgresql://test:fixture-only@db.private/markiro?sslmode=verify-full",
+    DATABASE_URL: databaseUrl.href,
     PLATFORM_AUTH_SECRET: "fixture-only-configuration-secret-".repeat(2),
     MAIL_PAYLOAD_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
     S3_ENDPOINT: "https://s3.example.org",
