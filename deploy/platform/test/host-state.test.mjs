@@ -487,7 +487,7 @@ test("unawaited mutation keeps the lock until its real directory fsync finishes"
   await withHostState(root, async (store) => assert.equal((await store.read()).sequence, 1));
 });
 
-test("release directory fsync failure restores a blocking lock and never reports success", async (t) => {
+test("retirement fsync failure is distinct and permits a fresh synced acquisition", async (t) => {
   const { root } = await privateFixture(t);
   const owner = child(
     t,
@@ -499,17 +499,87 @@ test("release directory fsync failure restores a blocking lock and never reports
         if(++syncs === 2) throw new Error("private-release-fsync"); return originalSync(); }; } return h; };
     syncBuiltinESMExports(); const { withHostState } = await import(${JSON.stringify(moduleUrl)});
     try { await withHostState(root, () => {}); process.send({success: true}); }
-    catch(error) { process.send({code: error.code, durabilityUncertain: error.durabilityUncertain}); }
+    catch(error) { process.send({code: error.code, message: error.message, durabilityUncertain: error.durabilityUncertain, lockRetirementUncertain: error.lockRetirementUncertain}); }
     process.disconnect();`,
     [root],
   );
   assert.deepEqual((await once(owner, "message", { signal: AbortSignal.timeout(10000) }))[0], {
-    code: "ERR_HOST_STATE",
-    durabilityUncertain: true,
+    code: "ERR_HOST_LOCK_RELEASE",
+    message: "Host deployment lock retirement failed.",
+    durabilityUncertain: false,
+    lockRetirementUncertain: true,
   });
-  await lstat(join(root, ".deploy.lock"));
-  await assert.rejects(
-    withHostState(root, () => {}),
-    rejected,
-  );
+  await assert.rejects(lstat(join(root, ".deploy.lock")), { code: "ENOENT" });
+  await withHostState(root, (store) => store.begin(hostIdentity()));
+  assert.equal((await disk(root)).sequence, 1);
 });
+
+for (const healthy of [false, true])
+  test(`retirement failure leaves a synced successor untouched (${healthy ? "healthy handoff" : "unresolved candidate"})`, async (t) => {
+    const { root } = await privateFixture(t);
+    const owner = child(
+      t,
+      `
+    import assert from "node:assert/strict"; import fs from "node:fs/promises";
+    import { syncBuiltinESMExports } from "node:module";
+    const root = process.argv[1]; const healthy = ${JSON.stringify(healthy)};
+    let markRelease, failRelease, markSecond, releaseSecond;
+    const reachedRelease = new Promise(resolve => { markRelease = resolve; });
+    const releaseGate = new Promise(resolve => { failRelease = resolve; });
+    const secondEntered = new Promise(resolve => { markSecond = resolve; });
+    const secondGate = new Promise(resolve => { releaseSecond = resolve; });
+    let syncs = 0; const originalOpen = fs.open.bind(fs);
+    fs.open = async (...args) => { const h = await originalOpen(...args);
+      if(args[0] === root) { const originalSync = h.sync.bind(h); h.sync = async () => {
+        if(++syncs === (healthy ? 20 : 3)) { markRelease(); await releaseGate; throw new Error("private-retirement-fsync"); }
+        return originalSync(); }; } return h; };
+    syncBuiltinESMExports(); const { withHostState } = await import(${JSON.stringify(moduleUrl)});
+    const { hostIdentity, backupProof } = await import(${JSON.stringify(new URL("./host-fixtures.mjs", import.meta.url).href)});
+    const phases = ["admitted", "images-verified", "target-stopped", "backup-verified", "migrating", "migrated", "api-started", "edge-started", "healthy"];
+    const identity = hostIdentity(); let expired;
+    const first = withHostState(root, async store => {
+      expired = store; await store.begin(identity);
+      if(healthy) for(const phase of phases) {
+        if(phase !== "admitted") await store.enter(phase);
+        await store.complete(phase, ...(phase === "backup-verified" ? [backupProof(identity)] : []));
+      }
+    }).catch(error => ({code: error.code, message: error.message, durabilityUncertain: error.durabilityUncertain, lockRetirementUncertain: error.lockRetirementUncertain}));
+    await reachedRelease;
+    const second = withHostState(root, async store => {
+      const state = await store.read(); assert.equal(state.current.identity.operationId, identity.operationId);
+      if(healthy) { await store.begin(hostIdentity()); assert.deepEqual((await store.read()).previousHealthy.identity, identity); }
+      else await assert.rejects(store.begin(hostIdentity()), {code: "ERR_HOST_STATE"});
+      markSecond(); await secondGate;
+    });
+    await secondEntered;
+    const lockBefore = await fs.lstat(root + "/.deploy.lock");
+    const bytesBefore = await fs.readFile(root + "/state.json", "utf8");
+    failRelease(); const error = await first;
+    const lockAfter = await fs.lstat(root + "/.deploy.lock");
+    assert.equal(lockAfter.ino, lockBefore.ino); assert.equal(lockAfter.dev, lockBefore.dev);
+    assert.equal(await fs.readFile(root + "/state.json", "utf8"), bytesBefore);
+    for(const method of [() => expired.read(), () => expired.begin(hostIdentity()), () => expired.enter("images-verified"), () => expired.complete("admitted"), () => expired.fail()])
+      await assert.rejects(method(), {code: "ERR_HOST_STATE"});
+    releaseSecond(); await second;
+    await withHostState(root, async store => {
+      assert.equal((await store.read()).current.status, "entered");
+      await assert.rejects(store.begin(hostIdentity()), {code: "ERR_HOST_STATE"});
+    });
+    process.send({error, successorUntouched: true, expiredMethodsRejected: true, unresolvedBeginRejected: true, healthyHandoff: healthy});
+    process.disconnect();`,
+      [root],
+    );
+    const result = (await once(owner, "message", { signal: AbortSignal.timeout(10000) }))[0];
+    assert.deepEqual(result, {
+      error: {
+        code: "ERR_HOST_LOCK_RELEASE",
+        message: "Host deployment lock retirement failed.",
+        durabilityUncertain: false,
+        lockRetirementUncertain: true,
+      },
+      successorUntouched: true,
+      expiredMethodsRejected: true,
+      unresolvedBeginRejected: true,
+      healthyHandoff: healthy,
+    });
+  });

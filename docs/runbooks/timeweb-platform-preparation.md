@@ -486,8 +486,10 @@ It rejects concurrent method calls, nested/second owners, escaped store methods,
 and drains already-started work before releasing its own lock. It never breaks
 an existing lock. State mutations increment a sequence and atomically replace
 `state.json` with file and parent-directory fsync before success. Read results
-and accepted input identities are independent copies. Errors expose only
-`ERR_HOST_STATE`, a generic message and `durabilityUncertain`.
+and accepted input identities are independent copies. State/publication errors
+expose only `ERR_HOST_STATE`, a generic message and `durabilityUncertain`.
+Lock-retirement failures have a distinct sanitized `ERR_HOST_LOCK_RELEASE`,
+`durabilityUncertain: false`, `lockRetirementUncertain: true`.
 
 Each root represents one host/database/volume target. A candidate binds a
 canonical operation UUID, complete strict admission record, immutable executor
@@ -507,8 +509,23 @@ entry requires that bound record. `fail()` preserves the current phase and any
 backup while making it recovery-required; earlier healthy identity is retained
 as history and cannot replace the failed candidate. Unresolved records prohibit
 a new begin even after normal lock release or restart. A killed owner leaves its
-lock. Any uncertain write outcome latches for the owner and retains a blocking
-lock even if the callback catches the error. Investigate retained state/locks
+lock. Acquisition or journal-publication uncertainty latches for the owner and
+retains the held blocking lock even if the callback catches the error.
+
+Lock retirement starts only after the callback store expires and all writes
+are drained and durably synced. The owner unlinks only its own lock, then fsyncs
+the directory. A retirement-only failure returns the distinct error above;
+it does not make already-synced journal writes uncertain. A successor can
+acquire/fsync after unlink while the former owner awaits retirement fsync, so
+there is no permanent fence promise for retirement-only failure. The former
+owner never restores a lock or removes/changes a successor's lock/state. Its
+expired methods remain unusable. The error grants no mutation or recovery
+authority: a new `withHostState` acquisition must sync its own lock and read
+strict durable state, which still blocks unresolved candidates. A completed
+healthy candidate can hand off after a fresh synced acquisition. A crash may
+leave a conservative stale lock; do not automatically break it.
+
+Investigate retained state/locks
 through a separately reviewed operator recovery procedure; do not delete them
 to retry a failed deployment.
 

@@ -8,8 +8,9 @@ PR #733 remains open; publication/admission is not host acceptance.
 
 Private filesystem/configuration snapshots and the durable deployment-state
 library are implemented with local fault-injection tests. The state library binds
-strict admission syntax, target and backup-proof identities, retains uncertainty
-and stale locks, and blocks unresolved operations; it performs no commands or
+strict admission syntax, target and backup-proof identities, retains held locks
+on publication uncertainty and conservatively handles stale locks, and blocks
+unresolved operations; it performs no commands or
 backup verification. Bounded command orchestration, the reviewed backup/restore
 adapter, separate database-role configuration, prepared-target acceptance,
 protected SSH/workflow and host CLI remain pending. No host operation is
@@ -148,6 +149,19 @@ migrating -> migrated -> api-started -> edge-started -> healthy. Persist entry
 into a phase before the corresponding command and its completion afterward;
 interrupted/in-progress states never imply success. Reject a second operation
 while a candidate is unresolved, including after reboot.
+
+Journal publication/acquisition uncertainty latches and retains the held lock.
+After all writes are drained and durably synced and the callback store expires,
+retirement unlinks only the owner's lock and syncs the directory. A failed
+retirement returns distinct sanitized `ERR_HOST_LOCK_RELEASE` with
+`durabilityUncertain: false`, `lockRetirementUncertain: true`; it is not a new
+uncertainty in already-synced journal contents. The former owner never restores
+or removes a successor's lock and its expired store cannot mutate state. Unlink
+allows a successor to acquire/fsync before retirement sync finishes, so no
+permanent fence is promised for retirement-only failure. A crash can leave a
+conservative stale lock that is never automatically broken. New operations
+require a fresh synced acquisition and strict validation of durable state;
+retirement errors grant no recovery/reset authority.
 
 Order only the reviewed base and compact Compose files. Pull before stopping.
 Stop edge/API, prove no target API/worker remains, start/wait PostgreSQL only,

@@ -20,23 +20,19 @@ import {
 
 async function releaseOwnLock(root, lockPath, owned) {
   const actual = await lstat(lockPath);
-  if (actual.dev !== owned.dev || actual.ino !== owned.ino) throw stateError(true);
+  if (actual.dev !== owned.dev || actual.ino !== owned.ino) throw lockReleaseError();
   await unlink(lockPath);
-  try {
-    await syncPrivateDirectory(root);
-  } catch {
-    // If unlink durability is uncertain, restore a blocking lock when possible.
-    // An intervening owner wins O_EXCL and its lock is never removed here.
-    const retained = await open(lockPath, "wx", 0o600);
-    try {
-      await retained.writeFile(`${randomUUID()}\n`);
-      await retained.sync();
-      await syncPrivateDirectory(root);
-    } finally {
-      await retained.close();
-    }
-    throw stateError(true);
-  }
+  // Journal writes are already drained and durable, and the store has expired.
+  // A successor may acquire/sync after unlink; never restore or alter its lock.
+  await syncPrivateDirectory(root);
+}
+
+function lockReleaseError() {
+  const error = new Error("Host deployment lock retirement failed.");
+  error.code = "ERR_HOST_LOCK_RELEASE";
+  error.durabilityUncertain = false;
+  error.lockRetirementUncertain = true;
+  return error;
 }
 
 // Lock names are deliberately fixed. The private root and cooperating operators
@@ -50,6 +46,7 @@ export async function withHostState(root, callback) {
   let pending;
   let outcome;
   let failure;
+  let retirementFailed = false;
   const lockPath = join(typeof root === "string" ? root : "", ".deploy.lock");
   const latch = (error) => {
     uncertain ||= error?.durabilityUncertain === true;
@@ -193,18 +190,19 @@ export async function withHostState(root, callback) {
       try {
         await lock.close();
       } catch {
-        uncertain = true;
+        retirementFailed = true;
       }
     }
-    if (owned && !uncertain) {
+    if (owned && !uncertain && !retirementFailed) {
       try {
         await releaseOwnLock(root, lockPath, owned);
       } catch {
-        uncertain = true;
+        retirementFailed = true;
       }
     }
   }
   if (uncertain) throw stateError(true);
+  if (retirementFailed) throw lockReleaseError();
   if (failure) throw failure;
   return outcome;
 }
