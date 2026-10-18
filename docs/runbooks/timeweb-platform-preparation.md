@@ -402,7 +402,11 @@ not exist and its parent directory must already exist. The repository is fixed t
 run of `release-platform-images.yml`; both `build` and `publish` must have succeeded
 in that exact attempt. A newer rerun invalidates an older attempt selection.
 Admission also revalidates the exact successful main-push CI run and attempt
-recorded by the publisher.
+recorded by the publisher. It rereads the current publisher after validating the
+selected attempt's jobs. After both registry checks and temporary cleanup, it
+rereads current publisher and CI provenance immediately before creating the
+record. These reads retain the same HTTP timeout and response-size bounds and
+must still match the selected successful attempts, source and repository checks.
 
 The verifier binds artifact metadata to the selected run, source, branch and
 repository IDs, checks its SHA256 against the downloaded ZIP, and reads exactly
@@ -437,8 +441,12 @@ Success exclusively creates a regular mode-0600 JSON file with exactly:
 - `registry.api` and `registry.edge`, each exactly
   `{ reference, imageId, platform: "linux/amd64" }`.
 
-This record is verification evidence, not a signature, deployment authorization,
-restore proof, capacity acceptance or proof that any host is running the images.
+This record captures point-in-time verification evidence. The final publisher
+and CI reads are sequential observations, not an atomic lock against a rerun
+starting afterward. A later rerun requires fresh admission, and any future host
+executor must recheck freshness and provenance at its own execution boundary.
+The record is not a signature, deployment authorization, restore proof, capacity
+acceptance or proof that any host is running the images.
 The verifier does not pull/load/push images or contact a deployment host. Running
 its tests does not satisfy live admission of an actual protected publication.
 

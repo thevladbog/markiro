@@ -107,6 +107,16 @@ function validatePublisher(run, expected) {
       run.repository.id === run.head_repository.id,
   );
 }
+/** A fresh current snapshot must still name the already validated attempt/repository. */
+export async function recheckPublisher(expected, selected, transport) {
+  const current = await transport.json(`/runs/${expected.workflowRunId}`);
+  validatePublisher(current, expected);
+  requireTrue(
+    current.repository.id === selected.repository.id &&
+      current.head_repository.id === selected.head_repository.id,
+  );
+}
+
 export async function fetchPublisher(expected, transport) {
   const base = `/runs/${expected.workflowRunId}`;
   const latest = await transport.json(base);
@@ -155,6 +165,7 @@ export async function fetchPublisher(expected, transport) {
     }
   }
   requireTrue(required.size === 0);
+  await recheckPublisher(expected, run, transport);
   return run;
 }
 export function validateArtifact(value, run, artifactId, now = Date.now()) {

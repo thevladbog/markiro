@@ -148,7 +148,7 @@ test("ordered default ZIP verification produces exhaustive private admission rec
   assert.deepEqual(JSON.parse(await fs.readFile(h.input.outputFile, "utf8")), expectedRecord);
   assert.equal((await fs.stat(h.input.outputFile)).mode & 0o777, 0o600);
   assert.equal(h.state.commands.length, 2);
-  assert.equal(h.state.calls.length, 9);
+  assert.equal(h.state.calls.length, 12);
   for (const { url, options } of h.state.calls) {
     assert.ok(options.signal);
     assert.equal(options.redirect, "manual");
@@ -651,4 +651,133 @@ test("default ZIP parser preserves valid stored and deflate members", async (t) 
       evidenceText: JSON.stringify(release().evidence),
     });
   }
+});
+
+test("publisher rerun after the first current snapshot fails before artifact verification", async (t) => {
+  for (const status of ["queued", "in_progress", "completed"]) {
+    const h = await harness(t);
+    let reads = 0;
+    h.state.override = async (url) => {
+      if (url !== `${base}/runs/456`) return;
+      reads++;
+      return response(
+        reads === 1
+          ? h.state.run
+          : {
+              ...h.state.run,
+              run_attempt: 3,
+              status,
+              conclusion: status === "completed" ? "success" : null,
+            },
+      );
+    };
+    await rejected(h, "publisher");
+    assert.equal(reads, 2);
+    assert.ok(h.state.calls.every(({ url }) => !url.includes("/artifacts/")));
+    assert.equal(h.state.commands.length, 0);
+  }
+});
+
+test("CI rerun after the first current snapshot fails the final admission recheck", async (t) => {
+  for (const status of ["queued", "in_progress", "completed"]) {
+    const h = await harness(t);
+    let reads = 0;
+    h.state.override = async (url) => {
+      if (url !== `${base}/runs/123`) return;
+      reads++;
+      return response(
+        reads === 1
+          ? h.state.ci
+          : {
+              ...h.state.ci,
+              run_attempt: 4,
+              status,
+              conclusion: status === "completed" ? "success" : null,
+            },
+      );
+    };
+    await rejected(h, "ci");
+    assert.equal(reads, 2);
+    assert.equal(h.state.commands.length, 2);
+  }
+});
+
+test("publisher or CI rerun during registry inspection cannot create an admission record", async (t) => {
+  for (const target of ["publisher", "ci"]) {
+    for (const status of ["queued", "in_progress", "completed"]) {
+      const h = await harness(t);
+      const run = h.adapters.run;
+      h.adapters.run = async (...args) => {
+        const value = await run(...args);
+        if (h.state.commands.length === 2) {
+          const current = target === "publisher" ? h.state.run : h.state.ci;
+          current.run_attempt++;
+          current.status = status;
+          current.conclusion = status === "completed" ? "success" : null;
+        }
+        return value;
+      };
+      await rejected(h, target);
+      assert.equal(h.state.commands.length, 2);
+    }
+  }
+});
+
+test("final provenance rechecks preserve source, status and repository identity validation", async (t) => {
+  for (const target of ["publisher", "ci"]) {
+    const patches = [
+      { head_sha: "b".repeat(40) },
+      { conclusion: "failure" },
+      { repository: { id: 10, full_name: "fork/markiro" } },
+    ];
+    if (target === "publisher")
+      patches.push({
+        repository: { id: 11, full_name: "thevladbog/markiro" },
+        head_repository: { id: 11, full_name: "thevladbog/markiro" },
+      });
+    for (const patch of patches) {
+      const h = await harness(t);
+      const run = h.adapters.run;
+      h.adapters.run = async (...args) => {
+        const value = await run(...args);
+        if (h.state.commands.length === 2)
+          Object.assign(target === "publisher" ? h.state.run : h.state.ci, patch);
+        return value;
+      };
+      await rejected(h, target);
+    }
+  }
+});
+
+test("unchanged provenance is rechecked after registry and cleanup immediately before output", async (t) => {
+  const h = await harness(t);
+  const order = [];
+  const request = h.adapters.request;
+  const run = h.adapters.run;
+  h.adapters.request = async (url, options) => {
+    order.push(url);
+    if (h.state.commands.length === 2) {
+      assert.deepEqual(
+        (await fs.readdir(h.dir)).filter((name) => name.startsWith("platform-admission-")),
+        [],
+      );
+      await assert.rejects(fs.lstat(h.input.outputFile), { code: "ENOENT" });
+    }
+    return request(url, options);
+  };
+  h.adapters.run = async (...args) => {
+    order.push("registry");
+    return run(...args);
+  };
+  const record = await admitPlatformRelease(h.input, h.adapters);
+  assert.deepEqual(order.slice(-4), [
+    "registry",
+    "registry",
+    `${base}/runs/456`,
+    `${base}/runs/123`,
+  ]);
+  assert.equal(h.state.calls.filter(({ url }) => url === `${base}/runs/456`).length, 3);
+  assert.equal(h.state.calls.filter(({ url }) => url === `${base}/runs/123`).length, 2);
+  assert.deepEqual(record.publisher, { runId: "456", runAttempt: "2" });
+  assert.deepEqual(record.ci, { runId: "123", runAttempt: "3" });
 });

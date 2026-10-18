@@ -10,12 +10,13 @@ import {
 import {
   REPOSITORY,
   fetchPublisher,
+  recheckPublisher,
   githubTransport,
   validateArtifact,
 } from "./admission-github.mjs";
 import { extractReleaseZip } from "./admission-archive.mjs";
 import { inspectRegistryImage } from "./admission-registry.mjs";
-import { sha256RegularFile } from "./release-evidence.mjs";
+import { sha256RegularFile, validatePlatformCiEvidence } from "./release-evidence.mjs";
 import { fetchPlatformCi } from "./release-ci.mjs";
 
 async function absent(path) {
@@ -89,11 +90,8 @@ export async function admitPlatformRelease(
     phase = "evidence";
     const { manifest, verified } = validatePublishedPlatformRelease({ ...texts, expected });
     phase = "ci";
-    const ci = await fetchPlatformCi(
-      { repository: REPOSITORY, sourceSha, runId: verified.ciRunId },
-      token,
-      transport.ciRequest,
-    );
+    const ciExpected = { repository: REPOSITORY, sourceSha, runId: verified.ciRunId };
+    const ci = await fetchPlatformCi(ciExpected, token, transport.ciRequest);
     if (
       ci.identity.ciRunId !== verified.ciRunId ||
       ci.identity.ciRunAttempt !== verified.ciRunAttempt
@@ -122,6 +120,18 @@ export async function admitPlatformRelease(
     phase = "cleanup";
     await fs.rm(directory, { recursive: true, force: true });
     directory = undefined;
+    // Bound the final observation window after registry work and temporary cleanup.
+    // These sequential snapshots are evidence, not an atomic lock against later reruns.
+    phase = "publisher";
+    await recheckPublisher(expected, publisher, transport);
+    phase = "ci";
+    const currentCi = validatePlatformCiEvidence(
+      await transport.json(`/runs/${verified.ciRunId}`),
+      ci.jobs,
+      ciExpected,
+    );
+    if (currentCi.ciRunId !== verified.ciRunId || currentCi.ciRunAttempt !== verified.ciRunAttempt)
+      throw new Error();
     phase = "output";
     await writeExclusive(outputFile, record);
     return record;
