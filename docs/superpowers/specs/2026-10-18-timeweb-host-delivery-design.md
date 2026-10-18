@@ -1,8 +1,19 @@
 # Timeweb compact host delivery design
 
-Status: next-stage design, not an implemented or authorized host operation.
-The protected platform publisher merged in PR #732. Actual publication and
-independent artifact verification remain prerequisites to the first host run.
+Status, 2026-10-19: the protected publisher merged in PR #732 and
+[publisher run 39169553922, attempt 1](https://github.com/thevladbog/markiro/actions/runs/39169553922)
+published source/tooling `6fe44af838fc873cd06c7f0d52a4a5dae77dd7e5`.
+Independent read-only admission of that publication completed. Admission tooling
+PR #733 remains open; publication/admission is not host acceptance.
+
+Private filesystem/configuration snapshots and the durable deployment-state
+library are implemented with local fault-injection tests. The state library binds
+strict admission syntax, target and backup-proof identities, retains uncertainty
+and stale locks, and blocks unresolved operations; it performs no commands or
+backup verification. Bounded command orchestration, the reviewed backup/restore
+adapter, separate database-role configuration, prepared-target acceptance,
+protected SSH/workflow and host CLI remain pending. No host operation is
+implemented or authorized by these library tests.
 
 ## Outcome and boundaries
 

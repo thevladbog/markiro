@@ -75,3 +75,42 @@ export async function privateFixture(t) {
   await writeEnv();
   return { root, manifest, env, envFile, dockerConfig, candidateId: randomUUID(), writeEnv };
 }
+
+export function hostIdentity() {
+  const { manifest, evidence } = release();
+  return {
+    operationId: randomUUID(),
+    admission: {
+      version: 1,
+      kind: "platform-release-admission",
+      repository: "thevladbog/markiro",
+      manifest,
+      verified: evidence.verified,
+      artifact: { id: "789", sha256: "f".repeat(64) },
+      publisher: { runId: "456", runAttempt: "2" },
+      ci: { runId: "123", runAttempt: "3" },
+      registry: Object.fromEntries(
+        ["api", "edge"].map((name) => [
+          name,
+          {
+            reference: manifest[name],
+            imageId: evidence.verified.images[name].id,
+            platform: "linux/amd64",
+          },
+        ]),
+      ),
+    },
+    executorSha: "b".repeat(40),
+    configurationSha256: "c".repeat(64),
+    target: { hostId: "fixture-host", databaseId: "fixture-db", volumeId: "fixture-volume" },
+  };
+}
+
+export function backupProof(identity) {
+  return {
+    archiveSha256: "d".repeat(64),
+    restoreEvidenceSha256: "e".repeat(64),
+    target: structuredClone(identity.target),
+    operationId: identity.operationId,
+  };
+}

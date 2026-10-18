@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Dedicated target is Linux amd64, 2 vCPU / 4 GiB, local PostgreSQL 17, fixed Compose project `markiro-platform`, server/UI profiles `platform-only`.
-- No host CLI/workflow, VM purchase, SSH, Docker execution, source changes, DNS, key generation, database restore or remote writes in this slice.
+- No host CLI/workflow, VM purchase, SSH, Docker runtime/container operations, source changes, DNS, key generation, database restore or remote writes in this slice. Existing local `docker compose config` rendering in the required production contract suite is allowed as read-only verification; it does not contact a daemon or mutate containers/hosts.
 - Node 24; no new dependencies; preserve existing env/preflight compatibility and the release publisher.
 - Private deployment root is pre-created, absolute, canonical, owned by current UID, mode 0700. All descendants used by these modules are private, owned, non-symlink paths. Ancestors must be root/current-user owned and not group/other writable, except a root-owned sticky temporary ancestor outside the private root for isolated tests. Canonical `realpath` test roots avoid macOS `/var` aliases.
 - Files are regular, single-link, owned, mode 0600, bounded to 1 MiB; no secret values or raw filesystem errors in returned errors/evidence. Private root ownership is the trust boundary; hostile root/current-UID processes are outside the threat model and must not be claimed as prevented by path checks.
@@ -60,6 +60,7 @@ This deliberately separates safety primitives from the future command orchestrat
 **Files:**
 
 - Create: `deploy/platform/host/state.mjs`
+- Create: `deploy/platform/host/state-validation.mjs` (pure strict admission, identity and state validation)
 - Create: `deploy/platform/test/host-state.test.mjs`
 - Modify: `deploy/platform/test/host-fixtures.mjs`
 - Modify: `docs/superpowers/specs/2026-10-18-timeweb-host-delivery-design.md` (accurate implemented/pending status only)
