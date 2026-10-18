@@ -1,6 +1,6 @@
 # Timeweb Platform Release Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Publish the exact tested platform images through a protected manual workflow, making them available for the next Timeweb deployment stage.
 
@@ -44,11 +44,11 @@
 - `resolvePublishedDigest(repositoryDigests, repository)` returns the one valid exact-repository sha256 digest; rejects duplicates, malformed or absent matches and unexpected repository inputs.
 - `sha256RegularFile(path)` streams and hashes a regular non-symlink single-link file, rejects unsuitable files and changes during read; never loads a multi-GB archive into memory.
 
-- [ ] Write failing tests for wrong repo/workflow/event/branch/SHA/run status, skipped/duplicate/missing required jobs, mixed attempts/incomplete job listing and unsafe IDs.
-- [ ] Write failing evidence tests for roundtrip, exact keys, every identity/profile/tag/ID/hash mismatch, archive file/symlink tampering and digest ambiguity.
-- [ ] Run `node --test deploy/platform/test/release-evidence.test.mjs` and record the expected failure.
-- [ ] Implement the interfaces with generic errors that never include untrusted payloads or paths containing secrets. Reuse existing immutable manifest validation where appropriate.
-- [ ] Re-run focused tests and all platform tests. Run changed-file Prettier and `git diff --check`; commit explicit files after self-review.
+- [x] Write failing tests for wrong repo/workflow/event/branch/SHA/run status, skipped/duplicate/missing required jobs, mixed attempts/incomplete job listing and unsafe IDs.
+- [x] Write failing evidence tests for roundtrip, exact keys, every identity/profile/tag/ID/hash mismatch, archive file/symlink tampering and digest ambiguity.
+- [x] Run `node --test deploy/platform/test/release-evidence.test.mjs` and record the expected failure.
+- [x] Implement the interfaces with generic errors that never include untrusted payloads or paths containing secrets. Reuse existing immutable manifest validation where appropriate.
+- [x] Re-run focused tests and all platform tests. Run changed-file Prettier and `git diff --check`; commit explicit files after self-review.
 
 ## Task 2: Protected build, verify and publish workflow
 
@@ -62,12 +62,12 @@
 
 **Interfaces:** Consume Task 1's evidence validation. The CLI provides workflow operations to validate downloaded CI run/attempt-job JSON, export Docker archive and evidence after the harness, verify/load the exact artifact, and publish/write platform manifest plus release evidence. The implementer chooses the precise CLI verbs, documents them and tests actual operation ordering using injected command/file adapters; secrets come only from masked process environment or protected files. Docker is called with argument arrays, never interpolated shell code.
 
-- [ ] Write failing orchestration tests proving no load on invalid/hash-mismatched archive, no push on ID changes, no rebuild, correct manifest digest/source/run binding, and failure if either push/digest resolution fails.
-- [ ] Write failing workflow contracts: manual main only; input `ci_run_id`; exact successful run attempt fetched with complete pagination; no publishing permissions in build; protected dependent publish job; artifact-ID handoff; no SSH/deployment/provider operations; exact image IDs rechecked; safe evidence-only uploads. Add the workflow to reviewed trigger inventory.
-- [ ] Implement build job: resolve exact main CI via authenticated HTTPS, checkout `github.sha` with credentials disabled, install Node/pnpm and Chromium using existing pinned Actions, run platform/CI/production contracts, build API and platform edge for Linux amd64 using existing Dockerfiles/public landing variables, run `ci-stack.mjs --local-ci`, export exact IDs with unique tags and evidence, upload immutable artifact with one-day retention. Upload only sanitized harness screenshots/verification separately, including on failures.
-- [ ] Implement protected publish job using `production-deploy`, `contents: read`, `packages: write`; download the exact artifact ID from its build job, revalidate evidence/hash, load and check IDs, login to GHCR, push exact tags, resolve exact repo digests, create existing platform manifest, upload uniquely run/attempt-named manifest/evidence for 90 days. No mutation credentials before protection. Retain failed partial publication evidence without advertising a complete release.
-- [ ] Update runbook with exact dispatch inputs, protected approval boundary, artifact retrieval/verification, source/tooling identity and publication-vs-deployment distinction. Record today's merge and inventory as dated observations. Migration checklist covers host-executor prerequisite, fresh restore with app off, roles/ACL, encryption/license identities, staged S3, isolated egress, separate exact-image compact test, external backup, one writer and MX-preserving final cutover. Old resource deletion waits for acceptance.
-- [ ] Run all platform tests, `corepack pnpm test:production-bundle:contract`, `corepack pnpm test:ci-policy`, `corepack pnpm format:check` and `git diff --check`. Do not claim GitHub/registry/target proof from local contracts. Commit explicit paths after self-review.
+- [x] Write failing orchestration tests proving no load on invalid/hash-mismatched archive, no push on ID changes, no rebuild, correct manifest digest/source/run binding, and failure if either push/digest resolution fails.
+- [x] Write failing workflow contracts: manual main only; input `ci_run_id`; exact successful run attempt fetched with complete pagination; no publishing permissions in build; protected dependent publish job; artifact-ID handoff; no SSH/deployment/provider operations; exact image IDs rechecked; safe evidence-only uploads. Add the workflow to reviewed trigger inventory.
+- [x] Implement build job: resolve exact main CI via authenticated HTTPS, checkout `github.sha` with credentials disabled, install Node/pnpm and Chromium using existing pinned Actions, run platform/CI/production contracts, build API and platform edge for Linux amd64 using existing Dockerfiles/public landing variables, run `ci-stack.mjs --local-ci`, export exact IDs with unique tags and evidence, upload immutable artifact with one-day retention. Upload only sanitized harness screenshots/verification separately, including on failures.
+- [x] Implement protected publish job using `production-deploy`, `contents: read`, `packages: write`; download the exact artifact ID from its build job, revalidate evidence/hash, load and check IDs, login to GHCR, push exact tags, resolve exact repo digests, create existing platform manifest, upload uniquely run/attempt-named manifest/evidence for 90 days. No mutation credentials before protection. Retain failed partial publication evidence without advertising a complete release.
+- [x] Update runbook with exact dispatch inputs, protected approval boundary, artifact retrieval/verification, source/tooling identity and publication-vs-deployment distinction. Record today's merge and inventory as dated observations. Migration checklist covers host-executor prerequisite, fresh restore with app off, roles/ACL, encryption/license identities, staged S3, isolated egress, separate exact-image compact test, external backup, one writer and MX-preserving final cutover. Old resource deletion waits for acceptance.
+- [x] Run all platform tests, `corepack pnpm test:production-bundle:contract`, `corepack pnpm test:ci-policy`, `corepack pnpm format:check` and `git diff --check`. Do not claim GitHub/registry/target proof from local contracts. Commit explicit paths after self-review.
 
 ## Delivery gates
 
