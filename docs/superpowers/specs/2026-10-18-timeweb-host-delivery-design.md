@@ -190,3 +190,17 @@ explicit acceptance.
    verify pinned-host rejection and complete isolated Linux rehearsal.
 5. Only then purchase a suitable available VM, provision, rehearse and seek cutover
    acceptance. Resource availability and price must be refreshed at purchase.
+
+## Restore compatibility observation, 2026-10-18
+
+An isolated local PostgreSQL 17.11 experiment against the current encrypted backup
+confirmed that the managed provider's role-grant graph cannot simply be replayed:
+a grantor-permission check rejected the raw roles export. A second, deliberately
+limited experiment using source-named roles without login or elevated attributes
+successfully replayed database owners and object ACLs. Original membership and
+role privileges were not reproduced. Both temporary databases had no network,
+published ports or application and were removed afterward; source and backups
+were unchanged. This supports an explicit role-mapping implementation, not blind
+replay of `pg_dumpall` or acceptance of those placeholder roles as production
+credentials. Target architecture/TLS and application/migration grants remain
+separate gates.
