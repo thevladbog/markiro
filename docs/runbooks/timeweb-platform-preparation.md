@@ -1,9 +1,10 @@
 # Timeweb platform preparation
 
-Status: local preparation only. This package has no host deployment executor. No
-server, DNS, mail routing, production database or bucket is changed by the
-configuration preflight. Infrastructure approval, protected publishing and a
-protected deployment workflow are future work.
+Status: portable preparation plus a protected image publisher. This package has
+no host deployment executor. No server, DNS, mail routing, production database or
+bucket is changed by configuration preflight or image publication. Infrastructure
+approval and protected host deployment remain separate gates. See
+[the migration checklist](timeweb-migration.md).
 
 ## Package and immutable identities
 
@@ -26,16 +27,18 @@ Platform manifest version 1 has exactly these fields: `version`, `serverProfile`
 Both profiles equal `platform-only`; SHAs are full lowercase commits; images are
 repository-bound sha256 references. The parser reuses legacy immutable
 image/run/date validation. Legacy manifest parsing rejects this schema, so it
-cannot be fed into the existing production deployment path. Preparation does not
-publish a manifest or image: CI uses synthetic digest placeholders and local
-SHA-tagged images, never release evidence.
+cannot be fed into the existing production deployment path. Synthetic CI uses
+placeholder runtime digests and local SHA tags. Only the protected publisher
+below creates release evidence and real registry digest references.
 
 The `release-images.yml` trigger and Node validation now include this package;
 its exact legacy manifest, published outputs and `deploy-production.yml` remain
 unchanged. The platform edge is built and exercised by the mandatory PR/main CI
-bundle job; the publisher continues to export only the verified legacy images. Do not dispatch either workflow to
-deploy this bundle. Do not invoke `deploy/yandex/remote-deploy.mjs` as a shortcut;
-it has unrelated host and secret-management responsibilities.
+bundle job; that legacy publisher exports only the verified legacy images. The
+separate `release-platform-images.yml` publishes the platform images after
+approval, and does not deploy them. Do not invoke
+`deploy/yandex/remote-deploy.mjs` as a shortcut; it has unrelated host and
+secret-management responsibilities.
 
 ## Protected runtime configuration
 
@@ -111,9 +114,8 @@ upstream in this bundle.
 
 Compose `deploy/platform/compose.yml` **first**, followed by
 `deploy/platform/compose.compact.yml`. The base profile remains usable alone for
-external PostgreSQL. The compact overlay is local preparation, not an approved
-Timeweb dispatch, publisher or host executor. Never add `compose.ci.yml` to a
-production composition. Images are built and verified in CI, never on the target
+external PostgreSQL. The compact overlay is local preparation, not a Timeweb host
+dispatch or executor. Never add `compose.ci.yml` to a production composition. Images are built and verified in CI, never on the target
 VM; API/edge immutable digest and source/tooling bindings still pass preflight.
 
 | Service                               | Memory limit | CPU quota | Node heap |
@@ -277,15 +279,19 @@ acceptance, physical printing, Windows behavior or factory continuity.
    licenses/reports, object URLs and disabled legacy/device routes on the restored
    target. Decide explicitly which pending platform mail/report intents may run;
    startup repair can activate them immediately, while mail retention is scheduled.
-5. Verify current Timeweb SMTP for `markiro.app`: authentication, TLS/STARTTLS,
-   sender identity, bounce/retry behavior, SPF/DKIM/DMARC and actual controlled
-   delivery. Mail is already at Timeweb. No MX move is requested or necessary.
+5. Verify Timeweb SMTP for `markiro.app`: authentication, TLS/STARTTLS, sender
+   identity, bounce/retry behavior, SPF/DKIM/DMARC and actual controlled delivery.
+   A Timeweb mailbox exists, but the 2026-10-18 authoritative DNS observation
+   found no public MX/SPF/DMARC. Inventory and separately approve sender records
+   in the authoritative zone; see the dated migration checklist. Preserve mail
+   records during subsequent web cutover.
 6. Approve a single writer cutover window. Fence the old writable application and
    legacy workers before enabling target writes, verify the final delta/backup,
    then explicitly approve DNS/TLS changes. Preserve recovery copies and old
    immutable releases; never run both profiles against one writable database.
-7. Implement a separate protected platform publishing/dispatch workflow only
-   after approval. Bind exact successful source/tooling workflow runs, immutable
+7. Use the reviewed protected platform publisher below only after main CI and
+   approval. Implement and review a separate host dispatch workflow before any
+   host mutation. Bind exact successful source/tooling workflow runs, immutable
    API/platform-edge digests, profiles and manifest into candidate/healthy state.
    Validate provenance and profile before host mutation. Reject `api-only` when
    current and requested server/UI profiles differ, or either profile is absent.
@@ -297,5 +303,81 @@ acceptance, physical printing, Windows behavior or factory continuity.
    exact digests and public negative/positive smoke. After new writes, DNS reversal
    alone is not a lossless rollback; reconcile data before changing the writer.
 
-No host executor, publication, provisioning, DNS action or server mutation is
-included in this preparation package.
+No host executor, provisioning, DNS action or server mutation is included. The
+protected publisher is a separately approved registry operation.
+
+## Protected platform image publication
+
+`Publish platform images` (`release-platform-images.yml`) accepts one required
+string input, `ci_run_id`. Dispatch from **main only**, after the publisher itself
+is merged. Its immutable dispatch `github.sha` is both source and tooling SHA.
+Select a successful `CI` push run on main in this repository for exactly that SHA;
+PR CI and a successful run for an earlier main commit do not qualify. The resolver
+reads the exact successful run attempt and every jobs page, and requires both
+`production-bundle` and `ci-required` to have completed successfully. Skipped
+mandatory jobs fail the gate. No alternate source SHA input exists.
+
+For example, after independently selecting and checking the numeric run ID:
+
+```sh
+gh workflow run release-platform-images.yml --ref main -f ci_run_id=CI_RUN_ID
+```
+
+`main` can move between selection and dispatch; in that case the SHA mismatch
+fails safely. Inspect the actual dispatch SHA before approving publication. The
+build job uses only contents/actions read permission. It builds Linux amd64 API
+and platform edge once, captures IDs before the synthetic harness, checks them
+afterward and retags those IDs as
+`platform-<sourceSha>-<workflowRunId>-<workflowRunAttempt>`. Local SHA build tags
+are never pushed. The workflow preserves the existing public landing build
+variables. It uploads only `images.tar` and strict `verified-images.json` in
+`markiro-platform-images-<runId>-<attempt>`, with one-day retention and no overwrite.
+The three allowlisted harness files are kept separately, including on failure.
+
+The dependent publish job waits at the existing **production-deploy** environment
+(required reviewers and main-only policy observed 2026-10-18). It receives only
+contents:read and packages:write, uses no host secrets, downloads the exact
+artifact ID emitted by its build job, verifies profiles/SHAs/run/attempt/CI
+identity and regular-file SHA256 before loading, then compares both loaded IDs.
+GHCR login happens only after load validation. Both IDs are checked again before
+each push. There is no rebuild, SSH, provider operation or deployment step.
+
+After approval, inspect the workflow conclusion and the immutable artifact ID for
+`markiro-platform-release-<runId>-<attempt>`. Download that specific ID from the
+selected run (the GitHub artifact API is
+`GET /repos/OWNER/REPO/actions/artifacts/ARTIFACT_ID/zip`); do not select a mutable
+artifact name from a different run. This 90-day artifact contains
+`platform-manifest.json` and `release-evidence.json`. Confirm `status: complete`,
+all six identities, both verified IDs and archive hash, and both repository-bound
+published digests against the manifest. Independently inspect the exact GHCR
+digest references before approving any host delivery. Version-1 platform manifest
+validation remains separate from legacy manifest validation.
+
+If either push or digest resolution fails, the job fails and uploads only
+`markiro-platform-incomplete-<runId>-<attempt>` with sanitized partial evidence.
+A pushed tag may exist even though there is no complete release. Never deploy
+from partial evidence. If approval outlasts the one-day image retention, or a job
+rerun changes `github.run_attempt`, rerun **all jobs** so build and publish share
+the same new attempt. A publish-only rerun cannot reuse old-attempt evidence.
+
+The thin CLI uses explicit path arguments; identity values come from GitHub's
+runner environment and validated step outputs:
+
+| Verb and arguments                   | Purpose                                                                                         |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `fetch-ci DIRECTORY`                 | Authenticated HTTPS download of run/attempt jobs, then validate; `GH_TOKEN` is environment-only |
+| `validate-ci DIRECTORY`              | Validate downloaded `run.json` and complete `jobs.json` against repository/SHA/CI run           |
+| `capture FILE`                       | Save exact local SHA-tag IDs before the harness                                                 |
+| `export DIRECTORY CAPTURE_FILE`      | Recheck tested IDs, tag by ID and export archive plus evidence into a new directory             |
+| `verify DIRECTORY`                   | Validate strict evidence and archive hash without Docker load                                   |
+| `load DIRECTORY`                     | Verify first, load archive, compare exact image IDs                                             |
+| `publish DIRECTORY OUTPUT_DIRECTORY` | Reverify archive and IDs, push, resolve digests and write release into a new directory          |
+
+Invoke as `node deploy/platform/release-images.mjs VERB ...`. Expected environment:
+`RELEASE_SHA`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `CI_RUN_ID`, `CI_RUN_ATTEMPT`;
+CI resolution additionally needs `GITHUB_REPOSITORY` and `GH_TOKEN`. CI validation
+writes canonical `ci-run-id`/`ci-run-attempt` to `GITHUB_OUTPUT` when present. Keep
+credentials masked and out of arguments. The image archive is large; hash
+verification streams bytes. Use a fresh isolated Docker daemon for an independent
+`load` check. Publication is registry evidence only; it proves no target restore,
+Timeweb capacity, DNS/TLS, SMTP delivery or production installation.
