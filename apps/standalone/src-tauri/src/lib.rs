@@ -51,6 +51,45 @@ impl<R: Runtime> LinkEvents for TauriLinkEvents<R> {
     fn revision(&self, revision: HostRevision) {
         let _ = self.0.emit(connection::REVISION_EVENT, revision);
     }
+
+    fn reconcile_dataset<'a>(
+        &'a self,
+        host_id: &'a str,
+        epoch: Option<&'a str>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), connection::LinkError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let local = self.0.state::<LocalDbState>();
+            let db = match local.get() {
+                Ok(db) => db,
+                Err(_) if epoch.is_none() => return Ok(()),
+                Err(_) => {
+                    self.0.state::<DeviceState>().dataset().freeze();
+                    return Err(connection::LinkError::DatasetResetFailed);
+                }
+            };
+            let process_dataset = self.0.state::<DeviceState>().dataset();
+            let local_dataset = db.dataset();
+            if process_dataset.is_frozen()
+                || local_dataset.epoch(host_id) != epoch
+                || local_dataset.is_frozen()
+            {
+                // A database set aside/reopened after startup may own another
+                // DatasetState. Freeze both native command surfaces first.
+                process_dataset.freeze();
+                local_dataset.freeze();
+            }
+            if db
+                .reconcile_dataset(host_id, epoch)
+                .await
+                .map_err(|_| connection::LinkError::DatasetResetFailed)?
+            {
+                self.0.restart();
+            }
+            Ok(())
+        })
+    }
 }
 
 #[tauri::command]
@@ -365,10 +404,14 @@ where
     S: AsRef<str>,
 {
     let role: Option<InstallRole> = installation.map(|file| file.role);
-    let device = DeviceState::load(dir.to_path_buf()).with_install_role(role);
+    let local = tauri::async_runtime::block_on(LocalDbState::open(dir));
+    let dataset = local.get().map(|db| db.dataset()).unwrap_or_default();
+    let device = DeviceState::load(dir.to_path_buf())
+        .with_install_role(role)
+        .with_dataset(dataset);
     let link = device.watch_link();
     app.manage(device);
-    app.manage(tauri::async_runtime::block_on(LocalDbState::open(dir)));
+    app.manage(local);
     app.manage(ConnectionState::default());
     app.manage(scanner::manager(app.clone()));
     app.manage(lockdown::LockdownState::default());

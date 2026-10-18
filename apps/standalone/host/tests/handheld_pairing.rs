@@ -375,6 +375,7 @@ async fn a_request_authenticated_with_the_old_key_stops_when_the_key_was_rotated
     assert_eq!(status, StatusCode::OK, "{paired}");
     let mut conn = admin.app.state.pool.acquire().await.unwrap();
     let stale = AuthDevice {
+        dataset_guard: None,
         id: id.clone(),
         kind: DeviceKind::Handheld,
         key_hash: Some(markiro_host::secrets::key_hash(&old)),
@@ -383,6 +384,7 @@ async fn a_request_authenticated_with_the_old_key_stops_when_the_key_was_rotated
     let error = stale.require_live_in(&mut conn).await.unwrap_err();
     assert_eq!(error.status(), StatusCode::UNAUTHORIZED);
     let current = AuthDevice {
+        dataset_guard: None,
         key_hash: Some(markiro_host::secrets::key_hash(
             paired["deviceKey"].as_str().unwrap(),
         )),

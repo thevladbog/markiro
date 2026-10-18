@@ -359,11 +359,26 @@ where
 /// network printer are two connections, never one interleaved stream, and to
 /// one COM port the second finds the port taken and is `not_sent`.
 #[tauri::command]
-pub async fn print_bytes(target: Value, payload_base64: String) -> Result<(), String> {
+pub async fn print_bytes(
+    state: tauri::State<'_, crate::device::DeviceState>,
+    target: Value,
+    payload_base64: String,
+) -> Result<(), String> {
+    let dataset = state.dataset();
+    if dataset.is_frozen() {
+        return Err(PrintError::NotSent.code().to_owned());
+    }
     let target = parse_target(target).map_err(|error| error.code().to_owned())?;
     let bytes = decode_payload(&payload_base64).map_err(|error| error.code().to_owned())?;
     drop(payload_base64);
-    match run_blocking(move || print_to(&target, &bytes, Timeouts::default())).await {
+    match run_blocking(move || {
+        if dataset.is_frozen() {
+            return Err(PrintFailure::new(PrintError::NotSent, "dataset replaced"));
+        }
+        print_to(&target, &bytes, Timeouts::default())
+    })
+    .await
+    {
         Ok(()) => Ok(()),
         Err(failure) => {
             eprintln!(

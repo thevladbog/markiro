@@ -11,6 +11,7 @@ export interface LocalStatement {
 
 /** Codes the shell rejects the local commands with (`LocalDbError::code` in src-tauri). */
 export const LOCAL_DB_ERROR_CODES = [
+  "dataset_reset_required",
   "local_db_unavailable",
   "invalid_statement",
   "unsupported_value",

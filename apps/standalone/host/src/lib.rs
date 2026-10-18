@@ -16,6 +16,7 @@ pub mod disaggregation;
 pub mod error;
 pub mod facts;
 pub mod feed;
+pub mod import_replace;
 pub mod inn;
 pub mod install;
 #[cfg(windows)]

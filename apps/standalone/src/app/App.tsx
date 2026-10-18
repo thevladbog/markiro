@@ -82,6 +82,7 @@ import { NetworkPairing } from "./NetworkPairing.js";
 import { useStationLicense } from "./use-station-license.js";
 import {
   ConfigErrorScreen,
+  DatasetResetFailedScreen,
   DeviceRejectedScreen,
   HostMissingScreen,
   OtherHostScreen,
@@ -913,6 +914,7 @@ function AppScreens({
 
   return (
     <main className="standalone-screen">
+      {view.kind === "dataset_reset_failed" && <DatasetResetFailedScreen />}
       {view.kind === "loading" && <WaitScreen messageKey="shell.loading" />}
       {view.kind === "config_error" && (
         <ConfigErrorScreen

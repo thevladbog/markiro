@@ -20,6 +20,8 @@ class HostBootstrapImpl(
     private val blocks: HostBlockSupplier,
 ) : HostBootstrap {
     override suspend fun initialSync(): Result<Unit> = runCatching {
+        val hello = api.hello().getOrThrow()
+        if (db.recovery.observeHostDataset(hello.hostId, hello.datasetEpoch)) throw app.markiro.handheld.core.storage.RecoveryBlocked()
         reference.sync().getOrThrow()
         val org = api.orgPrint().getOrThrow()
         meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, org.issuerPrefix)

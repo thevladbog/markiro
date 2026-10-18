@@ -31,6 +31,8 @@ import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { CloudHistoryImport } from "./CloudHistoryImport.js";
 import { noteText } from "./import-notes.js";
+import { readCloudHistoryBlob, type CloudHistoryManifest } from "../../host/cloud-history.js";
+import { requireHistoryTimeZone } from "./history-time-zone.js";
 
 /**
  * «Перенос из облака» (plan IMP, administrators): the cloud's file into this new site.
@@ -47,14 +49,15 @@ import { noteText } from "./import-notes.js";
  */
 export function CloudImportPage() {
   const { t } = useTranslation();
+  const [replacement, setReplacement] = useState(false);
   return (
     <>
       <PageHeader
         title={t("office.cloudImport.title")}
         description={t("office.cloudImport.subtitle")}
       />
-      <CloudImportContent />
-      <CloudHistoryImport />
+      <CloudImportContent replacement={replacement} onReplacementChange={setReplacement} />
+      {!replacement && <CloudHistoryImport />}
     </>
   );
 }
@@ -146,6 +149,12 @@ function failureText(t: TFunction, error: unknown): string {
     if (error.code === "conflict" && details.constraint === "already_imported") {
       return t("office.cloudImport.failure.alreadyImported", { at: value("importedAt") });
     }
+    if (error.code === "conflict" && details.constraint === "replacement_changed") {
+      return t("office.cloudImport.replacement.revisionChanged");
+    }
+    if (error.code === "conflict" && details.constraint === "replacement_backup_failed") {
+      return t("office.cloudImport.replacement.backupFailed");
+    }
     if (error.code === "conflict" && details.constraint === "org_gln") {
       return t("office.cloudImport.failure.orgGln", {
         site: value("siteGln"),
@@ -159,7 +168,13 @@ function failureText(t: TFunction, error: unknown): string {
   return t(errorMessageKey(error));
 }
 
-function CloudImportContent() {
+function CloudImportContent({
+  replacement,
+  onReplacementChange,
+}: {
+  replacement: boolean;
+  onReplacementChange: (value: boolean) => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   // The call goes through `call` directly: `useOfficeMutation` would keep the
@@ -167,6 +182,7 @@ function CloudImportContent() {
   const { api, call } = useOfficeSession();
   const org = useOfficeQuery(officeKeys.org, (host, token) => host.getOrg(token));
   const held = useRef<HeldFile | null>(null);
+  const history = useRef<CloudHistoryManifest | null>(null);
   // Counts the choices of a file, so a read that finishes after a newer choice is dropped.
   const generation = useRef(0);
   const pending = useRef(false);
@@ -179,12 +195,14 @@ function CloudImportContent() {
   const [done, setDone] = useState<CloudImportSummary | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [historyView, setHistoryView] = useState<CloudHistoryManifest | null>(null);
 
   useEffect(
     () => () => {
       // Leaving the page drops the file, and with it the answer of whatever is still on its way.
       generation.current += 1;
       held.current = null;
+      history.current = null;
     },
     [],
   );
@@ -199,6 +217,8 @@ function CloudImportContent() {
   const forget = () => {
     generation.current += 1;
     held.current = null;
+    history.current = null;
+    setHistoryView(null);
     setReading(false);
     setProblem(null);
     setView(null);
@@ -237,9 +257,51 @@ function CloudImportContent() {
     setView(describeFile(t, read.file, Date.now()));
   };
 
+  const chooseHistory = async (picked: File) => {
+    if (pending.current) return;
+    const mine = ++generation.current;
+    history.current = null;
+    setHistoryView(null);
+    setTrial(null);
+    setConfirming(false);
+    setFailure(null);
+    setReading(true);
+    try {
+      let manifest: CloudHistoryManifest | null = null;
+      // Reach EOF: the reader checks every part and refuses truncated/extra rows.
+      for await (const row of readCloudHistoryBlob(picked)) {
+        if (mine !== generation.current) return;
+        if ("format" in row) {
+          requireHistoryTimeZone(row.organization.timeZone);
+          manifest = row;
+        }
+      }
+      if (mine !== generation.current) return;
+      const catalog = held.current?.file;
+      if (
+        manifest === null ||
+        catalog === undefined ||
+        manifest.source.tenantId !== catalog.source.tenantId ||
+        manifest.organization.gln !== catalog.payload.organization.gln
+      ) {
+        setFailure(t("office.cloudImport.replacement.sourceMismatch"));
+        return;
+      }
+      history.current = manifest;
+      setHistoryView(manifest);
+    } catch {
+      if (mine === generation.current)
+        setFailure(t("office.cloudImport.replacement.invalidHistory"));
+    } finally {
+      if (mine === generation.current) setReading(false);
+    }
+  };
+
   const run = async (dryRun: boolean): Promise<void> => {
     const mine = held.current;
     if (mine === null || pending.current) return;
+    const manifest = history.current;
+    if (replacement && (manifest === null || (!dryRun && trial?.replacement === undefined))) return;
     pending.current = true;
     setSending(true);
     setFailure(null);
@@ -247,20 +309,50 @@ function CloudImportContent() {
       let summary: CloudImportSummary;
       try {
         summary = await call((token) =>
-          api.importFromCloud(token, cloudImportRequest(mine.file, mine.importId, dryRun)),
+          api.importFromCloud(
+            token,
+            cloudImportRequest(
+              mine.file,
+              mine.importId,
+              dryRun,
+              replacement && manifest !== null
+                ? {
+                    history: manifest,
+                    ...(!dryRun && trial?.replacement !== undefined
+                      ? { expectedRevision: trial.replacement.expectedRevision }
+                      : {}),
+                  }
+                : undefined,
+            ),
+          ),
         );
       } catch (error) {
+        if (
+          replacement &&
+          error instanceof HostError &&
+          error.kind === "api" &&
+          error.details.constraint === "replacement_changed"
+        ) {
+          setTrial(null);
+          setConfirming(false);
+        }
         setFailure(failureText(t, error));
         return;
       }
       // The page was left or the file replaced while the host worked: nothing to show.
       if (held.current !== mine) return;
+      if (replacement && summary.replacement === undefined) {
+        setTrial(null);
+        setFailure(t("office.cloudImport.replacement.unsupported"));
+        return;
+      }
       if (dryRun && !summary.repeated) {
         setTrial(summary);
         return;
       }
       // Done (a check that finds the import already made is done too): the file is not needed again.
       held.current = null;
+      history.current = null;
       setConfirming(false);
       setTrial(null);
       setDone(summary);
@@ -356,6 +448,18 @@ function CloudImportContent() {
   return (
     <>
       <p className="office-note">{t("office.cloudImport.intro")}</p>
+      {done === null && (
+        <Checkbox
+          label={t("office.cloudImport.replacement.mode")}
+          checked={replacement}
+          disabled={sending || reading}
+          onCheckedChange={(value) => {
+            forget();
+            onReplacementChange(value);
+          }}
+        />
+      )}
+      {replacement && <Alert tone="warn">{t("office.cloudImport.replacement.warning")}</Alert>}
       <FileDropZone
         label={t("office.cloudImport.choose")}
         hint={t("office.cloudImport.chooseHint")}
@@ -374,6 +478,32 @@ function CloudImportContent() {
             ? t("office.cloudImport.problems.shape", { path: problem.path })
             : t(`office.cloudImport.problems.${problem.kind}`)}
         </Alert>
+      )}
+      {replacement && view !== null && done === null && (
+        <>
+          <FileDropZone
+            label={t("office.cloudImport.replacement.chooseHistory")}
+            hint={t("office.cloudImport.replacement.historyHint")}
+            accept=".jsonl,application/x-ndjson"
+            busy={reading}
+            disabled={sending || reading}
+            onFile={(picked) => void chooseHistory(picked)}
+            onRejected={() => {
+              history.current = null;
+              setHistoryView(null);
+              setTrial(null);
+              setFailure(t("office.cloudImport.replacement.invalidHistory"));
+            }}
+          />
+          {historyView !== null && (
+            <Alert tone="ok">
+              {t("office.cloudImport.replacement.historyReady", {
+                source: historyView.source.tenantName,
+                parts: historyView.parts.length,
+              })}
+            </Alert>
+          )}
+        </>
       )}
       {view !== null && (
         <>
@@ -458,19 +588,44 @@ function CloudImportContent() {
           )}
           <div ref={doneRegion} tabIndex={-1}>
             {done !== null && (
-              <Card title={t("office.cloudImport.doneTitle")} titleAs="h2">
-                <Alert tone="ok">
-                  {done.repeated
-                    ? t("office.cloudImport.repeated")
-                    : t("office.cloudImport.doneOk")}
-                </Alert>
-                <DefinitionGrid items={counts(done)} />
-                <ul>
-                  {view.rehearsal && <li>{t("office.cloudImport.afterRehearsal")}</li>}
-                  <li>{t("office.cloudImport.afterStations")}</li>
-                  <li>{t("office.cloudImport.afterDeleteFile")}</li>
-                  <li>{t("office.cloudImport.afterCloudCounters")}</li>
-                </ul>
+              <Card
+                title={t(
+                  done.replacement === undefined
+                    ? "office.cloudImport.doneTitle"
+                    : "office.cloudImport.replacement.pendingTitle",
+                )}
+                titleAs="h2"
+              >
+                {done.replacement !== undefined ? (
+                  <>
+                    <Alert tone="warn">{t("office.cloudImport.replacement.resume")}</Alert>
+                    <DefinitionGrid
+                      items={[
+                        {
+                          id: "backup",
+                          term: t("office.cloudImport.replacement.backup"),
+                          description: done.replacement.backupFile ?? t("office.common.none"),
+                          mono: true,
+                        },
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Alert tone="ok">
+                      {done.repeated
+                        ? t("office.cloudImport.repeated")
+                        : t("office.cloudImport.doneOk")}
+                    </Alert>
+                    <DefinitionGrid items={counts(done)} />
+                    <ul>
+                      {view.rehearsal && <li>{t("office.cloudImport.afterRehearsal")}</li>}
+                      <li>{t("office.cloudImport.afterStations")}</li>
+                      <li>{t("office.cloudImport.afterDeleteFile")}</li>
+                      <li>{t("office.cloudImport.afterCloudCounters")}</li>
+                    </ul>
+                  </>
+                )}
               </Card>
             )}
           </div>
@@ -479,7 +634,11 @@ function CloudImportContent() {
               <Button variant="secondary" disabled={sending} onClick={forget}>
                 {t("office.cloudImport.clear")}
               </Button>
-              <Button variant="secondary" disabled={sending} onClick={() => void run(true)}>
+              <Button
+                variant="secondary"
+                disabled={sending || reading || (replacement && historyView === null)}
+                onClick={() => void run(true)}
+              >
                 {t("office.cloudImport.check")}
               </Button>
               <Button
@@ -489,7 +648,11 @@ function CloudImportContent() {
                   setConfirming(true);
                 }}
               >
-                {t("office.cloudImport.import")}
+                {t(
+                  replacement
+                    ? "office.cloudImport.replacement.submit"
+                    : "office.cloudImport.import",
+                )}
               </Button>
             </div>
           )}
@@ -497,6 +660,7 @@ function CloudImportContent() {
             <ConfirmImport
               trial={trial}
               rehearsal={view.rehearsal}
+              replacement={replacement}
               failure={failure}
               onConfirm={() => run(false)}
               onClose={() => setConfirming(false)}
@@ -511,6 +675,7 @@ function CloudImportContent() {
 interface ConfirmImportProps {
   trial: CloudImportSummary;
   rehearsal: boolean;
+  replacement: boolean;
   failure: string | null;
   onConfirm: () => Promise<void>;
   onClose: () => void;
@@ -522,15 +687,30 @@ interface ConfirmImportProps {
  * in this opening of the dialog, so a rehearsal file never lands on a
  * production site by a press of Enter.
  */
-function ConfirmImport({ trial, rehearsal, failure, onConfirm, onClose }: ConfirmImportProps) {
+function ConfirmImport({
+  trial,
+  rehearsal,
+  replacement,
+  failure,
+  onConfirm,
+  onClose,
+}: ConfirmImportProps) {
   const { t } = useTranslation();
   const openedAt = useRef(performance.now());
   const [acknowledged, setAcknowledged] = useState(false);
-  const blocked = rehearsal && !acknowledged;
+  const [replacementAcknowledged, setReplacementAcknowledged] = useState(false);
+  const blocked = (rehearsal && !acknowledged) || (replacement && !replacementAcknowledged);
   return (
     <FormDialog
-      title={t("office.cloudImport.confirmTitle")}
-      submitLabel={t("office.cloudImport.import")}
+      title={t(
+        replacement
+          ? "office.cloudImport.replacement.confirmTitle"
+          : "office.cloudImport.confirmTitle",
+      )}
+      submitLabel={t(
+        replacement ? "office.cloudImport.replacement.submit" : "office.cloudImport.import",
+      )}
+      submitVariant={replacement ? "destructive" : "primary"}
       submitDisabled={blocked}
       onSubmit={async () => {
         // Under the cursor of the double click that opened this dialog, the
@@ -543,15 +723,30 @@ function ConfirmImport({ trial, rehearsal, failure, onConfirm, onClose }: Confir
       onClose={onClose}
       alert={failure === null ? null : <Alert tone="error">{failure}</Alert>}
     >
+      {replacement && (
+        <>
+          <p>{t("office.cloudImport.replacement.confirm")}</p>
+          <Checkbox
+            label={t("office.cloudImport.replacement.acknowledge")}
+            checked={replacementAcknowledged}
+            onCheckedChange={setReplacementAcknowledged}
+          />
+        </>
+      )}
       <p>
-        {t("office.cloudImport.confirmText", {
-          lines: trial.linesCreated,
-          counterparties: trial.counterparties,
-          templates: trial.templates,
-          products: trial.products,
-          operators: trial.operators,
-          badges: trial.badges,
-        })}
+        {t(
+          replacement
+            ? "office.cloudImport.replacement.confirmCounts"
+            : "office.cloudImport.confirmText",
+          {
+            lines: trial.linesCreated,
+            counterparties: trial.counterparties,
+            templates: trial.templates,
+            products: trial.products,
+            operators: trial.operators,
+            badges: trial.badges,
+          },
+        )}
       </p>
       {rehearsal && (
         <>

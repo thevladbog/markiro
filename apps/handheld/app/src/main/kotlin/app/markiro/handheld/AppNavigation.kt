@@ -163,12 +163,19 @@ object Routes {
 @Composable
 fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: RosterRefresher, preferences: AppPreferences) {
     val start by shell.start.collectAsStateWithLifecycle()
+    val recovery by shell.recoveryState.collectAsStateWithLifecycle()
+    val restartReady by shell.datasetRestartReady.collectAsStateWithLifecycle()
+    val datasetFailed by shell.datasetResetFailed.collectAsStateWithLifecycle()
     val dark = when (preferences.theme) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     MarkiroTheme(dark = dark) {
+        if (recovery.phase == app.markiro.handheld.core.storage.RecoveryPhase.DATASET_RESET_PENDING) {
+            DatasetResetScreen(restartReady, datasetFailed, shell::retryDatasetReset)
+            return@MarkiroTheme
+        }
         val first = start ?: return@MarkiroTheme
         val nav = rememberNavController()
         val sessionState by session.state.collectAsStateWithLifecycle()

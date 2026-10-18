@@ -125,6 +125,7 @@ describe("local database on node:sqlite", () => {
       "floor_sign_in_failures",
       "floor_sscc_blocks",
       "floor_unit_labels",
+      "installation_dataset_epochs",
       "outbox",
       "ref_lines",
       "ref_operator_badges",

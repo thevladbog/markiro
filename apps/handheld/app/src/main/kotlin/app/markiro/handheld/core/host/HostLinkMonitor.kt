@@ -44,11 +44,12 @@ class HostLinkMonitor(private val now: () -> Long, private val onRestore: (Strin
      * at once, a changed one only after [register] (telling the host the blocks the device holds) succeeded, so a failed registration is
      * repeated on the next beat.
      */
-    suspend fun heartbeat(api: HostApi, config: DeviceConfigDao, register: suspend () -> Result<Unit>): Result<HostObservation> {
+    suspend fun heartbeat(api: HostApi, config: DeviceConfigDao, beforeRestore: suspend (HelloDto) -> Unit = {}, register: suspend () -> Result<Unit>): Result<HostObservation> {
         val hello = api.hello().getOrElse { error ->
             mutable.value = mutable.value.copy(reachable = false, failure = (error as? HostApiError)?.failure)
             return Result.failure(error)
         }
+        beforeRestore(hello)
         val known = config.get()?.hostRestoreEpoch
         val observation = observe(hello, known)
         val epoch = hello.restoreEpoch

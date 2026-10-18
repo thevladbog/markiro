@@ -831,8 +831,8 @@ pub async fn protocol_guard(mut request: Request, next: Next) -> Result<Response
 }
 
 async fn hello(State(state): State<AppState>) -> Result<Json<markiro_proto::Hello>, ApiError> {
-    let (initialized, restore_epoch): (bool, Option<String>) =
-        sqlx::query_as("SELECT initialized_at IS NOT NULL, restore_epoch FROM site WHERE id = 1")
+    let (initialized, restore_epoch, dataset_epoch): (bool, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT initialized_at IS NOT NULL, restore_epoch, dataset_epoch FROM site WHERE id = 1")
             .fetch_one(&state.pool)
             .await
             .map_err(ApiError::internal)?;
@@ -845,6 +845,7 @@ async fn hello(State(state): State<AppState>) -> Result<Json<markiro_proto::Hell
         time: state.timestamp(),
         initialized,
         restore_epoch,
+        dataset_epoch,
     }))
 }
 

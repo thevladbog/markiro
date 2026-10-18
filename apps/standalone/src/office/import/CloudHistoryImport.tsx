@@ -152,6 +152,8 @@ export function CloudHistoryImport() {
         session.api.cancelCloudHistory(token, { batchId: target.batchId }),
       );
       clear();
+      if (target.replacementBackupFile !== undefined)
+        setProgress(t("office.cloudImport.replacement.cancelWarning"));
       setConfirm(null);
       client.setQueryData(officeKeys.historyState, null);
       void remote.refetch();
@@ -166,6 +168,23 @@ export function CloudHistoryImport() {
   return (
     <Card title={t("office.cloudHistory.title")} titleAs="h2">
       <p className="office-note">{t("office.cloudHistory.intro")}</p>
+      {remote.data?.replacementBackupFile !== undefined && (
+        <>
+          <DefinitionGrid
+            items={[
+              {
+                id: "replacementBackup",
+                term: t("office.cloudImport.replacement.backup"),
+                description: remote.data.replacementBackupFile,
+                mono: true,
+              },
+            ]}
+          />
+          {remote.data.status !== "complete" && (
+            <Alert tone="warn">{t("office.cloudImport.replacement.resume")}</Alert>
+          )}
+        </>
+      )}
       {remote.isError && (
         <Alert
           tone="error"
@@ -269,7 +288,14 @@ export function CloudHistoryImport() {
           onClose={() => setConfirm(null)}
           alert={failure === null ? null : <Alert tone="error">{failure}</Alert>}
         >
-          <p>{t("office.cloudHistory.cancelWarning", { name: confirm.source.tenantName })}</p>
+          <p>
+            {t(
+              confirm.replacementBackupFile === undefined
+                ? "office.cloudHistory.cancelWarning"
+                : "office.cloudImport.replacement.cancelWarning",
+              { name: confirm.source.tenantName },
+            )}
+          </p>
         </FormDialog>
       )}
     </Card>

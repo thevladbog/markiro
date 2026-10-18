@@ -19,6 +19,7 @@ export const TRANSPORT_CODES = [
   "not_paired",
   "config_unreadable",
   "timeout",
+  "dataset_reset_required",
 ] as const;
 export type TransportCode = (typeof TRANSPORT_CODES)[number];
 

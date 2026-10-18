@@ -2625,3 +2625,35 @@ fn the_outcome_of_the_last_update_answers_through_the_ipc_shape() {
     );
     assert!(!updated.data.path().join("update-pending.json").exists());
 }
+
+#[test]
+fn a_frozen_dataset_refuses_new_print_starts_before_payload_or_transport() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(dir.path()));
+    let dataset = local.get().unwrap().dataset();
+    tauri::async_runtime::block_on(
+        local
+            .get()
+            .unwrap()
+            .reconcile_dataset("host-one", Some("replacement")),
+    )
+    .unwrap();
+    let device = DeviceState::load(dir.path().to_path_buf()).with_dataset(dataset);
+    let (_app, webview) = mock_app_with(device, local);
+    assert_eq!(
+        invoke(
+            &webview,
+            "print_bytes",
+            json!({ "target": {}, "payloadBase64": "invalid" })
+        ),
+        Err(json!("not_sent"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "print_windows_raster",
+            json!({ "queue": "", "payloadBase64": "invalid", "documentName": "", "paper": null })
+        ),
+        Err(json!("not_sent"))
+    );
+}

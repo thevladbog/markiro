@@ -1,17 +1,29 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Checkbox, FileDropZone, Input, Modal, RadioGroup } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  FileDropZone,
+  Input,
+  Modal,
+  RadioGroup,
+  Textarea,
+} from "@markiro/ui";
 import type { StandaloneSite, StandaloneSiteInspection } from "@markiro/platform-contracts";
 
 import {
   ActivationFileError,
   inspectActivationRequest,
   readActivationRequestFile,
+  readActivationRequestText,
   registerStandaloneSite,
   type ActivationRequest,
 } from "./standalone-api.js";
 import { standaloneErrorKey, standaloneSitesKey } from "./standalone-format.js";
+import { diagnosticsKey } from "./diagnostics-api.js";
+import { diagnosticsErrorCode, diagnosticsErrorKey } from "./diagnostics-format.js";
 
 const CREATE = "create";
 
@@ -27,6 +39,7 @@ export function StandaloneSiteRegistration({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const [paste, setPaste] = useState("");
   const [request, setRequest] = useState<ActivationRequest | null>(null);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [fileError, setFileError] = useState<ActivationFileError["reason"] | null>(null);
@@ -34,49 +47,79 @@ export function StandaloneSiteRegistration({
   const [name, setName] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const inspect = useMutation({
-    mutationFn: (value: ActivationRequest) =>
-      inspectActivationRequest(tenantId, { request: value }),
+    gcTime: 0,
+    mutationFn: (input: { request: ActivationRequest; acknowledge?: boolean }) =>
+      inspectActivationRequest(tenantId, {
+        request: input.request,
+        ...(input.acknowledge ? { acknowledgeUnboundHost: true } : {}),
+      }),
+    onSuccess: async (response) => {
+      if (response.diagnostics)
+        await queryClient.invalidateQueries({ queryKey: diagnosticsKey(tenantId) });
+    },
   });
   const inspection: StandaloneSiteInspection | undefined = inspect.data;
   const register = useMutation({
+    gcTime: 0,
     mutationFn: () => {
       if (!request || !inspection) throw new Error("activation request required");
+      const activation = { ...request };
+      delete activation.supportToken;
       return mode === CREATE
         ? registerStandaloneSite(tenantId, {
             intent: "create",
             requestId,
             name: name.trim(),
-            request,
+            request: activation,
             acknowledgedWarnings: inspection.warnings,
           })
         : registerStandaloneSite(tenantId, {
             intent: "rebind",
             requestId,
             siteId: mode,
-            request,
+            request: activation,
             acknowledgedWarnings: inspection.warnings,
           });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: standaloneSitesKey(tenantId) });
-      onClose();
+      close();
     },
   });
-  const readFile = async (file: File) => {
+  function close(): void {
+    setPaste("");
+    setRequest(null);
+    inspect.reset();
+    register.reset();
+    onClose();
+  }
+  const resetInspect = inspect.reset;
+  const resetRegister = register.reset;
+  useEffect(
+    () => () => {
+      resetInspect();
+      resetRegister();
+    },
+    [resetInspect, resetRegister],
+  );
+  const read = async (load: () => ActivationRequest | Promise<ActivationRequest>) => {
     setFileError(null);
     setRequest(null);
     setAcknowledged(false);
     inspect.reset();
     register.reset();
     try {
-      const value = await readActivationRequestFile(file);
+      const value = await load();
       setRequest(value);
       setRequestId(crypto.randomUUID());
-      inspect.mutate(value);
+      inspect.mutate({ request: value });
     } catch (error) {
       setFileError(error instanceof ActivationFileError ? error.reason : "invalid");
     }
   };
+  const unbound =
+    inspect.isError &&
+    diagnosticsErrorCode(inspect.error) === "standalone_diagnostics_host_unbound";
   const noValue = t("tenants.detail.standalone.noValue");
   const canSubmit =
     inspection !== undefined &&
@@ -88,11 +131,11 @@ export function StandaloneSiteRegistration({
     <Modal
       open
       title={t("tenants.detail.standalone.register.title")}
-      onClose={onClose}
+      onClose={close}
       closeLabel={t("tenants.detail.standalone.register.cancel")}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={close}>
             {t("tenants.detail.standalone.register.cancel")}
           </Button>
           <Button disabled={!canSubmit} onClick={() => register.mutate()}>
@@ -109,16 +152,60 @@ export function StandaloneSiteRegistration({
         ariaLabel={t("tenants.detail.standalone.register.drop")}
         accept=".json,application/json"
         busy={inspect.isPending}
-        onFile={(file) => void readFile(file)}
+        onFile={(file) => void read(() => readActivationRequestFile(file))}
       />
+      <Textarea
+        label={t("tenants.detail.standalone.register.pasteLabel")}
+        rows={4}
+        value={paste}
+        readOnly={inspect.isPending}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(event) => setPaste(event.target.value)}
+      />
+      <Button
+        variant="secondary"
+        disabled={paste.trim() === "" || inspect.isPending}
+        onClick={() => void read(() => readActivationRequestText(paste))}
+      >
+        {t("tenants.detail.standalone.register.pasteSubmit")}
+      </Button>
       {fileError ? (
         <Alert tone="error" role="alert">
           {t(`tenants.detail.standalone.register.fileErrors.${fileError}`)}
         </Alert>
       ) : null}
-      {inspect.isError ? (
+      {unbound ? (
+        <Alert
+          tone="warn"
+          action={
+            <Button
+              variant="secondary"
+              disabled={inspect.isPending || request === null}
+              onClick={() => {
+                if (request !== null) inspect.mutate({ request, acknowledge: true });
+              }}
+            >
+              {t("tenants.detail.diagnostics.ingest.confirmUnboundAction")}
+            </Button>
+          }
+        >
+          {t("tenants.detail.diagnostics.ingest.confirmUnbound")}
+        </Alert>
+      ) : inspect.isError ? (
         <Alert tone="error" role="alert">
-          {t(standaloneErrorKey(inspect.error))}
+          {t(
+            diagnosticsErrorCode(inspect.error)?.startsWith("standalone_diagnostics_")
+              ? diagnosticsErrorKey(inspect.error)
+              : standaloneErrorKey(inspect.error),
+          )}
+        </Alert>
+      ) : null}
+      {inspection?.diagnostics ? (
+        <Alert tone="ok" role="status">
+          {t("tenants.detail.standalone.register.statisticsUpdated", {
+            n: inspection.diagnostics.monthsApplied,
+          })}
         </Alert>
       ) : null}
       {inspection ? (

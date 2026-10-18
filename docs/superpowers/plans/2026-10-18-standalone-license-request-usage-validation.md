@@ -1,0 +1,50 @@
+# Activation request usage validation
+
+Validation date: 2026-10-18. Scope: optional encrypted statistics in an activation export, immediate tenant diagnostics ingestion, strict host binding, explicit unbound-host acknowledgment, nonblocking export fallback warnings, and token cleanup on dialog close/unmount.
+
+## Automated checks
+
+| Area                                        | Command                                                                                                                                                                                                                                                                     | Result                                                                                                   |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Platform contracts                          | `corepack pnpm --filter @markiro/platform-contracts test`                                                                                                                                                                                                                   | 41 files, 412 tests passed                                                                               |
+| Platform contracts                          | package `typecheck`, `lint`, `build`                                                                                                                                                                                                                                        | Passed                                                                                                   |
+| SaaS admin, final source                    | `corepack pnpm --filter @markiro/saas-admin test --maxWorkers=1`                                                                                                                                                                                                            | 64 files, 649 tests passed                                                                               |
+| SaaS admin                                  | package `typecheck`, `lint`, `build`                                                                                                                                                                                                                                        | Passed                                                                                                   |
+| Standalone license UI and encrypted payload | `corepack pnpm --filter @markiro/standalone exec vitest run test/license-section.test.tsx test/support-parity.test.ts`                                                                                                                                                      | 2 files, 70 tests passed                                                                                 |
+| API focused database/route/OpenAPI checks   | `corepack pnpm --filter @markiro/api exec vitest run test/standalone-diagnostics.e2e.test.ts test/standalone-sites.e2e.test.ts test/platform-standalone-licenses.routes.test.ts test/platform-contract-openapi.test.ts test/platform-standalone-diagnostics.routes.test.ts` | 5 files, 42 tests passed                                                                                 |
+| API                                         | package `typecheck`, `lint`, `build`                                                                                                                                                                                                                                        | Passed                                                                                                   |
+| Full API                                    | package `test`, public `.env.example` settings plus isolated database URL                                                                                                                                                                                                   | 440 files passed, 2 failed, 17 skipped; 4948 tests passed, 5 failed, 119 skipped (5072 total); 1238.73 s |
+| Whitespace and scoped formatting            | `git diff --check`, scoped Prettier checks                                                                                                                                                                                                                                  | Passed                                                                                                   |
+
+API database checks use a newly created disposable PostgreSQL 17 container bound only to an ephemeral loopback port. The database was migrated using the repository runtime migrator. No shared database, existing `.env`, production database, or production secrets were used. The disposable container and its anonymous volume were removed after the checks; working logs remain under `/private/tmp/license-usage-*.log`.
+
+The encrypted export test compares its decrypted plaintext with the existing support `usagePayload` allowlist. Other regressions cover legacy requests, absent keys, unavailable statistics, missing license metadata, actual bundled-key encryption, immediate file/paste ingestion, duplicate/stale reports, tenant/current-owner denial, mismatched or missing payload host IDs, exact existing ingestion audit behavior, snapshot token stripping, and mutation-cache cleanup after close/unmount.
+
+## Wider-run observations
+
+A two-worker SaaS run failed one unchanged entitlement-navigation pending-state case at its initial button lookup while the DOM still showed authentication/route loading. The isolated navigation file passed 5 tests, and the complete final single-worker suite passed 649 tests. The original startup failure is a load observation; no baseline run establishes its cause. No assertions or timeouts were weakened.
+
+An initial full API attempt had only `DATABASE_URL` configured and was stopped after a focused probe confirmed missing required environment variables in `loadEnv`. That interrupted attempt is not counted as full-suite coverage. The replacement full run loads the repository's public development example configuration and overrides its database URL with the isolated instance.
+
+The replacement full API run completed with the failures below. Its 17 skipped files / 119 skipped tests are not counted as verified coverage.
+
+- `inventory-documents.e2e.test.ts`: the continuous production journey exceeded its 5-second test timeout (5002 ms), followed by two ZIP-download fixture-creation failures (`seedReadySingleArtifact`, line 1522: expected 201, received 400), before their presigning assertions. The timed-out test holds the production generator registry until its asynchronous `finally`; following fixtures request synthetic formats through a delegating registry, and invalid format selection produces 400. This source coupling supports a post-timeout cascade. The whole file passed all 22 tests in isolation with identical public environment/database and unchanged assertions/timeouts (9.17 s total; all test bodies 3.65 s). The initiating full-run timeout remains an unresolved load observation: neither a baseline run nor a successful isolated rerun proves its ultimate cause.
+- `signer-agents.e2e.test.ts`: two manual refresh cases failed. The example environment leaves `CHZ_TOKEN_ENCRYPTION_KEY` unset; `requestTokenRefresh` rejects an unconfigured crypto service before checking agent state. The full run received 503 instead of expected 202 and 409, matching that guard. Running only this file with a fixed test-only 32-byte symmetric key added to the subprocess environment passed all 7 tests in 9.31 s. This confirms the configuration boundary; no support private key was read or generated, and no assertions were changed.
+
+The full API gate is not claimed green. An isolated rerun alone will not establish that an earlier wider-run failure was pre-existing.
+
+## Release coordination and external acceptance
+
+The bundled public support keyset has one nonretired P-256 key, `sup-d11c3182`. Its public point imports successfully and derives that exact key ID; the normal export UI test includes an encrypted token using this bundled key. Builds without an available key or usable statistics still save a legacy-compatible request and display a warning.
+
+API ingestion requires the corresponding private-key configuration in `STANDALONE_SUPPORT_KEYS_JSON`. Public source and deployment configuration list the optional Lockbox entry, but this session did not inspect production private keys or prove runtime key pairing/readiness. Missing API configuration produces an explicit ingestion error.
+
+Release preparation, separately authorized by the owner on 2026-10-18, verified
+the configured production Lockbox key in memory: P-256, derived kid
+`sup-d11c3182`, and public x/y match the bundled key exactly. No private material
+was printed or saved. The protected deployment must still materialize that
+configuration and pass the runtime checks.
+
+Deploy the matching API and SaaS admin changes, verify runtime support-key readiness, and then distribute the new standalone build. Previous strict SaaS/API versions reject the additional `supportToken` export field. New readers accept all legacy activation files; the host activation protocol is unchanged.
+
+No production mutation, deployment, commit, push, Windows installation, physical-device test, printer test, or live authenticated browser test was performed for this slice. Automated DOM tests do not establish those external acceptance boundaries.

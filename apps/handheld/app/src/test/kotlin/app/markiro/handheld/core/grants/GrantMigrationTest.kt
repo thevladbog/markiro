@@ -15,7 +15,7 @@ import java.util.UUID
 class GrantMigrationTest {
     @Test fun realVersionThirteenUpgradePreservesQueuedBytesAndHasNoImplicitStrictConfig() = runTest {
         val context=ApplicationProvider.getApplicationContext<Context>(); val name="grant-upgrade-${UUID.randomUUID()}.db"
-        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_13_14,MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21).build()
+        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_13_14,MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).build()
         try {
             val old=database()
             val raw="exact\u001dqueued-code"
@@ -23,6 +23,7 @@ class GrantMigrationTest {
             old.metaDao().put(MetaEntity("saved-print-evidence","exact prepared bytes"))
             val sql=old.openHelper.writableDatabase
             listOf("grant_state","grant_tokens","grant_counters","grant_evidence","grant_task_bindings","grant_task_provenance","grant_readiness_outbox").forEach { sql.execSQL("DROP TABLE $it") }
+            removeDatasetColumnsForHistoricalFixture(sql)
             sql.version=13; old.close()
             val upgraded=database()
             try {
@@ -37,10 +38,11 @@ class GrantMigrationTest {
 
     @Test fun versionFourteenUpgradeKeepsReadinessIntentAcrossReopen() = runTest {
         val context=ApplicationProvider.getApplicationContext<Context>(); val name="grant-readiness-${UUID.randomUUID()}.db"
-        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21).build()
+        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).build()
         try {
             database().let { current -> try {
                 current.openHelper.writableDatabase.execSQL("DROP TABLE grant_readiness_outbox")
+                removeDatasetColumnsForHistoricalFixture(current.openHelper.writableDatabase)
                 current.openHelper.writableDatabase.version=14
             } finally { current.close() } }
             database().let { upgraded -> try {

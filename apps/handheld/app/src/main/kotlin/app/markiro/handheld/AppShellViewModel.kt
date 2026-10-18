@@ -37,6 +37,11 @@ class AppShellViewModel(
     constructor(config: DeviceConfigDao, session: SessionHolder, revocation: RevocationBus, recovery: DeviceRecovery) :
         this(config, session, revocation, recovery, idleMs = IDLE_LOCK_MS)
 
+    val recoveryState = recovery.state
+    val datasetRestartReady = recovery.datasetRestartReady
+    val datasetResetFailed = recovery.datasetResetFailed
+    fun retryDatasetReset() { viewModelScope.launch { runCatching { recovery.retryHostDatasetReset() } } }
+
     private val _start = MutableStateFlow<StartDestination?>(null)
     val start: StateFlow<StartDestination?> = _start
     private val _events = MutableSharedFlow<ShellEvent>(extraBufferCapacity = 1)
@@ -50,6 +55,8 @@ class AppShellViewModel(
                 if (current.phase == RecoveryPhase.UNINITIALIZED) return@collect
                 val active = current.phase == RecoveryPhase.ACTIVE
                 if (!active) session.signOut()
+                // Startup retry must choose its route only after the retained pairing is usable.
+                if (current.phase == RecoveryPhase.DATASET_RESET_PENDING) return@collect
                 if (_start.value == null) {
                     _start.value = when {
                         !active -> StartDestination.PAIRING
@@ -60,7 +67,7 @@ class AppShellViewModel(
                     // Every pairing passes through it on its way to ACTIVE, and emitting
                     // here sent the operator back to the pairing screen the moment pairing
                     // succeeded -- recoverable only by restarting the app.
-                } else if (!active && current.phase != RecoveryPhase.RESTORING) _events.emit(ShellEvent.Revoked)
+                } else if (!active && current.phase !in setOf(RecoveryPhase.RESTORING, RecoveryPhase.DATASET_RESET_PENDING)) _events.emit(ShellEvent.Revoked)
             }
         }
         viewModelScope.launch {

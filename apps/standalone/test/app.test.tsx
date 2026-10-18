@@ -1366,6 +1366,28 @@ describe("App", () => {
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
   });
 
+  it("removes the floor while dataset cleanup failed and stays blocked during reconnect", async () => {
+    const link = fakeConnection();
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    await screen.findByText("Вход оператора");
+    await link.status({
+      state: "offline",
+      lastContactAt: null,
+      lastError: "dataset_reset_failed",
+      seq: 2,
+    });
+    await screen.findByText("Не удалось обновить местные данные");
+    expect(screen.queryByText("Вход оператора")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Вход в офис" })).toBeNull();
+    await link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 3 });
+    expect(screen.getByText("Не удалось обновить местные данные")).toBeTruthy();
+  });
+
   it("names the remote host whose certificate changed on the link", async () => {
     const link = fakeConnection();
     renderApp({

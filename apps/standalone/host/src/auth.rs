@@ -31,6 +31,41 @@ pub struct AuthDevice {
     /// extractor read it must stop the request the old key was still carrying. `None` only for a
     /// handler a test calls without a request.
     pub key_hash: Option<String>,
+    pub dataset_guard: Option<DatasetGuard>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DatasetGuard(pub Option<String>);
+
+impl DatasetGuard {
+    pub async fn check(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+        if crate::import_replace::epoch(conn).await? != self.0 {
+            return Err(ApiError::conflict(
+                "dataset_changed",
+                "restart the application to load the replaced dataset",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn dataset_write(parts: &Parts) -> bool {
+    if matches!(parts.method.as_str(), "GET" | "HEAD" | "OPTIONS") {
+        return false;
+    }
+    let path = parts.uri.path();
+    // Recovery/admin transfer operations are intentional, never a station's
+    // queued production. Keep them usable after a lost replacement answer.
+    ![
+        "/v1/office/import",
+        "/v1/office/license",
+        "/v1/office/backups",
+        "/v1/office/restore",
+    ]
+    .iter()
+    .any(|p| path == *p || path.starts_with(&format!("{p}/")))
+        && path != "/v1/office/login"
+        && path != "/v1/office/logout"
 }
 
 impl FromRequestParts<AppState> for AuthDevice {
@@ -99,6 +134,21 @@ async fn authenticate(
     if let Some(route) = parts.extensions.get::<axum::extract::MatchedPath>() {
         crate::device_kinds::check(parts.method.as_str(), route.as_str(), kind)?;
     }
+    let dataset_guard = if dataset_write(parts) {
+        let guard = DatasetGuard(
+            parts
+                .headers
+                .get(markiro_proto::DATASET_EPOCH_HEADER)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned),
+        );
+        guard
+            .check(&mut *state.pool.acquire().await.map_err(ApiError::internal)?)
+            .await?;
+        Some(guard)
+    } else {
+        None
+    };
     // Record activity at most once a minute per device to keep writes rare.
     // Even an `UPDATE` that matches no row takes SQLite's write lock, so it
     // runs only when the stored time is due. The request that finds it due
@@ -153,6 +203,7 @@ async fn authenticate(
         id,
         kind,
         key_hash: Some(presented),
+        dataset_guard,
     })
 }
 
@@ -206,14 +257,16 @@ impl AuthDevice {
         )
         .bind(&self.id)
         .bind(self.key_hash.as_deref())
-        .fetch_optional(conn)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
-        kind.ok_or_else(|| {
+        let kind = kind.ok_or_else(|| {
             ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
-        })?
-        .parse()
-        .map_err(ApiError::internal)
+        })?;
+        if let Some(guard) = &self.dataset_guard {
+            guard.check(conn).await?;
+        }
+        kind.parse().map_err(ApiError::internal)
     }
 
     /// The device is still paired and not revoked, and its kind (as stored) is one of `kinds`; the
@@ -274,6 +327,7 @@ pub struct OfficeContext {
     pub device_id: String,
     pub session_id: String,
     pub user: OfficeUser,
+    pub dataset_guard: Option<DatasetGuard>,
 }
 
 impl OfficeContext {
@@ -292,6 +346,9 @@ impl OfficeContext {
     /// Re-check inside the caller's write transaction that this session still
     /// exists and its user is active; returns the user's current role.
     async fn live_role_in(&self, conn: &mut SqliteConnection) -> Result<OfficeRole, ApiError> {
+        if let Some(guard) = &self.dataset_guard {
+            guard.check(conn).await?;
+        }
         let row: Option<(i64, String)> = sqlx::query_as(
             "SELECT u.active, u.role FROM office_sessions s \
              JOIN office_users u ON u.id = s.user_id \
@@ -543,6 +600,7 @@ impl FromRequestParts<AppState> for OfficeContext {
         let role: OfficeRole = role.parse().map_err(ApiError::internal)?;
         Ok(Self {
             device_id: device.id,
+            dataset_guard: device.dataset_guard,
             session_id,
             user: OfficeUser {
                 id: user_id,

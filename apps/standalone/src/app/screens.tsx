@@ -14,6 +14,16 @@ const PROBE_REASON_KEY = {
   app_too_old: "shell.version.appTooOld",
 } as const satisfies Record<HostProbeErrorCode, string>;
 
+export function DatasetResetFailedScreen() {
+  const { t } = useTranslation();
+  return (
+    <Card className="standalone-card" title={t("shell.datasetResetFailed.title")} titleAs="h2">
+      <Alert tone="error">{t("shell.datasetResetFailed.body")}</Alert>
+      <p>{t("shell.datasetResetFailed.recovery")}</p>
+    </Card>
+  );
+}
+
 export function WaitScreen({
   messageKey,
 }: {

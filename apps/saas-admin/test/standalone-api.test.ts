@@ -6,6 +6,7 @@ import {
   downloadStandaloneLicense,
   getStandaloneSites,
   readActivationRequestFile,
+  readActivationRequestText,
 } from "../src/pages/tenants/standalone-api.js";
 import { saveLicenseFile } from "../src/pages/tenants/standalone-download.js";
 import { jsonResponse } from "./render.js";
@@ -117,4 +118,12 @@ describe("standalone license API client (plan ЛЦ-0)", () => {
       URL.revokeObjectURL = original.revoke;
     }
   });
+});
+
+it("uses the same parser for pasted and imported activation exports and preserves the token", async () => {
+  const exported = { ...JSON.parse(activationText), supportToken: "MKS1.test.ABC_-12" };
+  const text = JSON.stringify(exported);
+  expect(readActivationRequestText(text)).toEqual(exported);
+  await expect(readActivationRequestFile(new Blob([text]))).resolves.toEqual(exported);
+  expect(() => readActivationRequestText("not JSON")).toThrow(ActivationFileError);
 });

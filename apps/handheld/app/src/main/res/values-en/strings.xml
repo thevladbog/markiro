@@ -818,4 +818,8 @@
     <string name="host_reject_license">The host\'s license has no pallet mode</string>
     <string name="host_reject_pallet_conflict">The box is already on another pallet</string>
     <string name="host_reject_data">The host did not accept the record\'s data</string>
+    <string name="host_dataset_reset_title">Host data was replaced</string>
+    <string name="host_dataset_reset_body">Close the app using this button, then open it again. Old tasks and queues will be cleared at startup. Pairing and printer settings will be kept.</string>
+    <string name="host_dataset_reset_failed">Local data could not be reset. Work is blocked. Try again.</string>
+    <string name="host_dataset_reset_close">Close application</string>
 </resources>

@@ -106,6 +106,7 @@ pub async fn pinned_host_versions(
             crate::host_client::Credentials {
                 device_key: None,
                 office_token: None,
+                dataset_epoch: None,
             },
         )
         .await

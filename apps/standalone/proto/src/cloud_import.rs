@@ -40,6 +40,24 @@ pub struct CloudImportRequest {
     pub rehearsal: bool,
     pub source: CloudImportSource,
     pub payload: CloudImportPayload,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement: Option<CloudImportReplacement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudImportReplacement {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<i64>,
+    pub history: crate::cloud_history::CloudHistoryManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudReplacementSummary {
+    pub expected_revision: i64,
+    pub dataset_epoch: Option<String>,
+    pub backup_file: Option<String>,
 }
 
 /// Which cloud tenant the file came from.
@@ -204,6 +222,8 @@ pub struct CloudImportSummary {
     pub badge_salt_replaced: bool,
     pub sscc_counters: Vec<SsccCounterValue>,
     pub shift_number_counters: Vec<ShiftNumberCounterValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement: Option<CloudReplacementSummary>,
 }
 
 /// A counter of the file as it stands after the import.

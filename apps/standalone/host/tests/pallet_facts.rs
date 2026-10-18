@@ -642,6 +642,7 @@ async fn receive_as(admin: &Admin, id: &str, records: &[Value]) -> (StatusCode, 
     let outcome = receive_facts(
         State(admin.app.state.clone()),
         AuthDevice {
+            dataset_guard: None,
             id: id.to_owned(),
             kind: DeviceKind::Station,
             key_hash: None,

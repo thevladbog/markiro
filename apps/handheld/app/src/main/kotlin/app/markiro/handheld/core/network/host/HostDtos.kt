@@ -14,6 +14,7 @@ data class HelloDto(
     val time: String? = null,
     val initialized: Boolean = true,
     val restoreEpoch: String? = null,
+    val datasetEpoch: String? = null,
 )
 
 @Serializable

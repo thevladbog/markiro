@@ -4,13 +4,16 @@ import "../../../src/office/list/list.css";
 import "../../../src/i18n/index.js";
 import { createRoot } from "react-dom/client";
 import { StrictMode } from "react";
+import { z } from "zod";
 import { ThemeProvider } from "@markiro/ui";
 import fixture from "../../../proto/fixtures/cloud-history-read.json";
+import importSummary from "../../../proto/fixtures/cloud-import-summary.json";
 import { createHostApi } from "../../../src/host/api.js";
 import { HostError, type HostClient } from "../../../src/host/client.js";
 import {
   cloudHistoryImportRequestSchema,
   cloudHistoryImportStateSchema,
+  cloudHistoryManifestSchema,
   type CloudHistoryImportState,
 } from "../../../src/host/cloud-history.js";
 import { cloudPalletRowsSchema } from "../../../src/host/cloud-history-read.js";
@@ -42,6 +45,7 @@ let state: CloudHistoryImportState | null = null;
 const stored = new Map<string, { file: ExportFile; contentBase64: string }>();
 const metrics = {
   routes: [] as string[],
+  replacements: [] as { dryRun: boolean; expectedRevision: number | null }[],
   formats: [] as string[],
   forms: [] as string[],
   downloads: 0,
@@ -52,6 +56,7 @@ declare global {
   interface Window {
     historyAcceptance: typeof metrics;
     historyUpload: string;
+    historyRestart: () => void;
   }
 }
 window.historyAcceptance = metrics;
@@ -115,7 +120,43 @@ const client: HostClient = {
     else if (path === "/v1/office/license") answer = ACTIVE_LICENSE;
     else if (path === "/v1/office/backups") answer = HEALTHY_BACKUPS;
     else if (path === "/v1/office/me") answer = user;
-    else if (path === "/v1/office/import/history" && method === "GET") answer = state;
+    else if (path === "/v1/office/import" && method === "POST") {
+      const body = z
+        .object({
+          dryRun: z.boolean(),
+          replacement: z.object({
+            expectedRevision: z.number().optional(),
+            history: cloudHistoryManifestSchema,
+          }),
+        })
+        .parse(options.body);
+      if (!body.dryRun && body.replacement.expectedRevision !== 42)
+        throw new Error("controlled replacement revision differs");
+      metrics.replacements.push({
+        dryRun: body.dryRun,
+        expectedRevision: body.replacement.expectedRevision ?? null,
+      });
+      const backupFile = "backups/pre-import/controlled-replacement.db";
+      answer = {
+        ...importSummary,
+        dryRun: body.dryRun,
+        replacement: {
+          expectedRevision: 42,
+          datasetEpoch: body.dryRun ? null : "550e8400-e29b-41d4-a716-446655440000",
+          backupFile: body.dryRun ? null : backupFile,
+        },
+      };
+      if (!body.dryRun)
+        state = cloudHistoryImportStateSchema.parse({
+          batchId: body.replacement.history.checksum,
+          source: body.replacement.history.source,
+          status: "pending",
+          receivedIndices: [],
+          totalParts: body.replacement.history.parts.length,
+          counts: { shifts: 0, codes: 0, boxes: 0, items: 0, pallets: 0, owners: 0 },
+          replacementBackupFile: backupFile,
+        });
+    } else if (path === "/v1/office/import/history" && method === "GET") answer = state;
     else if (path === "/v1/office/import/history" && method === "POST") {
       const body = cloudHistoryImportRequestSchema.parse(options.body);
       answer = cloudHistoryImportStateSchema.parse({
@@ -125,6 +166,9 @@ const client: HostClient = {
         receivedIndices: [0],
         totalParts: 1,
         counts: body.manifest.counts,
+        ...(state?.replacementBackupFile === undefined
+          ? {}
+          : { replacementBackupFile: state.replacementBackupFile }),
       });
       if (!body.dryRun) state = cloudHistoryImportStateSchema.parse(answer);
     } else if (path === "/v1/office/import/history/complete") {
@@ -258,23 +302,33 @@ const files: OfficeFilesApi = {
 };
 const root = document.getElementById("root");
 if (root === null) throw new Error("harness root");
-createRoot(root).render(
-  <StrictMode>
-    <ThemeProvider defaultTheme="dark">
-      <Office
-        session={{
-          user,
-          api,
-          call: (operation) => operation("controlled-fixture-session"),
-          logout: async () => undefined,
-          refreshUser: async () => undefined,
-        }}
-        files={files}
-        printForm={() => {
-          metrics.printed++;
-        }}
-        initialPath={new URLSearchParams(location.search).get("start") ?? "/import"}
-      />
-    </ThemeProvider>
-  </StrictMode>,
-);
+const harnessRoot = createRoot(root);
+let generation = 0;
+function renderHarness() {
+  harnessRoot.render(
+    <StrictMode>
+      <ThemeProvider defaultTheme="dark">
+        <Office
+          key={generation}
+          session={{
+            user,
+            api,
+            call: (operation) => operation("controlled-fixture-session"),
+            logout: async () => undefined,
+            refreshUser: async () => undefined,
+          }}
+          files={files}
+          printForm={() => {
+            metrics.printed++;
+          }}
+          initialPath={new URLSearchParams(location.search).get("start") ?? "/import"}
+        />
+      </ThemeProvider>
+    </StrictMode>,
+  );
+}
+window.historyRestart = () => {
+  generation++;
+  renderHarness();
+};
+renderHarness();

@@ -7,9 +7,9 @@ import builtIn from "../../../proto/fixtures/support-keys.json";
  * (`proto/fixtures/support-keys.json`, public halves only, in the shape of
  * `trust-keys.json`). A key is a P-256 ECDH key as a JWK with its `kid`; the
  * schema refuses a private key (`d`), another curve and an unknown field, so a
- * private key pasted into the file by mistake cannot load. The production
- * keyset is empty until the owner generates the pair: a build without a key
- * says the statistics are not available instead of printing them readable.
+ * private key pasted into the file by mistake cannot load. A build without
+ * an active public key says the statistics are not available instead of
+ * printing them readable.
  */
 const supportKeySchema = z
   .object({

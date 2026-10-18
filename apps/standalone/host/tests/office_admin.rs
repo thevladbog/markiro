@@ -1035,6 +1035,7 @@ async fn require_admin_in_rechecks_role_and_session_inside_the_transaction() {
         .await
         .unwrap();
     let context = OfficeContext {
+        dataset_guard: None,
         device_id: "unused-by-require-admin-in".to_owned(),
         session_id: session_id.clone(),
         user: OfficeUser {

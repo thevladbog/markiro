@@ -62,6 +62,24 @@ const SUMMARY = cloudImportSummarySchema.parse(
     readFileSync(new URL("../proto/fixtures/cloud-import-summary.json", testModuleUrl), "utf8"),
   ),
 );
+const HISTORY = readFileSync(
+  new URL("../proto/fixtures/cloud-history.jsonl", testModuleUrl),
+  "utf8",
+);
+
+function historyFile(text = HISTORY): File {
+  const file = new File([text], "history.jsonl");
+  Object.defineProperty(file, "stream", {
+    value: () =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(text));
+          controller.close();
+        },
+      }),
+  });
+  return file;
+}
 /** The site's profile with the file's GLN, as after a wizard run from the file. */
 const SITE_ORG = { ...ORG_PROFILE, gln: "4600682000010" };
 
@@ -296,6 +314,169 @@ afterEach(() => {
 });
 
 describe("«Перенос из облака»", () => {
+  it("requires a fresh check after the server revision changes before replacement", async () => {
+    const session = adminSession();
+    session.api.importFromCloud
+      .mockResolvedValueOnce({
+        ...SUMMARY,
+        dryRun: true,
+        replacement: {
+          expectedRevision: 42,
+          datasetEpoch: null,
+          backupFile: null,
+        },
+      })
+      .mockRejectedValueOnce(
+        new HostError({
+          kind: "api",
+          code: "conflict",
+          status: 409,
+          message: "changed",
+          details: { constraint: "replacement_changed" },
+        }),
+      );
+    await openImport(session);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Заменить существующие данные" }));
+    choose(
+      await rewritten((value) => {
+        value.source = { tenantId: "history-tenant", tenantName: "Example" };
+      }),
+    );
+    await screen.findByRole("button", { name: "Проверить" });
+    fireEvent.change(screen.getAllByTestId("file-drop-input")[1]!, {
+      target: { files: [historyFile()] },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Проверить" }).hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Заменить данные" }).hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Заменить данные" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText(/повторить его другим файлом тоже/)).toBeNull();
+    await afterPressGuard();
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "Работа остановлена на всех станциях; подтверждаю удаление местных данных и очередей",
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить данные" }));
+    await screen.findByText(
+      "Данные сервера изменились после проверки. Повторите проверку перед заменой.",
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Заменить данные" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+  it("refuses history from another cloud tenant before a replacement check reaches the host", async () => {
+    const session = adminSession();
+    await openImport(session);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Заменить существующие данные" }));
+    choose(GOLDEN);
+    await screen.findByRole("button", { name: "Проверить" });
+    fireEvent.change(screen.getAllByTestId("file-drop-input")[1]!, {
+      target: { files: [historyFile()] },
+    });
+    await screen.findByText(
+      "Каталог и история должны относиться к одному облачному аккаунту и GLN. Выберите соответствующий файл истории.",
+    );
+    expect(session.api.importFromCloud).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Проверить" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows a repeated replacement result as held for history without sending another replacement", async () => {
+    const session = adminSession();
+    session.api.importFromCloud.mockResolvedValue({
+      ...SUMMARY,
+      repeated: true,
+      replacement: {
+        expectedRevision: 42,
+        datasetEpoch: "f61379f4-c98a-4a5b-b56e-dad222584969",
+        backupFile: "pre-import/existing.db",
+      },
+    });
+    await openImport(session);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Заменить существующие данные" }));
+    choose(
+      await rewritten((value) => {
+        value.source = { tenantId: "history-tenant", tenantName: "Example" };
+      }),
+    );
+    await screen.findByRole("button", { name: "Проверить" });
+    fireEvent.change(screen.getAllByTestId("file-drop-input")[1]!, {
+      target: { files: [historyFile()] },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Проверить" }).hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+    await screen.findByText("pre-import/existing.db");
+    expect(screen.queryByRole("button", { name: "Заменить данные" })).toBeNull();
+    expect(session.api.importFromCloud).toHaveBeenCalledTimes(1);
+  });
+  it("requires matching fully validated history and a destructive acknowledgement before replacement", async () => {
+    const session = adminSession();
+    session.api.importFromCloud.mockImplementation(async (_token, request) => ({
+      ...SUMMARY,
+      dryRun: request.dryRun,
+      replacement: {
+        expectedRevision: 42,
+        datasetEpoch: request.dryRun ? null : "f61379f4-c98a-4a5b-b56e-dad222584969",
+        backupFile: request.dryRun ? null : "pre-import/backup.db",
+      },
+    }));
+    await openImport(session);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Заменить существующие данные" }));
+    choose(
+      await rewritten((value) => {
+        value.source = { tenantId: "history-tenant", tenantName: "Example" };
+      }),
+    );
+    const check = await screen.findByRole("button", { name: "Проверить" });
+    expect(check.hasAttribute("disabled")).toBe(true);
+    const historyInput = screen
+      .getAllByTestId("file-drop-input")
+      .find((input) => input.getAttribute("aria-label") === "Файл истории для замены");
+    // Locate by its enclosing labelled drop zone, independently from the resume chooser.
+    const chooser = historyInput ?? screen.getAllByTestId("file-drop-input")[1]!;
+    fireEvent.change(chooser, { target: { files: [historyFile(HISTORY + "{}\n")] } });
+    expect(
+      await screen.findByText(
+        "Файл истории не принят. Выберите целую выгрузку истории без изменений.",
+      ),
+    ).toBeTruthy();
+    expect(check.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(chooser, { target: { files: [historyFile()] } });
+    await waitFor(() => expect(check.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(check);
+    await waitFor(() => expect(sent(session)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Заменить данные" }));
+    const dialog = await screen.findByRole("dialog");
+    await afterPressGuard();
+    const submit = within(dialog).getByRole("button", { name: "Заменить данные" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "Работа остановлена на всех станциях; подтверждаю удаление местных данных и очередей",
+      }),
+    );
+    fireEvent.click(submit);
+    await screen.findByText("pre-import/backup.db");
+    expect(sent(session)[1]?.replacement?.expectedRevision).toBe(42);
+    expect(session.api.importCloudHistory).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/После перезапуска снова выберите тот же файл истории/),
+    ).toBeTruthy();
+  });
   it("is in the menu of an administrator only", async () => {
     const session = fakeOfficeSession({ user: TECHNOLOGIST });
     renderOffice(session);

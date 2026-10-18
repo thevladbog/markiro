@@ -419,6 +419,7 @@ async fn catalog_writes_recheck_the_session_inside_the_transaction() {
             .await
             .unwrap();
     let context = OfficeContext {
+        dataset_guard: None,
         device_id,
         session_id,
         user: serde_json::from_value(me).unwrap(),

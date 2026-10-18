@@ -541,3 +541,11 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_host_outbox_state_seq` ON `host_outbox` (`state`, `seq`)")
     }
 }
+
+/** Host business generations: additive; cloud data and paired credentials stay untouched. */
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE device_config ADD COLUMN hostDatasetEpoch TEXT")
+        db.execSQL("ALTER TABLE device_recovery ADD COLUMN datasetResetEpoch TEXT")
+    }
+}

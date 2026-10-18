@@ -10,8 +10,10 @@
 //! A large reference page goes in as one JSON parameter per entity
 //! (`json_each`), so the limits bound SQL, not rows.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -68,6 +70,8 @@ pub enum TableClass {
     /// This computer's workstation settings — printers, scanners, sound
     /// (plan 2a7): they belong to the PC, not to a pairing, and outlive it.
     Workstation,
+    /// Native installation metadata; retained through pairing and dataset replacement.
+    Installation,
 }
 
 /// Every table `src-tauri/migrations` creates, with its class, in the order
@@ -100,6 +104,7 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_sscc_blocks", TableClass::DeviceData),
     // The unit label jobs (plan РЕЖ part B, migration `0015`): this device's records.
     ("floor_unit_labels", TableClass::DeviceData),
+    ("installation_dataset_epochs", TableClass::Installation),
     ("outbox", TableClass::DeviceData),
     ("ref_lines", TableClass::Disposable),
     ("ref_operator_badges", TableClass::Disposable),
@@ -169,6 +174,8 @@ pub enum LocalDbError {
     /// A statement changed another number of rows than `expectedChanges`;
     /// the batch rolled back whole.
     ChangesMismatch,
+    /// Host dataset changed; old webview callbacks may no longer write.
+    DatasetResetRequired,
     /// [`LocalDb::clear_copies`] found `count` outbox records without a
     /// receipt that its [`UnsentGuard`] protects, and cleared nothing.
     UnsentRecords { count: u64 },
@@ -183,6 +190,7 @@ impl LocalDbError {
             LocalDbError::UnsupportedValue => "unsupported_value",
             LocalDbError::StatementFailed => "statement_failed",
             LocalDbError::ChangesMismatch => "changes_mismatch",
+            LocalDbError::DatasetResetRequired => "dataset_reset_required",
             LocalDbError::UnsentRecords { .. } => "unsent_facts",
         }
     }
@@ -264,9 +272,32 @@ pub struct LocalStatement {
     pub expected_changes: Option<u64>,
 }
 
+/// The generation loaded at process start. Never advance it in a running webview:
+/// callbacks created by the old generation must never acquire the new header.
+#[derive(Debug, Default)]
+pub struct DatasetState {
+    epochs: BTreeMap<String, String>,
+    frozen: AtomicBool,
+}
+
+impl DatasetState {
+    pub fn epoch(&self, host_id: &str) -> Option<&str> {
+        self.epochs.get(host_id).map(String::as_str)
+    }
+
+    pub fn freeze(&self) {
+        self.frozen.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.frozen.load(Ordering::SeqCst)
+    }
+}
+
 pub struct LocalDb {
     writer: SqlitePool,
     readers: SqlitePool,
+    dataset: Arc<DatasetState>,
 }
 
 impl LocalDb {
@@ -365,7 +396,71 @@ impl LocalDb {
                     .busy_timeout(BUSY_TIMEOUT),
             )
             .await?;
-        Ok(Self { writer, readers })
+        let epochs: Vec<(String, String)> =
+            sqlx::query_as("SELECT host_id, epoch FROM installation_dataset_epochs")
+                .fetch_all(&writer)
+                .await?;
+        let dataset = Arc::new(DatasetState {
+            epochs: epochs.into_iter().collect(),
+            frozen: AtomicBool::new(false),
+        });
+        Ok(Self {
+            writer,
+            readers,
+            dataset,
+        })
+    }
+
+    pub fn dataset(&self) -> Arc<DatasetState> {
+        self.dataset.clone()
+    }
+
+    /// Replace every local business/reference row, including legacy queues. Native
+    /// metadata and workstation hardware settings stay. The epoch commits with
+    /// the purge; the running process remains frozen until a complete restart.
+    pub async fn reconcile_dataset(
+        &self,
+        host_id: &str,
+        epoch: Option<&str>,
+    ) -> Result<bool, LocalDbError> {
+        if self.dataset.epoch(host_id) == epoch && !self.dataset.is_frozen() {
+            return Ok(false);
+        }
+        // Set before waiting for the writer. Transactions already waiting for it
+        // recheck under BEGIN IMMEDIATE, so no old callback can repopulate rows.
+        self.dataset.freeze();
+        let mut tx = self
+            .writer
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        for (table, class) in TABLE_CLASSES {
+            if matches!(class, TableClass::Disposable | TableClass::DeviceData) {
+                sqlx::query(&format!("DELETE FROM {table}"))
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|_| LocalDbError::StatementFailed)?;
+            }
+        }
+        match epoch {
+            Some(epoch) => {
+                sqlx::query("INSERT INTO installation_dataset_epochs (host_id, epoch) VALUES (?, ?) ON CONFLICT(host_id) DO UPDATE SET epoch = excluded.epoch")
+                    .bind(host_id).bind(epoch).execute(&mut *tx).await.map_err(|_| LocalDbError::StatementFailed)?;
+            }
+            None => {
+                // Restoring a pre-replacement backup returns the host to no
+                // generation. That transition still requires a clean restart.
+                sqlx::query("DELETE FROM installation_dataset_epochs WHERE host_id = ?")
+                    .bind(host_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|_| LocalDbError::StatementFailed)?;
+            }
+        }
+        tx.commit()
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        Ok(true)
     }
 
     /// Run one `SELECT` or `WITH` statement on a read-only connection. Each
@@ -408,6 +503,18 @@ impl LocalDb {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|_| LocalDbError::StatementFailed)?;
+        if self.dataset.is_frozen() {
+            return Err(LocalDbError::DatasetResetRequired);
+        }
+        // Installation metadata is native-owned, never a webview SQL target.
+        if statements.iter().any(|statement| {
+            statement
+                .sql
+                .to_ascii_lowercase()
+                .contains("installation_dataset_epochs")
+        }) {
+            return Err(LocalDbError::InvalidStatement);
+        }
         let mut changes = Vec::with_capacity(statements.len());
         for LocalStatement {
             sql,

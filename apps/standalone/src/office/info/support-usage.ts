@@ -153,6 +153,21 @@ export function usagePayload(stats: UsageStats, about: UsagePayloadAbout): strin
   });
 }
 
+/** Shared encrypted allowlist for support text and activation exports. */
+export async function createUsageToken(
+  stats: UsageStats,
+  about: UsagePayloadAbout,
+  keyset: SupportKeyset,
+): Promise<string | null> {
+  const key = activeSupportKey(keyset);
+  if (key === null) return null;
+  try {
+    return await encryptSupportPayload(usagePayload(stats, about), key);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The contributor of the usage statistics (`SUPPORT_CONTRIBUTORS`): a block
  * titled «Данные для анализа» with the line «Зашифрованные данные» and the
@@ -177,23 +192,22 @@ export function createUsageContributor(keyset: SupportKeyset) {
     if (context.usage.kind === "failed") return absent();
     const stats = context.usage.stats;
     const license = context.license?.kind === "ok" ? context.license.license : null;
-    const payload = usagePayload(stats, {
-      generatedAt: facts.generatedAt,
-      appVersion: facts.appVersion,
-      hostVersion: facts.hostVersion,
-      hostId: facts.hostId,
-      role: facts.role,
-      os: facts.os,
-      arch: facts.arch,
-      webview: facts.webview,
-      license,
-    });
-    let opaque: string;
-    try {
-      opaque = await encryptSupportPayload(payload, key);
-    } catch {
-      return absent();
-    }
+    const opaque = await createUsageToken(
+      stats,
+      {
+        generatedAt: facts.generatedAt,
+        appVersion: facts.appVersion,
+        hostVersion: facts.hostVersion,
+        hostId: facts.hostId,
+        role: facts.role,
+        os: facts.os,
+        arch: facts.arch,
+        webview: facts.webview,
+        license,
+      },
+      keyset,
+    );
+    if (opaque === null) return absent();
     return {
       title,
       lines: [["", t("office.about.support.usage.encrypted")]],

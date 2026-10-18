@@ -298,6 +298,7 @@ pub async fn fetch(
     let credentials = Credentials {
         device_key: Some(link.key()),
         office_token: None,
+        dataset_epoch: link.dataset_epoch.as_deref(),
     };
     let answer = pinned
         .send("GET", OFFER_PATH, None, credentials)

@@ -1477,6 +1477,41 @@ only.
 
 ### Imported shift history (cloud → standalone)
 
+Replacement mode (2026-10-18) takes both a catalog and a fully read history
+manifest. `CloudImportRequest.replacement.expectedRevision` binds the final
+request to the dry-run revision. The administrator explicitly authorizes removal
+of test business data; normal empty-site import is unchanged. A dedicated read
+connection makes a verified copy in `backups/pre-import` while BEGIN IMMEDIATE
+prevents other writers. This subtree is intentionally outside scheduled cleanup
+and retention. Backup failure changes no business data; transaction failure
+rolls back the replacement and retains the copy. Device identities/keys, office
+accounts, licensing files/clock, audit and hardware settings survive. Issued SSCC
+and printed document/shift counter floors never move backwards. Device line
+assignments are matched to imported normalized names, otherwise cleared.
+
+The same transaction stages the pending history batch and a new
+`site.dataset_epoch`, plus durable `replacement_pending` and backup filename.
+It clears the previous test dataset's restore epoch/facts hold, superseding them
+with the pending-history hold; the old markers remain in the pre-import copy.
+Cancel keeps the hold; without its precreated batch, ordinary history upload is
+refused until a new explicit replacement or restore. Successful history
+completion clears the hold. Imported source/cancellation audit lookups are
+scoped to the dataset epoch, while exact importId retries retain their receipts.
+
+`Hello.datasetEpoch` and `x-markiro-dataset-epoch` are separate from
+`restoreEpoch`: a replacement discards test queues, never resends the last thirty
+days. Business writes check the presented generation at authentication and inside
+their transaction; legacy clients cannot write after replacement. Existing change
+streams end on a changed generation. Native reconciliation runs before Online,
+including a second hello after stream establishment to close the handshake race.
+It freezes SQL/network writes and print starts, atomically clears Disposable and
+DeviceData tables and stores the generation per host in Installation metadata,
+then restarts. Workstation settings and pairing files stay. The process keeps its
+old generation/frozen state until restart, so late callbacks cannot refill the
+cleared journal. Reconciliation failure blocks floor/office work until restart;
+a restored pre-replacement copy's absent epoch also causes reconciliation.
+Windows restart and physical printing remain separate acceptance checks.
+
 Catalog formats 1/2 stay unchanged. History is a separate `markiro-cloud-history`
 version-1 JSONL: manifest followed by bounded parts (5,000 rows / 4 MiB each).
 `CloudHistoryImport` below «Перенос из облака» streams the selected Blob to EOF
@@ -7256,7 +7291,7 @@ field from the answer (`usagePayload`), deflated when the webview can, and seale
 the maker's public key — ephemeral ECDH P-256, HKDF-SHA256, AES-256-GCM — into
 `MKS1.<kid>.<base64url>`. The text shows a neutral label and that one token; a build
 whose keyset is empty (`proto/fixtures/support-keys.json`, public JWKs only, in the
-shape of `trust-keys.json`; the production keyset is EMPTY until the owner adds one)
+shape of `trust-keys.json`; the current bundle includes `sup-d11c3182`)
 says «недоступна в этой сборке» instead of printing counts, and so does a role that is
 not an administrator or a host that did not answer. `tools/standalone-support/decrypt.mjs`
 opens a token with the private key (`--key support-private.pem`, a whole support text on
@@ -7266,7 +7301,7 @@ stdin or a file) and prints the JSON and a table; its Node contract
 tests on the key id, flag, ephemeral key, nonce and ciphertext. The test keys are made
 when the tests run; no private key is committed (`no-private-keys.test.mjs`).
 
-Owner's steps, once (the private key stays on the owner's machine):
+Owner's steps when rotating/provisioning a key (the private key stays private):
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out support-private.pem
@@ -7276,6 +7311,25 @@ node tools/standalone-support/decrypt.mjs --public-jwk --key support-private.pem
 then put the printed `{ kid, jwk }` into `keys` of `proto/fixtures/support-keys.json`
 and build. A key that must stop being used goes into `retiredKids` (an old text still
 opens with its file); the newest key that is not retired is the one the build uses.
+
+## License request usage statistics (2026-10-18)
+
+Saved activation exports add optional `supportToken` to the legacy activation
+request through `standaloneActivationExportSchema`; the strict native activation
+protocol is unchanged. The exporter collects fresh usage counts and encrypts the
+same `usagePayload` as support text via shared `createUsageToken`. An unavailable
+key/read/encryption leaves a usable legacy request and an explicit saved-without-
+statistics warning. Never fall back to plaintext statistics.
+
+Platform file and JSON-paste inspection reuse diagnostics ingestion. Require
+v2 token hostId to match the activation hostId before writes; preserve tenant
+ownership, explicit unbound-host acknowledgment, deduplication and newer-snapshot
+rules. A same-tenant registered host can update stats even when registration is
+blocked as already registered. Do not save supportToken in site snapshots/audit;
+inspect/register mutations have immediate GC and close/unmount resets. Legacy
+requests stay valid. Roll out API/admin support and the matching diagnostics
+private-key configuration before distributing enriched request files to clients;
+older strict admin/API builds cannot read the added field.
 
 ## Office user photos
 

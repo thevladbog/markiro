@@ -18,7 +18,7 @@ fn write_error(e: sqlx::Error) -> ApiError {
 }
 pub async fn require_ready(conn: &mut SqliteConnection) -> Result<(), ApiError> {
     let pending: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM cloud_history_batches WHERE status='pending')",
+        "SELECT EXISTS(SELECT 1 FROM cloud_history_batches WHERE status='pending') OR EXISTS(SELECT 1 FROM site WHERE replacement_pending=1)",
     )
     .fetch_one(&mut *conn)
     .await
@@ -81,6 +81,12 @@ pub async fn state(
         counts.owners += c.owners;
     }
     Ok(Some(CloudHistoryImportState {
+        replacement_backup_file: sqlx::query_scalar(
+            "SELECT replacement_backup_file FROM site WHERE id=1",
+        )
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?,
         batch_id: m.checksum,
         source: m.source,
         status: if status == "complete" {
@@ -97,7 +103,20 @@ pub async fn require_site(
     conn: &mut SqliteConnection,
     m: &CloudHistoryManifest,
 ) -> Result<(), ApiError> {
-    let source:Option<String>=sqlx::query_scalar("SELECT json_extract(details,'$.sourceTenantId') FROM audit_log WHERE action='import.cloud' AND result='ok' ORDER BY id LIMIT 1").fetch_optional(&mut *conn).await.map_err(ApiError::internal)?;
+    // A replacement precreates its exact history batch atomically with the
+    // catalog. Cancel removes that batch but keeps the production hold: a
+    // different ordinary history upload must not be able to release it.
+    let canceled_replacement: bool = sqlx::query_scalar(
+        "SELECT replacement_pending=1 AND NOT EXISTS(SELECT 1 FROM cloud_history_batches WHERE id=? AND status IN ('pending','complete')) FROM site WHERE id=1",
+    )
+    .bind(&m.checksum)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    if canceled_replacement {
+        return Err(conflict("replacement_history_canceled"));
+    }
+    let source:Option<String>=sqlx::query_scalar("SELECT json_extract(details,'$.sourceTenantId') FROM audit_log WHERE action='import.cloud' AND result='ok' AND json_extract(details,'$.datasetEpoch') IS (SELECT dataset_epoch FROM site WHERE id=1) ORDER BY id LIMIT 1").fetch_optional(&mut *conn).await.map_err(ApiError::internal)?;
     if source.as_deref() != Some(&m.source.tenant_id) {
         return Err(conflict("history_source"));
     }

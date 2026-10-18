@@ -228,6 +228,7 @@ async fn a_body_that_never_ends_is_a_timeout_too() {
             Credentials {
                 device_key: Some(live.link.key()),
                 office_token: None,
+                dataset_epoch: None,
             },
             Some(Duration::from_millis(300)),
         ),
@@ -260,6 +261,7 @@ async fn a_connected_request_past_the_clients_limit_without_a_limit_is_unreachab
             Credentials {
                 device_key: Some(live.link.key()),
                 office_token: None,
+                dataset_epoch: None,
             },
             None,
         ),
