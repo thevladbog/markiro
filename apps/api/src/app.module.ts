@@ -1,6 +1,5 @@
 import { DeviceGrantsModule } from "./modules/device-grants/device-grants.module";
 import { PlatformGrantReadinessModule } from "./modules/device-grants/platform-grant-readiness.module";
-import { PlatformStandaloneDiagnosticsModule } from "./modules/standalone-diagnostics/platform-standalone-diagnostics.module";
 import { PlatformStandaloneLicensesModule } from "./modules/standalone-licenses/platform-standalone-licenses.module";
 import { PublicApiModule } from "./modules/public-api/public-api.module";
 import { PlatformEntitlementsModule } from "./subscriptions/platform-entitlements.module";
@@ -111,7 +110,6 @@ export class AppModule {
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
               PlatformGrantReadinessModule.forRoot(env),
               PlatformStandaloneLicensesModule.forRoot(env),
-              PlatformStandaloneDiagnosticsModule.forRoot(env),
               PlatformCatalogModule,
               PlatformEntitlementsModule,
               PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),

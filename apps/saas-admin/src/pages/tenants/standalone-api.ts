@@ -18,7 +18,7 @@ import {
 import { platformApiFetch } from "../../api/client.js";
 
 export type ActivationRequest = StandaloneSiteInspectRequest["request"];
-/** An activation request is a few hundred bytes; anything above 64 KiB is not one. */
+/** Bound legacy requests and exports with encrypted twelve-month usage data before parsing. */
 export const MAX_ACTIVATION_REQUEST_BYTES = 64 * 1024;
 
 export class ActivationFileError extends Error {
@@ -123,9 +123,16 @@ export function downloadStandaloneLicense(
 /** Reads the host's «Запрос на активацию» file in the browser and validates it before sending. */
 export async function readActivationRequestFile(file: Blob): Promise<ActivationRequest> {
   if (file.size > MAX_ACTIVATION_REQUEST_BYTES) throw new ActivationFileError("too_large");
+  return readActivationRequestText(await file.text());
+}
+
+/** File and clipboard JSON share the same bounded, strict export parser. */
+export function readActivationRequestText(text: string): ActivationRequest {
+  if (new TextEncoder().encode(text).length > MAX_ACTIVATION_REQUEST_BYTES)
+    throw new ActivationFileError("too_large");
   let value: unknown;
   try {
-    value = JSON.parse(await file.text());
+    value = JSON.parse(text);
   } catch {
     throw new ActivationFileError("not_json");
   }

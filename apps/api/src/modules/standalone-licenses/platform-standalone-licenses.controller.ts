@@ -52,7 +52,9 @@ export class PlatformStandaloneLicensesController {
 
   @Post("inspect")
   @HttpCode(200)
-  @ApiOperation({ summary: "Inspect an activation request: INN facts, warnings, host binding" })
+  @ApiOperation({
+    summary: "Inspect an activation request and ingest its optional encrypted usage statistics",
+  })
   @PlatformApiProtectedOk({ body: contracts.inspect.body, response: contracts.inspect.response })
   @RequirePlatformCapabilities(...STANDALONE_LICENSE_CAPABILITIES)
   async inspect(

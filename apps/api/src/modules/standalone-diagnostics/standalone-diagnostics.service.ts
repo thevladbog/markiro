@@ -116,9 +116,10 @@ export class StandaloneDiagnosticsService {
     principal: PlatformPrincipal | undefined,
     tenantId: string,
     body: StandaloneDiagnosticsIngestRequest,
+    expectedHostId?: string,
   ): Promise<StandaloneDiagnosticsIngestResponse> {
     const outcome = await standaloneTransaction(this.db, (tx) =>
-      this.process(tx, principal, tenantId, body),
+      this.process(tx, principal, tenantId, body, expectedHostId),
     );
     if (outcome.kind === "done") return outcome.response;
     // A refusal is audited in its own transaction: rolling the work back must not erase the trace.
@@ -145,6 +146,7 @@ export class StandaloneDiagnosticsService {
     principal: PlatformPrincipal | undefined,
     tenantId: string,
     body: StandaloneDiagnosticsIngestRequest,
+    expectedHostId?: string,
   ): Promise<Outcome> {
     const { user } = await requireStandaloneLicenseActor(tx, principal, tenantId, true);
     const actor: Actor = { id: user.id, role: user.role };
@@ -165,6 +167,8 @@ export class StandaloneDiagnosticsService {
     const parsed = parseSupportPayload(opened.json, this.now());
     if (!parsed.ok) return reject(parsed.reason, { kid: opened.kid });
     const payload = parsed.payload;
+    if (expectedHostId !== undefined && (payload.v !== 2 || payload.hostId !== expectedHostId))
+      return reject("payload_invalid", { kid: opened.kid });
     const hostKey = payload.v === 2 && payload.hostId !== null ? payload.hostId : "unknown";
 
     // Binding: a pasted report must belong to this tenant's site.

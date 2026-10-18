@@ -13,7 +13,8 @@ import {
   noPublishedStandaloneBuild,
 } from "../src/modules/standalone-diagnostics/standalone-diagnostics.service";
 import { createOrganization } from "./support/subscription-fixtures";
-import { auditRows, platformActor } from "./support/standalone-license-fixture";
+import { StandaloneSitesService } from "../src/modules/standalone-licenses/standalone-sites.service";
+import { activationRequest, auditRows, platformActor } from "./support/standalone-license-fixture";
 import {
   sealSupportToken,
   supportPayloadV1,
@@ -80,6 +81,123 @@ const rows = (tenantId: string) =>
     .where(eq(schema.standaloneSupportDiagnostics.tenantId, tenantId));
 
 describe.skipIf(!process.env.DATABASE_URL)("standalone diagnostics (plan ДИАГ А2)", () => {
+  it("imports activation statistics immediately for an already registered host and preserves freshness", async () => {
+    const admin = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    const request = activationRequest({ inn: "7707083893" });
+    await bindSite(tenantId, request.hostId, admin.userId);
+    const sites = new StandaloneSitesService(
+      db,
+      new PlatformAuditService(),
+      null,
+      () => NOW,
+      service,
+    );
+    const exported = {
+      ...request,
+      supportToken: token(supportPayloadV2({ hostId: request.hostId })),
+    };
+    const result = await sites.inspect(admin, tenantId, { request: exported });
+    expect(result).toMatchObject({
+      blocking: "host_registered",
+      diagnostics: { duplicate: false, monthsApplied: 2 },
+    });
+    expect(await service.statistics(admin, tenantId, {})).toMatchObject({
+      hosts: [request.hostId],
+      months: [{ month: "2026-09" }, { month: "2026-10" }],
+    });
+    expect((await sites.inspect(admin, tenantId, { request: exported })).diagnostics).toMatchObject(
+      { duplicate: true, monthsApplied: 0 },
+    );
+    const older = {
+      ...request,
+      supportToken: token(
+        supportPayloadV2({ hostId: request.hostId, generatedAt: "2026-10-13T09:00:00.000Z" }),
+      ),
+    };
+    expect((await sites.inspect(admin, tenantId, { request: older })).diagnostics).toMatchObject({
+      duplicate: false,
+      monthsApplied: 0,
+      monthsSkipped: 2,
+    });
+  });
+
+  it("requires explicit unbound confirmation and rejects a host currently owned by another tenant", async () => {
+    const admin = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    const request = activationRequest({ inn: "7707083893" });
+    const sites = new StandaloneSitesService(
+      db,
+      new PlatformAuditService(),
+      null,
+      () => NOW,
+      service,
+    );
+    const exported = {
+      ...request,
+      supportToken: token(supportPayloadV2({ hostId: request.hostId })),
+    };
+    expect(await refusal(sites.inspect(admin, tenantId, { request: exported }))).toMatchObject({
+      status: 409,
+      body: { code: "standalone_diagnostics_host_unbound" },
+    });
+    expect(await rows(tenantId)).toEqual([]);
+    expect(
+      (await sites.inspect(admin, tenantId, { request: exported, acknowledgeUnboundHost: true }))
+        .diagnostics,
+    ).toMatchObject({ monthsApplied: 2 });
+    const otherTenant = await createOrganization(db);
+    await bindSite(otherTenant, request.hostId, admin.userId);
+    expect(
+      await refusal(
+        sites.inspect(admin, tenantId, { request: exported, acknowledgeUnboundHost: true }),
+      ),
+    ).toMatchObject({ status: 409, body: { code: "standalone_diagnostics_host_other_tenant" } });
+    expect(await rows(otherTenant)).toEqual([]);
+  });
+
+  it("rejects activation tokens for a different, absent or legacy host before storing data", async () => {
+    const admin = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    const expectedHost = randomUUID();
+    for (const payload of [
+      supportPayloadV2({ hostId: randomUUID() }),
+      supportPayloadV2({ hostId: null }),
+      supportPayloadV1(),
+    ]) {
+      expect(
+        await refusal(
+          service.ingest(
+            admin,
+            tenantId,
+            { text: text(payload), acknowledgeUnboundHost: true },
+            expectedHost,
+          ),
+        ),
+      ).toEqual({
+        status: 422,
+        body: { code: "standalone_diagnostics_payload_invalid" },
+      });
+    }
+    expect(await rows(tenantId)).toEqual([]);
+    expect(await service.statistics(admin, tenantId, {})).toMatchObject({ months: [] });
+    const audits = await auditRows(db, tenantId);
+    expect(audits).toHaveLength(3);
+    for (const audit of audits)
+      expect(audit).toMatchObject({
+        actorPlatformUserId: admin.userId,
+        actorRole: "platform_admin",
+        tenantId,
+        action: "standalone.diagnostics.ingest",
+        outcome: "rejected",
+        targetType: "standalone_support_diagnostic",
+        targetId: null,
+        reason: "payload_invalid",
+        requestId: null,
+        before: null,
+      });
+  });
+
   it("accepts a v2 report: history row, month aggregates and the exact audit row", async () => {
     const admin = await platformActor(db);
     const tenantId = await createOrganization(db);

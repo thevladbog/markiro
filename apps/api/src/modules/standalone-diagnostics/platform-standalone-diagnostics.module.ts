@@ -28,6 +28,7 @@ export class PlatformStandaloneDiagnosticsModule {
       module: PlatformStandaloneDiagnosticsModule,
       imports: [PlatformAuditModule],
       controllers: [PlatformStandaloneDiagnosticsController],
+      exports: [StandaloneDiagnosticsService],
       providers: [
         { provide: STANDALONE_SUPPORT_KEYS, useValue: keys },
         { provide: STANDALONE_DIAGNOSTICS_CLOCK, useValue: () => new Date() },

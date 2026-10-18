@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nextProvider } from "react-i18next";
@@ -52,16 +52,14 @@ function stubApi(routes: Record<string, Array<() => Response>>): Call[] {
   return calls;
 }
 
-function renderPanel() {
+function renderPanel(
+  client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  }),
+) {
   return render(
     <I18nextProvider i18n={i18n}>
-      <QueryClientProvider
-        client={
-          new QueryClient({
-            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-          })
-        }
-      >
+      <QueryClientProvider client={client}>
         <ThemeProvider defaultTheme="light">
           <MemoryRouter>
             <StandaloneSitesPanel tenantId={STANDALONE_TENANT_ID} />
@@ -91,7 +89,122 @@ afterEach(async () => {
 });
 
 describe("standalone site registration (plan ЛЦ-0)", () => {
+  it.each(["close", "unmount"])(
+    "releases the encrypted activation token from the mutation cache after %s",
+    async (exit) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      const token = "MKS1.test.PRIVATE_ENCRYPTED_USAGE";
+      const exported = { ...activationRequest, supportToken: token };
+      stubApi({
+        [`GET ${BASE}`]: [() => jsonResponse(200, STANDALONE_SITE_LIST)],
+        [`POST ${BASE}/inspect`]: [() => jsonResponse(200, STANDALONE_INSPECTION)],
+      });
+      const view = renderPanel(client);
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole("button", { name: "Добавить площадку из запроса активации" }),
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Площадка из запроса активации" });
+      await user.upload(
+        within(dialog).getByTestId("file-drop-input"),
+        activationFile(JSON.stringify(exported)),
+      );
+      await within(dialog).findByLabelText("Название площадки");
+      const cached = () =>
+        JSON.stringify(
+          client
+            .getMutationCache()
+            .getAll()
+            .map((mutation) => mutation.state),
+        );
+      expect(cached()).toContain(token);
+      if (exit === "close")
+        await user.click(within(dialog).getAllByRole("button", { name: "Отмена" })[0]!);
+      else view.unmount();
+      await vi.waitFor(() => expect(cached()).not.toContain(token));
+    },
+  );
+
+  it.each(["paste", "file"])(
+    "refreshes diagnostics immediately on %s and asks explicitly for an unbound host",
+    async (source) => {
+      const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+      const exported = { ...activationRequest, supportToken: "MKS1.test.ABC_-12" };
+      const calls = stubApi({
+        [`GET ${BASE}`]: [() => jsonResponse(200, STANDALONE_SITE_LIST)],
+        [`POST ${BASE}/inspect`]: [
+          () => jsonResponse(409, { code: "standalone_diagnostics_host_unbound" }),
+          () =>
+            jsonResponse(200, {
+              ...STANDALONE_INSPECTION,
+              blocking: "host_registered",
+              registeredSite: { id: STANDALONE_SITE_ID, name: "Цех розлива" },
+              diagnostics: {
+                duplicate: false,
+                monthsApplied: 2,
+                monthsSkipped: 0,
+                diagnostic: {
+                  id: "d1111111-1111-4111-8111-111111111111",
+                  hostKey: exported.hostId,
+                  siteId: STANDALONE_SITE_ID,
+                  generatedAt: "2026-10-14T09:00:00.000Z",
+                  receivedAt: "2026-10-18T09:00:00.000Z",
+                  kid: "test",
+                  payloadVersion: 2,
+                  appVersion: "0.2.0",
+                  hostVersion: "0.2.0",
+                  pcRole: "host",
+                  os: null,
+                  arch: null,
+                  webview: null,
+                  licenseState: null,
+                },
+              },
+            }),
+        ],
+      });
+      renderPanel();
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole("button", { name: "Добавить площадку из запроса активации" }),
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Площадка из запроса активации" });
+      if (source === "file")
+        await user.upload(
+          within(dialog).getByTestId("file-drop-input"),
+          activationFile(JSON.stringify(exported)),
+        );
+      else {
+        fireEvent.change(within(dialog).getByLabelText("Или вставьте JSON запроса на активацию"), {
+          target: { value: JSON.stringify(exported) },
+        });
+        await user.click(within(dialog).getByRole("button", { name: "Импортировать запрос" }));
+      }
+      const confirm = await within(dialog).findByRole("button", { name: "Сохранить без привязки" });
+      expect(invalidate).not.toHaveBeenCalledWith({
+        queryKey: ["platform", "tenants", STANDALONE_TENANT_ID, "standalone-diagnostics"],
+      });
+      await user.click(confirm);
+      expect(
+        await within(dialog).findByText("Статистика запроса обработана. Обновлено месяцев: 2."),
+      ).toBeDefined();
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ["platform", "tenants", STANDALONE_TENANT_ID, "standalone-diagnostics"],
+      });
+      expect(
+        calls.filter((call) => call.key === `POST ${BASE}/inspect`).map((call) => call.body),
+      ).toEqual([{ request: exported }, { request: exported, acknowledgeUnboundHost: true }]);
+      expect(within(dialog).getByRole("button", { name: "Добавить площадку" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+    },
+  );
+
   it("registers a site after the operator acknowledges the INN mismatch", async () => {
+    const exported = { ...activationRequest, supportToken: "MKS1.test.PRIVATE_ENCRYPTED_USAGE" };
     vi.spyOn(crypto, "randomUUID").mockReturnValue(REQUEST_ID);
     const calls = stubApi({
       [`GET ${BASE}`]: [() => jsonResponse(200, STANDALONE_SITE_LIST)],
@@ -115,7 +228,10 @@ describe("standalone site registration (plan ЛЦ-0)", () => {
       await screen.findByRole("button", { name: "Добавить площадку из запроса активации" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Площадка из запроса активации" });
-    await user.upload(within(dialog).getByTestId("file-drop-input"), activationFile());
+    await user.upload(
+      within(dialog).getByTestId("file-drop-input"),
+      activationFile(JSON.stringify(exported)),
+    );
 
     expect(
       await within(dialog).findByText(
@@ -135,7 +251,7 @@ describe("standalone site registration (plan ЛЦ-0)", () => {
 
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(calls.filter((call) => call.key.startsWith("POST"))).toEqual([
-      { key: `POST ${BASE}/inspect`, body: { request: activationRequest } },
+      { key: `POST ${BASE}/inspect`, body: { request: exported } },
       {
         key: `POST ${BASE}`,
         body: {
