@@ -585,3 +585,70 @@ test("registry rejects ambiguous top-level manifest payloads instead of guessing
   value.manifests = [];
   assert.throws(() => validateRegistryManifest(JSON.stringify(value), ref, id));
 });
+
+async function adversarialZip(dir, mutation) {
+  const file = join(dir, "forged.zip");
+  const script = `import json,struct,sys,zlib
+entries=json.loads(sys.argv[2]); mutation=sys.argv[3]
+local=bytearray(); central=bytearray()
+for entry in entries:
+ name=entry['name'].encode(); prefix=entry['text'].encode(); data=prefix
+ method=0 if mutation.startswith('stored') else 8
+ if mutation in ('oversized-prefix','stored-oversized-prefix'): data += b' ' * 300000
+ if mutation == 'understated-prefix': data += b'    '
+ compressor=zlib.compressobj(wbits=-15)
+ compressed=data if method == 0 else compressor.compress(data)+compressor.flush()
+ if mutation == 'trailing-data': compressed += b'trailing junk'
+ if mutation == 'concatenated-stream':
+  extra=zlib.compressobj(wbits=-15); compressed += extra.compress(b' ')+extra.flush()
+ if mutation == 'truncated-stream': compressed=compressed[:-1]
+ crc=zlib.crc32(prefix); size=len(prefix); offset=len(local)
+ local += struct.pack('<4s5H3L2H',b'PK\\x03\\x04',20,0,method,0,0,crc,len(compressed),size,len(name),0)+name+compressed
+ central += struct.pack('<4s6H3L5H2L',b'PK\\x01\\x02',0x314,20,0,method,0,0,crc,len(compressed),size,len(name),0,0,0,0,0o100600<<16,offset)+name
+end=struct.pack('<4s4H2LH',b'PK\\x05\\x06',0,0,len(entries),len(entries),len(central),len(local),0)
+open(sys.argv[1],'wb').write(local+central+end)
+`;
+  await exec("python3", ["-I", "-c", script, file, JSON.stringify(entries()), mutation]);
+  return file;
+}
+
+test("default ZIP parser bounds actual streams rather than trusting declared prefix size and CRC", async (t) => {
+  const dir = await temporary(t);
+  for (const mutation of [
+    "oversized-prefix",
+    "understated-prefix",
+    "stored-oversized-prefix",
+    "trailing-data",
+    "concatenated-stream",
+    "truncated-stream",
+  ]) {
+    const file = await adversarialZip(dir, mutation);
+    await assert.rejects(
+      extractReleaseZip(file),
+      { message: "platform admission failed: archive" },
+      mutation,
+    );
+  }
+});
+
+test("valid-hash oversized deflate prefix fails admission before CI, registry or output", async (t) => {
+  const h = await harness(t);
+  const file = await adversarialZip(h.dir, "oversized-prefix");
+  h.state.bytes = await fs.readFile(file);
+  h.state.metadata.digest = `sha256:${hash(h.state.bytes)}`;
+  h.state.metadata.size_in_bytes = h.state.bytes.length;
+  await rejected(h, "archive");
+  assert.equal(h.state.commands.length, 0);
+  assert.ok(h.state.calls.every(({ url }) => !url.includes("/runs/123")));
+});
+
+test("default ZIP parser preserves valid stored and deflate members", async (t) => {
+  const dir = await temporary(t);
+  for (const mutation of ["stored-valid", "deflate-valid"]) {
+    const file = await adversarialZip(dir, mutation);
+    assert.deepEqual(await extractReleaseZip(file), {
+      manifestText: JSON.stringify(release().manifest),
+      evidenceText: JSON.stringify(release().evidence),
+    });
+  }
+});
