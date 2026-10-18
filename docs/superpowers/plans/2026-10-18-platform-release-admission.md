@@ -1,6 +1,6 @@
 # Published Platform Release Admission Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Verify an actual published platform release before future host delivery.
 
@@ -61,23 +61,23 @@ existing Docker CLI; no new npm dependencies.
 - The implementer chooses focused adapter signatures and final exact admission
   record field structure, documents them and tests that record exhaustively.
 
-- [ ] Write focused failing tests for strict complete evidence and binding, including
+- [x] Write focused failing tests for strict complete evidence and binding, including
       null/wrong-type/extra-key/newline identity values and mismatched timestamps.
-- [ ] Run the focused tests and save the expected RED result.
-- [ ] Implement strict validators using existing schemas, not duplicate image parsing.
-- [ ] Add failing orchestration/real-ZIP tests for the five review focus cases,
+- [x] Run the focused tests and save the expected RED result.
+- [x] Implement strict validators using existing schemas, not duplicate image parsing.
+- [x] Add failing orchestration/real-ZIP tests for the five review focus cases,
       incomplete/mixed attempt pages, redirected token leakage, size limits,
       CRC/truncation, registry mismatch and pre-existing output.
-- [ ] Implement bounded authenticated GitHub resolution and archive extraction into
+- [x] Implement bounded authenticated GitHub resolution and archive extraction into
       private temporary resources. Resolve real Docker manifest output shape from
       installed CLI help/current official documentation before choosing assertions.
-- [ ] Implement registry config/architecture/digest checks and exclusive mode-0600
+- [x] Implement registry config/architecture/digest checks and exclusive mode-0600
       success record; no success record or raw diagnostics on any failure.
-- [ ] Add CLI documentation and a real subprocess failure test with sentinel secrets.
-- [ ] Run `node --test deploy/platform/test/*.test.mjs`, production bundle contracts,
+- [x] Add CLI documentation and a real subprocess failure test with sentinel secrets.
+- [x] Run `node --test deploy/platform/test/*.test.mjs`, production bundle contracts,
       CI-policy tests, repository formatting and `git diff --check`. Record live
       publisher acceptance as unrun until an actual protected release exists.
-- [ ] Self-review and commit explicit paths; do not push or open PR from the worker.
+- [x] Self-review and commit explicit paths; do not push or open PR from the worker.
 
 ## Delivery gates
 
