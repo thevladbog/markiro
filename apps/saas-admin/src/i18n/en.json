@@ -1980,6 +1980,9 @@
           "openLabel": "Issuance history: {{name}}"
         },
         "register": {
+          "pasteLabel": "Or paste the activation request JSON",
+          "pasteSubmit": "Import request",
+          "statisticsUpdated": "Request statistics processed. Months updated: {{n}}.",
           "open": "Add a site from an activation request",
           "title": "Site from an activation request",
           "drop": "Drop the request file or click",

@@ -1,3 +1,4 @@
+import { PlatformStandaloneDiagnosticsModule } from "../standalone-diagnostics/platform-standalone-diagnostics.module";
 import { Module, type DynamicModule } from "@nestjs/common";
 import type { Env } from "../../env";
 import { PlatformAuditModule } from "../../platform-auth/platform-audit.module";
@@ -16,7 +17,7 @@ export class PlatformStandaloneLicensesModule {
   static forRoot(env: Env): DynamicModule {
     return {
       module: PlatformStandaloneLicensesModule,
-      imports: [PlatformAuditModule],
+      imports: [PlatformAuditModule, PlatformStandaloneDiagnosticsModule.forRoot(env)],
       controllers: [PlatformStandaloneLicensesController],
       providers: [
         { provide: STANDALONE_LICENSE_SIGNING, useValue: configureStandaloneLicenseSigning(env) },

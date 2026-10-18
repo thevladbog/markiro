@@ -21,6 +21,7 @@ import {
   standaloneLicenseSigningKeysetSchema,
   standaloneLicenseRightsSchema,
   standaloneSiteRegisterSchema,
+  standaloneActivationExportSchema,
 } from "../src/index.js";
 
 const ORIGIN = "https://api.example.invalid";
@@ -420,5 +421,21 @@ describe("the issuance journal's assignment bound", () => {
     expect(sql).toContain(
       `jsonb_array_length("standalone_license_issuances"."source_assignments") between 1 and ${STANDALONE_ASSIGNMENT_REFS_MAX}`,
     );
+  });
+});
+
+describe("activation exports with usage statistics", () => {
+  it("accepts legacy requests and an opaque token without changing the host request", () => {
+    expect(standaloneActivationExportSchema.parse(request)).toEqual(request);
+    const exported = { ...request, supportToken: "MKS1.test.ABC_-12" };
+    expect(standaloneActivationExportSchema.parse(exported)).toEqual(exported);
+    expect(standaloneActivationRequestSchema.safeParse(exported).success).toBe(false);
+    expect(
+      platformStandaloneLicenseContracts.inspect.body.parse({ request: exported }).request,
+    ).toEqual(exported);
+    for (const supportToken of ["plaintext counts", "MKS1.test." + "a".repeat(16384)])
+      expect(standaloneActivationExportSchema.safeParse({ ...request, supportToken }).success).toBe(
+        false,
+      );
   });
 });

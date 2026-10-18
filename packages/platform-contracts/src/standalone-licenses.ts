@@ -6,6 +6,8 @@ import {
   standaloneOpaqueIdSchema,
 } from "@markiro/domain";
 
+import { standaloneDiagnosticsIngestResponseSchema } from "./standalone-diagnostics.js";
+
 import { entitlementRevisionSchema } from "./entitlements.js";
 import { grantPublicKeySchema } from "./offline-grants.js";
 import { platformTimestampSchema, platformUuidSchema } from "./primitives.js";
@@ -259,8 +261,21 @@ export const standaloneSiteListSchema = z
   .strict();
 export type StandaloneSiteList = z.infer<typeof standaloneSiteListSchema>;
 
+/** Saved export only: the host activation protocol remains unchanged. */
+export const standaloneActivationExportSchema = standaloneActivationRequestSchema.extend({
+  supportToken: z
+    .string()
+    .max(16 * 1024)
+    .regex(/^MKS1\.[A-Za-z0-9_-]{1,32}\.[A-Za-z0-9_-]+$/)
+    .optional(),
+});
+export type StandaloneActivationExport = z.infer<typeof standaloneActivationExportSchema>;
+
 export const standaloneSiteInspectRequestSchema = z
-  .object({ request: standaloneActivationRequestSchema })
+  .object({
+    request: standaloneActivationExportSchema,
+    acknowledgeUnboundHost: z.boolean().optional(),
+  })
   .strict();
 export type StandaloneSiteInspectRequest = z.infer<typeof standaloneSiteInspectRequestSchema>;
 
@@ -280,6 +295,7 @@ export const standaloneSiteInspectionSchema = z
       .strict(),
     warnings: z.array(standaloneSiteWarningSchema).max(STANDALONE_SITE_WARNINGS.length),
     blocking: z.enum(["host_registered", "host_taken"]).nullable(),
+    diagnostics: standaloneDiagnosticsIngestResponseSchema.optional(),
     registeredSite: z
       .object({ id: platformUuidSchema, name: z.string().min(1).max(200) })
       .strict()
@@ -297,7 +313,7 @@ export const standaloneSiteRegisterSchema = z.discriminatedUnion("intent", [
       intent: z.literal("create"),
       requestId: platformUuidSchema,
       name: z.string().trim().min(1).max(200),
-      request: standaloneActivationRequestSchema,
+      request: standaloneActivationExportSchema,
       acknowledgedWarnings: acknowledgedWarningsSchema,
     })
     .strict(),
@@ -306,7 +322,7 @@ export const standaloneSiteRegisterSchema = z.discriminatedUnion("intent", [
       intent: z.literal("rebind"),
       requestId: platformUuidSchema,
       siteId: platformUuidSchema,
-      request: standaloneActivationRequestSchema,
+      request: standaloneActivationExportSchema,
       acknowledgedWarnings: acknowledgedWarningsSchema,
     })
     .strict(),
