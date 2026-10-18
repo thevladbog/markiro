@@ -53,7 +53,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
       intent: "create" as const,
       requestId: randomUUID(),
       name: "Цех розлива",
-      request,
+      request: { ...request, supportToken: "MKS1.test.ABC" },
       acknowledgedWarnings: [],
     };
 
@@ -81,6 +81,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
     ]);
     expect(await sites.register(admin, tenantId, body)).toEqual(site);
     expect(await siteRows(tenantId)).toHaveLength(1);
+    expect((await siteRows(tenantId))[0]?.lastActivationRequest).toEqual(request);
     expect(await auditRows(db, tenantId)).toEqual([
       {
         actorPlatformUserId: admin.userId,

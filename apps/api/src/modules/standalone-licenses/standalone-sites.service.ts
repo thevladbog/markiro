@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
@@ -13,6 +13,7 @@ import {
   type StandaloneSiteList,
   type StandaloneSiteRegister,
 } from "@markiro/platform-contracts";
+import { StandaloneDiagnosticsService } from "../standalone-diagnostics/standalone-diagnostics.service";
 import { DB } from "../../auth/auth.module";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
@@ -45,6 +46,7 @@ export class StandaloneSitesService {
     @Inject(STANDALONE_LICENSE_SIGNING)
     private readonly signing: StandaloneLicenseSigningConfiguration | null,
     @Inject(STANDALONE_LICENSE_CLOCK) private readonly now: StandaloneLicenseClock,
+    @Optional() private readonly diagnostics?: StandaloneDiagnosticsService,
   ) {}
 
   async list(
@@ -99,7 +101,7 @@ export class StandaloneSitesService {
     tenantId: string,
     body: StandaloneSiteInspectRequest,
   ): Promise<StandaloneSiteInspection> {
-    return standaloneTransaction(
+    const inspection = await standaloneTransaction(
       this.db,
       async (tx) => {
         await requireStandaloneLicenseActor(tx, principal, tenantId, false);
@@ -146,6 +148,18 @@ export class StandaloneSitesService {
       },
       "read only",
     );
+    if (body.request.supportToken === undefined) return inspection;
+    if (!this.diagnostics) throw conflict("standalone_diagnostics_not_configured");
+    const diagnostics = await this.diagnostics.ingest(
+      principal,
+      tenantId,
+      {
+        text: body.request.supportToken,
+        ...(body.acknowledgeUnboundHost === true ? { acknowledgeUnboundHost: true } : {}),
+      },
+      body.request.hostId,
+    );
+    return standaloneSiteInspectionSchema.parse({ ...inspection, diagnostics });
   }
 
   /** `create` binds a new site; `rebind` moves an existing site to a new host id (spec §6.3). */
@@ -157,7 +171,8 @@ export class StandaloneSitesService {
     return standaloneTransaction(this.db, async (tx) => {
       const { user } = await requireStandaloneLicenseActor(tx, principal, tenantId, true);
       const now = this.now();
-      const { request } = body;
+      const request = { ...body.request };
+      delete request.supportToken;
       let site: StandaloneSiteRow | null = null;
       if (body.intent === "create") {
         const [replay] = await tx

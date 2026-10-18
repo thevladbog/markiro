@@ -18,7 +18,7 @@ class ReplacementMigrationTest {
         val context=ApplicationProvider.getApplicationContext<Context>()
         val name="replacement-${UUID.randomUUID()}.db"
         val credential=InMemoryCredentialStore().apply { write("synthetic-key") }
-        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_19_20, MIGRATION_20_21).build()
+        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).build()
         try {
             val before=open(); before.initializeRecoveryForTest(credential)
             val owner=before.deviceRecoveryDao().get()
@@ -26,6 +26,7 @@ class ReplacementMigrationTest {
             before.palletMembershipRemovalDao().insert(PalletMembershipRemovalEntity(palletId="pallet", sscc="removed", removedAt="t", operatorId=null, status=RemovalStatus.SENT))
             before.metaDao().put(MetaEntity("saved-print-bytes","raw\u001dsaved"))
             before.openHelper.writableDatabase.execSQL("DROP TABLE replacement_drain")
+            removeDatasetColumnsForHistoricalFixture(before.openHelper.writableDatabase)
             before.openHelper.writableDatabase.version=19; before.close()
             val upgraded=open(); DeviceRecovery(upgraded,credential).initialize()
             assertEquals(owner,upgraded.deviceRecoveryDao().get())

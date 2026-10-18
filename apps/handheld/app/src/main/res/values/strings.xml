@@ -848,4 +848,8 @@
     <string name="host_reject_license">В лицензии хоста нет режима паллет</string>
     <string name="host_reject_pallet_conflict">Короб уже на другой паллете</string>
     <string name="host_reject_data">Хост не принял данные записи</string>
+    <string name="host_dataset_reset_title">Данные хоста заменены</string>
+    <string name="host_dataset_reset_body">Закройте приложение этой кнопкой и откройте его снова. Старые задания и очереди будут удалены при запуске. Подключение и настройки принтеров сохранятся.</string>
+    <string name="host_dataset_reset_failed">Не удалось обновить локальные данные. Работа остановлена. Повторите попытку.</string>
+    <string name="host_dataset_reset_close">Закрыть приложение</string>
 </resources>

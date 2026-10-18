@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostApi } from "../src/host/api.js";
 import type { HostClient } from "../src/host/client.js";
+import { cloudHistoryManifestSchema } from "../src/host/cloud-history.js";
 import {
   MAX_CLOUD_EXPORT_BYTES,
   canonicalJson,
@@ -25,6 +26,27 @@ function fixtureText(name: string): string {
 
 const GOLDEN = fixtureText("cloud-export-file.json");
 const IMPORT_ID = "8f14e45f-ceea-467a-9d9b-1c7e0b1a2d3e";
+
+it("carries replacement history and the checked revision, while legacy requests omit replacement", async () => {
+  const file = await golden();
+  const manifest = cloudHistoryManifestSchema.parse(
+    JSON.parse(fixtureText("cloud-history.jsonl").split("\n")[0]!),
+  );
+  const replacement = { expectedRevision: 17, history: manifest };
+  expect(cloudImportRequest(file, IMPORT_ID, false, replacement).replacement).toEqual(replacement);
+  expect(cloudImportRequest(file, IMPORT_ID, true)).not.toHaveProperty("replacement");
+  const summary = JSON.parse(fixtureText("cloud-import-summary.json")) as object;
+  expect(
+    cloudImportSummarySchema.parse({
+      ...summary,
+      replacement: {
+        expectedRevision: 18,
+        datasetEpoch: null,
+        backupFile: null,
+      },
+    }).replacement,
+  ).toEqual({ expectedRevision: 18, datasetEpoch: null, backupFile: null });
+});
 
 async function golden(): Promise<CloudExportFile> {
   const read = await readCloudExportFile(GOLDEN);

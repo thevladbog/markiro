@@ -187,6 +187,7 @@ export const cloudHistoryCompleteRequestSchema = z.strictObject({ batchId: check
 export const cloudHistoryCancelRequestSchema = cloudHistoryCompleteRequestSchema;
 export const cloudHistoryImportStateSchema = z
   .strictObject({
+    replacementBackupFile: z.string().optional(),
     batchId: checksum,
     source: cloudHistorySourceSchema,
     status: z.enum(["pending", "complete"]),

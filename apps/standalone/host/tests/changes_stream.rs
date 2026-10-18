@@ -56,6 +56,30 @@ fn rev_event(rev: i64) -> String {
     format!("event: rev\ndata: {{\"rev\":{rev}}}\n\n")
 }
 
+#[tokio::test]
+async fn replacement_ends_existing_streams_before_sending_the_new_revision() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (_, _, mut body) = open_stream(&app, &key).await;
+    next_text(&mut body).await;
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE site SET dataset_epoch='d0000000-0000-4000-8000-000000000001' WHERE id=1")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    markiro_host::db::commit_with_revision(tx, &app.state.revisions, rev)
+        .await
+        .unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(5), body.frame())
+        .await
+        .unwrap()
+        .is_none());
+}
+
 fn org_update(expected_rev: i64) -> Value {
     json!({
         "name": "ООО «Атолл-Юг»",
@@ -404,6 +428,7 @@ async fn opening_a_stream_for_a_device_revoked_meanwhile_is_refused() {
     let refused = markiro_host::routes::changes::stream(
         State(app.state.clone()),
         AuthDevice {
+            dataset_guard: None,
             id,
             kind: DeviceKind::Station,
             key_hash: None,

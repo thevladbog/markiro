@@ -51,7 +51,7 @@ class HostBootstrapImplTest {
 
     private class Host(val answers: Map<String, HostResult>) : HostTransport {
         val asked = mutableListOf<String>()
-        override suspend fun get(path: String) = answers.getValue(path.substringBefore('?')).also { asked += path }
+        override suspend fun get(path: String) = (if (path == "/v1/hello") HostResult.Ok(200, """{"product":"markiro-host","protocol":6,"minProtocol":1,"hostId":"legacy"}""", null) else answers.getValue(path.substringBefore('?'))).also { asked += path }
         override suspend fun post(path: String, body: String) = answers.getValue(path).also { asked += path }
     }
 

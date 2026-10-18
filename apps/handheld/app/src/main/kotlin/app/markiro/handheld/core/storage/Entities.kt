@@ -37,6 +37,8 @@ data class DeviceConfigEntity(
     val hostRestoreEpoch: String? = null,
     /** The last revision of `GET /v1/changes` applied. */
     val hostRev: Long? = null,
+    /** Business dataset acknowledged only after startup cleanup; independent of restoreEpoch. */
+    val hostDatasetEpoch: String? = null,
 )
 
 /** Roster mirror; hashes are PHC verifiers, never plaintext. */

@@ -32,6 +32,7 @@ pub const PROTOCOL_VERSION: u32 = 6;
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
 pub const PROTOCOL_HEADER: &str = "x-markiro-protocol";
+pub const DATASET_EPOCH_HEADER: &str = "x-markiro-dataset-epoch";
 /// Request header carrying the office session token.
 pub const OFFICE_SESSION_HEADER: &str = "x-office-session";
 /// Request header carrying the app's own version on every request of the
@@ -342,6 +343,8 @@ pub struct Hello {
     /// Absent until the first restore.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_epoch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_epoch: Option<String>,
 }
 
 /// The part of `hello` that keeps its shape in every protocol version.

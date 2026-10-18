@@ -60,11 +60,13 @@ const NOT_EMPTY: [(&str, &str); 8] = [
 /// The import already done: its id and its summary, from its audit row.
 async fn earlier_import(
     conn: &mut SqliteConnection,
+    request_id: &str,
 ) -> Result<Option<(String, String, CloudImportSummary)>, ApiError> {
     let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT at, details FROM audit_log WHERE action = ? AND result = 'ok' ORDER BY id LIMIT 1",
+        "SELECT at, details FROM audit_log WHERE action = ? AND result = 'ok' AND (json_extract(details,'$.importId')=?2 OR json_extract(details,'$.datasetEpoch') IS (SELECT dataset_epoch FROM site WHERE id=1)) ORDER BY CASE WHEN json_extract(details,'$.importId')=?2 THEN 0 ELSE 1 END,id DESC LIMIT 1",
     )
     .bind(actions::IMPORT_CLOUD)
+    .bind(request_id)
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
@@ -365,6 +367,7 @@ async fn write(
         badge_salt_replaced,
         sscc_counters,
         shift_number_counters,
+        replacement: None,
     })
 }
 
@@ -407,24 +410,31 @@ pub async fn import(
     AdminImport { context, request }: AdminImport,
 ) -> Result<Json<CloudImportSummary>, ApiError> {
     let valid = cloud_import::check(&request)?;
+    crate::import_replace::validate(&request)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
-    if let Some((import_id, imported_at, summary)) = earlier_import(&mut tx).await? {
+    if let Some((import_id, imported_at, summary)) =
+        earlier_import(&mut tx, &request.import_id).await?
+    {
         if import_id == request.import_id {
             return Ok(Json(CloudImportSummary {
                 repeated: true,
                 ..summary
             }));
         }
-        return Err(
-            ApiError::conflict("already_imported", "this site already took an import")
-                .with_details(
-                    json!({ "constraint": "already_imported", "importedAt": imported_at }),
-                ),
-        );
+        if request.replacement.is_none() {
+            return Err(
+                ApiError::conflict("already_imported", "this site already took an import")
+                    .with_details(
+                        json!({ "constraint": "already_imported", "importedAt": imported_at }),
+                    ),
+            );
+        }
     }
-    require_empty(&mut tx).await?;
+    if request.replacement.is_none() {
+        require_empty(&mut tx).await?;
+    }
     let site_gln: Option<String> = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
         .fetch_optional(&mut *tx)
         .await
@@ -442,8 +452,32 @@ pub async fn import(
         );
     }
     require_groups(&mut tx, &valid).await?;
+    let checked_revision = crate::import_replace::require_revision(&mut tx, &request).await?;
+    let backup = if request.replacement.is_some() && !request.dry_run {
+        Some(crate::import_replace::backup(&state).await?)
+    } else {
+        None
+    };
+    let assignments = if request.replacement.is_some() {
+        crate::import_replace::clear(&mut tx).await?
+    } else {
+        Vec::new()
+    };
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    let summary = write(&mut tx, &valid, rev, &at).await?;
+    let mut summary = write(&mut tx, &valid, rev, &at).await?;
+    if request.replacement.is_some() {
+        summary.replacement = Some(
+            crate::import_replace::stage(
+                &mut tx,
+                &request,
+                checked_revision,
+                &at,
+                assignments,
+                backup.as_ref().map(|b| b.0.clone()),
+            )
+            .await?,
+        );
+    }
     // The lines it added take seats of the license (plan ЛЦ-2): beyond the
     // file the import (and its dry run) is refused whole, without a row.
     crate::license::seats::require_added_seats(
@@ -460,6 +494,20 @@ pub async fn import(
             ..summary
         }));
     }
+    let mut details = crate::import_replace::details(
+        &mut tx,
+        json!({
+            "importId": request.import_id,
+            "exportedAt": request.exported_at,
+            "rehearsal": request.rehearsal,
+            "sourceTenantId": request.source.tenant_id,
+            "summary": summary,
+        }),
+    )
+    .await?;
+    if let Some((file, digest)) = backup {
+        details["backup"] = json!({"file":file,"sha256":digest});
+    }
     audit::record(
         &mut tx,
         &at,
@@ -469,13 +517,7 @@ pub async fn import(
             target_type: Some("site"),
             target_id: Some("1"),
             outcome: Outcome::Ok,
-            details: json!({
-                "importId": request.import_id,
-                "exportedAt": request.exported_at,
-                "rehearsal": request.rehearsal,
-                "sourceTenantId": request.source.tenant_id,
-                "summary": summary,
-            }),
+            details,
         },
     )
     .await

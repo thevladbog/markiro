@@ -117,6 +117,9 @@ pub async fn stage(
     office_token: &str,
     manifest_path: &Path,
 ) -> Result<Staged, StageError> {
+    if link.is_frozen() {
+        return Err(StageError::InvalidRequest);
+    }
     let text = read_manifest_text(manifest_path).await?;
     let manifest =
         read_manifest(&text, &trust::update_keyset()).map_err(|_| StageError::ManifestRefused)?;
@@ -135,6 +138,7 @@ pub async fn stage(
     let credentials = Credentials {
         device_key: Some(link.key()),
         office_token: Some(office_token),
+        dataset_epoch: link.dataset_epoch.as_deref(),
     };
     let pinned = PinnedClient::new(&link.address, &link.fingerprint).map_err(transport)?;
     let answer = pinned

@@ -189,6 +189,7 @@ async fn a_check_never_waits_for_a_batch_being_written() {
         check_code(
             State(admin.app.state.clone()),
             AskingDevice(AuthDevice {
+                dataset_guard: None,
                 id: station.clone(),
                 kind: DeviceKind::Station,
                 key_hash: None,

@@ -77,6 +77,7 @@ impl RequestError {
 pub struct Credentials<'a> {
     pub device_key: Option<&'a Secret>,
     pub office_token: Option<&'a str>,
+    pub dataset_epoch: Option<&'a str>,
 }
 
 impl std::fmt::Debug for Credentials<'_> {
@@ -95,6 +96,30 @@ impl std::fmt::Debug for Credentials<'_> {
             redacted(self.office_token)
         )
     }
+}
+
+fn credential_headers(credentials: Credentials<'_>) -> Result<HeaderMap, RequestError> {
+    let mut headers = HeaderMap::new();
+    if let Some(key) = credentials.device_key {
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", key.expose()))
+                .map_err(|_| RequestError::InvalidRequest)?,
+        );
+    }
+    if let Some(token) = credentials.office_token {
+        headers.insert(
+            OFFICE_SESSION_HEADER,
+            HeaderValue::from_str(token).map_err(|_| RequestError::InvalidRequest)?,
+        );
+    }
+    if let Some(epoch) = credentials.dataset_epoch {
+        headers.insert(
+            markiro_proto::DATASET_EPOCH_HEADER,
+            HeaderValue::from_str(epoch).map_err(|_| RequestError::InvalidRequest)?,
+        );
+    }
+    Ok(headers)
 }
 
 #[derive(Debug, Clone)]
@@ -150,12 +175,7 @@ impl PinnedClient {
         if let Some(limit) = limit {
             request = request.timeout(limit);
         }
-        if let Some(key) = credentials.device_key {
-            request = request.bearer_auth(key.expose());
-        }
-        if let Some(token) = credentials.office_token {
-            request = request.header(OFFICE_SESSION_HEADER, token);
-        }
+        request = request.headers(credential_headers(credentials)?);
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -340,12 +360,7 @@ impl TransferClient {
             .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
             .header(reqwest::header::CONTENT_LENGTH, length)
             .body(reqwest::Body::from(file));
-        if let Some(key) = credentials.device_key {
-            request = request.bearer_auth(key.expose());
-        }
-        if let Some(token) = credentials.office_token {
-            request = request.header(OFFICE_SESSION_HEADER, token);
-        }
+        request = request.headers(credential_headers(credentials)?);
         let response = match request.send().await {
             Ok(response) => response,
             Err(error) if error.is_builder() => return Err(RequestError::InvalidRequest),
@@ -659,6 +674,7 @@ mod tests {
         let credentials = Credentials {
             device_key: Some(&key),
             office_token: Some("office-token-value"),
+            dataset_epoch: None,
         };
         let debug = format!("{credentials:?}");
         assert!(!debug.contains("device-key-value"), "{debug}");
@@ -673,5 +689,22 @@ mod tests {
             empty,
             "Credentials { device_key: None, office_token: None }"
         );
+    }
+    #[test]
+    fn dataset_epoch_is_attached_to_authenticated_request_headers() {
+        let headers = credential_headers(Credentials {
+            device_key: None,
+            office_token: None,
+            dataset_epoch: Some("8b134f46-5501-4ba2-931e-fde1e7251951"),
+        })
+        .unwrap();
+        assert_eq!(
+            headers.get("X-Markiro-Dataset-Epoch").unwrap(),
+            "8b134f46-5501-4ba2-931e-fde1e7251951"
+        );
+        assert!(credential_headers(Credentials::default())
+            .unwrap()
+            .get("X-Markiro-Dataset-Epoch")
+            .is_none());
     }
 }

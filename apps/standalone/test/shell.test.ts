@@ -41,6 +41,17 @@ function paired(overrides: Partial<ShellState> = {}): ShellState {
 }
 
 describe("nextShellView", () => {
+  it("blocks both an active floor and the office after a failed dataset reset", () => {
+    const failed = linkStatus({ state: "offline", lastError: "dataset_reset_failed" });
+    for (const state of [
+      paired({ floorWork: { sessionId: 1, shiftId: "old-shift" } }),
+      paired({ office: { kind: "open", session: SESSION } }),
+    ]) {
+      expect(
+        nextShellView(shellReducer(state, { type: "link_status", status: failed }), ADDRESS),
+      ).toEqual({ kind: "dataset_reset_failed" });
+    }
+  });
   it("waits for the device and the local host", () => {
     expect(nextShellView(initialShellState, ADDRESS)).toEqual({ kind: "loading" });
     expect(nextShellView(unpaired(), ADDRESS)).toEqual({ kind: "loading" });

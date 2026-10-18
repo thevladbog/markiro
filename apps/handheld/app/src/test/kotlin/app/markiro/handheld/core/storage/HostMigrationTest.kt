@@ -11,7 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** A cloud terminal of version 20 with a live queue upgrades to 21 and loses nothing (spec 10: "облачный остаётся облачным"). */
+/** A cloud terminal of version 20 with a live queue upgrades through 21 to 22 and loses nothing (spec 10: "облачный остаётся облачным"). */
 @RunWith(AndroidJUnit4::class)
 class HostMigrationTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
@@ -22,7 +22,7 @@ class HostMigrationTest {
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
             MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
             MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-            MIGRATION_20_21,
+            MIGRATION_20_21, MIGRATION_21_22,
         ).build()
 
     @Test
@@ -76,7 +76,9 @@ class HostMigrationTest {
             assertEquals("t-1", db.deviceRecoveryDao().get()!!.tenantId)
             assertNull(db.deviceRecoveryDao().get()!!.pinSha256)
             assertEquals(HANDHELD_DATABASE_VERSION, db.openHelper.readableDatabase.version)
-            assertEquals(21, HANDHELD_DATABASE_VERSION)
+            assertEquals(22, HANDHELD_DATABASE_VERSION)
+            assertNull(config.hostDatasetEpoch)
+            assertNull(db.deviceRecoveryDao().get()!!.datasetResetEpoch)
             assertEquals(0, db.hostOutboxDao().queuedCount())
         } finally {
             db.close()

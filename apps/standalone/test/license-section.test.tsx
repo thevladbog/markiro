@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { standaloneActivationRequestSchema } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
+import * as SupportKeys from "../src/office/info/support-keys.js";
+import { usageStatsSchema } from "../src/host/usage-stats.js";
 import { HostError } from "../src/host/client.js";
 import type { LicensePreview, LicenseTerms, OfficeLicense } from "../src/host/protocol.js";
 import { OfficeFilesError } from "../src/office/exports/office-files.js";
@@ -682,6 +684,60 @@ const ACTIVATION_REQUEST = standaloneActivationRequestSchema.parse(
 );
 
 describe("the activation request and the emergency extension", () => {
+  it.each(["statistics unavailable", "no key"])(
+    "warns when the saved request has no usage statistics: %s",
+    async (reason) => {
+      const key =
+        reason === "no key"
+          ? vi.spyOn(SupportKeys, "activeSupportKey").mockReturnValue(null)
+          : null;
+      try {
+        const session = sessionWith();
+        session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+        const files = fakeOfficeFiles();
+        const card = await openLicense(session, files);
+        fireEvent.click(
+          within(card).getByRole("button", { name: "Сохранить запрос на активацию" }),
+        );
+        expect(
+          await within(card).findByText(
+            "Запрос сохранён без статистики использования. Для обновления статистики сформируйте новый запрос, когда сведения станут доступны.",
+          ),
+        ).toBeTruthy();
+        const saved = files.save.mock.calls[0]?.[1][0];
+        expect(
+          saved === undefined ? null : JSON.parse(new TextDecoder().decode(saved.bytes)),
+        ).toEqual(ACTIVATION_REQUEST);
+      } finally {
+        key?.mockRestore();
+      }
+    },
+  );
+
+  it("includes encrypted usage statistics in a normal build without showing the fallback warning", async () => {
+    const session = sessionWith();
+    session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+    session.api.getUsageStats.mockResolvedValue(
+      usageStatsSchema.parse(
+        JSON.parse(
+          readFileSync(new URL("../proto/fixtures/usage-stats.json", testModuleUrl), "utf8"),
+        ),
+      ),
+    );
+    const files = fakeOfficeFiles();
+    const card = await openLicense(session, files);
+    fireEvent.click(within(card).getByRole("button", { name: "Сохранить запрос на активацию" }));
+    expect(await within(card).findByText(/^Запрос сохранён в папке /)).toBeTruthy();
+    const saved = files.save.mock.calls[0]?.[1][0];
+    expect(
+      saved === undefined ? null : JSON.parse(new TextDecoder().decode(saved.bytes)),
+    ).toMatchObject({
+      ...ACTIVATION_REQUEST,
+      supportToken: expect.stringMatching(/^MKS1\.sup-d11c3182\./),
+    });
+    expect(within(card).queryByText(/^Запрос сохранён без статистики/)).toBeNull();
+  });
+
   it("saves the host's activation request as JSON under «Лицензия» and shows the folder", async () => {
     const session = sessionWith(WRONG_HOST);
     session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
@@ -716,7 +772,9 @@ describe("the activation request and the emergency extension", () => {
       if (failure !== null) files.save.mockRejectedValue(failure);
       const card = await openLicense(session, files);
       fireEvent.click(within(card).getByRole("button", { name: "Сохранить запрос на активацию" }));
-      await within(card).findByText(failure === null ? /^Запрос сохранён/ : /Не удалось сохранить/);
+      await within(card).findByText(
+        failure === null ? /^Запрос сохранён в папке / : /Не удалось сохранить/,
+      );
       await waitFor(() => expect(heldWith(ACTIVATION_REQUEST.organization.name)).toEqual([]));
     },
   );
@@ -939,7 +997,7 @@ describe("the activation request and the emergency extension", () => {
     await waitFor(() => expect(files.save).toHaveBeenCalledTimes(1));
     expect(button).toHaveProperty("disabled", true);
     finish();
-    await within(card).findByText(/^Запрос сохранён/);
+    await within(card).findByText(/^Запрос сохранён в папке /);
     expect(button).toHaveProperty("disabled", false);
   });
 

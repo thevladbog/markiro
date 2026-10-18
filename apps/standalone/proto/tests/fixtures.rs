@@ -1970,7 +1970,7 @@ fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
 fn this_build_speaks_protocol_six_and_the_current_hello_fixtures_say_so() {
     assert_eq!(PROTOCOL_VERSION, 6);
     assert_eq!(MIN_PROTOCOL_VERSION, 1);
-    for name in ["hello.json", "hello-restored.json"] {
+    for name in ["hello.json", "hello-restored.json", "hello-replaced.json"] {
         let hello: Hello = serde_json::from_value(fixture(name)).unwrap();
         assert_eq!(hello.protocol, PROTOCOL_VERSION, "{name}");
         assert_eq!(hello.min_protocol, MIN_PROTOCOL_VERSION, "{name}");

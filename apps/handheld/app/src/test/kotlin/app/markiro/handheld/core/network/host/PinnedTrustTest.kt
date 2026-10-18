@@ -107,6 +107,16 @@ class PinnedTrustTest {
         assertEquals(tls.pin, manager.observed)
     }
 
+
+    @Test fun thePinnedClientSendsOnlyTheSuppliedProcessDatasetEpoch() {
+        val host = TestTls.create("dataset-host")
+        val server = serverOf(host).also { it.enqueue(MockResponse().setBody("{}")) }
+        val epoch = "8b134f46-5501-4ba2-931e-fde1e7251951"
+        val client = HostHttpClient.pinned(host.pin, datasetEpoch = { epoch }) { "key" }
+        get(client, server).execute().use { assertEquals(200, it.code) }
+        assertEquals(epoch, server.takeRequest().getHeader("x-markiro-dataset-epoch"))
+    }
+
     // ---- the pinned client over real TLS ----
 
     @Test

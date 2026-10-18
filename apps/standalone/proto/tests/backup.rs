@@ -133,6 +133,22 @@ fn hello_carries_the_restore_epoch_only_after_a_restore() {
 }
 
 #[test]
+fn hello_carries_a_replacement_epoch_independently_of_restore() {
+    let replaced: Hello = round_trip("hello-replaced.json");
+    assert_eq!(
+        replaced.dataset_epoch.as_deref(),
+        Some("8b134f46-5501-4ba2-931e-fde1e7251951")
+    );
+    assert_eq!(replaced.restore_epoch, None);
+    let plain: Hello = round_trip("hello.json");
+    assert_eq!(plain.dataset_epoch, None);
+    assert!(serde_json::to_value(plain)
+        .unwrap()
+        .get("datasetEpoch")
+        .is_none());
+}
+
+#[test]
 fn the_code_lists_match_their_fixture() {
     let listed = fixture("backup-codes.json");
     let names = |key: &str| -> Vec<String> {

@@ -123,7 +123,7 @@ describe("HostStatusLine", () => {
 
   it("has a text for every reason the shell reports", () => {
     const reasons = hostStatusSchema.shape.lastError.unwrap().options;
-    expect(reasons).toHaveLength(7);
+    expect(reasons).toHaveLength(8);
     for (const reason of reasons) {
       expect(i18n.exists(`errors.link.${reason}`), reason).toBe(true);
     }

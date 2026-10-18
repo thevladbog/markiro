@@ -51,7 +51,7 @@ fun DeviceOwner.sameHostDevice(other: DeviceOwner, pinMayChange: Boolean): Boole
 /** What a pairing with a host adds to a publication: the pin, the host and the addresses of the payload (active one first). */
 @Serializable
 data class HostPairing(val pinSha256: String, val hostId: String, val addresses: List<String>)
-enum class RecoveryPhase { UNINITIALIZED, UNPAIRED, ACTIVE, SEALING, SEALED, RESTORING, OWNER_UNRESOLVED }
+enum class RecoveryPhase { UNINITIALIZED, UNPAIRED, ACTIVE, SEALING, SEALED, RESTORING, OWNER_UNRESOLVED, DATASET_RESET_PENDING }
 data class RecoveryState(val phase: RecoveryPhase = RecoveryPhase.UNINITIALIZED, val owner: DeviceOwner? = null, val generation: Long = 0)
 data class GenerationToken(val owner: DeviceOwner, val generation: Long)
 class RecoveryBlocked : CancellationException("Device data is sealed or this operation belongs to an earlier credential")
@@ -64,6 +64,8 @@ data class DeviceRecoveryEntity(
     val generation: Long, val phase: String, val pendingId: String? = null,
     /** The pinned certificate fingerprint of a host owner (plan ТСД-А); `null` for the cloud. */
     val pinSha256: String? = null,
+    /** Target dataset; pending phase distinguishes an explicit absent epoch. */
+    val datasetResetEpoch: String? = null,
 ) {
     fun owner(): DeviceOwner? = if (serverOrigin != null && tenantId != null && deviceId != null && kind != null) {
         DeviceOwner(serverOrigin, tenantId, deviceId, kind, pinSha256)
@@ -95,13 +97,30 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
     private val mutable = MutableStateFlow(RecoveryState())
     val state: StateFlow<RecoveryState> = mutable
     private val json = Json { encodeDefaults = true }
+    private var epochAtProcessStart: String? = null
+    private var resetRequiresRestart = false
+    private var requestedDatasetReset: DeviceRecoveryEntity? = null
+    private val restartReady = MutableStateFlow(false)
+    val datasetRestartReady: StateFlow<Boolean> = restartReady
+    private val datasetFailure = MutableStateFlow(false)
+    val datasetResetFailed: StateFlow<Boolean> = datasetFailure
+    fun processDatasetEpoch(): String? = epochAtProcessStart
+
     init { db.attachRecovery(this) }
 
     suspend fun initialize() = transitions.withLock {
         val observed = mutable.value
-        if (observed.phase !in setOf(RecoveryPhase.UNINITIALIZED, RecoveryPhase.SEALING, RecoveryPhase.RESTORING)) return@withLock
+        if (observed.phase == RecoveryPhase.DATASET_RESET_PENDING && resetRequiresRestart) return@withLock
+        if (observed.phase !in setOf(RecoveryPhase.UNINITIALIZED, RecoveryPhase.SEALING, RecoveryPhase.RESTORING, RecoveryPhase.DATASET_RESET_PENDING)) return@withLock
         var row = db.deviceRecoveryDao().get()
+        if (row?.phase == RecoveryPhase.DATASET_RESET_PENDING.name) {
+            mutable.value = row.state()
+            restartReady.value = true // The pending marker was durable before this process.
+            try { completeHostDatasetReset(row) } catch (error: Exception) { datasetFailure.value = true; throw error }
+            return@withLock
+        }
         val config = db.deviceConfigDao().get()
+        epochAtProcessStart = config?.takeIf { it.backend == "host" }?.hostDatasetEpoch
         if (row == null) {
             val owner = config?.let { ownerOf(it.serverUrl, it.tenantId, it.deviceId, it.kind, it.pinSha256) }
             val phase = when {
@@ -132,6 +151,77 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             mutable.value = row.state()
         }
         if (mutable.value.phase == RecoveryPhase.ACTIVE && credential.staged() != null) credential.clearStaged()
+    }
+
+    /** Freeze the old process immediately; its Room data is purged only by a fresh initialize. */
+    suspend fun observeHostDataset(hostId: String, epoch: String?): Boolean {
+        val config = db.deviceConfigDao().get() ?: return false
+        if (config.backend != "host") return false
+        if (current().phase == RecoveryPhase.DATASET_RESET_PENDING) return true
+        if (epoch == epochAtProcessStart) return false
+        val observed = mutable.value
+        check(config.hostId == hostId && observed.owner?.tenantId == hostId && observed.owner.pinSha256 != null) { "Dataset host does not match pairing" }
+        if (observed.phase != RecoveryPhase.ACTIVE) throw RecoveryBlocked()
+        resetRequiresRestart = true
+        val owner = checkNotNull(observed.owner)
+        val pendingIntent = DeviceRecoveryEntity(serverOrigin = owner.serverOrigin, tenantId = owner.tenantId,
+            deviceId = owner.deviceId, kind = owner.kind, generation = observed.generation,
+            phase = RecoveryPhase.DATASET_RESET_PENDING.name, pinSha256 = owner.pinSha256, datasetResetEpoch = epoch)
+        if (!mutable.compareAndSet(observed, observed.copy(phase = RecoveryPhase.DATASET_RESET_PENDING))) throw RecoveryBlocked()
+        requestedDatasetReset = pendingIntent // Only the CAS winner owns the target; no fallible read precedes this.
+        try {
+            withContext(NonCancellable) {
+                transitions.withLock {
+                    commits.withLock {
+                        val row = checkNotNull(db.deviceRecoveryDao().get())
+                        check(row.owner() == observed.owner && row.generation == observed.generation && row.phase == RecoveryPhase.ACTIVE.name)
+                        db.withTransaction { db.deviceRecoveryDao().put(pendingIntent) }
+                        restartReady.value = true
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            datasetFailure.value = true
+            throw error
+        }
+        datasetFailure.value = false
+        return true
+    }
+
+    /** A failed intent write stays blocked; retry only that write, never purge the live process. */
+    suspend fun retryHostDatasetReset() {
+        if (!resetRequiresRestart) { initialize(); return }
+        transitions.withLock {
+            commits.withLock {
+                val pending = checkNotNull(requestedDatasetReset)
+                check(current().phase == RecoveryPhase.DATASET_RESET_PENDING && current().owner == pending.owner())
+                db.withTransaction { db.deviceRecoveryDao().put(pending) }
+                restartReady.value = true
+                datasetFailure.value = false
+            }
+        }
+    }
+
+    private suspend fun completeHostDatasetReset(row: DeviceRecoveryEntity) {
+        check(!resetRequiresRestart)
+        val config = checkNotNull(db.deviceConfigDao().get())
+        check(config.backend == "host" && config.hostId == row.owner()?.tenantId && row.owner()?.pinSha256 != null &&
+            ownerOf(config.serverUrl, config.tenantId, config.deviceId, config.kind, config.pinSha256) == row.owner() && credential.read() != null)
+        check(row.generation < Long.MAX_VALUE)
+        val active = row.copy(phase = RecoveryPhase.ACTIVE.name, generation = row.generation + 1, pendingId = null, datasetResetEpoch = null)
+        db.withTransaction {
+            clearHostDatasetBusinessTables(db)
+            db.deviceConfigDao().upsert(config.copy(
+                activeShiftId = null, activeInventoryId = null, lastOperatorId = null, rosterFetchedAt = null,
+                shiftsCount = null, inventoryCount = null, countsAt = null, lineId = null, lineName = null,
+                hostRev = null, hostRestoreEpoch = null, hostDatasetEpoch = row.datasetResetEpoch,
+            ))
+            db.deviceRecoveryDao().put(active)
+        }
+        epochAtProcessStart = row.datasetResetEpoch
+        restartReady.value = false
+        datasetFailure.value = false
+        mutable.value = active.state()
     }
 
     /** Validate the durable owner before every recovery/publication path, not just ACTIVE startup. */

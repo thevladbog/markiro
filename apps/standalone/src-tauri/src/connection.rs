@@ -62,6 +62,8 @@ pub enum LinkError {
     /// ОБН-3): this PC updates from the host (`GET /v1/device/update`,
     /// outside the protocol guard).
     AppTooOld,
+    /// The local copy could not be replaced; no online work may start.
+    DatasetResetFailed,
 }
 
 /// `standalone://host-status` and the answer of `connection_status`.
@@ -129,6 +131,15 @@ pub struct HostRevision {
 pub trait LinkEvents: Send + Sync + 'static {
     fn status(&self, status: &HostStatus);
     fn revision(&self, revision: HostRevision);
+    /// Complete native dataset reconciliation before any stream event/Online.
+    fn reconcile_dataset<'a>(
+        &'a self,
+        _host_id: &'a str,
+        _epoch: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), LinkError>> + Send + 'a>>
+    {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Tauri state: the latest status, for `connection_status`.
@@ -307,10 +318,17 @@ async fn follow(
     // restored).
     let (versions, epoch) = read_hello(link).await;
     state.note_host(versions);
-    let mut epoch = match epoch {
-        Ok(epoch) => epoch,
+    let hello = match epoch {
+        Ok(hello) => hello,
         Err(error) => return (error, false),
     };
+    if let Err(error) = events
+        .reconcile_dataset(&hello.host_id, hello.dataset_epoch.as_deref())
+        .await
+    {
+        return (error, false);
+    }
+
     let mut stream = match client.open(STREAM_PATH, link.key()).await {
         Ok(StreamOpen::Open(stream)) => stream,
         Ok(StreamOpen::Refused(response)) => return (refusal(&response), false),
@@ -329,8 +347,26 @@ async fn follow(
         };
         for item in items {
             if !online {
+                // A replacement can commit after the first hello and before
+                // this stream captures its initial revision. Reprobe before
+                // releasing any event to the old webview generation.
+                let (versions, current_hello) = read_hello(link).await;
+                state.note_host(versions);
+                let current_hello = match current_hello {
+                    Ok(hello) => hello,
+                    Err(error) => return (error, false),
+                };
+                if let Err(error) = events
+                    .reconcile_dataset(
+                        &current_hello.host_id,
+                        current_hello.dataset_epoch.as_deref(),
+                    )
+                    .await
+                {
+                    return (error, false);
+                }
                 online = true;
-                let epoch = epoch.take();
+                let epoch = current_hello.restore_epoch;
                 state.publish_with(events, |current| {
                     current.state = LinkState::Online;
                     current.last_error = None;
@@ -348,7 +384,12 @@ async fn follow(
 /// epoch, `None` when it names none, and what it tells of the host's versions
 /// whatever the verdict. A transport failure is the link's
 /// (`request_error`, so a changed certificate is told apart).
-async fn read_hello(link: &HostLink) -> (Option<HostVersions>, Result<Option<String>, LinkError>) {
+async fn read_hello(
+    link: &HostLink,
+) -> (
+    Option<HostVersions>,
+    Result<markiro_proto::Hello, LinkError>,
+) {
     let client = match PinnedClient::new(&link.address, &link.fingerprint) {
         Ok(client) => client,
         Err(error) => return (None, Err(request_error(error))),
@@ -357,7 +398,7 @@ async fn read_hello(link: &HostLink) -> (Option<HostVersions>, Result<Option<Str
         .send("GET", HELLO_PATH, None, Credentials::default())
         .await
     {
-        Ok(response) => (versions_of(&response), epoch_of(&response)),
+        Ok(response) => (versions_of(&response), hello_of(&response)),
         Err(error) => (None, Err(request_error(error))),
     }
 }
@@ -375,18 +416,21 @@ fn versions_of(response: &HostResponse) -> Option<HostVersions> {
 /// Anything else — another status, no body, not a Markiro host, an epoch
 /// that does not read — is `StreamRefused`: `hello` is unauthenticated and
 /// always a 200 on a healthy host.
+#[cfg(test)]
 fn epoch_of(response: &HostResponse) -> Result<Option<String>, LinkError> {
+    hello_of(response).map(|hello| hello.restore_epoch)
+}
+
+fn hello_of(response: &HostResponse) -> Result<markiro_proto::Hello, LinkError> {
     if response.status != 200 {
         return Err(LinkError::StreamRefused);
     }
     let body = response.body.clone().ok_or(LinkError::StreamRefused)?;
-    classify_hello(body)
-        .map(|hello| hello.restore_epoch)
-        .map_err(|error| match error {
-            ProbeError::HostTooOld => LinkError::HostTooOld,
-            ProbeError::AppTooOld => LinkError::AppTooOld,
-            _ => LinkError::StreamRefused,
-        })
+    classify_hello(body).map_err(|error| match error {
+        ProbeError::HostTooOld => LinkError::HostTooOld,
+        ProbeError::AppTooOld => LinkError::AppTooOld,
+        _ => LinkError::StreamRefused,
+    })
 }
 
 fn request_error(error: RequestError) -> LinkError {
@@ -646,6 +690,7 @@ mod tests {
             (LinkError::StreamEnded, "stream_ended"),
             (LinkError::HostTooOld, "host_too_old"),
             (LinkError::AppTooOld, "app_too_old"),
+            (LinkError::DatasetResetFailed, "dataset_reset_failed"),
         ];
         for (error, wire) in errors {
             assert_eq!(serde_json::to_value(error).unwrap(), json!(wire));

@@ -441,8 +441,8 @@ pub async fn stream(
     let revisions = state.revisions.subscribe();
     let revocations = state.revocations.subscribe();
     let stopping = state.stopping.subscribe();
-    let current = {
-        let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    let (current, dataset_epoch) = {
+        let mut conn = state.pool.begin().await.map_err(ApiError::internal)?;
         if !device_active(&mut *conn, &device.id)
             .await
             .map_err(ApiError::internal)?
@@ -452,9 +452,12 @@ pub async fn stream(
                 "unknown or revoked device key",
             ));
         }
-        db::current_revision(&mut conn)
-            .await
-            .map_err(ApiError::internal)?
+        (
+            db::current_revision(&mut conn)
+                .await
+                .map_err(ApiError::internal)?,
+            crate::import_replace::epoch(&mut conn).await?,
+        )
     };
     let follow = Follow {
         first: Some(current),
@@ -464,6 +467,7 @@ pub async fn stream(
         stopping,
         pool: state.pool.clone(),
         device_id: device.id,
+        dataset_epoch,
     };
     let events = unfold(follow, |mut follow| async move {
         if let Some(rev) = follow.first.take() {
@@ -513,6 +517,13 @@ pub async fn stream(
                 // waiting for a revision the device has not already been
                 // told about instead of sending a non-increasing event.
                 Wake::Revision(rev) if rev > follow.last => {
+                    let epoch: Result<Option<String>, _> =
+                        sqlx::query_scalar("SELECT dataset_epoch FROM site WHERE id=1")
+                            .fetch_one(&follow.pool)
+                            .await;
+                    if epoch.ok() != Some(follow.dataset_epoch.clone()) {
+                        return None;
+                    }
                     follow.last = rev;
                     return Some((Ok(rev_event(rev)), follow));
                 }
@@ -534,6 +545,7 @@ struct Follow {
     stopping: watch::Receiver<bool>,
     pool: SqlitePool,
     device_id: String,
+    dataset_epoch: Option<String>,
 }
 
 /// What woke a change stream.

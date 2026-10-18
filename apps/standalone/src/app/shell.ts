@@ -159,6 +159,7 @@ export interface ShellState {
 }
 
 export type ShellView =
+  | { kind: "dataset_reset_failed" }
   | { kind: "loading" }
   | { kind: "config_error" }
   | { kind: "host_missing"; reason: HostProbeErrorCode }
@@ -291,6 +292,7 @@ function linkRejection(status: HostStatus): RejectionReason | null {
  * about that host, so it is ignored entirely for that device.
  */
 export function nextShellView(state: ShellState, localAddress: string): ShellView {
+  if (state.link?.lastError === "dataset_reset_failed") return { kind: "dataset_reset_failed" };
   const { device, localHost } = state;
   if (device.kind === "loading") return { kind: "loading" };
   if (device.kind === "unreadable") return { kind: "config_error" };
@@ -531,6 +533,9 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         office: { kind: "open", session: { ...state.office.session, user: action.user } },
       };
     case "link_status": {
+      // Native reconciliation restarts the process after success. Until then
+      // a reconnect must never reveal the old generation's floor or office.
+      if (state.link?.lastError === "dataset_reset_failed") return state;
       const rejection = linkRejection(action.status);
       if (rejection === null) return { ...state, link: action.status };
       return reject({ ...state, link: action.status }, rejection);

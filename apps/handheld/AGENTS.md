@@ -74,8 +74,17 @@ Android tests must also verify its interpretation.
   or a debug-HTTP dependency to host mode; never log keys, codes, claim bodies or
   fingerprints.
 - Host facts and pallet events are frozen once into `host_outbox` (`HostRecordFreezer`,
-  `HostPalletEvents`) and resent as the same bytes by `HostSyncEngine`; only receipts
-  remove rows. The cloud `SyncEngine` returns early on a host device.
+  `HostPalletEvents`) and resent as the same bytes by `HostSyncEngine`; during normal
+  synchronization only receipts remove rows. The cloud `SyncEngine` returns early
+  on a host device.
+- Explicit cloud-import replacement uses `Hello.datasetEpoch`, independently of
+  restore replay. Send only the process-start epoch in the pinned client. Detect
+  changes before bootstrap or restore reconciliation, freeze recovery admission
+  and persist `DATASET_RESET_PENDING`. Purge classified business tables only in a
+  fresh process, atomically with the new epoch/generation. Retain credentials,
+  device configuration, printers/assignments and hardware preferences; do not use
+  revocation/sealing to reset business data. A failed reset stays blocked and
+  retryable. Never expose a new epoch to old callbacks or resume old outboxes.
 - Off in host mode: grants, replacement, inventory, write-offs, update checks, duplicate
   DataMatrix print (`STATION_UPDATE_REQUIRED`). Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
+import type { CloudHistoryManifest } from "./cloud-history.js";
 import { canonicalSaltSchema, templatePurposeSchema, templateSpecSchema } from "./protocol.js";
 
 /**
@@ -173,10 +174,18 @@ export interface CloudImportRequest {
   rehearsal: boolean;
   source: { tenantId: string; tenantName: string };
   payload: CloudImportPayload;
+  replacement?: { expectedRevision?: number; history: CloudHistoryManifest };
 }
 
 /** Mirrors `markiro_proto::cloud_import::CloudImportSummary`; a response, so lenient. */
 export const cloudImportSummarySchema = z.object({
+  replacement: z
+    .object({
+      expectedRevision: z.number().int().nonnegative(),
+      datasetEpoch: z.uuid().nullable(),
+      backupFile: z.string().nullable(),
+    })
+    .optional(),
   dryRun: z.boolean(),
   repeated: z.boolean(),
   linesCreated: z.number().int().nonnegative(),
@@ -318,6 +327,7 @@ export function cloudImportRequest(
   file: CloudExportFile,
   importId: string,
   dryRun: boolean,
+  replacement?: CloudImportRequest["replacement"],
 ): CloudImportRequest {
   return {
     importId,
@@ -327,5 +337,6 @@ export function cloudImportRequest(
     rehearsal: file.rehearsal,
     source: { tenantId: file.source.tenantId, tenantName: file.source.tenantName },
     payload: file.payload,
+    ...(replacement === undefined ? {} : { replacement }),
   };
 }

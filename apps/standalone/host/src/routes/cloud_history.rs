@@ -20,7 +20,7 @@ use sqlx::SqliteConnection;
 
 async fn was_cancelled(conn: &mut SqliteConnection, batch: &str) -> Result<bool, ApiError> {
     sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM audit_log WHERE action=? AND target_id=? AND result='ok')",
+        "SELECT EXISTS(SELECT 1 FROM audit_log WHERE action=? AND target_id=? AND result='ok' AND json_extract(details,'$.datasetEpoch') IS (SELECT dataset_epoch FROM site WHERE id=1))",
     )
     .bind(actions::IMPORT_CLOUD_HISTORY_CANCEL)
     .bind(batch)
@@ -105,8 +105,21 @@ pub async fn cancel(
     }
     let at = state.timestamp();
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    audit::record(&mut tx,&at,Entry{actor:context.actor(),action:actions::IMPORT_CLOUD_HISTORY_CANCEL,target_type:Some("cloud_history"),target_id:Some(&r.batch_id),outcome:Outcome::Ok,
-        details:json!({"sourceTenantId":current.source.tenant_id,"receivedParts":current.received_indices.len(),"counts":current.counts})}).await.map_err(ApiError::internal)?;
+    let cancel_details = crate::import_replace::details(&mut tx,json!({"sourceTenantId":current.source.tenant_id,"receivedParts":current.received_indices.len(),"counts":current.counts})).await?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::IMPORT_CLOUD_HISTORY_CANCEL,
+            target_type: Some("cloud_history"),
+            target_id: Some(&r.batch_id),
+            outcome: Outcome::Ok,
+            details: cancel_details,
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
@@ -222,6 +235,10 @@ pub async fn complete(
     sqlx::query("UPDATE cloud_history_batches SET status='complete',completed_at=? WHERE id=?")
         .bind(&at)
         .bind(&r.batch_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("UPDATE site SET replacement_pending=0 WHERE id=1")
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;

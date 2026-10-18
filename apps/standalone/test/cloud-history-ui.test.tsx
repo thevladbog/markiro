@@ -79,6 +79,16 @@ async function choose(text = golden) {
   });
 }
 describe("cloud history office transfer", () => {
+  it("shows the retained pre-import backup and production hold after restarting", async () => {
+    setup({ ...pending, replacementBackupFile: "pre-import/recovery.db" });
+    await screen.findByText("pre-import/recovery.db");
+    expect(
+      await screen.findByText(/После перезапуска снова выберите тот же файл истории/),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("История перенесена. Работа разрешена после завершения импорта."),
+    ).toBeNull();
+  });
   it("streams the source preview, validates every part before import and only completes after activation", async () => {
     const host = setup();
     await choose();

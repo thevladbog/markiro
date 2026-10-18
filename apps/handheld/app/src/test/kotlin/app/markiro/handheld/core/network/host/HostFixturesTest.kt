@@ -27,6 +27,15 @@ import org.junit.Test
  * differs here fails with the fixture's own case.
  */
 class HostFixturesTest {
+    @Test fun oldAndReplacedHelloCarryIndependentOptionalDatasetEpochs() {
+        val json = Json { ignoreUnknownKeys = true }
+        val legacy = json.decodeFromJsonElement(HelloDto.serializer(), fixture("hello.json"))
+        val replaced = json.decodeFromJsonElement(HelloDto.serializer(), fixture("hello-replaced.json"))
+        assertNull(legacy.datasetEpoch)
+        assertNull(replaced.restoreEpoch)
+        assertEquals("8b134f46-5501-4ba2-931e-fde1e7251951", replaced.datasetEpoch)
+    }
+
     private fun fixture(name: String): JsonObject = Json.parseToJsonElement(
         checkNotNull(javaClass.classLoader?.getResource(name)) { "$name is not in the test resources: see build.gradle.kts" }
             .readText(),

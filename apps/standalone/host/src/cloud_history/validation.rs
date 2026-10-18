@@ -171,12 +171,8 @@ fn code(c: &CloudHistoryCode, field: &str) -> Result<(), ApiError> {
     }
     Ok(())
 }
-pub fn check(r: &CloudHistoryImportRequest) -> Result<(), ApiError> {
-    let m = &r.manifest;
-    let p = &r.part;
+pub fn check_manifest(m: &CloudHistoryManifest) -> Result<(), ApiError> {
     bounded(m, MAX_HISTORY_MANIFEST_BYTES, "manifest")?;
-    bounded(p, MAX_HISTORY_PART_BYTES, "part")?;
-    bounded(r, MAX_HISTORY_REQUEST_BYTES, "request")?;
     if m.format != CLOUD_HISTORY_FORMAT
         || m.format_version != CLOUD_HISTORY_FORMAT_VERSION
         || m.parts.is_empty()
@@ -238,6 +234,15 @@ pub fn check(r: &CloudHistoryImportRequest) -> Result<(), ApiError> {
     {
         return Err(invalid("manifest.checksum"));
     }
+    Ok(())
+}
+pub fn check(r: &CloudHistoryImportRequest) -> Result<(), ApiError> {
+    let m = &r.manifest;
+    let p = &r.part;
+    bounded(m, MAX_HISTORY_MANIFEST_BYTES, "manifest")?;
+    bounded(p, MAX_HISTORY_PART_BYTES, "part")?;
+    bounded(r, MAX_HISTORY_REQUEST_BYTES, "request")?;
+    check_manifest(m)?;
     let summary = m
         .parts
         .get(p.index as usize)

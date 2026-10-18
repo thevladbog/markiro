@@ -19,6 +19,7 @@ use crate::device_config::{self, DeviceConfig};
 use crate::host_client::{Credentials, HostResponse, PinnedClient, RequestError};
 use crate::host_probe::{self, HelloObservation, ProbeError};
 use crate::installation::InstallRole;
+use crate::local_db::DatasetState;
 use crate::secret_store;
 
 /// A station's line (`PUT /v1/device/line`): only [`DeviceState::select_line`]
@@ -77,6 +78,8 @@ pub struct HostLink {
     pub address: String,
     pub fingerprint: String,
     key: Secret,
+    pub dataset_epoch: Option<String>,
+    dataset: Arc<DatasetState>,
 }
 
 impl HostLink {
@@ -85,7 +88,13 @@ impl HostLink {
             address,
             fingerprint,
             key,
+            dataset_epoch: None,
+            dataset: Arc::default(),
         }
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.dataset.is_frozen()
     }
 
     pub fn key(&self) -> &Secret {
@@ -135,6 +144,7 @@ pub enum DeviceError {
     /// The site's license does not include this kind of device (`conflict`
     /// on `feature_disabled`: a handheld without `handheld`).
     FeatureDisabled,
+    DatasetResetRequired,
 }
 
 impl DeviceError {
@@ -158,6 +168,7 @@ impl DeviceError {
             DeviceError::AddressOtherHost => "address_other_host",
             DeviceError::SeatLimit => "seat_limit",
             DeviceError::FeatureDisabled => "feature_disabled",
+            DeviceError::DatasetResetRequired => "dataset_reset_required",
         }
     }
 }
@@ -193,12 +204,15 @@ impl PairedDevice {
         }
     }
 
-    fn link(&self) -> Arc<HostLink> {
-        Arc::new(HostLink::new(
+    fn link(&self, dataset: Arc<DatasetState>) -> Arc<HostLink> {
+        let mut link = HostLink::new(
             self.config.host_address.clone(),
             self.config.fingerprint.clone(),
             self.key.clone(),
-        ))
+        );
+        link.dataset_epoch = dataset.epoch(&self.config.host_id).map(str::to_owned);
+        link.dataset = dataset;
+        Arc::new(link)
     }
 }
 
@@ -219,6 +233,7 @@ pub struct DeviceState {
     /// The installer's role for this computer (`installation.rs`); `None`
     /// in a development build.
     role: Option<InstallRole>,
+    dataset: Arc<DatasetState>,
 }
 
 impl DeviceState {
@@ -234,7 +249,7 @@ impl DeviceState {
             Err(_) => Current::Unreadable,
         };
         let link = match &current {
-            Current::Paired(device) => Some(device.link()),
+            Current::Paired(device) => Some(device.link(Arc::default())),
             _ => None,
         };
         Self {
@@ -243,6 +258,28 @@ impl DeviceState {
             pairing: tokio::sync::Mutex::new(()),
             link: watch::channel(link).0,
             role: None,
+            dataset: Arc::default(),
+        }
+    }
+
+    pub fn with_dataset(mut self, dataset: Arc<DatasetState>) -> Self {
+        self.dataset = dataset;
+        if let Current::Paired(device) = &*self.current.lock().expect("device lock") {
+            self.link
+                .send_replace(Some(device.link(self.dataset.clone())));
+        }
+        self
+    }
+
+    pub fn dataset(&self) -> Arc<DatasetState> {
+        self.dataset.clone()
+    }
+
+    fn require_mutations(&self) -> Result<(), DeviceError> {
+        if self.dataset.is_frozen() {
+            Err(DeviceError::DatasetResetRequired)
+        } else {
+            Ok(())
         }
     }
 
@@ -416,6 +453,7 @@ impl DeviceState {
                 Credentials {
                     device_key: Some(&device.key),
                     office_token: None,
+                    dataset_epoch: self.dataset.epoch(&device.config.host_id),
                 },
             )
             .await
@@ -440,7 +478,7 @@ impl DeviceState {
             client,
         });
         let status = updated.status();
-        let link = updated.link();
+        let link = updated.link(self.dataset.clone());
         *self.current.lock().expect("device lock") = Current::Paired(updated);
         self.link.send_replace(Some(link));
         Ok(status)
@@ -451,6 +489,7 @@ impl DeviceState {
     /// line even while the host is away. Serialised with pairing and
     /// forgetting, so it never writes over a pairing that changed meanwhile.
     pub async fn select_line(&self, line_id: &str) -> Result<DeviceStatus, DeviceError> {
+        self.require_mutations()?;
         let _pairing = self.pairing.lock().await;
         let device = self.paired()?;
         let body = serde_json::to_value(DeviceLineRequest {
@@ -466,6 +505,7 @@ impl DeviceState {
                 Credentials {
                     device_key: Some(&device.key),
                     office_token: None,
+                    dataset_epoch: self.dataset.epoch(&device.config.host_id),
                 },
             )
             .await
@@ -500,6 +540,7 @@ impl DeviceState {
                 Credentials {
                     device_key: Some(&device.key),
                     office_token: None,
+                    dataset_epoch: self.dataset.epoch(&device.config.host_id),
                 },
             )
             .await
@@ -596,7 +637,7 @@ impl DeviceState {
             config,
         });
         let status = device.status();
-        let link = device.link();
+        let link = device.link(self.dataset.clone());
         *self.current.lock().expect("device lock") = Current::Paired(device);
         self.link.send_replace(Some(link));
         Ok(status)
@@ -630,6 +671,9 @@ impl DeviceState {
         if !webview_may_reach(path) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
+        if method != "GET" {
+            self.require_mutations()?;
+        }
         let limit = request_limit(timeout_ms)?;
         let device = self.paired()?;
         device
@@ -641,6 +685,7 @@ impl DeviceState {
                 Credentials {
                     device_key: Some(&device.key),
                     office_token,
+                    dataset_epoch: self.dataset.epoch(&device.config.host_id),
                 },
                 limit,
             )

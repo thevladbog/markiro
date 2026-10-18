@@ -369,6 +369,7 @@ async fn a_malformed_office_token_is_invalid_before_any_io() {
                 Credentials {
                     device_key: None,
                     office_token: Some("bad\ntoken"),
+                    dataset_epoch: None,
                 },
             )
             .await,
@@ -439,4 +440,61 @@ async fn every_request_names_the_app_version_and_the_host_records_it() {
         seen.is_some(),
         "the host notes when it first heard the version"
     );
+}
+
+#[tokio::test]
+async fn process_generation_is_sent_on_native_writes_and_advances_only_after_restart() {
+    use markiro_standalone_lib::local_db::LocalDb;
+    const EPOCH: &str = "8b134f46-5501-4ba2-931e-fde1e7251951";
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let local = LocalDb::open(app_dir.path()).await.unwrap();
+    let state = DeviceState::load(app_dir.path().to_path_buf()).with_dataset(local.dataset());
+    state
+        .local_pair(&address(&host), NAME, "0.1.0")
+        .await
+        .unwrap();
+    let wizard: serde_json::Value =
+        serde_json::from_str(include_str!("../../proto/fixtures/bootstrap-request.json")).unwrap();
+    let bootstrapped = state
+        .request("POST", "/v1/bootstrap", Some(&wizard), None)
+        .await
+        .unwrap();
+    assert_eq!(bootstrapped.status, 200, "{:?}", bootstrapped.body);
+    let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(HostPaths::new(host_dir.path()).database_file())
+        .connect()
+        .await
+        .unwrap();
+    let line_id: String = sqlx::query_scalar("SELECT id FROM lines LIMIT 1")
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE site SET dataset_epoch = ? WHERE id = 1")
+        .bind(EPOCH)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        state.select_line(&line_id).await,
+        Err(DeviceError::RequestFailed),
+        "missing old generation cannot mutate replaced host"
+    );
+    assert!(local
+        .reconcile_dataset(&host.host_id, Some(EPOCH))
+        .await
+        .unwrap());
+    assert_eq!(
+        state.select_line(&line_id).await,
+        Err(DeviceError::DatasetResetRequired),
+        "purged process stays frozen"
+    );
+    let reopened = LocalDb::open(app_dir.path()).await.unwrap();
+    let reloaded = DeviceState::load(app_dir.path().to_path_buf()).with_dataset(reopened.dataset());
+    assert_eq!(
+        reloaded.select_line(&line_id).await.unwrap().line_id,
+        Some(line_id)
+    );
+    host.stop().await.unwrap();
 }

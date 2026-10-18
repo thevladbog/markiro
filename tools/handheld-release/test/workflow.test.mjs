@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
@@ -13,13 +14,60 @@ const release = workflow.jobs.release;
 const steps = release.steps;
 const stepIndex = (fragment) => steps.findIndex((step) => (step.name ?? "").includes(fragment));
 
-test("the release is dispatch-only, owner-gated, and off main it does not run", () => {
+const PILOT_REF = "refs/heads/standalone/pilot-mvp";
+const authorizeIf =
+  "github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/standalone/pilot-mvp' && inputs.publish == false && inputs.action == 'release')";
+
+test("the release is dispatch-only and owner-gated; pilot may only build an artifact", () => {
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
-  assert.equal(workflow.jobs.authorize.if, "github.ref == 'refs/heads/main'");
-  assert.equal(release.if, "github.ref == 'refs/heads/main' && inputs.action != 'sync-download'");
+  assert.equal(workflow.jobs.authorize.if, authorizeIf);
+  assert.equal(release.if, `(${authorizeIf}) && inputs.action != 'sync-download'`);
   assert.equal(release.needs, "authorize");
   assert.match(text, /test "\$RELEASE_ACTOR" = "\$RELEASE_OWNER"/);
   assert.match(text, /test "\$OWNER_CONFIRMATION" = "BUILD-HANDHELD-RELEASE"/);
+});
+
+test("the shell authorization also rejects pilot publication, repair and arbitrary refs", () => {
+  const gate = workflow.jobs.authorize.steps.find((step) =>
+    step.name?.includes("Authorize handheld release owner"),
+  );
+  assert.equal(gate.env.RELEASE_PUBLISH, "${{ inputs.publish }}");
+  assert.equal(gate.env.RELEASE_ACTION, "${{ inputs.action }}");
+  assert.match(gate.run, new RegExp(`\\[\\[ "\\$GITHUB_REF" == "${PILOT_REF}" \\]\\]`));
+  assert.match(gate.run, /test "\$RELEASE_PUBLISH" = "false"/);
+  assert.match(gate.run, /test "\$RELEASE_ACTION" = "release"/);
+  assert.match(gate.run, /else\s+exit 1/);
+  const authorize = (ref, publish, action, actor = "owner") =>
+    spawnSync("bash", ["-c", gate.run], {
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_REF: ref,
+        RELEASE_ACTOR: actor,
+        RELEASE_OWNER: "owner",
+        OWNER_CONFIRMATION: "BUILD-HANDHELD-RELEASE",
+        RELEASE_PUBLISH: String(publish),
+        RELEASE_ACTION: action,
+      },
+    }).status;
+  assert.equal(authorize("refs/heads/main", true, "release"), 0);
+  assert.equal(authorize("refs/heads/main", false, "sync-download"), 0);
+  assert.equal(authorize(PILOT_REF, false, "release"), 0);
+  assert.notEqual(authorize(PILOT_REF, true, "release"), 0);
+  assert.notEqual(authorize(PILOT_REF, false, "sync-download"), 0);
+  assert.notEqual(authorize("refs/heads/untrusted", false, "release"), 0);
+  assert.notEqual(authorize(PILOT_REF, false, "release", "contributor"), 0);
+});
+
+test("pilot artifact versions advance the stable installed APK without publishing it", () => {
+  const resolve = workflow.jobs.authorize.steps.find((step) => step.id === "version");
+  assert.equal(
+    resolve.env.CHANNEL,
+    "${{ github.ref == 'refs/heads/standalone/pilot-mvp' && 'stable' || inputs.channel }}",
+  );
+  const summary = steps.find((step) => step.name?.includes("Prove the artifact is signed"));
+  assert.match(summary.run, /GITHUB_REF_NAME/);
+  assert.match(summary.run, /pilot artifact only/);
 });
 
 test("building is the default and publishing must be asked for", () => {

@@ -14,6 +14,7 @@ const CONSTRAINTS = new Set([
   "history_counts",
   "history_graph",
   "history_cancelled",
+  "replacement_history_canceled",
   "history_missing",
   "history_already_complete",
   "history_counter",

@@ -6,6 +6,8 @@ import { Alert, Button } from "@markiro/ui";
 
 import { HostError } from "../../../host/client.js";
 import { errorMessageKey } from "../../../host/errors.js";
+import { useAbout } from "../about-context.js";
+import { activationWithUsage } from "./activation-usage.js";
 import type { OfficeLicense } from "../../../host/protocol.js";
 import { EMERGENCY_MS, licenseMinute } from "../../../lib/license-dates.js";
 import { OfficeFilesError } from "../../exports/office-files.js";
@@ -16,7 +18,7 @@ import { ACTIVATION_FILE, activationBytes, activationFolder } from "./license-fi
 import type { LicenseText } from "./license-view.js";
 
 type Saved =
-  | { kind: "saved"; path: string; segments: readonly string[] }
+  | { kind: "saved"; path: string; segments: readonly string[]; usageIncluded: boolean }
   | { kind: "failed"; text: LicenseText };
 
 export interface LicenseActionsProps {
@@ -40,12 +42,19 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
   const { t } = useTranslation();
   const titleId = useId();
   const files = useOfficeFiles();
+  const about = useAbout();
   const queryClient = useQueryClient();
   // The answer names the organization and its INN: reset once saved, and
   // `gcTime: 0` drops it from the mutation cache at once.
-  const request = useOfficeMutation((api, token, _: null) => api.getActivationRequest(token), {
-    gcTime: 0,
-  });
+  const request = useOfficeMutation(
+    async (api, token, _: null) => {
+      const body = await api.getActivationRequest(token);
+      return activationWithUsage(body, api, token, about);
+    },
+    {
+      gcTime: 0,
+    },
+  );
   const saving = useRef(false);
   const [busy, setBusy] = useState(false);
   const opening = useRef(false);
@@ -66,7 +75,12 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
       const folder = await files.save(activationFolder(new Date()), [
         { name: ACTIVATION_FILE, bytes: activationBytes(body) },
       ]);
-      setSaved({ kind: "saved", path: folder.path, segments: folder.segments });
+      setSaved({
+        kind: "saved",
+        path: folder.path,
+        segments: folder.segments,
+        usageIncluded: body.supportToken !== undefined,
+      });
     } catch (error) {
       setSaved({
         kind: "failed",
@@ -126,6 +140,11 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
             }
           >
             {t("office.about.license.activation.saved", { path: saved.path })}
+          </Alert>
+        )}
+        {saved?.kind === "saved" && !saved.usageIncluded && (
+          <Alert tone="warn" role="presentation">
+            {t("office.about.license.activation.withoutUsage")}
           </Alert>
         )}
         {saved?.kind === "failed" && (

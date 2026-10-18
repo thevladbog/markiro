@@ -279,13 +279,18 @@ describe("the station's own production tables (migration 0006)", () => {
     );
     // `floor_restore_epochs` (migration `0009`) is a pairing's own
     // bookkeeping that a forget empties, tagged the same way.
+    // Installation generation metadata is retained per host, independently of pairing.
     expect(columns).toEqual(
-      [...DEVICE_TABLES, ...WAREHOUSE_TABLES, "floor_restore_epochs"]
+      [...DEVICE_TABLES, ...WAREHOUSE_TABLES, "floor_restore_epochs", "installation_dataset_epochs"]
         .sort()
-        .flatMap((tableName) => [
-          { tableName, columnName: "device_id", required: 1 },
-          { tableName, columnName: "host_id", required: 1 },
-        ]),
+        .flatMap((tableName) =>
+          tableName === "installation_dataset_epochs"
+            ? [{ tableName, columnName: "host_id", required: 1 }]
+            : [
+                { tableName, columnName: "device_id", required: 1 },
+                { tableName, columnName: "host_id", required: 1 },
+              ],
+        ),
     );
     const keys = await executor.query(
       "SELECT t.name AS name FROM pragma_table_list AS t, pragma_foreign_key_list(t.name) AS k " +

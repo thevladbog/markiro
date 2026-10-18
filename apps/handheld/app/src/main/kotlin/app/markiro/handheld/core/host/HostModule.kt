@@ -45,7 +45,7 @@ class DeviceHostTransport(
     private val active = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
     private fun client(pin: String): OkHttpClient = synchronized(this) {
-        cached?.takeIf { it.first == pin }?.second ?: HostHttpClient.pinned(pin) { key() }.also { cached = pin to it }
+        cached?.takeIf { it.first == pin }?.second ?: HostHttpClient.pinned(pin, datasetEpoch = recovery::processDatasetEpoch) { key() }.also { cached = pin to it }
     }
 
     /** Thrown as `IOException` so the transport reports "unreachable", never a crash inside the interceptor chain. */

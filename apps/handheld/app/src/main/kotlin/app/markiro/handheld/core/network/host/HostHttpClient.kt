@@ -36,12 +36,13 @@ internal object ObserveOnly : Interceptor {
 }
 
 /** The headers the host asks of a device: its protocol and its app's version, and the key as a bearer token. */
-private class DeviceHeaders(private val key: () -> String?) : Interceptor {
+private class DeviceHeaders(private val key: () -> String?, private val datasetEpoch: () -> String?) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val builder = chain.request().newBuilder()
             .header("x-markiro-protocol", HostCompat.PROTOCOL.toString())
             .header("x-markiro-app-version", BuildConfig.VERSION_NAME)
         key()?.let { builder.header("Authorization", "Bearer $it") }
+        datasetEpoch()?.let { builder.header("x-markiro-dataset-epoch", it) }
         return chain.proceed(builder.build())
     }
 }
@@ -70,11 +71,11 @@ object HostHttpClient {
      * only after the handshake went through [PinnedTrustManager]: it re-reads the peer's leaf and compares it with the pin, so the
      * single place that ignores the name is this one.
      */
-    fun pinned(pin: String, key: () -> String?): OkHttpClient = base()
+    fun pinned(pin: String, datasetEpoch: () -> String? = { null }, key: () -> String?): OkHttpClient = base()
         .trusting(PinnedTrustManager(pin)) { _, session ->
             runCatching { CertPin.matches(pin, session.peerCertificates.first().encoded) }.getOrDefault(false)
         }
-        .addInterceptor(DeviceHeaders(key))
+        .addInterceptor(DeviceHeaders(key, datasetEpoch))
         .build()
 
     /** The client for looking at a host that is not yet verified: no key, no code, certificate recorded in `observer`. */

@@ -165,6 +165,14 @@ function fixture(name: string): unknown {
 }
 
 describe("protocol schemas parse the shared Rust fixtures", () => {
+  it("accepts an additive dataset epoch while keeping legacy hello valid", () => {
+    const legacy = fixture("hello.json") as Record<string, unknown>;
+    const epoch = "8b134f46-5501-4ba2-931e-fde1e7251951";
+    expect(helloSchema.parse(legacy).datasetEpoch).toBeUndefined();
+    expect(helloSchema.parse(fixture("hello-replaced.json")).datasetEpoch).toBe(epoch);
+    expect(helloSchema.safeParse({ ...legacy, datasetEpoch: "invalid" }).success).toBe(false);
+  });
+
   it("hello", () => {
     expect(helloSchema.parse(fixture("hello.json"))).toMatchObject({
       product: "markiro-host",
@@ -3876,7 +3884,7 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
 
   it("is the version of the current hello fixtures, and the future one stays ahead", () => {
     expect(PROTOCOL_VERSION).toBe(6);
-    for (const name of ["hello.json", "hello-restored.json"]) {
+    for (const name of ["hello.json", "hello-restored.json", "hello-replaced.json"]) {
       expect((fixture(name) as Row).protocol, name).toBe(PROTOCOL_VERSION);
     }
     expect((fixture("hello-future.json") as Row).protocol as number).toBeGreaterThan(

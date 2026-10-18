@@ -375,9 +375,12 @@ test("the command line prepares the release and refuses what the function refuse
   ];
   const run = spawnSync(process.execPath, args, { encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);
+  // The CLI reads the real build version; the fixture's installer bytes stay
+  // fixed, so a version bump changes its output name but never this digest.
+  const buildVersion = await readStandaloneVersion();
   assert.equal(
     run.stdout,
-    `${INSTALLER} 07fb0332d384ea8d15c76c2c6a4e176e93345d9f403b1cd17e8b0dd2e4d1ac62 (NotSigned)\n`,
+    `markiro-standalone-${buildVersion}-windows-x86_64-setup.exe 07fb0332d384ea8d15c76c2c6a4e176e93345d9f403b1cd17e8b0dd2e4d1ac62 (NotSigned)\n`,
   );
   // The output directory is not empty any more: a second run is refused.
   assert.notEqual(spawnSync(process.execPath, args, { encoding: "utf8" }).status, 0);

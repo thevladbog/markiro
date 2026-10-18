@@ -349,6 +349,7 @@ async fn issue_as(admin: &Admin, id: &str, kind: DeviceKind, body: Value) -> (St
     let outcome = issue_block(
         State(admin.app.state.clone()),
         AuthDevice {
+            dataset_guard: None,
             id: id.to_owned(),
             kind,
             key_hash: None,

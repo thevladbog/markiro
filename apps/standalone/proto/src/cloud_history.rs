@@ -239,6 +239,8 @@ pub struct CloudHistoryImportRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHistoryImportState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_backup_file: Option<String>,
     pub batch_id: String,
     pub source: CloudImportSource,
     pub status: CloudHistoryStatus,

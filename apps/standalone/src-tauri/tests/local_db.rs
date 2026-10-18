@@ -81,6 +81,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_sign_in_failures",
             "floor_sscc_blocks",
             "floor_unit_labels",
+            "installation_dataset_epochs",
             "outbox",
             "ref_lines",
             "ref_operator_badges",
@@ -879,10 +880,12 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 /// not examine either: the table `ref_product_photos`, and `ref_products`, which got
 /// `photo_checksum` appended to its text, and migration `0018` (beta 3, the shift date on the
 /// station): `floor_shifts`, which got `planned_date` appended to its text.
+/// The independent native generation table of `0020` is pinned by the dataset tests.
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     rows.into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
         .filter(|row| row["tbl_name"] != "ref_product_photos")
+        .filter(|row| row["tbl_name"] != "installation_dataset_epochs")
         .map(|mut row| {
             if row["type"] == "table" && row["name"] == "ref_products" {
                 let old = before
@@ -1911,7 +1914,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
             .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
             .await
             .unwrap();
-        let expected = if *class == TableClass::Disposable {
+        let expected = if matches!(class, TableClass::Disposable | TableClass::Installation) {
             0
         } else {
             1
@@ -5619,4 +5622,185 @@ async fn removing_the_upgrade_copies_takes_every_pre_file_and_only_those() {
             .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn dataset_replacement_discards_old_facts_and_freezes_late_callbacks() {
+    let (dir, db) = open().await;
+    db.transaction(device_records()).await.unwrap();
+    db.transaction(vec![statement(
+        "INSERT INTO workstation_settings (key, value) VALUES ('printers', '{}')",
+        json!([]),
+    )])
+    .await
+    .unwrap();
+    assert!(!db.reconcile_dataset("host-one", None).await.unwrap());
+    assert!(db
+        .reconcile_dataset("host-one", Some("8b134f46-5501-4ba2-931e-fde1e7251951"))
+        .await
+        .unwrap());
+    for (table, class) in TABLE_CLASSES {
+        if *class == TableClass::DeviceData || *class == TableClass::Disposable {
+            let rows = db
+                .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
+                .await
+                .unwrap();
+            assert_eq!(rows[0]["n"], json!(0), "{table}");
+        }
+    }
+    assert_eq!(
+        db.query(
+            "SELECT value FROM workstation_settings WHERE key = 'printers'",
+            vec![]
+        )
+        .await
+        .unwrap()[0]["value"],
+        json!("{}")
+    );
+    assert!(
+        db.transaction(device_records()).await.is_err(),
+        "late JS cannot reinsert old facts"
+    );
+    assert_eq!(
+        db.dataset().epoch("host-one"),
+        None,
+        "process epoch stays old until restart"
+    );
+    let restarted = LocalDb::open(dir.path()).await.unwrap();
+    assert_eq!(
+        restarted.dataset().epoch("host-one"),
+        Some("8b134f46-5501-4ba2-931e-fde1e7251951")
+    );
+    assert!(!restarted
+        .reconcile_dataset("host-one", Some("8b134f46-5501-4ba2-931e-fde1e7251951"))
+        .await
+        .unwrap());
+    assert_eq!(restarted.dataset().epoch("another-host"), None);
+    restarted.transaction(device_records()).await.unwrap();
+}
+
+#[tokio::test]
+async fn dataset_replacement_failure_rolls_back_and_stays_frozen_until_retry() {
+    let (dir, db) = open().await;
+    db.transaction(device_records()).await.unwrap();
+    let mut connection = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("CREATE TRIGGER refuse_dataset_clear BEFORE DELETE ON floor_shifts BEGIN SELECT RAISE(ABORT, 'blocked'); END").execute(&mut connection).await.unwrap();
+    assert!(db
+        .reconcile_dataset("host-one", Some("new-epoch"))
+        .await
+        .is_err());
+    assert!(db.dataset().is_frozen());
+    assert!(
+        db.query("SELECT id FROM floor_shifts", vec![])
+            .await
+            .unwrap()
+            .len()
+            > 0
+    );
+    assert!(db
+        .query("SELECT epoch FROM installation_dataset_epochs", vec![])
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(db.transaction(device_records()).await.is_err());
+    sqlx::query("DROP TRIGGER refuse_dataset_clear")
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    assert!(db
+        .reconcile_dataset("host-one", Some("new-epoch"))
+        .await
+        .unwrap());
+    assert!(db.dataset().is_frozen());
+}
+
+#[tokio::test]
+async fn a_writer_waiting_before_dataset_replacement_cannot_repopulate_the_old_generation() {
+    use std::sync::Arc;
+    let (dir, db) = open().await;
+    let db = Arc::new(db);
+    let mut blocker = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut blocker)
+        .await
+        .unwrap();
+    let old = db.clone();
+    let writer = tokio::spawn(async move { old.transaction(device_records()).await });
+    // Yield the first write to the pool, with SQLite's writer held externally.
+    tokio::task::yield_now().await;
+    let replacement_db = db.clone();
+    let reset = tokio::spawn(async move {
+        replacement_db
+            .reconcile_dataset("host-one", Some("next-epoch"))
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !db.dataset().is_frozen() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    sqlx::query("COMMIT").execute(&mut blocker).await.unwrap();
+    assert!(writer.await.unwrap().is_err());
+    assert!(reset.await.unwrap().unwrap());
+    assert!(db
+        .query("SELECT id FROM floor_shifts", vec![])
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn restoring_a_host_without_a_dataset_epoch_also_discards_the_replaced_generation() {
+    let (dir, db) = open().await;
+    assert!(db
+        .reconcile_dataset("host-one", Some("replacement"))
+        .await
+        .unwrap());
+    let restarted = LocalDb::open(dir.path()).await.unwrap();
+    restarted.transaction(device_records()).await.unwrap();
+    assert!(restarted.reconcile_dataset("host-one", None).await.unwrap());
+    assert_eq!(
+        restarted.dataset().epoch("host-one"),
+        Some("replacement"),
+        "running process never adopts the restored generation"
+    );
+    assert!(restarted.transaction(device_records()).await.is_err());
+    let restored = LocalDb::open(dir.path()).await.unwrap();
+    assert_eq!(restored.dataset().epoch("host-one"), None);
+    assert!(restored
+        .query("SELECT id FROM floor_shifts", vec![])
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(!restored.reconcile_dataset("host-one", None).await.unwrap());
+    restored.transaction(device_records()).await.unwrap();
+}
+
+#[tokio::test]
+async fn webview_sql_cannot_advance_native_dataset_metadata() {
+    let (_dir, db) = open().await;
+    assert_eq!(
+        db.transaction(vec![statement(
+            "INSERT INTO installation_dataset_epochs (host_id, epoch) VALUES (?, ?)",
+            json!(["host-one", "untrusted"])
+        )])
+        .await,
+        Err(LocalDbError::InvalidStatement)
+    );
+    assert!(db
+        .query("SELECT epoch FROM installation_dataset_epochs", vec![])
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(!db.dataset().is_frozen());
 }

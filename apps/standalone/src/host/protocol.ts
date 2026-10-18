@@ -43,6 +43,7 @@ export const helloSchema = z
     initialized: z.boolean(),
     /** A new UUID at every restore of the host from a copy (plan РК); absent before the first. */
     restoreEpoch: z.uuid().optional(),
+    datasetEpoch: z.uuid().optional(),
   })
   .strict();
 export type Hello = z.infer<typeof helloSchema>;
@@ -144,6 +145,7 @@ export const hostStatusSchema = z
         "stream_ended",
         "host_too_old",
         "app_too_old",
+        "dataset_reset_failed",
       ])
       .nullable(),
     /** Grows with every status the shell publishes. */

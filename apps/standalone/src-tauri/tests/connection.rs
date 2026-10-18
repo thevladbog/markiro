@@ -431,3 +431,108 @@ async fn a_host_whose_hello_does_not_read_keeps_the_link_offline() {
     task.abort();
     host.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn failed_dataset_reconciliation_never_publishes_online_or_a_revision() {
+    struct Refuse(Recorder);
+    impl LinkEvents for Refuse {
+        fn status(&self, status: &HostStatus) {
+            self.0.status(status);
+        }
+        fn revision(&self, revision: HostRevision) {
+            self.0.revision(revision);
+        }
+        fn reconcile_dataset<'a>(
+            &'a self,
+            _host_id: &'a str,
+            _epoch: Option<&'a str>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), LinkError>> + Send + 'a>>
+        {
+            Box::pin(async { Err(LinkError::DatasetResetFailed) })
+        }
+    }
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path(), "127.0.0.1:0").await;
+    let device = paired(&host, app_dir.path()).await;
+    let (sender, mut heard) = mpsc::unbounded_channel();
+    let task = tokio::spawn(connection::supervise(
+        device.watch_link(),
+        Arc::new(Refuse(Recorder(sender))),
+        ConnectionState::default(),
+        FAST,
+    ));
+    assert_eq!(next_status(&mut heard).await.state, LinkState::Connecting);
+    let failed = next_status(&mut heard).await;
+    assert_eq!(failed.state, LinkState::Offline);
+    assert_eq!(failed.last_error, Some(LinkError::DatasetResetFailed));
+    task.abort();
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn replacement_between_hello_and_stream_is_reconciled_before_online() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct ReplaceAfterHello {
+        recorder: Recorder,
+        database: std::path::PathBuf,
+        calls: AtomicUsize,
+    }
+    const EPOCH: &str = "8b134f46-5501-4ba2-931e-fde1e7251951";
+    impl LinkEvents for ReplaceAfterHello {
+        fn status(&self, status: &HostStatus) {
+            self.recorder.status(status);
+        }
+        fn revision(&self, revision: HostRevision) {
+            self.recorder.revision(revision);
+        }
+        fn reconcile_dataset<'a>(
+            &'a self,
+            _host_id: &'a str,
+            epoch: Option<&'a str>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), LinkError>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    assert_eq!(epoch, None);
+                    let mut db = SqliteConnectOptions::new()
+                        .filename(&self.database)
+                        .connect()
+                        .await
+                        .unwrap();
+                    sqlx::query("UPDATE site SET dataset_epoch = ? WHERE id = 1")
+                        .bind(EPOCH)
+                        .execute(&mut db)
+                        .await
+                        .unwrap();
+                    db.close().await.unwrap();
+                    Ok(())
+                } else {
+                    assert_eq!(epoch, Some(EPOCH));
+                    Err(LinkError::DatasetResetFailed)
+                }
+            })
+        }
+    }
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path(), "127.0.0.1:0").await;
+    let device = paired(&host, app_dir.path()).await;
+    let (sender, mut heard) = mpsc::unbounded_channel();
+    let task = tokio::spawn(connection::supervise(
+        device.watch_link(),
+        Arc::new(ReplaceAfterHello {
+            recorder: Recorder(sender),
+            database: HostPaths::new(host_dir.path()).database_file(),
+            calls: AtomicUsize::new(0),
+        }),
+        ConnectionState::default(),
+        FAST,
+    ));
+    assert_eq!(next_status(&mut heard).await.state, LinkState::Connecting);
+    let failed = next_status(&mut heard).await;
+    assert_eq!(failed.state, LinkState::Offline);
+    assert_eq!(failed.last_error, Some(LinkError::DatasetResetFailed));
+    task.abort();
+    host.stop().await.unwrap();
+}

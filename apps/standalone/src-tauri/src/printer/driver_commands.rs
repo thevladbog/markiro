@@ -69,12 +69,28 @@ async fn observe_within(
 /// other word is `invalid_artifact` before the queue is opened.
 #[tauri::command]
 pub async fn print_windows_raster(
+    state: tauri::State<'_, crate::device::DeviceState>,
     queue: String,
     payload_base64: String,
     document_name: String,
     paper: Option<String>,
 ) -> Result<Outcome, String> {
+    let dataset = state.dataset();
+    if dataset.is_frozen() {
+        return Err("not_sent".to_owned());
+    }
     Ok(print_within(DRIVER_WAIT, move || {
+        if dataset.is_frozen() {
+            return Outcome::Failed {
+                ok: false,
+                error: driver::Failure {
+                    code: "not_sent",
+                    phase: "before_start",
+                    receipt: None,
+                    diagnostic: None,
+                },
+            };
+        }
         driver::print(queue, payload_base64, document_name, paper)
     })
     .await)

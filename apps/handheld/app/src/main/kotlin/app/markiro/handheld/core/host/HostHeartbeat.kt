@@ -27,7 +27,9 @@ class HostHeartbeat(
         if (config.get()?.backend != "host") return
         try {
             db.recovery.work {
-                monitor.heartbeat(api(), config) { blocks.registerKnown() }.onSuccess { observation ->
+                monitor.heartbeat(api(), config, beforeRestore = { hello ->
+                    if (db.recovery.observeHostDataset(hello.hostId, hello.datasetEpoch)) throw RecoveryBlocked()
+                }) { blocks.registerKnown() }.onSuccess { observation ->
                     if (observation.restored) meta.remove(MetaStore.BOX_REGISTRY_UNTIL)
                     // A failure of this read is not the link's: the shift list asks again.
                     runCatching { device() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
