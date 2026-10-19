@@ -170,8 +170,17 @@ postgresql://APP_ROLE:URL_ENCODED_PASSWORD@db.private:5432/markiro?sslmode=verif
 
 The HBA file requires peer authentication for local sockets, rejects all non-TLS
 TCP and allows TLS TCP only with SCRAM. The bootstrap `postgres` superuser uses
-its separate file password. Before restore/migration, provision the intended
-application/migration roles and grants through the approved operator procedure;
+its separate file password. `postgres/roles.mjs` prepares private SQL for explicit,
+one-time provisioning of a fresh `markiro` database: `markiro_migrator` owns
+`public` and `drizzle`; `markiro_app` receives business DML/sequence privileges,
+including default privileges for later migrations, and owns `pgboss_platform`.
+Both logins have NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION and
+NOBYPASSRLS, with no membership between them. Only migrator receives CREATE on
+the `markiro` database: Drizzle checks this privilege even for its precreated
+schema. This does not grant CREATEDB. Required `btree_gist` is installed by the
+bootstrap owner. Existing databases and provider ownership/ACL mapping require
+separate restore review; do not use fresh provisioning to rewrite existing roles.
+Before restore/migration, provision the approved role/owner mapping;
 do not use that bootstrap superuser in the production API URL. The image's init
 variables apply only to a new empty volume and do not rotate restored roles or
 passwords. Preserve role ownership, extensions and restore permissions. The server
@@ -182,16 +191,25 @@ users (API image uses uid 1000). Validate mount ownership on the Linux target;
 Mac bind-mount permission behavior is not that proof. Production CA/keys are
 supplied by the protected operator process; this package generates none.
 
+Compact and CI overlays explicitly set `PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA=true`
+for API only. This disables pg-boss schema creation, while retaining queue-local
+DDL, queue migrations and startup repair. A missing precreated schema fails;
+there is no broader-grant fallback. The strict optional flag defaults to false
+for existing portable/legacy configurations. These changes require a newly built
+and admitted API image; older published or locally derived images do not prove
+compatibility with this role policy.
+
 For a future approved operation, carry the validated protected runtime file into
 Compose explicitly. Reject ambient variable overrides; do not source the file,
 print expanded `compose config`, or pass secret values in CLI arguments. The
 following command prefix illustrates a clean environment and explicit composition
-from the repository root; `--env-file` supplies only Compose interpolation, while
-the services' raw `env_file` preserves literal credential dollars:
+from the repository root; `interpolation.env` contains only allowlisted non-secret
+values from host configuration, never runtime credentials. The services' separate
+raw `env_file` inputs preserve literal credential dollars:
 
 ```sh
-env -i PATH="$PATH" MARKIRO_PLATFORM_ENV_FILE=/absolute/protected/runtime.env docker compose \
-  --env-file /absolute/protected/runtime.env -p markiro-platform \
+env -i PATH="$PATH" docker compose \
+  --env-file /absolute/protected/interpolation.env -p markiro-platform \
   -f deploy/platform/compose.yml -f deploy/platform/compose.compact.yml config --quiet
 ```
 
@@ -381,3 +399,260 @@ credentials masked and out of arguments. The image archive is large; hash
 verification streams bytes. Use a fresh isolated Docker daemon for an independent
 `load` check. Publication is registry evidence only; it proves no target restore,
 Timeweb capacity, DNS/TLS, SMTP delivery or production installation.
+
+## Read-only release admission
+
+After the protected publisher has completed successfully, select its exact full
+lowercase source SHA, numeric run ID, attempt and release artifact ID. Admission
+requires Node 24+, Python 3 (standard-library `zipfile`), and Docker CLI with
+`manifest inspect --verbose`. Set `GH_TOKEN` through the operator's protected
+process environment with repository Actions read access. Do not put it in command
+arguments. Private GHCR images require existing local Docker authentication.
+Admission never logs in or changes that configuration.
+
+```bash
+node deploy/platform/admit-release.mjs SOURCE_SHA RUN_ID ATTEMPT ARTIFACT_ID OUTPUT_FILE
+```
+
+Replace each positional placeholder with the selected value. `OUTPUT_FILE` must
+not exist and its parent directory must already exist. The repository is fixed to
+`thevladbog/markiro`. The selected publisher must be a successful manual `main`
+run of `release-platform-images.yml`; both `build` and `publish` must have succeeded
+in that exact attempt. A newer rerun invalidates an older attempt selection.
+Admission also revalidates the exact successful main-push CI run and attempt
+recorded by the publisher. It rereads the current publisher after validating the
+selected attempt's jobs. After both registry checks and temporary cleanup, it
+rereads current publisher and CI provenance immediately before creating the
+record. These reads retain the same HTTP timeout and response-size bounds and
+must still match the selected successful attempts, source and repository checks.
+
+The verifier binds artifact metadata to the selected run, source, branch and
+repository IDs, checks its SHA256 against the downloaded ZIP, and reads exactly
+`platform-manifest.json` and `release-evidence.json`. ZIP archives are limited to
+1 MiB, each member to 256 KiB. Extra entries, links, directories, encryption,
+traversal, corrupt CRCs and truncated members fail admission. HTTP reads have
+30-second timeouts; JSON responses are capped at 2 MiB with at most 100 pages of
+100 jobs. Signed HTTPS download redirects receive no GitHub credentials and are
+limited to four blob requests. Temporary archives use a private directory and
+are removed before the output record is created.
+
+Registry confirmation is mandatory for both immutable digest references. The
+only Docker operation is `docker manifest inspect --verbose REFERENCE`, bounded
+to 60 seconds and 1 MiB of output. The parser uses the
+[Docker CLI 29.6.1 ImageManifest shape](https://github.com/docker/cli/blob/v29.6.1/cli/manifest/types/types.go):
+`Ref`, `Descriptor.digest`, `Descriptor.platform`, and exactly one of
+`SchemaV2Manifest` or `OCIManifest`. It requires Linux amd64, the exact requested
+repository/digest, and a config digest equal to the captured image ID. Verbose
+indexes are arrays and are rejected, including single-member indexes. The older
+top-level `Digest`/`Platform` example on Docker's documentation page is not the
+supported shape. A future CLI output change fails closed and requires review.
+
+Success exclusively creates a regular mode-0600 JSON file with exactly:
+
+- `version: 1`, `kind: "platform-release-admission"`, and
+  `repository: "thevladbog/markiro"`;
+- `manifest` and `verified`: the validated original platform manifest and verified
+  image evidence, including their original publisher and CI identities;
+- `artifact: { id, sha256 }`: canonical artifact ID and lowercase ZIP SHA256;
+- `publisher: { runId, runAttempt }` and `ci: { runId, runAttempt }`: canonical
+  decimal strings checked against GitHub;
+- `registry.api` and `registry.edge`, each exactly
+  `{ reference, imageId, platform: "linux/amd64" }`.
+
+This record captures point-in-time verification evidence. The final publisher
+and CI reads are sequential observations, not an atomic lock against a rerun
+starting afterward. A later rerun requires fresh admission, and any future host
+executor must recheck freshness and provenance at its own execution boundary.
+The record is not a signature, deployment authorization, restore proof, capacity
+acceptance or proof that any host is running the images.
+The verifier does not pull/load/push images or contact a deployment host. Running
+its tests does not satisfy live admission of an actual protected publication.
+
+Failures print only a phase (`input`, `output`, `publisher`, `artifact`, `archive`,
+`evidence`, `ci`, `registry` or `cleanup`) and produce no new success record.
+Existing output files are preserved. For `input`/`output`, correct the selection
+or choose a new output path. For GitHub/evidence/archive failures, inspect the
+selected protected publisher and its immutable artifacts through authenticated
+operator tooling; do not edit evidence or substitute another attempt's files.
+For `registry`, check existing registry access and the supported Docker output
+shape separately. Resolve the cause and rerun with the same explicit identities,
+or select a newly completed publication. Never treat a failed admission as
+permission to provision, deploy or change DNS.
+
+## Host safety library contract and pending gates
+
+As of 2026-10-19, protected
+[publisher run 39169553922, attempt 1](https://github.com/thevladbog/markiro/actions/runs/39169553922)
+published source/tooling `6fe44af838fc873cd06c7f0d52a4a5dae77dd7e5`, followed by
+independent read-only release admission. Admission tooling PR #733 remains open.
+These observations establish release provenance; the local safety tests below
+establish filesystem/state behavior. Neither establishes a running target.
+
+`deploy/platform/host/config.mjs` snapshots validated runtime values in private,
+immutable `candidates/<uuid>/runtime.env` files and hashes the captured bytes.
+`snapshotMigrationConfig` accepts a separate protected input with only
+`DATABASE_URL`, the same database/host/port/CA/verify-full TLS, and a distinct
+login. It exclusively publishes `migration.env` alongside the runtime snapshot.
+Combine runtime interpolation with `MARKIRO_PLATFORM_MIGRATION_ENV_FILE` from
+that returned path; runtime-only interpolation cannot construct a host child.
+API receives only runtime credentials; migrate receives only its database URL.
+The future host gate must bind both actual snapshot hashes: the existing state
+`configurationSha256` field does not yet implement that aggregate binding.
+Its separate child
+configuration permits only validated non-secret interpolation values and rejects
+ambient command-injection variables. The shared filesystem helpers require a
+pre-created canonical absolute root owned by the executing UID, mode 0700, with
+safe ancestors. Descendant directories are 0700 and regular single-link files
+are owned, mode 0600, and bounded to 1 MiB. Root/current-UID hostile processes
+are outside this private-root trust boundary.
+
+`withHostState(root, callback)` in `deploy/platform/host/state.mjs` exclusively
+creates and fsyncs `.deploy.lock` before reading `state.json`. The callback's
+store exposes only async `read`, `begin`, `enter`, `complete`, and `fail`.
+It rejects concurrent method calls, nested/second owners, escaped store methods,
+and drains already-started work before releasing its own lock. It never breaks
+an existing lock. State mutations increment a sequence and atomically replace
+`state.json` with file and parent-directory fsync before success. Read results
+and accepted input identities are independent copies. State/publication errors
+expose only `ERR_HOST_STATE`, a generic message and `durabilityUncertain`.
+Lock-retirement failures have a distinct sanitized `ERR_HOST_LOCK_RELEASE`,
+`durabilityUncertain: false`, `lockRetirementUncertain: true`.
+
+Each root represents one host/database/volume target. A candidate binds a
+canonical operation UUID, complete strict admission record, immutable executor
+SHA, configuration SHA256 and that target. Admission validation here checks
+syntax and cross-bindings; a future executor must separately establish fresh
+online provenance. Begin is allowed only for an empty root or a completed
+healthy candidate on the same target, retaining the prior full healthy record.
+Candidate UUIDs cannot reuse a retained operation. There is no resume, reset,
+rollback or recovery-clearing API.
+
+The enforced phases are admitted, images-verified, target-stopped,
+backup-verified, migrating, migrated, api-started, edge-started, healthy.
+Each phase must be entered before completion and the next phase. Backup
+completion requires exact archive/restore-evidence hashes, target and operation
+binding. This proof format does not verify archive bytes or a restore. Migration
+entry requires that bound record. `fail()` preserves the current phase and any
+backup while making it recovery-required; earlier healthy identity is retained
+as history and cannot replace the failed candidate. Unresolved records prohibit
+a new begin even after normal lock release or restart. A killed owner leaves its
+lock. Acquisition or journal-publication uncertainty latches for the owner and
+retains the held blocking lock even if the callback catches the error.
+
+Lock retirement starts only after the callback store expires and all writes
+are drained and durably synced. The owner unlinks only its own lock, then fsyncs
+the directory. A retirement-only failure returns the distinct error above;
+it does not make already-synced journal writes uncertain. A successor can
+acquire/fsync after unlink while the former owner awaits retirement fsync, so
+there is no permanent fence promise for retirement-only failure. The former
+owner never restores a lock or removes/changes a successor's lock/state. Its
+expired methods remain unusable. The error grants no mutation or recovery
+authority: a new `withHostState` acquisition must sync its own lock and read
+strict durable state, which still blocks unresolved candidates. A completed
+healthy candidate can hand off after a fresh synced acquisition. A crash may
+leave a conservative stale lock; do not automatically break it.
+
+Investigate retained state/locks
+through a separately reviewed operator recovery procedure; do not delete them
+to retry a failed deployment.
+
+Local `postgres/roles-ci.mjs --local-ci` exercises PG17 runtime migrations twice,
+actual pinned pg-boss lifecycle, business DML/default ACLs, role/DDL denial,
+Compose credential isolation, and both logins' CA/hostname/plaintext rejection.
+It requires a verified local Unix Docker endpoint, creates generated credentials
+and unique isolated resources, publishes no ports and cleans those resources.
+This synthetic proof does not establish existing-data restoration or target AMD64.
+
+The backup-byte/isolated-restore producer, aggregate configuration fingerprint
+and prepared-target validation library are implemented below. The host CLI, exact
+Compose orchestration, trusted live observation adapters, SSH transport and
+protected host workflow remain pending. Linux filesystem/crash rehearsal, actual target inventory,
+PostgreSQL TLS/roles, key continuity, off-host recovery, restored-data capacity,
+SMTP/S3/license checks and domain/TLS smoke remain separate acceptance gates.
+Pure local library tests invoke no Docker, SSH, GitHub or production service and do
+not authorize VM purchase, restore, deployment or DNS cutover.
+
+## Backup and prepared-target library boundary
+
+The [backup library](../../deploy/platform/backup/README.md) streams and hashes
+private immutable custom dumps, compares a real isolated PG17 restore with the
+source inventory under an exhaustive role mapping, and publishes completion only
+after its owned temporary resources are independently absent. Its worker image ID
+identifies the restore tooling; the prepared target PostgreSQL image digest is a
+separate field. The current local worker is Linux ARM64, not target-host AMD64.
+
+`verifyBackupGate({root,identity,backup,restoreEvidence})` rehashes actual archive,
+inventory and completed evidence bytes, validates the exact producer schema and
+operation/target/executor/snapshot/fence/runtime/provenance bindings, and returns
+only `{archiveSha256,restoreEvidenceSha256,target,operationId}` for the existing
+journal. Backup and restore descriptors are the exact Task 3 return values.
+Failed or incomplete restore reports, future reports and inconsistent cleanup
+inventories reject. A caller-created JSON document is not independent recovery
+proof: reviewed producers and the private cooperating-operator root are trusted.
+
+`fingerprintHostConfiguration({root,candidateId,runtimeSnapshot,migrationSnapshot})`
+rehashes both protected candidate files, including migration credentials. Its
+`configurationSha256` hashes canonical sorted-key JSON of exactly
+`{version:1,kind:'platform-host-configuration',candidateId,runtimeSha256,
+migrationSha256}`. The return value adds `configurationSha256` to those fields.
+Neither credential bytes nor connection URLs enter evidence. Runtime and migration
+snapshots must belong to the same candidate's `runtime.env` and `migration.env`.
+
+`await validatePreparedTarget(record, expected)` returns `{record,backupProof}`.
+It does not publish an acceptance file or authorize a deployment. The exact v1
+record has `version,kind,operationId,target,executorSha,provenance,
+configurationSha256,fence,observations`, kind `platform-prepared-target`, and fence
+`{fenceId,enforcementSha256,beganAt}`. Observations are exactly `postgres,tls,
+rolePolicy,restoredSnapshot,egress,keyContinuity,offHostRecovery`. Each has exactly
+`kind,producerId,executorSha,operationId,target,fenceId,configurationSha256,
+snapshotId,observedAt,value`. The first four are `measured`; the last three are
+`operator-attestation`, retaining an identified actor and durable reference.
+
+Trusted `expected` supplies root, host identity, configuration snapshot descriptors,
+backup/restore descriptors, role mapping, PostgreSQL image/architecture/OS/UID/GID,
+certificate fingerprint/SAN, role-policy hash, provenance, exact producer map,
+`maxAgeMs`, and independent `writerFence`/`workload` adapters. The policy hash must
+come from reviewed policy code and actual role observations, not a supplied
+unverified digest. Expected physical target identity, connection-to-target
+resolution and independent source-writer exclusion belong to those future trusted
+adapters. This library does not implement them.
+
+Measured values bind PG17, Linux, nonroot UID/GID, the distinct target image digest,
+certificate fingerprint/SAN/validity, role/configuration policy, and exact restored
+snapshot/archive/inventory/report/role-map/mapped-inventory/worker identity.
+The library automatically verifies archive/configuration bytes and mapped inventory
+hashes; matching supplied PostgreSQL/TLS records does not probe a physical host or
+perform a TLS handshake. Live-source acceptance requires planned Linux AMD64;
+local-synthetic ARM64 remains explicitly synthetic and cannot satisfy live-source.
+
+Every observation follows the same fence's beginning, is not future-dated, and
+is within an explicit positive `maxAgeMs` of at most 24 hours. The independent
+fresh fence and owned-workload observations must be at most 30 seconds old.
+The workload adapter supplies exact inspected container ID/name, operation owner
+label, target, producer, executor and `exited` state. Running, unknown and absent
+containers reject; this version has no prior-owned-ID absence protocol. Fence
+observations preserve Task 3 fields with boundary `prepared-target` plus producer
+and executor, and must still report the same held enforcement identity.
+
+Operator attestations explicitly cover isolated SMTP/S3, held retained mail and
+report jobs, disabled legacy queues and retention actions; decryption and signing
+key continuity against a key-manifest hash; and a bound off-host archive reference,
+recovery-test reference and independent key availability. Syntax or local tests do
+not establish these human/operational facts. No live acceptance file is generated.
+
+Call the validator inside `withHostState` immediately before every protected journal
+mutation or migration/start/recovery-sensitive action. The return is not a durable
+authorization token. The low-level journal still accepts its original proof shape;
+trusted callers can bypass the library, so enforcement awaits the future command
+orchestrator. A timed-out Docker CLI can leave the daemon workload running. Stop
+and independently inspect only the exact owned container, then recheck the fence.
+Even successful checks never clear `recovery-required`: there is no resume,
+automatic rollback or recovery-clearing API.
+
+The local `backup-ci.mjs --local-ci` includes actual archive/restore plus a uniquely
+owned networkless workload: bounded Docker wait times out, independent inspect
+finds it running, and integrated validation prevents journal advancement. Only
+actual owned stop/inspect plus a held fence admits the gate. All operator records
+in this harness say synthetic-only; they are not production keys, off-host recovery
+or SMTP/S3 acceptance. See the [durable verification record](../verification/2026-10-19-platform-backup-preparation.md)
+for exact commits, tests and remaining gates.

@@ -410,6 +410,10 @@ test("platform preparation builds its own edge and runs only after legacy cleanu
   const build = stepByName(job, "Build local platform-only edge preparation image");
   const stack = stepByName(job, "Verify isolated platform-only preparation stack");
   const cleanup = stepByName(job, "Remove production-bundle containers and volumes");
+  const roles = stepByName(job, "Verify isolated PostgreSQL roles and TLS");
+  assert.match(roles.run, /pnpm --filter @markiro\/db build/);
+  assert.match(roles.run, /node deploy\/platform\/postgres\/roles-ci\.mjs --local-ci/);
+  assert.ok(job.steps.indexOf(roles) < job.steps.indexOf(stack));
   assert.equal(contracts.run, "node --test deploy/platform/test/*.test.mjs");
   assert.match(build.run, /deploy\/platform\/edge\.Dockerfile/u);
   assert.match(build.run, /markiro-platform-edge/u);
@@ -419,4 +423,14 @@ test("platform preparation builds its own edge and runs only after legacy cleanu
   assert.ok(job.steps.indexOf(stack) > job.steps.indexOf(cleanup));
   assert.ok(job.steps.indexOf(build) > job.steps.indexOf(contracts));
   assert.equal(stepByName(job, "Preserve platform preparation evidence").if, "always()");
+});
+
+test("production-bundle owns the real fenced backup and isolated restore gate", () => {
+  const job = workflow.jobs["production-bundle"];
+  const backup = stepByName(job, "Verify isolated PostgreSQL backup and restore");
+  const roles = stepByName(job, "Verify isolated PostgreSQL roles and TLS");
+  const stack = stepByName(job, "Verify isolated platform-only preparation stack");
+  assert.equal(backup.run, "node deploy/platform/backup/backup-ci.mjs --local-ci");
+  assert.ok(job.steps.indexOf(backup) > job.steps.indexOf(roles));
+  assert.ok(job.steps.indexOf(backup) < job.steps.indexOf(stack));
 });

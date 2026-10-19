@@ -1236,6 +1236,10 @@ export class JobsModule {
         ],
         providers: [
           { provide: PG_CONNECTION_STRING, useValue: connectionString },
+          {
+            provide: "PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA",
+            useValue: env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA,
+          },
           { provide: PgBossService, useClass: PlatformJobsService },
           PlatformReportRunnerService,
           PlatformReportSourceService,

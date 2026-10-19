@@ -188,3 +188,15 @@ describe("standalone support keys environment (plan ДИАГ А1)", () => {
     expect(message).not.toContain("BROKEN");
   });
 });
+
+describe("preprovisioned platform queue schema", () => {
+  it.each([undefined, "false", "true"])("requires explicit opt-in: %s", (value) => {
+    const env = loadEnv({ ...requiredEnv, PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: value });
+    expect(env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA).toBe(value === "true");
+  });
+  it.each(["", "1", "TRUE", "yes"])("rejects ambiguous flag: %s", (value) => {
+    expect(() =>
+      loadEnv({ ...requiredEnv, PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: value }),
+    ).toThrow();
+  });
+});

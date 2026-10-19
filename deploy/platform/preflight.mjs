@@ -98,6 +98,11 @@ function exactHttpsOrigin(value, key) {
 }
 
 export function validateConfig(env, manifest) {
+  if (
+    env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA !== undefined &&
+    !["true", "false"].includes(env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA)
+  )
+    fail("PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA");
   for (const key of required) if (typeof env[key] !== "string" || !env[key].trim()) fail(key);
   const release = parsePlatformManifest(JSON.stringify(manifest), manifest?.workflowRunId);
   for (const key of ["SERVER_PROFILE", "VITE_SERVER_PROFILE"])
