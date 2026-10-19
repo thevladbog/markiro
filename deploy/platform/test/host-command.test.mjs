@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { writeFile, chmod, symlink, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { writeFile, chmod, symlink, mkdir, copyFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { privateFixture } from "./host-fixtures.mjs";
 import { operationFixture } from "./host-command-fixture.mjs";
 
@@ -30,6 +33,27 @@ test("source allowlist includes transitive trusted files and excludes CI overlay
   assert.ok(HOST_BUNDLE_FILES.includes("deploy/platform/compose.compact.yml"));
   assert.ok(!HOST_BUNDLE_FILES.includes("deploy/platform/compose.ci.yml"));
   assert.equal(new Set(HOST_BUNDLE_FILES).size, HOST_BUNDLE_FILES.length);
+});
+
+test("isolated host bundle includes every transitive runtime import", async (t) => {
+  const { HOST_BUNDLE_FILES } = await import("../host/command.mjs");
+  const f = await privateFixture(t);
+  const sourceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  for (const relative of HOST_BUNDLE_FILES) {
+    const target = join(f.root, relative);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    await copyFile(join(sourceRoot, relative), target);
+  }
+  const moduleUrl = pathToFileURL(join(f.root, "deploy/platform/host/command.mjs"));
+  await promisify(execFile)(
+    process.execPath,
+    ["--input-type=module", "-e", `await import(${JSON.stringify(moduleUrl.href)})`],
+    {
+      cwd: f.root,
+      env: { PATH: "/usr/bin:/bin" },
+      timeout: 10000,
+    },
+  );
 });
 
 test("strict operation loads only byte-bound installed files, snapshots and real backup descriptors", async (t) => {

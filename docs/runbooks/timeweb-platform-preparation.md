@@ -902,7 +902,7 @@ establish those settings.
 The runner starts Node 24 with an empty environment **before** module loading.
 Bash's builtin `printf` carries credentials and dispatch fields as NUL-delimited
 stdin; no secret is an OS argument. The transport creates private temporary key
-and known-host files, verifies a clean exact checkout, and compares all 31 actual
+and known-host files, verifies a clean exact checkout, and compares all 32 actual
 bundle files to immutable Git blobs. Existing admission validates the selected
 publisher, artifact bytes, release evidence, product CI and registry manifests.
 Only after all local gates does SSH begin. Private GHCR
@@ -952,8 +952,8 @@ reviewed setup/change window, provision this exact layout:
 All code/configuration/receipt files are regular, single-link, owner0600 with
 private 0700 parents and non-symlink ancestors. The sole policy-file exception is
 `deploy/platform/postgres/pg_hba.conf`, exactly0644 under those private parents.
-For the bootstrap, install these **36 files**, preserving relative layout, from
-an independently authenticated reviewed Git checkout: all 31 `HOST_BUNDLE_FILES`
+For the bootstrap, install these **37 files**, preserving relative layout, from
+an independently authenticated reviewed Git checkout: all 32 `HOST_BUNDLE_FILES`
 plus `deploy/platform/transport.mjs`, `deploy/platform/admit-release.mjs`,
 `deploy/platform/admission-archive.mjs`, `deploy/platform/admission-process.mjs`
 and `deploy/platform/admission-registry.mjs`. This is the current complete static
