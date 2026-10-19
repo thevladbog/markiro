@@ -1,9 +1,32 @@
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { setTimeout as delay } from "node:timers/promises";
 const require = createRequire(
   new URL("../../tools/production-browser/package.json", import.meta.url),
 );
+
+// Docker bridge changes can invalidate Chromium's initial network snapshot.
+// Retry only this explicit transport error on local, idempotent navigation;
+// never retry assertions, authentication, HTTP errors or generic timeouts.
+export async function navigateLocalPage(page, url, wait = delay) {
+  const target = new URL(url);
+  assert.equal(target.protocol, "https:");
+  assert.ok(["saas-admin.localhost", "landing.localhost"].includes(target.hostname));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await page.goto(url);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !error.message.includes("net::ERR_NETWORK_CHANGED") ||
+        attempt === 2
+      )
+        throw error;
+      await wait(1000);
+    }
+  }
+}
 
 export async function browserSmoke(port, evidenceDir, options = {}) {
   const { chromium } = options.chromium ? options : require("@playwright/test");
@@ -32,7 +55,7 @@ export async function browserSmoke(port, evidenceDir, options = {}) {
       if (response.status() >= 400 && failedResponses.length < 40)
         failedResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
     });
-    await page.goto(`https://saas-admin.localhost:${port}/login`);
+    await navigateLocalPage(page, `https://saas-admin.localhost:${port}/login`);
     await page.locator('input[type="email"]').waitFor();
     await page.locator('input[type="password"]').waitFor();
     await page.screenshot({ path: `${evidenceDir}/platform-login.png`, fullPage: true });
@@ -43,7 +66,7 @@ export async function browserSmoke(port, evidenceDir, options = {}) {
     );
     await page.locator('button[type="submit"]').click();
     assert.equal((await response).status(), 401);
-    await page.goto(`https://landing.localhost:${port}/`);
+    await navigateLocalPage(page, `https://landing.localhost:${port}/`);
     await page.locator("h1").waitFor();
     await page.screenshot({ path: `${evidenceDir}/platform-landing.png`, fullPage: true });
     assert.deepEqual(errors, [], "browser JavaScript errors");

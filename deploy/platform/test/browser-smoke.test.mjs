@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { browserSmoke } from "../browser-smoke.mjs";
+import { browserSmoke, navigateLocalPage } from "../browser-smoke.mjs";
 
 for (const screenshotFails of [false, true]) {
   test(`browser failure preserves diagnostics and original error: screenshotFails=${screenshotFails}`, async (t) => {
@@ -64,3 +64,63 @@ for (const screenshotFails of [false, true]) {
     assert.equal(closed, true);
   });
 }
+
+test("initial navigation retries only an explicit network-change failure", async () => {
+  let calls = 0;
+  let delays = 0;
+  const response = { status: () => 200 };
+  const page = {
+    goto: async () => {
+      if (++calls === 1) throw new Error("page.goto: net::ERR_NETWORK_CHANGED");
+      return response;
+    },
+  };
+  assert.equal(
+    await navigateLocalPage(page, "https://saas-admin.localhost:1234/login", async () => {
+      delays++;
+    }),
+    response,
+  );
+  assert.equal(calls, 2);
+  assert.equal(delays, 1);
+});
+
+for (const message of [
+  "net::ERR_NETWORK_CHANGED",
+  "net::ERR_CONNECTION_REFUSED",
+  "Timeout 30000ms exceeded.",
+]) {
+  test(`navigation preserves failure and bounds attempts: ${message}`, async () => {
+    const error = new Error(message);
+    let calls = 0;
+    const page = {
+      goto: async () => {
+        calls++;
+        throw error;
+      },
+    };
+    await assert.rejects(
+      navigateLocalPage(page, "https://saas-admin.localhost:1234/login", async () => {}),
+      (e) => e === error,
+    );
+    assert.equal(calls, message === "net::ERR_NETWORK_CHANGED" ? 3 : 1);
+  });
+}
+
+test("HTTP failure responses are returned unchanged and never retried", async () => {
+  let calls = 0;
+  const response = { status: () => 503 };
+  assert.equal(
+    await navigateLocalPage(
+      {
+        goto: async () => {
+          calls++;
+          return response;
+        },
+      },
+      "https://saas-admin.localhost:1234/login",
+    ),
+    response,
+  );
+  assert.equal(calls, 1);
+});
