@@ -43,6 +43,11 @@ for (const [name, mutate] of Object.entries({
   "pre-backup queue review rejects": (f) => {
     f.record.observations.egress.value.review.observedAt = "2020-01-01T00:00:00Z";
   },
+  "review one millisecond after its enclosing observation rejects": (f) => {
+    f.record.observations.egress.value.review.observedAt = new Date(
+      Date.parse(f.record.observations.egress.observedAt) + 1,
+    ).toISOString();
+  },
   "source hold cannot expire before authorization": (f) => {
     f.record.observations.egress.value.sourceHold.expiresAt = new Date(
       Date.now() + 1000,
