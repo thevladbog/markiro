@@ -96,8 +96,10 @@ The plan covers process safety, separate protected credentials, target role poli
 
 Self-review: all four tasks have explicit RED/GREEN and review boundaries; the five review risks are assigned to tests. Snapshot fingerprints include migration credentials without exposing them. Role-policy acceptance exercises pg-boss's real startup requirements. Archive hashes are verified from bytes rather than accepted from a caller. Existing production backups and source remain untouched.
 
-Status: Tasks 1–3 implemented and independently reviewed. Task 4 implementation, local integrated timeout and automated gates are complete;
-commit and independent review are tracked in the [verification record](../../verification/2026-10-19-platform-backup-preparation.md).
+Status: Tasks 1–3 implemented and independently reviewed. Task 4 implementation,
+local integrated timeout and automated gates are complete and committed as
+`3cf3e356b919eb14472ef93eb9c3ba49f228dd73`; the exact committed harness rerun passed.
+Independent review is tracked in the [verification record](../../verification/2026-10-19-platform-backup-preparation.md).
 Full API integration remains incomplete because its isolated DB/auth environment
 was absent; the focused API, type/lint/build and actual role harness are separate
 passing evidence. No server, merge or DNS changes were performed.

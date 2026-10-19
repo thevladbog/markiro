@@ -9,12 +9,12 @@ DNS or production-data mutation. Source and existing immutable backups remain in
 
 ## Implemented evidence
 
-| Slice                            | Committed code                                                     | Verification                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Bounded process groups           | `f5431cc85`                                                        | 13 focused tests; 162 platform tests at that revision. Exact committed Linux ARM64 Node 24.18.0 run: 13/13. CLI process death is explicitly not daemon workload death.                                                                                                                                                                                                                                             |
-| Separate credentials and roles   | `c8caed550`, correction `3ae70d98e`                                | 171 platform, 591 production contracts, 62 CI-policy, 30 focused API; API typecheck/lint/build and formatting passed. Hardened actual PG17.11 ARM64 probe passed: full migrations twice, pg-boss12.27.0 lifecycle, exact privileges/default grants, both-role TLS positive/negative checks, private stdin provisioning. Correction-focused 9/9.                                                                    |
-| Archive and real restore         | `eca1cd9bc`, correction `e54fe3665f683aee9f494f2ff935d0024df1f137` | 210 platform, 36 focused backup, scoped lint/full formatting passed. Exact committed run28 passed at PG17.11 Linux ARM64, image `sha256:036e8de959a93c20c4fcc5cf37526e40fa2bb0e83844f7b32fe6cddd0abc3a95`. Actual migrations, pg-boss, custom snapshot dump, exact mapped restore, executable integrity negatives, reverse-order delegated ACL chain, corrupt/partial restore failures and owned cleanup verified. |
-| Prepared target and journal gate | Task 4 under review                                                | RED: two expected missing-module failures. GREEN: 54 focused tests; 264 platform, 591 production contracts, 63 CI-policy. Final results are recorded below.                                                                                                                                                                                                                                                        |
+| Slice                            | Committed code                                                          | Verification                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bounded process groups           | `f5431cc85`                                                             | 13 focused tests; 162 platform tests at that revision. Exact committed Linux ARM64 Node 24.18.0 run: 13/13. CLI process death is explicitly not daemon workload death.                                                                                                                                                                                                                                             |
+| Separate credentials and roles   | `c8caed550`, correction `3ae70d98e`                                     | 171 platform, 591 production contracts, 62 CI-policy, 30 focused API; API typecheck/lint/build and formatting passed. Hardened actual PG17.11 ARM64 probe passed: full migrations twice, pg-boss12.27.0 lifecycle, exact privileges/default grants, both-role TLS positive/negative checks, private stdin provisioning. Correction-focused 9/9.                                                                    |
+| Archive and real restore         | `eca1cd9bc`, correction `e54fe3665f683aee9f494f2ff935d0024df1f137`      | 210 platform, 36 focused backup, scoped lint/full formatting passed. Exact committed run28 passed at PG17.11 Linux ARM64, image `sha256:036e8de959a93c20c4fcc5cf37526e40fa2bb0e83844f7b32fe6cddd0abc3a95`. Actual migrations, pg-boss, custom snapshot dump, exact mapped restore, executable integrity negatives, reverse-order delegated ACL chain, corrupt/partial restore failures and owned cleanup verified. |
+| Prepared target and journal gate | `3cf3e356b919eb14472ef93eb9c3ba49f228dd73` (independent review pending) | RED: two expected missing-module failures. GREEN: 54 focused tests; 264 platform, 591 production contracts, 63 CI-policy. Final results are recorded below.                                                                                                                                                                                                                                                        |
 
 Current-schema inventory is 1,015,851 bytes: 32,725 bytes remain under the unchanged
 1,048,576-byte private metadata limit. Schema growth beyond it fails closed. Run28
@@ -29,8 +29,31 @@ This was a dirty-tree development run; its recorded HEAD is not an exact source
 attestation. It proved CLI timeout with the workload still active, independent
 owned stop/inspection, released-fence rejection and terminal recovery preservation.
 Scoped ESLint, full repository formatting and git diff --check passed.
-The exact committed rerun is pending below. Independent review and publication
-remain controller-owned steps; this record does not accept them in advance.
+Exact committed run2 passed at `3cf3e356b919eb14472ef93eb9c3ba49f228dd73`,
+PG17.11 (Debian 17.11-1.pgdg12+2), Linux ARM64, worker image
+`sha256:bbba17e9c5c9b14f858aef3657119e94ee2e12ff8f4c25af3e39b8448ea01493`.
+It repeated actual custom dump/isolated restore, mapped ACL/executable fidelity,
+corrupt archive rejection, actual partial restore failure/cleanup, and the complete
+CLI/workload/fence/journal timeout sequence. Archive 1,286,208 bytes, inventory
+1,015,851 bytes, two intentional NOT VALID constraints preserved. Current-run
+owned resource cleanup passed. No target AMD64 or live acceptance follows.
+
+Reproduction uses Node24 and repository Corepack pnpm, without installing:
+
+```sh
+node --test deploy/platform/test/backup-gate.test.mjs deploy/platform/test/prepared-target.test.mjs
+node --test deploy/platform/test/*.test.mjs
+corepack pnpm test:production-bundle:contract
+corepack pnpm test:ci-policy
+corepack pnpm format:check
+node deploy/platform/backup/backup-ci.mjs --local-ci
+```
+
+Final outputs: focused54/54, platform264/264, production591/591, CI-policy63/63,
+all without skips; scoped ESLint, full formatting and diff checks passed. The
+Task4 source is frozen at the exact tested commit; subsequent evidence updates are
+documentation only. Independent review/publication remain controller-owned and
+are not accepted in advance.
 
 ## Decisions and consequences
 
@@ -91,6 +114,20 @@ remain controller-owned steps; this record does not accept them in advance.
     deployment CLI or generic remote orchestrator. Cost: future orchestration must
     call the gate immediately before every protected action; low-level journal
     shape validation does not enforce that integration itself.
+
+14. Reuse the existing linked worktree and scoped installed dependencies instead
+    of creating another checkout or installation, preserving disk and unrelated
+    work. Cost if unsuitable: a later isolated rebuild, not a lockfile/policy bypass.
+15. The generic runner accepts only explicit plain own-string environments and
+    never inherits ambient variables; Docker callers retain hostChildEnvironment.
+    TERM and KILL/reap bounds are 2,000 ms each; confirmation needs child close
+    plus process-group ESRCH. Cost: a stricter caller-specific wrapper if needed;
+    these checks say nothing about a daemon-owned container's lifetime.
+16. Keep runtime snapshot's interpolation subset, but require combined validated
+    migration-snapshot interpolation at hostChildEnvironment; Task4 hashes both.
+    Split roles-ci local resource lifecycle from roles-probe DB assertions and
+    update Compose/CI consumers together. Cost: future caller adaptation or small
+    helper consolidation before the host CLI, without weakening credential isolation.
 
 ## Limits and outstanding acceptance
 
