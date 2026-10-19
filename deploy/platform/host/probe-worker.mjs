@@ -1,11 +1,14 @@
 /** Fixed one-shot worker; only read-only SQL. No arguments, SQL, code or env supplied by JSON. */
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createHash, X509Certificate } from "node:crypto";
 import { checkServerIdentity } from "node:tls";
 import { pathToFileURL } from "node:url";
 
-const require = createRequire("/app/node_modules/@markiro/db/package.json");
+export function loadPostgresClient(packagePath = "/app/node_modules/@markiro/db/package.json") {
+  return createRequire(realpathSync(packagePath))("pg").Client;
+}
 const ensure = (ok) => {
   if (!ok) throw new Error("PostgreSQL host probe rejected.");
 };
@@ -163,7 +166,7 @@ export async function probePostgres({ Client, input, ca }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     ensure(process.argv.length === 2);
-    const { Client } = require("pg");
+    const Client = loadPostgresClient();
     const result = await probePostgres({
       Client,
       input: JSON.parse(await readFile("/input/connections.json", "utf8")),

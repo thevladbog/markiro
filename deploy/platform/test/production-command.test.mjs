@@ -12,8 +12,9 @@ async function fixture(t) {
   const f = await commandIntegrationFixture(t),
     record = f.record.deployment.preparedTarget;
   record.version = 2;
-  record.observations.egress.observedAt = new Date().toISOString();
-  record.observations.egress.value = productionAuthorization(record, f);
+  const observedAt = Date.now();
+  record.observations.egress.observedAt = new Date(observedAt).toISOString();
+  record.observations.egress.value = productionAuthorization(record, f, observedAt);
   await f.publish();
   const path = join(f.root, "daemon.json"),
     daemon = JSON.parse(await readFile(path));

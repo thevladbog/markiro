@@ -172,6 +172,9 @@ for (const mode of [
   "unreaped stop",
   "foreign image",
   "foreign user",
+  "foreign network mode",
+  "foreign created network",
+  "missing started network",
   "public worker",
 ])
   test(`one-shot probe lifecycle ${mode} never treats CLI termination as daemon cleanup`, async (t) => {
@@ -209,6 +212,8 @@ for (const mode of [
             Cmd: ["/probe/worker.mjs"],
           },
           HostConfig: {
+            NetworkMode:
+              mode === "foreign network mode" ? "9".repeat(64) : policy.networks.database.id,
             ReadonlyRootfs: true,
             Privileged: false,
             CapDrop: ["ALL"],
@@ -217,7 +222,9 @@ for (const mode of [
           },
           NetworkSettings: {
             Networks: {
-              [policy.networks.database.name]: { NetworkID: policy.networks.database.id },
+              [policy.networks.database.name]: {
+                NetworkID: mode === "foreign created network" ? "9".repeat(64) : "",
+              },
             },
           },
           Mounts: mounts.map((m) => ({
@@ -230,8 +237,10 @@ for (const mode of [
         return { stdout: container.Id };
       }
       if (args[0] === "start") {
+        container.NetworkSettings.Networks[policy.networks.database.name].NetworkID =
+          mode === "missing started network" ? "" : policy.networks.database.id;
         container.State = { Status: "running", Running: true, ExitCode: 0 };
-        if (mode !== "success")
+        if (!["success", "missing started network"].includes(mode))
           throw Object.assign(new Error("secret fixture output"), {
             terminationConfirmed: mode !== "unreaped start",
           });

@@ -174,9 +174,13 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
     same(c.Config.Cmd, ["/probe/worker.mjs"]);
     same(c.HostConfig.PortBindings ?? {}, {});
     same(Object.keys(c.NetworkSettings.Networks), [policy.networks.database.name]);
+    ensure(c.HostConfig.NetworkMode === policy.networks.database.id);
+    const networkId = c.NetworkSettings.Networks[policy.networks.database.name].NetworkID;
+    // Docker allocates the endpoint only on start; the requested network is
+    // already pinned in HostConfig. A started container must expose its ID.
     ensure(
-      c.NetworkSettings.Networks[policy.networks.database.name].NetworkID ===
-        policy.networks.database.id,
+      networkId === policy.networks.database.id ||
+        (c.State.Status === "created" && !c.State.Running && networkId === ""),
     );
     same(c.Mounts.map((m) => m.Destination).sort(), Object.keys(mounts).sort());
     for (const m of c.Mounts)

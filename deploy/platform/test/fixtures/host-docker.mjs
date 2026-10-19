@@ -81,13 +81,14 @@ else if (args[0] === "create") {
     },
     State: { Status: "created", Running: false },
     HostConfig: {
+      NetworkMode: network.Id,
       ReadonlyRootfs: args.includes("--read-only"),
       Privileged: false,
       CapDrop: [value("--cap-drop")],
       SecurityOpt: [value("--security-opt")],
       PortBindings: {},
     },
-    NetworkSettings: { Networks: { [network.Name]: { NetworkID: network.Id } } },
+    NetworkSettings: { Networks: { [network.Name]: { NetworkID: "" } } },
     Mounts: mounts.map((m) => ({
       Type: m.type,
       Source: m.source,
@@ -98,6 +99,9 @@ else if (args[0] === "create") {
   changed = true;
 } else if (args[0] === "start") {
   const c = select(args.at(-1));
+  c.NetworkSettings.Networks[
+    state.networks.find((n) => n.Id === c.HostConfig.NetworkMode).Name
+  ].NetworkID = c.HostConfig.NetworkMode;
   c.State = { Status: "exited", ExitCode: 0, Running: false };
   changed = true;
   output(state.probeResult);
