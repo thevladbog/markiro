@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { load } from "js-yaml";
 import { preparedFixture } from "./prepared-target-fixture.mjs";
 export async function dockerFixture(t, supplied = {}) {
   const { createHostObservers, postgresCommand } = await import("../host/observe.mjs");
@@ -7,6 +8,7 @@ export async function dockerFixture(t, supplied = {}) {
   const { fileURLToPath } = await import("node:url");
   const { runHostProcess } = await import("../host/process.mjs");
   const f = supplied.fixture ?? (await preparedFixture(t));
+  const compact = load(await readFile(new URL("../compose.compact.yml", import.meta.url), "utf8"));
   const project = "markiro-platform",
     pgid = "3".repeat(64),
     imageId = `sha256:${"f".repeat(64)}`;
@@ -88,7 +90,7 @@ export async function dockerFixture(t, supplied = {}) {
             "POSTGRES_DB=markiro",
             "POSTGRES_USER=postgres",
             "POSTGRES_PASSWORD_FILE=/run/markiro-postgres/password",
-            "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=peer",
+            `POSTGRES_INITDB_ARGS=${compact.services.postgres.environment.POSTGRES_INITDB_ARGS}`,
           ],
         },
         HostConfig: {
