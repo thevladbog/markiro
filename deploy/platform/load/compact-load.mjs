@@ -29,6 +29,7 @@ import { request as httpsRequest } from "node:https";
 import { createRequire } from "node:module";
 import { deflateRawSync, gzipSync } from "node:zlib";
 import { roleProvisioningSql } from "../postgres/roles.mjs";
+import { provisionRoles } from "../postgres/provision.mjs";
 import { localDockerEndpoint, summarize, runBoundedPhase, assess, hasOomEvent } from "./core.mjs";
 const argv = process.argv.slice(2);
 assert.ok(
@@ -634,34 +635,14 @@ try {
   }
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "postgres", "mailpit", "seaweedfs");
   if (injected) throw new Error("Injected failure after task-owned services started");
-  await compose("cp", rolesFile, "postgres:/tmp/roles.sql");
-  await compose(
-    "exec",
-    "-T",
-    "--user",
-    "0",
-    "postgres",
-    "chown",
-    "postgres:postgres",
-    "/tmp/roles.sql",
-  );
-  await compose(
-    "exec",
-    "-T",
-    "--user",
-    "postgres",
-    "postgres",
-    "psql",
-    "-X",
-    "-v",
-    "ON_ERROR_STOP=1",
-    "-U",
-    "postgres",
-    "-d",
-    "markiro",
-    "-f",
-    "/tmp/roles.sql",
-  );
+  await provisionRoles({
+    prefix: composeArgs,
+    container: "postgres",
+    env: environment,
+    sqlFile: rolesFile,
+    signal: interruption.signal,
+    compose: true,
+  });
   await compose("run", "--rm", "migrate");
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "--no-deps", "api", "edge");
   edgeCa = (

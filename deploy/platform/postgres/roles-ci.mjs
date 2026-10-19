@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { roleProvisioningSql } from "./roles.mjs";
+import { provisionRoles } from "./provision.mjs";
 
 if (process.argv.slice(2).join() !== "--local-ci")
   throw new Error("Explicit --local-ci required; remote targets are unsupported");
@@ -252,6 +253,11 @@ try {
     "/fixture/password",
     "/fixture/roles.sql",
   );
+  // Some local Docker-compatible daemons reject tmpfs uid/gid options.
+  // Prepare owned data/socket directories before entering the hardened service.
+  await docker("exec", helper, "mkdir", "/fixture/data");
+  await docker("exec", helper, "chown", "70:70", "/fixture/data", "/fixture");
+  await docker("exec", helper, "chmod", "700", "/fixture/data");
   owned.add(postgres);
   phase = "start PG17";
   await docker(
@@ -269,8 +275,19 @@ try {
     "wrong.private",
     "--mount",
     `type=volume,source=${volume},target=/fixture,readonly`,
+    "--mount",
+    `type=volume,source=${volume},target=/var/run/postgresql`,
+    "--env",
+    "PGDATA=/var/run/postgresql/data",
     "--tmpfs",
-    "/var/lib/postgresql/data:rw",
+    "/tmp:rw,noexec,nosuid,size=64m",
+    "--user",
+    "70:70",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--read-only",
     "--env",
     "POSTGRES_DB=markiro",
     "--env",
@@ -290,6 +307,22 @@ try {
     "-c",
     "password_encryption=scram-sha-256",
   );
+  const hardened = JSON.parse((await docker("inspect", postgres)).stdout)[0];
+  assert.equal(hardened.Config.User, "70:70");
+  assert.ok(
+    hardened.HostConfig.CapDrop.includes("ALL") || hardened.HostConfig.CapDrop.includes("CHOWN"),
+  );
+  assert.ok(
+    hardened.HostConfig.SecurityOpt.some((value) =>
+      /^no-new-privileges(?::true|=true)?$/u.test(value),
+    ),
+  );
+  assert.equal(hardened.HostConfig.ReadonlyRootfs, true);
+  const processStatus = (await docker("exec", postgres, "cat", "/proc/self/status")).stdout;
+  assert.match(processStatus, /^Uid:\s+70\s+70\s+70\s+70$/mu);
+  for (const mask of ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"])
+    assert.match(processStatus, new RegExp(`^${mask}:\\s+0+$`, "mu"));
+  assert.match(processStatus, /^NoNewPrivs:\s+1$/mu);
   let ready = false;
   for (let i = 0; i < 60; i++) {
     try {
@@ -309,6 +342,12 @@ try {
       ready = true;
       break;
     } catch {
+      const state = JSON.parse(
+        (await docker("inspect", "--format", "{{json .State}}", postgres)).stdout,
+      );
+      if (!state.Running) {
+        break;
+      }
       if (interruption.signal.aborted) throw new Error("Role harness interrupted");
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -384,22 +423,13 @@ try {
     await bootstrap("-c", cleanup);
   }
   phase = "explicit bootstrap provisioning";
-  await docker(
-    "exec",
-    "--user",
-    "postgres",
-    postgres,
-    "psql",
-    "-X",
-    "-v",
-    "ON_ERROR_STOP=1",
-    "-U",
-    "postgres",
-    "-d",
-    "markiro",
-    "-f",
-    "/fixture/roles.sql",
-  );
+  await provisionRoles({
+    prefix: ["--host", endpoint],
+    container: postgres,
+    env: environment,
+    sqlFile: join(fixture, "roles.sql"),
+    signal: interruption.signal,
+  });
   phase = "actual migrations, role permissions, pinned pg-boss and TLS";
   // Mount only code/dependencies, never the checkout root or a user's .env.
   const mounts = [
@@ -447,6 +477,7 @@ try {
       pgBossVersion: report.pgBossVersion,
       checks: [
         "rendered Compose credential isolation",
+        "SQL stdin provisioning as PostgreSQL with user70, cap-dropALL, no-new-privileges and read-only root",
         "fresh-only provisioning rejects existing objects/roles without partial grants",
         ...report.checks,
       ],
