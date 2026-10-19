@@ -3,14 +3,16 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { createLocalHttpsRequest } from "./local-https-request.mjs";
 import { readProtectedEnv } from "./preflight.mjs";
 import { smokePlatform } from "./smoke.mjs";
 import { browserSmoke } from "./browser-smoke.mjs";
+import { roleProvisioningSql } from "./postgres/roles.mjs";
+import { provisionRoles } from "./postgres/provision.mjs";
 
 const run = promisify(execFile);
 if (process.argv.slice(2).join() !== "--local-ci")
@@ -20,7 +22,7 @@ if (!/^[a-f0-9]{40}$/u.test(sha ?? ""))
   throw new Error("MARKIRO_SOURCE_SHA must identify locally built images");
 // Docker context can otherwise silently target a remote daemon. Context metadata
 // is inspected before creating resources; only the local Unix socket is allowed.
-const dockerEnv = { ...process.env };
+const dockerEnv = { PATH: process.env.PATH, HOME: homedir(), LANG: "C.UTF-8" };
 delete dockerEnv.DOCKER_HOST;
 delete dockerEnv.DOCKER_CONTEXT;
 const endpoint = JSON.parse(
@@ -33,6 +35,38 @@ const project = `markiro-platform-ci-${randomBytes(6).toString("hex")}`;
 const evidenceDir = resolve(process.env.PLATFORM_CI_EVIDENCE_DIR ?? join(directory, "evidence"));
 await mkdir(evidenceDir, { recursive: true });
 const envFile = join(directory, "runtime.env");
+const migrationFile = join(directory, "migration.env");
+const postgresFile = join(directory, "postgres.env");
+const rolesFile = join(directory, "roles.sql");
+const appPassword = randomBytes(32).toString("hex");
+const migratorPassword = randomBytes(32).toString("hex");
+const plugins = JSON.parse(
+  (await run("docker", ["info", "--format", "{{json .ClientInfo.Plugins}}"], { env: dockerEnv }))
+    .stdout,
+);
+const composePlugin = plugins.find((plugin) => plugin.Name === "compose")?.Path;
+assert.ok(
+  typeof composePlugin === "string" && composePlugin.startsWith("/"),
+  "Installed Compose plugin required",
+);
+await mkdir(join(directory, "docker"), { mode: 0o700 });
+await mkdir(join(directory, "docker", "cli-plugins"), { mode: 0o700 });
+await symlink(
+  await realpath(composePlugin),
+  join(directory, "docker", "cli-plugins", "docker-compose"),
+);
+dockerEnv.DOCKER_CONFIG = join(directory, "docker");
+dockerEnv.DOCKER_HOST = endpoint;
+dockerEnv.COMPOSE_DISABLE_ENV_FILE = "1";
+await writeFile(postgresFile, `POSTGRES_PASSWORD=${randomBytes(32).toString("hex")}\n`, {
+  mode: 0o600,
+});
+await writeFile(rolesFile, roleProvisioningSql({ appPassword, migratorPassword }), { mode: 0o600 });
+await writeFile(
+  migrationFile,
+  `DATABASE_URL=postgresql://markiro_migrator:${migratorPassword}@postgres:5432/markiro\n`,
+  { mode: 0o600 },
+);
 async function freePort() {
   const server = createServer();
   await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -46,7 +80,7 @@ while (httpsPort === httpPort) httpsPort = await freePort();
 const values = {
   SERVER_PROFILE: "platform-only",
   VITE_SERVER_PROFILE: "platform-only",
-  DATABASE_URL: "postgresql://markiro:platform-ci-only@postgres:5432/markiro",
+  DATABASE_URL: `postgresql://markiro_app:${appPassword}@postgres:5432/markiro`,
   PLATFORM_AUTH_SECRET: randomBytes(48).toString("base64"),
   PLATFORM_AUTH_URL: `https://saas-admin.localhost:${httpsPort}`,
   SAAS_ADMIN_ORIGIN: `https://saas-admin.localhost:${httpsPort}`,
@@ -79,6 +113,8 @@ await readProtectedEnv(envFile);
 const environment = {
   ...dockerEnv,
   MARKIRO_PLATFORM_ENV_FILE: envFile,
+  MARKIRO_PLATFORM_MIGRATION_ENV_FILE: migrationFile,
+  PLATFORM_CI_POSTGRES_ENV_FILE: postgresFile,
   MARKIRO_SOURCE_SHA: sha,
   MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
   MARKIRO_PLATFORM_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
@@ -141,8 +177,26 @@ try {
     if (name !== "edge") assert.ok(!service.ports?.length, `${name} exposes a port`);
   assert.equal(config.services.api.environment.SERVER_PROFILE, "platform-only");
   for (const port of config.services.edge.ports) assert.equal(port.host_ip, "127.0.0.1");
-  evidence.checks.push("rendered Compose isolation");
+  assert.equal(new URL(config.services.api.environment.DATABASE_URL).username, "markiro_app");
+  assert.equal(
+    new URL(config.services.migrate.environment.DATABASE_URL).username,
+    "markiro_migrator",
+  );
+  assert.ok(
+    !Object.keys(config.services.migrate.environment).some((key) =>
+      /LICENSE|MAIL|SMTP|SUPPORT|AUTH_SECRET/u.test(key),
+    ),
+  );
+  evidence.checks.push("rendered Compose isolation and separate database credentials");
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "postgres", "mailpit", "seaweedfs");
+  await provisionRoles({
+    prefix: args,
+    container: "postgres",
+    env: environment,
+    sqlFile: rolesFile,
+    signal: interruption.signal,
+    compose: true,
+  });
   await compose("run", "--rm", "migrate");
   await compose("run", "--rm", "migrate");
   evidence.checks.push("migration twice");
@@ -192,7 +246,7 @@ try {
       "postgres",
       "psql",
       "-U",
-      "markiro",
+      "postgres",
       "-d",
       "markiro",
       "-Atc",
@@ -223,7 +277,8 @@ try {
     await compose("down", "--volumes", "--remove-orphans");
     evidence.cleanup = true;
   } finally {
-    await rm(envFile, { force: true });
+    for (const file of [envFile, migrationFile, postgresFile, rolesFile])
+      await rm(file, { force: true });
     await writeFile(
       join(evidenceDir, "verification.json"),
       JSON.stringify(evidence, null, 2) + "\n",

@@ -4,6 +4,8 @@ services:
   migrate:
     image: ghcr.io/thevladbog/markiro-api:${MARKIRO_SOURCE_SHA:?required}
   api:
+    environment:
+      PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: "true"
     image: ghcr.io/thevladbog/markiro-api:${MARKIRO_SOURCE_SHA:?required}
   edge:
     image: ghcr.io/thevladbog/markiro-platform-edge:${MARKIRO_SOURCE_SHA:?required}
@@ -13,11 +15,13 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: markiro
-      POSTGRES_PASSWORD: platform-ci-only
+      POSTGRES_USER: postgres
       POSTGRES_DB: markiro
+    env_file:
+      - path: ${PLATFORM_CI_POSTGRES_ENV_FILE:?required}
+        format: raw
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "markiro", "-d", "markiro"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "markiro"]
       interval: 5s
       timeout: 5s
       retries: 15

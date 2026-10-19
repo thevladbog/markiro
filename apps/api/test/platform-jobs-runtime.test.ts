@@ -22,30 +22,38 @@ vi.mock("pg-boss", () => ({
   ),
 }));
 
-it("bounds the platform queue pool and pins report execution to one job per process", async () => {
-  calls.work.mockImplementation(async (name: string) => name);
-  const module = await Test.createTestingModule({
-    providers: [
-      PlatformJobsService,
-      { provide: "JOBS_PG_CONNECTION_STRING", useValue: "postgresql://unused/unused" },
-      { provide: MailJobsService, useValue: { dispatchOutbox: vi.fn(), reconcile: vi.fn() } },
-      { provide: MailRetentionService, useValue: { prune: vi.fn() } },
-      { provide: SubscriptionStatusJob, useValue: { run: vi.fn() } },
-      { provide: PlatformReportRunnerService, useValue: { reconcile: vi.fn() } },
-    ],
-  }).compile();
-  try {
-    await module.init();
-    expect(vi.mocked(PgBoss).mock.calls[0]?.[0]).toMatchObject({
-      max: 4,
-      schema: "pgboss_platform",
-    });
-    expect(calls.work).toHaveBeenCalledWith(
-      "platform-report-run",
-      { batchSize: 1, localConcurrency: 1 },
-      expect.any(Function),
-    );
-  } finally {
-    await module.close();
-  }
-});
+it.each([undefined, false, true])(
+  "bounds the queue pool and honors preprovisioned schema opt-in: %s",
+  async (preprovisioned) => {
+    vi.mocked(PgBoss).mockClear();
+    calls.work.mockImplementation(async (name: string) => name);
+    const module = await Test.createTestingModule({
+      providers: [
+        PlatformJobsService,
+        ...(preprovisioned === undefined
+          ? []
+          : [{ provide: "PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA", useValue: preprovisioned }]),
+        { provide: "JOBS_PG_CONNECTION_STRING", useValue: "postgresql://unused/unused" },
+        { provide: MailJobsService, useValue: { dispatchOutbox: vi.fn(), reconcile: vi.fn() } },
+        { provide: MailRetentionService, useValue: { prune: vi.fn() } },
+        { provide: SubscriptionStatusJob, useValue: { run: vi.fn() } },
+        { provide: PlatformReportRunnerService, useValue: { reconcile: vi.fn() } },
+      ],
+    }).compile();
+    try {
+      await module.init();
+      expect(vi.mocked(PgBoss).mock.calls[0]?.[0]).toMatchObject({
+        max: 4,
+        schema: "pgboss_platform",
+        createSchema: preprovisioned !== true,
+      });
+      expect(calls.work).toHaveBeenCalledWith(
+        "platform-report-run",
+        { batchSize: 1, localConcurrency: 1 },
+        expect.any(Function),
+      );
+    } finally {
+      await module.close();
+    }
+  },
+);

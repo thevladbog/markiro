@@ -33,6 +33,7 @@ services:
     cpus: 1.25
     environment:
       NODE_OPTIONS: "--max-old-space-size=1024"
+      PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: "true"
     volumes:
       - *postgres-ca
     networks: [default, database]

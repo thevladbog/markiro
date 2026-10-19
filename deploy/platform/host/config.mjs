@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { canonical, digest as configurationDigest, ensure, plain } from "../backup/schemas.mjs";
 import { rmdir, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { readProtectedEnv, validateConfig } from "../preflight.mjs";
 import {
   assertBindFileSync,
@@ -18,6 +19,7 @@ import {
 // Disabled worker switches are the only additional preflight-supported keys.
 const runtimeKeys = new Set([
   "SERVER_PROFILE",
+  "PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA",
   "VITE_SERVER_PROFILE",
   "MARKIRO_SOURCE_SHA",
   "MARKIRO_TOOLING_SHA",
@@ -100,14 +102,17 @@ const interpolationKeys = [
 const domain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/u;
 const digest = /^sha256:[a-f0-9]{64}$/u;
 
-function validateInterpolation(value) {
+function validateInterpolation(value, runtimeOnly = false) {
+  const keys = runtimeOnly
+    ? interpolationKeys
+    : [...interpolationKeys, "MARKIRO_PLATFORM_MIGRATION_ENV_FILE"];
   if (
     !value ||
     ![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
-    Reflect.ownKeys(value).length !== interpolationKeys.length
+    Reflect.ownKeys(value).length !== keys.length
   )
     throw privateFileError();
-  for (const key of interpolationKeys) {
+  for (const key of keys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (
       !descriptor ||
@@ -141,6 +146,17 @@ function validateInterpolation(value) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.ACME_EMAIL)) throw privateFileError();
   for (const key of pgFiles) assertBindFileSync(value[key]);
   assertPrivateFileSync(value.MARKIRO_PLATFORM_ENV_FILE);
+  if (!runtimeOnly) {
+    const runtime = value.MARKIRO_PLATFORM_ENV_FILE;
+    const migration = value.MARKIRO_PLATFORM_MIGRATION_ENV_FILE;
+    assertPrivateFileSync(migration);
+    if (
+      basename(runtime) !== "runtime.env" ||
+      basename(migration) !== "migration.env" ||
+      dirname(runtime) !== dirname(migration)
+    )
+      throw privateFileError();
+  }
 }
 
 function validateRuntime(env, manifest) {
@@ -193,7 +209,7 @@ export async function snapshotHostConfig({ root, candidateId, envFile, manifest 
         ]),
       ),
     );
-    validateInterpolation(interpolation);
+    validateInterpolation(interpolation, true);
     return { path, sha256: createHash("sha256").update(actual).digest("hex"), interpolation };
   } catch (error) {
     // Never remove a pre-existing candidate or an uncertain published write.
@@ -232,4 +248,92 @@ export function hostChildEnvironment({ interpolation, dockerConfig, ambient = pr
   } catch {
     throw privateFileError();
   }
+}
+
+// The caller must bind BOTH returned hashes in its operation configuration fingerprint.
+// Runtime interpolation alone deliberately cannot construct a host child environment.
+export async function snapshotMigrationConfig({ root, candidateId, envFile, runtimeSnapshot }) {
+  try {
+    await assertPrivateRoot(root);
+    if (
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(
+        candidateId,
+      )
+    )
+      throw privateFileError();
+    const relative = `candidates/${candidateId}`;
+    if (runtimeSnapshot?.path !== join(root, relative, "runtime.env")) throw privateFileError();
+    const runtimeBytes = await readPrivateFile(root, `${relative}/runtime.env`);
+    if (createHash("sha256").update(runtimeBytes).digest("hex") !== runtimeSnapshot.sha256)
+      throw privateFileError();
+    const runtime = await readProtectedEnv(runtimeSnapshot.path);
+    assertPrivateFileSync(envFile);
+    const migration = await readProtectedEnv(envFile);
+    if (Object.keys(migration).length !== 1 || !Object.hasOwn(migration, "DATABASE_URL"))
+      throw privateFileError();
+    const urls = [runtime.DATABASE_URL, migration.DATABASE_URL].map((value) => new URL(value));
+    for (const url of urls) {
+      const keys = [...url.searchParams.keys()];
+      if (
+        !["postgres:", "postgresql:"].includes(url.protocol) ||
+        !url.username ||
+        !url.password ||
+        !url.hostname ||
+        url.pathname.length < 2 ||
+        url.hash ||
+        url.searchParams.get("sslmode") !== "verify-full" ||
+        new Set(keys).size !== keys.length ||
+        keys.some((key) => !["sslmode", "sslrootcert"].includes(key))
+      )
+        throw privateFileError();
+    }
+    const [app, migrator] = urls;
+    if (
+      decodeURIComponent(app.username) === decodeURIComponent(migrator.username) ||
+      app.hostname !== migrator.hostname ||
+      (app.port || "5432") !== (migrator.port || "5432") ||
+      decodeURIComponent(app.pathname) !== decodeURIComponent(migrator.pathname) ||
+      app.searchParams.get("sslrootcert") !== migrator.searchParams.get("sslrootcert")
+    )
+      throw privateFileError();
+    const bytes = Buffer.from(`DATABASE_URL=${migration.DATABASE_URL}\n`);
+    await writePrivateFile(root, `${relative}/migration.env`, bytes);
+    const actual = await readPrivateFile(root, `${relative}/migration.env`);
+    if (!actual.equals(bytes)) throw privateFileError(true);
+    return {
+      path: join(root, relative, "migration.env"),
+      sha256: createHash("sha256").update(actual).digest("hex"),
+    };
+  } catch (error) {
+    throw privateFileError(error.durabilityUncertain === true);
+  }
+}
+
+// Re-read both private snapshots. Paths and candidate are part of the binding;
+// callers cannot substitute a hash for actual credential-bearing bytes.
+export async function fingerprintHostConfiguration({
+  root,
+  candidateId,
+  runtimeSnapshot,
+  migrationSnapshot,
+}) {
+  ensure(
+    typeof candidateId === "string" &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(
+        candidateId,
+      ),
+  );
+  const snapshots = plain({ runtimeSnapshot, migrationSnapshot });
+  const result = { version: 1, kind: "platform-host-configuration", candidateId };
+  for (const [key, name] of [
+    ["runtimeSnapshot", "runtime"],
+    ["migrationSnapshot", "migration"],
+  ]) {
+    const relative = `candidates/${candidateId}/${name}.env`;
+    ensure(snapshots[key].path === join(root, relative));
+    const actual = configurationDigest(await readPrivateFile(root, relative));
+    ensure(actual === snapshots[key].sha256);
+    result[`${name}Sha256`] = actual;
+  }
+  return { ...result, configurationSha256: configurationDigest(canonical(result)) };
 }
