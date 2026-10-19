@@ -646,6 +646,26 @@ try {
     run: runHostProcess,
   });
   const document = JSON.parse(await readFile(backup.inventoryPath, "utf8"));
+  phase = "sequence default ACL";
+  // A NULL relacl uses sequence defaults, not foreign-server defaults.
+  const defaultSequence = document.inventory.objects.find(
+    (object) =>
+      object.kind === "SEQUENCE" && object.schema === "fixture" && object.name === "not_called",
+  );
+  assert.ok(defaultSequence);
+  assert.deepEqual(defaultSequence.acl.map((grant) => grant.privilege).sort(), [
+    "SELECT",
+    "UPDATE",
+    "USAGE",
+  ]);
+  assert.ok(
+    defaultSequence.acl.every(
+      (grant) =>
+        grant.grantor === "provider_owner" &&
+        grant.grantee === "provider_owner" &&
+        grant.grantable === false,
+    ),
+  );
   const references = new Set(document.inventory.roles.map((r) => r.name));
   for (const o of document.inventory.objects) {
     references.add(o.owner);

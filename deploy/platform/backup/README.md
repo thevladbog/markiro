@@ -121,8 +121,10 @@ enabled normally; constraint definitions and validity capture their semantics.
 Column ACLs, RLS policies, custom collations, standalone composite types, role or
 database settings, role validity deadlines, foreign servers, large objects,
 event triggers, publications and subscriptions are unsupported and rejected.
-The database encoding and libc locale are preserved; other locale providers are
-rejected. This is a reviewed Markiro restore path, not a general PostgreSQL clone.
+The database encoding and supported libc or ICU locale metadata are preserved.
+ICU restore requires the genuine stored and actual collation versions to match
+before object replay; unsupported providers are rejected. This is a reviewed
+Markiro restore path, not a general PostgreSQL clone.
 
 Source and restore inventory sessions explicitly set `TimeZone=UTC`,
 `DateStyle=ISO,YMD`, `IntervalStyle=postgres`, `bytea_output=hex`,
@@ -131,7 +133,8 @@ with `row_to_json` under these settings, hashed with PostgreSQL SHA256, ordered
 by its hexadecimal digest with C collation, and streamed in 512-row batches into
 a table SHA256 and count. Duplicate rows remain duplicate digest entries.
 Encrypted bytea columns retain their actual bytes; no application recalculation
-or decryption occurs. Sequence values and `is_called` are compared separately.
+or decryption occurs. Sequence values and `is_called` are compared separately. A sequence with a NULL
+ACL retains PostgreSQL sequence defaults: its owner has SELECT, UPDATE and USAGE.
 
 Trusted extension members are explicitly assigned their mapped owners. Source
 superusers may have granted without explicit schema USAGE. Their safe mapped
