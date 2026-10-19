@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { rm, lstat } from "node:fs/promises";
 import { createPrivateDirectory, writePrivateFile, readPrivateFile } from "../host/files.mjs";
 import { openRuntime, readPrivateAbsolute, privateCopy } from "./local-runtime.mjs";
-import { publishArchive } from "./files.mjs";
+import { publishArchive, hashArchive } from "./files.mjs";
 import {
   identity,
   plain,
@@ -106,6 +106,36 @@ export async function createDatabaseBackup({
     problem = fail("cleanup");
     if (cleanup) cleanup.verified = false;
   });
+  if (!problem) {
+    try {
+      const archive = await hashArchive(directory, result.dump);
+      const inventory = {
+        version: 1,
+        kind: "platform-database-backup",
+        operationId,
+        target,
+        executorSha: runtime.config.executorSha,
+        provenance: runtime.config.provenance,
+        archiveSha256: archive.sha256,
+        archiveBytes: archive.bytes,
+        snapshotId: result.captured.snapshotId,
+        fence: { before, after },
+        startedAt,
+        completedAt: new Date().toISOString(),
+        runtime: {
+          image: runtime.config.image,
+          architecture: runtime.architecture,
+          postgresVersion: result.captured.postgresVersion,
+        },
+        inventory: result.captured.inventory,
+      };
+      const inventoryBytes = Buffer.from(canonical(inventory) + "\n");
+      if (inventoryBytes.length > 1048576) throw fail(`inventory-limit-${inventoryBytes.length}`);
+      result = { ...result, archive, inventoryBytes };
+    } catch (error) {
+      problem = error.stage ? error : fail("inventory-validation");
+    }
+  }
   if (problem) {
     await rm(output, { recursive: true, force: true }).catch(() => {
       problem = fail("cleanup");
@@ -128,27 +158,8 @@ export async function createDatabaseBackup({
     throw fail(problem.stage ?? "backup");
   }
   const archive = await publishArchive(directory, result.dump, "database.dump");
-  const inventory = {
-    version: 1,
-    kind: "platform-database-backup",
-    operationId,
-    target,
-    executorSha: runtime.config.executorSha,
-    provenance: runtime.config.provenance,
-    archiveSha256: archive.sha256,
-    archiveBytes: archive.bytes,
-    snapshotId: result.captured.snapshotId,
-    fence: { before, after },
-    startedAt,
-    completedAt: new Date().toISOString(),
-    runtime: {
-      image: runtime.config.image,
-      architecture: runtime.architecture,
-      postgresVersion: result.captured.postgresVersion,
-    },
-    inventory: result.captured.inventory,
-  };
-  const inventoryBytes = Buffer.from(canonical(inventory) + "\n");
+  ensure(archive.sha256 === result.archive.sha256 && archive.bytes === result.archive.bytes);
+  const { inventoryBytes } = result;
   await rm(output, { recursive: true, force: true });
   await writePrivateFile(directory, "inventory.json", inventoryBytes);
   return {

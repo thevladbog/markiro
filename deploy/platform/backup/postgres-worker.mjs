@@ -11,6 +11,7 @@ import {
   compareInventories,
 } from "./inventory.mjs";
 import { canonical, ensure, quote } from "./schemas.mjs";
+import { noWriters } from "./source-state.mjs";
 const require = createRequire(import.meta.url),
   { Client } = require("pg");
 const directory = "/work",
@@ -75,20 +76,6 @@ async function sourceClient(applicationName) {
     statement_timeout: 600000,
     ssl: { rejectUnauthorized: true, ca: await readFile("/input/ca.crt", "utf8") },
   });
-}
-async function noWriters(c, applicationName) {
-  const r = await c.query(
-    `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND pid<>pg_backend_pid() AND application_name<>$1`,
-    [applicationName],
-  );
-  ensure(r.rows[0].n === 0);
-  ensure(
-    (
-      await c.query(
-        "SELECT count(*)::int AS n FROM pg_prepared_xacts WHERE database=current_database()",
-      )
-    ).rows[0].n === 0,
-  );
 }
 async function archive() {
   const request = JSON.parse(await readFile("/input/request.json", "utf8")),

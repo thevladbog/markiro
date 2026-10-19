@@ -12,6 +12,7 @@ import { readProtectedEnv } from "./preflight.mjs";
 import { smokePlatform } from "./smoke.mjs";
 import { browserSmoke } from "./browser-smoke.mjs";
 import { roleProvisioningSql } from "./postgres/roles.mjs";
+import { provisionRoles } from "./postgres/provision.mjs";
 
 const run = promisify(execFile);
 if (process.argv.slice(2).join() !== "--local-ci")
@@ -188,34 +189,14 @@ try {
   );
   evidence.checks.push("rendered Compose isolation and separate database credentials");
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "postgres", "mailpit", "seaweedfs");
-  await compose("cp", rolesFile, "postgres:/tmp/roles.sql");
-  await compose(
-    "exec",
-    "-T",
-    "--user",
-    "0",
-    "postgres",
-    "chown",
-    "postgres:postgres",
-    "/tmp/roles.sql",
-  );
-  await compose(
-    "exec",
-    "-T",
-    "--user",
-    "postgres",
-    "postgres",
-    "psql",
-    "-X",
-    "-v",
-    "ON_ERROR_STOP=1",
-    "-U",
-    "postgres",
-    "-d",
-    "markiro",
-    "-f",
-    "/tmp/roles.sql",
-  );
+  await provisionRoles({
+    prefix: args,
+    container: "postgres",
+    env: environment,
+    sqlFile: rolesFile,
+    signal: interruption.signal,
+    compose: true,
+  });
   await compose("run", "--rm", "migrate");
   await compose("run", "--rm", "migrate");
   evidence.checks.push("migration twice");
