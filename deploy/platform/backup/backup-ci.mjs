@@ -25,7 +25,12 @@ import { verifyDatabaseRestore } from "./restore.mjs";
 import { canonical, digest, completedEvidence } from "./schemas.mjs";
 import { verifyLocalPreparedPath } from "./prepared-ci.mjs";
 import { roleProvisioningSql } from "../postgres/roles.mjs";
-if (process.argv.slice(2).join() !== "--local-ci") throw new Error("Explicit --local-ci required");
+import {
+  parseBackupCiArguments,
+  captureRecoveryImageSources,
+  completeRecoveryImageExport,
+} from "./recovery-image.mjs";
+const exportDirectory = parseBackupCiArguments(process.argv.slice(2));
 const root = await mkdtemp(join(await realpath(tmpdir()), "markiro-backup-ci-"));
 await chmod(root, 0o700);
 const operationId = randomUUID(),
@@ -39,6 +44,7 @@ const executable = process.platform === "darwin" ? dockerExecutable : "/usr/bin/
 let endpoint,
   phase = "local runtime",
   imageId,
+  exportSources,
   owned = [];
 const logs = [];
 async function cmd(args) {
@@ -195,6 +201,13 @@ try {
     join(context, "Dockerfile"),
     "FROM node:24.18.0-bookworm-slim AS node\nFROM postgres:17-bookworm\nCOPY --from=node /usr/local/bin/node /usr/local/bin/node\nCOPY --chown=999:999 runtime /opt/backup\nENTRYPOINT []\nUSER postgres\n",
   );
+  if (exportDirectory) {
+    phase = "verify exact image source inputs";
+    exportSources = await captureRecoveryImageSources({
+      repositoryRoot: resolve("."),
+      contextDirectory: context,
+    });
+  }
   phase = "build immutable local worker";
   const built = await promisify(execFile)(
     executable,
@@ -236,9 +249,11 @@ try {
     "const f=require('node:fs');f.accessSync('/opt/backup/fixture/probe.mjs');f.accessSync('/opt/backup/backup/postgres-worker.mjs');require('/opt/backup/node_modules/pg');require('/opt/backup/node_modules/pg-boss');import('/opt/backup/fixture/runtime-migrate.mjs').catch(()=>process.exit(1));",
   ]);
 
-  const executorSha = String(
-    (await promisify(execFile)("git", ["rev-parse", "HEAD"], { timeout: 10000 })).stdout,
-  ).trim();
+  const executorSha =
+    exportSources?.sourceSha ??
+    String(
+      (await promisify(execFile)("git", ["rev-parse", "HEAD"], { timeout: 10000 })).stdout,
+    ).trim();
   await privateWrite(
     join(root, "backup-runtime.json"),
     canonical({
@@ -840,11 +855,23 @@ try {
   if (error.stage) problem.message += ` Stage=${error.stage}.`;
 }
 try {
-  await cleanup();
+  await completeRecoveryImageExport({
+    cleanup,
+    problem,
+    request: exportDirectory
+      ? {
+          directory: exportDirectory,
+          repositoryRoot: resolve("."),
+          sources: exportSources,
+          imageId,
+          operationId,
+          dockerExecutable: executable,
+          endpoint,
+        }
+      : null,
+  });
 } catch (error) {
   problem = error;
-}
-if (problem) {
   if (imageId) {
     try {
       const image = JSON.parse((await cmd(["image", "inspect", imageId])).stdout)[0];

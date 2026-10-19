@@ -433,7 +433,10 @@ test("production-bundle owns the real fenced backup and isolated restore gate", 
   const backup = stepByName(job, "Verify isolated PostgreSQL backup and restore");
   const roles = stepByName(job, "Verify isolated PostgreSQL roles and TLS");
   const stack = stepByName(job, "Verify isolated platform-only preparation stack");
-  assert.equal(backup.run, "node deploy/platform/backup/backup-ci.mjs --local-ci");
+  assert.equal(
+    backup.run,
+    'node deploy/platform/backup/backup-ci.mjs --local-ci --export-image "$RUNNER_TEMP/platform-recovery-image"',
+  );
   assert.ok(job.steps.indexOf(backup) > job.steps.indexOf(roles));
   assert.ok(job.steps.indexOf(backup) < job.steps.indexOf(stack));
 });
@@ -506,4 +509,28 @@ test("platform delivery starts Node before any ambient loader can run and keeps 
     "Platform transport failed; preserve host operation and reconcile before retry.\n",
   );
   assert.doesNotMatch(result.stderr, /UNTRUSTED_NODE_LOADER|fixture-invalid-input/u);
+});
+
+test("production-bundle preserves only verified recovery image and manifest after successful backup cleanup", () => {
+  const job = workflow.jobs["production-bundle"];
+  const backup = stepByName(job, "Verify isolated PostgreSQL backup and restore");
+  const upload = stepByName(job, "Preserve verified recovery worker image");
+  assert.equal(
+    backup.run,
+    'node deploy/platform/backup/backup-ci.mjs --local-ci --export-image "$RUNNER_TEMP/platform-recovery-image"',
+  );
+  assert.equal(job.steps.indexOf(upload), job.steps.indexOf(backup) + 1);
+  assert.equal(upload.if, "success()");
+  assert.match(upload.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/u);
+  assert.equal(
+    upload.with.name,
+    "platform-recovery-worker-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+  );
+  assert.equal(
+    upload.with.path,
+    "${{ runner.temp }}/platform-recovery-image/recovery-image.tar\n${{ runner.temp }}/platform-recovery-image/recovery-image.json\n",
+  );
+  assert.equal(upload.with["if-no-files-found"], "error");
+  assert.equal(upload.with["retention-days"], 7);
+  assert.equal(upload.with.overwrite, undefined);
 });
