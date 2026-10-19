@@ -30,6 +30,111 @@ function acceptance(value, fields) {
   label(value.reference);
 }
 
+export const activationTables = Object.freeze([
+  "public.email_deliveries",
+  "public.email_outbox",
+  "public.platform_reports",
+  "public.standalone_support_diagnostics",
+  "pgboss_platform.job",
+  "pgboss.job",
+]);
+export function validateActivationProjection(value) {
+  ensure(Array.isArray(value) && value.length === activationTables.length);
+  value.forEach((row, i) => {
+    keys(row, ["table", "rows", "pending", "expired", "sha256"]);
+    ensure(row.table === activationTables[i] && hash(row.sha256));
+    for (const k of ["rows", "pending", "expired"])
+      ensure(Number.isSafeInteger(row[k]) && row[k] >= 0 && row[k] <= 2147483647);
+    ensure(row.pending <= row.rows && row.expired <= row.rows);
+    if (!row.rows) ensure(row.sha256 === digest("") && !row.pending && !row.expired);
+  });
+  return value;
+}
+export function validateProductionAuthorization(
+  record,
+  document,
+  evidence,
+  backupProof,
+  now = Date.now(),
+) {
+  const observation = record.observations.egress,
+    value = observation.value;
+  acceptance(value, [
+    "mode",
+    "smtp",
+    "s3",
+    "retainedMail",
+    "reportJobs",
+    "legacyQueues",
+    "retention",
+    "review",
+    "reviewSha256",
+    "sourceHold",
+    "expiresAt",
+  ]);
+  ensure(
+    value.mode === "production-activation" &&
+      value.smtp === "production" &&
+      value.s3 === "production" &&
+      value.retainedMail === "authorized" &&
+      value.reportJobs === "authorized" &&
+      value.retention === "authorized" &&
+      value.legacyQueues === "disabled",
+  );
+  const review = value.review;
+  keys(review, [
+    "version",
+    "kind",
+    "operationId",
+    "target",
+    "executorSha",
+    "configurationSha256",
+    "fenceId",
+    "snapshotId",
+    "archiveSha256",
+    "restoreEvidenceSha256",
+    "asOf",
+    "observedAt",
+    "projection",
+  ]);
+  ensure(
+    review.version === 1 &&
+      review.kind === "platform-retained-intent-review" &&
+      hash(value.reviewSha256) &&
+      digest(review) === value.reviewSha256,
+  );
+  for (const key of ["operationId", "target", "executorSha", "configurationSha256"])
+    same(review[key], record[key]);
+  same(review.fenceId, record.fence.fenceId);
+  same(review.snapshotId, document.snapshotId);
+  same(review.archiveSha256, backupProof.archiveSha256);
+  same(review.restoreEvidenceSha256, backupProof.restoreEvidenceSha256);
+  validateActivationProjection(review.projection);
+  const completed = Math.max(timestamp(document.completedAt), timestamp(evidence.completedAt));
+  ensure(
+    timestamp(review.asOf) >= completed &&
+      timestamp(review.asOf) <= timestamp(review.observedAt) &&
+      timestamp(review.observedAt) <= timestamp(observation.observedAt),
+  );
+  const hold = value.sourceHold;
+  keys(hold, ["kind", "held", "actor", "reference", "evidenceSha256", "observedAt", "expiresAt"]);
+  ensure(hold.kind === "operator-attestation" && hold.held === true && hash(hold.evidenceSha256));
+  label(hold.actor);
+  label(hold.reference);
+  ensure(
+    timestamp(hold.observedAt) >= completed &&
+      timestamp(hold.observedAt) <= timestamp(observation.observedAt),
+  );
+  const expires = timestamp(value.expiresAt);
+  ensure(
+    expires > now &&
+      expires <= timestamp(observation.observedAt) + 3600000 &&
+      timestamp(hold.expiresAt) >= expires &&
+      timestamp(hold.expiresAt) <= timestamp(hold.observedAt) + 3600000,
+  );
+  return value;
+}
+
 // This is an action-boundary check, not a durable authorization token. Call it
 // inside withHostState immediately before every protected journal mutation.
 // Trusted adapters independently inspect the held fence and exact owned workload.
@@ -70,13 +175,14 @@ export async function validatePreparedTarget(input, expected) {
     "observations",
   ]);
   ensure(
-    record.version === 1 &&
+    [1, 2].includes(record.version) &&
       record.kind === "platform-prepared-target" &&
       ["local-synthetic", "live-source"].includes(policy.provenance),
   );
   for (const key of ["operationId", "target", "executorSha", "configurationSha256"])
     same(record[key], identity[key]);
   same(record.provenance, policy.provenance);
+  if (record.version === 2) ensure(policy.provenance === "live-source");
   keys(record.fence, ["fenceId", "enforcementSha256", "beganAt"]);
   keys(record.observations, names);
   keys(policy.producers, names);
@@ -161,24 +267,28 @@ export async function validatePreparedTarget(input, expected) {
     timestamp(record.observations.restoredSnapshot.observedAt) >= timestamp(evidence.completedAt),
   );
   const egress = record.observations.egress.value;
-  acceptance(egress, [
-    "networkPolicySha256",
-    "smtp",
-    "s3",
-    "retainedMail",
-    "reportJobs",
-    "legacyQueues",
-    "retention",
-  ]);
-  ensure(
-    hash(egress.networkPolicySha256) &&
-      ["blocked", "sink"].includes(egress.smtp) &&
-      ["blocked", "isolated"].includes(egress.s3) &&
-      egress.retainedMail === "held" &&
-      egress.reportJobs === "held" &&
-      egress.legacyQueues === "disabled" &&
-      egress.retention === "disabled",
-  );
+  if (record.version === 2)
+    validateProductionAuthorization(record, document, evidence, backupProof, now);
+  else {
+    acceptance(egress, [
+      "networkPolicySha256",
+      "smtp",
+      "s3",
+      "retainedMail",
+      "reportJobs",
+      "legacyQueues",
+      "retention",
+    ]);
+    ensure(
+      hash(egress.networkPolicySha256) &&
+        ["blocked", "sink"].includes(egress.smtp) &&
+        ["blocked", "isolated"].includes(egress.s3) &&
+        egress.retainedMail === "held" &&
+        egress.reportJobs === "held" &&
+        egress.legacyQueues === "disabled" &&
+        egress.retention === "disabled",
+    );
+  }
   const key = record.observations.keyContinuity.value;
   acceptance(key, ["keyManifestSha256", "decryptionVerified", "signingContinuityVerified"]);
   ensure(
@@ -262,5 +372,7 @@ export async function validatePreparedTarget(input, expected) {
   for (const name of names)
     fresh(record.observations[name].observedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
   ensure(timestamp(tls.expiresAt) > checkedAt);
+  if (record.version === 2)
+    validateProductionAuthorization(record, document, evidence, backupProof, checkedAt);
   return { record, backupProof };
 }

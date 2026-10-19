@@ -10,8 +10,8 @@ async function execute(input, adapters) {
   assert.equal(typeof module.executePreparedDeployment, "function", "coordinator must be exported");
   return module.executePreparedDeployment(input, adapters);
 }
-async function fixture(t, failAt) {
-  const f = await preparedFixture(t);
+async function fixture(t, failAt, makePrepared = preparedFixture) {
+  const f = await makePrepared(t);
   const { writerFence, workload, root, identity, configuration, ...preparedPolicy } = f.expected;
   const input = {
     root,
@@ -562,3 +562,61 @@ for (const adapter of ["stopMigration", "inspectMigration"]) {
     assert.ok(!f.trace.some(([name]) => ["api", "edge", "smoke"].includes(name)));
   });
 }
+
+test("production first-activation record rejects a prior healthy target before any process", async (t) => {
+  const { productionFixture } = await import("./production-activation-fixture.mjs");
+  const f = await fixture(t, undefined, productionFixture);
+  const { withHostState } = await import("../host/state.mjs");
+  const { backupProof } = await import("./host-fixtures.mjs");
+  const previous = { ...f.identity, operationId: "00000000-0000-4000-8000-000000000099" };
+  await withHostState(f.root, async (store) => {
+    await store.begin(previous);
+    for (const phase of [
+      "admitted",
+      "images-verified",
+      "target-stopped",
+      "backup-verified",
+      "migrating",
+      "migrated",
+      "api-started",
+      "edge-started",
+      "healthy",
+    ]) {
+      if (phase !== "admitted") await store.enter(phase);
+      await store.complete(phase, ...(phase === "backup-verified" ? [backupProof(previous)] : []));
+    }
+  });
+  await assert.rejects(execute(f.input, f.adapters));
+  assert.deepEqual(f.trace, []);
+  assert.equal((await disk(f.root)).current.identity.operationId, previous.operationId);
+});
+
+test("production deadline crossed after validator checkedAt but before final async configuration return prevents API", async (t) => {
+  const { productionFixture } = await import("./production-activation-fixture.mjs");
+  const f = await fixture(t, undefined, productionFixture);
+  const actualNow = Date.now.bind(Date);
+  let now,
+    armed = false,
+    expired = false;
+  t.mock.method(Date, "now", () => {
+    const current = now ?? actualNow();
+    if (armed) {
+      armed = false;
+      queueMicrotask(() => {
+        now = Date.parse(f.input.preparedTarget.observations.egress.value.expiresAt) + 1;
+        expired = true;
+      });
+    }
+    return current;
+  });
+  const observe = f.adapters.writerFence.observe;
+  f.adapters.writerFence.observe = async (request) => {
+    const result = await observe(request);
+    if (request.phase === "api-started" && request.transitionBoundary === "command") armed = true;
+    return result;
+  };
+  await assert.rejects(execute(f.input, f.adapters));
+  assert.equal(expired, true);
+  assert.ok(!f.trace.some(([action]) => ["api", "edge"].includes(action)));
+  assert.equal((await disk(f.root)).current.status, "recovery-required");
+});

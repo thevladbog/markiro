@@ -1033,3 +1033,84 @@ physical PostgreSQL/HBA observations, failure recovery and public smoke, before
 cutover. Prior local Docker checks were ARM64. Preserve the separate checklist in
 [Timeweb migration gates](timeweb-migration.md) for capacity, import, keys, egress,
 independent backups, final freeze/delta, DNS/mail/release continuity and shutdown.
+
+## Explicit first production activation (prepared-target v2)
+
+Version 1 still describes isolated rehearsal. Its blocked/sink SMTP, isolated S3,
+held mail/reports and disabled retention cannot be inferred merely from a stopped
+API. Version 2 is a separate, explicit first-production authorization; it does not
+change the published API image or introduce worker switches. It rejects a prior
+healthy deployment. The existing recovery, source-byte, image, configuration,
+TLS, role, cleanup and physical target fence checks remain mandatory.
+
+The v2 record retains the same outer identity/fence and seven observations. Its
+`egress` is still `operator-attestation`. Its exact value fields are
+`approved,actor,reference,mode,smtp,s3,retainedMail,reportJobs,legacyQueues,retention,
+review,reviewSha256,sourceHold,expiresAt`. Set mode to `production-activation`,
+SMTP/S3 to `production`, mail/report/retention to `authorized`, and legacy queues
+to `disabled` only under an explicit accepted activation decision. These words
+authorize ordinary production behavior; they do not claim SMTP delivery or S3
+access was tested.
+
+`review` is an immutable `platform-retained-intent-review` version 1 object with
+`operationId,target,executorSha,configurationSha256,fenceId,snapshotId,
+archiveSha256,restoreEvidenceSha256,asOf,observedAt,projection`.
+`reviewSha256` hashes its existing canonical JSON representation. Every binding
+comes from the actual completed target backup/restore and its operation, never a
+historical rehearsal or a fixture. Both review and source-held observations follow
+the completed normal restore proof. The fixed `asOf` precedes review completion
+and stays unchanged for later expiration counts.
+
+The finite projection contains exactly six ordered summaries for
+`public.email_deliveries`, `public.email_outbox`, `public.platform_reports`,
+`public.standalone_support_diagnostics`, `pgboss_platform.job`, and `pgboss.job`.
+Each summary has `table,rows,pending,expired,sha256`; raw row values are hashed
+inside PostgreSQL. `activationProjectionSql(asOf)` and
+`measureActivationProjection(context,containerId,asOf)` in the installed command
+module execute one read-only repeatable snapshot. Optional missing job tables
+normalize to the same zero-count/empty hash as newly created empty tables.
+Existing rows, including old jobs, always remain represented. Diagnostic expiry
+uses the API's UTC 24-month date rule, and mail expiry covers its retained-payload
+and 30/90-day deletion rules. The command adapter remeasures before first API up
+at entry/command boundaries. A changed pending intent fails before API/edge;
+normal post-start queue mutations are explicitly permitted.
+
+`sourceHold` has exactly `kind,held,actor,reference,evidenceSha256,observedAt,
+expiresAt`: kind `operator-attestation`, held true, an identified operator and a
+real hash-bound external source-fence observation. The target CLI neither obtains
+Yandex credentials nor pretends to measure that external fact. Authorization and
+source lease must remain unexpired, authorization lasts at most one hour, and
+source lease must cover it. Protected approval delay consumes this window; if it
+expires, obtain fresh evidence and a newly accepted record. Expiry is rechecked
+after asynchronous probes and before API execution. Root keeps the source held
+through activation. No automatic source restart or DNS action is implied.
+
+To assemble a live record, still obtain all of the following genuine inputs:
+
+- The actual `normal-backup-result` operation/configuration/observation policy,
+  exact role mapping, immutable archive/inventory/restore descriptors and fence.
+  Rehash with existing `readVerifiedBackup`; use its actual snapshot and runtime.
+- Fresh PostgreSQL image/configuration identity, Linux AMD64 UID/GID 70 and
+  version, and actual fixed TLS/effective-role probes after the backup fence
+  began. An import probe made before that fence cannot be relabeled as fresh.
+  The fixed probe may use the digest-admitted API image with its entrypoint
+  overridden to the read-only worker; this does not boot the API application.
+- Measured role policy using the installed roles.mjs hash and actual probe, and
+  exact restoredSnapshot fields from the verified normal restore report. Keep
+  the writer-fence and v2 cleanup-absence adapters factual and fresh.
+- Fresh identified key-continuity acceptance referencing the preserved key
+  manifest, real retained-record decryption evidence and signing-continuity
+  checks. Report absent ciphertext classes explicitly; do not claim they were
+  decrypted. No replacement key or license issuance is required for the check.
+- An encrypted off-host copy of this exact normal database archive with readback
+  and a recovery-test reference, plus independently available decryption key.
+  Configuration-only backups and older source dumps do not satisfy this archive
+  binding. Keep offHostRecovery separate from key continuity and activation.
+
+Only publish a private operation record after those inputs and the production
+activation decision are real. Do not copy the synthetic test authorization or
+manufacture a live prepared-target record from parser success. Select immutable
+main tooling with successful CI that implements v2; an older v1-only executor
+cannot execute this record. Preserve the separately published product source and
+publisher identity when the host executor advances. Source freeze, controlled
+external checks, backup delivery and final public routing remain separate acts.

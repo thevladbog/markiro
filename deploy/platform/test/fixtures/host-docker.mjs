@@ -54,6 +54,11 @@ else if (args[1] === "inspect") {
   );
   if (!found) process.exitCode = 1;
   else output([found]);
+} else if (args[0] === "exec" && args.includes("--file")) {
+  let sql = "";
+  for await (const b of process.stdin) sql += b;
+  if (!sql.startsWith("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;")) process.exitCode = 1;
+  else output(state.activationProjection);
 } else if (args[0] === "exec") output(state.adminResult);
 else if (args[0] === "create") {
   const reference = args.at(-2),

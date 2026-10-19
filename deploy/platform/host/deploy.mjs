@@ -118,6 +118,7 @@ export async function executePreparedDeployment(input, adapters) {
     let deploymentFailure;
     const completed = await withHostState(root, async (store) => {
       const prior = await store.read();
+      if (preparedTarget.version === 2) ensure(!prior.current && !prior.previousHealthy);
       // No command (even an observer) may run for unresolved/foreign state.
       if (prior.current)
         ensure(
@@ -145,6 +146,12 @@ export async function executePreparedDeployment(input, adapters) {
         allowedServices: allowedServices(prior.current, phase, boundary),
         environment,
       });
+      const checkActivationDeadline = () => {
+        if (preparedTarget.version !== 2) return;
+        const value = preparedTarget.observations.egress.value,
+          now = Date.now();
+        ensure(Date.parse(value.expiresAt) > now && Date.parse(value.sourceHold.expiresAt) > now);
+      };
       const checkConfiguration = async () => {
         const fingerprint = await fingerprintHostConfiguration({ root, ...configuration });
         ensure(fingerprint.configurationSha256 === identity.configurationSha256);
@@ -201,12 +208,14 @@ export async function executePreparedDeployment(input, adapters) {
         // Observers may take time or touch external state: reject changed bytes
         // again before the protected transition or command.
         await checkConfiguration();
+        checkActivationDeadline();
         return verified.backupProof;
       };
       const compose = async (args, recovery = false) => {
         if (!recovery) {
           ensure(!adapters.signal?.aborted);
           await boundary("command");
+          checkActivationDeadline();
         }
         await run({
           executable: "/usr/bin/docker",
