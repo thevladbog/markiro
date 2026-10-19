@@ -322,7 +322,8 @@ export function createHostObservers(operation, policyInput, options = {}) {
           POSTGRES_DB: "markiro",
           POSTGRES_USER: "postgres",
           POSTGRES_PASSWORD_FILE: "/run/markiro-postgres/password",
-          POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=peer",
+          POSTGRES_INITDB_ARGS:
+            "--auth-host=scram-sha-256 --auth-local=peer --locale-provider=icu --icu-locale=en-US --lc-collate=C --lc-ctype=C --encoding=UTF8",
         };
       } else if (service === "edge") {
         same(c.Config.Cmd, image.Config.Cmd);

@@ -181,6 +181,7 @@ test("exports only the exact owned tested AMD64 image with private bounded sourc
       "synthetic-fixture-source",
     );
   assert.equal(manifest.sources.generated.sha256, digest("generated migration bytes\n"));
+  assert.deepEqual(manifest.sources.baseImages, []);
   assert.equal(manifest.dependencies.verification, "tested-image-only");
   assert.equal(manifest.dependencies.treeSha256, undefined);
   const { readdir } = await import("node:fs/promises");
@@ -395,3 +396,17 @@ for (const entrypoint of [null, [], ["sh"], "", {}, [null], undefined])
       await assert.rejects(lstat(f.request.directory), { code: "ENOENT" });
     }
   });
+
+test("source provenance records exact pinned worker base references and recipe bytes", async (t) => {
+  const f = await fixture(t);
+  const { workerRecipe, ICU_POSTGRES_BASE, ICU_NODE_BASE } =
+    await import("../backup/worker-recipes.mjs");
+  const recipe = workerRecipe("icu");
+  await writeFile(join(f.contextDirectory, "Dockerfile"), recipe);
+  const sources = await captured(f);
+  assert.deepEqual(sources.baseImages, [ICU_NODE_BASE, ICU_POSTGRES_BASE]);
+  assert.equal(sources.buildRecipeSha256, digest(recipe));
+  const result = await invoke(f, sources);
+  const manifest = JSON.parse(await readFile(result.manifestPath));
+  assert.deepEqual(manifest.sources.baseImages, [ICU_NODE_BASE, ICU_POSTGRES_BASE]);
+});

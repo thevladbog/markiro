@@ -59,7 +59,7 @@ test("local PostgreSQL persists data on a private network and requires verified 
   assert.doesNotMatch(hba, /trust/);
   assert.equal(
     c.services.postgres.environment.POSTGRES_INITDB_ARGS,
-    "--auth-host=scram-sha-256 --auth-local=peer",
+    "--auth-host=scram-sha-256 --auth-local=peer --locale-provider=icu --icu-locale=en-US --lc-collate=C --lc-ctype=C --encoding=UTF8",
   );
 });
 

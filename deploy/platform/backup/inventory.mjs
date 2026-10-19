@@ -1,3 +1,4 @@
+import { captureLocale } from "./locale.mjs";
 import { createHash } from "node:crypto";
 import { relationDefinition, sequenceDefinition, typeDefinition } from "./definitions.mjs";
 import { leastPrivilegeRoleAttributes, leastPrivilegeRoleSql } from "../postgres/roles.mjs";
@@ -68,7 +69,7 @@ export async function captureInventory(client, { excludeRole } = {}) {
   const objects =
     await rows(`SELECT 'DATABASE' AS kind,'' AS schema,datname AS name,datdba AS owner,coalesce(datacl,acldefault('d',datdba))::text AS acl,'pg_database' AS catalog,oid FROM pg_database WHERE datname=current_database()
  UNION ALL SELECT 'SCHEMA','',nspname,nspowner,coalesce(nspacl,acldefault('n',nspowner))::text,'pg_namespace',oid FROM pg_namespace n WHERE ${namespaces}
- UNION ALL SELECT CASE relkind WHEN 'S' THEN 'SEQUENCE' WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'r' THEN 'TABLE' WHEN 'p' THEN 'TABLE' ELSE 'UNSUPPORTED' END,n.nspname,c.relname,c.relowner,coalesce(c.relacl,acldefault(CASE WHEN relkind='S' THEN 'S'::"char" ELSE 'r'::"char" END,c.relowner))::text,'pg_class',c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE ${namespaces} AND c.relkind NOT IN ('i','I','t','c')
+ UNION ALL SELECT CASE relkind WHEN 'S' THEN 'SEQUENCE' WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'r' THEN 'TABLE' WHEN 'p' THEN 'TABLE' ELSE 'UNSUPPORTED' END,n.nspname,c.relname,c.relowner,coalesce(c.relacl,acldefault(CASE WHEN relkind='S' THEN 's'::"char" ELSE 'r'::"char" END,c.relowner))::text,'pg_class',c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE ${namespaces} AND c.relkind NOT IN ('i','I','t','c')
  UNION ALL SELECT CASE WHEN p.prokind='p' THEN 'PROCEDURE' WHEN p.prokind='f' THEN 'FUNCTION' ELSE 'UNSUPPORTED' END,n.nspname,p.proname,p.proowner,coalesce(p.proacl,acldefault('f',p.proowner))::text,'pg_proc',p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE ${namespaces}
  UNION ALL SELECT CASE WHEN t.typtype='d' THEN 'DOMAIN' ELSE 'TYPE' END,n.nspname,t.typname,t.typowner,coalesce(t.typacl,acldefault('T',t.typowner))::text,'pg_type',t.oid FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE ${namespaces} AND t.typrelid=0 AND t.typelem=0`);
   for (const object of objects) {
@@ -76,12 +77,7 @@ export async function captureInventory(client, { excludeRole } = {}) {
     object.owner = (await rows("SELECT pg_get_userbyid($1) AS name", [object.owner]))[0].name;
     object.acl = order(await rows(aclSQL, [object.acl]));
     if (object.kind === "DATABASE") {
-      object.locale = (
-        await rows(
-          "SELECT pg_encoding_to_char(encoding) AS encoding,datcollate AS collate,datctype AS ctype,datlocprovider AS provider FROM pg_database WHERE datname=current_database()",
-        )
-      )[0];
-      ensure(object.locale.provider === "c");
+      object.locale = await captureLocale(client);
     }
     object.extension =
       (

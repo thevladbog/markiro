@@ -48,6 +48,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/state.mjs",
   "deploy/platform/host/state-validation.mjs",
   "deploy/platform/backup/schemas.mjs",
+  "deploy/platform/backup/locale.mjs",
   "deploy/platform/backup/files.mjs",
   "deploy/platform/backup/restore.mjs",
   "deploy/platform/backup/local-runtime.mjs",

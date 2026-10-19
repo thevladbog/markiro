@@ -534,3 +534,27 @@ test("production-bundle preserves only verified recovery image and manifest afte
   assert.equal(upload.with["retention-days"], 7);
   assert.equal(upload.with.overwrite, undefined);
 });
+
+test("production-bundle exports ICU worker separately with exact pinned two-file upload", () => {
+  const job = workflow.jobs["production-bundle"];
+  const backup = stepByName(job, "Verify isolated ICU PostgreSQL backup and restore");
+  const upload = stepByName(job, "Preserve verified ICU recovery worker image");
+  assert.equal(
+    backup.run,
+    'node deploy/platform/backup/backup-ci.mjs --local-ci --icu --export-image "$RUNNER_TEMP/platform-recovery-image-icu"',
+  );
+  assert.equal(job.steps.indexOf(upload), job.steps.indexOf(backup) + 1);
+  assert.equal(upload.if, "success()");
+  assert.equal(upload.uses, "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+  assert.equal(
+    upload.with.name,
+    "platform-recovery-worker-icu-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+  );
+  assert.equal(
+    upload.with.path,
+    "${{ runner.temp }}/platform-recovery-image-icu/recovery-image.tar\n${{ runner.temp }}/platform-recovery-image-icu/recovery-image.json\n",
+  );
+  assert.equal(upload.with["if-no-files-found"], "error");
+  assert.equal(upload.with["retention-days"], 7);
+  assert.equal(upload.with.overwrite, undefined);
+});

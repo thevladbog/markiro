@@ -1,3 +1,4 @@
+import { createDatabaseSql, compareDatabaseLocale } from "./locale.mjs";
 /** Trusted image entry point. Never logs SQL, credentials, child output or rows. */
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -83,7 +84,7 @@ async function archive() {
   client = await sourceClient(applicationName);
   await client.connect();
   await client.query(
-    "SET timezone='UTC'; SET DateStyle='ISO,YMD'; SET IntervalStyle='postgres'; SET bytea_output='hex'; SET extra_float_digits=3; SET search_path=pg_catalog,public;",
+    "SET standard_conforming_strings=on; SET timezone='UTC'; SET DateStyle='ISO,YMD'; SET IntervalStyle='postgres'; SET bytea_output='hex'; SET extra_float_digits=3; SET search_path=pg_catalog,public;",
   );
   phase = "snapshot";
   const version = (await client.query("SHOW server_version")).rows[0].server_version;
@@ -131,21 +132,12 @@ async function restore() {
   });
   await client.connect();
   await client.query(
-    "SET timezone='UTC'; SET DateStyle='ISO,YMD'; SET IntervalStyle='postgres'; SET bytea_output='hex'; SET extra_float_digits=3; SET search_path=pg_catalog,public;",
+    "SET standard_conforming_strings=on; SET timezone='UTC'; SET DateStyle='ISO,YMD'; SET IntervalStyle='postgres'; SET bytea_output='hex'; SET extra_float_digits=3; SET search_path=pg_catalog,public;",
   );
   await client.query(roleSql(expected));
   const database = expected.objects.find((o) => o.kind === "DATABASE");
   ensure(database);
-  const locale = database.locale;
-  ensure(
-    locale?.provider === "c" &&
-      [locale.encoding, locale.collate, locale.ctype].every(
-        (v) => typeof v === "string" && /^[A-Za-z0-9_.@-]+$/u.test(v),
-      ),
-  );
-  await client.query(
-    `CREATE DATABASE ${quote(database.name)} OWNER ${quote(database.owner)} TEMPLATE template0 ENCODING '${locale.encoding}' LC_COLLATE '${locale.collate}' LC_CTYPE '${locale.ctype}' LOCALE_PROVIDER libc`,
-  );
+  await client.query(createDatabaseSql(database));
   await client.end();
   client = new Client({
     host: "/work/socket",
@@ -156,8 +148,10 @@ async function restore() {
   });
   await client.connect();
   await client.query(
-    "SET timezone='UTC'; SET DateStyle='ISO,YMD'; SET IntervalStyle='postgres'; SET bytea_output='hex'; SET extra_float_digits=3; SET search_path=pg_catalog,public;",
+    "SET standard_conforming_strings=on; SET timezone='UTC'; SET DateStyle='ISO,YMD'; SET IntervalStyle='postgres'; SET bytea_output='hex'; SET extra_float_digits=3; SET search_path=pg_catalog,public;",
   );
+  phase = "locale-compare";
+  await compareDatabaseLocale(client, database.locale);
   // Extension-created objects must have their expected mapped owner. Only the
   // currently required trusted extension is admitted; no arbitrary package load.
   for (const ext of expected.extensions) {

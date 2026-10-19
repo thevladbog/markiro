@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { writeFile, chmod } from "node:fs/promises";
+import { writeFile, chmod, readFile } from "node:fs/promises";
+import { load } from "js-yaml";
 import { join } from "node:path";
 import { preparedFixture } from "./prepared-target-fixture.mjs";
 import { validatePreparedTarget } from "../host/prepared-target.mjs";
@@ -67,6 +68,23 @@ test("Docker observation obtains identities through a real bounded fake executab
     active: [],
   });
 });
+test("Docker observation accepts actual compact ICU initialization and rejects legacy init arguments", async (t) => {
+  const f = await dockerFixture(t);
+  const compact = load(await readFile(new URL("../compose.compact.yml", import.meta.url), "utf8"));
+  const env = f.state.containers[0].Config.Env;
+  const index = env.findIndex((value) => value.startsWith("POSTGRES_INITDB_ARGS="));
+  assert.notEqual(index, -1);
+  env[index] = `POSTGRES_INITDB_ARGS=${compact.services.postgres.environment.POSTGRES_INITDB_ARGS}`;
+  await f.publish();
+  assert.equal(
+    (await f.observers.inventory(f.context)).owned[0].container.Id,
+    f.state.containers[0].Id,
+  );
+  env[index] = "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=peer";
+  await f.publish();
+  await assert.rejects(f.observers.inventory(f.context));
+});
+
 for (const repository of [
   "postgres",
   "library/postgres",
