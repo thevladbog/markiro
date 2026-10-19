@@ -246,6 +246,8 @@ export async function validatePreparedTarget(input, expected) {
     identity.configurationSha256,
   );
   const checkedAt = Date.now();
+  fresh(document.startedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
+  fresh(evidence.completedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
   fresh(workload.observedAt, record.fence.beganAt, 30000, checkedAt);
   fresh(fenceValue.observedAt, record.fence.beganAt, 30000, checkedAt);
   // Long adapters cannot extend the validity of older attestations/certificates.

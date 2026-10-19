@@ -49,11 +49,29 @@ corepack pnpm format:check
 node deploy/platform/backup/backup-ci.mjs --local-ci
 ```
 
-Final outputs: focused54/54, platform264/264, production591/591, CI-policy63/63,
-all without skips; scoped ESLint, full formatting and diff checks passed. The
-Task4 source is frozen at the exact tested commit; subsequent evidence updates are
-documentation only. Independent review/publication remain controller-owned and
-are not accepted in advance.
+Implementation-commit outputs: focused54/54, platform264/264, production591/591,
+CI-policy63/63, all without skips; scoped ESLint, full formatting and diff checks
+passed. Exact Docker evidence above belongs to `3cf3e356b`; the later time-predicate
+correction below has its own automated coverage. Independent review/publication
+remain controller-owned and are not accepted in advance.
+
+### Task 4 review correction: final freshness boundary
+
+Independent review found that backup start and restore completion could age past
+`maxAgeMs` while asynchronous workload/fence inspectors ran. The final boundary
+already rechecked prepared observations and TLS, but omitted these two older
+timestamps. Both freshness predicates now run again at final `checkedAt`.
+
+Two deterministic clock regressions first pass full validation, then advance time
+inside the fence adapter: backup-only expiry keeps the restore report fresh; the
+restore-expiry case keeps all prepared observations fresh (the backup must be at
+least as old by producer chronology). Both reject without completing
+`backup-verified`. RED: 39 passed, two expected failures. GREEN:
+`node --test deploy/platform/test/prepared-target.test.mjs` 41/41 and complete
+`node --test deploy/platform/test/*.test.mjs` 266/266, no skips. Scoped ESLint,
+Prettier and diff checks passed. Docker, production/CI contracts and full API were
+not rerun for this two-predicate correction; their earlier evidence and limits
+remain tied to the revisions stated above.
 
 ## Decisions and consequences
 

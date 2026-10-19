@@ -165,3 +165,61 @@ for (const [name, mutate] of Object.entries(mutations))
       assert.deepEqual(await store.read(), before);
     });
   });
+
+for (const expired of ["backup start", "restore completion"])
+  test(`prepared target rejects ${expired} expiring during inspection without journal advancement`, async (t) => {
+    const f = await preparedFixture(t);
+    const began = Date.parse(f.document.startedAt);
+    let now = began + 1000;
+    t.mock.method(Date, "now", () => now);
+    const iso = () => new Date(now).toISOString();
+    f.expected.maxAgeMs = 1500;
+    // Backup-only expiry has a newly completed restore. In the restore-expiry
+    // case the backup is necessarily at least as old by producer chronology.
+    if (expired === "backup start") {
+      f.document.completedAt = iso();
+      f.evidence.startedAt = iso();
+      f.evidence.completedAt = iso();
+    }
+    await f.publish();
+    const restored = f.record.observations.restoredSnapshot.value;
+    restored.inventorySha256 = f.backup.inventorySha256;
+    restored.restoreEvidenceSha256 = f.restoreEvidence.evidenceSha256;
+    for (const observation of Object.values(f.record.observations)) observation.observedAt = iso();
+    const inspect = f.expected.workload.inspect;
+    f.expected.workload.inspect = async () => ({ ...(await inspect()), observedAt: iso() });
+    const observe = f.expected.writerFence.observe;
+    f.expected.writerFence.observe = async (request) => ({
+      ...(await observe(request)),
+      observedAt: iso(),
+    });
+    // Establish that the full bytes/bindings and initial freshness are valid.
+    await validatePreparedTarget(f.record, f.expected);
+    f.expected.writerFence.observe = async (request) => {
+      const result = await observe(request);
+      now += 1000;
+      return { ...result, observedAt: iso() };
+    };
+    await withHostState(f.root, async (store) => {
+      await store.begin(f.identity);
+      await store.complete("admitted");
+      for (const phase of ["images-verified", "target-stopped"]) {
+        await store.enter(phase);
+        await store.complete(phase);
+      }
+      await store.enter("backup-verified");
+      const before = await store.read();
+      await assert.rejects(async () => {
+        const result = await validatePreparedTarget(f.record, f.expected);
+        await store.complete("backup-verified", result.backupProof);
+      });
+      const expiredAt = expired === "backup start" ? f.document.startedAt : f.evidence.completedAt;
+      assert.equal(now - Date.parse(expiredAt), 2000);
+      if (expired === "backup start") assert.equal(now - Date.parse(f.evidence.completedAt), 1000);
+      for (const observation of Object.values(f.record.observations))
+        assert.equal(now - Date.parse(observation.observedAt), 1000);
+      assert.deepEqual(await store.read(), before);
+      assert.equal(before.current.status, "entered");
+      assert.equal(before.current.backup, null);
+    });
+  });
