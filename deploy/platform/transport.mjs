@@ -103,7 +103,7 @@ export function sshArguments(target, phase, operationId) {
     "-o",
     "UpdateHostKeys=no",
     "-o",
-    "CheckHostIP=yes",
+    "CheckHostIP=no",
     "-o",
     "PasswordAuthentication=no",
     "-o",

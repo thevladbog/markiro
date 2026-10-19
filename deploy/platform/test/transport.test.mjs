@@ -522,3 +522,31 @@ test("failed private manifest read removes only owned local auth and emits no cr
     "preserve",
   );
 });
+
+test("DNS-host pin never adds a resolved-IP pin or weakens strict host verification", () => {
+  for (const phase of ["receive", "execute"]) {
+    const args = sshArguments(target(), phase, selection().operationId);
+    assert.ok(args.includes("CheckHostIP=no"));
+    assert.ok(!args.includes("CheckHostIP=yes"));
+    assert.ok(args.includes("StrictHostKeyChecking=yes"));
+    assert.ok(args.includes("UpdateHostKeys=no"));
+    assert.ok(args.includes("UserKnownHostsFile=/private/hosts"));
+  }
+});
+
+test("successful receive stdout with SSH warning still prevents execute", async (t) => {
+  const f = await senderFixture(t);
+  const original = f.options.runProcess;
+  f.options.runProcess = async (options) => {
+    if (options.executable !== "/usr/bin/ssh") return original(options);
+    f.calls.push(options);
+    return {
+      stdout: Buffer.from("Platform executor bundle received.\n"),
+      stderr: Buffer.from("Warning: Permanently added resolved IP to known hosts.\n"),
+    };
+  };
+  await assert.rejects(runTransport(f.config, f.options));
+  const ssh = f.calls.filter((c) => c.executable === "/usr/bin/ssh");
+  assert.equal(ssh.length, 1);
+  assert.match(ssh[0].args.at(-1), / receive /u);
+});
