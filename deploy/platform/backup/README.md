@@ -156,3 +156,15 @@ into nested comparisons, while restoring its deparsed SQL can flatten nested
 AND nodes. Pretty deparse produces identical SQL bytes for both trees without
 removing literals, casts, precedence or validation state. Changed definition
 hashes remain a restore failure.
+
+The host integration is `../host/backup-gate.mjs` and
+`../host/prepared-target.mjs`; the complete record and trusted-adapter contracts
+are documented in the [preparation runbook](../../../docs/runbooks/timeweb-platform-preparation.md#backup-and-prepared-target-library-boundary).
+`readVerifiedBackup` is an internal shared byte-verification helper, not a second
+acceptance API. `verifyBackupGate` returns only the existing four journal fields.
+`validatePreparedTarget` additionally rehashes both credential-bearing candidate
+snapshots, verifies role mapping and fresh bound observations, and retains explicit
+operator provenance. The journal itself remains a lower-level syntax/state store.
+`prepared-ci.mjs` is called only by the synthetic local harness; it creates no live
+acceptance. Its CLI timeout probe independently inspects the still-running owned
+container, requires actual stop plus held fence, and preserves terminal recovery.

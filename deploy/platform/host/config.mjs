@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { canonical, digest as configurationDigest, ensure, plain } from "../backup/schemas.mjs";
 import { rmdir, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { readProtectedEnv, validateConfig } from "../preflight.mjs";
@@ -306,4 +307,33 @@ export async function snapshotMigrationConfig({ root, candidateId, envFile, runt
   } catch (error) {
     throw privateFileError(error.durabilityUncertain === true);
   }
+}
+
+// Re-read both private snapshots. Paths and candidate are part of the binding;
+// callers cannot substitute a hash for actual credential-bearing bytes.
+export async function fingerprintHostConfiguration({
+  root,
+  candidateId,
+  runtimeSnapshot,
+  migrationSnapshot,
+}) {
+  ensure(
+    typeof candidateId === "string" &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(
+        candidateId,
+      ),
+  );
+  const snapshots = plain({ runtimeSnapshot, migrationSnapshot });
+  const result = { version: 1, kind: "platform-host-configuration", candidateId };
+  for (const [key, name] of [
+    ["runtimeSnapshot", "runtime"],
+    ["migrationSnapshot", "migration"],
+  ]) {
+    const relative = `candidates/${candidateId}/${name}.env`;
+    ensure(snapshots[key].path === join(root, relative));
+    const actual = configurationDigest(await readPrivateFile(root, relative));
+    ensure(actual === snapshots[key].sha256);
+    result[`${name}Sha256`] = actual;
+  }
+  return { ...result, configurationSha256: configurationDigest(canonical(result)) };
 }

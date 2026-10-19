@@ -23,6 +23,7 @@ import { createDatabaseBackup } from "./archive.mjs";
 import { hashArchive, publishArchive } from "./files.mjs";
 import { verifyDatabaseRestore } from "./restore.mjs";
 import { canonical, digest, completedEvidence } from "./schemas.mjs";
+import { verifyLocalPreparedPath } from "./prepared-ci.mjs";
 import { roleProvisioningSql } from "../postgres/roles.mjs";
 if (process.argv.slice(2).join() !== "--local-ci") throw new Error("Explicit --local-ci required");
 const root = await mkdtemp(join(await realpath(tmpdir()), "markiro-backup-ci-"));
@@ -611,6 +612,31 @@ try {
   completedEvidence(evidence, { operationId, target, ...backup });
   assert.equal(digest(await readFile(proof.evidencePath)), proof.evidenceSha256);
   assert.ok(document.inventory.sequences.some((s) => s.isCalled === false && s.lastValue === "37"));
+  phase = "prepared target and owned workload timeout";
+  logs.push(
+    await verifyLocalPreparedPath({
+      root,
+      operationId,
+      target,
+      executorSha,
+      document,
+      backup,
+      restoreEvidence: proof,
+      roleMapping,
+      writerFence,
+      cmd,
+      run: runHostProcess,
+      executable,
+      endpoint,
+      imageId,
+      owned,
+      source,
+      fixture,
+      appPassword,
+      migratorPassword,
+      label,
+    }),
+  );
   phase = "corrupt byte rejection";
   const corrupt = join(root, "corrupt.dump");
   await publishArchive(root, backup.archivePath, "corrupt.dump");

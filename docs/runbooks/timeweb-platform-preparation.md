@@ -563,11 +563,96 @@ It requires a verified local Unix Docker endpoint, creates generated credentials
 and unique isolated resources, publishes no ports and cleans those resources.
 This synthetic proof does not establish existing-data restoration or target AMD64.
 
-The host CLI, exact Compose orchestration,
-reviewed backup-byte/isolated-restore verification, aggregate configuration binding,
-prepared-target acceptance, SSH transport and protected host workflow
-remain pending. Linux filesystem/crash rehearsal, actual target inventory,
+The backup-byte/isolated-restore producer, aggregate configuration fingerprint
+and prepared-target validation library are implemented below. The host CLI, exact
+Compose orchestration, trusted live observation adapters, SSH transport and
+protected host workflow remain pending. Linux filesystem/crash rehearsal, actual target inventory,
 PostgreSQL TLS/roles, key continuity, off-host recovery, restored-data capacity,
 SMTP/S3/license checks and domain/TLS smoke remain separate acceptance gates.
 Pure local library tests invoke no Docker, SSH, GitHub or production service and do
 not authorize VM purchase, restore, deployment or DNS cutover.
+
+## Backup and prepared-target library boundary
+
+The [backup library](../../deploy/platform/backup/README.md) streams and hashes
+private immutable custom dumps, compares a real isolated PG17 restore with the
+source inventory under an exhaustive role mapping, and publishes completion only
+after its owned temporary resources are independently absent. Its worker image ID
+identifies the restore tooling; the prepared target PostgreSQL image digest is a
+separate field. The current local worker is Linux ARM64, not target-host AMD64.
+
+`verifyBackupGate({root,identity,backup,restoreEvidence})` rehashes actual archive,
+inventory and completed evidence bytes, validates the exact producer schema and
+operation/target/executor/snapshot/fence/runtime/provenance bindings, and returns
+only `{archiveSha256,restoreEvidenceSha256,target,operationId}` for the existing
+journal. Backup and restore descriptors are the exact Task 3 return values.
+Failed or incomplete restore reports, future reports and inconsistent cleanup
+inventories reject. A caller-created JSON document is not independent recovery
+proof: reviewed producers and the private cooperating-operator root are trusted.
+
+`fingerprintHostConfiguration({root,candidateId,runtimeSnapshot,migrationSnapshot})`
+rehashes both protected candidate files, including migration credentials. Its
+`configurationSha256` hashes canonical sorted-key JSON of exactly
+`{version:1,kind:'platform-host-configuration',candidateId,runtimeSha256,
+migrationSha256}`. The return value adds `configurationSha256` to those fields.
+Neither credential bytes nor connection URLs enter evidence. Runtime and migration
+snapshots must belong to the same candidate's `runtime.env` and `migration.env`.
+
+`await validatePreparedTarget(record, expected)` returns `{record,backupProof}`.
+It does not publish an acceptance file or authorize a deployment. The exact v1
+record has `version,kind,operationId,target,executorSha,provenance,
+configurationSha256,fence,observations`, kind `platform-prepared-target`, and fence
+`{fenceId,enforcementSha256,beganAt}`. Observations are exactly `postgres,tls,
+rolePolicy,restoredSnapshot,egress,keyContinuity,offHostRecovery`. Each has exactly
+`kind,producerId,executorSha,operationId,target,fenceId,configurationSha256,
+snapshotId,observedAt,value`. The first four are `measured`; the last three are
+`operator-attestation`, retaining an identified actor and durable reference.
+
+Trusted `expected` supplies root, host identity, configuration snapshot descriptors,
+backup/restore descriptors, role mapping, PostgreSQL image/architecture/OS/UID/GID,
+certificate fingerprint/SAN, role-policy hash, provenance, exact producer map,
+`maxAgeMs`, and independent `writerFence`/`workload` adapters. The policy hash must
+come from reviewed policy code and actual role observations, not a supplied
+unverified digest. Expected physical target identity, connection-to-target
+resolution and independent source-writer exclusion belong to those future trusted
+adapters. This library does not implement them.
+
+Measured values bind PG17, Linux, nonroot UID/GID, the distinct target image digest,
+certificate fingerprint/SAN/validity, role/configuration policy, and exact restored
+snapshot/archive/inventory/report/role-map/mapped-inventory/worker identity.
+The library automatically verifies archive/configuration bytes and mapped inventory
+hashes; matching supplied PostgreSQL/TLS records does not probe a physical host or
+perform a TLS handshake. Live-source acceptance requires planned Linux AMD64;
+local-synthetic ARM64 remains explicitly synthetic and cannot satisfy live-source.
+
+Every observation follows the same fence's beginning, is not future-dated, and
+is within an explicit positive `maxAgeMs` of at most 24 hours. The independent
+fresh fence and owned-workload observations must be at most 30 seconds old.
+The workload adapter supplies exact inspected container ID/name, operation owner
+label, target, producer, executor and `exited` state. Running, unknown and absent
+containers reject; this version has no prior-owned-ID absence protocol. Fence
+observations preserve Task 3 fields with boundary `prepared-target` plus producer
+and executor, and must still report the same held enforcement identity.
+
+Operator attestations explicitly cover isolated SMTP/S3, held retained mail and
+report jobs, disabled legacy queues and retention actions; decryption and signing
+key continuity against a key-manifest hash; and a bound off-host archive reference,
+recovery-test reference and independent key availability. Syntax or local tests do
+not establish these human/operational facts. No live acceptance file is generated.
+
+Call the validator inside `withHostState` immediately before every protected journal
+mutation or migration/start/recovery-sensitive action. The return is not a durable
+authorization token. The low-level journal still accepts its original proof shape;
+trusted callers can bypass the library, so enforcement awaits the future command
+orchestrator. A timed-out Docker CLI can leave the daemon workload running. Stop
+and independently inspect only the exact owned container, then recheck the fence.
+Even successful checks never clear `recovery-required`: there is no resume,
+automatic rollback or recovery-clearing API.
+
+The local `backup-ci.mjs --local-ci` includes actual archive/restore plus a uniquely
+owned networkless workload: bounded Docker wait times out, independent inspect
+finds it running, and integrated validation prevents journal advancement. Only
+actual owned stop/inspect plus a held fence admits the gate. All operator records
+in this harness say synthetic-only; they are not production keys, off-host recovery
+or SMTP/S3 acceptance. See the [durable verification record](../verification/2026-10-19-platform-backup-preparation.md)
+for exact commits, tests and remaining gates.

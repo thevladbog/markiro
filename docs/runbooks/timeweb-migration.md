@@ -6,6 +6,23 @@ S3. CRM, n8n, Chatwoot hosting, vbtech and landing redesign are outside this mov
 Do not provision a paid idle VM before reviewed delivery and restore tooling exist.
 No checklist entry authorizes production changes by itself.
 
+## Preparation code status: 2026-10-19
+
+Bounded host processes, separate runtime/migration snapshots, explicit role policy,
+private custom archive/isolated restore, byte-verifying backup gate and versioned
+prepared-target validation are implemented as libraries. The disposable local
+harness checks real PG17 ARM64 and daemon-workload timeout/owned stop behavior.
+See the [verification record](../verification/2026-10-19-platform-backup-preparation.md).
+
+This does not complete the checklist below. Live source/physical target resolution,
+independently enforced writer fencing, protected transport/workflow, complete host
+command orchestration, operator bootstrap and actual Timeweb rehearsal remain
+pending. Prepared records preserve measured versus operator-attested provenance;
+local synthetic records cannot become live acceptance. Target Linux AMD64,
+production-data restore, actual TLS/role inventory, retained-intent/SMTP/S3 isolation,
+key continuity, off-host recovery and capacity need their own evidence. A stopped
+owned workload never clears a terminal recovery-required journal.
+
 ## Dated observations: 2026-10-18
 
 - Preparation PR #731 merged as `0ca0433f1ef2695667da1ad6bc9ef9ba1e6c4a96`.
