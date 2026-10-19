@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { preparedFixture } from "./prepared-target-fixture.mjs";
@@ -55,7 +55,8 @@ async function fixture(t, failAt) {
     stopMigration: () => action("stop-migration"),
     smoke: () => action("smoke"),
     runProcess: async (request) => {
-      const args = request.args;
+      assert.deepEqual(request.args.slice(0, 2), ["--host", "unix:///var/run/docker.sock"]);
+      const args = request.args.slice(2);
       assert.deepEqual(args.slice(0, 3), ["compose", "--project-name", "markiro-platform"]);
       assert.equal(args[3], "--file");
       assert.match(args[4], /\/deploy\/platform\/compose\.yml$/u);
@@ -97,6 +98,11 @@ async function fixture(t, failAt) {
 
 test("clean first install journals actions before executing and completes healthy in exact order", async (t) => {
   const f = await fixture(t);
+  await writeFile(
+    join(f.input.dockerConfig, "config.json"),
+    JSON.stringify({ currentContext: "remote-attacker" }),
+    { mode: 0o600 },
+  );
   assert.deepEqual(await execute(f.input, f.adapters), f.identity);
   assert.deepEqual(f.trace, [
     ["release", "admitted"],

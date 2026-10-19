@@ -223,3 +223,59 @@ for (const expired of ["backup start", "restore completion"])
       assert.equal(before.current.backup, null);
     });
   });
+
+function cleanedWorkload(f) {
+  const resources = structuredClone(f.evidence.cleanup.resources);
+  const producerId = f.expected.workload.producerId;
+  return {
+    identity: { resources },
+    producerId,
+    executorSha: f.identity.executorSha,
+    inspect: async () => ({
+      version: 2,
+      kind: "platform-restore-cleanup",
+      status: "absent",
+      operationId: f.identity.operationId,
+      target: f.identity.target,
+      producerId,
+      executorSha: f.identity.executorSha,
+      observedAt: new Date().toISOString(),
+      resources,
+      present: [],
+      operationResources: [],
+    }),
+  };
+}
+
+test("prepared target accepts fresh absence of all byte-bound restore cleanup resources", async (t) => {
+  const f = await preparedFixture(t);
+  f.expected.workload = cleanedWorkload(f);
+  const result = await validatePreparedTarget(f.record, f.expected);
+  assert.equal(result.backupProof.restoreEvidenceSha256, f.restoreEvidence.evidenceSha256);
+});
+
+for (const mutation of [
+  "missing resource",
+  "substituted resource",
+  "remaining volume",
+  "extra operation resource",
+  "stale",
+  "unknown key",
+])
+  test(`prepared cleanup rejects ${mutation}`, async (t) => {
+    const f = await preparedFixture(t);
+    f.expected.workload = cleanedWorkload(f);
+    const inspect = f.expected.workload.inspect;
+    f.expected.workload.inspect = async () => {
+      const observation = await inspect();
+      if (mutation === "missing resource") observation.resources.pop();
+      if (mutation === "substituted resource") observation.resources[0].name += "-other";
+      if (mutation === "remaining volume") observation.present.push(observation.resources[0]);
+      if (mutation === "extra operation resource")
+        observation.operationResources.push({ kind: "container", name: "outsider" });
+      if (mutation === "stale") observation.observedAt = new Date(Date.now() - 31000).toISOString();
+      if (mutation === "unknown key") observation.verified = true;
+      return observation;
+    };
+    await assert.rejects(validatePreparedTarget(f.record, f.expected));
+  });

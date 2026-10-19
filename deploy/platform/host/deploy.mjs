@@ -211,6 +211,8 @@ export async function executePreparedDeployment(input, adapters) {
         await run({
           executable: "/usr/bin/docker",
           args: [
+            "--host",
+            "unix:///var/run/docker.sock",
             "compose",
             "--project-name",
             project,

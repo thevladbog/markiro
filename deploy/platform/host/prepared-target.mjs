@@ -191,12 +191,12 @@ export async function validatePreparedTarget(input, expected) {
   same(offhost.archiveSha256, backupProof.archiveSha256);
   label(offhost.recoveryTestReference);
   ensure(offhost.independentKeyAvailable === true);
-  // Observe after expensive byte checks so prior CLI termination cannot be
-  // mistaken for daemon workload death. Only an inspected exited ID is accepted.
+  // Observe after byte checks. v2 binds fresh absence to the actual restore
+  // producer's complete cleanup inventory; v1 retains stopped-worker compatibility.
   const workload = plain(
     await expected.workload.inspect({ operationId: identity.operationId, target: identity.target }),
   );
-  keys(workload, [
+  const common = [
     "version",
     "kind",
     "operationId",
@@ -204,23 +204,31 @@ export async function validatePreparedTarget(input, expected) {
     "producerId",
     "executorSha",
     "observedAt",
-    "containerId",
-    "name",
-    "ownerOperationId",
     "status",
-  ]);
-  keys(expected.workload.identity, ["containerId", "name"]);
-  ensure(
-    workload.version === 1 &&
-      workload.kind === "platform-owned-workload" &&
-      workload.status === "exited" &&
-      /^[a-f0-9]{64}$/u.test(workload.containerId),
-  );
+  ];
+  if (workload.version === 2) {
+    keys(workload, [...common, "resources", "present", "operationResources"]);
+    keys(expected.workload.identity, ["resources"]);
+    ensure(workload.kind === "platform-restore-cleanup" && workload.status === "absent");
+    same(expected.workload.identity.resources, evidence.cleanup.resources);
+    same(workload.resources, evidence.cleanup.resources);
+    same(workload.present, []);
+    same(workload.operationResources, []);
+  } else {
+    keys(workload, [...common, "containerId", "name", "ownerOperationId"]);
+    keys(expected.workload.identity, ["containerId", "name"]);
+    ensure(
+      workload.version === 1 &&
+        workload.kind === "platform-owned-workload" &&
+        workload.status === "exited" &&
+        /^[a-f0-9]{64}$/u.test(workload.containerId),
+    );
+    same(workload.ownerOperationId, identity.operationId);
+    for (const key of ["containerId", "name"]) same(workload[key], expected.workload.identity[key]);
+    label(workload.name);
+  }
   same(workload.operationId, identity.operationId);
   same(workload.target, identity.target);
-  same(workload.ownerOperationId, identity.operationId);
-  for (const key of ["containerId", "name"]) same(workload[key], expected.workload.identity[key]);
-  label(workload.name);
   label(expected.workload.producerId);
   same(workload.producerId, expected.workload.producerId);
   same(workload.executorSha, identity.executorSha);

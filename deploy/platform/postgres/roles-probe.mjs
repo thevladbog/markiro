@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { probePostgres } from "../host/probe-worker.mjs";
 import { createRequire } from "node:module";
 import { runRuntimeMigrations } from "../../../packages/db/dist/runtime-migrate.js";
 const dbRequire = createRequire(new URL("../../../packages/db/package.json", import.meta.url));
@@ -210,6 +211,15 @@ try {
     }
   }
   checks.push("both logins verify CA and hostname; wrong CA, hostname and plaintext denied");
+  phase = "read-only host probe";
+  const hostProbe = await probePostgres({
+    Client,
+    input: { appUrl, migrationUrl: migratorUrl },
+    ca,
+  });
+  assert.equal(hostProbe.postgresVersion, postgresVersion);
+  assert.equal(hostProbe.tls.san, "db.private");
+  checks.push("fixed host probe read-only policy and independent TLS negatives");
   const apiManifest = JSON.parse(
     await readFile(new URL("../../../apps/api/package.json", import.meta.url), "utf8"),
   );

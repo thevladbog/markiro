@@ -564,8 +564,8 @@ and unique isolated resources, publishes no ports and cleans those resources.
 This synthetic proof does not establish existing-data restoration or target AMD64.
 
 The backup-byte/isolated-restore producer, aggregate configuration fingerprint
-and prepared-target validation library are implemented below. The host CLI, exact
-Compose orchestration, trusted live observation adapters, SSH transport and
+and prepared-target validation library are implemented below. The fixed host CLI, exact Compose orchestration and
+trusted live observation adapters are described below. SSH transport and the
 protected host workflow remain pending. Linux filesystem/crash rehearsal, actual target inventory,
 PostgreSQL TLS/roles, key continuity, off-host recovery, restored-data capacity,
 SMTP/S3/license checks and domain/TLS smoke remain separate acceptance gates.
@@ -614,8 +614,8 @@ certificate fingerprint/SAN, role-policy hash, provenance, exact producer map,
 `maxAgeMs`, and independent `writerFence`/`workload` adapters. The policy hash must
 come from reviewed policy code and actual role observations, not a supplied
 unverified digest. Expected physical target identity, connection-to-target
-resolution and independent source-writer exclusion belong to those future trusted
-adapters. This library does not implement them.
+resolution and independent writer exclusion belong to the trusted host
+adapters described below. This library alone does not implement them.
 
 Measured values bind PG17, Linux, nonroot UID/GID, the distinct target image digest,
 certificate fingerprint/SAN/validity, role/configuration policy, and exact restored
@@ -628,9 +628,10 @@ local-synthetic ARM64 remains explicitly synthetic and cannot satisfy live-sourc
 Every observation follows the same fence's beginning, is not future-dated, and
 is within an explicit positive `maxAgeMs` of at most 24 hours. The independent
 fresh fence and owned-workload observations must be at most 30 seconds old.
-The workload adapter supplies exact inspected container ID/name, operation owner
-label, target, producer, executor and `exited` state. Running, unknown and absent
-containers reject; this version has no prior-owned-ID absence protocol. Fence
+The v1 workload adapter supplies exact inspected container ID/name, operation
+owner label, target, producer, executor and `exited` state; running, unknown and
+absent containers reject on that path. The additive v2 cleanup-absence protocol
+described below binds fresh absence to the completed restore cleanup inventory. Fence
 observations preserve Task 3 fields with boundary `prepared-target` plus producer
 and executor, and must still report the same held enforcement identity.
 
@@ -643,8 +644,8 @@ not establish these human/operational facts. No live acceptance file is generate
 Call the validator inside `withHostState` immediately before every protected journal
 mutation or migration/start/recovery-sensitive action. The return is not a durable
 authorization token. The low-level journal still accepts its original proof shape;
-trusted callers can bypass the library, so enforcement awaits the future command
-orchestrator. A timed-out Docker CLI can leave the daemon workload running. Stop
+trusted callers can bypass the library, so use the fixed command orchestrator
+described below for deployment enforcement. A timed-out Docker CLI can leave the daemon workload running. Stop
 and independently inspect only the exact owned container, then recheck the fence.
 Even successful checks never clear `recovery-required`: there is no resume,
 automatic rollback or recovery-clearing API.
@@ -656,3 +657,166 @@ actual owned stop/inspect plus a held fence admits the gate. All operator record
 in this harness say synthetic-only; they are not production keys, off-host recovery
 or SMTP/S3 acceptance. See the [durable verification record](../verification/2026-10-19-platform-backup-preparation.md)
 for exact commits, tests and remaining gates.
+
+## Fixed host command and installed-file contract (Task 2, 2026-10-19)
+
+The host entry point is exactly
+`node INSTALLED_ROOT/deploy/platform/host/command.mjs OPERATION_DIRECTORY`.
+Both paths are canonical absolute private directories; `INSTALLED_ROOT` must be
+this command's actual installation root. Transport must verify the complete bundle
+before executing it and start Node with a clean environment, before `NODE_OPTIONS`
+or loader variables could influence the interpreter. The command exports
+`HOST_BUNDLE_FILES`, the exact transitive source/composition allowlist. CI overlays,
+caller scripts and environment-selected adapters are not part of that list.
+
+Every installed directory is owned by the executing UID, mode 0700, with safe
+non-symlink ancestors. Code, receipts, operation JSON, snapshots and connection
+inputs are regular single-link owner-only mode-0600 files. The **only** source
+exception is `deploy/platform/postgres/pg_hba.conf`: exactly mode 0644, owned by
+root or the executor, no symlink/hard link, exact reviewed SHA256, private parents.
+It contains authentication policy only. The exception is necessary because the
+fixed compact composition bind-mounts that file into PostgreSQL running as UID/GID
+70; a root-owned mode-0600 inode would be unreadable there. No credentials use
+this exception. Host Node 24+, `/usr/bin/docker` with Compose V2 and
+`/usr/bin/python3` must already exist; the command installs nothing.
+
+`OPERATION_DIRECTORY/operation.json` has exactly:
+
+```json
+{
+  "version": 1,
+  "kind": "platform-host-operation",
+  "installedRoot": "/absolute/private/installed-root",
+  "deployment": "the exact data-only executePreparedDeployment input below",
+  "observationPolicy": {
+    "machineId": "32 lowercase hex characters from /etc/machine-id",
+    "dockerId": "independently recorded local Docker daemon ID",
+    "postgresImageId": "sha256: plus the exact 64-hex local PG image ID",
+    "volume": {
+      "name": "markiro-platform_postgres-data",
+      "createdAt": "exact Docker volume creation timestamp",
+      "mountpoint": "/var/lib/docker/volumes/markiro-platform_postgres-data/_data"
+    },
+    "networks": {
+      "default": { "name": "markiro-platform_default", "id": "64-hex Docker ID" },
+      "database": { "name": "markiro-platform_database", "id": "64-hex Docker ID" }
+    }
+  }
+}
+```
+
+The descriptive strings above explain the schema and are not accepted sample
+values. `deployment` is an object with exactly `root,identity,configuration,
+dockerConfig,preparedTarget,preparedPolicy`. `configuration` has exactly
+`candidateId,runtimeSnapshot,migrationSnapshot`, using the existing snapshot
+producer return values. `preparedPolicy` has exactly `backup,restoreEvidence,
+roleMapping,postgres,tls,rolePolicySha256,provenance,maxAgeMs,producers`, with the
+existing verified descriptors and policy schemas. Only `live-source` provenance
+is accepted by this public command. The complete admission stays in `identity`.
+`identity.target.hostId` is the actual machine ID; `databaseId` is PostgreSQL's
+observed decimal system identifier; `volumeId` is the fixed Docker volume name,
+additionally bound to its creation timestamp and mountpoint by the policy.
+The bootstrap must record actual values rather than copy expectations into proof.
+
+The separately trusted preprovisioned `deployment.root/installed-executor.json`
+has exactly `{version:1,kind:"platform-installed-executor",executorSha,
+ci:{runId,runAttempt},files}`. `files` maps every exported `HOST_BUNDLE_FILES` path,
+and no others, to its SHA256 from the reviewed immutable executor checkout.
+Its executor SHA equals `identity.executorSha`; this can differ from the published
+product source/tooling SHA. Protect this receipt independently of incoming
+operation JSON. Self-reported hashes alone do not establish source provenance;
+the protected transport/bootstrap must verify the receipt and bundle before Node
+starts. The command rereads the receipt and all actual source bytes at boundaries.
+
+`OPERATION_DIRECTORY/github-token` is a separate private fixed-name file holding
+a short-lived repository Actions read token. It is never in JSON, argv, child
+environments, transferred artifacts or output. Transport may supply it through
+pinned SSH stdin and remove it after confirmed owned-command termination.
+The command freshly rechecks the exact publisher and complete jobs, artifact
+metadata and downloaded archive bytes, published manifests, and both product and
+executor successful main CI identities. Archive parsing uses the existing fixed
+Python validator under the bounded host process runner. Neither a saved admission
+record nor expected image JSON substitutes for these checks.
+
+The target must already have its private internal database network, ordinary
+platform network, restored local PostgreSQL and approved images available from
+separate preparation/rehearsal. PostgreSQL has no published port. The observer
+inspects the whole daemon (at most 32 containers), rejects any unknown running
+workload and any foreign database-network member or database-volume mount,
+compares image IDs/platforms, complete environments, commands, entry points,
+read-only mounts and privilege restrictions, and enforces phase-specific active
+services. Old exact healthy API/edge images may remain stopped until Compose
+replaces them. Existing runtime settings and credentials must still match the
+candidate apart from recorded release identities; this path does not implicitly
+approve credential/configuration rotation.
+
+The HBA observer follows the **actual mounted inode**, including one in a previous
+installed bundle. It checks safe ownership/private parents, exact reviewed bytes,
+unchanged inode metadata before/after reading, and PostgreSQL startup after both
+file mtime and ctime. Bootstrap must install policy before starting/restarting PG.
+`pg_hba_file_rules` describes current file contents, not last-loaded policy; reload
+time alone is not accepted as proof. The fixed read-only peer query separately
+checks system identifier, PG17, SSL, actual HBA path, current semantic rules,
+prepared transactions and connected session roles/addresses. SQL has server-side
+statement/lock/idle deadlines as well as the bounded Docker subprocess deadline.
+Unknown sessions fail; authorized migration/API sessions must originate from the
+exact allowed container IP. Root and cooperating operator processes remain inside
+the established host trust boundary; this is not protection against a hostile
+root or Docker administrator.
+
+`enforcementSha256` is SHA256 of the existing canonical sorted-key JSON encoding
+of exactly `{version:1,kind:"platform-docker-private-database-fence",target,
+dockerId,network,volume,postgresImageId,hbaSha256}`, where `network` is the policy's
+`database` network object and `hbaSha256` is the reviewed HBA hash. The same identity
+must have been independently observed by the target-local backup fence producer.
+Current complete membership/mount/session inspection enforces this policy before
+returning `held:true`; zero sessions alone is insufficient. Source-side freeze is
+separate and is never inferred from this target-only fence.
+
+The fixed one-shot `probe-worker.mjs` uses the selected API image's already
+installed `/app/node_modules/@markiro/db` dependency graph (`pg`). It receives
+only a private minimal connection JSON, CA and exact reviewed worker source as
+read-only binds, runs with all capabilities dropped and no new privileges on the
+exact internal network, and has no published ports or database-volume mount.
+All SQL is fixed and read-only; it checks both actual TLS logins, wrong-host,
+untrusted-CA and plaintext rejection, role flags/memberships, business ownership,
+DML/schema boundaries and default privileges. Image ID, command, mounts and owner
+label are inspected before start and before owned stop/removal. The adapter
+returns only after fresh absence; an unconfirmed subprocess termination forbids
+racing cleanup and preserves its `terminationConfirmed:false` flag. It never
+runs API startup as the probe command. Direct host probes and Docker tests do not
+establish external SMTP/S3, licensing or physical production acceptance.
+
+Prepared-target v1 records remain compatible. The trusted workload adapter now
+also supports observation **v2**, kind `platform-restore-cleanup`, status `absent`:
+exact fields `version,kind,status,operationId,target,producerId,executorSha,
+observedAt,resources,present,operationResources`. Its identity is `{resources}`;
+the exact ordered resource list must match the existing byte-verified completed
+restore report (both volumes and init/worker names). Both observed survivor lists
+must be empty, including extra resources carrying that backup-operation label.
+Freshness is still 30 seconds. The old v1 exact exited-container observation is
+retained for compatibility; no tombstone container is manufactured. The real
+local backup harness exercises successful cleanup followed by v2 acceptance.
+
+Source-to-target import is an operational prerequisite, not a deployment action.
+The existing backup schema binds one physical target throughout; do not rewrite
+Yandex source identities as Timeweb identities. First independently verify source
+freeze, recovery copies and the reviewed source-to-target restore/mapping. Then
+produce a **target-local**, fenced backup and isolated restore proof for this
+host operation. Provider role/database settings and unsupported inventory features
+must receive explicit reviewed treatment; they cannot be silently dropped to pass
+the backup validator. The pre-migration snapshot remains the recovery boundary;
+this executor does not compare post-migration live rows to pre-migration bytes.
+Egress, retained work suppression, key continuity and off-host recovery remain
+fresh identified operator attestations, never synthetic observations.
+
+Only durable healthy completion prints success. Smoke uses bounded loopback TLS
+with actual configured domain SNI, verifies release/profile headers and platform,
+retired and denied routes. Public DNS, SMTP/S3, source freeze/import, target AMD64,
+protected workflow dispatch and factory acceptance remain separate live gates.
+
+All host observations, owned probe lifecycle operations and coordinator Compose
+commands invoke `/usr/bin/docker --host unix:///var/run/docker.sock`. The private
+`DOCKER_CONFIG` may contain registry credentials, but its `currentContext` cannot
+retarget execution. Ambient Docker endpoint variables are never inherited. The
+machine ID proof and mutating commands therefore refer to the same local daemon.
