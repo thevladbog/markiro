@@ -414,7 +414,10 @@ test("platform preparation builds its own edge and runs only after legacy cleanu
   assert.match(roles.run, /pnpm --filter @markiro\/db build/);
   assert.match(roles.run, /node deploy\/platform\/postgres\/roles-ci\.mjs --local-ci/);
   assert.ok(job.steps.indexOf(roles) < job.steps.indexOf(stack));
-  assert.equal(contracts.run, "node --test deploy/platform/test/*.test.mjs");
+  assert.equal(
+    contracts.run,
+    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+  );
   assert.match(build.run, /deploy\/platform\/edge\.Dockerfile/u);
   assert.match(build.run, /markiro-platform-edge/u);
   assert.doesNotMatch(build.run, /--push|docker push/u);
