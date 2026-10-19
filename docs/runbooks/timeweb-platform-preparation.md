@@ -484,7 +484,8 @@ permission to provision, deploy or change DNS.
 As of 2026-10-19, protected
 [publisher run 39169553922, attempt 1](https://github.com/thevladbog/markiro/actions/runs/39169553922)
 published source/tooling `6fe44af838fc873cd06c7f0d52a4a5dae77dd7e5`, followed by
-independent read-only release admission. Admission tooling PR #733 remains open.
+independent read-only release admission. Admission tooling PR #733 subsequently
+merged as `0d30c7341`; verify the current exact main CI before any new dispatch.
 These observations establish release provenance; the local safety tests below
 establish filesystem/state behavior. Neither establishes a running target.
 
@@ -496,8 +497,8 @@ login. It exclusively publishes `migration.env` alongside the runtime snapshot.
 Combine runtime interpolation with `MARKIRO_PLATFORM_MIGRATION_ENV_FILE` from
 that returned path; runtime-only interpolation cannot construct a host child.
 API receives only runtime credentials; migrate receives only its database URL.
-The future host gate must bind both actual snapshot hashes: the existing state
-`configurationSha256` field does not yet implement that aggregate binding.
+The implemented host gate binds both actual snapshot hashes through
+`fingerprintHostConfiguration` and the identity configurationSha256.
 Its separate child
 configuration permits only validated non-secret interpolation values and rejects
 ambient command-injection variables. The shared filesystem helpers require a
@@ -565,8 +566,9 @@ This synthetic proof does not establish existing-data restoration or target AMD6
 
 The backup-byte/isolated-restore producer, aggregate configuration fingerprint
 and prepared-target validation library are implemented below. The fixed host CLI, exact Compose orchestration and
-trusted live observation adapters are described below. SSH transport and the
-protected host workflow remain pending. Linux filesystem/crash rehearsal, actual target inventory,
+trusted live observation adapters are described below. Pinned SSH transport and
+the protected host workflow are implemented in the final section; their live
+dispatch and independent bootstrap remain unrun. Linux filesystem/crash rehearsal, actual target inventory,
 PostgreSQL TLS/roles, key continuity, off-host recovery, restored-data capacity,
 SMTP/S3/license checks and domain/TLS smoke remain separate acceptance gates.
 Pure local library tests invoke no Docker, SSH, GitHub or production service and do
@@ -860,3 +862,164 @@ The role observer checks effective app USAGE on `public` and effective USAGE
 **and** SELECT on every current public sequence, in addition to default ACLs for
 future objects. The isolated role harness revokes each permission independently,
 requires rejection, restores the grant, and requires success before continuing.
+
+## Protected pinned delivery and independent bootstrap (2026-10-19)
+
+`.github/workflows/deploy-platform.yml` is a separate manual, main-only job on
+`production-deploy`. It does not publish images or provision the target. The
+protected publisher remains `release-platform-images.yml`; the automatic legacy
+production publisher is not a substitute. Select the exact product source SHA,
+publisher run and attempt, immutable complete release artifact ID, operation UUID,
+and the successful main-push **executor** CI run and attempt. The executor SHA is
+`github.sha` of this dispatch; it can differ from the product SHA. Both are checked
+independently, including successful required CI jobs. Never substitute an older
+green head or a queued run.
+
+Only these target settings are used: `TIMEWEB_PLATFORM_HOST`,
+`TIMEWEB_PLATFORM_SSH_PORT`, `TIMEWEB_PLATFORM_SSH_USER`,
+`TIMEWEB_PLATFORM_KNOWN_HOSTS` (protected environment variables) and
+`TIMEWEB_PLATFORM_SSH_PRIVATE_KEY` (protected secret). Obtain the host key through
+an independently authenticated provider console/bootstrap channel; pin that exact
+key as one `host key-type base64` line with no wildcard, marker or extra comment,
+including `[host]:port` for a nonstandard port. Supported key types are
+ssh-ed25519, ecdsa-sha2-nistp256 and ssh-rsa; SSH still enforces its normal
+cryptographic algorithm policy. An absent/ambiguous pin fails locally. There is no keyscan, TOFU,
+SSH agent, user SSH configuration, proxy, password fallback or legacy Yandex
+variable fallback. Environment protection/required reviewers and branch policies
+must be configured and verified in GitHub before dispatch; YAML alone does not
+establish those settings.
+
+The runner starts Node 24 with an empty environment **before** module loading.
+Bash's builtin `printf` carries credentials and dispatch fields as NUL-delimited
+stdin; no secret is an OS argument. The transport creates private temporary key
+and known-host files, verifies a clean exact checkout, and compares all 31 actual
+bundle files to immutable Git blobs. Existing admission validates the selected
+publisher, artifact bytes, release evidence, product CI and registry manifests.
+Only after all local gates does SSH begin. Private GHCR
+reads use the short-lived read-only job token and strictly validated github.actor
+received over the same stdin channel. An exclusive owner0600 config in an owned
+0700 local temporary directory is passed through explicit DOCKER_CONFIG only to
+exact digest-bound GHCR manifest reads, then removed on success or failure. No
+ambient Docker auth, durable PAT or public-package assumption is required. This
+adds one protected temporary copy of the job token; it is never part of a bundle,
+log or workflow artifact. Local auth failure prevents any SSH command.
+
+### Bootstrap contract, performed separately by an authorized operator
+
+This is an operational prerequisite, not an installer executed by delivery. Use a
+fresh supported Linux AMD64 OS with fixed `/usr/bin/node` (24+),
+`/usr/bin/python3`, `/usr/bin/docker` and Compose V2. Verify their actual versions,
+package provenance, local Docker socket and boot persistence. The deployment
+account must own its private directories and have the approved Docker access.
+Root/cooperating operators are trusted. An account permitted to use Docker is a
+privileged account; ordinary users must not write these paths. Disable unapproved
+SSH startup hooks and environment acceptance; the fixed remote command is:
+
+```text
+exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C /usr/bin/node /opt/markiro-platform/bootstrap/deploy/platform/transport.mjs receive OPERATION_UUID
+exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C /usr/bin/node /opt/markiro-platform/bootstrap/deploy/platform/transport.mjs execute OPERATION_UUID
+```
+
+The transport permits only these verbs and a canonical UUID. Do not replace the
+bootstrap during any active or uncertain operation. Under an independently
+reviewed setup/change window, provision this exact layout:
+
+```text
+/opt/markiro-platform/                         owner 0700
+  bootstrap/                                  independently trusted reviewed source
+    deploy/platform/transport.mjs              fixed receiver entrypoint
+    deploy/platform/...                        its complete reviewed module imports
+    deploy/production/...                      reviewed imported production helpers
+  state/                                      owner 0700
+    installed-executor.json                    independent owner 0600 receipt
+    ...                                        private config, journal and backup inputs
+  operations/                                 owner 0700
+    OPERATION_UUID/                            owner 0700, preprovisioned
+      operation.json                          exact Task 2 schema, owner 0600
+  bundles/                                    owner 0700; UUID child MUST NOT exist
+```
+
+All code/configuration/receipt files are regular, single-link, owner0600 with
+private 0700 parents and non-symlink ancestors. The sole policy-file exception is
+`deploy/platform/postgres/pg_hba.conf`, exactly0644 under those private parents.
+For the bootstrap, install these **36 files**, preserving relative layout, from
+an independently authenticated reviewed Git checkout: all 31 `HOST_BUNDLE_FILES`
+plus `deploy/platform/transport.mjs`, `deploy/platform/admit-release.mjs`,
+`deploy/platform/admission-archive.mjs`, `deploy/platform/admission-process.mjs`
+and `deploy/platform/admission-registry.mjs`. This is the current complete static
+import closure plus runtime policy/worker assets; verify it again when updating
+bootstrap. Exclude `.env`, credentials, output, tests and CI overlays. Copying just
+transport.mjs is not sufficient. Runtime delivery installs only `HOST_BUNDLE_FILES` and never changes
+the bootstrap. Bootstrap provenance is an external trust anchor, not a receipt
+supplied inside the SSH payload.
+
+Independently fetch and verify successful main-push CI for the exact executor
+SHA/attempt. From that trusted immutable checkout, enumerate `HOST_BUNDLE_FILES`,
+compare each local file with `git show EXECUTOR_SHA:PATH`, and compute SHA256 of
+those exact bytes. The exported `buildSourceBundle` performs that local comparison
+and returns `{bundle, receipt}`; it does **not** verify CI itself or install the
+receipt. Install its receipt only after independent CI review, with exact fields
+`{version:1,kind:'platform-installed-executor',executorSha,ci:{runId,runAttempt},files}`.
+Never derive the host's expected hashes from an incoming transfer, accept a
+caller-generated receipt as provenance, or overwrite a receipt/source while a
+deployment is active. Receipt replacement for a subsequent executor is a separate
+reviewed bootstrap operation after confirmed healthy completion and no held lock.
+
+Prepare `operation.json` from real target observations, config snapshots, admission,
+and verified backup/restore proof. Set `deployment.root` to
+`/opt/markiro-platform/state` and `installedRoot` to
+`/opt/markiro-platform/bundles/OPERATION_UUID`. The UUID must equal
+`deployment.identity.operationId`. No `github-token` may already exist. Do not
+fabricate `preparedTarget`, held-fence booleans, restore evidence, role ownership
+or source identity to make bootstrap pass. The receiver validates the independent
+receipt and entire exact file set before taking the existing state lock and
+creating the unique bundle root. It rejects active/recovery-required state, an
+existing root, extra/missing files, hash mismatches and mismatched product identity.
+A partial transfer remains for reconciliation; no automatic replacement occurs.
+
+### Execution, token lifetime and recovery
+
+The second SSH carries only a short-lived read-only GitHub job token on stdin.
+The protected job requests contents/actions/packages read; no durable PAT is
+required. The receiver rechecks every source file, including the host CLI loader,
+against the independent receipt **before** starting Node on it. It creates the
+fixed exclusive owner0600 `operations/UUID/github-token` and starts the exact
+Task 2 command with a clean environment. The actual executed module root must
+match the operation's installedRoot. Configuration, credentials and database
+connection inputs remain preprovisioned private host files, never source bundle
+or workflow artifacts. There is no deployment artifact upload.
+
+All processes, output and stdin are bounded. The normal success path requires the
+exact `Platform host deployment healthy.` line with newline, empty stderr, exit0
+and confirmed host CLI process-group exit. Only then is the token unlinked and
+its directory synced. The Task 2 CLI emits its documented sanitized JSON on
+failure; this transport deliberately treats **every** nonzero result as uncertain
+and retains the token, bundle and protected state. It never infers safety from
+stderr wording or `terminationConfirmed:null`. Malformed responses, timeouts,
+SSH loss, false termination, durability uncertainty, cancellation and cleanup
+failure all require operator reconciliation. No automatic retry, lock removal,
+rollback, token deletion, `up` of all services or `down -v` is provided. Even loss
+of the success acknowledgement requires reconciliation. Failed execution cannot
+be repeated while its exclusive token remains. Removal after failure requires
+separate proof that the command and owned subprocesses/daemon workloads stopped;
+then follow the journal's recovery decision, not a blind rerun.
+
+Before the first deployment, independently implement/verify the production
+**target-local recovery backup producer with a real enforced writerFence adapter**.
+It is not provided by this transport. First perform a separately verified
+Yandex-source → Timeweb import, mapping provider roles and settings explicitly,
+including `markiro` → `markiro_migrator`, reviewed extension ownership, business
+ownership and retained legacy queues. Then take the target-local recovery backup
+under its actual target identity and fence, restore it independently and bind the
+proof to this operation. Do not relabel Yandex physical identity as Timeweb. The
+selected API image must already be available locally for the pre-admission probe.
+The Task 2 command will refresh live GitHub provenance, probe real TLS/roles,
+verify the actual daemon/volume/network/fence and execute only the fixed
+`markiro-platform` base + compact service phases.
+
+This code is not live acceptance. Run the exact selected release end to end on
+Linux AMD64, including protected GitHub refresh, published API-image probe,
+physical PostgreSQL/HBA observations, failure recovery and public smoke, before
+cutover. Prior local Docker checks were ARM64. Preserve the separate checklist in
+[Timeweb migration gates](timeweb-migration.md) for capacity, import, keys, egress,
+independent backups, final freeze/delta, DNS/mail/release continuity and shutdown.
