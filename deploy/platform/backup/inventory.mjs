@@ -1,3 +1,4 @@
+import { captureLocale } from "./locale.mjs";
 import { createHash } from "node:crypto";
 import { relationDefinition, sequenceDefinition, typeDefinition } from "./definitions.mjs";
 import { leastPrivilegeRoleAttributes, leastPrivilegeRoleSql } from "../postgres/roles.mjs";
@@ -76,12 +77,7 @@ export async function captureInventory(client, { excludeRole } = {}) {
     object.owner = (await rows("SELECT pg_get_userbyid($1) AS name", [object.owner]))[0].name;
     object.acl = order(await rows(aclSQL, [object.acl]));
     if (object.kind === "DATABASE") {
-      object.locale = (
-        await rows(
-          "SELECT pg_encoding_to_char(encoding) AS encoding,datcollate AS collate,datctype AS ctype,datlocprovider AS provider FROM pg_database WHERE datname=current_database()",
-        )
-      )[0];
-      ensure(object.locale.provider === "c");
+      object.locale = await captureLocale(client);
     }
     object.extension =
       (

@@ -291,3 +291,32 @@ test("function definition and trigger definition/enabled state participate in ex
     assert.throws(() => compareInventories(a, b));
   }
 });
+
+test("database ICU metadata is strict and participates in final inventory equality", () => {
+  const source = fixture();
+  source.objects.push({
+    kind: "DATABASE",
+    schema: "",
+    name: "markiro",
+    owner: "provider_owner",
+    args: [],
+    extension: null,
+    acl: [],
+    locale: {
+      encoding: "UTF8",
+      collate: "C",
+      ctype: "C",
+      provider: "i",
+      icuLocale: "en-US",
+      icuRules: null,
+      collationVersion: "153.136",
+      actualCollationVersion: "153.136",
+    },
+  });
+  assert.equal(compareInventories(source, source), true);
+  const changed = structuredClone(source);
+  changed.objects.at(-1).locale.icuRules = "&a<b";
+  assert.throws(() => compareInventories(source, changed));
+  changed.objects.at(-1).locale.actualCollationVersion = "153.112";
+  assert.throws(() => mapInventory(changed, mapping));
+});

@@ -1,3 +1,4 @@
+import { validateLocale } from "./locale.mjs";
 import { createHash } from "node:crypto";
 export const fail = (stage = "validation") => {
   const e = new Error("Protected database backup operation failed.");
@@ -318,13 +319,7 @@ function objectRow(o) {
   if (method) ensure(identifier(o.method));
   if (definition) ensure(hash(o.sha256));
   if (o.kind === "DATABASE") {
-    keys(o.locale, ["encoding", "collate", "ctype", "provider"]);
-    ensure(
-      o.locale.provider === "c" &&
-        [o.locale.encoding, o.locale.collate, o.locale.ctype].every(
-          (x) => typeof x === "string" && /^[A-Za-z0-9_.@-]+$/u.test(x),
-        ),
-    );
+    validateLocale(o.locale);
   }
   acl(o.acl, aclPrivileges[objectPrivilegeKind(o.kind)]);
 }
