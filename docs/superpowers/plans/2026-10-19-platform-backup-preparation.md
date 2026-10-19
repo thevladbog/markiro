@@ -87,7 +87,7 @@
 - [x] Write failing tests that mix evidence from different backups/operations/targets, replay before the writer fence, change either configuration snapshot, substitute an operator assertion for an automatic restore result, or omit egress/key/recovery acceptance. Verify rejected evidence cannot complete `backup-verified` in `withHostState`.
 - [x] Implement validation and byte rehashing. Operator acceptance cannot be inferred from JSON shape or local checks; retain the explicit provenance in the result. No automatic acceptance-file creation for live targets.
 - [x] Exercise the integrated path only against the disposable test target, including a timed-out migration container remaining active; prove migration/start/recovery actions do not advance until that workload is confirmed stopped and the fence remains valid.
-- [ ] Run complete platform tests, production contracts, CI policy, formatting and final independent review. Report isolated PostgreSQL verification separately from actual target, production data, SMTP/S3, key continuity, capacity and off-host recovery acceptance.
+- [x] Run complete platform tests, production contracts, CI policy, formatting and final independent review. Report isolated PostgreSQL verification separately from actual target, production data, SMTP/S3, key continuity, capacity and off-host recovery acceptance.
 - [x] Commit the validated library slice. Protected SSH/workflow, complete command orchestration, host CLI, bootstrap and actual Timeweb rehearsal remain the next separate delivery stage; this plan does not dispatch them.
 
 ## Coverage and execution boundary
@@ -96,10 +96,13 @@ The plan covers process safety, separate protected credentials, target role poli
 
 Self-review: all four tasks have explicit RED/GREEN and review boundaries; the five review risks are assigned to tests. Snapshot fingerprints include migration credentials without exposing them. Role-policy acceptance exercises pg-boss's real startup requirements. Archive hashes are verified from bytes rather than accepted from a caller. Existing production backups and source remain untouched.
 
-Status: Tasks 1–3 implemented and independently reviewed. Task 4 implementation,
-local integrated timeout and automated gates are complete and committed as
-`3cf3e356b919eb14472ef93eb9c3ba49f228dd73`; the exact committed harness rerun passed.
-Independent review is tracked in the [verification record](../../verification/2026-10-19-platform-backup-preparation.md).
+Status: Tasks 1–4 implemented and independently reviewed. Final review correction
+`3b72654d63c0cea5793e83c0d8135a32d00f6e9f` passed the exact committed PG17
+roundtrip, all 25 schema semantic negatives and prior security/ACL/timeout/cleanup
+gates. Final platform 286/286, scoped lint and full formatting passed. Production
+contracts/CI-policy retain their earlier passing evidence because those surfaces
+were unchanged; fresh applicable remote CI remains required. P2 is closed and
+scoped rereview approved; exact evidence and the private-format rulings are in the [verification record](../../verification/2026-10-19-platform-backup-preparation.md).
 Full API integration remains incomplete because its isolated DB/auth environment
 was absent; the focused API, type/lint/build and actual role harness are separate
 passing evidence. No server, merge or DNS changes were performed.

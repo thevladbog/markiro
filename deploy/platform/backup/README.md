@@ -83,9 +83,10 @@ views, sequences, functions/procedures, enum/domain/extension types, and the
 constraint definitions are stored as SHA256 of canonical-session
 `pg_get_indexdef`/`pg_get_constraintdef(oid,true)` bytes; actionable owners and ACLs remain
 structured fields. The full private metadata file, including bindings, must fit
-1,048,576 bytes. The earlier fixture before independent column fingerprints produced
-1,015,851 bytes (32,725 bytes headroom); the corrected fixture measurement is
-recorded in the [durable verification](../../../docs/verification/2026-10-19-platform-backup-preparation.md). Current-schema growth past that boundary fails
+1,048,576 bytes. The corrected committed fixture produces a 1,019,906-byte private
+file (1,019,905 canonical JSON bytes plus its newline), leaving 28,670 bytes of
+headroom. Exact source/image and earlier measurements are recorded in the
+[durable verification](../../../docs/verification/2026-10-19-platform-backup-preparation.md). Current-schema growth past that boundary fails
 closed; the cap is not increased automatically. Every nested record has exact
 keys, scalar types, allowed values and unique typed identities.
 Each table/view/materialized-view `sha256` hashes canonical JSON of
