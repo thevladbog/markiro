@@ -293,3 +293,65 @@ test("target backup excludes concurrent deployment at every boundary", async (t)
   await invoke(f);
   assert.equal(f.boundaries(), 4);
 });
+
+for (const purpose of ["archive", "restore"])
+  test(`target backup retains lock when ${purpose} cleanup and failure evidence persistence both fail`, async (t) => {
+    const f = await fixture(t);
+    const original = f.options.runProcess;
+    const worker = `markiro-backup-${f.input.operation.identity.operationId}-${purpose}-worker`;
+    const directory = join(
+      f.f.root,
+      `${purpose === "archive" ? "backup" : "restore"}-${f.input.operation.identity.operationId}`,
+    );
+    f.options.runProcess = async (request) => {
+      const args = request.args.slice(2);
+      if (args[0] === "container" && args[1] === "rm" && args.at(-1) === worker) {
+        // Actual protected writer fails with EEXIST before publication, replacing
+        // the producer's cleanup error with durabilityUncertain=false.
+        await writeFile(join(directory, "failure.json"), "existing failure evidence", {
+          mode: 0o600,
+          flag: "wx",
+        });
+        throw new Error("controlled cleanup failure");
+      }
+      return original(request);
+    };
+    let failure;
+    try {
+      await invoke(f);
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.code, "ERR_TARGET_BACKUP");
+    assert.equal(f.docker.containers.has(worker), true);
+    assert.ok(await lstat(join(f.f.root, ".deploy.lock")));
+    assert.equal(failure.durabilityUncertain, true);
+    assert.equal(failure.recoveryRequired, true);
+    await assert.rejects(
+      withHostState(f.f.root, () => assert.fail("uncertain producer released lock")),
+      { code: "ERR_HOST_STATE" },
+    );
+    for (const name of purpose === "archive"
+      ? ["database.dump", "inventory.json"]
+      : ["evidence.json"])
+      await assert.rejects(lstat(join(directory, name)), { code: "ENOENT" });
+  });
+
+test("target backup never issues another process command after unconfirmed termination", async (t) => {
+  const f = await fixture(t, "unreaped");
+  const original = f.options.runProcess;
+  let unreaped = false,
+    laterCommands = 0;
+  f.options.runProcess = async (request) => {
+    if (unreaped) laterCommands++;
+    try {
+      return await original(request);
+    } catch (error) {
+      if (error.terminationConfirmed === false) unreaped = true;
+      throw error;
+    }
+  };
+  await assert.rejects(invoke(f), { terminationConfirmed: false, durabilityUncertain: true });
+  assert.equal(unreaped, true);
+  assert.equal(laterCommands, 0);
+});

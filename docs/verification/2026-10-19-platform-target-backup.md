@@ -34,10 +34,19 @@ before crossing that helper. The outer sanitized error separately preserves an
 unconfirmed termination flag and requires recovery. A regression first reproduced
 loss of a process durability flag, then passed with the latch.
 
+Round 1 review reproduced a cleanup error being replaced by an early failure when
+persisting `failure.json`, releasing the lock with a surviving worker. Both archive
+and restore regressions now combine actual EEXIST from the private writer with a
+failed worker removal. The adapter conservatively retains the lock whenever the
+producer pipeline throws before successful completion establishes resource absence,
+independent of error stage or evidence persistence. It issues no further process
+commands after unconfirmed child termination.
+
 Automated local verification passed:
 
 - `node --test deploy/platform/test/target-backup.test.mjs deploy/platform/test/backup-archive.test.mjs`: 31/31, zero failures/skips (final rerun after readability refactor).
-- `node --test deploy/platform/test/*.test.mjs`: 471/471, zero failures/skips (178.1s).
+- Round 1 focused regressions: `node --test --test-name-pattern='persistence both fail|another process command' deploy/platform/test/target-backup.test.mjs`: 3/3, zero failures/skips.
+- Final round 1 `node --test deploy/platform/test/*.test.mjs`: 474/474, zero failures/skips (165.2s).
 - Scoped ESLint and Prettier checks on all changed JavaScript/docs passed.
 - `git diff --check` passed.
 

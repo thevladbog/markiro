@@ -236,9 +236,12 @@ trusted tests. The function neither builds nor publishes its worker image.
 Archive output is captured and worker resources are verified absent before the
 final snapshot fence observation; archive publication still follows that
 observation. Isolated restore uses network `none`. No descriptor is returned until
-its cleanup and a final physical/database re-observation succeed. Failures retain
-private producer evidence. Unreaped processes, uncertain process durability or
-unverified worker cleanup retain the deployment lock and require operator recovery;
+its cleanup and a final physical/database re-observation succeed. Producers attempt
+to retain private failure evidence. Unreaped processes, uncertain process durability or
+an incomplete archive/restore producer call retain the deployment lock and require
+operator recovery. A producer call is considered complete only after successful
+cleanup; failure-evidence persistence errors cannot erase that uncertainty. No
+additional process commands run after unconfirmed child termination;
 a sanitized producer failure alone is never taken as proof of cleanup. Completed
 producer files from a later failing outer operation do not admit a prepared target.
 Source import, target Linux execution, TLS/effective roles, key continuity, egress,

@@ -79,6 +79,9 @@ export async function createTargetRecoveryBackup(
         /^[1-9][0-9]{0,19}$/u.test(op.identity.target.databaseId),
     );
     const run = async (request) => {
+      // An unreaped child can still mutate Docker state; do not issue even
+      // cleanup commands until an operator has resolved that uncertainty.
+      ensure(terminated);
       try {
         return await (options.runProcess ?? runHostProcess)(request);
       } catch (error) {
@@ -88,6 +91,7 @@ export async function createTargetRecoveryBackup(
       }
     };
     return await withHostState(op.root, async (store) => {
+      let producerInFlight = false;
       try {
         const journal = await store.read();
         ensure(
@@ -177,6 +181,7 @@ export async function createTargetRecoveryBackup(
             hbaSha256,
           }),
         };
+        producerInFlight = true;
         const backup = await createDatabaseBackup({
           root: op.root,
           operationId: op.identity.operationId,
@@ -207,13 +212,14 @@ export async function createTargetRecoveryBackup(
           roleMapping: mapping,
           run,
         });
+        producerInFlight = false;
         await inspect("after-restore");
         return { backup, restoreEvidence, fence };
       } catch (error) {
-        // withHostState retains a lock only for durability uncertainty and strips
-        // callback flags. Latch unreaped children before producer sanitization;
-        // uncertain cleanup is equally unsafe for a cooperating successor.
-        if (!terminated || uncertain || error.stage === "cleanup") error.durabilityUncertain = true;
+        // A producer can lose its cleanup error when persisting failure evidence
+        // also fails. Only successful completion establishes resource absence;
+        // any incomplete call must retain the cooperating deployment lock.
+        if (!terminated || uncertain || producerInFlight) error.durabilityUncertain = true;
         throw error;
       }
     });
