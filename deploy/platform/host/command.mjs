@@ -21,9 +21,11 @@ import {
   createCleanupObserver,
   validateObservationPolicy,
   observerProducer,
+  jsonRows,
   guarded,
 } from "./observe.mjs";
 import { observePostgresAdmin, runPostgresProbe } from "./probe.mjs";
+import { activationTables, validateActivationProjection } from "./prepared-target.mjs";
 import {
   githubTransport,
   fetchPublisher,
@@ -33,6 +35,97 @@ import {
 } from "../admission-github.mjs";
 import { fetchPlatformCi } from "../release-ci.mjs";
 import { validatePublishedPlatformRelease } from "../release-admission.mjs";
+
+/** Finite read-only review: raw tenant values are hashed inside PostgreSQL only. */
+export function activationProjectionSql(asOf) {
+  ensure(typeof asOf === "string" && new Date(asOf).toISOString() === asOf);
+  const instant = `'${asOf}'::timestamptz`;
+  const cutoff = new Date(asOf);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - 24);
+  const pending = [
+    "t.status IN ('queued','sending','retrying')",
+    "t.published_at IS NULL",
+    "t.status IN ('queued','processing')",
+    "false",
+    "t.state::text NOT IN ('completed','cancelled','failed')",
+    "t.state::text NOT IN ('completed','cancelled','failed')",
+  ];
+  const expired = [
+    `(t.status IN ('sent','canceled','failed') AND t.terminal_at < ${instant}-interval '24 hours' AND t.encrypted_payload IS NOT NULL) OR (t.status IN ('sent','canceled') AND t.terminal_at < ${instant}-interval '30 days') OR (t.status='failed' AND t.terminal_at < ${instant}-interval '90 days')`,
+    "false",
+    `t.expires_at < ${instant}`,
+    `t.received_at < '${cutoff.toISOString()}'::timestamptz`,
+    "false",
+    "false",
+  ];
+  const query = (table, i) =>
+    `SELECT json_build_object('table','${table}','rows',count(*)::int,'pending',(count(*) FILTER (WHERE pending))::int,'expired',(count(*) FILTER (WHERE expired))::int,'sha256',encode(sha256(convert_to(coalesce(string_agg(h,'' ORDER BY h),''),'UTF8')),'hex')) FROM (SELECT encode(sha256(convert_to(row_to_json(t)::text,'UTF8')),'hex') AS h,(${pending[i]}) AS pending,(${expired[i]}) AS expired FROM ${table} t) v;`;
+  const lines = [
+    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;",
+    "SET LOCAL timezone='UTC'; SET LOCAL DateStyle='ISO,YMD'; SET LOCAL IntervalStyle='postgres'; SET LOCAL bytea_output='hex'; SET LOCAL extra_float_digits=3;",
+  ];
+  activationTables.forEach((table, i) => {
+    if (i < 4) lines.push(query(table, i));
+    else {
+      const flag = i === 4 ? "has_platform" : "has_legacy";
+      lines.push(
+        `SELECT to_regclass('${table}') IS NOT NULL AS ${flag} \\gset`,
+        `\\if :${flag}`,
+        query(table, i),
+        "\\else",
+        `SELECT json_build_object('table','${table}','rows',0,'pending',0,'expired',0,'sha256','${digest("")}');`,
+        "\\endif",
+      );
+    }
+  });
+  lines.push("COMMIT;");
+  return lines.join("\n") + "\n";
+}
+export async function measureActivationProjection(
+  context,
+  containerId,
+  asOf,
+  runProcess = runHostProcess,
+  signal,
+) {
+  return guarded(async () => {
+    const result = await runProcess({
+      executable: "/usr/bin/docker",
+      args: [
+        "--host",
+        "unix:///var/run/docker.sock",
+        "exec",
+        "-i",
+        "--user",
+        "70:70",
+        "--env",
+        "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=15000 -c log_statement=none -c log_min_error_statement=panic",
+        containerId,
+        "psql",
+        "-X",
+        "--no-password",
+        "--username",
+        "postgres",
+        "--dbname",
+        "markiro",
+        "--tuples-only",
+        "--no-align",
+        "--quiet",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--file",
+        "-",
+      ],
+      cwd: context.root,
+      env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", DOCKER_CONFIG: context.dockerConfig },
+      timeoutMs: 60000,
+      outputLimitBytes: 65536,
+      input: Buffer.from(activationProjectionSql(asOf)),
+      ...(signal ? { signal } : {}),
+    });
+    return validateActivationProjection(jsonRows(result.stdout));
+  });
+}
 
 export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/command.mjs",
@@ -380,7 +473,24 @@ export async function createHostAdapters(loaded, options = {}) {
       }),
     inspectTarget: (context) =>
       guarded(async () => {
-        await inspect(context);
+        const { state } = await inspect(context);
+        if (
+          op.preparedTarget.version === 2 &&
+          context.phase === "api-started" &&
+          ["entry", "command"].includes(context.boundary)
+        ) {
+          const value = op.preparedTarget.observations.egress.value;
+          const pg = state.owned.find((v) => v.service === "postgres").container;
+          const current = await measureActivationProjection(
+            context,
+            pg.Id,
+            value.review.asOf,
+            runProcess,
+            options.signal,
+          );
+          same(current, value.review.projection);
+          ensure(Date.parse(value.expiresAt) > Date.now());
+        }
         return {
           target: plain(op.identity.target),
           project: "markiro-platform",
