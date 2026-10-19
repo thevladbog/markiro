@@ -84,7 +84,8 @@ jobs:
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Verify portable platform preparation contracts
-        run: node --test deploy/platform/test/*.test.mjs
+        # The legacy bundle project must not enter the isolated host executor tests.
+        run: env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs
       - name: Generate masked test-only environment
         env:
           LANDING_DEMO_SUBMISSION_ENABLED: ${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED == 'true' && 'true' || 'false' }}
