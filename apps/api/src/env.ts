@@ -155,6 +155,10 @@ const storageEndpointSchema = z.url().transform((value, ctx) => {
 const EnvSchema = z
   .object({
     SERVER_PROFILE: z.enum(["legacy", "platform-only"]).default("legacy"),
+    PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DATABASE_URL: z.string().min(1),
     BETTER_AUTH_SECRET: z.string().min(16).optional(),

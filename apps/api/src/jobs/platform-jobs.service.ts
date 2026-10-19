@@ -40,12 +40,18 @@ export class PlatformJobsService
     private readonly reports: PlatformReportRunnerService,
     @Optional() private readonly support?: SupportChatJobsService,
     @Optional() private readonly sync?: SupportChatSyncService,
+    @Optional()
+    @Inject("PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA")
+    private readonly preprovisionedSchema = false,
   ) {}
 
   async onModuleInit(): Promise<void> {
     const boss = new PgBoss({
       connectionString: this.connectionString,
       schema: "pgboss_platform",
+      // Compact deployments provision the queue schema separately. PostgreSQL
+      // checks database CREATE even when CREATE SCHEMA IF NOT EXISTS finds it.
+      createSchema: !this.preprovisionedSchema,
       // Separate from the shared API/auth pool; LISTEN uses one additional client.
       max: 4,
     });

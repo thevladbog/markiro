@@ -12,13 +12,23 @@ import {
 } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, cp, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  rm,
+  chmod,
+  realpath,
+  symlink,
+} from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { request as httpsRequest } from "node:https";
 import { createRequire } from "node:module";
 import { deflateRawSync, gzipSync } from "node:zlib";
+import { roleProvisioningSql } from "../postgres/roles.mjs";
 import { localDockerEndpoint, summarize, runBoundedPhase, assess, hasOomEvent } from "./core.mjs";
 const argv = process.argv.slice(2);
 assert.ok(
@@ -29,8 +39,9 @@ assert.ok(
 const smoke = argv.includes("--smoke"),
   injected = argv.includes("--fail-after-start");
 const redactions = [];
+const protectedLoadError = (message) => new Error(message);
 const run = promisify(execFile),
-  dockerEnv = { ...process.env };
+  dockerEnv = { PATH: process.env.PATH, HOME: homedir(), LANG: "C.UTF-8" };
 delete dockerEnv.DOCKER_HOST;
 delete dockerEnv.DOCKER_CONTEXT;
 const interruption = new AbortController();
@@ -63,16 +74,33 @@ async function command(bin, args, options = {}) {
     safe = safe
       .replace(/postgres(?:ql)?:[^\s]+/g, "[database URL redacted]")
       .replace(/[A-Za-z0-9+/_=-]{28,}/g, "[long value redacted]");
-    throw new Error(
+    throw protectedLoadError(
       `Local command failed: ${bin} ${args.slice(0, 2).join(" ")}; categories=${categories.join(",")}; sanitized=${safe.slice(-600)}`,
     );
   }
 }
-localDockerEndpoint(
-  JSON.parse((await command("docker", ["context", "inspect"])).stdout)[0]?.Endpoints?.docker?.Host,
-);
+const endpoint = JSON.parse((await command("docker", ["context", "inspect"])).stdout)[0]?.Endpoints
+  ?.docker?.Host;
+localDockerEndpoint(endpoint);
+dockerEnv.DOCKER_HOST = endpoint;
+dockerEnv.COMPOSE_DISABLE_ENV_FILE = "1";
 const directory = await mkdtemp(join(await realpath(tmpdir()), "markiro-compact-load-"));
 await chmod(directory, 0o755);
+const plugins = JSON.parse(
+  (await command("docker", ["info", "--format", "{{json .ClientInfo.Plugins}}"])).stdout,
+);
+const composePlugin = plugins.find((plugin) => plugin.Name === "compose")?.Path;
+assert.ok(
+  typeof composePlugin === "string" && composePlugin.startsWith("/"),
+  "Installed Compose plugin required",
+);
+await mkdir(join(directory, "docker"), { mode: 0o700 });
+await mkdir(join(directory, "docker", "cli-plugins"), { mode: 0o700 });
+await symlink(
+  await realpath(composePlugin),
+  join(directory, "docker", "cli-plugins", "docker-compose"),
+);
+dockerEnv.DOCKER_CONFIG = join(directory, "docker");
 const project = `markiro-compact-load-${randomBytes(5).toString("hex")}`;
 const evidenceDir = resolve(process.env.COMPACT_LOAD_EVIDENCE_DIR ?? join(directory, "evidence"));
 assert.ok(
@@ -106,7 +134,9 @@ const values = {},
   })),
   tenants = Array.from({ length: 100 }, () => randomUUID());
 const password = randomBytes(24).toString("base64url"),
-  pgPassword = randomBytes(24).toString("base64url");
+  pgPassword = randomBytes(24).toString("base64url"),
+  appPassword = randomBytes(32).toString("hex"),
+  migratorPassword = randomBytes(32).toString("hex");
 const support = generateKeyPairSync("ec", { namedCurve: "prime256v1" }),
   license = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const licenseJwk = license.publicKey.export({ format: "jwk" });
@@ -122,11 +152,14 @@ const httpPort = await freePort(),
   httpsPort = await freePort(),
   origin = `https://saas-admin.localhost:${httpsPort}`;
 const envFile = join(directory, "runtime.env"),
+  migrationFile = join(directory, "migration.env"),
+  rolesFile = join(directory, "roles.sql"),
   overlay = join(directory, "overlay.yml");
 const tlsVolume = `${project}-tls`;
 const environment = {
   ...dockerEnv,
   MARKIRO_PLATFORM_ENV_FILE: envFile,
+  MARKIRO_PLATFORM_MIGRATION_ENV_FILE: migrationFile,
   MARKIRO_SOURCE_SHA: process.env.MARKIRO_SOURCE_SHA ?? "68070da5f4cb1e2a54e1eca3d7ca223d1ff993d1",
   MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
   MARKIRO_PLATFORM_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
@@ -162,7 +195,7 @@ const compose = async (...args) => {
       ...(args[0] === "down" ? {} : { signal: interruption.signal }),
     });
   } catch (error) {
-    throw new Error(`compose ${args.slice(0, 2).join(" ")}: ${error.message}`);
+    throw protectedLoadError(`compose ${args.slice(0, 2).join(" ")}: ${error.message}`);
   }
 };
 const sql = async (query) =>
@@ -499,7 +532,7 @@ try {
   Object.assign(values, {
     SERVER_PROFILE: "platform-only",
     VITE_SERVER_PROFILE: "platform-only",
-    DATABASE_URL: `postgresql://postgres:${pgPassword}@db.private:5432/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt`,
+    DATABASE_URL: `postgresql://markiro_app:${appPassword}@db.private:5432/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt`,
     PLATFORM_AUTH_SECRET: randomBytes(48).toString("base64"),
     PLATFORM_AUTH_URL: origin,
     SAAS_ADMIN_ORIGIN: origin,
@@ -540,6 +573,8 @@ try {
   redactions.push(
     password,
     pgPassword,
+    appPassword,
+    migratorPassword,
     directory,
     ...Object.values(values).filter((v) => v.length > 8),
   );
@@ -551,26 +586,47 @@ try {
     { mode: 0o600 },
   );
   await writeFile(
+    migrationFile,
+    `DATABASE_URL=postgresql://markiro_migrator:${migratorPassword}@db.private:5432/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(rolesFile, roleProvisioningSql({ appPassword, migratorPassword }), {
+    mode: 0o600,
+  });
+  await writeFile(
     overlay,
     `services:\n  api:\n    image: ${images.api}\n    volumes:\n      - ${resolve("deploy/platform/load")}:/load:ro\n      - ${directory}/private:/load-private:ro\n  migrate:\n    image: ${images.api}\n  edge:\n    image: ${images.edge}\n    ports: !override\n      - "127.0.0.1:${httpPort}:8080"\n      - "127.0.0.1:${httpsPort}:8443"\n  postgres:\n    image: postgres:17-alpine\n    tmpfs: !override\n      - /tmp:rw,noexec,nosuid,size=64m\n      - /var/run/postgresql:rw,noexec,nosuid,size=16m,mode=1777\n    volumes: !override\n      - postgres-data:/var/lib/postgresql/data\n      - ${resolve("deploy/platform/postgres/pg_hba.conf")}:/etc/postgresql/pg_hba.conf:ro\n      - load-tls:/run/markiro-postgres:ro\n  mailpit:\n    image: axllent/mailpit:v1.30.0\n    mem_limit: 128m\n  seaweedfs:\n    image: docker.io/chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882\n    mem_limit: 256m\n    environment:\n      AWS_ACCESS_KEY_ID: markiro\n      AWS_SECRET_ACCESS_KEY: synthetic-local-only\n      S3_BUCKET: markiro-private\nvolumes:\n  load-tls:\n    external: true\n    name: ${tlsVolume}\n`,
   );
   await command("docker", ["volume", "create", tlsVolume]);
+  const copyContainer = `${project}-tls-copy`;
   await command("docker", [
-    "run",
-    "--rm",
+    "create",
+    "--name",
+    copyContainer,
     "--network",
     "none",
-    "--user",
-    "0",
-    "-v",
-    `${directory}:/input:ro`,
     "-v",
     `${tlsVolume}:/output`,
     "postgres:17-alpine",
-    "sh",
-    "-c",
-    "cp /input/server.crt /input/server.key /input/password /output/ && chown -R 70:70 /output && chmod 600 /output/server.key /output/password",
+    "sleep",
+    "infinity",
   ]);
+  try {
+    await command("docker", ["start", copyContainer]);
+    for (const file of ["server.crt", "server.key", "password"])
+      await command("docker", ["cp", join(directory, file), `${copyContainer}:/output/${file}`]);
+    await command("docker", ["exec", copyContainer, "chown", "-R", "70:70", "/output"]);
+    await command("docker", [
+      "exec",
+      copyContainer,
+      "chmod",
+      "600",
+      "/output/server.key",
+      "/output/password",
+    ]);
+  } finally {
+    await command("docker", ["rm", "-f", copyContainer]);
+  }
   const config = JSON.parse((await compose("config", "--format", "json")).stdout);
   for (const [name, s] of Object.entries(config.services)) {
     if (name !== "edge") assert.ok(!s.ports?.length);
@@ -578,6 +634,34 @@ try {
   }
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "postgres", "mailpit", "seaweedfs");
   if (injected) throw new Error("Injected failure after task-owned services started");
+  await compose("cp", rolesFile, "postgres:/tmp/roles.sql");
+  await compose(
+    "exec",
+    "-T",
+    "--user",
+    "0",
+    "postgres",
+    "chown",
+    "postgres:postgres",
+    "/tmp/roles.sql",
+  );
+  await compose(
+    "exec",
+    "-T",
+    "--user",
+    "postgres",
+    "postgres",
+    "psql",
+    "-X",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-U",
+    "postgres",
+    "-d",
+    "markiro",
+    "-f",
+    "/tmp/roles.sql",
+  );
   await compose("run", "--rm", "migrate");
   await compose("up", "-d", "--wait", "--wait-timeout", "120", "--no-deps", "api", "edge");
   edgeCa = (

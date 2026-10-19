@@ -10,6 +10,8 @@ test("compact runtime budgets two CPUs and 2752 MiB while migration is a separat
   assert.equal(s.api.mem_limit, "1536m");
   assert.equal(s.api.environment.NODE_OPTIONS, "--max-old-space-size=1024");
   assert.equal(s.api.cpus, 1.25);
+  assert.equal(s.api.environment.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA, "true");
+  assert.equal(s.migrate.environment.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA, undefined);
   assert.equal(s.postgres.mem_limit, "1024m");
   assert.equal(s.postgres.cpus, 0.5);
   assert.equal(s.edge.mem_limit, "192m");

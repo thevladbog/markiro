@@ -591,6 +591,10 @@ jobs:
           docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
           -f deploy/production/compose.ci.yml down --volumes --remove-orphans
 
+      - name: Verify isolated PostgreSQL roles and TLS
+        run: |
+          pnpm --filter @markiro/db build
+          node deploy/platform/postgres/roles-ci.mjs --local-ci
       - name: Verify isolated platform-only preparation stack
         env:
           MARKIRO_SOURCE_SHA: ${{ github.sha }}

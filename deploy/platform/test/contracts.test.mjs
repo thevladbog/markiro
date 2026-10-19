@@ -151,7 +151,10 @@ test("portable topology exposes only hardened edge, pins API profile and raw pro
     assert.equal(svc.environment.SERVER_PROFILE, "platform-only");
     assert.equal(svc.ports, undefined);
     assert.equal(svc.env_file[0].format, "raw");
-    assert.match(svc.env_file[0].path, /MARKIRO_PLATFORM_ENV_FILE:\?/);
+    assert.match(
+      svc.env_file[0].path,
+      key === "api" ? /MARKIRO_PLATFORM_ENV_FILE:\?/ : /MARKIRO_PLATFORM_MIGRATION_ENV_FILE:\?/,
+    );
   }
   assert.deepEqual(compose.services.api.healthcheck.test, [
     "CMD",
@@ -343,7 +346,7 @@ test("CI PostgreSQL health waits for final TCP listener instead of the socket-on
     "-h",
     "127.0.0.1",
     "-U",
-    "markiro",
+    "postgres",
     "-d",
     "markiro",
   ]);

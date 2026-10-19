@@ -2,7 +2,7 @@ services:
   migrate:
     image: ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}
     env_file:
-      - path: ${MARKIRO_PLATFORM_ENV_FILE:?MARKIRO_PLATFORM_ENV_FILE is required}
+      - path: ${MARKIRO_PLATFORM_MIGRATION_ENV_FILE:?MARKIRO_PLATFORM_MIGRATION_ENV_FILE is required}
         format: raw
     environment:
       SERVER_PROFILE: platform-only

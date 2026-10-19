@@ -15,6 +15,7 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 import { assertPrivateRoot, readPrivateFile, writePrivateFile } from "../host/files.mjs";
+import * as hostConfig from "../host/config.mjs";
 import { hostChildEnvironment, snapshotHostConfig } from "../host/config.mjs";
 import { readProtectedEnv } from "../preflight.mjs";
 import { envBytes, privateFixture } from "./host-fixtures.mjs";
@@ -134,6 +135,7 @@ test("snapshot preserves literal secrets, optional inventory and stable sorted b
   Object.assign(f.env, {
     SMTP_PASSWORD: String.raw`literal$secret#value\\tail`,
     SMTP_REPLY_TO: "reply@markiro.app",
+    PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: "true",
     STANDALONE_LICENSE_ISSUER: "fixture-issuer",
     STANDALONE_LICENSE_KID: "fixture-kid",
     STANDALONE_LICENSE_PRIVATE_KEY_PEM: String.raw`-----BEGIN PRIVATE KEY-----\nTEST-ONLY\n-----END PRIVATE KEY-----`,
@@ -175,6 +177,7 @@ test("snapshots reject unknown keys and invalid configuration with generic error
     { STANDALONE_UNRECOGNIZED_KEY: sentinel },
     { SMTP_PASSWORD: `"${sentinel}"` },
     { SERVER_PROFILE: "legacy" },
+    { PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: "yes" },
     { MARKIRO_SOURCE_SHA: "b".repeat(40) },
     { MARKIRO_POSTGRES_IMAGE_DIGEST: "postgres:17" },
     { MARKIRO_POSTGRES_PASSWORD_FILE: undefined },
@@ -207,7 +210,7 @@ test("snapshot refuses unsafe source ancestors and candidate directories", async
 
 test("child environment has exact non-secret keys and never inherits ambient values", async (t) => {
   const f = await privateFixture(t);
-  const { interpolation } = await snapshotHostConfig(f);
+  const { interpolation } = await completeSnapshot(f);
   const env = hostChildEnvironment({
     interpolation,
     dockerConfig: f.dockerConfig,
@@ -215,7 +218,14 @@ test("child environment has exact non-secret keys and never inherits ambient val
   });
   assert.deepEqual(
     Object.keys(env).sort(),
-    [...interpolationKeys, "PATH", "LANG", "DOCKER_CONFIG", "COMPOSE_DISABLE_ENV_FILE"].sort(),
+    [
+      ...interpolationKeys,
+      "MARKIRO_PLATFORM_MIGRATION_ENV_FILE",
+      "PATH",
+      "LANG",
+      "DOCKER_CONFIG",
+      "COMPOSE_DISABLE_ENV_FILE",
+    ].sort(),
   );
   assert.equal(env.PATH, "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
   assert.equal(env.LANG, "C.UTF-8");
@@ -229,7 +239,7 @@ test("child environment has exact non-secret keys and never inherits ambient val
 
 test("child environment rejects all ambient command injection families", async (t) => {
   const f = await privateFixture(t);
-  const { interpolation } = await snapshotHostConfig(f);
+  const { interpolation } = await completeSnapshot(f);
   for (const key of [
     "COMPOSE_FILE",
     "COMPOSE_PROJECT_NAME",
@@ -262,10 +272,10 @@ test("child environment rejects all ambient command injection families", async (
 
 test("child environment independently validates exact keys and every interpolation field", async (t) => {
   const f = await privateFixture(t);
-  const { interpolation } = await snapshotHostConfig(f);
+  const { interpolation } = await completeSnapshot(f);
   const child = (value) =>
     hostChildEnvironment({ interpolation: value, dockerConfig: f.dockerConfig, ambient: {} });
-  for (const key of interpolationKeys) {
+  for (const key of [...interpolationKeys, "MARKIRO_PLATFORM_MIGRATION_ENV_FILE"]) {
     const missing = { ...interpolation };
     delete missing[key];
     assert.throws(() => child(missing), safeError, key);
@@ -290,7 +300,7 @@ test("child environment independently validates exact keys and every interpolati
 
 test("Docker directory and snapshot path must remain canonical and private at child construction", async (t) => {
   const f = await privateFixture(t);
-  const { interpolation } = await snapshotHostConfig(f);
+  const { interpolation } = await completeSnapshot(f);
   const child = (dockerConfig) =>
     hostChildEnvironment({ interpolation, dockerConfig, ambient: {} });
   for (const path of ["relative", f.envFile, `${f.dockerConfig}/`, join(f.root, sentinel)])
@@ -313,7 +323,7 @@ test("PG bind files allow container read permissions but reject unsafe paths and
     "MARKIRO_POSTGRES_PASSWORD_FILE",
   ])
     await chmod(f.env[key], 0o640);
-  const { interpolation } = await snapshotHostConfig(f);
+  const { interpolation } = await completeSnapshot(f);
   const child = () =>
     hostChildEnvironment({ interpolation, dockerConfig: f.dockerConfig, ambient: {} });
   assert.doesNotThrow(child);
@@ -336,7 +346,7 @@ test("unknown write options fail closed", async (t) => {
 
 test("hidden interpolation keys fail closed", async (t) => {
   const f = await privateFixture(t);
-  const { interpolation } = await snapshotHostConfig(f);
+  const { interpolation } = await completeSnapshot(f);
   const hidden = { ...interpolation };
   Object.defineProperty(hidden, "MARKIRO_SOURCE_SHA", {
     value: interpolation.MARKIRO_SOURCE_SHA,
@@ -477,4 +487,147 @@ test("snapshot cleanup failures preserve durability uncertainty and sanitized er
       assert.doesNotMatch(error.message, /DO-NOT-LEAK|markiro-host-|\/private\//);
     });
   }
+});
+
+async function migrationFixture(t) {
+  const f = await privateFixture(t);
+  const runtimeSnapshot = await snapshotHostConfig(f);
+  const url = new URL(f.env.DATABASE_URL);
+  url.username = "markiro_migrator";
+  url.password = String.raw`literal$#\'"@:/secret`;
+  const envFile = join(f.root, "migration-source.env");
+  await writeFile(envFile, envBytes({ DATABASE_URL: url.href }), { mode: 0o600 });
+  return { ...f, envFile, runtimeSnapshot, url };
+}
+
+test("migration snapshot is exclusive, private, literal and contains only DATABASE_URL", async (t) => {
+  assert.equal(typeof hostConfig.snapshotMigrationConfig, "function");
+  const f = await migrationFixture(t);
+  const result = await hostConfig.snapshotMigrationConfig(f);
+  assert.deepEqual(Object.keys(result).sort(), ["path", "sha256"]);
+  assert.equal(result.path, join(f.root, "candidates", f.candidateId, "migration.env"));
+  const bytes = await readFile(result.path);
+  assert.deepEqual(bytes, envBytes({ DATABASE_URL: f.url.href }));
+  assert.equal(result.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.equal((await lstat(result.path)).mode & 0o7777, 0o600);
+  await assert.rejects(hostConfig.snapshotMigrationConfig(f), safeError);
+  assert.deepEqual(await readFile(result.path), bytes);
+});
+
+test("migration snapshot refuses missing, linked, permissive and unknown-key inputs", async (t) => {
+  assert.equal(typeof hostConfig.snapshotMigrationConfig, "function");
+  const f = await migrationFixture(t);
+  await assert.rejects(
+    hostConfig.snapshotMigrationConfig({ ...f, envFile: join(f.root, sentinel) }),
+    safeError,
+  );
+  await symlink(f.envFile, join(f.root, "migration-alias"));
+  await assert.rejects(
+    hostConfig.snapshotMigrationConfig({ ...f, envFile: join(f.root, "migration-alias") }),
+    safeError,
+  );
+  await chmod(f.envFile, 0o644);
+  await assert.rejects(hostConfig.snapshotMigrationConfig(f), safeError);
+  await chmod(f.envFile, 0o600);
+  for (const env of [{}, { DATABASE_URL: f.url.href, SMTP_PASSWORD: sentinel }]) {
+    await writeFile(f.envFile, envBytes(env));
+    await assert.rejects(hostConfig.snapshotMigrationConfig(f), safeError);
+  }
+});
+
+test("migration snapshot rejects same login and divergent database or TLS endpoint", async (t) => {
+  assert.equal(typeof hostConfig.snapshotMigrationConfig, "function");
+  const f = await migrationFixture(t);
+  for (const change of [
+    (u) => {
+      u.username = new URL(f.env.DATABASE_URL).username;
+    },
+    (u) => {
+      u.hostname = "elsewhere.private";
+    },
+    (u) => {
+      u.port = "5433";
+    },
+    (u) => {
+      u.pathname = "/other";
+    },
+    (u) => {
+      u.searchParams.set("sslrootcert", "/other/ca.crt");
+    },
+    (u) => {
+      u.searchParams.set("sslmode", "disable");
+    },
+    (u) => {
+      u.searchParams.append("sslmode", "verify-full");
+    },
+    (u) => {
+      u.searchParams.set("host", "elsewhere.private");
+    },
+  ]) {
+    const url = new URL(f.url);
+    change(url);
+    await writeFile(f.envFile, envBytes({ DATABASE_URL: url.href }));
+    await assert.rejects(hostConfig.snapshotMigrationConfig(f), safeError);
+  }
+});
+
+test("migration snapshot binds actual runtime bytes and candidate identity", async (t) => {
+  assert.equal(typeof hostConfig.snapshotMigrationConfig, "function");
+  const f = await migrationFixture(t);
+  for (const patch of [
+    { candidateId: randomUUID() },
+    { runtimeSnapshot: { ...f.runtimeSnapshot, sha256: "0".repeat(64) } },
+  ])
+    await assert.rejects(hostConfig.snapshotMigrationConfig({ ...f, ...patch }), safeError);
+  await writeFile(f.runtimeSnapshot.path, Buffer.from("DATABASE_URL=changed\n"));
+  await assert.rejects(hostConfig.snapshotMigrationConfig(f), safeError);
+});
+
+test("runtime-only interpolation cannot construct a child environment", async (t) => {
+  const f = await privateFixture(t);
+  const { interpolation } = await snapshotHostConfig(f);
+  assert.throws(
+    () => hostChildEnvironment({ interpolation, dockerConfig: f.dockerConfig, ambient: {} }),
+    safeError,
+  );
+});
+
+async function completeSnapshot(f) {
+  const runtime = await snapshotHostConfig(f);
+  const migrationFile = join(f.root, "migration-input.env");
+  const url = new URL(f.env.DATABASE_URL);
+  url.username = "markiro_migrator";
+  await writeFile(migrationFile, envBytes({ DATABASE_URL: url.href }), { mode: 0o600 });
+  const migration = await hostConfig.snapshotMigrationConfig({
+    ...f,
+    envFile: migrationFile,
+    runtimeSnapshot: runtime,
+  });
+  return {
+    ...runtime,
+    interpolation: {
+      ...runtime.interpolation,
+      MARKIRO_PLATFORM_MIGRATION_ENV_FILE: migration.path,
+    },
+  };
+}
+
+test("child interpolation binds the two distinct snapshot paths of one candidate", async (t) => {
+  const f = await privateFixture(t);
+  const { interpolation } = await completeSnapshot(f);
+  const other = await completeSnapshot({ ...f, candidateId: randomUUID() });
+  for (const path of [
+    interpolation.MARKIRO_PLATFORM_ENV_FILE,
+    f.envFile,
+    other.interpolation.MARKIRO_PLATFORM_MIGRATION_ENV_FILE,
+  ])
+    assert.throws(
+      () =>
+        hostChildEnvironment({
+          interpolation: { ...interpolation, MARKIRO_PLATFORM_MIGRATION_ENV_FILE: path },
+          dockerConfig: f.dockerConfig,
+          ambient: {},
+        }),
+      safeError,
+    );
 });

@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { chmod, symlink } from "node:fs/promises";
+import { chmod, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
-import { hostChildEnvironment, snapshotHostConfig } from "../host/config.mjs";
+import {
+  hostChildEnvironment,
+  snapshotHostConfig,
+  snapshotMigrationConfig,
+} from "../host/config.mjs";
 import { runHostProcess } from "../host/process.mjs";
 import { privateFixture } from "./host-fixtures.mjs";
 
@@ -130,6 +134,19 @@ test("does not inherit ambient credentials or configuration", async (t) => {
 test("accepts the existing validated host environment without weakening its checks", async (t) => {
   const f = await privateFixture(t);
   const snapshot = await snapshotHostConfig({ ...f });
+  const url = new URL(f.env.DATABASE_URL);
+  url.username = "markiro_migrator";
+  const input = join(f.root, "migration-input.env");
+  await writeFile(input, `DATABASE_URL=${url.href}\n`, { mode: 0o600 });
+  const migration = await snapshotMigrationConfig({
+    ...f,
+    envFile: input,
+    runtimeSnapshot: snapshot,
+  });
+  snapshot.interpolation = {
+    ...snapshot.interpolation,
+    MARKIRO_PLATFORM_MIGRATION_ENV_FILE: migration.path,
+  };
   const env = hostChildEnvironment({
     interpolation: snapshot.interpolation,
     dockerConfig: f.dockerConfig,

@@ -170,8 +170,17 @@ postgresql://APP_ROLE:URL_ENCODED_PASSWORD@db.private:5432/markiro?sslmode=verif
 
 The HBA file requires peer authentication for local sockets, rejects all non-TLS
 TCP and allows TLS TCP only with SCRAM. The bootstrap `postgres` superuser uses
-its separate file password. Before restore/migration, provision the intended
-application/migration roles and grants through the approved operator procedure;
+its separate file password. `postgres/roles.mjs` prepares private SQL for explicit,
+one-time provisioning of a fresh `markiro` database: `markiro_migrator` owns
+`public` and `drizzle`; `markiro_app` receives business DML/sequence privileges,
+including default privileges for later migrations, and owns `pgboss_platform`.
+Both logins have NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION and
+NOBYPASSRLS, with no membership between them. Only migrator receives CREATE on
+the `markiro` database: Drizzle checks this privilege even for its precreated
+schema. This does not grant CREATEDB. Required `btree_gist` is installed by the
+bootstrap owner. Existing databases and provider ownership/ACL mapping require
+separate restore review; do not use fresh provisioning to rewrite existing roles.
+Before restore/migration, provision the approved role/owner mapping;
 do not use that bootstrap superuser in the production API URL. The image's init
 variables apply only to a new empty volume and do not rotate restored roles or
 passwords. Preserve role ownership, extensions and restore permissions. The server
@@ -182,16 +191,25 @@ users (API image uses uid 1000). Validate mount ownership on the Linux target;
 Mac bind-mount permission behavior is not that proof. Production CA/keys are
 supplied by the protected operator process; this package generates none.
 
+Compact and CI overlays explicitly set `PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA=true`
+for API only. This disables pg-boss schema creation, while retaining queue-local
+DDL, queue migrations and startup repair. A missing precreated schema fails;
+there is no broader-grant fallback. The strict optional flag defaults to false
+for existing portable/legacy configurations. These changes require a newly built
+and admitted API image; older published or locally derived images do not prove
+compatibility with this role policy.
+
 For a future approved operation, carry the validated protected runtime file into
 Compose explicitly. Reject ambient variable overrides; do not source the file,
 print expanded `compose config`, or pass secret values in CLI arguments. The
 following command prefix illustrates a clean environment and explicit composition
-from the repository root; `--env-file` supplies only Compose interpolation, while
-the services' raw `env_file` preserves literal credential dollars:
+from the repository root; `interpolation.env` contains only allowlisted non-secret
+values from host configuration, never runtime credentials. The services' separate
+raw `env_file` inputs preserve literal credential dollars:
 
 ```sh
-env -i PATH="$PATH" MARKIRO_PLATFORM_ENV_FILE=/absolute/protected/runtime.env docker compose \
-  --env-file /absolute/protected/runtime.env -p markiro-platform \
+env -i PATH="$PATH" docker compose \
+  --env-file /absolute/protected/interpolation.env -p markiro-platform \
   -f deploy/platform/compose.yml -f deploy/platform/compose.compact.yml config --quiet
 ```
 
@@ -471,7 +489,16 @@ These observations establish release provenance; the local safety tests below
 establish filesystem/state behavior. Neither establishes a running target.
 
 `deploy/platform/host/config.mjs` snapshots validated runtime values in private,
-immutable candidate files and hashes the captured bytes. Its separate child
+immutable `candidates/<uuid>/runtime.env` files and hashes the captured bytes.
+`snapshotMigrationConfig` accepts a separate protected input with only
+`DATABASE_URL`, the same database/host/port/CA/verify-full TLS, and a distinct
+login. It exclusively publishes `migration.env` alongside the runtime snapshot.
+Combine runtime interpolation with `MARKIRO_PLATFORM_MIGRATION_ENV_FILE` from
+that returned path; runtime-only interpolation cannot construct a host child.
+API receives only runtime credentials; migrate receives only its database URL.
+The future host gate must bind both actual snapshot hashes: the existing state
+`configurationSha256` field does not yet implement that aggregate binding.
+Its separate child
 configuration permits only validated non-secret interpolation values and rejects
 ambient command-injection variables. The shared filesystem helpers require a
 pre-created canonical absolute root owned by the executing UID, mode 0700, with
@@ -529,11 +556,18 @@ Investigate retained state/locks
 through a separately reviewed operator recovery procedure; do not delete them
 to retry a failed deployment.
 
-The host CLI, bounded process-group command runner, exact Compose orchestration,
-reviewed backup-byte/isolated-restore verification, separate application/migration
-credentials, prepared-target acceptance, SSH transport and protected host workflow
+Local `postgres/roles-ci.mjs --local-ci` exercises PG17 runtime migrations twice,
+actual pinned pg-boss lifecycle, business DML/default ACLs, role/DDL denial,
+Compose credential isolation, and both logins' CA/hostname/plaintext rejection.
+It requires a verified local Unix Docker endpoint, creates generated credentials
+and unique isolated resources, publishes no ports and cleans those resources.
+This synthetic proof does not establish existing-data restoration or target AMD64.
+
+The host CLI, exact Compose orchestration,
+reviewed backup-byte/isolated-restore verification, aggregate configuration binding,
+prepared-target acceptance, SSH transport and protected host workflow
 remain pending. Linux filesystem/crash rehearsal, actual target inventory,
 PostgreSQL TLS/roles, key continuity, off-host recovery, restored-data capacity,
 SMTP/S3/license checks and domain/TLS smoke remain separate acceptance gates.
-Local library tests invoke no Docker, SSH, GitHub or production service and do
+Pure local library tests invoke no Docker, SSH, GitHub or production service and do
 not authorize VM purchase, restore, deployment or DNS cutover.
