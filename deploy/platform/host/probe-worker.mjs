@@ -121,12 +121,14 @@ export async function probePostgres({ Client, input, ca }) {
             await client.query(`SELECT
             NOT has_database_privilege('markiro_app',current_database(),'CREATE') AS app_no_create,
             has_database_privilege('markiro_migrator',current_database(),'CREATE') AS migrator_create,
+            has_schema_privilege('markiro_app','public','USAGE') AS app_public_usage,
             NOT has_schema_privilege('markiro_app','public','CREATE') AS app_no_public_ddl,
             NOT has_schema_privilege('markiro_app','drizzle','USAGE') AS app_no_journal,
             (SELECT nspowner='markiro_migrator'::regrole FROM pg_namespace WHERE nspname='public') AS public_owner,
             (SELECT nspowner='markiro_migrator'::regrole FROM pg_namespace WHERE nspname='drizzle') AS drizzle_owner,
             (SELECT nspowner='markiro_app'::regrole FROM pg_namespace WHERE nspname='pgboss_platform') AS queue_owner,
             NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','S','v','m') AND c.relowner <> 'markiro_migrator'::regrole) AS business_owner,
+            NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND NOT (has_sequence_privilege('markiro_app',c.oid,'USAGE') AND has_sequence_privilege('markiro_app',c.oid,'SELECT'))) AS business_sequences,
             NOT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='pgboss' AND has_schema_privilege('markiro_app',oid,'USAGE')) AS legacy_denied,
             NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p') AND (NOT (has_table_privilege('markiro_app',c.oid,'SELECT') AND has_table_privilege('markiro_app',c.oid,'INSERT') AND has_table_privilege('markiro_app',c.oid,'UPDATE') AND has_table_privilege('markiro_app',c.oid,'DELETE')) OR has_table_privilege('markiro_app',c.oid,'TRUNCATE'))) AS business_dml
           `)

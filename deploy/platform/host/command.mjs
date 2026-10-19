@@ -255,9 +255,9 @@ async function verifyAdmission(loaded, runProcess, request) {
   }
 }
 
-function smokeRequest(host, path, sha, status) {
+function smokeRequest(host, path, sha, status, request = httpsRequest) {
   return new Promise((resolve, reject) => {
-    const req = httpsRequest(
+    const req = request(
       {
         hostname: "127.0.0.1",
         port: 443,
@@ -418,7 +418,13 @@ export async function createHostAdapters(loaded, options = {}) {
           [values.MARKIRO_RETIRED_ADMIN_DOMAIN, "/api/auth/get-session", 410],
           [values.MARKIRO_RETIRED_KIOSK_DOMAIN, "/kiosk/sync", 410],
         ])
-          await smokeRequest(host, path, context.identity.admission.manifest.sourceSha, status);
+          await smokeRequest(
+            host,
+            path,
+            context.identity.admission.manifest.sourceSha,
+            status,
+            options.httpsRequest,
+          );
       }),
   };
 }
@@ -432,12 +438,24 @@ export async function runHostCommand(args, options = {}) {
     throw commandError(error);
   }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** Stable sanitized process-boundary protocol; null makes no termination claim. */
+export async function runHostCommandCli(args, options = {}) {
   try {
-    await runHostCommand(process.argv.slice(2));
+    await runHostCommand(args, options);
     process.stdout.write("Platform host deployment healthy.\n");
-  } catch {
-    process.stderr.write("Platform host deployment failed; inspect protected state.\n");
+  } catch (error) {
+    process.stderr.write(
+      JSON.stringify({
+        version: 1,
+        kind: "platform-host-command-failure",
+        code: "ERR_HOST_COMMAND",
+        terminationConfirmed: error.terminationConfirmed === false ? false : null,
+        recoveryRequired: error.recoveryRequired === true,
+        durabilityUncertain: error.durabilityUncertain === true,
+      }) + "\n",
+    );
     process.exitCode = 1;
   }
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  await runHostCommandCli(process.argv.slice(2));

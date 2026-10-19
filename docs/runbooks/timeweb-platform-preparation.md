@@ -820,3 +820,43 @@ commands invoke `/usr/bin/docker --host unix:///var/run/docker.sock`. The privat
 `DOCKER_CONFIG` may contain registry credentials, but its `currentContext` cannot
 retarget execution. Ambient Docker endpoint variables are never inherited. The
 machine ID proof and mutating commands therefore refer to the same local daemon.
+
+### Host command process result protocol
+
+Exit 0 and stdout `Platform host deployment healthy.` follow durable healthy
+completion only. Exit 1 writes exactly one sanitized JSON line to stderr:
+
+```json
+{
+  "version": 1,
+  "kind": "platform-host-command-failure",
+  "code": "ERR_HOST_COMMAND",
+  "terminationConfirmed": false,
+  "recoveryRequired": true,
+  "durabilityUncertain": true
+}
+```
+
+The three flags reflect the actual failure; the example shows all uncertainty
+flags set. `terminationConfirmed` is **false or null**, never an inferred true:
+false means an owned subprocess may still be issuing commands; null means the
+failure did not carry an unconfirmed-termination marker and makes no independent
+claim about daemon workload death. `recoveryRequired` and `durabilityUncertain`
+are booleans. No error message, stack, credentials, connection URL or raw child
+output is included. The exported `runHostCommandCli(args, trustedOptions={})`
+uses this same protocol; the installed executable passes only its argv and
+exposes no injection options.
+
+Task 3 must retain this structured result with the operation outcome. On
+`terminationConfirmed:false`, transport loss, missing/malformed failure JSON or
+unknown protocol version, preserve the operation directory/token and require
+explicit reconciliation; never race a potentially unreaped process with cleanup.
+On `recoveryRequired:true` or `durabilityUncertain:true`, preserve the blocking
+state and prohibit automatic retry or lock removal. A normal nonzero result is
+not a successful deployment. Token cleanup still requires confirmed termination
+of the host command and its owned subprocesses; null alone is not that proof.
+
+The role observer checks effective app USAGE on `public` and effective USAGE
+**and** SELECT on every current public sequence, in addition to default ACLs for
+future objects. The isolated role harness revokes each permission independently,
+requires rejection, restores the grant, and requires success before continuing.

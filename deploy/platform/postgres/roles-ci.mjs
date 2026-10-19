@@ -469,9 +469,14 @@ try {
     throw new Error("Isolated role probe failed");
   }
   const report = JSON.parse(result.stdout);
-  assert.ok(Array.isArray(report.checks) && report.checks.length === 6);
+  assert.ok(Array.isArray(report.checks) && report.checks.length === 7);
   assert.ok(
     report.checks.includes("fixed host probe read-only policy and independent TLS negatives"),
+  );
+  assert.ok(
+    report.checks.includes(
+      "effective schema USAGE and current sequence USAGE/SELECT revocation rejected and restored",
+    ),
   );
   process.stdout.write(
     JSON.stringify({
