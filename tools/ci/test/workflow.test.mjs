@@ -414,7 +414,10 @@ test("platform preparation builds its own edge and runs only after legacy cleanu
   assert.match(roles.run, /pnpm --filter @markiro\/db build/);
   assert.match(roles.run, /node deploy\/platform\/postgres\/roles-ci\.mjs --local-ci/);
   assert.ok(job.steps.indexOf(roles) < job.steps.indexOf(stack));
-  assert.equal(contracts.run, "node --test deploy/platform/test/*.test.mjs");
+  assert.equal(
+    contracts.run,
+    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+  );
   assert.match(build.run, /deploy\/platform\/edge\.Dockerfile/u);
   assert.match(build.run, /markiro-platform-edge/u);
   assert.doesNotMatch(build.run, /--push|docker push/u);
@@ -433,4 +436,74 @@ test("production-bundle owns the real fenced backup and isolated restore gate", 
   assert.equal(backup.run, "node deploy/platform/backup/backup-ci.mjs --local-ci");
   assert.ok(job.steps.indexOf(backup) > job.steps.indexOf(roles));
   assert.ok(job.steps.indexOf(backup) < job.steps.indexOf(stack));
+});
+
+test("platform deployment is protected main-only and supplies immutable independent executor/product identities", () => {
+  const raw = readFileSync(".github/workflows/deploy-platform.yml", "utf8");
+  const flow = load(raw);
+  assert.deepEqual(Object.keys(flow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(flow.on.workflow_dispatch.inputs).sort(), [
+    "artifact_id",
+    "executor_ci_run_attempt",
+    "executor_ci_run_id",
+    "operation_id",
+    "publisher_run_attempt",
+    "publisher_run_id",
+    "source_sha",
+  ]);
+  const job = flow.jobs.deploy;
+  assert.equal(job.environment, "production-deploy");
+  assert.equal(
+    job.if,
+    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}",
+  );
+  assert.equal(flow.concurrency["cancel-in-progress"], false);
+  assert.equal(flow.concurrency.group, "timeweb-platform-production");
+  assert.deepEqual(job.permissions, { contents: "read", actions: "read", packages: "read" });
+  assert.ok(job["timeout-minutes"] >= 55);
+  const checkout = job.steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+  assert.equal(checkout.with.ref, "${{ github.sha }}");
+  assert.equal(checkout.with["persist-credentials"], false);
+  const step = stepByName(job, "Deliver pinned prepared platform operation");
+  assert.equal(step.env.EXECUTOR_SHA, "${{ github.sha }}");
+  assert.equal(step.env.EXECUTOR_CI_RUN_ID, "${{ inputs.executor_ci_run_id }}");
+  assert.equal(step.env.EXECUTOR_CI_RUN_ATTEMPT, "${{ inputs.executor_ci_run_attempt }}");
+  assert.equal(step.env.GITHUB_TOKEN, "${{ github.token }}");
+  assert.equal(step.env.GITHUB_ACTOR, "${{ github.actor }}");
+  assert.equal(
+    step.env.TIMEWEB_PLATFORM_SSH_PRIVATE_KEY,
+    "${{ secrets.TIMEWEB_PLATFORM_SSH_PRIVATE_KEY }}",
+  );
+  assert.equal(step.env.TIMEWEB_PLATFORM_KNOWN_HOSTS, "${{ vars.TIMEWEB_PLATFORM_KNOWN_HOSTS }}");
+  assert.match(step.run, /printf '%s\\0'/u);
+  assert.match(step.run, /\/usr\/bin\/env -i PATH=/u);
+  assert.match(step.run, /transport\.mjs run/u);
+  assert.doesNotMatch(
+    raw,
+    /upload-artifact|ssh-keyscan|YC_APP|MARKIRO_DEPLOY_HOST|\bPAT\b|secrets\.GITHUB_TOKEN|docker compose|node -e/u,
+  );
+  for (const step of job.steps) if (step.uses) assert.match(step.uses, /@[a-f0-9]{40}$/u);
+});
+
+test("platform delivery starts Node before any ambient loader can run and keeps input out of argv", () => {
+  const flow = load(readFileSync(".github/workflows/deploy-platform.yml", "utf8"));
+  const step = stepByName(flow.jobs.deploy, "Deliver pinned prepared platform operation");
+  const env = Object.fromEntries(
+    Object.keys(step.env).map((key) => [key, "fixture-invalid-input"]),
+  );
+  env.PATH = process.env.PATH;
+  env.NODE_OPTIONS = `--import=${process.cwd()}/deploy/platform/test/fixtures/transport-poison.mjs`;
+  env.NODE_PATH = "/untrusted";
+  const result = spawnSync("/bin/bash", ["-c", step.run], {
+    env,
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "Platform transport failed; preserve host operation and reconcile before retry.\n",
+  );
+  assert.doesNotMatch(result.stderr, /UNTRUSTED_NODE_LOADER|fixture-invalid-input/u);
 });

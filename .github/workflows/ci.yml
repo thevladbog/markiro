@@ -476,7 +476,9 @@ jobs:
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Verify portable platform preparation contracts
-        run: node --test deploy/platform/test/*.test.mjs
+        # The host executor rejects ambient Compose overrides; this project belongs
+        # only to the legacy production bundle tested by the surrounding steps.
+        run: env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs
       - name: Generate masked test-only environment
         run: |
           set -euo pipefail

@@ -13,6 +13,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "ci.yml": ["pull_request", "push", "workflow_dispatch"],
     "dependency-review.yml": ["pull_request"],
     "deploy-production.yml": ["workflow_dispatch"],
+    "deploy-platform.yml": ["workflow_dispatch"],
     "deploy-vbtech-production.yml": ["workflow_dispatch"],
     "diagnose-production.yml": ["workflow_dispatch"],
     "handheld-release.yml": ["workflow_dispatch"],

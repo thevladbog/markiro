@@ -10,6 +10,7 @@ import {
   snapshotMigrationConfig,
 } from "../host/config.mjs";
 import { validatePreparedTarget } from "../host/prepared-target.mjs";
+import { createCleanupObserver } from "../host/observe.mjs";
 import { withHostState } from "../host/state.mjs";
 import { digest } from "./schemas.mjs";
 
@@ -310,7 +311,12 @@ export async function verifyLocalPreparedPath({
     await assert.rejects(store.begin(identity));
     assert.equal((await store.read()).current.status, "recovery-required");
   });
+  // The actual restore producer has already removed all four temporary resources.
+  // Validate v2 absence against the completed byte-verified cleanup inventory.
+  expected.workload = createCleanupObserver(identity, evidence.cleanup.resources, cmd);
+  await validatePreparedTarget(record, expected);
   return {
+    restoreCleanupAbsenceVerified: true,
     kind: "local-synthetic-prepared-target-timeout",
     executorSha,
     image: imageId,

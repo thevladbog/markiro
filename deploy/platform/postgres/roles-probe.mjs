@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { probePostgres } from "../host/probe-worker.mjs";
 import { createRequire } from "node:module";
 import { runRuntimeMigrations } from "../../../packages/db/dist/runtime-migrate.js";
 const dbRequire = createRequire(new URL("../../../packages/db/package.json", import.meta.url));
@@ -210,6 +211,48 @@ try {
     }
   }
   checks.push("both logins verify CA and hostname; wrong CA, hostname and plaintext denied");
+  phase = "read-only host probe";
+  const hostProbe = await probePostgres({
+    Client,
+    input: { appUrl, migrationUrl: migratorUrl },
+    ca,
+  });
+  assert.equal(hostProbe.postgresVersion, postgresVersion);
+  assert.equal(hostProbe.tls.san, "db.private");
+  phase = "effective host probe privilege negatives";
+  await migrator.query("CREATE SEQUENCE public.host_probe_sequence");
+  try {
+    for (const [revoke, grant] of [
+      [
+        "REVOKE USAGE ON SCHEMA public FROM markiro_app",
+        "GRANT USAGE ON SCHEMA public TO markiro_app",
+      ],
+      [
+        "REVOKE USAGE ON SEQUENCE public.host_probe_sequence FROM markiro_app",
+        "GRANT USAGE ON SEQUENCE public.host_probe_sequence TO markiro_app",
+      ],
+      [
+        "REVOKE SELECT ON SEQUENCE public.host_probe_sequence FROM markiro_app",
+        "GRANT SELECT ON SEQUENCE public.host_probe_sequence TO markiro_app",
+      ],
+    ]) {
+      await migrator.query(revoke);
+      try {
+        await assert.rejects(
+          probePostgres({ Client, input: { appUrl, migrationUrl: migratorUrl }, ca }),
+        );
+      } finally {
+        await migrator.query(grant);
+      }
+      await probePostgres({ Client, input: { appUrl, migrationUrl: migratorUrl }, ca });
+    }
+  } finally {
+    await migrator.query("DROP SEQUENCE public.host_probe_sequence");
+  }
+  checks.push("fixed host probe read-only policy and independent TLS negatives");
+  checks.push(
+    "effective schema USAGE and current sequence USAGE/SELECT revocation rejected and restored",
+  );
   const apiManifest = JSON.parse(
     await readFile(new URL("../../../apps/api/package.json", import.meta.url), "utf8"),
   );

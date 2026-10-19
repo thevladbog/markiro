@@ -10,14 +10,16 @@ No checklist entry authorizes production changes by itself.
 
 Bounded host processes, separate runtime/migration snapshots, explicit role policy,
 private custom archive/isolated restore, byte-verifying backup gate and versioned
-prepared-target validation are implemented as libraries. The disposable local
+prepared-target validation are implemented with a fixed host command and
+protected pinned transport/workflow. The disposable local
 harness checks real PG17 ARM64 and daemon-workload timeout/owned stop behavior.
 See the [verification record](../verification/2026-10-19-platform-backup-preparation.md).
 
 This does not complete the checklist below. Live source/physical target resolution,
-independently enforced writer fencing, protected transport/workflow, complete host
-command orchestration, operator bootstrap and actual Timeweb rehearsal remain
-pending. Prepared records preserve measured versus operator-attested provenance;
+independently enforced production writer fencing, independently trusted operator
+bootstrap, source-to-target import and actual Timeweb rehearsal remain pending.
+The protected workflow has not been dispatched against a live target. Prepared
+records preserve measured versus operator-attested provenance;
 local synthetic records cannot become live acceptance. Target Linux AMD64,
 production-data restore, actual TLS/role inventory, retained-intent/SMTP/S3 isolation,
 key continuity, off-host recovery and capacity need their own evidence. A stopped
@@ -123,3 +125,55 @@ Refresh these observations before execution; they are not current-state guarante
 - [ ] Keep old resources, backups, keys and immutable releases until explicit
       acceptance, recovery proof and release-download continuity. Delete no old
       resource simply because the new host starts successfully.
+
+## Delivery readiness update: 2026-10-19
+
+The [protected delivery/bootstrap contract](timeweb-platform-preparation.md#protected-pinned-delivery-and-independent-bootstrap-2026-10-19)
+is implemented for review. Every operational checkbox remains a separate gate;
+implementation does not authorize resource creation or prove target readiness.
+
+- [ ] Confirm a current approved budget. The recorded Timeweb quote for 2 vCPU /
+      4 GiB / 50 GiB is **5,780 RUB/month including IPv4 and one backup**. Budget
+      acceptance is pending; no VM was created. Refresh the quote before ordering.
+- [ ] Record the exact executor main SHA and its successful CI run/attempt.
+      Historical main `0d30c7341` (merged PR #733) was green at that head; the later
+      recorded main CI `39209755286` was awaiting standalone-windows-build and
+      production-bundle in the latest controller update. CodeQL run `39209754577`
+      succeeded; alerts 171–174 were fixed, and GitGuardian was skipped after the
+      test-credential classification. Older operations-log rows are superseded by
+      that dated update.
+      Neither observation certifies this new transport commit. Select fresh green
+      evidence after review/merge; keep product SHA and executor SHA separate.
+- [ ] Install the separately trusted receiver/imports and independent receipt;
+      provision actual private operation/configuration, PostgreSQL TLS and roles.
+      Run Linux AMD64 exact-release rehearsal and verify 2/4/50 memory/disk/CPU
+      headroom under import, backup, migrations, normal traffic and restart.
+- [ ] Complete and verify source→target role/extension/ownership mapping. Produce
+      a real target-local recovery backup using an independently enforced fence
+      and verify isolated restore/off-host recovery. Existing synthetic harness
+      output cannot satisfy this gate. Keep key material independently recoverable.
+- [ ] Preload the exact candidate API image required by the host admission probe;
+      verify private PostgreSQL, wrong-host/untrusted-CA/plaintext rejection, role
+      grants, default ACL, retained queues, scheduler/worker suppression and egress.
+- [ ] Verify auth/encryption/signing-key continuity and separate new credentials
+      where approved; test retained encrypted records without printing secrets.
+- [ ] Record source freeze ownership and timing, final DB export/import validation,
+      final S3 delta/checksums, and the evidence that neither source nor target can
+      run duplicate workers or emit unintended SMTP/CHZ/other external effects.
+- [ ] Preserve public authoritative Yandex DNS, release CDN/S3 and existing
+      download URLs until their own accepted continuity/cutover checks pass.
+      Public MX was absent in the recorded read-only inspection despite the
+      Timeweb mailbox/staged mail records. Verify actual public MX/SPF/DKIM/DMARC,
+      SMTP send/receive, DNS TTLs, ACME/TLS, all platform routes and release updates.
+- [ ] Keep the independently restored CRM backup and the stopped CRM VM disk.
+      The latest available backup dated October 11 does not prove equality with
+      that stopped disk. Do not delete that disk or any source/provider resource.
+- [ ] Name the incident/rollback decision owner and recovery source. The host
+      executor never automatically rolls back after a migration or uncertain
+      process. Prove exclusive writer ownership before failback or token/lock
+      retirement. Shut down source workloads only under the accepted cutover
+      decision after observation; resource deletion requires separate approval.
+
+No provider, server, DNS, mail, storage or resource-deletion change was performed
+by this implementation. The quoted inventory/pricing/CI statements are dated
+handoff observations and must be refreshed at execution time.

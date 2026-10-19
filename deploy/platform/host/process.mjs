@@ -41,14 +41,16 @@ export async function runHostProcess(options) {
   let executable, args, cwd, env, timeoutMs, outputLimitBytes, signal;
   let childEnv;
   let childArgs;
+  let input;
   try {
-    ({ executable, args, cwd, env, timeoutMs, outputLimitBytes, signal } = options);
+    ({ executable, args, cwd, env, timeoutMs, outputLimitBytes, signal, input } = options);
     if (
       !["linux", "darwin"].includes(process.platform) ||
       typeof executable !== "string" ||
       !isAbsolute(executable) ||
       executable.includes("\0") ||
       !Array.isArray(args) ||
+      (input !== undefined && (!Buffer.isBuffer(input) || input.length > 1048576)) ||
       !Number.isSafeInteger(timeoutMs) ||
       timeoutMs <= 0 ||
       timeoutMs > 3600000 ||
@@ -59,6 +61,7 @@ export async function runHostProcess(options) {
     )
       throw processError("spawn", true);
     childArgs = Array.from(args);
+    if (input !== undefined) input = Buffer.from(input);
     if (childArgs.some((arg) => typeof arg !== "string" || arg.includes("\0")))
       throw processError("spawn", true);
     assertPrivateRootSync(cwd);
@@ -99,6 +102,7 @@ export async function runHostProcess(options) {
       signal?.removeEventListener("abort", abort);
       if (!confirmed) {
         // Bound our handles even when the OS cannot confirm workload termination.
+        child.stdin?.destroy();
         child.stdout.destroy();
         child.stderr.destroy();
         child.unref();
@@ -147,11 +151,18 @@ export async function runHostProcess(options) {
         env: childEnv,
         shell: false,
         detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
     } catch {
       reject(processError("spawn", true));
       return;
+    }
+    if (input !== undefined) {
+      child.stdin.on("error", () => stop("stdin"));
+      // One bounded write: Node owns backpressure and end closes stdin after flush.
+      child.stdin.end(input, (error) => {
+        if (error) stop("stdin");
+      });
     }
     for (const stream of ["stdout", "stderr"]) {
       child[stream].on("data", (bytes) => {
