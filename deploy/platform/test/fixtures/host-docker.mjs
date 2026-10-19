@@ -44,7 +44,13 @@ else if (args[1] === "inspect") {
           ? [state.volume]
           : state.images;
   const found = source.find((v) =>
-    [v.Id, v.Name, v.Name?.slice(1), ...(v.RepoDigests ?? [])].includes(args[2]),
+    [
+      v.Id,
+      v.Name,
+      v.Name?.slice(1),
+      ...(v.RepoDigests ?? []),
+      ...(v.LookupReferences ?? []),
+    ].includes(args[2]),
   );
   if (!found) process.exitCode = 1;
   else output([found]);

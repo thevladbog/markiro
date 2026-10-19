@@ -780,6 +780,16 @@ installed `/app/node_modules/@markiro/db` dependency graph (`pg`). It receives
 only a private minimal connection JSON, CA and exact reviewed worker source as
 read-only binds, runs with all capabilities dropped and no new privileges on the
 exact internal network, and has no published ports or database-volume mount.
+Its numeric UID:GID comes directly from the trusted host executor process (root
+or a Docker-enabled non-root operator), never from operation JSON or environment.
+All three bound source files must be regular, single-link, executor-owned mode-0600
+inodes under private parents; ownership/mode checks run before container creation.
+The inspected container user must exactly match that UID:GID. Dropping every
+capability means UID 0 cannot read another UID's mode-0600 files, so do not switch the
+probe to root or widen file modes/capabilities to work around access failures.
+Docker image inspection compares canonical repository plus exact digest,
+including Docker Hub familiar-name aliases and tagless RepoDigests, while still
+requiring the exact published image ID and Linux AMD64 platform.
 All SQL is fixed and read-only; it checks both actual TLS logins, wrong-host,
 untrusted-CA and plaintext rejection, role flags/memberships, business ownership,
 DML/schema boundaries and default privileges. Image ID, command, mounts and owner

@@ -7,6 +7,7 @@ import {
   createPrivateDirectory,
   writePrivateFile,
   assertBindFileSync,
+  assertPrivateFileSync,
   assertPrivateRootSync,
 } from "./files.mjs";
 import { guarded, observationError } from "./observe.mjs";
@@ -143,6 +144,9 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
   const name = `markiro-platform-probe-${context.identity.operationId}`;
   const image = context.identity.admission.registry.api;
   const mounts = {};
+  const uid = process.getuid(),
+    gid = process.getgid();
+  const executorUser = `${uid}:${gid}`;
   const existing = async () =>
     String((await command(["container", "ls", "--all", "--format", "{{.Names}}"], true)).stdout)
       .trim()
@@ -159,7 +163,7 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
         c.Config.Labels?.["io.markiro.probe-operation"] === context.identity.operationId,
     );
     ensure(
-      c.Config.User === "0:0" &&
+      c.Config.User === executorUser &&
         c.HostConfig.ReadonlyRootfs &&
         !c.HostConfig.Privileged &&
         c.HostConfig.CapDrop?.includes("ALL") &&
@@ -180,6 +184,7 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
     return c;
   };
   try {
+    ensure(Number.isSafeInteger(uid) && uid >= 0 && Number.isSafeInteger(gid) && gid >= 0);
     await verifySources();
     ensure(!(await existing()).includes(name));
     const root = context.root;
@@ -203,6 +208,9 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
       "/input/ca.crt": join(directory, "ca.crt"),
       "/probe/worker.mjs": workerPath,
     });
+    // With all capabilities dropped, container root cannot read another UID's
+    // private files. Bind only executor-owned 0600 inodes and use that trusted UID.
+    for (const source of Object.values(mounts)) assertPrivateFileSync(source);
     // Mark intended ownership before create: a failed CLI may have reached Docker.
     created = true;
     await command([
@@ -214,7 +222,7 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
       "--network",
       policy.networks.database.id,
       "--user",
-      "0:0",
+      executorUser,
       "--read-only",
       "--cap-drop",
       "ALL",

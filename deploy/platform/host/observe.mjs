@@ -144,6 +144,21 @@ const envMap = (values) => {
 };
 const running = (c) => c.State.Running || c.State.Restarting || c.State.Paused;
 
+// Docker inspect reports repository@digest without the optional pull tag.
+// Resolve only Docker Hub's familiar-name aliases; never match digest alone.
+function repositoryDigest(reference) {
+  const match = /^([^@\s]+)@(sha256:[a-f0-9]{64})$/u.exec(reference);
+  ensure(match);
+  const name = match[1].replace(/:[^/:]+$/u, "");
+  const parts = name.split("/");
+  let registry = "docker.io";
+  if (parts.length > 1 && (/[.:]/u.test(parts[0]) || parts[0] === "localhost"))
+    registry = parts.shift();
+  if (registry === "index.docker.io") registry = "docker.io";
+  if (registry === "docker.io" && parts.length === 1) parts.unshift("library");
+  return `${registry}/${parts.join("/")}@${match[2]}`;
+}
+
 // These are factual Docker observations, not a complete PostgreSQL acceptance.
 // The caller must run the fixed PostgreSQL/TLS probe before returning a held fence.
 export function createHostObservers(operation, policyInput, options = {}) {
@@ -158,7 +173,13 @@ export function createHostObservers(operation, policyInput, options = {}) {
   const inspectImage = async (reference, id, recovery = false) => {
     const image = await inspectOne("image", reference, recovery);
     ensure(image.Id === id && image.Os === "linux" && image.Architecture === "amd64");
-    if (reference.includes("@")) ensure(image.RepoDigests?.includes(reference));
+    if (reference.includes("@")) {
+      const expected = repositoryDigest(reference);
+      ensure(
+        Array.isArray(image.RepoDigests) &&
+          image.RepoDigests.some((value) => repositoryDigest(value) === expected),
+      );
+    }
     return image;
   };
   async function inventory(context) {

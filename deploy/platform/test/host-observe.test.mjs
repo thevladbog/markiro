@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { writeFile, chmod } from "node:fs/promises";
+import { join } from "node:path";
 import { preparedFixture } from "./prepared-target-fixture.mjs";
 import { validatePreparedTarget } from "../host/prepared-target.mjs";
 import { dockerFixture } from "./host-observe-fixture.mjs";
@@ -65,6 +67,41 @@ test("Docker observation obtains identities through a real bounded fake executab
     active: [],
   });
 });
+for (const repository of [
+  "postgres",
+  "library/postgres",
+  "docker.io/postgres",
+  "docker.io/library/postgres",
+  "index.docker.io/library/postgres",
+]) {
+  test(`Docker observation accepts real tagless RepoDigests with ${repository} alias`, async (t) => {
+    const f = await dockerFixture(t);
+    f.state.images[0].RepoDigests = [`${repository}@${f.f.env.MARKIRO_POSTGRES_IMAGE_DIGEST}`];
+    await f.publish();
+    assert.equal(
+      (await f.observers.inventory(f.context)).owned[0].container.Image,
+      f.policy.postgresImageId,
+    );
+  });
+}
+for (const value of [
+  "postgres-other@",
+  "evil.example/postgres@",
+  "docker.io/other/postgres@",
+  "docker.io.evil/library/postgres@",
+  "wrong-digest",
+]) {
+  test(`Docker observation rejects repository/digest mismatch: ${value}`, async (t) => {
+    const f = await dockerFixture(t);
+    f.state.images[0].RepoDigests = [
+      value === "wrong-digest"
+        ? `postgres@sha256:${"1".repeat(64)}`
+        : `${value}${f.f.env.MARKIRO_POSTGRES_IMAGE_DIGEST}`,
+    ];
+    await f.publish();
+    await assert.rejects(f.observers.inventory(f.context));
+  });
+}
 for (const mutation of [
   "nonlinux",
   "wrong architecture",
@@ -116,6 +153,8 @@ for (const mode of [
   "unreaped start",
   "unreaped stop",
   "foreign image",
+  "foreign user",
+  "public worker",
 ])
   test(`one-shot probe lifecycle ${mode} never treats CLI termination as daemon cleanup`, async (t) => {
     const { runPostgresProbe } = await import("../host/probe.mjs");
@@ -126,6 +165,9 @@ for (const mode of [
     };
     const image = f.identity.admission.registry.api;
     const calls = [];
+    const workerPath = join(f.root, "worker.mjs");
+    await writeFile(workerPath, "// fixed worker fixture", { mode: 0o600 });
+    if (mode === "public worker") await chmod(workerPath, 0o644);
     let container;
     const command = async (args) => {
       calls.push(args);
@@ -140,7 +182,10 @@ for (const mode of [
           State: { Status: "created", Running: false, ExitCode: 0 },
           Config: {
             Image: image.reference,
-            User: "0:0",
+            User:
+              mode === "foreign user"
+                ? `${process.getuid() + 1}:${process.getgid()}`
+                : args[args.indexOf("--user") + 1],
             Labels: { "io.markiro.probe-operation": f.identity.operationId },
             Entrypoint: ["node"],
             Cmd: ["/probe/worker.mjs"],
@@ -204,12 +249,18 @@ for (const mode of [
         context,
         policy,
         command,
-        workerPath: "/trusted/worker.mjs",
+        workerPath,
         verifySources: async () => {},
       });
     if (mode === "success") {
       assert.equal((await action()).postgresVersion, "17.11");
       assert.equal(container, undefined);
+      assert.equal(
+        calls.find((args) => args[0] === "create")[
+          calls.find((args) => args[0] === "create").indexOf("--user") + 1
+        ],
+        `${process.getuid()}:${process.getgid()}`,
+      );
     } else {
       await assert.rejects(
         action(),
@@ -220,7 +271,8 @@ for (const mode of [
       if (mode === "worker timeout") assert.equal(container, undefined);
       if (mode === "unreaped start") assert.equal(calls.at(-1)[0], "start");
       if (mode === "unreaped stop") assert.equal(calls.at(-1)[1], "stop");
-      if (mode === "foreign image")
+      if (mode === "public worker") assert.ok(!calls.some((args) => args[0] === "create"));
+      if (mode === "foreign image" || mode === "foreign user")
         assert.ok(
           !calls.some(
             (args) => ["start", "stop", "rm"].includes(args[0]) || ["stop", "rm"].includes(args[1]),
