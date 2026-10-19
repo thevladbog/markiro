@@ -246,3 +246,43 @@ a sanitized producer failure alone is never taken as proof of cleanup. Completed
 producer files from a later failing outer operation do not admit a prepared target.
 Source import, target Linux execution, TLS/effective roles, key continuity, egress,
 off-host recovery and deployment admission remain separate operational gates.
+
+The existing synthetic CI harness can preserve its exact tested worker image with
+`node deploy/platform/backup/backup-ci.mjs --local-ci --export-image /absolute/new/private-directory`.
+Export defaults off. It runs only after all positive/negative backup, restore and
+prepared-path checks and verified fixture/worker cleanup succeed. The saved object
+is the immutable image built before runtime fixture credentials or data exist;
+`docker save` never includes container writable layers or Docker volumes. No
+container commit/export, runtime connections, credentials, database dump or table
+inventory enters this artifact.
+
+The output directory is new and mode 0700, containing only mode-0600
+`recovery-image.tar` and `recovery-image.json`. Export requires the same owned
+Linux AMD64 configuration image ID used by the tests. It checks the image before
+and after saving, streams the archive hash, and fails closed above 2 GiB or a
+1 MiB manifest. Source verification bounds the copied inventory to 2,048 files,
+each Git blob to 2 MiB and total repository bytes to 256 MiB. It compares all
+working/staged copied source bytes and exact file inventory with `git show` at the
+captured checkout SHA before build, then rechecks sources before and after image
+save. Added, removed, altered and untracked copied files fail; a HEAD label alone
+is insufficient. Existing or symlinked output paths are rejected and preserved.
+
+The manifest identifies synthetic probe/migration source as fixture code. Generated
+`runtime-migrate.js` and the generated build recipe have separate byte hashes;
+compiled bytes are not asserted to be Git source. Installed `pg`, `drizzle-orm`
+and `pg-boss` dependency trees and public Node/PostgreSQL base bytes are covered by
+the actual tested image ID. No separate dependency-tree or base-source hash is
+claimed. The manifest remains `local-synthetic`, including in CI; it never asserts
+live target execution or recovery acceptance.
+
+CI retains only these two files for seven days using the existing pinned upload
+action after successful harness completion. Pull-request CI may export an image
+for verification. Production use requires an independent check of the exact
+successful main-push CI run and attempt, repository/source SHA and immutable
+artifact ID/digest. The operator must rehash archive bytes, compare source hashes
+and generated-byte provenance with that main revision, load only the admitted
+archive, and reinspect its exact Linux AMD64 image configuration ID before binding
+a protected backup operation. A PR artifact, successful image build, upload, or
+synthetic round trip never authorizes a production operation. Application image
+publication and its protected gates are unchanged. Actual artifact transfer/load
+and target restore remain operational gates.
