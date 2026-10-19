@@ -9,41 +9,13 @@ import {
   identifier,
   digest,
   fail,
+  objectKinds,
+  privileges,
 } from "./schemas.mjs";
 const order = (rows) =>
   rows.sort((a, b) => (canonical(a) < canonical(b) ? -1 : canonical(a) > canonical(b) ? 1 : 0));
 const qname = (schema, name) => (schema ? `${quote(schema)}.${quote(name)}` : quote(name));
 const roleName = (name) => (name === "PUBLIC" ? "PUBLIC" : quote(name));
-const objectKinds = new Set([
-  "DATABASE",
-  "SCHEMA",
-  "TABLE",
-  "VIEW",
-  "MATERIALIZED VIEW",
-  "SEQUENCE",
-  "FUNCTION",
-  "PROCEDURE",
-  "TYPE",
-  "DOMAIN",
-  "OPERATOR",
-  "OPERATOR CLASS",
-  "OPERATOR FAMILY",
-]);
-const privileges = new Set([
-  "SELECT",
-  "INSERT",
-  "UPDATE",
-  "DELETE",
-  "TRUNCATE",
-  "REFERENCES",
-  "TRIGGER",
-  "MAINTAIN",
-  "USAGE",
-  "CREATE",
-  "CONNECT",
-  "TEMPORARY",
-  "EXECUTE",
-]);
 const aclSQL = `SELECT pg_get_userbyid(grantor) AS grantor,CASE WHEN grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(grantee) END AS grantee,privilege_type AS privilege,is_grantable AS grantable FROM aclexplode($1::aclitem[])`;
 const namespaces = `n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_toast' AND n.nspname !~ '^pg_temp'`;
 export async function captureInventory(client, { excludeRole } = {}) {
@@ -123,6 +95,11 @@ export async function captureInventory(client, { excludeRole } = {}) {
           [object.oid],
         )
       : [];
+    if (["FUNCTION", "PROCEDURE"].includes(object.kind))
+      object.definitionSha256 = digest(
+        (await rows("SELECT pg_get_functiondef($1::oid) AS definition", [object.oid]))[0]
+          .definition,
+      );
     // Column ACLs require a separate grant model; fail closed rather than lose them.
     if (object.catalog === "pg_class")
       ensure(
@@ -207,6 +184,20 @@ export async function captureInventory(client, { excludeRole } = {}) {
     row.definitionSha256 = digest(row.definition);
     delete row.definition;
   }
+  ensure(
+    (
+      await rows(
+        `SELECT count(*)::int AS n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE ${namespaces} AND t.tgisinternal AND t.tgenabled<>'O'`,
+      )
+    )[0].n === 0,
+  );
+  const triggers = await rows(
+    `SELECT n.nspname AS schema,c.relname AS table,t.tgname AS name,pg_get_triggerdef(t.oid,true) AS definition,t.tgenabled AS enabled FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE ${namespaces} AND NOT t.tgisinternal`,
+  );
+  for (const t of triggers) {
+    t.definitionSha256 = digest(t.definition);
+    delete t.definition;
+  }
   const journal = tables.find((t) => t.schema === "drizzle" && t.name === "__drizzle_migrations");
   const result = {
     roles,
@@ -218,6 +209,7 @@ export async function captureInventory(client, { excludeRole } = {}) {
     sequences,
     indexes,
     constraints,
+    triggers,
     migrationJournal: journal ? { count: journal.count, sha256: journal.sha256 } : null,
   };
   for (const value of Object.values(result)) if (Array.isArray(value)) order(value);
@@ -345,13 +337,38 @@ function objectIdentity(o) {
 }
 const grantKind = (kind) =>
   ["VIEW", "MATERIALIZED VIEW"].includes(kind) ? "TABLE" : kind === "DOMAIN" ? "TYPE" : kind;
-function grantStatements(acl, on) {
-  const result = [];
-  for (const a of [...acl].sort((a, b) => Number(b.grantable) - Number(a.grantable))) {
+function grantStatements(acl, on, owner) {
+  // Grant authority is per privilege. The object owner inherently holds every
+  // grant option; another grantor must first receive that particular option.
+  const pending = order(structuredClone(acl)),
+    authority = new Map(),
+    result = [];
+  for (const privilege of privileges) {
+    const edges = pending.filter(
+      (a) => a.privilege === privilege && a.grantable && a.grantee !== owner,
+    );
+    const active = new Set(),
+      done = new Set();
+    const visit = (role) => {
+      if (active.has(role)) throw fail("acl-cycle");
+      if (done.has(role)) return;
+      active.add(role);
+      for (const edge of edges.filter((e) => e.grantor === role)) visit(edge.grantee);
+      active.delete(role);
+      done.add(role);
+    };
+    for (const edge of edges) visit(edge.grantor);
+    authority.set(privilege, new Set([owner]));
+  }
+  while (pending.length) {
+    const index = pending.findIndex((a) => authority.get(a.privilege)?.has(a.grantor));
+    if (index < 0) throw fail("acl-prerequisite");
+    const [a] = pending.splice(index, 1);
     ensure(privileges.has(a.privilege) && typeof a.grantable === "boolean");
     result.push(
       `SET ROLE ${quote(a.grantor)}; GRANT ${a.privilege} ${on} TO ${roleName(a.grantee)}${a.grantable ? " WITH GRANT OPTION" : ""}; RESET ROLE;`,
     );
+    if (a.grantable) authority.get(a.privilege).add(a.grantee);
   }
   return result;
 }
@@ -378,7 +395,7 @@ export function ownershipSql(inventory) {
   const applyAcl = (o) => {
     const on = `ON ${grantKind(o.kind)} ${objectIdentity(o)}`;
     sql.push(`REVOKE ALL ${on} FROM PUBLIC, ${quote(o.owner)};`);
-    sql.push(...grantStatements(o.acl, on));
+    sql.push(...grantStatements(o.acl, on, o.owner));
   };
   for (const o of inventory.objects.filter((o) => o.kind !== "SCHEMA")) {
     if (o.kind.startsWith("OPERATOR")) {

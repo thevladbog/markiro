@@ -187,25 +187,286 @@ export const inventoryKeys = [
   "sequences",
   "indexes",
   "constraints",
+  "triggers",
   "migrationJournal",
 ];
+export const objectKinds = new Set([
+  "DATABASE",
+  "SCHEMA",
+  "TABLE",
+  "VIEW",
+  "MATERIALIZED VIEW",
+  "SEQUENCE",
+  "FUNCTION",
+  "PROCEDURE",
+  "TYPE",
+  "DOMAIN",
+  "OPERATOR",
+  "OPERATOR CLASS",
+  "OPERATOR FAMILY",
+]);
+export const privileges = new Set([
+  "SELECT",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "TRUNCATE",
+  "REFERENCES",
+  "TRIGGER",
+  "MAINTAIN",
+  "USAGE",
+  "CREATE",
+  "CONNECT",
+  "TEMPORARY",
+  "EXECUTE",
+]);
+const roleNameValid = (value) => identifier(value) && value !== "PUBLIC";
+function uniqueRows(rows, identity, validate) {
+  ensure(Array.isArray(rows));
+  const seen = new Set();
+  for (const row of rows) {
+    validate(row);
+    const id = canonical(identity(row));
+    ensure(!seen.has(id));
+    seen.add(id);
+  }
+}
+function acl(value, allowed) {
+  uniqueRows(
+    value,
+    (a) => [a.grantor, a.grantee, a.privilege],
+    (a) => {
+      keys(a, ["grantor", "grantee", "privilege", "grantable"]);
+      ensure(
+        roleNameValid(a.grantor) &&
+          (a.grantee === "PUBLIC" || roleNameValid(a.grantee)) &&
+          allowed.has(a.privilege) &&
+          typeof a.grantable === "boolean" &&
+          !(a.grantee === "PUBLIC" && a.grantable),
+      );
+    },
+  );
+}
+const aclPrivileges = {
+  DATABASE: new Set(["CREATE", "CONNECT", "TEMPORARY"]),
+  SCHEMA: new Set(["CREATE", "USAGE"]),
+  TABLE: new Set([
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "TRUNCATE",
+    "REFERENCES",
+    "TRIGGER",
+    "MAINTAIN",
+  ]),
+  SEQUENCE: new Set(["SELECT", "UPDATE", "USAGE"]),
+  FUNCTION: new Set(["EXECUTE"]),
+  TYPE: new Set(["USAGE"]),
+  OPERATOR: new Set(),
+};
+const objectPrivilegeKind = (kind) =>
+  ({
+    VIEW: "TABLE",
+    "MATERIALIZED VIEW": "TABLE",
+    PROCEDURE: "FUNCTION",
+    DOMAIN: "TYPE",
+    "OPERATOR CLASS": "OPERATOR",
+    "OPERATOR FAMILY": "OPERATOR",
+  })[kind] ?? kind;
+function objectRow(o) {
+  ensure(objectKinds.has(o.kind));
+  const routine = ["FUNCTION", "PROCEDURE"].includes(o.kind),
+    method = ["OPERATOR CLASS", "OPERATOR FAMILY"].includes(o.kind);
+  keys(o, [
+    "kind",
+    "schema",
+    "name",
+    "owner",
+    "acl",
+    "extension",
+    "args",
+    ...(routine ? ["definitionSha256"] : []),
+    ...(method ? ["method"] : []),
+    ...(o.kind === "DATABASE" ? ["locale"] : []),
+  ]);
+  ensure(
+    identifier(o.name) &&
+      roleNameValid(o.owner) &&
+      (o.extension === null || o.extension === "btree_gist") &&
+      (["DATABASE", "SCHEMA"].includes(o.kind) ? o.schema === "" : identifier(o.schema)),
+  );
+  ensure(Array.isArray(o.args));
+  if (!routine && o.kind !== "OPERATOR") ensure(o.args.length === 0);
+  if (o.kind === "OPERATOR")
+    ensure(
+      o.args.length === 2 &&
+        /^[+*<>=~!@#%^&|`?/-]+$/u.test(o.name) &&
+        !o.name.includes("--") &&
+        !o.name.includes("/*"),
+    );
+  for (const arg of o.args) {
+    keys(arg, ["schema", "name"]);
+    ensure(
+      (o.kind === "OPERATOR" && arg.schema === null && arg.name === null) ||
+        (identifier(arg.schema) && identifier(arg.name)),
+    );
+  }
+  if (method) ensure(identifier(o.method));
+  if (routine) ensure(hash(o.definitionSha256));
+  if (o.kind === "DATABASE") {
+    keys(o.locale, ["encoding", "collate", "ctype", "provider"]);
+    ensure(
+      o.locale.provider === "c" &&
+        [o.locale.encoding, o.locale.collate, o.locale.ctype].every(
+          (x) => typeof x === "string" && /^[A-Za-z0-9_.@-]+$/u.test(x),
+        ),
+    );
+  }
+  acl(o.acl, aclPrivileges[objectPrivilegeKind(o.kind)]);
+}
+function objectKey(o) {
+  const group = ["TABLE", "VIEW", "MATERIALIZED VIEW", "SEQUENCE"].includes(o.kind)
+    ? "relation"
+    : ["FUNCTION", "PROCEDURE"].includes(o.kind)
+      ? "routine"
+      : ["TYPE", "DOMAIN"].includes(o.kind)
+        ? "type"
+        : o.kind;
+  return [group, o.schema, o.name, o.args, o.method ?? null];
+}
+const unsigned = (value) => typeof value === "string" && /^(0|[1-9][0-9]*)$/u.test(value);
+const qualified = (row) => ensure(identifier(row.schema) && identifier(row.name));
 export function validateInventory(value) {
   const v = plain(value);
   keys(v, inventoryKeys);
-  for (const k of inventoryKeys) if (k !== "migrationJournal") ensure(Array.isArray(v[k]));
-  ensure(
-    v.migrationJournal === null ||
-      (hash(v.migrationJournal.sha256) && /^\d+$/u.test(v.migrationJournal.count)),
+  uniqueRows(
+    v.roles,
+    (r) => r.name,
+    (r) => {
+      keys(r, [
+        "name",
+        "login",
+        "superuser",
+        "createdb",
+        "createrole",
+        "replication",
+        "bypassrls",
+        "inherit",
+        "connectionLimit",
+      ]);
+      ensure(roleNameValid(r.name));
+      for (const k of [
+        "login",
+        "superuser",
+        "createdb",
+        "createrole",
+        "replication",
+        "bypassrls",
+        "inherit",
+      ])
+        ensure(typeof r[k] === "boolean");
+      ensure(
+        Number.isInteger(r.connectionLimit) &&
+          r.connectionLimit >= -1 &&
+          r.connectionLimit <= 2147483647,
+      );
+    },
   );
-  for (const row of v.indexes)
-    ensure(
-      row.valid === true && row.ready === true && row.live === true && hash(row.definitionSha256),
-    );
-  for (const row of v.constraints)
-    ensure(typeof row.validated === "boolean" && hash(row.definitionSha256));
-  for (const row of v.tables) ensure(hash(row.sha256) && /^\d+$/u.test(row.count));
-  for (const row of v.sequences)
-    ensure(/^-?\d+$/u.test(row.lastValue) && typeof row.isCalled === "boolean");
+  uniqueRows(
+    v.memberships,
+    (m) => [m.role, m.member, m.grantor],
+    (m) => {
+      keys(m, ["role", "member", "grantor", "admin", "inherit", "set"]);
+      for (const k of ["role", "member", "grantor"]) ensure(roleNameValid(m[k]));
+      for (const k of ["admin", "inherit", "set"]) ensure(typeof m[k] === "boolean");
+    },
+  );
+  uniqueRows(v.objects, objectKey, objectRow);
+  uniqueRows(
+    v.defaultPrivileges,
+    (d) => [d.owner, d.schema, d.kind],
+    (d) => {
+      keys(d, ["owner", "schema", "kind", "acl"]);
+      const kind = { r: "TABLE", S: "SEQUENCE", f: "FUNCTION", T: "TYPE", n: "SCHEMA" }[d.kind];
+      ensure(roleNameValid(d.owner) && (d.schema === "" || identifier(d.schema)) && kind);
+      acl(d.acl, aclPrivileges[kind]);
+      ensure(d.acl.every((a) => a.grantor === d.owner));
+    },
+  );
+  uniqueRows(
+    v.extensions,
+    (e) => e.name,
+    (e) => {
+      keys(e, ["name", "version", "schema", "owner"]);
+      ensure(
+        e.name === "btree_gist" &&
+          typeof e.version === "string" &&
+          /^[0-9]+(?:\.[0-9]+)*$/u.test(e.version) &&
+          identifier(e.schema) &&
+          roleNameValid(e.owner),
+      );
+    },
+  );
+  uniqueRows(
+    v.tables,
+    (r) => [r.schema, r.name],
+    (r) => {
+      keys(r, ["schema", "name", "count", "sha256"]);
+      qualified(r);
+      ensure(unsigned(r.count) && hash(r.sha256));
+    },
+  );
+  uniqueRows(
+    v.sequences,
+    (r) => [r.schema, r.name],
+    (r) => {
+      keys(r, ["schema", "name", "lastValue", "isCalled"]);
+      qualified(r);
+      ensure(
+        typeof r.lastValue === "string" &&
+          /^-?(0|[1-9][0-9]*)$/u.test(r.lastValue) &&
+          typeof r.isCalled === "boolean",
+      );
+    },
+  );
+  uniqueRows(
+    v.indexes,
+    (r) => [r.schema, r.name],
+    (r) => {
+      keys(r, ["schema", "name", "definitionSha256", "valid", "ready", "live"]);
+      qualified(r);
+      ensure(hash(r.definitionSha256) && r.valid === true && r.ready === true && r.live === true);
+    },
+  );
+  uniqueRows(
+    v.constraints,
+    (r) => [r.schema, r.table, r.name],
+    (r) => {
+      keys(r, ["schema", "table", "name", "definitionSha256", "validated"]);
+      qualified(r);
+      ensure(
+        (r.table === "" || identifier(r.table)) &&
+          hash(r.definitionSha256) &&
+          typeof r.validated === "boolean",
+      );
+    },
+  );
+  uniqueRows(
+    v.triggers,
+    (r) => [r.schema, r.table, r.name],
+    (r) => {
+      keys(r, ["schema", "table", "name", "definitionSha256", "enabled"]);
+      qualified(r);
+      ensure(
+        identifier(r.table) && hash(r.definitionSha256) && ["O", "D", "R", "A"].includes(r.enabled),
+      );
+    },
+  );
+  if (v.migrationJournal !== null) {
+    keys(v.migrationJournal, ["count", "sha256"]);
+    ensure(unsigned(v.migrationJournal.count) && hash(v.migrationJournal.sha256));
+  }
   return v;
 }
 export function completedEvidence(value, expected) {

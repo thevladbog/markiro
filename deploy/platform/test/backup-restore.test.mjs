@@ -16,6 +16,7 @@ const inventory = () => ({
   sequences: [],
   indexes: [],
   constraints: [],
+  triggers: [],
   migrationJournal: null,
 });
 async function fixture(t) {
@@ -312,3 +313,41 @@ test("an existing volume is never initialized or claimed by a new restore", asyn
   assert.ok(docker.volumes.has(name));
   assert.ok(!docker.calls.some((c) => c.args[2] === "create"));
 });
+
+for (const fault of ["mount-destination", "extra-network"])
+  test(`restore rejects observed ${fault} before executing SQL`, async (t) => {
+    const f = await fixture(t);
+    await writeFile(
+      join(f.root, "backup-runtime.json"),
+      canonical({
+        version: 1,
+        executorSha: f.document.executorSha,
+        dockerExecutable: "/usr/bin/docker",
+        endpoint: "unix:///synthetic.sock",
+        image: f.document.runtime.image,
+        provenance: "local-synthetic",
+      }),
+      { mode: 0o600 },
+    );
+    const { fakeDocker } = await import("./backup-runtime-fixture.mjs"),
+      docker = fakeDocker({
+        ...f,
+        image: f.document.runtime.image,
+        restored: { inventory: f.document.inventory, postgresVersion: "17.11" },
+      });
+    const run = async (spec) => {
+      const result = await docker.run(spec);
+      if (spec.args[2] === "inspect" && !spec.args.includes("--format")) {
+        const value = JSON.parse(result.stdout);
+        if (value[0]?.Config.User === "999:999") {
+          if (fault === "mount-destination") value[0].Mounts[0].Destination = "/unexpected";
+          else value[0].NetworkSettings.Networks.unexpected = {};
+          return { ...result, stdout: Buffer.from(canonical(value)) };
+        }
+      }
+      return result;
+    };
+    await assert.rejects(verifyDatabaseRestore({ ...f, run }));
+    assert.ok(!docker.calls.some((c) => c.args.includes("restore-init")));
+    assert.equal(docker.containers.size + docker.volumes.size, 0);
+  });

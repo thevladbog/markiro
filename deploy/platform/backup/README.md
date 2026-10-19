@@ -83,7 +83,14 @@ views, sequences, functions/procedures, enum/domain/extension types, and the
 constraint definitions are stored as SHA256 of canonical-session
 `pg_get_indexdef`/`pg_get_constraintdef(oid,true)` bytes; actionable owners and ACLs remain
 structured fields. The full private metadata file, including bindings, must fit
-1,048,576 bytes. Current-schema growth past that boundary fails closed.
+1,048,576 bytes. The reviewed current-schema fixture produces 1,015,851 bytes,
+leaving 32,725 bytes of headroom. Current-schema growth past that boundary fails
+closed; the cap is not increased automatically. Every nested record has exact
+keys, scalar types, allowed values and unique typed identities.
+Function/procedure definitions use SHA256 of `pg_get_functiondef` bytes. User
+triggers retain schema/table/name, SHA256 of `pg_get_triggerdef(oid,true)`, and
+exact enabled state (`O`, `D`, `R`, `A`). Internal constraint triggers must remain
+enabled normally; constraint definitions and validity capture their semantics.
 Column ACLs, RLS policies, custom collations, standalone composite types, role or
 database settings, role validity deadlines, foreign servers, large objects,
 event triggers, publications and subscriptions are unsupported and rejected.
@@ -103,7 +110,10 @@ Trusted extension members are explicitly assigned their mapped owners. Source
 superusers may have granted without explicit schema USAGE. Their safe mapped
 roles borrow only USAGE on the exact needed schemas inside the ownership/ACL
 transaction; every temporary grant is explicitly revoked before the exact source
-schema ACL is recreated. Completion still requires full ACL equality.
+schema ACL is recreated. Grants are replayed separately per privilege in
+prerequisite order, starting with the object's owner and propagating grant options.
+Cycles and grantors without an established grant option fail closed. Completion
+still requires full ACL equality.
 
 The local worker runs as UID/GID 999, without Linux capabilities, with no-new-
 privileges, a read-only root, read-only input, and only its labelled private data
@@ -112,13 +122,20 @@ and DAC_OVERRIDE to prepare Docker/Podman copy ownership, then is removed before
 SQL runs. All image-declared volume destinations must be explicitly mounted;
 unknown declarations fail closed. PostgreSQL is launched by Docker's detached
 exec inside the inspected owned container, never detached from the host runner.
+Inspection requires the exact expected mount destinations and read/write modes,
+and rejects extra network attachments even when NetworkMode claims `none`.
 Cleanup verifies absence of each owned resource after removing it.
 
 `node deploy/platform/backup/backup-ci.mjs --local-ci` builds a private worker
 image from existing installed dependencies and current compiled DB migrations,
 without installing packages. Its synthetic source runs the Task 2 role policy,
 all current migrations and installed pg-boss, then adds renamed owners/grantees,
-ACLs/default privileges, encrypted bytes and an uncalled sequence. Source traffic
+ACLs/default privileges, a reverse-lexical multihop delegated grant chain,
+encrypted bytes and an uncalled sequence. A source-only synthetic probe disables
+the current credential-epoch trigger and changes its function body inside a
+transaction. Actual inventory recapture rejects each change while rows, journal,
+owners and ACLs stay equal; rollback restores the current schema before backup.
+Source traffic
 is confined to an owned internal network with no published ports. Restore has
 network `none`. The harness also rejects changed bytes before creating resources
 and runs a deliberately truncated custom archive through real pg_restore to

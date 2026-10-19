@@ -183,14 +183,28 @@ export async function openRuntime({ root, operationId, purpose, run }) {
       for (const [check, ok] of Object.entries({
         network:
           network === "none"
-            ? c.HostConfig.NetworkMode === "none"
+            ? c.HostConfig.NetworkMode === "none" &&
+              Object.keys(c.NetworkSettings.Networks ?? {}).every((name) => name === "none")
             : Object.keys(c.NetworkSettings.Networks ?? {}).join() === network,
         ports: Object.keys(c.HostConfig.PortBindings ?? {}).length === 0,
         user: c.Config.User === "999:999",
         readonly: c.HostConfig.ReadonlyRootfs === true,
         mounts:
           c.Mounts.length === 3 &&
-          c.Mounts.every((m) => m.Type === "volume" && [volume, inputVolume].includes(m.Name)),
+          c.Mounts.every((m) => {
+            const expected = {
+              "/work": { name: volume, writable: true },
+              "/var/lib/postgresql/data": { name: volume, writable: true },
+              "/input": { name: inputVolume, writable: false },
+            }[m.Destination];
+            return (
+              expected &&
+              m.Type === "volume" &&
+              m.Name === expected.name &&
+              m.RW === expected.writable
+            );
+          }) &&
+          new Set(c.Mounts.map((m) => m.Destination)).size === 3,
         input: c.Mounts.find((m) => m.Name === inputVolume)?.RW === false,
       })) {
         if (!ok) throw fail(`container-${check}`);

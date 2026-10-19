@@ -13,7 +13,7 @@ const role = {
   connectionLimit: -1,
 };
 const fixture = () => ({
-  roles: [role],
+  roles: [{ ...role }],
   memberships: [],
   objects: [
     {
@@ -56,6 +56,7 @@ const fixture = () => ({
       validated: true,
     },
   ],
+  triggers: [],
   migrationJournal: { count: "1", sha256: "b".repeat(64) },
 });
 const mapping = {
@@ -125,6 +126,7 @@ test("rejects changed index or constraint definition hashes and preserves intent
 test("recreates mapped ownership of trusted extension members", () => {
   const source = fixture();
   source.objects[0] = {
+    definitionSha256: "a".repeat(64),
     kind: "FUNCTION",
     schema: "public",
     name: "extension_member",
@@ -180,6 +182,7 @@ test("maps typed trusted-extension operators and access methods without unsuppor
 test("temporary schema usage for lowered source-superuser grantors is revoked before exact schema ACL replay", () => {
   const source = fixture();
   source.objects.push({
+    definitionSha256: "a".repeat(64),
     kind: "FUNCTION",
     schema: "public",
     name: "owned",
@@ -196,4 +199,95 @@ test("temporary schema usage for lowered source-superuser grantors is revoked be
   assert.match(sql, /^BEGIN;/);
   assert.match(sql, /COMMIT;$/);
   assert.doesNotMatch(sql, /GRANT CREATE ON SCHEMA/);
+});
+
+test("delegated ACLs follow privilege prerequisites despite reverse lexical names", () => {
+  const source = fixture();
+  source.roles.push(
+    { ...role, name: "z_delegate" },
+    { ...role, name: "a_reader" },
+    { ...role, name: "m_leaf" },
+  );
+  source.objects[0].acl = [
+    { grantor: "z_delegate", grantee: "a_reader", privilege: "USAGE", grantable: true },
+    { grantor: "a_reader", grantee: "m_leaf", privilege: "USAGE", grantable: false },
+    { grantor: "provider_owner", grantee: "z_delegate", privilege: "USAGE", grantable: true },
+  ];
+  const sql = ownershipSql(source),
+    first = sql.indexOf('SET ROLE "provider_owner"; GRANT USAGE'),
+    second = sql.indexOf('SET ROLE "z_delegate"; GRANT USAGE'),
+    third = sql.indexOf('SET ROLE "a_reader"; GRANT USAGE');
+  assert.ok(first >= 0 && second > first && third > second);
+  const valid = structuredClone(source.objects[0].acl);
+  source.objects[0].acl.push({
+    grantor: "a_reader",
+    grantee: "z_delegate",
+    privilege: "USAGE",
+    grantable: true,
+  });
+  assert.throws(
+    () => ownershipSql(source),
+    (e) => e.stage === "acl-cycle",
+  );
+  source.objects[0].acl = structuredClone(valid);
+  source.objects[0].acl[2].privilege = "CREATE";
+  assert.throws(
+    () => ownershipSql(source),
+    (e) => e.stage === "acl-prerequisite",
+  );
+  source.objects[0].acl = valid.slice(0, 2);
+  assert.throws(() => ownershipSql(source));
+});
+
+test("nested inventory rejects unknown fields, invalid types and duplicate identities", () => {
+  const bad = [
+    (v) => (v.roles[0].login = "false"),
+    (v) => (v.roles[0].extra = true),
+    (v) => v.roles.push({ ...v.roles[0] }),
+    (v) => (v.objects[0].acl = "bad"),
+    (v) => (v.objects[0].acl[0].extra = true),
+    (v) => v.objects.push({ ...v.objects[0] }),
+    (v) => (v.objects[0].kind = "UNSUPPORTED"),
+    (v) => (v.indexes[0].extra = true),
+    (v) => (v.tables[0].count = 1),
+  ];
+  for (const mutate of bad) {
+    const value = fixture();
+    mutate(value);
+    assert.throws(() => compareInventories(value, value));
+  }
+});
+
+test("function definition and trigger definition/enabled state participate in exact equality", () => {
+  const a = fixture();
+  a.objects.push({
+    kind: "FUNCTION",
+    schema: "public",
+    name: "security_epoch",
+    owner: "provider_owner",
+    args: [],
+    extension: null,
+    acl: [],
+    definitionSha256: "a".repeat(64),
+  });
+  a.triggers = [
+    {
+      schema: "public",
+      table: "secret",
+      name: "security_epoch",
+      definitionSha256: "b".repeat(64),
+      enabled: "O",
+    },
+  ];
+  assert.equal(compareInventories(a, a), true);
+  for (const mutate of [
+    (v) => (v.objects.at(-1).definitionSha256 = "c".repeat(64)),
+    (v) => (v.triggers[0].definitionSha256 = "c".repeat(64)),
+    (v) => (v.triggers[0].enabled = "D"),
+    (v) => (v.triggers = []),
+  ]) {
+    const b = structuredClone(a);
+    mutate(b);
+    assert.throws(() => compareInventories(a, b));
+  }
 });
