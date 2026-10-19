@@ -397,6 +397,8 @@ test("stopped prior release remains inspectable until Compose replaces it withou
 
 for (const mutation of [
   "valid old bundle",
+  "owned IPv4 session",
+  "owned IPv6 session",
   "reload only",
   "wrong database",
   "foreign session",
@@ -465,6 +467,17 @@ for (const mutation of [
         },
       ],
     };
+    const sessionAddress = mutation === "owned IPv6 session" ? "2001:db8::9" : "172.20.0.8";
+    const owned = [
+      { service: "postgres", container: pg },
+      {
+        service: "api",
+        active: true,
+        container: { NetworkSettings: { Networks: { database: { IPAddress: sessionAddress } } } },
+      },
+    ];
+    if (mutation.startsWith("owned "))
+      value.sessions = [{ usename: "markiro_app", client_addr: sessionAddress }];
     if (mutation === "reload only") value.started_at = 0;
     if (mutation === "wrong database") value.system_id = "9999";
     if (mutation === "foreign session")
@@ -476,7 +489,7 @@ for (const mutation of [
     const action = () =>
       observePostgresAdmin({
         context,
-        state: { owned: [{ service: "postgres", container: pg }] },
+        state: { owned },
         hbaSha256: digest(bytes),
         command: async (args) => {
           assert.equal(args[0], "exec");
@@ -488,10 +501,16 @@ for (const mutation of [
                 arg.includes("statement_timeout=10000"),
             ),
           );
-          return { stdout: JSON.stringify(value) };
+          const observed = structuredClone(value);
+          // PostgreSQL inet::text includes the mask; host(inet) returns the address.
+          if (!args.at(-1).includes("host(client_addr) AS client_addr"))
+            for (const session of observed.sessions)
+              session.client_addr += session.client_addr.includes(":") ? "/128" : "/32";
+          return { stdout: JSON.stringify(observed) };
         },
       });
-    if (mutation === "valid old bundle") assert.equal((await action()).system_id, "1234");
+    if (mutation === "valid old bundle" || mutation.startsWith("owned "))
+      assert.equal((await action()).system_id, "1234");
     else await assert.rejects(action());
   });
 }

@@ -19,7 +19,7 @@ const adminQuery = `SELECT row_to_json(v) FROM (SELECT
  current_setting('hba_file') AS hba_file,
  extract(epoch FROM pg_postmaster_start_time())*1000 AS started_at,
  (SELECT coalesce(json_agg(row_to_json(h) ORDER BY h.rule_number),'[]'::json) FROM (SELECT rule_number,type,database,user_name,address,netmask,auth_method,options,error FROM pg_hba_file_rules) h) AS hba,
- (SELECT coalesce(json_agg(row_to_json(s)),'[]'::json) FROM (SELECT usename,client_addr::text,application_name FROM pg_stat_activity WHERE backend_type='client backend' AND datid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND pid<>pg_backend_pid()) s) AS sessions,
+ (SELECT coalesce(json_agg(row_to_json(s)),'[]'::json) FROM (SELECT usename,host(client_addr) AS client_addr,application_name FROM pg_stat_activity WHERE backend_type='client backend' AND datid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND pid<>pg_backend_pid()) s) AS sessions,
  (SELECT count(*)::int FROM pg_prepared_xacts WHERE database=current_database()) AS prepared
 ) v`;
 const same = (a, b) => ensure(canonical(a) === canonical(b));
