@@ -60,7 +60,8 @@ remain controller-owned and are not accepted in advance.
 Independent review found that backup start and restore completion could age past
 `maxAgeMs` while asynchronous workload/fence inspectors ran. The final boundary
 already rechecked prepared observations and TLS, but omitted these two older
-timestamps. Both freshness predicates now run again at final `checkedAt`.
+timestamps. Both freshness predicates now run again at final `checkedAt`, committed in
+`4cf504a10cee72dfb821bd96797fddb280903086`.
 
 Two deterministic clock regressions first pass full validation, then advance time
 inside the fence adapter: backup-only expiry keeps the restore report fresh; the
@@ -173,5 +174,14 @@ No browser, hardware, Windows or physical printer validation applies to this sli
 
 Cleanup verified each current run's named/labelled resources. Earlier experimental
 anonymous volumes cannot be attributed after old containers were removed; they were
-not globally pruned. Do not report global Docker cleanliness. Local worker images
-are retained as identified test artifacts; no old backup archive was deleted.
+not globally pruned. Do not report global Docker cleanliness. The latest verified local worker image
+`sha256:bbba17e9c5c9b14f858aef3657119e94ee2e12ff8f4c25af3e39b8448ea01493`
+is retained with its ownership label and no container references. Scoped storage
+hygiene found old `sha256:695173c196e230117139ea9efe9eb69358f08280bb21156bf6b6ed1c34954b8a`
+already absent, and removed only obsolete owned images
+`sha256:036e8de959a93c20c4fcc5cf37526e40fa2bb0e83844f7b32fe6cddd0abc3a95` and
+`sha256:31ae3bd60da4900574cabd54f687f1c1f7a90a98a5ea8285a91f2b83124d5caf`
+after matching the local operation ledger, actual image labels and zero container
+references. Their absence was verified. All four final-run operation IDs have no
+remaining labelled fixture containers/volumes/networks or producer containers/volumes.
+No global prune, unknown-volume removal or old backup archive deletion occurred.
