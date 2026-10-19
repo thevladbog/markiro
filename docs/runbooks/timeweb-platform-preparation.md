@@ -460,3 +460,80 @@ For `registry`, check existing registry access and the supported Docker output
 shape separately. Resolve the cause and rerun with the same explicit identities,
 or select a newly completed publication. Never treat a failed admission as
 permission to provision, deploy or change DNS.
+
+## Host safety library contract and pending gates
+
+As of 2026-10-19, protected
+[publisher run 39169553922, attempt 1](https://github.com/thevladbog/markiro/actions/runs/39169553922)
+published source/tooling `6fe44af838fc873cd06c7f0d52a4a5dae77dd7e5`, followed by
+independent read-only release admission. Admission tooling PR #733 remains open.
+These observations establish release provenance; the local safety tests below
+establish filesystem/state behavior. Neither establishes a running target.
+
+`deploy/platform/host/config.mjs` snapshots validated runtime values in private,
+immutable candidate files and hashes the captured bytes. Its separate child
+configuration permits only validated non-secret interpolation values and rejects
+ambient command-injection variables. The shared filesystem helpers require a
+pre-created canonical absolute root owned by the executing UID, mode 0700, with
+safe ancestors. Descendant directories are 0700 and regular single-link files
+are owned, mode 0600, and bounded to 1 MiB. Root/current-UID hostile processes
+are outside this private-root trust boundary.
+
+`withHostState(root, callback)` in `deploy/platform/host/state.mjs` exclusively
+creates and fsyncs `.deploy.lock` before reading `state.json`. The callback's
+store exposes only async `read`, `begin`, `enter`, `complete`, and `fail`.
+It rejects concurrent method calls, nested/second owners, escaped store methods,
+and drains already-started work before releasing its own lock. It never breaks
+an existing lock. State mutations increment a sequence and atomically replace
+`state.json` with file and parent-directory fsync before success. Read results
+and accepted input identities are independent copies. State/publication errors
+expose only `ERR_HOST_STATE`, a generic message and `durabilityUncertain`.
+Lock-retirement failures have a distinct sanitized `ERR_HOST_LOCK_RELEASE`,
+`durabilityUncertain: false`, `lockRetirementUncertain: true`.
+
+Each root represents one host/database/volume target. A candidate binds a
+canonical operation UUID, complete strict admission record, immutable executor
+SHA, configuration SHA256 and that target. Admission validation here checks
+syntax and cross-bindings; a future executor must separately establish fresh
+online provenance. Begin is allowed only for an empty root or a completed
+healthy candidate on the same target, retaining the prior full healthy record.
+Candidate UUIDs cannot reuse a retained operation. There is no resume, reset,
+rollback or recovery-clearing API.
+
+The enforced phases are admitted, images-verified, target-stopped,
+backup-verified, migrating, migrated, api-started, edge-started, healthy.
+Each phase must be entered before completion and the next phase. Backup
+completion requires exact archive/restore-evidence hashes, target and operation
+binding. This proof format does not verify archive bytes or a restore. Migration
+entry requires that bound record. `fail()` preserves the current phase and any
+backup while making it recovery-required; earlier healthy identity is retained
+as history and cannot replace the failed candidate. Unresolved records prohibit
+a new begin even after normal lock release or restart. A killed owner leaves its
+lock. Acquisition or journal-publication uncertainty latches for the owner and
+retains the held blocking lock even if the callback catches the error.
+
+Lock retirement starts only after the callback store expires and all writes
+are drained and durably synced. The owner unlinks only its own lock, then fsyncs
+the directory. A retirement-only failure returns the distinct error above;
+it does not make already-synced journal writes uncertain. A successor can
+acquire/fsync after unlink while the former owner awaits retirement fsync, so
+there is no permanent fence promise for retirement-only failure. The former
+owner never restores a lock or removes/changes a successor's lock/state. Its
+expired methods remain unusable. The error grants no mutation or recovery
+authority: a new `withHostState` acquisition must sync its own lock and read
+strict durable state, which still blocks unresolved candidates. A completed
+healthy candidate can hand off after a fresh synced acquisition. A crash may
+leave a conservative stale lock; do not automatically break it.
+
+Investigate retained state/locks
+through a separately reviewed operator recovery procedure; do not delete them
+to retry a failed deployment.
+
+The host CLI, bounded process-group command runner, exact Compose orchestration,
+reviewed backup-byte/isolated-restore verification, separate application/migration
+credentials, prepared-target acceptance, SSH transport and protected host workflow
+remain pending. Linux filesystem/crash rehearsal, actual target inventory,
+PostgreSQL TLS/roles, key continuity, off-host recovery, restored-data capacity,
+SMTP/S3/license checks and domain/TLS smoke remain separate acceptance gates.
+Local library tests invoke no Docker, SSH, GitHub or production service and do
+not authorize VM purchase, restore, deployment or DNS cutover.
