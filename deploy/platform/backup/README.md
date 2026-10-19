@@ -271,7 +271,8 @@ The manifest identifies synthetic probe/migration source as fixture code. Genera
 `runtime-migrate.js` and the generated build recipe have separate byte hashes;
 compiled bytes are not asserted to be Git source. Installed `pg`, `drizzle-orm`
 and `pg-boss` dependency trees and public Node/PostgreSQL base bytes are covered by
-the actual tested image ID. No separate dependency-tree or base-source hash is
+the actual tested image ID. The manifest also records the exact base-image references in the hashed recipe;
+the ICU route pins both references by digest. No separate dependency-tree hash is
 claimed. The manifest remains `local-synthetic`, including in CI; it never asserts
 live target execution or recovery acceptance.
 
@@ -286,3 +287,22 @@ a protected backup operation. A PR artifact, successful image build, upload, or
 synthetic round trip never authorizes a production operation. Application image
 publication and its protected gates are unchanged. Actual artifact transfer/load
 and target restore remain operational gates.
+
+Use `node deploy/platform/backup/backup-ci.mjs --local-ci --icu` for the separate
+Alpine ICU worker, or add `--export-image /absolute/new/private-directory` on
+Linux AMD64 after the same checks. The default route remains Bookworm/libc.
+The ICU worker uses the target's pinned PostgreSQL Alpine base, with worker-only
+UID/GID 999 and a checked PostgreSQL utility compatibility path. Target PostgreSQL
+UID 70 and observer identity are unchanged. Compact bootstrap explicitly selects
+UTF8, ICU en-US and C/C.
+
+The ICU harness verifies a full default-locale fixture including Unicode values,
+a genuine custom-rules database roundtrip, and natural Alpine ICU 153.136 to
+Bookworm ICU 153.120 rejection before object replay. Only the negative fixture
+copies and rebinds its worker image field to reach that comparison; genuine ICU
+metadata and dump bytes stay unchanged. It separately verifies that an unchanged
+inventory bound to the wrong image is rejected. Both failures require verified
+cleanup and absence of completed evidence. No production validation is relaxed.
+CI runs both routes and retains their two-file exports under separate exact paths
+and artifact names. ARM64 local runs exercise recovery without production export.
+These checks do not accept the separate source ICU upgrade or live target import.

@@ -187,13 +187,22 @@ export async function captureRecoveryImageSources({ repositoryRoot, contextDirec
     return bounded({
       ...result,
       buildRecipeSha256: digest(await sourceBytes(join(contextDirectory, "Dockerfile"))),
+      baseImages: String(await sourceBytes(join(contextDirectory, "Dockerfile")))
+        .split("\n")
+        .filter((line) => line.startsWith("FROM "))
+        .map((line) => line.split(" ")[1]),
     });
   } catch {
     throw error();
   }
 }
 async function verifySources(repositoryRoot, sources) {
-  keys(sources, ["sourceSha", "files", "generated", "buildRecipeSha256"]);
+  keys(sources, ["sourceSha", "files", "generated", "buildRecipeSha256", "baseImages"]);
+  ensure(
+    Array.isArray(sources.baseImages) &&
+      sources.baseImages.length <= 2 &&
+      sources.baseImages.every((v) => typeof v === "string" && /^[a-z0-9:@./-]+$/u.test(v)),
+  );
   bounded(sources);
   ensure(hash(sources.buildRecipeSha256));
   const current = await snapshot(repositoryRoot);
