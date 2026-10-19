@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   hostChildEnvironment,
@@ -21,6 +22,15 @@ const options = (f, source, overrides = {}) => ({
   outputLimitBytes: 1024,
   ...overrides,
 });
+const treeOptions = (f, observer, mode, overrides = {}) =>
+  options(f, "", {
+    args: [
+      fileURLToPath(new URL("./fixtures/process-tree.mjs", import.meta.url)),
+      mode,
+      observer.path,
+    ],
+    ...overrides,
+  });
 const safeError =
   (reason, confirmed = true) =>
   (error) => {
@@ -36,7 +46,7 @@ const safeError =
 // IPC readiness and socket close events witness live processes and their termination.
 // PID/group probes after settlement additionally prove they have been reaped.
 async function observeTree(t, f, count) {
-  const path = join(f.root, "ipc.sock");
+  const path = join(f.root, "ipc-quote'-$().sock");
   const pids = [];
   const sockets = [];
   let readyResolve;
@@ -77,8 +87,7 @@ async function observeTree(t, f, count) {
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => server.close(resolve));
   });
-  const connect = `const socket = require('node:net').connect(${JSON.stringify(path)}, () => socket.write(process.pid + '\\n'));`;
-  return { pids, ready, closed, connect };
+  return { pids, ready, closed, path };
 }
 
 test("passes shell metacharacters literally and returns separate binary output", async (t) => {
@@ -239,9 +248,7 @@ test("rejects unsafe process inputs before spawn with redacted errors", async (t
 test("timeout terminates and reaps a real process", { timeout: 12000 }, async (t) => {
   const f = await privateFixture(t);
   const observer = await observeTree(t, f, 1);
-  const result = runHostProcess(
-    options(f, `${observer.connect} setInterval(() => {}, 1000);`, { timeoutMs: 1000 }),
-  );
+  const result = runHostProcess(treeOptions(f, observer, "wait", { timeoutMs: 1000 }));
   const rejected = assert.rejects(result, safeError("timeout"));
   await observer.ready;
   await rejected;
@@ -256,9 +263,7 @@ test(
     const f = await privateFixture(t);
     const observer = await observeTree(t, f, 2);
     const controller = new AbortController();
-    const descendant = `process.on('SIGTERM', () => {}); ${observer.connect} setInterval(() => {}, 1000);`;
-    const source = `process.on('SIGTERM', () => {}); ${observer.connect} require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { env: {}, stdio: 'ignore' }); setInterval(() => {}, 1000);`;
-    const result = runHostProcess(options(f, source, { signal: controller.signal }));
+    const result = runHostProcess(treeOptions(f, observer, "tree", { signal: controller.signal }));
     const rejected = assert.rejects(result, safeError("aborted"));
     await observer.ready;
     controller.abort(secret);
@@ -294,10 +299,8 @@ test(
   async (t) => {
     const f = await privateFixture(t);
     const observer = await observeTree(t, f, 1);
-    const descendant = `${observer.connect} socket.once('connect', () => process.send('ready')); setInterval(() => {}, 1000);`;
     // A child-to-parent IPC handshake holds root exit until the descendant is live.
-    const source = `const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { env: {}, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); child.once('message', () => { child.disconnect(); child.unref(); });`;
-    const result = runHostProcess(options(f, source));
+    const result = runHostProcess(treeOptions(f, observer, "exiting-parent"));
     const rejected = assert.rejects(result, safeError("termination"));
     await observer.ready;
     await rejected;
@@ -323,11 +326,7 @@ test(
       return originalKill.call(process, pid, signal);
     });
     const result = runHostProcess(
-      options(
-        f,
-        `process.on('SIGTERM', () => {}); ${observer.connect} setInterval(() => {}, 1000);`,
-        { signal: controller.signal },
-      ),
+      treeOptions(f, observer, "ignore-term", { signal: controller.signal }),
     );
     const rejected = assert.rejects(result, safeError("termination", false));
     await observer.ready;
