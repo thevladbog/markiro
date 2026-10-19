@@ -41,7 +41,7 @@ remains 1 MiB; oversized inventory fails closed.
 Inventory contains sorted roles and attributes, memberships, typed object
 identities and owners/ACLs, default privileges, extensions, table row-byte digests
 and counts, sequence values and `is_called`, index/constraint state and migration
-journal digest/count. Row-byte digests include encrypted column bytes; no rows or
+journal digest/count, plus independent definition fingerprints. Row-byte digests include encrypted column bytes; no rows or
 ciphertexts appear in evidence. All metadata and archive bytes are private.
 
 Role mapping is exhaustive `{version:1,roles:[{source,target}],allowedDeltas:[]}`.
@@ -83,10 +83,36 @@ views, sequences, functions/procedures, enum/domain/extension types, and the
 constraint definitions are stored as SHA256 of canonical-session
 `pg_get_indexdef`/`pg_get_constraintdef(oid,true)` bytes; actionable owners and ACLs remain
 structured fields. The full private metadata file, including bindings, must fit
-1,048,576 bytes. The reviewed current-schema fixture produces 1,015,851 bytes,
-leaving 32,725 bytes of headroom. Current-schema growth past that boundary fails
+1,048,576 bytes. The earlier fixture before independent column fingerprints produced
+1,015,851 bytes (32,725 bytes headroom); the corrected fixture measurement is
+recorded in the [durable verification](../../../docs/verification/2026-10-19-platform-backup-preparation.md). Current-schema growth past that boundary fails
 closed; the cap is not increased automatically. Every nested record has exact
 keys, scalar types, allowed values and unique typed identities.
+Each table/view/materialized-view `sha256` hashes canonical JSON of
+ordered live column names, resolved type schema/name and typmod, NOT NULL,
+`pg_get_expr(...,true)` default/generation expression, generated/identity mode and
+resolved collation; relation kind, partition key/bound, ordered parent identities
+and sorted relation options are included. Views additionally include
+`pg_get_viewdef(oid,true)`. Physical dropped-column ordinal gaps are deliberately
+excluded; logical column order is preserved. No source OIDs, SQL-dump hash or
+expression regex normalization enters the fingerprints.
+
+Enums hash ordered labels; domains hash resolved base type/typmod, nullability,
+default and collation, plus ordered constraint names/definitions/validation bound
+to the specific domain (also retained in the existing constraints inventory). Sequences hash resolved type, start/increment/min/max/cache/cycle and
+serial/identity ownership dependency, separately from last_value/is_called.
+Other custom base/range/multirange/pseudo types reject; only `btree_gist` base
+types are admitted under the trusted extension/version policy, hashing their
+storage/category and resolved I/O/modifier/analyzer function identities. The
+trusted worker supplies the same extension implementation; fingerprints and the
+extension version are not a native binary-code attestation.
+
+Definition-bearing object, index, constraint and trigger records use the compact
+`sha256` key for exactly one lowercase 64-hex SHA256 fingerprint. The earlier
+unpublished `definitionSha256` key is rejected, not reinterpreted; shortening the
+key retains all semantics under the fixed metadata ceiling. Archive/configuration
+API fields and table row digests keep their existing meanings. Previous
+metadata lacking these fingerprints fails closed and needs a new backup/proof.
 Function/procedure definitions use SHA256 of `pg_get_functiondef` bytes. User
 triggers retain schema/table/name, SHA256 of `pg_get_triggerdef(oid,true)`, and
 exact enabled state (`O`, `D`, `R`, `A`). Internal constraint triggers must remain
@@ -135,8 +161,19 @@ encrypted bytes and an uncalled sequence. A source-only synthetic probe disables
 the current credential-epoch trigger and changes its function body inside a
 transaction. Actual inventory recapture rejects each change while rows, journal,
 owners and ACLs stay equal; rollback restores the current schema before backup.
-Source traffic
-is confined to an owned internal network with no published ports. Restore has
+The separate guarded schema probe checks NOT NULL and removed/changed defaults
+on current station/kiosk credential_epoch and station security_revocation_revision,
+plus view, enum, domain, type/typmod, generated/identity, partition and sequence
+semantics. Each mutation is source-only inside a savepoint, rejects inventory
+equality with rows/journal/owners/ACLs unchanged, and rolls back. It refuses
+standalone/host execution before connecting: the Linux container must have matching
+operation ID arguments, environment and private fixture marker. The harness also
+inspects its exact source image, ownership label, private volume and absence of
+published ports before invoking it. Synthetic fixtures retain domain, generated,
+identity, dropped-column-gap and partition definitions for the full round trip.
+A unit-level restore negative verifies a changed column fingerprint cannot publish
+completed evidence even after successful cleanup.
+Source traffic is confined to an owned internal network with no published ports. Restore has
 network `none`. The harness also rejects changed bytes before creating resources
 and runs a deliberately truncated custom archive through real pg_restore to
 prove recovery-required evidence and actual resource removal. Production-bundle

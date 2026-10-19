@@ -351,3 +351,52 @@ for (const fault of ["mount-destination", "extra-network"])
     assert.ok(!docker.calls.some((c) => c.args.includes("restore-init")));
     assert.equal(docker.containers.size + docker.volumes.size, 0);
   });
+
+test("changed column-definition fingerprint forbids completed restore evidence", async (t) => {
+  const f = await fixture(t);
+  f.document.inventory.objects.push({
+    kind: "TABLE",
+    schema: "public",
+    name: "station_devices",
+    owner: "owner",
+    acl: [],
+    args: [],
+    extension: null,
+    sha256: "a".repeat(64),
+  });
+  f.roleMapping.roles.push({ source: "owner", target: "mapped_owner" });
+  await writeFile(f.backup.inventoryPath, canonical(f.document), { mode: 0o600 });
+  f.backup.inventorySha256 = digest(canonical(f.document));
+  await writeFile(
+    join(f.root, "backup-runtime.json"),
+    canonical({
+      version: 1,
+      executorSha: f.document.executorSha,
+      dockerExecutable: "/usr/bin/docker",
+      endpoint: "unix:///synthetic.sock",
+      image: f.document.runtime.image,
+      provenance: "local-synthetic",
+    }),
+    { mode: 0o600 },
+  );
+  const actual = structuredClone(f.document.inventory);
+  actual.objects[0].owner = "mapped_owner";
+  actual.objects[0].sha256 = "b".repeat(64);
+  const { fakeDocker } = await import("./backup-runtime-fixture.mjs");
+  const docker = fakeDocker({
+    ...f,
+    image: f.document.runtime.image,
+    restored: { inventory: actual, postgresVersion: "17.11" },
+  });
+  await assert.rejects(
+    verifyDatabaseRestore({ ...f, run: docker.run }),
+    (e) => e.stage === "inventory-objects",
+  );
+  const report = JSON.parse(
+    await readFile(join(f.root, `restore-${f.operationId}`, "failure.json")),
+  );
+  assert.equal(report.status, "recovery-required");
+  assert.equal(report.cleanup.verified, true);
+  await assert.rejects(readFile(join(f.root, `restore-${f.operationId}`, "evidence.json")));
+  assert.equal(docker.containers.size + docker.volumes.size, 0);
+});

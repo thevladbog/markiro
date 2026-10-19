@@ -41,7 +41,7 @@ const fixture = () => ({
     {
       schema: "public",
       name: "idx",
-      definitionSha256: "d".repeat(64),
+      sha256: "d".repeat(64),
       valid: true,
       ready: true,
       live: true,
@@ -52,7 +52,7 @@ const fixture = () => ({
       schema: "public",
       table: "secret",
       name: "pk",
-      definitionSha256: "e".repeat(64),
+      sha256: "e".repeat(64),
       validated: true,
     },
   ],
@@ -116,17 +116,17 @@ test("rejects changed index or constraint definition hashes and preserves intent
   a.constraints[0].validated = false;
   b.constraints[0].validated = false;
   assert.equal(compareInventories(a, b), true);
-  b.constraints[0].definitionSha256 = "f".repeat(64);
+  b.constraints[0].sha256 = "f".repeat(64);
   assert.throws(() => compareInventories(a, b));
   const c = structuredClone(a);
-  c.indexes[0].definitionSha256 = "f".repeat(64);
+  c.indexes[0].sha256 = "f".repeat(64);
   assert.throws(() => compareInventories(a, c));
 });
 
 test("recreates mapped ownership of trusted extension members", () => {
   const source = fixture();
   source.objects[0] = {
-    definitionSha256: "a".repeat(64),
+    sha256: "a".repeat(64),
     kind: "FUNCTION",
     schema: "public",
     name: "extension_member",
@@ -182,7 +182,7 @@ test("maps typed trusted-extension operators and access methods without unsuppor
 test("temporary schema usage for lowered source-superuser grantors is revoked before exact schema ACL replay", () => {
   const source = fixture();
   source.objects.push({
-    definitionSha256: "a".repeat(64),
+    sha256: "a".repeat(64),
     kind: "FUNCTION",
     schema: "public",
     name: "owned",
@@ -268,21 +268,21 @@ test("function definition and trigger definition/enabled state participate in ex
     args: [],
     extension: null,
     acl: [],
-    definitionSha256: "a".repeat(64),
+    sha256: "a".repeat(64),
   });
   a.triggers = [
     {
       schema: "public",
       table: "secret",
       name: "security_epoch",
-      definitionSha256: "b".repeat(64),
+      sha256: "b".repeat(64),
       enabled: "O",
     },
   ];
   assert.equal(compareInventories(a, a), true);
   for (const mutate of [
-    (v) => (v.objects.at(-1).definitionSha256 = "c".repeat(64)),
-    (v) => (v.triggers[0].definitionSha256 = "c".repeat(64)),
+    (v) => (v.objects.at(-1).sha256 = "c".repeat(64)),
+    (v) => (v.triggers[0].sha256 = "c".repeat(64)),
     (v) => (v.triggers[0].enabled = "D"),
     (v) => (v.triggers = []),
   ]) {

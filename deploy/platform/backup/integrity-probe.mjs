@@ -32,7 +32,7 @@ try {
       o.name === "station_credential_epoch_advance",
   );
   assert.equal(trigger?.enabled, "O");
-  assert.ok(fn?.definitionSha256);
+  assert.ok(fn?.sha256);
   await client.query(
     "ALTER TABLE public.station_devices DISABLE TRIGGER station_credential_epoch_advance",
   );
@@ -54,8 +54,8 @@ try {
     assert.equal(canonical(changed[key]), canonical(before[key]));
   const withoutDefinition = (objects) =>
     objects
-      .map(({ definitionSha256, ...object }) => {
-        void definitionSha256;
+      .map(({ sha256, ...object }) => {
+        void sha256;
         return object;
       })
       .sort((a, b) => (canonical(a) < canonical(b) ? -1 : canonical(a) > canonical(b) ? 1 : 0));
@@ -74,8 +74,8 @@ try {
   assert.notEqual(
     changed.objects.find(
       (o) => o.kind === "FUNCTION" && o.schema === "public" && o.name === fn.name,
-    ).definitionSha256,
-    fn.definitionSha256,
+    ).sha256,
+    fn.sha256,
   );
   await client.query("ROLLBACK");
   const restored = (
@@ -83,7 +83,7 @@ try {
       "SELECT pg_get_functiondef('public.station_credential_epoch_advance()'::regprocedure) AS definition",
     )
   ).rows[0].definition;
-  assert.equal(digest(restored), fn.definitionSha256);
+  assert.equal(digest(restored), fn.sha256);
   assert.equal(
     (
       await client.query(

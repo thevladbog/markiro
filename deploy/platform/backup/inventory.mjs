@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { relationDefinition, sequenceDefinition, typeDefinition } from "./definitions.mjs";
 import { leastPrivilegeRoleAttributes, leastPrivilegeRoleSql } from "../postgres/roles.mjs";
 import {
   canonical,
@@ -96,10 +97,15 @@ export async function captureInventory(client, { excludeRole } = {}) {
         )
       : [];
     if (["FUNCTION", "PROCEDURE"].includes(object.kind))
-      object.definitionSha256 = digest(
+      object.sha256 = digest(
         (await rows("SELECT pg_get_functiondef($1::oid) AS definition", [object.oid]))[0]
           .definition,
       );
+    if (["TABLE", "VIEW", "MATERIALIZED VIEW"].includes(object.kind))
+      object.sha256 = await relationDefinition(rows, object);
+    if (object.kind === "SEQUENCE") object.sha256 = await sequenceDefinition(rows, object);
+    if (["TYPE", "DOMAIN"].includes(object.kind))
+      object.sha256 = await typeDefinition(rows, object);
     // Column ACLs require a separate grant model; fail closed rather than lose them.
     if (object.catalog === "pg_class")
       ensure(
@@ -181,7 +187,7 @@ export async function captureInventory(client, { excludeRole } = {}) {
     `SELECT n.nspname AS schema,coalesce(c.relname,'') AS table,co.conname AS name,pg_get_constraintdef(co.oid,true) AS definition,co.convalidated AS validated FROM pg_constraint co JOIN pg_namespace n ON n.oid=co.connamespace LEFT JOIN pg_class c ON c.oid=co.conrelid WHERE ${namespaces}`,
   );
   for (const row of [...indexes, ...constraints]) {
-    row.definitionSha256 = digest(row.definition);
+    row.sha256 = digest(row.definition);
     delete row.definition;
   }
   ensure(
@@ -195,7 +201,7 @@ export async function captureInventory(client, { excludeRole } = {}) {
     `SELECT n.nspname AS schema,c.relname AS table,t.tgname AS name,pg_get_triggerdef(t.oid,true) AS definition,t.tgenabled AS enabled FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE ${namespaces} AND NOT t.tgisinternal`,
   );
   for (const t of triggers) {
-    t.definitionSha256 = digest(t.definition);
+    t.sha256 = digest(t.definition);
     delete t.definition;
   }
   const journal = tables.find((t) => t.schema === "drizzle" && t.name === "__drizzle_migrations");

@@ -16,8 +16,9 @@ DNS or production-data mutation. Source and existing immutable backups remain in
 | Archive and real restore         | `eca1cd9bc`, correction `e54fe3665f683aee9f494f2ff935d0024df1f137`      | 210 platform, 36 focused backup, scoped lint/full formatting passed. Exact committed run28 passed at PG17.11 Linux ARM64, image `sha256:036e8de959a93c20c4fcc5cf37526e40fa2bb0e83844f7b32fe6cddd0abc3a95`. Actual migrations, pg-boss, custom snapshot dump, exact mapped restore, executable integrity negatives, reverse-order delegated ACL chain, corrupt/partial restore failures and owned cleanup verified. |
 | Prepared target and journal gate | `3cf3e356b919eb14472ef93eb9c3ba49f228dd73` (independent review pending) | RED: two expected missing-module failures. GREEN: 54 focused tests; 264 platform, 591 production contracts, 63 CI-policy. Final results are recorded below.                                                                                                                                                                                                                                                        |
 
-Current-schema inventory is 1,015,851 bytes: 32,725 bytes remain under the unchanged
-1,048,576-byte private metadata limit. Schema growth beyond it fails closed. Run28
+Before the final review correction, inventory was 1,015,851 bytes: 32,725 bytes
+remained under the unchanged 1,048,576-byte private metadata limit. The corrected
+format and measurement appear below. Schema growth beyond the cap fails closed. Run28
 archive was 1,286,207 bytes; archive lengths can vary with generated fixture values.
 Archives stream in 64 KiB chunks; the metadata limit is not raised for dumps.
 Completed producer reports require actual owned-resource absence, while the action
@@ -73,6 +74,53 @@ least as old by producer chronology). Both reject without completing
 Prettier and diff checks passed. Docker, production/CI contracts and full API were
 not rerun for this two-predicate correction; their earlier evidence and limits
 remain tied to the revisions stated above.
+
+### Final review correction: independent schema semantics
+
+The final review found that PG17 table-column NOT NULL, defaults, types and
+identity/generated definitions did not participate in independent equality. The
+corrected inventory stores one canonical semantic SHA256 per relation, including
+ordered live columns, resolved types/typmods/collations, nullability,
+default/generation expressions, identity/generated flags, relation kind/options,
+partition key/bound/parents and view query. Physical dropped-column gaps are
+excluded; logical order remains. Enum label order, domain base/default/nullability
+and domain-bound named constraints, and sequence generation parameters/ownership
+are fingerprinted. Other custom type kinds fail closed except the trusted
+version-matched btree_gist base types, whose catalog semantics and resolved
+function identities are captured. Native extension binaries remain trusted.
+
+The original verbose key pushed the actual worker inventory result to 1,049,133
+bytes and was rejected by the unchanged 1 MiB ceiling. The approved private format
+correction consistently shortens only definition fingerprint keys from
+`definitionSha256` to `sha256` on objects/indexes/constraints/triggers. Hashes
+remain lowercase 64-hex SHA256. Archive/configuration API names and row digests
+are unchanged. Exact validators reject previous local artifacts; regenerate them.
+No older artifact is silently reinterpreted and no limit was raised.
+
+RED: all 17 initial catalog regressions failed on the previous implementation.
+The new catalog suite now has 19 passing cases, including explicit old-key
+rejection and domain-local CHECK binding. A restore regression rejects a changed
+column fingerprint, verifies cleanup and forbids completed evidence.
+The guarded source-only PG17 probe separately rejects 25 transactional mutations:
+NOT NULL and removed/changed defaults on station/kiosk credential_epoch and station
+security_revocation_revision; view query, enum labels, domain null/default,
+column type/typmod, generated/identity state, partition bound and all seven
+sequence generation parameters. Rows, journal, owners and ACLs remain unchanged;
+all changes roll back before backup. Domain NOT NULL also removes its exact named
+pg_constraint row on PG17; that expected delta is asserted, then original
+constraints are substituted to independently prove definition-hash rejection.
+
+Development run4 passed the complete synthetic dump/restore, mapped ownership and
+ACL chains, current security executable integrity, corrupt/partial archives and
+owned cleanup, plus CLI-death/active-workload/owned-stop/released-fence/terminal-
+recovery gates. It used PG17.11 Linux ARM64, worker
+`sha256:d01abc97e5295ba839dfb9bba788a8671bd911fe70e2526f095f0eccba5b0fbf`.
+Raw inventory 1,018,161 bytes; complete private envelope 1,019,905 bytes, leaving
+28,671 bytes below 1,048,576. Archive 1,288,089 bytes; two intentional NOT VALID
+constraints retained. This is development evidence: its recorded base HEAD is not
+an exact-code attestation, and the final domain-local constraint refinement has
+focused coverage pending the committed integrated run. Exact committed verification
+is recorded separately after the source commit.
 
 ## Decisions and consequences
 
@@ -147,6 +195,16 @@ remain tied to the revisions stated above.
     Split roles-ci local resource lifecycle from roles-probe DB assertions and
     update Compose/CI consumers together. Cost: future caller adaptation or small
     helper consolidation before the host CLI, without weakening credential isolation.
+
+17. Extend definition equality with catalog semantics and use compact `sha256`
+    keys after measuring an actual cap rejection. Preserve the 1 MiB ceiling and
+    exact nested validation. Cost if the private schema is revised again:
+    regenerate prior local evidence; any future published consumer needs an
+    explicit versioned migration, never silent reinterpretation.
+18. Bind domain CHECK/NOT NULL names and definitions to each domain within its
+    fingerprint; the older global constraint records have no domain identity.
+    Cost: one bounded catalog read per domain and explicit canonical-session
+    representation review on PostgreSQL changes.
 
 ## Limits and outstanding acceptance
 

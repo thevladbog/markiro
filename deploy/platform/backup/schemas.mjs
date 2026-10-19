@@ -277,7 +277,10 @@ const objectPrivilegeKind = (kind) =>
 function objectRow(o) {
   ensure(objectKinds.has(o.kind));
   const routine = ["FUNCTION", "PROCEDURE"].includes(o.kind),
-    method = ["OPERATOR CLASS", "OPERATOR FAMILY"].includes(o.kind);
+    method = ["OPERATOR CLASS", "OPERATOR FAMILY"].includes(o.kind),
+    definition =
+      routine ||
+      ["TABLE", "VIEW", "MATERIALIZED VIEW", "SEQUENCE", "TYPE", "DOMAIN"].includes(o.kind);
   keys(o, [
     "kind",
     "schema",
@@ -286,7 +289,7 @@ function objectRow(o) {
     "acl",
     "extension",
     "args",
-    ...(routine ? ["definitionSha256"] : []),
+    ...(definition ? ["sha256"] : []),
     ...(method ? ["method"] : []),
     ...(o.kind === "DATABASE" ? ["locale"] : []),
   ]);
@@ -313,7 +316,7 @@ function objectRow(o) {
     );
   }
   if (method) ensure(identifier(o.method));
-  if (routine) ensure(hash(o.definitionSha256));
+  if (definition) ensure(hash(o.sha256));
   if (o.kind === "DATABASE") {
     keys(o.locale, ["encoding", "collate", "ctype", "provider"]);
     ensure(
@@ -434,20 +437,20 @@ export function validateInventory(value) {
     v.indexes,
     (r) => [r.schema, r.name],
     (r) => {
-      keys(r, ["schema", "name", "definitionSha256", "valid", "ready", "live"]);
+      keys(r, ["schema", "name", "sha256", "valid", "ready", "live"]);
       qualified(r);
-      ensure(hash(r.definitionSha256) && r.valid === true && r.ready === true && r.live === true);
+      ensure(hash(r.sha256) && r.valid === true && r.ready === true && r.live === true);
     },
   );
   uniqueRows(
     v.constraints,
     (r) => [r.schema, r.table, r.name],
     (r) => {
-      keys(r, ["schema", "table", "name", "definitionSha256", "validated"]);
+      keys(r, ["schema", "table", "name", "sha256", "validated"]);
       qualified(r);
       ensure(
         (r.table === "" || identifier(r.table)) &&
-          hash(r.definitionSha256) &&
+          hash(r.sha256) &&
           typeof r.validated === "boolean",
       );
     },
@@ -456,11 +459,9 @@ export function validateInventory(value) {
     v.triggers,
     (r) => [r.schema, r.table, r.name],
     (r) => {
-      keys(r, ["schema", "table", "name", "definitionSha256", "enabled"]);
+      keys(r, ["schema", "table", "name", "sha256", "enabled"]);
       qualified(r);
-      ensure(
-        identifier(r.table) && hash(r.definitionSha256) && ["O", "D", "R", "A"].includes(r.enabled),
-      );
+      ensure(identifier(r.table) && hash(r.sha256) && ["O", "D", "R", "A"].includes(r.enabled));
     },
   );
   if (v.migrationJournal !== null) {
