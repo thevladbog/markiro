@@ -95,14 +95,17 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   );
 });
 
-test("CI isolates platform contracts from the legacy Compose project", async () => {
-  const workflow = await parse(".github/workflows/ci.yml");
-  assert.equal(workflow.jobs["production-bundle"].env.COMPOSE_PROJECT_NAME, "markiro-production");
-  assert.equal(
-    namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts").run,
-    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
-  );
-});
+for (const file of ["ci.yml", "release-images.yml"]) {
+  test(`${file} isolates platform contracts from the legacy Compose project`, async () => {
+    const workflow = await parse(`.github/workflows/${file}`);
+    assert.equal(workflow.jobs["production-bundle"].env.COMPOSE_PROJECT_NAME, "markiro-production");
+    assert.equal(
+      namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts")
+        .run,
+      "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+    );
+  });
+}
 
 test("CI validates the edge image before landing browser gates", async () => {
   const workflow = await parse(".github/workflows/ci.yml");

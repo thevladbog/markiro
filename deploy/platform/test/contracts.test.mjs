@@ -207,7 +207,7 @@ test("CI routes platform files to bundle checks and builds isolated preparation 
   assert.ok(release.on.push.paths.includes("deploy/platform/**"));
   assert.ok(
     release.jobs["production-bundle"].steps.some(
-      (s) => s.run === "node --test deploy/platform/test/*.test.mjs",
+      (s) => s.run === "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
     ),
   );
   assert.doesNotMatch(
