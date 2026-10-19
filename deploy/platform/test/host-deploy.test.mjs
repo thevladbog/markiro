@@ -510,3 +510,49 @@ test("trusted AbortSignal remains outside JSON input and cleanup runs without th
   assert.equal(recovered, true);
   assert.equal((await disk(f.root)).current.status, "recovery-required");
 });
+
+for (const adapter of ["stopMigration", "inspectMigration"]) {
+  test(`unconfirmed ${adapter} termination stops the remaining recovery commands`, async (t) => {
+    const f = await fixture(t, "migrate");
+    const run = f.adapters.runProcess;
+    const stop = f.adapters.stopMigration;
+    const inspect = f.adapters.inspectMigration;
+    const raced = [];
+    let unconfirmed = false;
+    f.adapters.runProcess = async (request) => {
+      if (unconfirmed) raced.push("compose");
+      return run(request);
+    };
+    f.adapters.stopMigration = async (request) => {
+      if (unconfirmed) raced.push("stop-migration");
+      if (adapter === "stopMigration") {
+        unconfirmed = true;
+        throw Object.assign(new Error("fixture-private-unreaped-cleanup"), {
+          terminationConfirmed: false,
+        });
+      }
+      return stop(request);
+    };
+    f.adapters.inspectMigration = async (request) => {
+      if (unconfirmed) raced.push("inspect-migration");
+      if (adapter === "inspectMigration") {
+        unconfirmed = true;
+        throw Object.assign(new Error("fixture-private-unreaped-inspection"), {
+          terminationConfirmed: false,
+        });
+      }
+      return inspect(request);
+    };
+    let failure;
+    await assert.rejects(execute(f.input, f.adapters), (error) => {
+      failure = error;
+      return true;
+    });
+    assert.equal(unconfirmed, true);
+    assert.deepEqual(raced, []);
+    assert.equal(failure.terminationConfirmed, false);
+    assert.doesNotMatch(failure.message + failure.stack, /fixture-private/u);
+    assert.equal((await disk(f.root)).current.status, "recovery-required");
+    assert.ok(!f.trace.some(([name]) => ["api", "edge", "smoke"].includes(name)));
+  });
+}

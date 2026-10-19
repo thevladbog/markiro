@@ -33,6 +33,7 @@ function failure(phase, error) {
   result.phase = phase;
   result.recoveryRequired = true;
   result.durabilityUncertain = error?.durabilityUncertain === true;
+  if (error?.terminationConfirmed === false) result.terminationConfirmed = false;
   return result;
 }
 function stopped(value, identity) {
@@ -292,6 +293,15 @@ export async function executePreparedDeployment(input, adapters) {
         await complete();
         return plain(identity);
       } catch (error) {
+        let terminationConfirmed = error?.terminationConfirmed !== false;
+        const recover = async (action) => {
+          if (!terminationConfirmed) return;
+          try {
+            await action();
+          } catch (cleanupError) {
+            terminationConfirmed = cleanupError?.terminationConfirmed !== false;
+          }
+        };
         // Never replay prior binaries or drop volumes. Cleanup ignores the abort
         // signal, but still targets only ownership verified by trusted observers.
         if (began) {
@@ -300,19 +310,20 @@ export async function executePreparedDeployment(input, adapters) {
           await store.fail().catch(() => {});
           // An unreaped CLI may still issue daemon commands. Never race it with
           // a second mutating process; explicit operator recovery is required.
-          if (releaseVerified && error?.terminationConfirmed !== false) {
-            await observeTarget("recovery").catch(() => {});
+          if (releaseVerified && terminationConfirmed) {
+            await recover(() => observeTarget("recovery"));
             if (targetOwned) {
               if (migrationEntered) {
-                await adapters.stopMigration(context("recovery")).catch(() => {});
-                await inspectMigration().catch(() => {});
+                await recover(() => adapters.stopMigration(context("recovery")));
+                await recover(inspectMigration);
               }
-              await compose(["stop", "edge", "api"], true).catch(() => {});
-              await inspectStopped().catch(() => {});
+              await recover(() => compose(["stop", "edge", "api"], true));
+              await recover(inspectStopped);
             }
           }
         }
         deploymentFailure = failure(phase, error);
+        if (!terminationConfirmed) deploymentFailure.terminationConfirmed = false;
         return null;
       }
     });
