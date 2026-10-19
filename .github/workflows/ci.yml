@@ -595,6 +595,8 @@ jobs:
         run: |
           pnpm --filter @markiro/db build
           node deploy/platform/postgres/roles-ci.mjs --local-ci
+      - name: Verify isolated PostgreSQL backup and restore
+        run: node deploy/platform/backup/backup-ci.mjs --local-ci
       - name: Verify isolated platform-only preparation stack
         env:
           MARKIRO_SOURCE_SHA: ${{ github.sha }}

@@ -1,3 +1,14 @@
+export const leastPrivilegeRoleAttributes = Object.freeze({
+  superuser: false,
+  createdb: false,
+  createrole: false,
+  replication: false,
+  bypassrls: false,
+});
+export const leastPrivilegeRoleSql = Object.keys(leastPrivilegeRoleAttributes)
+  .map((name) => `NO${name.toUpperCase()}`)
+  .join(" ");
+
 /** Explicit, one-time provisioning for an empty platform database.
  * Execute as the isolated bootstrap owner, before migrations. Never called by API
  * startup; existing deployments need a separately reviewed ownership mapping.
@@ -28,8 +39,8 @@ BEGIN
   END IF;
 END
 $fresh$;
-CREATE ROLE markiro_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(appPassword)};
-CREATE ROLE markiro_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(migratorPassword)};
+CREATE ROLE markiro_app LOGIN ${leastPrivilegeRoleSql} PASSWORD ${literal(appPassword)};
+CREATE ROLE markiro_migrator LOGIN ${leastPrivilegeRoleSql} PASSWORD ${literal(migratorPassword)};
 REVOKE ALL ON DATABASE markiro FROM PUBLIC;
 GRANT CONNECT ON DATABASE markiro TO markiro_app, markiro_migrator;
 -- Drizzle executes CREATE SCHEMA IF NOT EXISTS even for a precreated schema.

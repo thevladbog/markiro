@@ -424,3 +424,13 @@ test("platform preparation builds its own edge and runs only after legacy cleanu
   assert.ok(job.steps.indexOf(build) > job.steps.indexOf(contracts));
   assert.equal(stepByName(job, "Preserve platform preparation evidence").if, "always()");
 });
+
+test("production-bundle owns the real fenced backup and isolated restore gate", () => {
+  const job = workflow.jobs["production-bundle"];
+  const backup = stepByName(job, "Verify isolated PostgreSQL backup and restore");
+  const roles = stepByName(job, "Verify isolated PostgreSQL roles and TLS");
+  const stack = stepByName(job, "Verify isolated platform-only preparation stack");
+  assert.equal(backup.run, "node deploy/platform/backup/backup-ci.mjs --local-ci");
+  assert.ok(job.steps.indexOf(backup) > job.steps.indexOf(roles));
+  assert.ok(job.steps.indexOf(backup) < job.steps.indexOf(stack));
+});
