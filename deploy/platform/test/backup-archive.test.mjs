@@ -9,8 +9,9 @@ import { createDatabaseBackup } from "../backup/archive.mjs";
 import { readPrivateFile } from "../host/files.mjs";
 import { canonical, digest } from "../backup/schemas.mjs";
 
-for (const nearLimit of [false, true])
-  test(`backup ${nearLimit ? "rejects an oversized envelope before publishing" : "publishes readable complete metadata"}`, async (t) => {
+for (const scenario of ["complete", "oversized", "final-fence-failure"])
+  test(`backup ${scenario}`, async (t) => {
+    const nearLimit = scenario === "oversized";
     const { root } = await privateFixture(t);
     const operationId = randomUUID();
     const target = { hostId: "local", databaseId: "markiro", volumeId: "owned" };
@@ -104,22 +105,32 @@ for (const nearLimit of [false, true])
       connectionFile,
       run,
       writerFence: {
-        observe: async ({ boundary }) => ({
-          version: 1,
-          kind: "platform-writer-fence",
-          operationId,
-          target,
-          fenceId,
-          enforcementSha256: "c".repeat(64),
-          beganAt,
-          observedAt: new Date().toISOString(),
-          boundary,
-          held: true,
-        }),
+        observe: async ({ boundary }) => {
+          if (boundary === "after-snapshot") {
+            assert.equal(docker.containers.size + docker.volumes.size, 0);
+            for (const name of ["database.dump", "inventory.json"])
+              await assert.rejects(readFile(join(root, `backup-${operationId}`, name)), {
+                code: "ENOENT",
+              });
+            if (scenario === "final-fence-failure") throw new Error("private observation failure");
+          }
+          return {
+            version: 1,
+            kind: "platform-writer-fence",
+            operationId,
+            target,
+            fenceId,
+            enforcementSha256: "c".repeat(64),
+            beganAt,
+            observedAt: new Date().toISOString(),
+            boundary,
+            held: true,
+          };
+        },
       },
     };
     const directory = join(root, `backup-${operationId}`);
-    if (nearLimit) {
+    if (nearLimit || scenario === "final-fence-failure") {
       let failureError;
       try {
         await createDatabaseBackup(request);
@@ -129,7 +140,8 @@ for (const nearLimit of [false, true])
       assert.ok(failureError);
       for (const name of ["database.dump", "inventory.json", "input", "output"])
         await assert.rejects(readFile(join(directory, name)), { code: "ENOENT" });
-      assert.ok(failureError.stage?.startsWith("inventory-limit-"));
+      if (nearLimit) assert.ok(failureError.stage?.startsWith("inventory-limit-"));
+      else assert.equal(failureError.stage, "fence-validation");
       const failure = JSON.parse(await readPrivateFile(directory, "failure.json"));
       assert.equal(failure.status, "recovery-required");
       assert.equal(failure.cleanup.verified, true);

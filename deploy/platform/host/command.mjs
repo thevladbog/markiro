@@ -298,6 +298,20 @@ function smokeRequest(host, path, sha, status, request = httpsRequest) {
   });
 }
 
+// Shared physical fence binding for host admission and target-local recovery copies.
+export function hostFenceEnforcementSha256({ target, policy, hbaSha256 }) {
+  return digest({
+    version: 1,
+    kind: "platform-docker-private-database-fence",
+    target,
+    dockerId: policy.dockerId,
+    network: policy.networks.database,
+    volume: policy.volume,
+    postgresImageId: policy.postgresImageId,
+    hbaSha256,
+  });
+}
+
 export async function createHostAdapters(loaded, options = {}) {
   const { record, receipt, verified, verifySources } = loaded;
   const op = record.deployment,
@@ -309,14 +323,9 @@ export async function createHostAdapters(loaded, options = {}) {
     readMachineId: options.readMachineId,
   });
   const hbaSha256 = receipt.files["deploy/platform/postgres/pg_hba.conf"];
-  const enforcementSha256 = digest({
-    version: 1,
-    kind: "platform-docker-private-database-fence",
+  const enforcementSha256 = hostFenceEnforcementSha256({
     target: op.identity.target,
-    dockerId: policy.dockerId,
-    network: policy.networks.database,
-    volume: policy.volume,
-    postgresImageId: policy.postgresImageId,
+    policy,
     hbaSha256,
   });
   ensure(op.preparedTarget.fence.enforcementSha256 === enforcementSha256);

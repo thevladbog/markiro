@@ -206,3 +206,43 @@ operator provenance. The journal itself remains a lower-level syntax/state store
 `prepared-ci.mjs` is called only by the synthetic local harness; it creates no live
 acceptance. Its CLI timeout probe independently inspects the still-running owned
 container, requires actual stop plus held fence, and preserves terminal recovery.
+
+The trusted operator entry point
+`../host/target-backup.mjs#createTargetRecoveryBackup` accepts
+`{operation,observationPolicy,hbaPath,hbaSha256,connectionFile,roleMapping,verifySources}`
+and returns `{backup,restoreEvidence,fence}`. `operation` contains only the existing
+`root`, deployment `identity`, candidate `configuration` snapshots and
+`dockerConfig` (the root's `docker` directory). The returned fence is the existing
+`{fenceId,beganAt,enforcementSha256}` binding for later prepared-target acceptance;
+it is created only after a successful factual observation. It does not construct
+or admit a prepared-target record.
+
+This function uses concrete host Docker and PostgreSQL observers under the same
+`.deploy.lock` as deployment, rejects unresolved journals, and permits only
+PostgreSQL at observation boundaries. It pins `/usr/bin/docker`,
+`unix:///var/run/docker.sock`, Linux AMD64, `live-source` provenance, and the
+operation's executor SHA. The protected connection must select
+`db.private:5432/markiro`, the exact observed private database network and the
+configured CA bytes. Runtime, connection, service, password, CA and both candidate
+snapshots are reread at every boundary. Credentials stay in protected files.
+
+The operator supplies a trusted `verifySources` function that verifies reviewed
+installed source bytes and independently checked immutable worker-image provenance;
+it is invoked at entry, before snapshot, after archive cleanup and after isolated
+restore cleanup. This is a JavaScript trust boundary, never a JSON callback or a
+caller-supplied `held` observation. Optional process/machine-ID adapters exist for
+trusted tests. The function neither builds nor publishes its worker image.
+
+Archive output is captured and worker resources are verified absent before the
+final snapshot fence observation; archive publication still follows that
+observation. Isolated restore uses network `none`. No descriptor is returned until
+its cleanup and a final physical/database re-observation succeed. Producers attempt
+to retain private failure evidence. Unreaped processes, uncertain process durability or
+an incomplete archive/restore producer call retain the deployment lock and require
+operator recovery. A producer call is considered complete only after successful
+cleanup; failure-evidence persistence errors cannot erase that uncertainty. No
+additional process commands run after unconfirmed child termination;
+a sanitized producer failure alone is never taken as proof of cleanup. Completed
+producer files from a later failing outer operation do not admit a prepared target.
+Source import, target Linux execution, TLS/effective roles, key continuity, egress,
+off-host recovery and deployment admission remain separate operational gates.

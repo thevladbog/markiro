@@ -61,20 +61,6 @@ export async function createDatabaseBackup({
     await runtime.prepare(input, config.network);
     phase = "worker";
     await runtime.execute();
-    phase = "fence";
-    after = fence(
-      await writerFence.observe({ operationId, target, boundary: "after-snapshot" }),
-      operationId,
-      target,
-      "after-snapshot",
-    );
-    ensure(
-      before.fenceId === after.fenceId &&
-        before.beganAt === after.beganAt &&
-        before.enforcementSha256 === after.enforcementSha256,
-    );
-    validateFencePair({ before, after }, operationId, target);
-    ensure(Date.parse(startedAt) <= Date.parse(before.observedAt));
     phase = "output";
     await runtime.output(output);
     const metadata = await lstat(join(output, "inventory.json"));
@@ -108,6 +94,21 @@ export async function createDatabaseBackup({
   });
   if (!problem) {
     try {
+      phase = "fence";
+      after = fence(
+        await writerFence.observe({ operationId, target, boundary: "after-snapshot" }),
+        operationId,
+        target,
+        "after-snapshot",
+      );
+      ensure(
+        before.fenceId === after.fenceId &&
+          before.beganAt === after.beganAt &&
+          before.enforcementSha256 === after.enforcementSha256,
+      );
+      validateFencePair({ before, after }, operationId, target);
+      ensure(Date.parse(startedAt) <= Date.parse(before.observedAt));
+      phase = "inventory";
       const archive = await hashArchive(directory, result.dump);
       const inventory = {
         version: 1,
@@ -133,7 +134,7 @@ export async function createDatabaseBackup({
       if (inventoryBytes.length > 1048576) throw fail(`inventory-limit-${inventoryBytes.length}`);
       result = { ...result, archive, inventoryBytes };
     } catch (error) {
-      problem = error.stage ? error : fail("inventory-validation");
+      problem = error.stage ? error : fail(`${phase}-validation`);
     }
   }
   if (problem) {
