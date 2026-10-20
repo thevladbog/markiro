@@ -102,6 +102,11 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         opened_at: row.opened_at,
         closed_at: row.closed_at,
         snapshot: None,
+        max_stations: None,
+        participants: None,
+        my_state: None,
+        totals: None,
+        by_device: None,
     })
 }
 

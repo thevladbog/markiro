@@ -690,6 +690,11 @@ export const employeeRecordSchema = z.object({
 });
 export type EmployeeRecord = z.infer<typeof employeeRecordSchema>;
 
+/** The most devices one shift of a line takes at a time (plan 2b): the host's `0052` CHECK. */
+export const MAX_STATIONS = 16;
+/** A line's limit of devices in one shift, 1–`MAX_STATIONS`. */
+export const maxStationsSchema = z.number().int().min(1).max(MAX_STATIONS);
+
 /** `GET /v1/office/lines`: a production line as the office sees it, archived ones included. */
 export const officeLineSchema = z.object({
   id: z.uuid(),
@@ -1065,6 +1070,49 @@ export const shiftTotalsSchema = z.object({
 export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
 
 /**
+ * A device's part in a shift (`markiro_proto::ParticipantState`, plan 2b, protocol 7): `active`
+ * holds one of the line's slots, `left` paused and freed it, `closed` closed its part for good.
+ */
+export const participantStateSchema = z.enum(["active", "left", "closed"]);
+export type ParticipantState = z.infer<typeof participantStateSchema>;
+
+/** `markiro_proto::ShiftParticipant`: a device that entered the shift, first entry first. */
+export const shiftParticipantSchema = z.object({
+  deviceId: z.uuid(),
+  deviceKind: deviceKindSchema,
+  deviceName: z.string(),
+  state: participantStateSchema,
+  firstEnteredAt: z.iso.datetime(),
+  joinedAt: z.iso.datetime(),
+  leftAt: z.iso.datetime().nullable(),
+  closedAt: z.iso.datetime().nullable(),
+  closedBy: z.enum(["device", "office_user"]).nullable(),
+  closedActualQty: z.number().int().nonnegative().nullable(),
+  closedReasonCode: z.string().nullable(),
+  lateDataAt: z.iso.datetime().nullable(),
+  lastSeenAt: z.iso.datetime().nullable(),
+});
+export type ShiftParticipant = z.infer<typeof shiftParticipantSchema>;
+
+/** `markiro_proto::DeviceTotals`: one device's part of a shift's totals. */
+export const deviceTotalsSchema = z.object({
+  deviceId: z.uuid(),
+  accepted: z.number().int().nonnegative(),
+  boxesClosed: z.number().int().nonnegative(),
+  pallets: z.number().int().nonnegative(),
+});
+export type DeviceTotals = z.infer<typeof deviceTotalsSchema>;
+
+/** `markiro_proto::DeviceShiftTotals`: the whole shift's totals as of `asOf`, the host's time. */
+export const deviceShiftTotalsSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+  boxesClosed: z.number().int().nonnegative(),
+  pallets: z.number().int().nonnegative(),
+  asOf: z.iso.datetime(),
+});
+export type DeviceShiftTotals = z.infer<typeof deviceShiftTotalsSchema>;
+
+/**
  * `GET /v1/office/shifts`, `GET …/{id}` and the answer of every office write of
  * a shift, each with its `totals`. It carries ids, not names: the office names
  * products, lines, counterparties and devices from its own lists.
@@ -1103,6 +1151,12 @@ const officeShiftObject = z.object({
   createdAt: z.iso.datetime(),
   rev: z.number().int(),
   totals: shiftTotalsSchema,
+  /** The devices that entered the shift (plan 2b, protocol 7); left out for a planned shift and by an older host. */
+  participants: z.array(shiftParticipantSchema).optional(),
+  /** Each participant's part of `totals`, in the order of `participants`. */
+  byDevice: z.array(deviceTotalsSchema).optional(),
+  /** Its last device closed it without the reason the shared total needed; the office gives it. */
+  closeReasonMissing: z.boolean().optional(),
 });
 export const officeShiftSchema = officeShiftObject.superRefine(printsOnlyInValidation(false));
 export type OfficeShift = z.infer<typeof officeShiftSchema>;
@@ -1427,6 +1481,13 @@ const deviceShiftObject = z.object({
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
+  /** The line's limit of devices in one shift (plan 2b, protocol 7): open and closed shifts only. */
+  maxStations: maxStationsSchema.optional(),
+  participants: z.array(shiftParticipantSchema).optional(),
+  /** This device's own state; left out when it never entered. */
+  myState: participantStateSchema.optional(),
+  totals: deviceShiftTotalsSchema.optional(),
+  byDevice: z.array(deviceTotalsSchema).optional(),
 });
 export const deviceShiftSchema = deviceShiftObject.superRefine(printsOnlyInValidation(false));
 export type DeviceShift = z.infer<typeof deviceShiftSchema>;
@@ -1468,12 +1529,14 @@ export type EnteredShift = z.infer<typeof enteredShiftSchema>;
  * What a station can work, as it names it entering a shift (mirrors
  * `markiro_proto::shift_supports`, plan РЕЖ). `validationDmDuplicate` is
  * declared with protocol 4 and checked by the host from protocol 5 (part B).
- * `handheldHost` is a handheld's; a station never names it.
+ * `handheldHost` is a handheld's; a station never names it. `multiStation` (plan 2b, protocol 7):
+ * the device joins a shift another device works while the line has a free slot.
  */
 export const SHIFT_SUPPORTS = {
   validation: "validation-v1",
   validationDmDuplicate: "validation-dm-duplicate-v1",
   handheldHost: "handheld-host-v1",
+  multiStation: "multi-station-v1",
 } as const;
 
 /**
@@ -2081,6 +2144,12 @@ export const shiftCloseSchema = z
   .object({ reason: z.string(), expectedRev: z.number().int() })
   .strict();
 export type ShiftClose = z.infer<typeof shiftCloseSchema>;
+
+/** `PUT /v1/office/shifts/{id}/close-reason` (plan 2b): one of the six codes, over the loaded revision. */
+export const shiftCloseReasonSetSchema = z
+  .object({ reasonCode: z.string(), expectedRev: z.number().int() })
+  .strict();
+export type ShiftCloseReasonSet = z.infer<typeof shiftCloseReasonSetSchema>;
 
 /**
  * Mirrors `markiro_proto::ShiftExportRecord`: `POST /v1/office/shifts/{id}/exports`

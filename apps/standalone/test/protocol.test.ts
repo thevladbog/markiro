@@ -100,11 +100,13 @@ import {
   productUpdateSchema,
   LABEL_VERIFICATIONS,
   REPRINT_REASONS,
+  MAX_STATIONS,
   SHIFT_SUPPORTS,
   UNIT_LABEL_ERROR_CODES,
   UNIT_LABEL_EVENTS,
   unitLabelFactSchema,
   validationPrintSchema,
+  shiftCloseReasonSetSchema,
   shiftCloseSchema,
   shiftCreateSchema,
   shiftEnterSchema,
@@ -358,6 +360,10 @@ const RESPONSES = [
   ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
   ["device-shifts.json", deviceShiftsSchema],
+  ["device-shifts-participants.json", deviceShiftsSchema],
+  ["office-shift-participants.json", officeShiftSchema],
+  ["error-shift-line-full.json", errorBodySchema],
+  ["facts-response-part-close.json", factReceiptsSchema],
   ["device-shift-entered.json", enteredShiftSchema],
   ["device-shift-entered-pallets.json", enteredShiftSchema],
   ["device-shift-entered-sheet.json", enteredShiftSchema],
@@ -411,6 +417,9 @@ const REQUESTS = [
   ["shift-create-validation-print.json", shiftCreateSchema],
   ["shift-enter.json", shiftEnterSchema],
   ["shift-enter-empty.json", shiftEnterSchema],
+  ["shift-enter-multi.json", shiftEnterSchema],
+  ["shift-enter-handheld-multi.json", shiftEnterSchema],
+  ["shift-close-reason-set.json", shiftCloseReasonSetSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
@@ -560,6 +569,7 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
       validation: "validation-v1",
       validationDmDuplicate: "validation-dm-duplicate-v1",
       handheldHost: "handheld-host-v1",
+      multiStation: "multi-station-v1",
     });
     // The station of part A works validation, and says so on every entry.
     expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter.json"));
@@ -3931,5 +3941,45 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
     expect(
       bootstrapRequestSchema.parse(fixture("bootstrap-request-address.json")).addressConfirmed,
     ).toBe(true);
+  });
+});
+
+describe("several devices in one shift (plan 2b)", () => {
+  it("reads a shared shift whose devices add up to its totals", () => {
+    const [shift] = deviceShiftsSchema.parse(fixture("device-shifts-participants.json")).shifts;
+    expect(shift).toBeDefined();
+    const byDevice = shift?.byDevice ?? [];
+    expect(byDevice.reduce((sum, part) => sum + part.accepted, 0)).toBe(shift?.totals?.accepted);
+    expect(shift?.participants?.map((participant) => participant.deviceId)).toStrictEqual(
+      byDevice.map((part) => part.deviceId),
+    );
+    expect(shift?.myState).toBe("active");
+    expect(shift?.maxStations).toBe(2);
+  });
+
+  it("reads a shift of a host before protocol 7 without them", () => {
+    const [old] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts;
+    expect(old?.participants).toBeUndefined();
+    expect(old?.totals).toBeUndefined();
+    expect(old?.byDevice).toBeUndefined();
+    expect(
+      officeShiftSchema.parse(fixture("office-shift.json")).closeReasonMissing,
+    ).toBeUndefined();
+  });
+
+  it("bounds the line's limit and the participant's state like the host", () => {
+    expect(MAX_STATIONS).toBe(16);
+    const shift = fixture("device-shifts-participants.json") as {
+      shifts: Record<string, unknown>[];
+    };
+    const first = shift.shifts[0] as Record<string, unknown>;
+    for (const maxStations of [0, 17]) {
+      expect(deviceShiftsSchema.safeParse({ shifts: [{ ...first, maxStations }] }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      deviceShiftsSchema.safeParse({ shifts: [{ ...first, myState: "paused" }] }).success,
+    ).toBe(false);
   });
 });

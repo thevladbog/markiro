@@ -195,6 +195,9 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
             open_pallets: u32::try_from(row.open_pallets).map_err(ApiError::internal)?,
             unit_labels,
         },
+        participants: Vec::new(),
+        by_device: Vec::new(),
+        close_reason_missing: false,
     })
 }
 
