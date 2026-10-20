@@ -8,7 +8,6 @@ import {
   chmod,
   chown,
   copyFile,
-  cp,
   lstat,
   mkdir,
   mkdtemp,
@@ -176,7 +175,12 @@ try {
   await mkdir(join(root, "postgres"), { mode: 0o700 });
   await mkdir(join(root, "pg"), { mode: 0o700 });
   for (const name of ["compose.yml", "compose.compact.yml", "postgres/pg_hba.conf"]) {
-    await cp(join(repositoryRoot, "deploy/platform", name), join(root, name));
+    await copyFile(
+      join(repositoryRoot, "deploy/platform", name),
+      join(root, name),
+      constants.COPYFILE_EXCL,
+    );
+    await chown(join(root, name), process.getuid(), process.getgid());
     await chmod(join(root, name), name.endsWith("pg_hba.conf") ? 0o644 : 0o600);
   }
   const hbaPath = join(root, "postgres/pg_hba.conf"),

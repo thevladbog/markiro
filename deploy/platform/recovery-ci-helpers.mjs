@@ -144,6 +144,23 @@ export async function cleanupRecoveryResources(resources, command, invocationId)
 
 // Public CI output must never include a child error message, output or path.
 export function recoveryCiErrorCategory(error) {
+  if (error?.code === "ERR_TARGET_BACKUP") {
+    if (
+      [
+        "input-validation",
+        "host-state",
+        "private-inputs",
+        "observer-setup",
+        "entry-observation",
+        "writer-fence",
+        "archive-production",
+        "isolated-restore",
+        "post-restore-observation",
+      ].includes(error.targetBackupStage)
+    )
+      return `target-backup-${error.targetBackupStage}`;
+    return "target-backup";
+  }
   if (error instanceof TypeError) return "type-error";
   if (error instanceof ReferenceError) return "reference-error";
   if (error instanceof RangeError) return "range-error";

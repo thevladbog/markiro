@@ -238,6 +238,29 @@ test("recovery CI failure categories expose only allowlisted metadata", () => {
       category,
     );
   assert.equal(recoveryCiErrorCategory({ code: "ERR_ASSERTION" }), "assertion");
+  for (const targetBackupStage of [
+    "input-validation",
+    "host-state",
+    "private-inputs",
+    "observer-setup",
+    "entry-observation",
+    "writer-fence",
+    "archive-production",
+    "isolated-restore",
+    "post-restore-observation",
+  ])
+    assert.equal(
+      recoveryCiErrorCategory({ code: "ERR_TARGET_BACKUP", targetBackupStage }),
+      `target-backup-${targetBackupStage}`,
+    );
+  assert.equal(
+    recoveryCiErrorCategory({
+      code: "ERR_TARGET_BACKUP",
+      targetBackupStage: "secret-path",
+      message: "secret-output",
+    }),
+    "target-backup",
+  );
   assert.equal(recoveryCiErrorCategory({ code: "ERR_HOST_PRIVATE_FILE" }), "private-file");
   for (const archiveReason of [
     "root",
@@ -340,4 +363,21 @@ test("CI uses supported Compose create arguments and retains no-deps on service 
   assert.ok(
     source.includes('await compose(["up", "--detach", "--no-deps", "--wait", "postgres"])'),
   );
+});
+
+test("CI copies Compose and HBA inputs as fresh executor-owned files before hashing", async () => {
+  const source = await readFile(new URL("../recovery-ci.mjs", import.meta.url), "utf8");
+  const loop = source.slice(
+    source.indexOf(
+      'for (const name of ["compose.yml", "compose.compact.yml", "postgres/pg_hba.conf"])',
+    ),
+    source.indexOf("  const hbaPath ="),
+  );
+  assert.match(
+    loop,
+    /await copyFile\(\s*join\(repositoryRoot, "deploy\/platform", name\),\s*join\(root, name\),\s*constants.COPYFILE_EXCL,?\s*\)/u,
+  );
+  assert.ok(loop.includes("await chown(join(root, name), process.getuid(), process.getgid())"));
+  assert.ok(loop.indexOf("await copyFile") < loop.indexOf("await chown"));
+  assert.ok(loop.indexOf("await chown") < loop.indexOf("await chmod"));
 });

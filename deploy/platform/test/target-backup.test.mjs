@@ -364,3 +364,20 @@ for (const mode of [
       assert.equal(f.workerCommands(), 0);
   });
 }
+
+test("target backup exposes only its trusted fixed boundary, not injected error metadata", async (t) => {
+  const f = await fixture(t);
+  f.options.runProcess = async () => {
+    throw Object.assign(new Error("secret command output and path"), {
+      targetBackupStage: "secret-stage",
+      stage: "secret-stage",
+    });
+  };
+  await assert.rejects(invoke(f), (error) => {
+    assert.equal(error.code, "ERR_TARGET_BACKUP");
+    assert.equal(error.message, "Target recovery backup failed.");
+    assert.equal(error.targetBackupStage, "entry-observation");
+    assert.ok(!JSON.stringify(error).includes("secret"));
+    return true;
+  });
+});

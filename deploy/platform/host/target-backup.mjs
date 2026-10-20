@@ -21,9 +21,10 @@ import { canonical } from "../backup/schemas.mjs";
 import { validateRecoveryAdmission } from "./recovery-admission.mjs";
 import { hostFenceEnforcementSha256 } from "./command.mjs";
 
-function targetBackupError(error, terminated) {
+function targetBackupError(error, terminated, stage) {
   const result = new Error("Target recovery backup failed.");
   result.code = "ERR_TARGET_BACKUP";
+  result.targetBackupStage = stage;
   result.recoveryRequired = true;
   if (!terminated || error?.terminationConfirmed === false) result.terminationConfirmed = false;
   if (error?.durabilityUncertain === true) result.durabilityUncertain = true;
@@ -136,7 +137,8 @@ async function produceTargetBackup(
   withOwner,
 ) {
   let terminated = true,
-    uncertain = false;
+    uncertain = false,
+    stage = "input-validation";
   try {
     const op = plain(operation);
     keys(op, ["root", "identity", "configuration", "dockerConfig"]);
@@ -165,11 +167,13 @@ async function produceTargetBackup(
         throw error;
       }
     };
+    stage = "host-state";
     return await withOwner(op.root, async (journal) => {
       let producerInFlight = false;
       try {
         // Snapshot the actual private files; every boundary must still read the
         // same bytes, including after isolated restore has removed its workers.
+        stage = "private-inputs";
         const runtimeBytes = await readBackupRuntime(
           op.root,
           op.identity.operationId,
@@ -199,6 +203,7 @@ async function produceTargetBackup(
           [descriptor.caFile, caBytes],
         ];
         validateConnectionFiles(serviceBytes, passwordBytes);
+        stage = "observer-setup";
         const observers = createHostObservers(op, policy, {
           runProcess: run,
           ...(options.signal ? { signal: options.signal } : {}),
@@ -247,7 +252,9 @@ async function produceTargetBackup(
           await observePostgresAdmin({ context: c, state, command: observers.command, hbaSha256 });
           ensure(terminated && !uncertain);
         };
+        stage = "entry-observation";
         await inspect("entry");
+        stage = "writer-fence";
         const fence = {
           fenceId: randomUUID(),
           beganAt: new Date().toISOString(),
@@ -258,6 +265,7 @@ async function produceTargetBackup(
           }),
         };
         producerInFlight = true;
+        stage = "archive-production";
         const backup = await createDatabaseBackup({
           root: op.root,
           operationId: op.identity.operationId,
@@ -281,6 +289,7 @@ async function produceTargetBackup(
             },
           },
         });
+        stage = "isolated-restore";
         const restoreEvidence = await verifyDatabaseRestore({
           root: op.root,
           operationId: op.identity.operationId,
@@ -291,6 +300,7 @@ async function produceTargetBackup(
           recoveryRuntime,
         });
         producerInFlight = false;
+        stage = "post-restore-observation";
         await inspect("after-restore");
         return { backup, restoreEvidence, fence };
       } catch (error) {
@@ -302,6 +312,6 @@ async function produceTargetBackup(
       }
     });
   } catch (error) {
-    throw targetBackupError(error, terminated);
+    throw targetBackupError(error, terminated, stage);
   }
 }
