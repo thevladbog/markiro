@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import {
   recoveryRoleMapping,
   validateWorkerManifest,
@@ -235,4 +236,19 @@ test("recovery CI failure categories expose only allowlisted metadata", () => {
     null,
   ])
     assert.equal(recoveryCiErrorCategory(error), "operation");
+});
+
+test("synthetic recovery harness provisions create-only same-worker runtime before held producer", async () => {
+  const source = await readFile(new URL("../recovery-ci.mjs", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /const backupRuntime = \{[\s\S]*?executorSha: sourceSha,[\s\S]*?image: manifest\.image\.id,[\s\S]*?provenance: "live-source",[\s\S]*?\};/u,
+  );
+  const original = source.indexOf('await save("backup-runtime.json", backupRuntime)');
+  const derived = source.indexOf(
+    "await save(`recovery-backup-runtime-${identity.operationId}.json`, backupRuntime)",
+  );
+  const producer = source.indexOf("result = await store.produceBackup(");
+  assert.ok(original > 0 && derived > original && producer > derived);
+  assert.match(source, /mode: 0o600, flag: "wx"/u);
 });

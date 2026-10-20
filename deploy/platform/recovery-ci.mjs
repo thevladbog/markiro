@@ -423,14 +423,16 @@ try {
     ),
   );
   const roleMapping = recoveryRoleMapping({ roles, objects: [] });
-  await save("backup-runtime.json", {
+  const backupRuntime = {
     version: 1,
     executorSha: sourceSha,
     dockerExecutable: "/usr/bin/docker",
     endpoint: "unix:///var/run/docker.sock",
     image: manifest.image.id,
     provenance: "live-source",
-  });
+  };
+  await save("backup-runtime.json", backupRuntime);
+  await save(`recovery-backup-runtime-${identity.operationId}.json`, backupRuntime);
   await save(
     "service.conf",
     "[backup]\nhost=db.private\nport=5432\ndbname=markiro\nuser=postgres\nsslmode=verify-full\nsslrootcert=/input/ca.crt\n",
