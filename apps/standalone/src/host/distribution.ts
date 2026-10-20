@@ -47,11 +47,14 @@ export const deviceUpdateOfferSchema = z.object({
 });
 export type DeviceUpdateOffer = z.infer<typeof deviceUpdateOfferSchema>;
 
+/**
+ * A device's protocol against the host's window. App versions are never compared: the office,
+ * the stations and the handhelds are separate version lines.
+ */
 export const DEVICE_VERSION_STATES = [
-  "current",
-  "behind",
+  "compatible",
   "incompatible",
-  "newer",
+  "host_older",
   "unknown",
 ] as const;
 export type DeviceVersionState = (typeof DEVICE_VERSION_STATES)[number];

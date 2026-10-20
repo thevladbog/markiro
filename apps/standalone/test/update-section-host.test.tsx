@@ -115,21 +115,38 @@ describe("«Устройства и версии»", () => {
     renderWith(<DeviceVersionsBlock />, { session: sessionOf(TECHNOLOGIST) });
     expect(
       await screen.findByText(
-        "Хост: 0.3.0. Актуальны: 1 из 5; отстают: 1; несовместимы: 1; новее хоста: 1; версия неизвестна: 1",
+        "Хост: 0.3.0. Совместимы по протоколу: 2 из 5; несовместимы: 1; протокол новее хоста: 1; версия неизвестна: 1",
       ),
     ).toBeTruthy();
     expect(screen.getByText(/Пакет обновления 0\.3\.0 на хосте проверен/)).toBeTruthy();
-    for (const state of [
-      "Актуальная",
-      "Отстаёт, совместима",
-      "Несовместима — не подключится",
-      "Новее хоста",
-      "Неизвестно",
-    ]) {
+    for (const state of ["Несовместима — не подключится", "Протокол новее хоста", "Неизвестно"]) {
       expect(screen.getByText(state)).toBeTruthy();
     }
+    expect(screen.getAllByText("Совместима")).toHaveLength(2);
     expect(screen.getByText(/Запущена установка/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "История обновлений", level: 4 })).toBeTruthy();
+  });
+});
+
+describe("«Устройства и версии» and the app versions", () => {
+  it("warns of nothing for a station and a handheld on their own versions with compatible protocols", async () => {
+    const [first, second, third] = STATUS.devices;
+    if (first === undefined || second === undefined || third === undefined) {
+      throw new Error("no devices in the fixture");
+    }
+    const session = sessionOf(TECHNOLOGIST);
+    session.api.getUpdateStatus.mockResolvedValue({
+      ...STATUS,
+      devices: [
+        { ...first, kind: "station", appVersion: "0.2.1", state: "compatible" },
+        { ...second, kind: "handheld", appVersion: "4.2.0", state: "compatible" },
+        { ...third, kind: "office", appVersion: "0.9.9", state: "compatible" },
+      ],
+    });
+    renderWith(<DeviceVersionsBlock />, { session });
+    expect(await screen.findByText("Хост: 0.3.0. Совместимы по протоколу: 3 из 3")).toBeTruthy();
+    expect(screen.getAllByText("Совместима")).toHaveLength(3);
+    expect(screen.queryByText(/Несовместима|новее хоста|Отстаёт|отстают/)).toBeNull();
   });
 });
 

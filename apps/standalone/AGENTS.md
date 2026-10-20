@@ -2808,7 +2808,7 @@ from every `hello` and `app_too_old`/`host_too_old` instead of
 `stream_refused`; the webview offers the update only when the host is newer,
 gives a package of its version, this PC is not below `minUpgradeFrom` and
 the manifest's signature checked out (`update_check_manifest`). An office
-PC paired with a host in the network sees «Версии не совпадают»; a station
+PC paired with a host in the network, whose protocol is outside the window, sees «Приложение и хост несовместимы»; a station
 keeps working offline and its line says so off a shift's work. The sign-in
 screen offers «Обновить с хоста» (ЛО16) only when the host refuses the
 station (`app_too_old`); a station that is merely behind gets the text line
@@ -7391,3 +7391,10 @@ phase). Migration `0046_user_avatars.sql`, `host/src/avatar.rs`, `host/src/route
 - **Webview**: `HostApi.getUserAvatar` / `putUserAvatar` / `deleteUserAvatar` and the Zod
   `userAvatarStateSchema`, `userAvatarPutSchema` (strict); the texts of the codes are in
   `errors.api.*` (the profile dialog will override them with its own).
+
+App versions are never compared (office, stations and handhelds are separate version lines): the
+office raises no warning, chip or attention item from `appVersion` against the host's or another
+device's. «Устройства и версии» shows each device's version number and judges only its protocol
+against the host's window (`compatible`, `incompatible`, `host_older`, `unknown`). The only
+version rules left are the update offer's (a newer host with a signed package, `minUpgradeFrom`)
+and the protocol window (`app_too_old` / `host_too_old`).

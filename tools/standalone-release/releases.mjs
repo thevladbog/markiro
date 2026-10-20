@@ -2,7 +2,7 @@
 // compatibility during a rollout (plan ОБН-3, spec §10.11.6): one release
 // back. Every release keeps its MIN_PROTOCOL_VERSION at or below the
 // PROTOCOL_VERSION of the release before it, so a device of N−1 still works
-// with a host of N, and only N−2 meets «Версии не совпадают». The owner adds
+// with a host of N, and only N−2 meets «Приложение и хост несовместимы». The owner adds
 // a release's line in the commit that releases it.
 
 import { readFile } from "node:fs/promises";

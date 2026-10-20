@@ -1054,9 +1054,11 @@ describe("App", () => {
       device: fakeDevice(null),
       host: fakeHost(),
     });
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(
-      screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
+      screen.getByText(
+        "Это приложение говорит на более старом протоколе, чем принимает служба «Markiro Хост». Обновите приложение.",
+      ),
     ).toBeTruthy();
   });
 
@@ -1087,7 +1089,7 @@ describe("App", () => {
       host,
       updates: fakeUpdatesApi(),
     });
-    await screen.findByText("Версии не совпадают");
+    await screen.findByText("Приложение и хост несовместимы");
     expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
     expect(host.getDeviceUpdate).not.toHaveBeenCalled();
   });
@@ -1173,9 +1175,11 @@ describe("App", () => {
       device: fakeDevice(DEVICE_STATUS),
       host: fakeHost(),
     });
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(
-      screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
+      screen.getByText(
+        "Это приложение говорит на более старом протоколе, чем принимает служба «Markiro Хост». Обновите приложение.",
+      ),
     ).toBeTruthy();
     expect(screen.queryByText("Вход оператора")).toBeNull();
   });
@@ -1606,7 +1610,7 @@ describe("App", () => {
       device: fakeDevice(DEVICE_STATUS),
       host: fakeHost(),
     });
-    await screen.findByText("Версии не совпадают");
+    await screen.findByText("Приложение и хост несовместимы");
     expect(screen.queryByRole("button", { name: "Подключиться к хосту в сети" })).toBeNull();
   });
 });
@@ -2865,7 +2869,10 @@ describe("the operator on the floor", () => {
     await act(async () => {
       failProbe(new HostProbeError("host_too_old", "old"));
     });
-    await screen.findByText("Служба «Markiro Хост» старее этого приложения.", { exact: false });
+    await screen.findByText(
+      "Служба «Markiro Хост» говорит на более старом протоколе, чем это приложение.",
+      { exact: false },
+    );
     // The floor comes back with a sign-in screen of its own, and only then
     // does the first screen's check finish: it ended with its screen.
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
@@ -4427,7 +4434,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     });
     await screen.findByText("Вход в офис");
     await link.status(REFUSING);
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Обновить с хоста" })).toBeTruthy();
   });
 
@@ -4445,7 +4452,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     });
     await screen.findByText("Вход в офис");
     await link.status(REFUSING);
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     await waitFor(() => expect(updates.checkManifest).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
   });
@@ -4466,7 +4473,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     });
     await screen.findByText("Вход в офис");
     await link.status(REFUSING);
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     await waitFor(() => expect(host.getDeviceUpdate).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
   });
