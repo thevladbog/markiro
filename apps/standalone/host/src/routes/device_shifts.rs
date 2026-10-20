@@ -5,7 +5,10 @@
 //! (after it subscribes to the link and after every revision event), since a
 //! shift is no feed record: shifts are per line, and an open one carries up
 //! to two layouts (a box's and, with pallets, a pallet's), its snapshot at
-//! most 320 KB.
+//! most 320 KB. Since plan 2b an open or closed shift also carries its line's limit, its
+//! participants, the asking device's state, the whole shift's totals as of the read and each
+//! device's part; a scan takes no revision, so a device reads this list again to refresh its
+//! totals.
 
 use axum::extract::State;
 use axum::Json;
@@ -23,6 +26,8 @@ use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::routes::devices::require_active_line;
 use crate::server::AppState;
+use crate::shift_participants;
+use crate::shift_totals;
 use crate::shifts::{self, NewShift};
 use crate::validate;
 
@@ -38,8 +43,9 @@ const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_f
      s.planned_qty, s.box_capacity, s.box_template_id, \
      s.pallet_box_capacity, s.pallet_template_id, s.validation_print_mode, \
      s.validation_print_verification, s.validation_print_template_id, s.owner_device_id, \
-     s.opened_at, s.closed_at \
+     s.opened_at, s.closed_at, l.max_stations \
      FROM shifts s JOIN products p ON p.id = s.product_id \
+     JOIN lines l ON l.id = s.line_id \
      LEFT JOIN counterparties c ON c.id = s.counterparty_id";
 
 #[derive(sqlx::FromRow)]
@@ -69,14 +75,17 @@ struct ShiftRow {
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
+    /// The line's limit of devices in one shift (plan 2b).
+    max_stations: u32,
 }
 
 fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
     let created_from = row.created_from.parse().map_err(ApiError::internal)?;
+    let status: ShiftStatus = row.status.parse().map_err(ApiError::internal)?;
     Ok(DeviceShift {
         number: shifts::format_number(&row.number_month_key, row.number_seq, created_from),
         id: row.id,
-        status: row.status.parse().map_err(ApiError::internal)?,
+        status,
         mode: row.mode.parse().map_err(ApiError::internal)?,
         pallets_enabled: row.pallets_enabled,
         created_from,
@@ -102,7 +111,9 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         opened_at: row.opened_at,
         closed_at: row.closed_at,
         snapshot: None,
-        max_stations: None,
+        // Plan 2b: an open or closed shift names its line's limit; `with_participation` adds the
+        // rest.
+        max_stations: (status != ShiftStatus::Planned).then_some(row.max_stations),
         participants: None,
         my_state: None,
         totals: None,
@@ -117,6 +128,41 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<DeviceShif
         .await
         .map_err(ApiError::internal)?;
     row.map(record).transpose()
+}
+
+/// An open or closed shift as `device_id` sees it (plan 2b): its participants, the device's own
+/// state, the whole shift's totals as of `as_of` and each device's part. A planned shift has none.
+async fn with_participation(
+    conn: &mut SqliteConnection,
+    mut shift: DeviceShift,
+    device_id: &str,
+    as_of: &str,
+) -> Result<DeviceShift, ApiError> {
+    if shift.status == ShiftStatus::Planned {
+        return Ok(shift);
+    }
+    let participants = shift_participants::list(&mut *conn, &shift.id).await?;
+    shift.my_state = participants
+        .iter()
+        .find(|participant| participant.device_id == device_id)
+        .map(|participant| participant.state);
+    shift.totals = Some(shift_totals::totals(&mut *conn, &shift.id, as_of).await?);
+    shift.by_device = Some(shift_totals::by_device(&mut *conn, &shift.id).await?);
+    shift.participants = Some(participants);
+    Ok(shift)
+}
+
+/// [`read`] of a shift that must exist, as `device_id` sees it.
+async fn read_for(
+    conn: &mut SqliteConnection,
+    id: &str,
+    device_id: &str,
+    as_of: &str,
+) -> Result<DeviceShift, ApiError> {
+    let shift = read(&mut *conn, id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    with_participation(conn, shift, device_id, as_of).await
 }
 
 const STATION_ONLY: &str = "only a station works on shifts";
@@ -165,10 +211,13 @@ pub async fn list_device_shifts(
     .fetch_all(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let as_of = state.timestamp();
+    let mut shifts = Vec::with_capacity(rows.len());
+    for row in rows {
+        shifts.push(with_participation(&mut tx, record(row)?, &device.id, &as_of).await?);
+    }
     tx.rollback().await.map_err(ApiError::internal)?;
-    Ok(Json(DeviceShifts {
-        shifts: rows.into_iter().map(record).collect::<Result<_, _>>()?,
-    }))
+    Ok(Json(DeviceShifts { shifts }))
 }
 
 /// `conflict` on `shift_line`: the shift is not on the station's line, or
@@ -497,9 +546,7 @@ pub async fn enter_shift(
             .map_err(ApiError::internal)?;
             let snapshot: ShiftSnapshot =
                 serde_json::from_str(&text).map_err(ApiError::internal)?;
-            let mut entered = read(&mut tx, &id)
-                .await?
-                .ok_or_else(|| ApiError::internal("shift vanished"))?;
+            let mut entered = read_for(&mut tx, &id, &device.id, &at).await?;
             tx.commit().await.map_err(ApiError::internal)?;
             entered.snapshot = Some(snapshot);
             return Ok(Json(entered));
@@ -586,9 +633,7 @@ pub async fn enter_shift(
     )
     .await
     .map_err(ApiError::internal)?;
-    let mut opened = read(&mut tx, &id)
-        .await?
-        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    let mut opened = read_for(&mut tx, &id, &device.id, &at).await?;
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
