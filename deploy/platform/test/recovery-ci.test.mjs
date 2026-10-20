@@ -239,6 +239,34 @@ test("recovery CI failure categories expose only allowlisted metadata", () => {
     );
   assert.equal(recoveryCiErrorCategory({ code: "ERR_ASSERTION" }), "assertion");
   assert.equal(recoveryCiErrorCategory({ code: "ERR_HOST_PRIVATE_FILE" }), "private-file");
+  for (const archiveReason of [
+    "root",
+    "path",
+    "parent",
+    "type",
+    "owner",
+    "mode",
+    "links",
+    "opened-dev",
+    "opened-ino",
+    "opened-size",
+    "opened-mtimeNs",
+    "opened-ctimeNs",
+    "path-dev",
+    "path-ino",
+    "path-size",
+    "path-mtimeNs",
+    "path-ctimeNs",
+    "read-length",
+  ])
+    assert.equal(
+      recoveryCiErrorCategory({ code: "ERR_HOST_PRIVATE_FILE", archiveReason }),
+      `archive-${archiveReason}`,
+    );
+  assert.equal(
+    recoveryCiErrorCategory({ code: "ERR_HOST_PRIVATE_FILE", archiveReason: "secret-path" }),
+    "private-file",
+  );
   for (const code of ["ENOENT", "EACCES", "EPERM", "EIO", "ENOSPC"])
     assert.equal(
       recoveryCiErrorCategory({ code, path: "secret-path", message: "secret-output" }),

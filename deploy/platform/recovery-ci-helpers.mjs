@@ -148,7 +148,32 @@ export function recoveryCiErrorCategory(error) {
   if (error instanceof ReferenceError) return "reference-error";
   if (error instanceof RangeError) return "range-error";
   if (error?.code === "ERR_ASSERTION") return "assertion";
-  if (error?.code === "ERR_HOST_PRIVATE_FILE") return "private-file";
+  if (error?.code === "ERR_HOST_PRIVATE_FILE") {
+    if (
+      [
+        "root",
+        "path",
+        "parent",
+        "type",
+        "owner",
+        "mode",
+        "links",
+        "opened-dev",
+        "opened-ino",
+        "opened-size",
+        "opened-mtimeNs",
+        "opened-ctimeNs",
+        "path-dev",
+        "path-ino",
+        "path-size",
+        "path-mtimeNs",
+        "path-ctimeNs",
+        "read-length",
+      ].includes(error.archiveReason)
+    )
+      return `archive-${error.archiveReason}`;
+    return "private-file";
+  }
   if (["ENOENT", "EACCES", "EPERM", "EIO", "ENOSPC"].includes(error?.code))
     return `filesystem-${error.code}`;
   if (
