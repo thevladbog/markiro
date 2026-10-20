@@ -2,6 +2,7 @@
 pub mod operations;
 pub mod read;
 pub mod validation;
+pub mod warehouse;
 use crate::error::ApiError;
 use markiro_proto::{cloud_history::*, Secret};
 use sqlx::{Row, SqliteConnection};

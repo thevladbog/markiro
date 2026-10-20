@@ -1611,11 +1611,25 @@ export const warehouseSourceSchema = z.object({
   boxCount: z.number().int().nonnegative().optional(),
   operatorName: z.string().nullable(),
   deviceId: z.uuid(),
+  /**
+   * The record came with the cloud history import (the host leaves the key out for a native one):
+   * no station or operator made it, so `deviceId` is the nil UUID and `operatorName` is null.
+   */
+  imported: z.boolean().optional(),
 });
 export type WarehouseSource = z.infer<typeof warehouseSourceSchema>;
 
 /** Why a found record is not printed again (`markiro_proto::WarehouseUnavailable`). */
-export const WAREHOUSE_UNAVAILABLE = ["released", "disassembled"] as const;
+export const WAREHOUSE_UNAVAILABLE = [
+  "released",
+  "disassembled",
+  // An imported record the label cannot be made of: its shift, its production date or its product
+  // (with a ЧЗ group) is not in the host (`cloud_history/warehouse.rs`).
+  "imported_no_shift",
+  "imported_no_production_date",
+  "imported_product_unknown",
+] as const;
+export type WarehouseUnavailableReason = (typeof WAREHOUSE_UNAVAILABLE)[number];
 
 /** The answer of `POST /v1/device/warehouse/lookup`. */
 export const warehouseLookupResultSchema = z.discriminatedUnion("status", [
