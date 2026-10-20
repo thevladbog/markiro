@@ -14,7 +14,18 @@ enum ReadStep {
 
 struct TestPort {
     input: Receiver<ReadStep>,
-    dropped: Sender<()>,
+    /// Declared after `input` on purpose: fields drop in declaration order, so
+    /// the signal goes out once the input channel is closed, not before it.
+    _dropped: Released,
+}
+
+/// Tells the test the handle is gone, when it is dropped.
+struct Released(Sender<()>);
+
+impl Drop for Released {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
 }
 
 impl Read for TestPort {
@@ -36,12 +47,6 @@ impl Read for TestPort {
         };
         buf[..bytes.len()].copy_from_slice(&bytes);
         Ok(bytes.len())
-    }
-}
-
-impl Drop for TestPort {
-    fn drop(&mut self) {
-        let _ = self.dropped.send(());
     }
 }
 
@@ -120,7 +125,7 @@ impl Rig {
         let (dropped_tx, dropped) = mpsc::channel();
         let port = TestPort {
             input: rx,
-            dropped: dropped_tx,
+            _dropped: Released(dropped_tx),
         };
         let step = match delayed {
             Some(release) => OpenStep::Delayed(port, release),
@@ -304,6 +309,36 @@ fn removal_suppresses_delayed_read_and_replacement_waits_for_handle_drop() {
     assert_eq!(rig.scans(), ["CURRENT"]);
     let events = rig.events.lock().unwrap();
     assert!(!events.iter().any(|event| matches!(event, ScannerEvent::Status(snapshot) if snapshot.revision > closed_revision && snapshot.scanners.is_empty())));
+}
+
+#[test]
+fn the_release_signal_means_the_input_channel_is_already_closed() {
+    // A reader blocked in a read holds the handle: removal returns at once and
+    // the handle is released only when the read gives it up. The signal of the
+    // release must then find the input closed, with no gap to race.
+    let rig = Rig::new(TEST_RETRY);
+    let port = rig.port("COM3", None);
+    rig.configure(&["COM3"]);
+    wait_until(|| rig.connected("COM3"));
+    let (release, blocked) = mpsc::channel();
+    let (entered, reading) = mpsc::channel();
+    port.input
+        .send(ReadStep::Delayed(b"STALE\n".to_vec(), blocked, entered))
+        .unwrap();
+    reading.recv_timeout(Duration::from_secs(3)).unwrap();
+    rig.configure(&[]);
+    assert!(
+        port.dropped.try_recv().is_err(),
+        "the reader still holds the handle"
+    );
+    assert!(port.input.send(ReadStep::Bytes(b"HELD\n".to_vec())).is_ok());
+    release.send(()).unwrap();
+    port.dropped.recv_timeout(Duration::from_secs(3)).unwrap();
+    assert!(port
+        .input
+        .send(ReadStep::Bytes(b"LATE\n".to_vec()))
+        .is_err());
+    assert!(rig.scans().is_empty());
 }
 
 #[test]
@@ -591,7 +626,7 @@ fn the_handle_is_released_before_the_loss_is_published() {
     let (dropped_tx, dropped) = mpsc::channel();
     let port = Arc::new(Mutex::new(Some(TestPort {
         input: rx,
-        dropped: dropped_tx,
+        _dropped: Released(dropped_tx),
     })));
     let opener: PortOpener = Arc::new(move |_| match port.lock().unwrap().take() {
         Some(port) => Ok(Box::new(port)),
