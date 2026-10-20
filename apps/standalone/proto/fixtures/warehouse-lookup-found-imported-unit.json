@@ -1,0 +1,27 @@
+{
+  "status": "found",
+  "source": {
+    "kind": "unit",
+    "subjectId": "7a6ad5f358a3f6d800e0550c5bc16079d73004e9766bfc13c572778c62a6657d",
+    "identity": "7a6ad5f358a3f6d800e0550c5bc16079d73004e9766bfc13c572778c62a6657d",
+    "canonical": "010460068200001321S000001\u001d93Tail",
+    "product": {
+      "id": "8b1c2d3e-4f5a-4b6c-9d7e-8f9a0b1c2d3e",
+      "gtin14": "04600682000013",
+      "name": "Молоко 3,2% 0,9 л",
+      "printName": "Молоко 3,2%",
+      "chzProductGroupCode": 8,
+      "shelfLifeDays": 10,
+      "egaisCode": null
+    },
+    "counterpartyName": null,
+    "shiftId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "shiftNumber": "OCT26-003",
+    "productionDate": "2026-10-08",
+    "at": "2026-10-08T05:58:41.090Z",
+    "itemCount": 1,
+    "operatorName": null,
+    "deviceId": "00000000-0000-0000-0000-000000000000",
+    "imported": true
+  }
+}

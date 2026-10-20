@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::device_config::{self, DeviceConfig};
+use crate::device_config::{self, DeviceConfig, RepairTarget};
 use crate::host_client::{Credentials, HostResponse, PinnedClient, RequestError};
 use crate::host_probe::{self, HelloObservation, ProbeError};
 use crate::installation::InstallRole;
@@ -384,6 +384,40 @@ impl DeviceState {
         name: &str,
         app_version: &str,
     ) -> Result<DeviceStatus, DeviceError> {
+        self.claim_intent(address, fingerprint, code, name, app_version, true)
+            .await
+    }
+
+    /// [`Self::claim`] that ignores a pending repair: the code is an ordinary
+    /// one and makes a new device (the person chose «новое устройство» on the
+    /// pairing screen). A code made for one device is then refused by the host.
+    pub async fn claim_as_new_device(
+        &self,
+        address: &str,
+        fingerprint: &str,
+        code: &str,
+        name: &str,
+        app_version: &str,
+    ) -> Result<DeviceStatus, DeviceError> {
+        self.claim_intent(address, fingerprint, code, name, app_version, false)
+            .await
+    }
+
+    /// The device this station was when a repair forget removed its pairing,
+    /// while no new pairing has replaced it (`repair.json`).
+    pub fn repair_target(&self) -> Result<Option<RepairTarget>, DeviceError> {
+        Ok(device_config::load_repair(&self.dir))
+    }
+
+    async fn claim_intent(
+        &self,
+        address: &str,
+        fingerprint: &str,
+        code: &str,
+        name: &str,
+        app_version: &str,
+        recover: bool,
+    ) -> Result<DeviceStatus, DeviceError> {
         if !is_fingerprint(fingerprint) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
@@ -404,13 +438,21 @@ impl DeviceState {
         }
         let client = PinnedClient::new(address, fingerprint).map_err(DeviceError::Request)?;
         let kind = self.claim_kind();
+        // A repair forget left the device this station was; the host re-keys
+        // that device only when the claim names it, and only a code made for
+        // it is accepted then. Another host's hint names nobody here.
+        let recover_device_id = recover
+            .then(|| device_config::load_repair(&self.dir))
+            .flatten()
+            .filter(|target| target.host_id == observation.hello.host_id)
+            .map(|target| target.device_id);
         let request = ClaimRequest {
             code: Secret::new(code),
             kind,
             name: name.to_owned(),
             app_version: app_version.to_owned(),
             capabilities: Vec::new(),
-            recover_device_id: None,
+            recover_device_id,
         };
         let body = serde_json::to_value(&request).expect("ClaimRequest serializes");
         let response = client
@@ -631,6 +673,9 @@ impl DeviceState {
                 .map_err(|_| DeviceError::Storage)?,
         };
         device_config::save(&self.dir, &config).map_err(|_| DeviceError::Storage)?;
+        // The pairing the hint waited for exists now; a stale hint must not
+        // name a device in a later claim.
+        let _ = device_config::clear_repair(&self.dir);
         let device = Arc::new(PairedDevice {
             key: pair.device_key,
             client,
@@ -698,7 +743,37 @@ impl DeviceState {
     /// device is revoked in the office. Serialised with `local_pair` so a
     /// forget cannot interleave with a pairing in progress.
     pub async fn forget(&self) -> Result<(), DeviceError> {
+        self.forget_keeping(false).await
+    }
+
+    /// [`Self::forget`] of a device the host refused or whose host changed
+    /// («Подключить заново»): this station keeps the ids of the device it was
+    /// (`repair.json`), so the code the office makes for that device
+    /// (`POST /v1/office/devices/{id}/pairing-code`) re-pairs the same device
+    /// instead of making a new one, and the records this PC kept for the
+    /// pairing stay its own. Without a readable pairing there is nothing to
+    /// keep and the forget is the plain one.
+    pub async fn forget_for_repair(&self) -> Result<(), DeviceError> {
+        self.forget_keeping(true).await
+    }
+
+    async fn forget_keeping(&self, repair: bool) -> Result<(), DeviceError> {
         let _pairing = self.pairing.lock().await;
+        let target = match &*self.current.lock().expect("device lock") {
+            Current::Paired(device) if repair => Some(RepairTarget {
+                host_id: device.config.host_id.clone(),
+                device_id: device.config.device_id.clone(),
+            }),
+            _ => None,
+        };
+        // The hint first: a failure after it leaves a station still paired and
+        // a hint no claim reads (the claim needs an unpaired station).
+        match &target {
+            Some(target) => {
+                device_config::save_repair(&self.dir, target).map_err(|_| DeviceError::Storage)?
+            }
+            None => device_config::clear_repair(&self.dir).map_err(|_| DeviceError::Storage)?,
+        }
         device_config::clear(&self.dir).map_err(|_| DeviceError::Storage)?;
         *self.current.lock().expect("device lock") = Current::Unpaired;
         self.link.send_replace(None);

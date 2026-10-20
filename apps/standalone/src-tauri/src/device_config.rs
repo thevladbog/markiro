@@ -33,6 +33,19 @@ pub struct DeviceConfig {
     pub device_key: ProtectedSecret,
 }
 
+/// The device a station was before a repair forget (`repair.json`): ids only,
+/// no secret. The claim that follows names it (`recoverDeviceId`), so the host
+/// gives the same device a new key and the records this PC kept for the
+/// pairing (`host_id`, `device_id`) still belong to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepairTarget {
+    pub host_id: String,
+    pub device_id: String,
+}
+
+pub const REPAIR_FILE_NAME: &str = "repair.json";
+
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceConfigError {
     #[error("device config {path}: {source}")]
@@ -130,6 +143,43 @@ pub fn clear(dir: &Path) -> Result<(), DeviceConfigError> {
     }
 }
 
+/// `Ok(None)` when no repair is pending; an unreadable file counts as none (a
+/// station then pairs as a new device, which is the safe reading).
+pub fn load_repair(dir: &Path) -> Option<RepairTarget> {
+    let text = fs::read_to_string(dir.join(REPAIR_FILE_NAME)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+pub fn save_repair(dir: &Path, target: &RepairTarget) -> Result<(), DeviceConfigError> {
+    let io = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| DeviceConfigError::Io { path, source }
+    };
+    fs::create_dir_all(dir).map_err(io(dir))?;
+    let final_path = dir.join(REPAIR_FILE_NAME);
+    let temporary = dir.join(".repair.json.tmp");
+    let data = serde_json::to_vec(target).expect("RepairTarget serializes");
+    fs::write(&temporary, data).map_err(io(&temporary))?;
+    fs::rename(&temporary, &final_path).map_err(io(&final_path))?;
+    sync_dir(dir).map_err(io(dir))
+}
+
+/// Remove the repair hint; tolerates it being absent.
+pub fn clear_repair(dir: &Path) -> Result<(), DeviceConfigError> {
+    let target = dir.join(REPAIR_FILE_NAME);
+    match fs::remove_file(&target) {
+        Ok(()) => sync_dir(dir).map_err(|source| DeviceConfigError::Io {
+            path: dir.to_path_buf(),
+            source,
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(DeviceConfigError::Io {
+            path: target,
+            source,
+        }),
+    }
+}
+
 fn write_owner_only(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -176,6 +226,28 @@ mod tests {
                 value: "device-key-value".into(),
             },
         }
+    }
+
+    #[test]
+    fn a_repair_hint_round_trips_and_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(load_repair(dir.path()), None);
+        let target = RepairTarget {
+            host_id: "h".into(),
+            device_id: "d".into(),
+        };
+        save_repair(dir.path(), &target).unwrap();
+        assert_eq!(load_repair(dir.path()), Some(target));
+        clear_repair(dir.path()).unwrap();
+        clear_repair(dir.path()).unwrap();
+        assert_eq!(load_repair(dir.path()), None);
+    }
+
+    #[test]
+    fn an_unreadable_repair_hint_counts_as_none() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(REPAIR_FILE_NAME), "{not json").unwrap();
+        assert_eq!(load_repair(dir.path()), None);
     }
 
     #[test]

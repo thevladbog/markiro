@@ -122,16 +122,42 @@ async fn host_claim(
     fingerprint: String,
     code: String,
     name: String,
+    as_new: Option<bool>,
 ) -> Result<DeviceStatus, String> {
+    // `as_new`: the person chose «новое устройство», so a pending repair is
+    // not named in the claim (`DeviceState::claim_as_new_device`).
+    let result = if as_new == Some(true) {
+        state
+            .claim_as_new_device(
+                &address,
+                &fingerprint,
+                &code,
+                &name,
+                env!("CARGO_PKG_VERSION"),
+            )
+            .await
+    } else {
+        state
+            .claim(
+                &address,
+                &fingerprint,
+                &code,
+                &name,
+                env!("CARGO_PKG_VERSION"),
+            )
+            .await
+    };
+    result.map_err(|error| error.code().to_owned())
+}
+
+/// Whether this station is waiting to be paired again as the device it was
+/// (`repair.json`): the pairing screen then says a code made for that device
+/// is needed. The ids stay in Rust; the webview learns only that it is so.
+#[tauri::command]
+fn device_repair_pending(state: tauri::State<'_, DeviceState>) -> Result<bool, String> {
     state
-        .claim(
-            &address,
-            &fingerprint,
-            &code,
-            &name,
-            env!("CARGO_PKG_VERSION"),
-        )
-        .await
+        .repair_target()
+        .map(|target| target.is_some())
         .map_err(|error| error.code().to_owned())
 }
 
@@ -243,6 +269,7 @@ async fn device_forget(
     state: tauri::State<'_, DeviceState>,
     local: tauri::State<'_, LocalDbState>,
     keep_unsent: Option<bool>,
+    repair: Option<bool>,
 ) -> Result<(), String> {
     let status = state.status();
     let guard = match (keep_unsent, &status) {
@@ -294,10 +321,14 @@ async fn device_forget(
         );
         return Err(storage());
     }
-    state
-        .forget()
-        .await
-        .map_err(|error| error.code().to_owned())
+    // The device-rejected, other-host and config-error screens forget in order
+    // to pair again: that forget keeps the device's ids for the claim.
+    let forgotten = if repair == Some(true) {
+        state.forget_for_repair().await
+    } else {
+        state.forget().await
+    };
+    forgotten.map_err(|error| error.code().to_owned())
 }
 
 #[tauri::command]
@@ -341,6 +372,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         device_select_line,
         device_refresh,
         device_forget,
+        device_repair_pending,
         device_change_address,
         install_role,
         local_query,

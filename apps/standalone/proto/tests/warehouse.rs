@@ -59,6 +59,39 @@ fn every_lookup_answer_round_trips() {
     assert_eq!(source.kind, WarehouseSubjectKind::Pallet);
     assert_eq!(source.box_count, Some(40));
     assert_eq!(source.canonical, None);
+    let imported: WarehouseLookupResult = round_trip("warehouse-lookup-found-imported-unit.json");
+    let WarehouseLookupResult::Found { source } = imported else {
+        panic!("the imported unit fixture is found");
+    };
+    assert!(source.imported);
+    assert_eq!(source.operator_name, None);
+    // A native record leaves the marker out of the wire.
+    let native: WarehouseLookupResult = round_trip("warehouse-lookup-found-unit.json");
+    let WarehouseLookupResult::Found { source } = native else {
+        panic!("the unit fixture is found");
+    };
+    assert!(!source.imported);
+    for (name, reason) in [
+        (
+            "warehouse-lookup-unavailable-imported-no-shift.json",
+            WarehouseUnavailable::ImportedNoShift,
+        ),
+        (
+            "warehouse-lookup-unavailable-imported-no-production-date.json",
+            WarehouseUnavailable::ImportedNoProductionDate,
+        ),
+        (
+            "warehouse-lookup-unavailable-imported-product-unknown.json",
+            WarehouseUnavailable::ImportedProductUnknown,
+        ),
+    ] {
+        let answer: WarehouseLookupResult = round_trip(name);
+        assert_eq!(
+            answer,
+            WarehouseLookupResult::Unavailable { reason },
+            "{name}"
+        );
+    }
     let missing: WarehouseLookupResult = round_trip("warehouse-lookup-not-found.json");
     assert_eq!(missing, WarehouseLookupResult::NotFound);
     let gone: WarehouseLookupResult = round_trip("warehouse-lookup-unavailable.json");

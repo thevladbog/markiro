@@ -498,7 +498,7 @@ async fn backup_restore_preserves_pending_and_completed_batches() {
         .await
         .unwrap();
         conn.close().await.unwrap();
-        assert_eq!(manifest.schema_version, 50);
+        assert_eq!(manifest.schema_version, 51);
         let restored = tempfile::tempdir().unwrap();
         let paths = markiro_host::config::HostPaths::new(restored.path());
         markiro_host::restore::restore(

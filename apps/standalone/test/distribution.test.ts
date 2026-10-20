@@ -58,10 +58,10 @@ describe("distribution shapes (proto/fixtures)", () => {
   it("read the office's status with every device state", () => {
     const status = officeUpdateStatusSchema.parse(fixture("office-update-status.json"));
     expect(status.devices.map((device) => device.state)).toEqual([
-      "current",
-      "behind",
+      "compatible",
+      "compatible",
       "incompatible",
-      "newer",
+      "host_older",
       "unknown",
     ]);
     expect(status.history[0]).toMatchObject({

@@ -348,7 +348,6 @@ const CALM = {
     originalBytes: 12,
     maxStoredBytes: 100,
   },
-  hostVersion: "2.1.0",
   idleLines: [],
   nowMs: NOW,
   pcNowMs: NOW,
@@ -410,19 +409,27 @@ describe("«Требует внимания»", () => {
       license: licenseOf({ state: "expiring", daysLeft: 12 }),
       pcNowMs: NOW + 7 * 60_000,
       settings: { ...CALM.settings, storedBytes: 84 },
-      devices: [device({ appVersion: "2.0.0" })],
+      devices: [device({})],
     });
     expect(items.map((item) => item.kind).sort()).toEqual([
       "backup",
       "clock_skew",
       "license",
       "store_full",
-      "version_skew",
     ]);
     expect(items.find((item) => item.kind === "backup")?.to).toBe("/backups");
     expect(items.find((item) => item.kind === "license")?.to).toBe("/about#license");
     expect(items.find((item) => item.kind === "clock_skew")?.titleValues).toEqual({ minutes: 7 });
     expect(items.find((item) => item.kind === "store_full")?.to).toBeNull();
+  });
+
+  it("never warns of the app versions: a station and a handheld on their own versions are calm", () => {
+    const devices = [
+      device({ id: "s", kind: "station", appVersion: "0.3.0" }),
+      device({ id: "h", kind: "handheld", appVersion: "4.2.1" }),
+      device({ id: "o", kind: "office", appVersion: "0.1.0" }),
+    ];
+    expect(attentionItems({ ...CALM, devices })).toEqual([]);
   });
 
   it("does not warn of a clock at exactly five minutes, nor of a license that is fine", () => {

@@ -1116,6 +1116,8 @@ async fn a_record_of_each_kind_is_kept_exactly_as_sent_and_changes_nothing() {
                 text("operatorId"),
                 text("occurredAt"),
                 Some(received_at.clone()),
+                // A native subject: not marked as imported (migration 0051).
+                Some("0".to_owned()),
             ],
             "{record}"
         );

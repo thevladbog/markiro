@@ -52,6 +52,12 @@ export interface ClaimInput {
   fingerprint: string;
   code: string;
   name: string;
+  /**
+   * The person chose «новое устройство» on a pairing screen that was waiting
+   * to pair this station again as the device it was: the claim names no
+   * device and the code is an ordinary one.
+   */
+  asNew?: boolean;
 }
 
 /**
@@ -75,9 +81,18 @@ export interface DeviceApi {
    * Forget the pairing kept on this computer. While this pairing has shift
    * records the host has not acknowledged, the shell refuses with
    * `unsent_facts`; `keepUnsent: true` goes ahead anyway (a person confirmed
-   * it), and the records stay on this PC's disk.
+   * it), and the records stay on this PC's disk. `repair: true` is the forget
+   * of a rejected or moved device («Подключить заново»): the shell keeps the
+   * device's ids so the office's code for that device re-pairs the same device.
    */
-  forget(options?: { keepUnsent?: boolean }): Promise<void>;
+  forget(options?: { keepUnsent?: boolean; repair?: boolean }): Promise<void>;
+  /**
+   * Whether this station waits to be paired again as the device it was
+   * (`device_repair_pending`): set by a `repair` forget, cleared by the next
+   * pairing. The code that pairs it is the one the office makes on the
+   * Devices page for that device.
+   */
+  repairPending(): Promise<boolean>;
   /**
    * Read this device's record from the host again (`device_refresh`); the
    * shell keeps the line the office assigned in `device.json`. A
@@ -114,14 +129,28 @@ export function createTauriDeviceApi(call: Invoke = invoke): DeviceApi {
     async pairLocally(name) {
       return parseStatus(await run("host_local_pair", { name }));
     },
-    async claim({ address, fingerprint, code, name }) {
-      return parseStatus(await run("host_claim", { address, fingerprint, code, name }));
+    async claim({ address, fingerprint, code, name, asNew }) {
+      return parseStatus(
+        await run("host_claim", {
+          address,
+          fingerprint,
+          code,
+          name,
+          ...(asNew === true ? { asNew: true } : {}),
+        }),
+      );
     },
     async selectLine(lineId) {
       return parseStatus(await run("device_select_line", { lineId }));
     },
     async forget(options) {
-      await run("device_forget", options?.keepUnsent === true ? { keepUnsent: true } : {});
+      await run("device_forget", {
+        ...(options?.keepUnsent === true ? { keepUnsent: true } : {}),
+        ...(options?.repair === true ? { repair: true } : {}),
+      });
+    },
+    async repairPending() {
+      return (await run("device_repair_pending", {})) === true;
     },
     refresh: async () => parseStatus(await run("device_refresh", {})),
     async installRole() {

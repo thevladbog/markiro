@@ -92,6 +92,13 @@ joins the code's creation row). A new code for a device expires every code still
 spends the rest. A request the old key already authenticated stops at `AuthDevice::require_live_in`, which
 checks the key's hash again inside the write transaction. A code for one device used without that id, or an ordinary code with one, is
 `pairing_code_invalid` and stays whole.
+A station names its device the same way: a forget of «Подключить заново» or «Отвязать станцию»
+(`device_forget { repair: true }`, `DeviceState::forget_for_repair`) leaves `repair.json` (`hostId`, `deviceId`, no
+secret) beside `device.json`, and `host_claim` sends that `deviceId` as `recoverDeviceId` when the host it observes is
+that `hostId`; a successful pairing of any kind removes the file. «Подключить как новое устройство» on the pairing
+screen (`asNew`, `claim_as_new_device`) sends no id, so an ordinary code makes a new device; the screen remembers a
+refused code per mode. A forget of an unreadable pairing leaves no hint. A station on the host's PC pairs over
+loopback (`local-pair`), which has no code and always makes a new device.
 
 ## Audit
 
@@ -2808,7 +2815,7 @@ from every `hello` and `app_too_old`/`host_too_old` instead of
 `stream_refused`; the webview offers the update only when the host is newer,
 gives a package of its version, this PC is not below `minUpgradeFrom` and
 the manifest's signature checked out (`update_check_manifest`). An office
-PC paired with a host in the network sees «Версии не совпадают»; a station
+PC paired with a host in the network, whose protocol is outside the window, sees «Приложение и хост несовместимы»; a station
 keeps working offline and its line says so off a shift's work. The sign-in
 screen offers «Обновить с хоста» (ЛО16) only when the host refuses the
 station (`app_too_old`); a station that is merely behind gets the text line
@@ -7391,3 +7398,10 @@ phase). Migration `0046_user_avatars.sql`, `host/src/avatar.rs`, `host/src/route
 - **Webview**: `HostApi.getUserAvatar` / `putUserAvatar` / `deleteUserAvatar` and the Zod
   `userAvatarStateSchema`, `userAvatarPutSchema` (strict); the texts of the codes are in
   `errors.api.*` (the profile dialog will override them with its own).
+
+App versions are never compared (office, stations and handhelds are separate version lines): the
+office raises no warning, chip or attention item from `appVersion` against the host's or another
+device's. «Устройства и версии» shows each device's version number and judges only its protocol
+against the host's window (`compatible`, `incompatible`, `host_older`, `unknown`). The only
+version rules left are the update offer's (a newer host with a signed package, `minUpgradeFrom`)
+and the protocol window (`app_too_old` / `host_too_old`).
