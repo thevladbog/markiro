@@ -66,6 +66,7 @@ export async function verifyDatabaseRestore({
   backup,
   roleMapping,
   run,
+  recoveryRuntime,
 }) {
   identity(operationId, target);
   target = plain(target);
@@ -102,7 +103,7 @@ export async function verifyDatabaseRestore({
       "request.json",
       Buffer.from(canonical({ inventory: document.inventory, roleMapping })),
     );
-    runtime = await openRuntime({ root, operationId, purpose: "restore", run });
+    runtime = await openRuntime({ root, operationId, purpose: "restore", run, recoveryRuntime });
     ensure(
       runtime.config.executorSha === document.executorSha &&
         runtime.config.provenance === document.provenance &&

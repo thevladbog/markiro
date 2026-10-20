@@ -24,7 +24,13 @@ test("archive hashing rejects symbolic and hard links and permissive files", asy
   await symlink(source, join(root, "symbolic"));
   await assert.rejects(hashArchive(root, join(root, "symbolic")));
   await link(source, join(root, "hard"));
-  await assert.rejects(hashArchive(root, source));
+  await assert.rejects(
+    hashArchive(root, source),
+    (error) => error.code === "ERR_HOST_PRIVATE_FILE" && error.archiveReason === "links",
+  );
   await writeFile(join(root, "public"), "PGDMP", { mode: 0o644 });
-  await assert.rejects(hashArchive(root, join(root, "public")));
+  await assert.rejects(
+    hashArchive(root, join(root, "public")),
+    (error) => error.code === "ERR_HOST_PRIVATE_FILE" && error.archiveReason === "mode",
+  );
 });

@@ -135,6 +135,25 @@ export function validateProductionAuthorization(
   return value;
 }
 
+// Capture only the facts already accepted by the full validator. Rechecking is
+// synchronous, so later asynchronous boundary work cannot extend their lifetime.
+function preparedTargetFreshness(context) {
+  const { record, document, evidence, backupProof, policy, workload, fenceValue } = plain(context);
+  return () => {
+    const checkedAt = Date.now();
+    fresh(document.startedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
+    fresh(evidence.completedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
+    fresh(workload.observedAt, record.fence.beganAt, 30000, checkedAt);
+    fresh(fenceValue.observedAt, record.fence.beganAt, 30000, checkedAt);
+    // Long adapters cannot extend the validity of older attestations/certificates.
+    for (const name of names)
+      fresh(record.observations[name].observedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
+    ensure(timestamp(record.observations.tls.value.expiresAt) > checkedAt);
+    if (record.version === 2)
+      validateProductionAuthorization(record, document, evidence, backupProof, checkedAt);
+  };
+}
+
 // This is an action-boundary check, not a durable authorization token. Call it
 // inside withHostState immediately before every protected journal mutation.
 // Trusted adapters independently inspect the held fence and exact owned workload.
@@ -363,16 +382,15 @@ export async function validatePreparedTarget(input, expected) {
       .configurationSha256,
     identity.configurationSha256,
   );
-  const checkedAt = Date.now();
-  fresh(document.startedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
-  fresh(evidence.completedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
-  fresh(workload.observedAt, record.fence.beganAt, 30000, checkedAt);
-  fresh(fenceValue.observedAt, record.fence.beganAt, 30000, checkedAt);
-  // Long adapters cannot extend the validity of older attestations/certificates.
-  for (const name of names)
-    fresh(record.observations[name].observedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
-  ensure(timestamp(tls.expiresAt) > checkedAt);
-  if (record.version === 2)
-    validateProductionAuthorization(record, document, evidence, backupProof, checkedAt);
-  return { record, backupProof };
+  const recheckFreshness = preparedTargetFreshness({
+    record,
+    document,
+    evidence,
+    backupProof,
+    policy,
+    workload,
+    fenceValue,
+  });
+  recheckFreshness();
+  return { record, backupProof, recheckFreshness };
 }

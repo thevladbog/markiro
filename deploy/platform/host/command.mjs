@@ -133,6 +133,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/probe.mjs",
   "deploy/platform/host/probe-worker.mjs",
   "deploy/platform/host/deploy.mjs",
+  "deploy/platform/host/deployment-boundary.mjs",
   "deploy/platform/host/config.mjs",
   "deploy/platform/host/files.mjs",
   "deploy/platform/host/process.mjs",
@@ -279,7 +280,7 @@ export async function loadHostOperation(directory, options = {}) {
   }
 }
 
-async function verifyAdmission(loaded, runProcess, request) {
+export async function verifyAdmission(loaded, runProcess, request) {
   const { record, receipt } = loaded,
     op = record.deployment,
     admission = op.identity.admission;
