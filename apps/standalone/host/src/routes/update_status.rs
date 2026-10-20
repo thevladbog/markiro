@@ -1,10 +1,9 @@
 //! `GET /v1/office/update-status` (plan ОБН-3, spec §10.11.7; every office
 //! role): the host's version and packages, each unrevoked device's version
-//! against the host's, its last download (`update.download`) and its last
+//! and protocol (the protocol against the host's window, never the app version), its last download (`update.download`) and its last
 //! installation (`app.update.start`), and the last rows of the
 //! distribution's audit. Reads only; nothing here needs a write lock.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use axum::extract::State;
@@ -13,7 +12,6 @@ use markiro_proto::update::distribution::{
     DeviceVersion, DeviceVersionState, HostPackage, OfficeUpdateStatus, PackageState,
     UpdateHistoryItem, UpdateMark,
 };
-use markiro_proto::update::AppVersion;
 use markiro_proto::{DeviceKind, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION};
 use serde_json::Value;
 use sqlx::SqliteConnection;
@@ -26,24 +24,24 @@ use crate::server::AppState;
 /// How many rows of the distribution's audit the office sees.
 pub const HISTORY_ROWS: i64 = 20;
 
-/// A device's version against the host's (spec §10.11.6). A device that
-/// never sent its version (`seen` false) is unknown, whatever its pairing
-/// recorded.
+/// A device's protocol against the host's window (spec §10.11.6). The app version is not
+/// compared: the office, stations and handhelds have their own version lines. A device that
+/// never sent its version (`seen` false) is unknown, whatever its pairing recorded. The window
+/// is the host's for every device kind (`protocol_guard` applies it to all of them).
 pub fn device_state(
-    host: Option<AppVersion>,
     min_protocol: u32,
-    app_version: &str,
+    max_protocol: u32,
     protocol: u32,
     seen: bool,
 ) -> DeviceVersionState {
-    let (Some(host), Some(app), true) = (host, app_version.parse::<AppVersion>().ok(), seen) else {
-        return DeviceVersionState::Unknown;
-    };
-    match app.cmp(&host) {
-        Ordering::Equal => DeviceVersionState::Current,
-        Ordering::Greater => DeviceVersionState::Newer,
-        Ordering::Less if protocol >= min_protocol => DeviceVersionState::Behind,
-        Ordering::Less => DeviceVersionState::Incompatible,
+    if !seen {
+        DeviceVersionState::Unknown
+    } else if protocol < min_protocol {
+        DeviceVersionState::Incompatible
+    } else if protocol > max_protocol {
+        DeviceVersionState::HostOlder
+    } else {
+        DeviceVersionState::Compatible
     }
 }
 
@@ -66,7 +64,6 @@ fn text(details: &Value, key: &str) -> Option<String> {
 
 async fn read_tables(
     conn: &mut SqliteConnection,
-    host: Option<AppVersion>,
 ) -> Result<(Vec<DeviceVersion>, Vec<UpdateHistoryItem>), ApiError> {
     let rows: Vec<DeviceRow> = sqlx::query_as(
         "SELECT d.id, d.kind, d.name, d.line_id, l.name AS line_name, d.app_version, \
@@ -114,9 +111,8 @@ async fn read_tables(
             let kind: DeviceKind = row.kind.parse().map_err(ApiError::internal)?;
             let protocol = u32::try_from(row.protocol).unwrap_or(0);
             let state = device_state(
-                host,
                 MIN_PROTOCOL_VERSION,
-                &row.app_version,
+                PROTOCOL_VERSION,
                 protocol,
                 row.version_seen_at.is_some(),
             );
@@ -193,10 +189,9 @@ pub async fn update_status(
             },
         ),
     };
-    let host = host_version.parse::<AppVersion>().ok();
     // One snapshot for the devices and the audit; nothing is written.
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    let read = read_tables(&mut tx, host).await;
+    let read = read_tables(&mut tx).await;
     tx.rollback().await.map_err(ApiError::internal)?;
     let (devices, history) = read?;
     Ok(Json(OfficeUpdateStatus {
@@ -212,40 +207,19 @@ pub async fn update_status(
 #[cfg(test)]
 mod tests {
     use markiro_proto::update::distribution::DeviceVersionState;
-    use markiro_proto::update::AppVersion;
 
     use super::device_state;
 
     #[test]
-    fn a_devices_state_follows_the_versions_and_the_protocol_window() {
-        let host = "0.3.0".parse::<AppVersion>().ok();
+    fn a_devices_state_follows_the_protocol_window_only() {
+        // The window is 3..=4 here; the app version is not an input at all.
+        assert_eq!(device_state(3, 4, 4, true), DeviceVersionState::Compatible);
+        assert_eq!(device_state(3, 4, 3, true), DeviceVersionState::Compatible);
         assert_eq!(
-            device_state(host, 3, "0.3.0", 4, true),
-            DeviceVersionState::Current
-        );
-        assert_eq!(
-            device_state(host, 3, "0.2.1", 3, true),
-            DeviceVersionState::Behind
-        );
-        assert_eq!(
-            device_state(host, 3, "0.1.0", 2, true),
+            device_state(3, 4, 2, true),
             DeviceVersionState::Incompatible
         );
-        assert_eq!(
-            device_state(host, 3, "0.4.0", 4, true),
-            DeviceVersionState::Newer
-        );
-        assert_eq!(
-            device_state(host, 3, "0.3.0", 4, false),
-            DeviceVersionState::Unknown
-        );
-        assert_eq!(
-            device_state(host, 3, "dev", 4, true),
-            DeviceVersionState::Unknown
-        );
-        assert_eq!(
-            device_state(None, 3, "0.3.0", 4, true),
-            DeviceVersionState::Unknown
-        );
+        assert_eq!(device_state(3, 4, 5, true), DeviceVersionState::HostOlder);
+        assert_eq!(device_state(3, 4, 4, false), DeviceVersionState::Unknown);
     }
 }

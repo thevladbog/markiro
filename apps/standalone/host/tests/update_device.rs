@@ -259,7 +259,13 @@ async fn the_office_reads_every_devices_version_against_the_host() {
         .await;
     let here = me["id"].as_str().unwrap().to_owned();
     let (behind, _) = pair_device(&admin.app, "station").await;
-    let (newer, _) = pair_device(&admin.app, "office").await;
+    // A handheld pairs by a code; the test needs only its kind, so a station is re-kinded.
+    let (newer, _) = pair_device(&admin.app, "station").await;
+    sqlx::query("UPDATE devices SET kind = 'handheld' WHERE id = ?")
+        .bind(&newer)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
     let (old, _) = pair_device(&admin.app, "station").await;
     let (unknown, _) = pair_device(&admin.app, "station").await;
     let (revoked, _) = pair_device(&admin.app, "station").await;
@@ -272,7 +278,7 @@ async fn the_office_reads_every_devices_version_against_the_host() {
         .await;
     version_of(&admin, &here, "0.3.0", 3, Some("2026-11-03T07:10:00Z")).await;
     version_of(&admin, &behind, "0.2.1", 3, Some("2026-11-02T15:00:00Z")).await;
-    version_of(&admin, &newer, "0.4.0", 3, Some("2026-11-03T08:00:00Z")).await;
+    version_of(&admin, &newer, "4.2.0", 3, Some("2026-11-03T08:00:00Z")).await;
     // Below the host's minimum protocol: it does not connect.
     version_of(&admin, &old, "0.0.9", 0, Some("2026-10-20T10:00:00Z")).await;
     sqlx::query(
@@ -351,9 +357,10 @@ async fn the_office_reads_every_devices_version_against_the_host() {
     assert_eq!(body["devices"].as_array().unwrap().len(), 5);
     assert_eq!(
         (&device(&here)["state"], &device(&here)["lineName"]),
-        (&json!("current"), &json!("Линия 1"))
+        (&json!("compatible"), &json!("Линия 1"))
     );
-    assert_eq!(device(&behind)["state"], json!("behind"));
+    // Another app version, a protocol inside the window: no comparison, no state of its own.
+    assert_eq!(device(&behind)["state"], json!("compatible"));
     assert_eq!(
         device(&behind)["downloaded"],
         json!({ "at": "2026-11-03T06:55:00Z", "version": "0.3.0" })
@@ -362,7 +369,9 @@ async fn the_office_reads_every_devices_version_against_the_host() {
         device(&behind)["installStarted"],
         json!({ "at": "2026-11-03T07:00:00Z", "version": "0.3.0" })
     );
-    assert_eq!(device(&newer)["state"], json!("newer"));
+    // A handheld on its own version line (4.x against the host's 0.3.0) is just compatible.
+    assert_eq!(device(&newer)["kind"], json!("handheld"));
+    assert_eq!(device(&newer)["state"], json!("compatible"));
     assert_eq!(
         device(&newer)["installStarted"],
         json!({ "at": "2026-11-03T07:05:00Z", "version": "0.4.0" })

@@ -116,10 +116,10 @@ fn the_offices_status_round_trips_with_every_device_state() {
             .map(|device| device.state)
             .collect::<Vec<_>>(),
         [
-            DeviceVersionState::Current,
-            DeviceVersionState::Behind,
+            DeviceVersionState::Compatible,
+            DeviceVersionState::Compatible,
             DeviceVersionState::Incompatible,
-            DeviceVersionState::Newer,
+            DeviceVersionState::HostOlder,
             DeviceVersionState::Unknown,
         ]
     );

@@ -118,7 +118,11 @@ describe("HostStatusLine", () => {
         sync={null}
       />,
     );
-    expect(screen.getByText("Это приложение старее хоста: обновите его с хоста.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Протокол этого приложения старее, чем принимает хост: обновите приложение с хоста.",
+      ),
+    ).toBeTruthy();
   });
 
   it("has a text for every reason the shell reports", () => {

@@ -90,15 +90,6 @@ export function deviceSummary(devices: readonly DeviceRecord[], nowMs: number): 
   return { byKind, silent };
 }
 
-/** Devices (not revoked) that run another version than the host. */
-export function versionSkew(
-  devices: readonly DeviceRecord[],
-  hostVersion: string | null,
-): DeviceRecord[] {
-  if (hostVersion === null) return [];
-  return devices.filter((device) => device.revokedAt === null && device.appVersion !== hostVersion);
-}
-
 /** How far this PC's clock is from the host's `hostNow`, in milliseconds (positive: this PC is ahead). */
 export function clockSkewMs(hostNow: string, pcNowMs: number): number {
   return pcNowMs - Date.parse(hostNow);

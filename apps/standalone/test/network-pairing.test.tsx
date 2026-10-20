@@ -204,7 +204,9 @@ describe("NetworkPairing", () => {
     const props = renderPairing({ probe });
     scan(PAYLOAD);
     expect(
-      await screen.findByText("Служба «Markiro Хост» старее этого приложения. Обновите службу."),
+      await screen.findByText(
+        "Служба «Markiro Хост» говорит на более старом протоколе, чем это приложение. Обновите службу.",
+      ),
     ).toBeTruthy();
     expect(props.onClaim).not.toHaveBeenCalled();
   });

@@ -8,7 +8,6 @@ import { useCan } from "./access.js";
 import { backupWarnings } from "./backups/backup-warnings.js";
 import { useBackupTime } from "./backups/backup-time.js";
 import { BackupWarnings } from "./backups/BackupWarnings.js";
-import { useAboutData } from "./info/about-data.js";
 import { HostAddressNotice } from "./overview/HostAddressNotice.js";
 import { LicenseNotices, useLicenseNotices } from "./info/license/LicenseNotices.js";
 import { AttentionPanel } from "./overview/AttentionPanel.js";
@@ -55,7 +54,6 @@ export function OfficeOverview() {
   const settings = useOfficeQuery(officeKeys.exportSettings, (api, token) =>
     api.getExportSettings(token),
   );
-  const about = useAboutData();
   const { admin, zone, today, nowMs } = data;
 
   const shifts = data.shifts.data ?? NO_SHIFTS;
@@ -94,7 +92,6 @@ export function OfficeOverview() {
     backups: data.backups.data ?? null,
     license: data.license.data ?? null,
     settings: settings.data ?? null,
-    hostVersion: about.data?.hello?.version ?? null,
     idleLines: cards.all
       .filter((card) => card.status === "idle" && card.shift !== null)
       .map((card) => ({

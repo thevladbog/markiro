@@ -146,16 +146,18 @@ pub struct HostPackage {
     pub disk_bytes: u64,
 }
 
-/// A device's version against the host's (spec §10.11.7).
+/// A device's protocol against the host's window (spec §10.11.7). The app versions of the
+/// office, the stations and the handhelds are separate version lines and are never compared;
+/// only the protocol decides whether a device can work with this host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceVersionState {
-    Current,
-    /// Older, its protocol still taken: works, the update is offered.
-    Behind,
+    /// Its protocol is inside the host's window: it works.
+    Compatible,
     /// Its protocol is below the host's minimum: it does not connect.
     Incompatible,
-    Newer,
+    /// Its protocol is above the host's: the host is the one to update.
+    HostOlder,
     /// The device never sent its version (`version_seen_at` is empty).
     Unknown,
 }

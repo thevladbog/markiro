@@ -4,34 +4,31 @@ import type { DeviceVersionState, OfficeUpdateStatus } from "../../host/distribu
 
 /** A device's state as a tag (the word goes beside it: never colour alone). */
 export const DEVICE_STATE_PHASE: Readonly<Record<DeviceVersionState, TagPhase>> = {
-  current: "done",
-  behind: "attention",
+  compatible: "done",
   incompatible: "failed",
-  newer: "attention",
+  host_older: "attention",
   unknown: "none",
 };
 
 export interface UpdateSummary {
   hostVersion: string;
   total: number;
-  current: number;
-  behind: number;
+  compatible: number;
   incompatible: number;
-  newer: number;
+  hostOlder: number;
   unknown: number;
 }
 
-/** «Хост: 0.3.0. Актуальны 3 из 5 …» (spec §10.11.7) as numbers. */
+/** «Хост: 0.3.0. Совместимы 3 из 5 …» (spec §10.11.7) as numbers: protocol, not app versions. */
 export function summarize(status: OfficeUpdateStatus): UpdateSummary {
   const count = (state: DeviceVersionState) =>
     status.devices.filter((device) => device.state === state).length;
   return {
     hostVersion: status.hostVersion,
     total: status.devices.length,
-    current: count("current"),
-    behind: count("behind"),
+    compatible: count("compatible"),
     incompatible: count("incompatible"),
-    newer: count("newer"),
+    hostOlder: count("host_older"),
     unknown: count("unknown"),
   };
 }
