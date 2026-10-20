@@ -368,10 +368,10 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
     },
   };
 }
-export async function readPrivateAbsolute(root, path) {
+export async function readPrivateAbsolute(root, path, options) {
   const name = relative(root, path);
   ensure(name && !name.startsWith(".") && !name.startsWith("/"));
-  return readPrivateFile(root, name);
+  return readPrivateFile(root, name, options);
 }
 export async function privateCopy(root, path, destination) {
   const bytes = await readPrivateAbsolute(root, path);

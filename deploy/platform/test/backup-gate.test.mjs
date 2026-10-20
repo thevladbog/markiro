@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { canonical, digest } from "../backup/schemas.mjs";
 import { appendFile } from "node:fs/promises";
 import { verifyBackupGate } from "../host/backup-gate.mjs";
 import { preparedFixture } from "./prepared-target-fixture.mjs";
@@ -81,3 +82,20 @@ for (const mutation of [
     });
   });
 }
+
+test("backup admission verifies a complete inventory above the control-file capacity", async (t) => {
+  const f = await preparedFixture(t);
+  for (let n = 0; n < 9000; n++)
+    f.document.inventory.tables.push({
+      schema: "public",
+      name: `large_${n}`,
+      count: "0",
+      sha256: "f".repeat(64),
+    });
+  assert.ok(Buffer.byteLength(canonical(f.document)) > 1051095);
+  f.evidence.restoredInventorySha256 = digest(f.document.inventory);
+  await f.publish();
+  assert.equal((await verifyBackupGate(f)).archiveSha256, f.backup.archiveSha256);
+  await appendFile(f.backup.inventoryPath, " ");
+  await assert.rejects(verifyBackupGate(f));
+});

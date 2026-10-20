@@ -6,12 +6,16 @@ import { join } from "node:path";
 import { privateFixture } from "./host-fixtures.mjs";
 import { fakeDocker } from "./backup-runtime-fixture.mjs";
 import { createDatabaseBackup } from "../backup/archive.mjs";
-import { readPrivateFile } from "../host/files.mjs";
+import { readPrivateFile, inventoryDocumentOptions } from "../host/files.mjs";
+import { mapInventory } from "../backup/inventory.mjs";
+import { verifyDatabaseRestore } from "../backup/restore.mjs";
 import { canonical, digest } from "../backup/schemas.mjs";
 
-for (const scenario of ["complete", "oversized", "final-fence-failure"])
+for (const scenario of ["complete", "production-sized", "oversized", "final-fence-failure"])
   test(`backup ${scenario}`, async (t) => {
     const nearLimit = scenario === "oversized";
+    const large = nearLimit || scenario === "production-sized";
+    const capacity = nearLimit ? inventoryDocumentOptions.maxBytes : 1051095 + 1024;
     const { root } = await privateFixture(t);
     const operationId = randomUUID();
     const target = { hostId: "local", databaseId: "markiro", volumeId: "owned" };
@@ -63,7 +67,7 @@ for (const scenario of ["complete", "oversized", "final-fence-failure"])
         migrationJournal: null,
       },
     };
-    if (nearLimit) {
+    if (large) {
       // Valid identifiers and multibyte UTF-8 make this a byte, not character, boundary.
       for (let n = 0; n < 5500; n++)
         captured.inventory.tables.push({
@@ -74,9 +78,9 @@ for (const scenario of ["complete", "oversized", "final-fence-failure"])
         });
     }
     let bytes = canonical(captured) + "\n";
-    if (nearLimit) {
+    if (large) {
       let size = Buffer.byteLength(bytes);
-      while (size < 1048576 - 256) {
+      while (size < capacity - 256) {
         const n = captured.inventory.tables.length;
         const row = { schema: "public", name: `table_${n}`, count: "0", sha256: "f".repeat(64) };
         captured.inventory.tables.push(row);
@@ -84,8 +88,8 @@ for (const scenario of ["complete", "oversized", "final-fence-failure"])
       }
     }
     bytes = canonical(captured) + "\n";
-    assert.ok(Buffer.byteLength(bytes) <= 1048576);
-    if (nearLimit) assert.ok(Buffer.byteLength(bytes) > 1048576 - 400);
+    assert.ok(Buffer.byteLength(bytes) <= capacity);
+    if (large) assert.ok(Buffer.byteLength(bytes) > capacity - 400);
     const docker = fakeDocker({ root, operationId, image });
     const beganAt = new Date().toISOString(),
       fenceId = randomUUID();
@@ -147,11 +151,39 @@ for (const scenario of ["complete", "oversized", "final-fence-failure"])
       assert.equal(failure.cleanup.verified, true);
     } else {
       const backup = await createDatabaseBackup(request);
-      const published = await readPrivateFile(directory, "inventory.json");
+      const published = await readPrivateFile(
+        directory,
+        "inventory.json",
+        inventoryDocumentOptions,
+      );
       const document = JSON.parse(published);
       assert.equal(digest(published), backup.inventorySha256);
       assert.equal(document.archiveSha256, digest(await readFile(backup.archivePath)));
       assert.deepEqual(document.inventory, captured.inventory);
+      if (scenario === "production-sized") {
+        assert.ok(published.length > 1051095);
+        const roleMapping = { version: 1, roles: [], allowedDeltas: [] };
+        const restoreDocker = fakeDocker({
+          root,
+          operationId,
+          image,
+          restored: {
+            inventory: mapInventory(captured.inventory, roleMapping),
+            postgresVersion: "17.11",
+          },
+        });
+        const restoreEvidence = await verifyDatabaseRestore({
+          root,
+          operationId,
+          target,
+          backup,
+          roleMapping,
+          run: restoreDocker.run,
+        });
+        assert.equal(restoreDocker.containers.size + restoreDocker.volumes.size, 0);
+        assert.ok(restoreEvidence.evidenceSha256);
+        await assert.rejects(readPrivateFile(directory, "inventory.json"));
+      }
     }
     assert.equal(docker.containers.size + docker.volumes.size, 0);
   });
