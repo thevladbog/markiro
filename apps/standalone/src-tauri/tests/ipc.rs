@@ -1230,6 +1230,101 @@ fn a_device_claims_a_code_through_the_ipc_shapes() {
     host.stop();
 }
 
+/// «Подключить заново» through the IPC shapes: `device_forget { repair: true }` keeps the
+/// device's ids, `device_repair_pending` says so, and `host_claim` with the office's code for
+/// that device pairs the SAME device again; `asNew` pairs a new one.
+#[test]
+fn a_station_pairs_again_as_the_same_device_through_the_ipc_shapes() {
+    let host = Host::start();
+    let office_dir = tempfile::tempdir().unwrap();
+    let office = DeviceState::load(office_dir.path().to_path_buf());
+    host.runtime
+        .block_on(office.local_pair(&host.address(), NAME, "0.1.0"))
+        .unwrap();
+    let bootstrap: Value = serde_json::from_str(BOOTSTRAP).unwrap();
+    let created = host
+        .runtime
+        .block_on(office.request("POST", "/v1/bootstrap", Some(&bootstrap), None))
+        .unwrap();
+    let token = created.body.unwrap()["session"]["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let issue = |path: &str| {
+        let issued = host
+            .runtime
+            .block_on(office.request("POST", path, None, Some(&token)))
+            .unwrap();
+        assert_eq!(issued.status, 200, "{:?}", issued.body);
+        issued.body.unwrap()["code"].as_str().unwrap().to_owned()
+    };
+    let claim = |code: &str, as_new: Option<bool>| {
+        let mut args = json!({
+            "address": host.address(),
+            "fingerprint": host.running.fingerprint,
+            "code": code,
+            "name": "Станция на линии 2"
+        });
+        if let Some(as_new) = as_new {
+            args["asNew"] = json!(as_new);
+        }
+        args
+    };
+
+    let station_dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(station_dir.path().to_path_buf()));
+    let first = invoke(
+        &webview,
+        "host_claim",
+        claim(&issue("/v1/office/pairing-codes"), None),
+    )
+    .unwrap();
+    let id = first["deviceId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        invoke(&webview, "device_repair_pending", json!({})),
+        Ok(json!(false))
+    );
+
+    // A plain forget keeps nothing; a repair forget keeps the ids.
+    invoke(&webview, "device_forget", json!({ "repair": true })).unwrap();
+    assert_eq!(
+        invoke(&webview, "device_repair_pending", json!({})),
+        Ok(json!(true))
+    );
+    let again = invoke(
+        &webview,
+        "host_claim",
+        claim(
+            &issue(&format!("/v1/office/devices/{id}/pairing-code")),
+            None,
+        ),
+    )
+    .unwrap();
+    assert_eq!(again["deviceId"], json!(id));
+    assert_eq!(
+        invoke(&webview, "device_repair_pending", json!({})),
+        Ok(json!(false))
+    );
+
+    // «Подключить как новое устройство»: the same screen, an ordinary code, a new device.
+    invoke(&webview, "device_forget", json!({ "repair": true })).unwrap();
+    let fresh = invoke(
+        &webview,
+        "host_claim",
+        claim(&issue("/v1/office/pairing-codes"), Some(true)),
+    )
+    .unwrap();
+    assert_ne!(fresh["deviceId"], json!(id));
+    invoke(&webview, "device_forget", json!({})).unwrap();
+    assert_eq!(
+        invoke(&webview, "device_repair_pending", json!({})),
+        Ok(json!(false))
+    );
+
+    drop(webview);
+    host.stop();
+}
+
 /// Line selection with the webview's `lineId`, the feed through
 /// `host_request`, and the stream refused there.
 #[test]

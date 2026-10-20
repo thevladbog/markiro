@@ -395,3 +395,68 @@ async fn a_request_authenticated_with_the_old_key_stops_when_the_key_was_rotated
         DeviceKind::Handheld
     );
 }
+
+async fn block_for(admin: &Admin, key: &str, request_id: &str) -> (StatusCode, Value) {
+    admin
+        .app
+        .send(json_request(
+            with_device(request("POST", "/v1/device/sscc/blocks"), key),
+            json!({ "requestId": request_id, "issuerPrefix": "460068200", "extension": 0 }),
+        ))
+        .await
+}
+
+/// Owner report 2026-10-20: the code «выпустить новый код привязки» makes must work for a station
+/// and a handheld alike, and a device paired again is the SAME device: work it queued offline
+/// before the re-pairing (a block request under its old key) is answered again with the same
+/// block, not issued twice, and the device's later requests are accepted under the new key.
+#[tokio::test]
+async fn a_repaired_station_and_handheld_replay_their_queued_requests_idempotently() {
+    for kind in ["station", "handheld"] {
+        let admin = admin().await;
+        let old = if kind == "handheld" {
+            pair_handheld(&admin).await
+        } else {
+            pair_device(&admin.app, "station").await.1
+        };
+        let id = device_id(&admin, &old).await;
+        let first_request = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
+        let (status, block) = block_for(&admin, &old, first_request).await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {block}");
+
+        let (status, code) = code_for(&admin, &id).await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {code}");
+        // A client of the OTHER kind cannot take the code, and the refusal leaves it whole.
+        let wrong = if kind == "handheld" {
+            "station"
+        } else {
+            "handheld"
+        };
+        let (status, refused) = claim(&admin, &code["code"], wrong, Some(&id)).await;
+        assert_eq!(
+            (status, refused["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!("pairing_code_invalid")),
+            "{kind}"
+        );
+        let (status, paired) = claim(&admin, &code["code"], kind, Some(&id)).await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {paired}");
+        assert_eq!(paired["deviceId"], json!(id), "{kind}");
+        let new = paired["deviceKey"].as_str().unwrap().to_owned();
+
+        // The old key is dead; the queued request is replayed under the new key and gets the
+        // same block (idempotent per device and request), and the counter does not move twice.
+        let (status, _) = block_for(&admin, &old, first_request).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{kind}");
+        let (status, replay) = block_for(&admin, &new, first_request).await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {replay}");
+        assert_eq!(replay["id"], block["id"], "{kind}");
+        assert_eq!(replay["fromSerial"], block["fromSerial"], "{kind}");
+        let (status, next) = block_for(&admin, &new, "8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d").await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {next}");
+        assert_ne!(next["id"], block["id"], "{kind}");
+        assert_eq!(
+            next["fromSerial"],
+            block["toSerial"].as_i64().map(|n| json!(n + 1)).unwrap()
+        );
+    }
+}

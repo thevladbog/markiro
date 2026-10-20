@@ -265,3 +265,176 @@ async fn a_malformed_fingerprint_or_code_is_refused_before_any_io() {
         Err(DeviceError::Probe(ProbeError::Unreachable))
     );
 }
+
+async fn device_count(office: &DeviceState, token: &str) -> usize {
+    let devices = office
+        .request("GET", "/v1/office/devices", None, Some(token))
+        .await
+        .unwrap();
+    devices.body.unwrap().as_array().unwrap().len()
+}
+
+/// A one-time code the office made for one existing device
+/// (`POST /v1/office/devices/{id}/pairing-code`).
+async fn device_code(office: &DeviceState, token: &str, device_id: &str) -> String {
+    let created = office
+        .request(
+            "POST",
+            &format!("/v1/office/devices/{device_id}/pairing-code"),
+            None,
+            Some(token),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status, 200, "{:?}", created.body);
+    created.body.unwrap()["code"].as_str().unwrap().to_owned()
+}
+
+/// «Выпустить новый код привязки» for a station (owner report 2026-10-20): the
+/// rejected station forgets its pairing and claims the device's own code. The
+/// claim names the device it was (`recoverDeviceId`), so the host gives that
+/// same device a new key instead of refusing the code as invalid.
+#[tokio::test]
+async fn a_station_pairs_again_with_its_devices_own_code_and_stays_the_same_device() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let office_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (office, token) = office(&host, office_dir.path()).await;
+    let code = new_code(&office, &token).await;
+    let station = DeviceState::load(station_dir.path().to_path_buf());
+    let first = station
+        .claim(&address(&host), &host.fingerprint, &code, STATION, "0.1.0")
+        .await
+        .unwrap();
+    let old_key_holder = DeviceState::load(station_dir.path().to_path_buf());
+
+    let for_device = device_code(&office, &token, &first.device_id).await;
+    let before = device_count(&office, &token).await;
+    station.forget_for_repair().await.unwrap();
+    assert_eq!(station.status(), Ok(None));
+    assert_eq!(
+        station
+            .repair_target()
+            .unwrap()
+            .map(|target| target.device_id),
+        Some(first.device_id.clone())
+    );
+    let again = station
+        .claim(
+            &address(&host),
+            &host.fingerprint,
+            &for_device,
+            STATION,
+            "0.1.1",
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.device_id, first.device_id);
+    assert_eq!(again.host_id, first.host_id);
+    assert_eq!(again.device_name, first.device_name);
+    // The hint is spent with the pairing, also on disk.
+    assert_eq!(station.repair_target().unwrap(), None);
+    // The new key works after a restart; the old key is dead at once.
+    let reloaded = DeviceState::load(station_dir.path().to_path_buf());
+    let info = reloaded
+        .request("GET", "/v1/device", None, None)
+        .await
+        .unwrap();
+    assert_eq!(info.status, 200, "{:?}", info.body);
+    assert_eq!(info.body.unwrap()["id"], first.device_id);
+    let old = old_key_holder
+        .request("GET", "/v1/device", None, None)
+        .await
+        .unwrap();
+    assert_eq!(old.status, 401);
+    // One device, not two: the list of devices did not grow.
+    let after = device_count(&office, &token).await;
+    assert_eq!(after, before);
+    host.stop().await.unwrap();
+}
+
+/// A plain forget (the «Отвязать станцию» of the workplace) leaves no hint: the
+/// device-bound code stays whole and refused, as the host's rule says; and a
+/// station that chose «новое устройство» sends no id either.
+#[tokio::test]
+async fn only_a_repair_forget_names_the_device_in_the_claim() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let office_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (office, token) = office(&host, office_dir.path()).await;
+    let code = new_code(&office, &token).await;
+    let station = DeviceState::load(station_dir.path().to_path_buf());
+    let first = station
+        .claim(&address(&host), &host.fingerprint, &code, STATION, "0.1.0")
+        .await
+        .unwrap();
+    let for_device = device_code(&office, &token, &first.device_id).await;
+
+    station.forget().await.unwrap();
+    assert_eq!(station.repair_target().unwrap(), None);
+    assert_eq!(
+        station
+            .claim(
+                &address(&host),
+                &host.fingerprint,
+                &for_device,
+                STATION,
+                "0.1.0"
+            )
+            .await,
+        Err(DeviceError::CodeInvalid)
+    );
+    assert_eq!(station.status(), Ok(None));
+    // A station paired again as a new device under a repair hint sends no id.
+    let again_code = new_code(&office, &token).await;
+    let second = station
+        .claim(
+            &address(&host),
+            &host.fingerprint,
+            &again_code,
+            STATION,
+            "0.1.0",
+        )
+        .await
+        .unwrap();
+    station.forget_for_repair().await.unwrap();
+    let ordinary = new_code(&office, &token).await;
+    let third = station
+        .claim_as_new_device(
+            &address(&host),
+            &host.fingerprint,
+            &ordinary,
+            STATION,
+            "0.1.0",
+        )
+        .await
+        .unwrap();
+    assert_ne!(third.device_id, second.device_id);
+    assert_eq!(station.repair_target().unwrap(), None);
+    host.stop().await.unwrap();
+}
+
+/// A hint from another host is not this host's device: the claim is ordinary.
+#[tokio::test]
+async fn a_hint_from_another_host_is_ignored() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let office_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (office, token) = office(&host, office_dir.path()).await;
+    std::fs::write(
+        station_dir.path().join("repair.json"),
+        r#"{"hostId":"00000000-0000-4000-8000-000000000000","deviceId":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}"#,
+    )
+    .unwrap();
+    let station = DeviceState::load(station_dir.path().to_path_buf());
+    let code = new_code(&office, &token).await;
+    let paired = station
+        .claim(&address(&host), &host.fingerprint, &code, STATION, "0.1.0")
+        .await
+        .unwrap();
+    assert_ne!(paired.device_id, "7c9e6679-7425-40de-944b-e07fc1f90ae7");
+    host.stop().await.unwrap();
+}

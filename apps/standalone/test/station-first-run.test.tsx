@@ -79,6 +79,7 @@ function fakeDevice(initial: DeviceStatus | null, role: InstallRole) {
       paired = { ...paired, lineId: lineFromHost };
       return paired;
     }),
+    repairPending: vi.fn<DeviceApi["repairPending"]>(async () => false),
     installRole: vi.fn<DeviceApi["installRole"]>(async () => role),
     changeAddress: vi.fn<DeviceApi["changeAddress"]>(async () => {
       throw new DeviceError("not_paired", "not paired");

@@ -92,6 +92,13 @@ joins the code's creation row). A new code for a device expires every code still
 spends the rest. A request the old key already authenticated stops at `AuthDevice::require_live_in`, which
 checks the key's hash again inside the write transaction. A code for one device used without that id, or an ordinary code with one, is
 `pairing_code_invalid` and stays whole.
+A station names its device the same way: a forget of «Подключить заново» or «Отвязать станцию»
+(`device_forget { repair: true }`, `DeviceState::forget_for_repair`) leaves `repair.json` (`hostId`, `deviceId`, no
+secret) beside `device.json`, and `host_claim` sends that `deviceId` as `recoverDeviceId` when the host it observes is
+that `hostId`; a successful pairing of any kind removes the file. «Подключить как новое устройство» on the pairing
+screen (`asNew`, `claim_as_new_device`) sends no id, so an ordinary code makes a new device; the screen remembers a
+refused code per mode. A forget of an unreadable pairing leaves no hint. A station on the host's PC pairs over
+loopback (`local-pair`), which has no code and always makes a new device.
 
 ## Audit
 
