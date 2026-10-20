@@ -1843,7 +1843,8 @@ enters again (no revision and no audit row, only its last-entered instant is tou
 takes a slot while fewer than `max_stations` others hold one (`shift.join`); a new device that does
 not name `multi-station-v1` is `shift_busy`. A `shift_closed` fact closes the sender's part; with no
 other participant active or left it closes the shift (`closed_by_kind = 'device'`, `closed_by` the
-last closer). A shift opened by an old build can be joined by a capable device (decision D4 checks only the joiner's capability); when the old opener closes its own `shift_closed` only its part closes. Receipts: `partClosed`, `reasonMissing`, `alreadyClosed`. The reason
+last closer; `closed_at` is the LATEST instant among the device-closed parts, because an offline
+station's earlier close may arrive last). A shift opened by an old build can be joined by a capable device (decision D4 checks only the joiner's capability); when the old opener closes its own `shift_closed` only its part closes. Receipts: `partClosed`, `reasonMissing`, `alreadyClosed`. The reason
 (`reason_need`, fixture `shift-close-reason-shared.json`): a one-device shift keeps stage 2a's
 refusal; in a shared shift only the closing close may need one, by the whole shift's accepted
 units against `shifts.planned_qty`, and a close without it closes the shift with
@@ -1858,8 +1859,8 @@ a scan takes no revision, so devices read the list again to refresh totals) come
 poll of every device; a client keeps a closed shift's figures from the last answer that had them),
 while the answer of one shift (an entry, a leave, a closed shift read back) carries them for any
 non-planned status; `OfficeShift` carries
-`participants`, `byDevice` and `closeReasonMissing`. The export's `stationClosedAt` is the closing
-device's instant.
+`participants`, `byDevice` and `closeReasonMissing`. The export's `stationClosedAt` is the latest accepted close
+instant of the shift's devices (`NULL` when the office closed it).
 
 ## Signed documents and trust keys
 

@@ -1,5 +1,5 @@
 //! The ЧЗ document of a shared shift (plan 2b, spec §7 «Экспорты»): its operation instant is the
-//! close of the device that closed the shift, not an earlier part's; an office-closed shift has
+//! latest close among its devices (not the last-received one); an office-closed shift has
 //! none.
 
 mod support;
@@ -25,7 +25,7 @@ async fn station_closed_at(admin: &Admin, shift: &str) -> Value {
 }
 
 #[tokio::test]
-async fn a_shared_shifts_document_takes_the_instant_of_its_last_closer() {
+async fn a_shared_shifts_document_takes_the_latest_close_instant_when_closes_arrive_in_order() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
     let (a, b, shift, _) = shared(&admin, &setup, None).await;
@@ -39,6 +39,29 @@ async fn a_shared_shifts_document_takes_the_instant_of_its_last_closer() {
     };
     receipts(&admin.app, &a.key, &[close(instant(60, 0))]).await;
     receipts(&admin.app, &b.key, &[close(instant(120, 250))]).await;
+    assert_eq!(
+        station_closed_at(&admin, &shift).await,
+        json!(instant(120, 250))
+    );
+}
+
+#[tokio::test]
+async fn an_offline_stations_earlier_close_arriving_last_does_not_move_the_instant_back() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (a, b, shift, _) = shared(&admin, &setup, None).await;
+    let close = |at: String| {
+        fact(
+            &record_id(1),
+            "shift_closed",
+            &shift,
+            shift_closed(None, 0, 0, None, &at),
+        )
+    };
+    // B closed later by its own clock but its close arrives first; A's earlier close arrives last
+    // and closes the shift: the document still names the latest instant, with B's milliseconds.
+    receipts(&admin.app, &b.key, &[close(instant(120, 250))]).await;
+    receipts(&admin.app, &a.key, &[close(instant(60, 900))]).await;
     assert_eq!(
         station_closed_at(&admin, &shift).await,
         json!(instant(120, 250))

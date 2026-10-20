@@ -132,6 +132,53 @@ async fn the_first_closer_closes_its_part_and_the_last_one_closes_the_shift() {
 }
 
 #[tokio::test]
+async fn the_shifts_close_instant_is_the_latest_device_close_whatever_the_arrival_order() {
+    let closed_at = |shift: String, admin: support::app::Admin| async move {
+        let at: String = sqlx::query_scalar("SELECT closed_at FROM shifts WHERE id = ?")
+            .bind(&shift)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+        at
+    };
+    // In order: the last arrival is the latest instant.
+    let admin_in = admin().await;
+    let setup = shift_setup(&admin_in).await;
+    let (a, b, shift, _) = shared(&admin_in, &setup, None).await;
+    let close = |at: String, shift: &str| {
+        fact(
+            &record_id(1),
+            "shift_closed",
+            shift,
+            shift_closed(None, 0, 0, None, &at),
+        )
+    };
+    receipts(&admin_in.app, &a.key, &[close(instant(60, 0), &shift)]).await;
+    receipts(&admin_in.app, &b.key, &[close(instant(120, 0), &shift)]).await;
+    assert_eq!(
+        closed_at(shift, admin_in).await,
+        "2026-10-08T06:02:00Z".to_owned()
+    );
+    // Out of order: an offline station's earlier close arrives last; closed_by stays the last
+    // closer, closed_at is the latest instant (whole seconds, the host's format).
+    let admin_out = admin().await;
+    let setup = shift_setup(&admin_out).await;
+    let (a, b, shift, _) = shared(&admin_out, &setup, None).await;
+    receipts(&admin_out.app, &b.key, &[close(instant(120, 0), &shift)]).await;
+    receipts(&admin_out.app, &a.key, &[close(instant(60, 0), &shift)]).await;
+    let by: String = sqlx::query_scalar("SELECT closed_by FROM shifts WHERE id = ?")
+        .bind(&shift)
+        .fetch_one(&admin_out.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(by, a.id);
+    assert_eq!(
+        closed_at(shift, admin_out).await,
+        "2026-10-08T06:02:00Z".to_owned()
+    );
+}
+
+#[tokio::test]
 async fn the_last_closer_needs_no_reason_when_the_whole_shift_meets_the_plan() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;

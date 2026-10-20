@@ -35,6 +35,7 @@ use serde_json::Value;
 use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Actor, Entry, Outcome};
+use crate::clock::{format_timestamp, parse_timestamp};
 use crate::db::next_revision;
 use crate::error::ApiError;
 use crate::shifts;
@@ -539,11 +540,27 @@ async fn close_part(
         .await
         .map_err(ApiError::internal);
     }
+    // The shift closes at the LATEST instant of its device-closed parts, not the last-received
+    // one: an offline station's earlier close may arrive last. Every part's `closed_at` is in the
+    // host's whole-second format (`close_by_device`), so parsing them orders them; the `closed_by`
+    // below stays the last closer.
+    let parts: Vec<String> = sqlx::query_scalar(
+        "SELECT closed_at FROM shift_participants \
+         WHERE shift_id = ? AND closed_by_kind = 'device' AND closed_at IS NOT NULL",
+    )
+    .bind(&context.shift.id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    let mut latest = parse_timestamp(&close.closed_at).map_err(ApiError::internal)?;
+    for part in &parts {
+        latest = latest.max(parse_timestamp(part).map_err(ApiError::internal)?);
+    }
     sqlx::query(
         "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'device', \
          closed_by = ?, close_reason_code = ?, close_reason_missing = ?, rev = ? WHERE id = ?",
     )
-    .bind(&close.closed_at)
+    .bind(format_timestamp(latest))
     .bind(context.device_id)
     .bind(&close.reason_code)
     .bind(close.reason_missing)
