@@ -19,7 +19,6 @@ import {
   isOnline,
   shiftProgress,
   storeNearlyFull,
-  versionSkew,
 } from "./overview-model.js";
 import { recentCivilDays } from "./overview-time.js";
 
@@ -272,14 +271,7 @@ export function shiftDayRow(
 }
 
 export type AttentionKind =
-  | "conflicts"
-  | "device_silent"
-  | "backup"
-  | "license"
-  | "clock_skew"
-  | "store_full"
-  | "version_skew"
-  | "line_idle";
+  "conflicts" | "device_silent" | "backup" | "license" | "clock_skew" | "store_full" | "line_idle";
 
 export type AttentionSeverity = "err" | "warn" | "info";
 
@@ -305,7 +297,6 @@ export interface AttentionInput {
   backups: BackupState | null;
   license: OfficeLicense | null;
   settings: ExportSettings | null;
-  hostVersion: string | null;
   idleLines: readonly { lineName: string; shiftId: string; minutes: number }[];
   /** The host's clock (a device's age is measured by it), and this PC's. */
   nowMs: number;
@@ -318,8 +309,8 @@ const SEVERITY_ORDER: Record<AttentionSeverity, number> = { err: 0, warn: 1, inf
 
 /**
  * What needs a person, most serious first: conflicts waiting, devices not heard for more than
- * ten minutes, the copies, the license, the clocks, the store of files, a version apart, an
- * idle line. Built here from what the office reads; a host endpoint may take the rules over.
+ * ten minutes, the copies, the license, the clocks, the store of files, an
+ * idle line (app versions are never compared: the office, stations and handhelds have their own). Built here from what the office reads; a host endpoint may take the rules over.
  */
 export function attentionItems(input: AttentionInput): AttentionItem[] {
   const format = input.format ?? ((instant: string) => formatWhen(instant, null));
@@ -443,22 +434,6 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
       to: null,
       actionKey: null,
     });
-  }
-  if (input.devices !== null) {
-    const skewed = versionSkew(input.devices, input.hostVersion);
-    if (skewed.length > 0) {
-      items.push({
-        id: "versions",
-        kind: "version_skew",
-        severity: "warn",
-        titleKey: "office.overview.attention.versions.title",
-        titleValues: { count: skewed.length, version: input.hostVersion ?? "" },
-        detailKey: null,
-        detailValues: {},
-        to: "/devices",
-        actionKey: "office.overview.attention.device.action",
-      });
-    }
   }
   for (const line of input.idleLines) {
     items.push({

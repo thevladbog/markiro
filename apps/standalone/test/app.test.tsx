@@ -241,6 +241,7 @@ function fakeDevice(
       return paired;
     }),
     // A development build's answer; a test sets the installer's role.
+    repairPending: vi.fn<DeviceApi["repairPending"]>(async () => false),
     installRole: vi.fn<DeviceApi["installRole"]>(async () => null),
     changeAddress: vi.fn<DeviceApi["changeAddress"]>(async (address) => {
       if (!paired) throw new DeviceError("not_paired", "not paired");
@@ -608,7 +609,8 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget).toHaveBeenCalledTimes(1);
+    // The forget of «Подключить заново» keeps the device's ids for the claim.
+    expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
 
@@ -722,10 +724,13 @@ describe("App", () => {
         "На этом компьютере не отправлено на хост записей смен: 2. После сброса подключения они останутся на диске этого ПК, но отправить их на хост будет нельзя.",
       ),
     ).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined]]);
+    expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+    expect(device.forget.mock.calls).toEqual([
+      [{ repair: true }],
+      [{ keepUnsent: true, repair: true }],
+    ]);
   });
 
   it("counts the records of every pairing when the device config cannot be read", async () => {
@@ -741,7 +746,10 @@ describe("App", () => {
     expect(await screen.findByText(/не отправлено на хост записей смен: 3\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+    expect(device.forget.mock.calls).toEqual([
+      [{ repair: true }],
+      [{ keepUnsent: true, repair: true }],
+    ]);
   });
 
   it("asks the same of a device paired to another host than the one that answers, counting its own records", async () => {
@@ -762,7 +770,10 @@ describe("App", () => {
     expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+    expect(device.forget.mock.calls).toEqual([
+      [{ repair: true }],
+      [{ keepUnsent: true, repair: true }],
+    ]);
   });
 
   it("says there are records not yet sent, without a number, when this computer cannot count them", async () => {
@@ -820,7 +831,10 @@ describe("App", () => {
       "disabled",
       false,
     );
-    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+    expect(device.forget.mock.calls).toEqual([
+      [{ repair: true }],
+      [{ keepUnsent: true, repair: true }],
+    ]);
   });
 
   it("does not carry a confirmation over to the next refusal of the reconnected device", async () => {
@@ -890,7 +904,7 @@ describe("App", () => {
     expect(device.forget).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить, не вернув блоки" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined]]);
+    expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
   });
 
   it("asks about the blocks first and about the records not yet sent next", async () => {
@@ -918,7 +932,10 @@ describe("App", () => {
     expect(screen.queryByText(OWED)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+    expect(device.forget.mock.calls).toEqual([
+      [{ repair: true }],
+      [{ keepUnsent: true, repair: true }],
+    ]);
   });
 
   it("forgets at once when the restore is settled, or the obligation cannot be read", async () => {
@@ -947,7 +964,7 @@ describe("App", () => {
       await screen.findByText("Вход оператора");
       await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
       fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
-      await waitFor(() => expect(device.forget.mock.calls).toEqual([[undefined]]));
+      await waitFor(() => expect(device.forget.mock.calls).toEqual([[{ repair: true }]]));
       expect(screen.queryByText(OWED)).toBeNull();
       view.unmount();
     }
@@ -971,7 +988,7 @@ describe("App", () => {
     expect(device.forget).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить, не вернув блоки" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    expect(device.forget.mock.calls).toEqual([[undefined]]);
+    expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
   });
 
   it("does not carry the warning about the blocks over to the screen of another refusal", async () => {
@@ -1022,7 +1039,7 @@ describe("App", () => {
     // The count belongs to the refusal it was made for.
     expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
-    expect(device.forget.mock.calls).toEqual([[undefined]]);
+    expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
   });
 
   it("shows a repair failure on the config-error screen and keeps it visible", async () => {
@@ -1054,9 +1071,11 @@ describe("App", () => {
       device: fakeDevice(null),
       host: fakeHost(),
     });
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(
-      screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
+      screen.getByText(
+        "Это приложение говорит на более старом протоколе, чем принимает служба «Markiro Хост». Обновите приложение.",
+      ),
     ).toBeTruthy();
   });
 
@@ -1087,7 +1106,7 @@ describe("App", () => {
       host,
       updates: fakeUpdatesApi(),
     });
-    await screen.findByText("Версии не совпадают");
+    await screen.findByText("Приложение и хост несовместимы");
     expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
     expect(host.getDeviceUpdate).not.toHaveBeenCalled();
   });
@@ -1173,9 +1192,11 @@ describe("App", () => {
       device: fakeDevice(DEVICE_STATUS),
       host: fakeHost(),
     });
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(
-      screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
+      screen.getByText(
+        "Это приложение говорит на более старом протоколе, чем принимает служба «Markiro Хост». Обновите приложение.",
+      ),
     ).toBeTruthy();
     expect(screen.queryByText("Вход оператора")).toBeNull();
   });
@@ -1589,6 +1610,48 @@ describe("App", () => {
     expect(host.getChanges).toHaveBeenCalledWith(0);
   });
 
+  it("tells a station that waits to be paired again to enter the device's own code, and claims as a new device on request", async () => {
+    const payload = `markiro-host:1?h=192.168.1.10&p=45710&f=${"ab".repeat(32)}&c=7K3MQ9XV2D`;
+    const probe = {
+      hello: vi.fn<HostProbe["hello"]>(async (address) => {
+        if (address !== REMOTE_ADDRESS) throw new HostProbeError("unreachable", "no host here");
+        return observation(true);
+      }),
+    };
+    const device = fakeDevice(null);
+    device.repairPending.mockResolvedValue(true);
+    renderApp({ probe, device, host: fakeHost() });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключиться к хосту в сети" }));
+    expect(await screen.findByText(/подключается заново как то же устройство/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить как новое устройство" }));
+    fireEvent.change(await screen.findByLabelText("Код с экрана офиса"), {
+      target: { value: payload },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подключить" }));
+    await waitFor(() =>
+      expect(device.claim).toHaveBeenCalledWith({
+        address: REMOTE_ADDRESS,
+        fingerprint: "ab".repeat(32),
+        code: "7K3MQ9XV2D",
+        name: "Станция",
+        asNew: true,
+      }),
+    );
+  });
+
+  it("asks the pairing screen of a station with nothing to repair for no repair controls", async () => {
+    const device = fakeDevice(null);
+    renderApp({
+      probe: probeAnswering(new HostProbeError("unreachable", "down")),
+      device,
+      host: fakeHost(),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключиться к хосту в сети" }));
+    await screen.findByLabelText("Код с экрана офиса");
+    await waitFor(() => expect(device.repairPending).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Подключить как новое устройство" })).toBeNull();
+  });
+
   it("goes back from pairing in the network to the missing local host", async () => {
     renderApp({
       probe: probeAnswering(new HostProbeError("unreachable", "down")),
@@ -1606,7 +1669,7 @@ describe("App", () => {
       device: fakeDevice(DEVICE_STATUS),
       host: fakeHost(),
     });
-    await screen.findByText("Версии не совпадают");
+    await screen.findByText("Приложение и хост несовместимы");
     expect(screen.queryByRole("button", { name: "Подключиться к хосту в сети" })).toBeNull();
   });
 });
@@ -2865,7 +2928,10 @@ describe("the operator on the floor", () => {
     await act(async () => {
       failProbe(new HostProbeError("host_too_old", "old"));
     });
-    await screen.findByText("Служба «Markiro Хост» старее этого приложения.", { exact: false });
+    await screen.findByText(
+      "Служба «Markiro Хост» говорит на более старом протоколе, чем это приложение.",
+      { exact: false },
+    );
     // The floor comes back with a sign-in screen of its own, and only then
     // does the first screen's check finish: it ended with its screen.
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
@@ -4427,7 +4493,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     });
     await screen.findByText("Вход в офис");
     await link.status(REFUSING);
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Обновить с хоста" })).toBeTruthy();
   });
 
@@ -4445,7 +4511,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     });
     await screen.findByText("Вход в офис");
     await link.status(REFUSING);
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     await waitFor(() => expect(updates.checkManifest).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
   });
@@ -4466,7 +4532,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     });
     await screen.findByText("Вход в офис");
     await link.status(REFUSING);
-    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     await waitFor(() => expect(host.getDeviceUpdate).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
   });
@@ -4964,8 +5030,8 @@ describe("the floor's own controls in the status bar (beta 3)", () => {
     expect(device.forget).not.toHaveBeenCalled();
     scan("MRK-000742");
     await waitFor(() => expect(device.forget).toHaveBeenCalledTimes(1));
-    // Nothing waited to be sent: no `keepUnsent`.
-    expect(device.forget).toHaveBeenCalledWith(undefined);
+    // Nothing waited to be sent: no `keepUnsent`; the ids are kept for a re-pairing.
+    expect(device.forget).toHaveBeenCalledWith({ repair: true });
   });
 });
 

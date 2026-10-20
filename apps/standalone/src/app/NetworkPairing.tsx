@@ -34,6 +34,13 @@ export interface NetworkPairingProps {
   comScans?: ScanSource;
   /** Opens the scanner settings (a «Настройки сканера» button); none without it. */
   onScannerSetup?: () => void;
+  /**
+   * This station waits to be paired again as the device it was
+   * (`DeviceApi.repairPending`): the code to enter is the one the office made
+   * for that device, and the shell names the device in the claim. A person
+   * may choose «новое устройство» instead, and the code is an ordinary one.
+   */
+  repairing?: boolean;
 }
 
 /** A typed code waiting for a person to compare the host's fingerprint with the office screen. */
@@ -115,6 +122,7 @@ export function NetworkPairing({
   onBack,
   comScans,
   onScannerSetup,
+  repairing = false,
 }: NetworkPairingProps) {
   const { t } = useTranslation();
   const [manual, setManual] = useState(false);
@@ -129,6 +137,8 @@ export function NetworkPairing({
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  // «Новое устройство»: pair as a new device although a repair is pending.
+  const [asNew, setAsNew] = useState(false);
   // Canonical codes the host already refused on this screen (item H): plain
   // component state, so leaving this screen (a fresh mount) forgets them.
   const [refusedCodes, setRefusedCodes] = useState<ReadonlyMap<string, string>>(new Map());
@@ -179,7 +189,13 @@ export function NetworkPairing({
     return parsed.success ? parsed.data : null;
   };
 
-  const claim = async (input: ClaimInput) => {
+  // A code refused while it named the old device is not refused as an ordinary
+  // code: the host leaves it whole, so the mode is part of the memory's key.
+  const refusalKey = (canonical: string) =>
+    `${asNew || !repairing ? "new" : "repair"}|${canonical}`;
+
+  const claim = async (given: ClaimInput) => {
+    const input: ClaimInput = repairing && asNew ? { ...given, asNew: true } : given;
     try {
       // On success the shell leaves this screen.
       await onClaim(input);
@@ -188,7 +204,7 @@ export function NetworkPairing({
       const key = claimFailureKey(error);
       setNotice({ key });
       if (error instanceof DeviceError && REMEMBER_REFUSAL.has(error.code)) {
-        setRefusedCodes((codes) => new Map(codes).set(input.code, key));
+        setRefusedCodes((codes) => new Map(codes).set(refusalKey(input.code), key));
       }
       setBusy(false);
     }
@@ -216,7 +232,7 @@ export function NetworkPairing({
       return;
     }
     if (deviceName === null) return;
-    const remembered = refusedCodes.get(payload.code);
+    const remembered = refusedCodes.get(refusalKey(payload.code));
     if (remembered !== undefined) {
       // Already refused from this screen: do not spend another of the
       // host's five attempts probing or claiming with it again.
@@ -252,7 +268,7 @@ export function NetworkPairing({
     if (canonical === null) codeProblem = hasCyrillic(code) ? "layout" : "invalid";
     setCodeError(codeProblem);
     if (deviceName === null || url === null || canonical === null) return;
-    const remembered = refusedCodes.get(canonical);
+    const remembered = refusedCodes.get(refusalKey(canonical));
     if (remembered !== undefined) {
       // Already refused from this screen: skip the probe entirely, so a
       // retry with the same code cannot reach `claim` either.
@@ -421,7 +437,27 @@ export function NetworkPairing({
       titleAs="h2"
     >
       <div className="standalone-form">
-        <p>{t("shell.networkPairing.intro")}</p>
+        <p>
+          {t(
+            repairing && !asNew ? "shell.networkPairing.introRepair" : "shell.networkPairing.intro",
+          )}
+        </p>
+        {repairing && (
+          <div className="standalone-form__actions">
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={busy}
+              aria-pressed={asNew}
+              onClick={() => {
+                setAsNew((current) => !current);
+                setNotice(null);
+              }}
+            >
+              {t(asNew ? "shell.networkPairing.repairAgain" : "shell.networkPairing.asNew")}
+            </Button>
+          </div>
+        )}
         {notice && <Alert tone="error">{t(notice.key, notice.values ?? {})}</Alert>}
         {body()}
         <div className="standalone-form__actions">

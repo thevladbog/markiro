@@ -20,10 +20,9 @@ describe("«Устройства и версии»", () => {
     expect(summarize(STATUS)).toEqual({
       hostVersion: "0.3.0",
       total: 5,
-      current: 1,
-      behind: 1,
+      compatible: 2,
       incompatible: 1,
-      newer: 1,
+      hostOlder: 1,
       unknown: 1,
     });
   });
@@ -46,7 +45,7 @@ describe("«Устройства и версии»", () => {
     expect(block?.lines).toContainEqual(["Пакет на хосте", "проверен, 0.3.0"]);
     expect(block?.lines).toContainEqual([
       "Станция линии 2 (станция)",
-      "0.2.1 · протокол 3 · отстаёт",
+      "0.2.1 · протокол 3 · совместима",
     ]);
     expect(JSON.stringify(block)).not.toContain("7863191b");
     session.api.getUpdateStatus.mockRejectedValue(new Error("down"));

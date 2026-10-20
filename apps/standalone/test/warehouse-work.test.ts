@@ -172,6 +172,48 @@ describe("a label printed again from the warehouse (plan СКЛ)", () => {
     expect(fields["counterparty.name"]).toBe("ООО «Север»");
   });
 
+  it("prints an imported unit and box like a native one, from the imported record's own facts", async () => {
+    const imported = {
+      imported: true,
+      operatorName: null,
+      deviceId: "00000000-0000-0000-0000-000000000000",
+    };
+    const at = await station();
+    const unit = await scan(
+      at,
+      KM,
+      answering({ status: "found", source: { ...UNIT_SOURCE, ...imported } }),
+    );
+    expect(unit).toMatchObject({ kind: "printed", job: { state: "sent", kind: "unit" } });
+    const box = await scan(
+      at,
+      BOX_SSCC,
+      answering({ status: "found", source: { ...BOX_SOURCE, ...imported } }),
+    );
+    expect(box).toMatchObject({ kind: "printed", job: { state: "sent", kind: "box" } });
+    // The record names the imported subject as the host found it; nothing else of the job differs.
+    expect(records(at.db)).toEqual([
+      expect.objectContaining({ subjectKind: "unit", subjectId: UNIT_SOURCE.subjectId }),
+      expect.objectContaining({ subjectKind: "box", subjectId: BOX_SOURCE.subjectId }),
+    ]);
+  });
+
+  it("tells an imported record the label cannot be made of from a plain «not found»", async () => {
+    const at = await station();
+    for (const reason of [
+      "imported_no_shift",
+      "imported_no_production_date",
+      "imported_product_unknown",
+    ] as const) {
+      expect(await scan(at, BOX_SSCC, answering({ status: "unavailable", reason }))).toEqual({
+        kind: "unavailable",
+        reason,
+      });
+    }
+    expect(at.shell.sends).toHaveLength(0);
+    expect(records(at.db)).toEqual([]);
+  });
+
   it("says why nothing was printed: offline, not found, unavailable, an old host, a restore", async () => {
     const at = await station();
     const never = vi.fn(async (): Promise<WarehouseLookupResult> => ({ status: "not_found" }));

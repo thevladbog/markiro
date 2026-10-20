@@ -40,14 +40,16 @@ function summaryText(status: OfficeUpdateStatus, t: TFunction): string {
   const parts = [
     t("office.about.update.devices.summary", {
       host: summary.hostVersion,
-      current: summary.current,
+      compatible: summary.compatible,
       total: summary.total,
     }),
   ];
-  for (const state of ["behind", "incompatible", "newer", "unknown"] as const) {
-    if (summary[state] > 0) {
-      parts.push(t(`office.about.update.devices.count.${state}`, { count: summary[state] }));
-    }
+  for (const [state, count] of [
+    ["incompatible", summary.incompatible],
+    ["hostOlder", summary.hostOlder],
+    ["unknown", summary.unknown],
+  ] as const) {
+    if (count > 0) parts.push(t(`office.about.update.devices.count.${state}`, { count }));
   }
   return parts.join("; ");
 }

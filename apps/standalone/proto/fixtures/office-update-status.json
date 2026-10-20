@@ -20,7 +20,7 @@
       "protocol": 4,
       "versionSeenAt": "2026-11-03T07:10:00Z",
       "lastSeenAt": "2026-11-03T09:00:00Z",
-      "state": "current",
+      "state": "compatible",
       "downloaded": { "at": "2026-11-03T06:55:00Z", "version": "0.3.0" },
       "installStarted": { "at": "2026-11-03T07:00:00Z", "version": "0.3.0" }
     },
@@ -34,7 +34,7 @@
       "protocol": 3,
       "versionSeenAt": "2026-11-02T15:00:00Z",
       "lastSeenAt": "2026-11-03T08:59:00Z",
-      "state": "behind",
+      "state": "compatible",
       "downloaded": null,
       "installStarted": null
     },
@@ -62,7 +62,7 @@
       "protocol": 4,
       "versionSeenAt": "2026-11-03T08:00:00Z",
       "lastSeenAt": "2026-11-03T08:30:00Z",
-      "state": "newer",
+      "state": "host_older",
       "downloaded": null,
       "installStarted": null
     },

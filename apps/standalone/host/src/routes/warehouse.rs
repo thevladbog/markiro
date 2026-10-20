@@ -37,6 +37,7 @@ use serde_json::Value;
 use sqlx::SqliteConnection;
 
 use crate::auth::AuthDevice;
+use crate::cloud_history::warehouse as history;
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson};
 use crate::facts::rules;
@@ -177,6 +178,10 @@ async fn find_unit(
         .await
         .map_err(ApiError::internal)?;
     let Some((scan_id, canonical, scanned_at, operator_name, device_id, shift_id)) = row else {
+        // Not a native owner: the cloud history import may own it.
+        if let Some(imported) = history::find_unit(&mut *conn, code_hash).await? {
+            return Ok(imported);
+        }
         let seen: Option<i64> = sqlx::query_scalar(UNIT_SEEN_SQL)
             .bind(code_hash)
             .fetch_optional(&mut *conn)
@@ -207,6 +212,7 @@ async fn find_unit(
             box_count: None,
             operator_name,
             device_id,
+            imported: false,
         },
     })
 }
@@ -255,6 +261,7 @@ async fn find_sscc(
                 box_count: None,
                 operator_name,
                 device_id,
+                imported: false,
             },
         });
     }
@@ -276,7 +283,10 @@ async fn find_sscc(
     let Some((id, closed_at, boxes, items, disassembled_at, operator_name, device_id, shift_id)) =
         found
     else {
-        return Ok(WarehouseLookupResult::NotFound);
+        return Ok(match history::find_sscc(&mut *conn, sscc).await? {
+            Some(imported) => imported,
+            None => WarehouseLookupResult::NotFound,
+        });
     };
     if disassembled_at.is_some() {
         return Ok(WarehouseLookupResult::Unavailable {
@@ -302,6 +312,7 @@ async fn find_sscc(
             box_count: Some(u32::try_from(boxes.unwrap_or(0)).map_err(ApiError::internal)?),
             operator_name,
             device_id,
+            imported: false,
         },
     })
 }
@@ -437,24 +448,30 @@ pub const UNIT_EXISTS_SQL: &str = "SELECT 1 FROM scans WHERE id = ? AND code_has
 pub const BOX_EXISTS_SQL: &str = "SELECT 1 FROM boxes WHERE id = ? AND sscc = ?";
 pub const PALLET_EXISTS_SQL: &str = "SELECT 1 FROM pallets WHERE id = ? AND sscc = ?";
 
-/// Whether the host has the unit (its scan), the box or the pallet a record
-/// names, by its id and identity together.
+/// Where the host has the unit (its scan), the box or the pallet a record
+/// names, by its id and identity together: among the native ones (`Some(false)`),
+/// else among the cloud history import's completed batch (`Some(true)`).
 async fn subject_exists(
     conn: &mut SqliteConnection,
     record: &WarehouseRecord,
-) -> Result<bool, ApiError> {
-    let sql = match record.subject_kind {
-        WarehouseSubjectKind::Unit => UNIT_EXISTS_SQL,
-        WarehouseSubjectKind::Box => BOX_EXISTS_SQL,
-        WarehouseSubjectKind::Pallet => PALLET_EXISTS_SQL,
+) -> Result<Option<bool>, ApiError> {
+    let (native, imported) = match record.subject_kind {
+        WarehouseSubjectKind::Unit => (UNIT_EXISTS_SQL, history::UNIT_EXISTS_SQL),
+        WarehouseSubjectKind::Box => (BOX_EXISTS_SQL, history::BOX_EXISTS_SQL),
+        WarehouseSubjectKind::Pallet => (PALLET_EXISTS_SQL, history::PALLET_EXISTS_SQL),
     };
-    let found: Option<i64> = sqlx::query_scalar(sql)
-        .bind(&record.subject_id)
-        .bind(&record.identity)
-        .fetch_optional(conn)
-        .await
-        .map_err(ApiError::internal)?;
-    Ok(found.is_some())
+    for (sql, marker) in [(native, false), (imported, true)] {
+        let found: Option<i64> = sqlx::query_scalar(sql)
+            .bind(&record.subject_id)
+            .bind(&record.identity)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+        if found.is_some() {
+            return Ok(Some(marker));
+        }
+    }
+    Ok(None)
 }
 
 async fn receive(
@@ -491,17 +508,17 @@ async fn receive(
             rejected(Some(record.id), warehouse_receipt_codes::PAYLOAD_MISMATCH)
         });
     }
-    if !subject_exists(&mut *conn, &record).await? {
+    let Some(imported) = subject_exists(&mut *conn, &record).await? else {
         return Ok(rejected(
             Some(record.id),
             warehouse_receipt_codes::SUBJECT_UNKNOWN,
         ));
-    }
+    };
     sqlx::query(
         "INSERT INTO warehouse_reprints (device_id, record_id, digest, session_id, job_id, \
          attempt, subject_kind, subject_id, identity, reason_code, repair, template_id, \
-         template_rev, outcome, error_code, operator_id, occurred_at, received_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         template_rev, outcome, error_code, operator_id, occurred_at, received_at, imported) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(device_id)
     .bind(&record.id)
@@ -521,6 +538,7 @@ async fn receive(
     .bind(&record.operator_id)
     .bind(&record.occurred_at)
     .bind(received_at)
+    .bind(imported)
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;

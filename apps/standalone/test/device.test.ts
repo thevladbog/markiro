@@ -64,6 +64,38 @@ describe("Tauri device API", () => {
     expect(call).toHaveBeenLastCalledWith("device_forget", {});
   });
 
+  it("asks the shell to keep the device's ids when the forget is a repair", async () => {
+    const call = vi.fn().mockResolvedValue(null);
+    await createTauriDeviceApi(call).forget({ repair: true });
+    expect(call).toHaveBeenLastCalledWith("device_forget", { repair: true });
+    await createTauriDeviceApi(call).forget({ keepUnsent: true, repair: true });
+    expect(call).toHaveBeenLastCalledWith("device_forget", { keepUnsent: true, repair: true });
+    await createTauriDeviceApi(call).forget({ repair: false });
+    expect(call).toHaveBeenLastCalledWith("device_forget", {});
+  });
+
+  it("reads whether this station waits to be paired again as its old device", async () => {
+    const yes = vi.fn().mockResolvedValue(true);
+    await expect(createTauriDeviceApi(yes).repairPending()).resolves.toBe(true);
+    expect(yes).toHaveBeenCalledWith("device_repair_pending", {});
+    const no = vi.fn().mockResolvedValue(false);
+    await expect(createTauriDeviceApi(no).repairPending()).resolves.toBe(false);
+  });
+
+  it("sends asNew to the claim only when the person chose a new device", async () => {
+    const call = vi.fn().mockResolvedValue(DEVICE_STATUS);
+    const input = {
+      address: "https://192.168.1.10:45710",
+      fingerprint: "ab".repeat(32),
+      code: "7KQ2M9XRTD",
+      name: "Станция на линии 2",
+    };
+    await createTauriDeviceApi(call).claim({ ...input, asNew: true });
+    expect(call).toHaveBeenLastCalledWith("host_claim", { ...input, asNew: true });
+    await createTauriDeviceApi(call).claim({ ...input, asNew: false });
+    expect(call).toHaveBeenLastCalledWith("host_claim", input);
+  });
+
   it("keeps the shell's refusal while unsent records remain", async () => {
     const call = vi.fn().mockRejectedValue("unsent_facts");
     expect((await failure(createTauriDeviceApi(call).forget())).code).toBe("unsent_facts");

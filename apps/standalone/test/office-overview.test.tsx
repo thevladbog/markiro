@@ -10,7 +10,6 @@ import {
   shiftBuckets,
   shiftProgress,
   storeNearlyFull,
-  versionSkew,
 } from "../src/office/overview/overview-model.js";
 import { licenseOf } from "./support/license.js";
 import {
@@ -85,12 +84,6 @@ describe("the overview's reading of the host's lists", () => {
     expect(
       deviceSummary([device({ lastSeenAt: outside })], NOW.getTime()).byKind.station.online,
     ).toBe(0);
-  });
-
-  it("finds the devices on another version than the host, and none when the host's is unknown", () => {
-    const devices = [device({ id: "a" }), device({ id: "b", appVersion: "2.0.0" })];
-    expect(versionSkew(devices, "2.1.0").map((each) => each.id)).toEqual(["b"]);
-    expect(versionSkew(devices, null)).toEqual([]);
   });
 
   it("reads the clocks' difference and a nearly full store", () => {

@@ -204,7 +204,9 @@ describe("NetworkPairing", () => {
     const props = renderPairing({ probe });
     scan(PAYLOAD);
     expect(
-      await screen.findByText("Служба «Markiro Хост» старее этого приложения. Обновите службу."),
+      await screen.findByText(
+        "Служба «Markiro Хост» говорит на более старом протоколе, чем это приложение. Обновите службу.",
+      ),
     ).toBeTruthy();
     expect(props.onClaim).not.toHaveBeenCalled();
   });
@@ -635,5 +637,59 @@ describe("NetworkPairing on a station before pairing (owner feedback, first Wind
   it("offers no scanner settings where the app gives none", () => {
     renderPairing();
     expect(screen.queryByRole("button", { name: "Настройки сканера" })).toBeNull();
+  });
+});
+
+describe("NetworkPairing of a station waiting to be paired again as its old device", () => {
+  it("says which code is needed and sends no asNew by default", async () => {
+    const props = renderPairing({ repairing: true });
+    expect(screen.getByText(/подключается заново как то же устройство/)).toBeTruthy();
+    scan(PAYLOAD);
+    await waitFor(() => expect(props.onClaim).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(props.onClaim).mock.calls[0]?.[0]).toEqual({
+      address: "https://192.168.1.10:45710",
+      fingerprint: FINGERPRINT,
+      code: "7K3MQ9XV2D",
+      name: "Станция",
+    });
+  });
+
+  it("claims as a new device after «Подключить как новое устройство», and can return", async () => {
+    const props = renderPairing({ repairing: true });
+    fireEvent.click(screen.getByRole("button", { name: "Подключить как новое устройство" }));
+    expect(screen.queryByText(/подключается заново как то же устройство/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Вернуться к повторному подключению" }));
+    expect(screen.getByText(/подключается заново как то же устройство/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить как новое устройство" }));
+    scan(PAYLOAD);
+    await waitFor(() => expect(props.onClaim).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(props.onClaim).mock.calls[0]?.[0]).toMatchObject({ asNew: true });
+  });
+
+  it("shows no repair controls on a screen that is not a repair, and never sends asNew there", async () => {
+    const props = renderPairing();
+    expect(screen.queryByRole("button", { name: "Подключить как новое устройство" })).toBeNull();
+    scan(PAYLOAD);
+    await waitFor(() => expect(props.onClaim).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(props.onClaim).mock.calls[0]?.[0]).not.toHaveProperty("asNew");
+  });
+
+  it("remembers a refusal per mode: a code refused with the old id may still pair a new device", async () => {
+    const onClaim = vi
+      .fn<NetworkPairingProps["onClaim"]>()
+      .mockRejectedValueOnce(new DeviceError("pairing_code_invalid", "refused"))
+      .mockResolvedValue(undefined);
+    renderPairing({ repairing: true, onClaim });
+    scan(PAYLOAD);
+    await screen.findByText(
+      "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+    );
+    // The same code from the same mode is not sent again.
+    scan(PAYLOAD);
+    expect(onClaim).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Подключить как новое устройство" }));
+    scan(PAYLOAD);
+    await waitFor(() => expect(onClaim).toHaveBeenCalledTimes(2));
+    expect(onClaim.mock.calls[1]?.[0]).toMatchObject({ asNew: true });
   });
 });

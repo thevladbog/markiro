@@ -292,6 +292,9 @@ function AppScreens({
   // The scanner settings opened from the pairing screen (owner feedback, first
   // Windows test): the same settings as the floor's «Рабочее место», scanners only.
   const [scannerSetup, setScannerSetup] = useState(false);
+  // The station waits to be paired again as the device it was (a repair
+  // forget): read when the network pairing screen opens.
+  const [repairPending, setRepairPending] = useState(false);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   // The installer's role, `"unknown"` until the shell answers (plan УСТ). It
   // comes from the shell alone: nothing the page can write sets it.
@@ -498,6 +501,22 @@ function AppScreens({
     );
   }, [pairingDue, pairLocally]);
 
+  useEffect(() => {
+    if (view.kind !== "network_pairing") return;
+    let live = true;
+    deviceApi.repairPending().then(
+      (pending) => {
+        if (live) setRepairPending(pending);
+      },
+      () => {
+        if (live) setRepairPending(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [view.kind, deviceApi]);
+
   const claim = useCallback(
     async (input: ClaimInput) => {
       dispatch({ type: "paired", status: await deviceApi.claim(input) });
@@ -568,7 +587,9 @@ function AppScreens({
           return;
         }
         setOwed(null);
-        deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined).then(
+        // These screens forget in order to pair again: the shell keeps the ids
+        // of this device, so the office's code for it re-pairs the same device.
+        deviceApi.forget(keepUnsent ? { keepUnsent: true, repair: true } : { repair: true }).then(
           () => {
             setRepairState("idle");
             setUnsent(null);
@@ -825,7 +846,11 @@ function AppScreens({
             owesBlocks: () =>
               restoreDue(localDb, { hostId: forgetHostId, deviceId: forgetDeviceId }),
             forget: async (keepUnsent) => {
-              await deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined);
+              // The station may be paired again as this same device: the shell keeps
+              // its ids, and the pairing screen offers «новое устройство» instead.
+              await deviceApi.forget(
+                keepUnsent ? { keepUnsent: true, repair: true } : { repair: true },
+              );
               setUnsent(null);
               dispatch({ type: "forgotten" });
               retryProbe();
@@ -956,6 +981,7 @@ function AppScreens({
           onBack={() => dispatch({ type: "network_pairing_cancelled" })}
           comScans={comScans}
           onScannerSetup={() => setScannerSetup(true)}
+          repairing={repairPending}
         />
       )}
       {view.kind === "pair_failed" && (

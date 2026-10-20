@@ -78,7 +78,11 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     // The keyboard scanner is a row of the list: always on, nothing to set.
     expect(screen.getByText("Клавиатурный сканер")).toBeTruthy();
     expect(screen.getByText("Работает всегда, без настройки")).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Сканеры" }));
+    // The focus is taken by a passive effect, which React flushes after the commit the heading
+    // appeared in: wait for the focus itself, not for the heading.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Сканеры" })),
+    );
     for (const button of screen.getAllByRole("button")) {
       expect(button.style.height, button.textContent ?? "").toBe("var(--control-floor)");
     }
