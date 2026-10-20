@@ -6,6 +6,11 @@ import { readFile, lstat } from "node:fs/promises";
 import { canonical, digest, ensure, keys } from "../backup/schemas.mjs";
 import { assertPrivateRootSync, assertBindFileSync, readPrivateFile } from "./files.mjs";
 export const RECOVERY_BUNDLE_FILES = Object.freeze([
+  "deploy/platform/recovery-transport.mjs",
+  "deploy/platform/admit-release.mjs",
+  "deploy/platform/admission-process.mjs",
+  "deploy/platform/admission-archive.mjs",
+  "deploy/platform/admission-registry.mjs",
   "deploy/platform/host/command.mjs",
   "deploy/platform/host/observe.mjs",
   "deploy/platform/host/probe.mjs",
