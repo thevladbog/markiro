@@ -3,9 +3,11 @@
  */
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import {
   chmod,
   chown,
+  copyFile,
   cp,
   lstat,
   mkdir,
@@ -139,7 +141,12 @@ try {
     manifest.sources.generated.sha256,
   );
   phase = "copy ICU export archive";
-  await cp(join(exportRoot, "recovery-image.tar"), join(root, "recovery-image.tar"));
+  await copyFile(
+    join(exportRoot, "recovery-image.tar"),
+    join(root, "recovery-image.tar"),
+    constants.COPYFILE_EXCL,
+  );
+  await chown(join(root, "recovery-image.tar"), process.getuid(), process.getgid());
   await chmod(join(root, "recovery-image.tar"), 0o600);
   phase = "verify ICU export archive hash";
   const archive = await hashArchive(root, join(root, "recovery-image.tar"));

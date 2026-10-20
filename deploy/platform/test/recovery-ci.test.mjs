@@ -295,3 +295,19 @@ test("synthetic recovery harness provisions create-only same-worker runtime befo
   assert.ok(original > 0 && derived > original && producer > derived);
   assert.match(source, /mode: 0o600, flag: "wx"/u);
 });
+
+test("CI creates an exclusively owned archive copy before strict hashing", async () => {
+  const source = await readFile(new URL("../recovery-ci.mjs", import.meta.url), "utf8");
+  const copied = source.indexOf(`await copyFile(
+    join(exportRoot, "recovery-image.tar"),
+    join(root, "recovery-image.tar"),
+    constants.COPYFILE_EXCL,
+  )`);
+  const hashed = source.indexOf(
+    'const archive = await hashArchive(root, join(root, "recovery-image.tar"))',
+  );
+  const owned = source.indexOf(
+    'await chown(join(root, "recovery-image.tar"), process.getuid(), process.getgid())',
+  );
+  assert.ok(copied > 0 && owned > copied && hashed > owned);
+});
