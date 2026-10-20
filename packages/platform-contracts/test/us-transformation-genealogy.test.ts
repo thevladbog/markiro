@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as contracts from "../src/index.js";
+import { transformationV2 } from "./support/us-transformation-v2-fixture.js";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const requestSchema = Reflect.get(contracts, "transformationGenealogyRequestSchema") as
@@ -8,6 +9,45 @@ const resultSchema = Reflect.get(contracts, "transformationGenealogyResultSchema
   { safeParse(value: unknown): { success: boolean }; parse(value: unknown): unknown } | undefined;
 
 describe("Transformation genealogy read contract", () => {
+  it("accepts strict V2 genealogy and rejects forged captured processor facts", () => {
+    const snapshot = transformationV2;
+    const result = {
+      startLotId: id(2),
+      direction: "upstream",
+      mode: "current",
+      selectedRevisionIds: [id(1)],
+      lots: [{ id: id(2), currentOrigin: true }],
+      events: [{ id: id(1), rootId: id(1), revision: 1, status: "finalized", snapshot }],
+      links: [],
+      complete: true,
+      diagnostics: [],
+      balance: { state: "unknown", values: [] },
+    };
+    expect(resultSchema?.safeParse(result).success).toBe(true);
+    expect(
+      resultSchema?.safeParse({
+        ...result,
+        events: [
+          {
+            ...result.events[0],
+            snapshot: {
+              ...snapshot,
+              processor: {
+                ...snapshot.processor,
+                kdes: { ...snapshot.processor.kdes, businessName: "Forged processor" },
+              },
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      resultSchema?.safeParse({
+        ...result,
+        events: [{ ...result.events[0], snapshot: { ...snapshot, snapshotVersion: 99 } }],
+      }).success,
+    ).toBe(false);
+  });
   it("exports strict read schemas", () => {
     expect(requestSchema).toBeDefined();
     expect(resultSchema).toBeDefined();

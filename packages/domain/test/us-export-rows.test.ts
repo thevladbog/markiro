@@ -10,6 +10,7 @@ import {
   snapshotV3,
 } from "../../platform-contracts/test/support/us-receiving-lifecycle-fixture.js";
 import { buildUsExportRows, compareExportRowIdentity } from "../src/traceability/export/rows.js";
+import { transformationV2 } from "../../platform-contracts/test/support/us-transformation-v2-fixture.js";
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
 const originalLine = at(snapshotV1.items, 0);
@@ -199,6 +200,112 @@ function input(
 }
 
 describe("US saved source rows", () => {
+  it("projects V2 split KDEs only from captured facts and keeps original display text", () => {
+    const captured = structuredClone(transformationV2);
+    const master = structuredClone(transformationV2);
+    master.processor.kdes.businessName = "Current master must not enter export";
+    at(master.inputs, 0).product.kdes.productName = "Current product must not enter export";
+    const rows = buildUsExportRows({
+      events: [
+        {
+          type: "transformation",
+          eventId: captured.eventId,
+          revision: 1,
+          timeZone: captured.timeZone,
+          lifecycle: "current_finalized",
+          payload: { kind: "frozen", snapshot: captured },
+        },
+      ],
+    });
+    expect(
+      rows.map((row) => [
+        row.values.product_name,
+        row.values.product_packaging_size_value,
+        row.values.tlc_source_business_name,
+        row.values.transformation_location_business_name,
+        row.values.snapshot_version,
+      ]),
+    ).toEqual([
+      ["Apple slices", "25.000", "Captured supplier", "Synthetic receiver", "2"],
+      ["Apple slices", "25.000", "Synthetic receiver", "Synthetic receiver", "2"],
+    ]);
+    expect(rows[0]?.values.tlc_source_reference_value).toBe(
+      "https://supplier.example.test/source/Ä?lot=001",
+    );
+    expect(rows[0]?.values.product_description_original).toBe("  Captured apples | opaque  ");
+    expect(rows[1]?.values.transformation_location_description_original).toBe(
+      "  Captured processor | opaque  ",
+    );
+    expect(rows[0]?.values).toMatchObject({
+      product_brand_name: "Test Orchard",
+      product_commodity: "Apple",
+      product_variety: "Gala",
+      product_packaging_size_uom: "lb",
+      product_packaging_style: "Case",
+      product_gtin: "00000000000000",
+      tlc_source_phone_number: "+1 509 555 0100",
+      tlc_source_address_kind: "street",
+      tlc_source_street_address_or_coordinates: "100 Test Way",
+      tlc_source_city: "Yakima",
+      tlc_source_state_or_region: "WA",
+      tlc_source_zip_or_postal_code: "98901",
+      tlc_source_country_code: "US",
+      tlc_source_country_display: "United States",
+    });
+    expect(captured).toEqual(transformationV2);
+  });
+  it("projects captured V2 coordinates and non-FTL lines without inventing lot fields", () => {
+    const snapshot = structuredClone(transformationV2);
+    const original = at(snapshot.inputs, 0);
+    const rows = buildUsExportRows({
+      events: [
+        {
+          type: "transformation",
+          eventId: snapshot.eventId,
+          revision: 1,
+          lifecycle: "current_finalized",
+          timeZone: snapshot.timeZone,
+          payload: {
+            kind: "frozen",
+            snapshot: {
+              ...snapshot,
+              inputs: [
+                {
+                  lineNo: 1,
+                  product: original.product,
+                  source: {
+                    kind: "location",
+                    description: "Saved salt supplier",
+                    kdes: {
+                      ...original.source.kdes,
+                      address: {
+                        kind: "coordinates",
+                        latitude: "45.001000",
+                        longitude: "-120.020000",
+                      },
+                    },
+                  },
+                  reference: "Salt batch A",
+                  quantity: "1",
+                  unitOfMeasure: "lb",
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(rows[0]?.values).toMatchObject({
+      lot_id: null,
+      tlc: null,
+      non_ftl_reference: "Salt batch A",
+      product_name: "Apple slices",
+      tlc_source_address_kind: "coordinates",
+      tlc_source_street_address_or_coordinates: "45.001000, -120.020000",
+      tlc_source_reference_kind: null,
+      tlc_source_reference_value: null,
+    });
+  });
   it("uses captured pin identity and timezone even when frozen payload carries its own header", () => {
     if (transformation.payload.kind !== "frozen" || shipping.payload.kind !== "frozen")
       throw new Error("Expected frozen fixtures");
@@ -316,9 +423,37 @@ describe("US saved source rows", () => {
     expect(rows[1]?.values.tlc_source_reference_value).toBe("https://example.test/Two");
   });
 
+  it("never treats stray structured values on a legacy version as captured V2 facts", () => {
+    const legacy = { ...transformationV2, snapshotVersion: 1 as const };
+    const rows = buildUsExportRows({
+      events: [
+        {
+          type: "transformation",
+          eventId: legacy.eventId,
+          revision: 1,
+          timeZone: legacy.timeZone,
+          lifecycle: "current_finalized",
+          payload: { kind: "frozen", snapshot: legacy },
+        },
+      ],
+    });
+    expect(
+      rows.map((row) => [
+        row.values.product_name,
+        row.values.tlc_source_business_name,
+        row.values.transformation_location_business_name,
+        row.values.snapshot_version,
+      ]),
+    ).toEqual([
+      [null, null, null, "1"],
+      [null, null, null, "1"],
+    ]);
+  });
+
   it("retains a non-FTL input as its own row without fabricating a lot or TLC", () => {
     if (transformation.payload.kind !== "frozen") throw new Error("Expected frozen fixture");
     const snapshot = transformation.payload.snapshot;
+    if (snapshot.snapshotVersion !== 1) throw new Error("Expected legacy V1 fixture");
     const rows = buildUsExportRows(
       input([
         {

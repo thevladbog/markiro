@@ -50,6 +50,10 @@ type TransformationLine = LineValues & {
   readonly product: { readonly id: string; readonly description: string };
   readonly source: SourceReference & { readonly description: string };
 };
+type TransformationLineV2 = TransformationLine & {
+  readonly product: TransformationLine["product"] & { readonly kdes: SavedProduct };
+  readonly source: TransformationLine["source"] & { readonly kdes: SavedLocation };
+};
 type ShippingLine = LineValues & {
   readonly lineNo: number;
   readonly product: { readonly id: string; readonly description: SavedProduct };
@@ -109,11 +113,24 @@ export type ExportRowsSourceRecord = CapturedEvent &
         readonly payload:
           | {
               readonly kind: "frozen";
-              readonly snapshot: FrozenHeader & {
-                readonly processor: { readonly description: string };
-                readonly inputs: readonly TransformationLine[];
-                readonly outputs: readonly TransformationLine[];
-              };
+              readonly snapshot: FrozenHeader &
+                (
+                  | {
+                      readonly snapshotVersion: 1;
+                      readonly processor: { readonly description: string };
+                      readonly inputs: readonly TransformationLine[];
+                      readonly outputs: readonly TransformationLine[];
+                    }
+                  | {
+                      readonly snapshotVersion: 2;
+                      readonly processor: {
+                        readonly description: string;
+                        readonly kdes: SavedLocation;
+                      };
+                      readonly inputs: readonly TransformationLineV2[];
+                      readonly outputs: readonly TransformationLineV2[];
+                    }
+                );
             }
           | {
               readonly kind: "saved_draft";
@@ -326,7 +343,12 @@ export function buildUsExportRows(input: ExportRowsInput): readonly CanonicalExp
           eventDate: snapshot.eventDate,
           snapshotVersion: snapshot.snapshotVersion,
           documents: snapshot.documents,
-          context: { "original.transformationLocationDescription": snapshot.processor.description },
+          context: {
+            "original.transformationLocationDescription": snapshot.processor.description,
+            ...(snapshot.snapshotVersion === 2
+              ? locationContext("transformationLocation", snapshot.processor.kdes)
+              : {}),
+          },
         };
         for (const [role, lines] of [
           ["input", snapshot.inputs],
@@ -342,6 +364,14 @@ export function buildUsExportRows(input: ExportRowsInput): readonly CanonicalExp
                   "original.tlcSourceDescription":
                     role === "output" ? snapshot.processor.description : line.source.description,
                   ...sourceReferenceContext(line.source),
+                  ...(snapshot.snapshotVersion === 2 &&
+                  "kdes" in line.product &&
+                  "kdes" in line.source
+                    ? {
+                        ...productContext(line.product.kdes),
+                        ...locationContext("tlcSource.location", line.source.kdes),
+                      }
+                    : {}),
                 },
               }),
             );

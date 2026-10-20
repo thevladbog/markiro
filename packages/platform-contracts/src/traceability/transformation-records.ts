@@ -5,6 +5,8 @@ import { traceabilityCivilDateSchema, traceabilityQuantitySchema } from "./event
 import { preservedTlcSchema } from "./lots.js";
 import { provisionUsTraceabilityProfileSchema } from "./profile.js";
 import { transformationDraftSchema } from "./transformation-draft.js";
+import { productDescriptionSnapshotSchema } from "./products.js";
+import { locationDescriptionSnapshotSchema } from "./receiving-finalization-v1.js";
 
 const version = z.number().int().min(1).max(2147483647);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -143,7 +145,7 @@ const snapshotOutput = z
     unitOfMeasure: transformationDraftSchema.shape.outputs.element.shape.unitOfMeasure.unwrap(),
   })
   .strict();
-export const transformationFinalizationSnapshotV1Schema = z
+const snapshotV1 = z
   .object({
     snapshotVersion: z.literal(1),
     eventId: identity,
@@ -165,69 +167,132 @@ export const transformationFinalizationSnapshotV1Schema = z
     finalizedBy: actor,
     finalizedAt: z.iso.datetime(),
   })
+  .strict();
+function refineSnapshot(
+  snapshot: Omit<z.infer<typeof snapshotV1>, "snapshotVersion">,
+  context: z.RefinementCtx,
+) {
+  const duplicate = (path: (string | number)[], message: string) =>
+    context.addIssue({ code: "custom", path, message });
+  if ((snapshot.revision === 1) !== (snapshot.previousRevisionId === undefined))
+    duplicate(["previousRevisionId"], "Predecessor required only after revision 1");
+  const inputLines = new Set<number>();
+  const inputLots = new Set<string>();
+  snapshot.inputs.forEach((input, index) => {
+    const expectedFtl = input.kind === "ftl_lot";
+    const actualFtl = ["covered", "contains_ftl_same_form"].includes(
+      input.product.coverage.coverageStatus,
+    );
+    if (expectedFtl ? !actualFtl : input.product.coverage.coverageStatus !== "not_covered")
+      duplicate(
+        ["inputs", index, "product", "coverage"],
+        "Coverage must match the input classification",
+      );
+    if (inputLines.has(input.lineNo))
+      duplicate(["inputs", index, "lineNo"], "Duplicate input line");
+    inputLines.add(input.lineNo);
+    if (input.kind === "ftl_lot") {
+      const lotId = input.lotId.toLowerCase();
+      if (inputLots.has(lotId)) duplicate(["inputs", index, "lotId"], "Duplicate input lot");
+      inputLots.add(lotId);
+    }
+  });
+  const outputLines = new Set<number>();
+  const outputLots = new Set<string>();
+  snapshot.outputs.forEach((output, index) => {
+    if (!["covered", "contains_ftl_same_form"].includes(output.product.coverage.coverageStatus))
+      duplicate(["outputs", index, "product", "coverage"], "Output requires reviewed FTL coverage");
+    if (outputLines.has(output.lineNo))
+      duplicate(["outputs", index, "lineNo"], "Duplicate output line");
+    outputLines.add(output.lineNo);
+    const lotId = output.lotId.toLowerCase();
+    if (outputLots.has(lotId)) duplicate(["outputs", index, "lotId"], "Duplicate output lot");
+    if (inputLots.has(lotId))
+      duplicate(["outputs", index, "lotId"], "Input lot cannot be an output lot");
+    outputLots.add(lotId);
+    if (
+      output.source.id.toLowerCase() !== snapshot.processor.id.toLowerCase() ||
+      output.source.description !== snapshot.processor.description
+    )
+      duplicate(["outputs", index, "source"], "Output source must be the processor");
+  });
+  const documentIds = new Set<string>();
+  snapshot.documents.forEach((document, index) => {
+    const id = document.id.toLowerCase();
+    if (documentIds.has(id)) duplicate(["documents", index, "id"], "Duplicate document");
+    documentIds.add(id);
+  });
+}
+export const transformationFinalizationSnapshotV1Schema = snapshotV1.superRefine(refineSnapshot);
+
+const productV2 = product
+  .extend({ kdes: productDescriptionSnapshotSchema })
+  .strict()
+  .refine((value) => value.id.toLowerCase() === value.kdes.sourceProductId.toLowerCase(), {
+    path: ["kdes", "sourceProductId"],
+    message: "Product KDE identity must match the captured product",
+  });
+const locationV2 = location
+  .extend({ kdes: locationDescriptionSnapshotSchema })
+  .strict()
+  .refine((value) => value.id.toLowerCase() === value.kdes.locationId.toLowerCase(), {
+    path: ["kdes", "locationId"],
+    message: "Location KDE identity must match the captured location",
+  });
+const locationSourceV2 = locationV2.safeExtend({ kind: z.literal("location") }).strict();
+const lotSourceV2 = z.discriminatedUnion("kind", [
+  locationSourceV2,
+  locationV2
+    .safeExtend({
+      kind: z.literal("reference"),
+      referenceKind: z.literal("web_url"),
+      referenceValue: z.string().max(1024).refine(isTlcSourceReferenceUrl),
+    })
+    .strict(),
+]);
+export const transformationFinalizationSnapshotV2Schema = snapshotV1
+  .extend({
+    snapshotVersion: z.literal(2),
+    processor: locationV2,
+    inputs: z
+      .array(
+        z.discriminatedUnion("kind", [
+          snapshotInput.options[0].extend({ product: productV2, source: lotSourceV2 }).strict(),
+          snapshotInput.options[1]
+            .extend({ product: productV2, source: locationSourceV2 })
+            .strict(),
+        ]),
+      )
+      .min(1)
+      .max(100),
+    outputs: z
+      .array(snapshotOutput.extend({ product: productV2, source: locationSourceV2 }).strict())
+      .min(1)
+      .max(100),
+  })
   .strict()
   .superRefine((snapshot, context) => {
-    const duplicate = (path: (string | number)[], message: string) =>
-      context.addIssue({ code: "custom", path, message });
-    if ((snapshot.revision === 1) !== (snapshot.previousRevisionId === undefined))
-      duplicate(["previousRevisionId"], "Predecessor required only after revision 1");
-    const inputLines = new Set<number>();
-    const inputLots = new Set<string>();
-    snapshot.inputs.forEach((input, index) => {
-      const expectedFtl = input.kind === "ftl_lot";
-      const actualFtl = ["covered", "contains_ftl_same_form"].includes(
-        input.product.coverage.coverageStatus,
-      );
-      if (expectedFtl ? !actualFtl : input.product.coverage.coverageStatus !== "not_covered")
-        duplicate(
-          ["inputs", index, "product", "coverage"],
-          "Coverage must match the input classification",
-        );
-      if (inputLines.has(input.lineNo))
-        duplicate(["inputs", index, "lineNo"], "Duplicate input line");
-      inputLines.add(input.lineNo);
-      if (input.kind === "ftl_lot") {
-        const lotId = input.lotId.toLowerCase();
-        if (inputLots.has(lotId)) duplicate(["inputs", index, "lotId"], "Duplicate input lot");
-        inputLots.add(lotId);
-      }
-    });
-    const outputLines = new Set<number>();
-    const outputLots = new Set<string>();
+    refineSnapshot(snapshot, context);
     snapshot.outputs.forEach((output, index) => {
-      if (!["covered", "contains_ftl_same_form"].includes(output.product.coverage.coverageStatus))
-        duplicate(
-          ["outputs", index, "product", "coverage"],
-          "Output requires reviewed FTL coverage",
-        );
-      if (outputLines.has(output.lineNo))
-        duplicate(["outputs", index, "lineNo"], "Duplicate output line");
-      outputLines.add(output.lineNo);
-      const lotId = output.lotId.toLowerCase();
-      if (outputLots.has(lotId)) duplicate(["outputs", index, "lotId"], "Duplicate output lot");
-      if (inputLots.has(lotId))
-        duplicate(["outputs", index, "lotId"], "Input lot cannot be an output lot");
-      outputLots.add(lotId);
-      if (
-        output.source.id.toLowerCase() !== snapshot.processor.id.toLowerCase() ||
-        output.source.description !== snapshot.processor.description
-      )
-        duplicate(["outputs", index, "source"], "Output source must be the processor");
-    });
-    const documentIds = new Set<string>();
-    snapshot.documents.forEach((document, index) => {
-      const id = document.id.toLowerCase();
-      if (documentIds.has(id)) duplicate(["documents", index, "id"], "Duplicate document");
-      documentIds.add(id);
+      if (JSON.stringify(output.source.kdes) !== JSON.stringify(snapshot.processor.kdes))
+        context.addIssue({
+          code: "custom",
+          path: ["outputs", index, "source", "kdes"],
+          message: "Output source KDEs must equal the captured processor KDEs",
+        });
     });
   });
+export const transformationFinalizationSnapshotSchema = z.discriminatedUnion("snapshotVersion", [
+  transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotV2Schema,
+]);
 export const transformationFinalizedRecordSchema = z
   .object({
     ...recordBase,
     status: z.literal("finalized"),
     finalizedAt: z.iso.datetime(),
     finalizedBy: actor,
-    snapshot: transformationFinalizationSnapshotV1Schema,
+    snapshot: transformationFinalizationSnapshotSchema,
   })
   .strict()
   .superRefine((value, context) => {
@@ -253,4 +318,10 @@ export type TransformationDraftRecord = z.infer<typeof transformationDraftRecord
 export type TransformationFinalizedRecord = z.infer<typeof transformationFinalizedRecordSchema>;
 export type TransformationFinalizationSnapshotV1 = z.infer<
   typeof transformationFinalizationSnapshotV1Schema
+>;
+export type TransformationFinalizationSnapshotV2 = z.infer<
+  typeof transformationFinalizationSnapshotV2Schema
+>;
+export type TransformationFinalizationSnapshot = z.infer<
+  typeof transformationFinalizationSnapshotSchema
 >;

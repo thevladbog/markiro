@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { usExportBuildIdentitySchema, usExportInputV1Schema } from "../src/index.js";
+import { transformationV2 } from "./support/us-transformation-v2-fixture.js";
 import {
   at,
   draft,
@@ -135,6 +136,39 @@ const shipping = {
 };
 
 describe("US frozen export input", () => {
+  it("accepts strict captured Transformation V2 while retaining pin and lifecycle validation", () => {
+    const snapshot = transformationV2;
+    const event = {
+      type: "transformation",
+      eventId: snapshot.eventId,
+      revision: 1,
+      timeZone: snapshot.timeZone,
+      lifecycle: "current_finalized",
+      payload: { kind: "frozen", snapshot },
+    };
+    const input = { ...valid, events: [event] };
+    expect(usExportInputV1Schema.safeParse(input).success).toBe(true);
+    for (const bad of [
+      { ...event, revision: 2 },
+      { ...event, lifecycle: "draft" },
+      { ...event, timeZone: "America/Los_Angeles" },
+      { ...event, payload: { kind: "frozen", snapshot: { ...snapshot, snapshotVersion: 99 } } },
+      {
+        ...event,
+        payload: {
+          kind: "frozen",
+          snapshot: {
+            ...snapshot,
+            processor: {
+              ...snapshot.processor,
+              kdes: { ...snapshot.processor.kdes, businessName: "Forged processor" },
+            },
+          },
+        },
+      },
+    ])
+      expect(usExportInputV1Schema.safeParse({ ...input, events: [bad] }).success).toBe(false);
+  });
   it.each([
     ["transformation", transformation],
     ["shipping", shipping],

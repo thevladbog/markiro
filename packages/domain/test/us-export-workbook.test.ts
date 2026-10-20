@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  transformationV1,
+  transformationV2,
+} from "../../platform-contracts/test/support/us-transformation-v2-fixture.js";
 import type { ExportInputV1 } from "../../platform-contracts/src/traceability/export-core.js";
 import {
   at,
@@ -125,6 +129,155 @@ function transformationApplicabilityFixture(): ExportWorkbookInput {
 }
 
 describe("US workbook model", () => {
+  it("keeps literal V1 missing KDEs source-linked without reconstructing opaque text", () => {
+    const base = fixture();
+    const result = buildUsExportWorkbook({
+      ...base,
+      events: [
+        {
+          type: "transformation",
+          eventId,
+          revision: 1,
+          lifecycle: "current_finalized",
+          timeZone: "America/Chicago",
+          payload: { kind: "frozen", snapshot: transformationV1 },
+        },
+      ],
+    });
+    const missing = result.findings.filter((finding) => finding.code === "REQUIRED_KDE_MISSING");
+    expect(missing.map(({ lineNo, fieldKey }) => [lineNo, fieldKey])).toEqual([
+      [1, "product_name"],
+      [1, "product_packaging_size_uom"],
+      [1, "product_packaging_size_value"],
+      [1, "product_packaging_style"],
+      [1, "product_name"],
+      [1, "product_packaging_size_uom"],
+      [1, "product_packaging_size_value"],
+      [1, "product_packaging_style"],
+      [1, "tlc_source_address_kind"],
+      [1, "tlc_source_business_name"],
+      [1, "tlc_source_city"],
+      [1, "tlc_source_country_code"],
+      [1, "tlc_source_country_display"],
+      [1, "tlc_source_phone_number"],
+      [1, "tlc_source_state_or_region"],
+      [1, "tlc_source_street_address_or_coordinates"],
+      [1, "tlc_source_zip_or_postal_code"],
+      [1, "transformation_location_address_kind"],
+      [1, "transformation_location_business_name"],
+      [1, "transformation_location_city"],
+      [1, "transformation_location_country_code"],
+      [1, "transformation_location_country_display"],
+      [1, "transformation_location_phone_number"],
+      [1, "transformation_location_state_or_region"],
+      [1, "transformation_location_street_address_or_coordinates"],
+      [1, "transformation_location_zip_or_postal_code"],
+    ]);
+    expect(
+      missing.map(({ eventId, revision, sourceRecord, severity }) => [
+        eventId,
+        revision,
+        sourceRecord,
+        severity,
+      ]),
+    ).toEqual([
+      ...Array.from({ length: 4 }, () => [
+        "00000000-0000-4000-8000-000000000001",
+        1,
+        "transformation:00000000-0000-4000-8000-000000000001:1:input:1",
+        "error",
+      ]),
+      ...Array.from({ length: 22 }, () => [
+        "00000000-0000-4000-8000-000000000001",
+        1,
+        "transformation:00000000-0000-4000-8000-000000000001:1:output:1",
+        "error",
+      ]),
+    ]);
+    expect(result.model?.mode).toBe("available_records_incomplete");
+  });
+  it.each([2, 99])("keeps Shipping version %s unsupported", (snapshotVersion) => {
+    const base = fixture();
+    const input = {
+      ...base,
+      events: [
+        {
+          type: "shipping",
+          eventId,
+          revision: 1,
+          lifecycle: "current_finalized",
+          timeZone: "America/Chicago",
+          payload: {
+            kind: "frozen",
+            snapshot: {
+              snapshotVersion,
+              eventDate: "2026-09-07",
+              documents: [],
+              shipFrom: snapshotV3.locationDescription,
+              recipient: snapshotV3.previousSourceDescription,
+              items: [],
+            },
+          },
+        },
+      ],
+    };
+    Object.assign(base, input);
+    expect(() => buildUsExportWorkbook(base)).toThrow(
+      expect.objectContaining({
+        code: "INVALID_SOURCE_RECORD",
+        sourceRecord: `shipping:${eventId}:1`,
+      }),
+    );
+  });
+  it("rejects unknown Transformation versions before returning rows", () => {
+    const base = fixture();
+    Object.assign(base, {
+      events: [
+        {
+          type: "transformation",
+          eventId,
+          revision: 1,
+          lifecycle: "current_finalized",
+          timeZone: "America/Chicago",
+          payload: { kind: "frozen", snapshot: { ...transformationV2, snapshotVersion: 99 } },
+        },
+      ],
+    });
+    expect(() => buildUsExportWorkbook(base)).toThrow(
+      expect.objectContaining({
+        code: "INVALID_SOURCE_RECORD",
+        sourceRecord: `transformation:${eventId}:1`,
+      }),
+    );
+  });
+  it("exports complete captured V2 KDEs and retains numeric info findings", () => {
+    const base = fixture();
+    const result = buildUsExportWorkbook({
+      ...base,
+      events: [
+        {
+          type: "transformation",
+          eventId,
+          revision: 1,
+          lifecycle: "current_finalized",
+          timeZone: "America/Chicago",
+          payload: { kind: "frozen", snapshot: transformationV2 },
+        },
+      ],
+    });
+    expect(result.model?.mode).toBe("export_ready_candidate");
+    expect(
+      result.findings.map(({ fieldKey, code, severity }) => [fieldKey, code, severity]),
+    ).toEqual([
+      ["product_packaging_size_value", "NUMERIC_LEXEME_PRESERVED_AS_TEXT", "info"],
+      ["quantity", "NUMERIC_LEXEME_PRESERVED_AS_TEXT", "info"],
+      ["product_packaging_size_value", "NUMERIC_LEXEME_PRESERVED_AS_TEXT", "info"],
+    ]);
+    expect(cell(result.model, "Transformation", "product_name")).toEqual({
+      kind: "text",
+      value: "Apple slices",
+    });
+  });
   it.each(["5.00", "05", "-0"])(
     "retains noncanonical safe numeric lexeme %s as text with its own info finding",
     (quantity) => {

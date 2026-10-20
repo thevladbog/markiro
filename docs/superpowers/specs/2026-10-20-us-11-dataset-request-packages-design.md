@@ -13,6 +13,13 @@ The approved six-month design remains authoritative. Dataset completion remains
 false: CLI orchestration, final viewer/browser acceptance and deployment are
 separate gates.
 
+The first actual Scenario A run exposed a native prerequisite: Transformation
+v1 retains only opaque product/location text and cannot supply 30 required export
+KDEs. Complete the separately reviewed
+`2026-10-20-us-11-transformation-structured-snapshot-design.md` before continuing
+the adapter. It permits a new V2 contract and additive migration for future
+finalizations only; it does not permit hydration or rewriting legacy V1 facts.
+
 Keep the recipe and digest unchanged. Requests are exactly:
 
 | Unit                 | Reference               | Owned regular chains              |
@@ -69,7 +76,9 @@ month business window. Use plainly synthetic contact/note content.
 Record the Request-stage receipt only after the actual row, owner, dates,
 scope and bound native selection are verified. Run the existing Validate API
 with the recorded revision for a new pending package; its digest must equal the
-owned captured selection. Unexpected findings stop export preparation. This
+owned captured selection. Error/warning findings stop export preparation. Native
+informational findings, including exact numeric-lexeme preservation, remain in
+the frozen snapshot, report and manifest and are not themselves blockers. This
 adapter does not silently acknowledge warnings or bypass blocking findings.
 
 ## Atomic queued run

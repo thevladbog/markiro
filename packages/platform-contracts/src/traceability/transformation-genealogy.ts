@@ -1,7 +1,7 @@
 import { UOM_CODES_V1 } from "@markiro/domain";
 import { z } from "zod";
 import { platformUuidSchema } from "../primitives.js";
-import { transformationFinalizationSnapshotV1Schema } from "./transformation-records.js";
+import { transformationFinalizationSnapshotSchema } from "./transformation-records.js";
 
 const revisionIds = z
   .array(platformUuidSchema)
@@ -50,7 +50,7 @@ const event = z
     rootId: platformUuidSchema,
     revision: z.number().int().min(1),
     status: z.enum(["finalized", "amended", "void"]),
-    snapshot: transformationFinalizationSnapshotV1Schema.nullable(),
+    snapshot: transformationFinalizationSnapshotSchema.nullable(),
   })
   .strict()
   .refine(

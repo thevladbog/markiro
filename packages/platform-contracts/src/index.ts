@@ -576,6 +576,8 @@ export {
   finalizeTransformationSchema,
   transformationDraftRecordSchema,
   transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotV2Schema,
+  transformationFinalizationSnapshotSchema,
   transformationFinalizedRecordSchema,
 } from "./traceability/transformation-records.js";
 export type {
@@ -585,6 +587,8 @@ export type {
   TransformationDraftRecord,
   TransformationFinalizedRecord,
   TransformationFinalizationSnapshotV1,
+  TransformationFinalizationSnapshotV2,
+  TransformationFinalizationSnapshot,
 } from "./traceability/transformation-records.js";
 export {
   amendTransformationSchema,

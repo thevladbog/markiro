@@ -1,11 +1,317 @@
 import { expect, it } from "vitest";
+import { transformationV1, transformationV2 } from "./support/us-transformation-v2-fixture.js";
+import { at } from "./support/us-receiving-lifecycle-fixture.js";
 import {
   createTransformationDraftSchema,
   saveTransformationDraftSchema,
   finalizeTransformationSchema,
   transformationFinalizedRecordSchema,
   transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotV2Schema,
+  transformationFinalizationSnapshotSchema,
 } from "../src/index.js";
+
+it("accepts captured V2 facts in finalized records while retaining V1 parsing", () => {
+  const snapshot = transformationV2;
+  const record = {
+    id: snapshot.eventId,
+    eventNumber: snapshot.eventNumber,
+    revision: 1,
+    draftVersion: 1,
+    timeZone: snapshot.timeZone,
+    createdBy: "qa",
+    updatedBy: "qa",
+    createdAt: snapshot.finalizedAt,
+    updatedAt: snapshot.finalizedAt,
+    status: "finalized",
+    finalizedAt: snapshot.finalizedAt,
+    finalizedBy: "qa",
+    snapshot,
+  };
+  expect(transformationFinalizedRecordSchema.safeParse(record).success).toBe(true);
+  expect(transformationFinalizationSnapshotV1Schema.parse(transformationV1)).toEqual(
+    transformationV1,
+  );
+  expect(transformationFinalizationSnapshotV2Schema.safeParse(snapshot).success).toBe(true);
+  expect(transformationFinalizationSnapshotSchema.safeParse(transformationV1).success).toBe(true);
+  expect(transformationFinalizationSnapshotSchema.safeParse(snapshot).success).toBe(true);
+  expect(transformationFinalizationSnapshotV1Schema.safeParse(snapshot).success).toBe(false);
+  expect(transformationFinalizationSnapshotV2Schema.safeParse(transformationV1).success).toBe(
+    false,
+  );
+  expect(
+    transformationFinalizedRecordSchema.safeParse({ ...record, id: at(snapshot.outputs, 0).lotId })
+      .success,
+  ).toBe(false);
+});
+
+it("binds V2 structured identities and complete output processor facts", () => {
+  const snapshot = transformationV2;
+  const input = at(snapshot.inputs, 0);
+  const output = at(snapshot.outputs, 0);
+  const otherId = "00000000-0000-4000-8000-000000000099";
+  const invalid = [
+    {
+      ...snapshot,
+      processor: {
+        ...snapshot.processor,
+        kdes: { ...snapshot.processor.kdes, locationId: otherId },
+      },
+    },
+    {
+      ...snapshot,
+      inputs: [
+        {
+          ...input,
+          product: { ...input.product, kdes: { ...input.product.kdes, sourceProductId: otherId } },
+        },
+      ],
+    },
+    {
+      ...snapshot,
+      outputs: [
+        {
+          ...output,
+          product: {
+            ...output.product,
+            kdes: { ...output.product.kdes, sourceProductId: otherId },
+          },
+        },
+      ],
+    },
+    {
+      ...snapshot,
+      inputs: [
+        {
+          ...input,
+          source: { ...input.source, kdes: { ...input.source.kdes, locationId: otherId } },
+        },
+      ],
+    },
+    {
+      ...snapshot,
+      outputs: [
+        {
+          ...output,
+          source: { ...output.source, kdes: { ...output.source.kdes, locationId: otherId } },
+        },
+      ],
+    },
+    ...[
+      { ...output.source.kdes, businessName: "Other processor" },
+      { ...output.source.kdes, partyId: otherId },
+      { ...output.source.kdes, address: { kind: "street", streetAddress: "Other street" } },
+      { ...output.source.kdes, countryDisplay: "Different country label" },
+    ].map((kdes) => ({
+      ...snapshot,
+      outputs: [{ ...output, source: { ...output.source, kdes } }],
+    })),
+  ];
+  for (const value of invalid)
+    expect(transformationFinalizationSnapshotSchema.safeParse(value).success).toBe(false);
+  const parsed = transformationFinalizationSnapshotV2Schema.parse(snapshot);
+  expect(at(parsed.inputs, 0).source).toMatchObject({
+    kind: "reference",
+    referenceKind: "web_url",
+    referenceValue: "https://supplier.example.test/source/Ä?lot=001",
+    kdes: {
+      businessName: "Captured supplier",
+      address: { kind: "street", streetAddress: "100 Test Way" },
+    },
+  });
+});
+
+it("rejects missing or extra V2 fields and malformed existing KDE schemas", () => {
+  const snapshot = transformationV2;
+  const input = at(snapshot.inputs, 0);
+  const output = at(snapshot.outputs, 0);
+  const omit = (value: object, key: string) => {
+    const copy = { ...value };
+    Reflect.deleteProperty(copy, key);
+    return copy;
+  };
+  const invalid = [
+    { ...snapshot, snapshotVersion: 3 },
+    { ...snapshot, snapshotVersion: undefined },
+    { ...snapshot, extra: true },
+    { ...snapshot, processor: omit(snapshot.processor, "kdes") },
+    { ...snapshot, inputs: [{ ...input, product: omit(input.product, "kdes") }] },
+    { ...snapshot, inputs: [{ ...input, source: omit(input.source, "kdes") }] },
+    { ...snapshot, outputs: [{ ...output, product: omit(output.product, "kdes") }] },
+    { ...snapshot, outputs: [{ ...output, source: omit(output.source, "kdes") }] },
+    { ...snapshot, processor: { ...snapshot.processor, extra: true } },
+    {
+      ...snapshot,
+      processor: { ...snapshot.processor, kdes: { ...snapshot.processor.kdes, extra: true } },
+    },
+    {
+      ...snapshot,
+      processor: {
+        ...snapshot.processor,
+        kdes: { ...snapshot.processor.kdes, phoneNumber: "not a phone" },
+      },
+    },
+    { ...snapshot, inputs: [{ ...input, product: { ...input.product, extra: true } }] },
+    {
+      ...snapshot,
+      inputs: [
+        { ...input, product: { ...input.product, kdes: { ...input.product.kdes, extra: true } } },
+      ],
+    },
+    {
+      ...snapshot,
+      inputs: [
+        {
+          ...input,
+          product: { ...input.product, kdes: { ...input.product.kdes, productName: "" } },
+        },
+      ],
+    },
+    {
+      ...snapshot,
+      inputs: [
+        {
+          ...input,
+          product: {
+            ...input.product,
+            kdes: { ...input.product.kdes, packagingSize: { value: "wrong", uom: "lb" } },
+          },
+        },
+      ],
+    },
+    {
+      ...snapshot,
+      inputs: [
+        {
+          ...input,
+          product: { ...input.product, kdes: omit(input.product.kdes, "packagingStyle") },
+        },
+      ],
+    },
+    { ...snapshot, inputs: [{ ...input, source: { ...input.source, referenceKind: "unknown" } }] },
+    {
+      ...snapshot,
+      inputs: [{ ...input, source: { ...input.source, referenceValue: "not a URL" } }],
+    },
+    { ...snapshot, inputs: [{ ...input, source: omit(input.source, "referenceValue") }] },
+    {
+      ...snapshot,
+      outputs: [
+        {
+          ...output,
+          source: {
+            ...snapshot.processor,
+            kind: "reference",
+            referenceKind: "web_url",
+            referenceValue: "https://example.test",
+          },
+        },
+      ],
+    },
+  ];
+  for (const value of invalid)
+    expect(transformationFinalizationSnapshotSchema.safeParse(value).success).toBe(false);
+});
+
+it.each([transformationV1, transformationV2])(
+  "preserves classification, quantity, line and revision rules in snapshot v$snapshotVersion",
+  (snapshot) => {
+    const input = at(snapshot.inputs, 0);
+    const output = at(snapshot.outputs, 0);
+    const invalid = [
+      { ...snapshot, revision: 2 },
+      { ...snapshot, previousRevisionId: snapshot.eventId },
+      { ...snapshot, inputs: [] },
+      { ...snapshot, outputs: [] },
+      ...["0", "-1", " 5", "1.0000"].map((quantity) => ({
+        ...snapshot,
+        inputs: [{ ...input, quantity }],
+      })),
+      { ...snapshot, inputs: [{ ...input, unitOfMeasure: "wrong" }] },
+      { ...snapshot, inputs: [{ ...input, lineNo: 0 }] },
+      { ...snapshot, inputs: [input, { ...input, lineNo: 2 }] },
+      { ...snapshot, inputs: [input, { ...input, lotId: output.lotId }] },
+      { ...snapshot, outputs: [{ ...output, lotId: input.lotId }] },
+      { ...snapshot, outputs: [output, { ...output, lineNo: 2 }] },
+      { ...snapshot, outputs: [output, { ...output, lotId: snapshot.eventId }] },
+      {
+        ...snapshot,
+        inputs: [
+          {
+            ...input,
+            product: {
+              ...input.product,
+              coverage: { ...input.product.coverage, coverageStatus: "not_covered" },
+            },
+          },
+        ],
+      },
+      {
+        ...snapshot,
+        outputs: [
+          {
+            ...output,
+            product: {
+              ...output.product,
+              coverage: { ...output.product.coverage, reviewedBy: null },
+            },
+          },
+        ],
+      },
+      {
+        ...snapshot,
+        outputs: [{ ...output, source: { ...output.source, description: "Other processor" } }],
+      },
+      { ...snapshot, documents: [at(snapshot.documents, 0), at(snapshot.documents, 0)] },
+    ];
+    for (const value of invalid)
+      expect(transformationFinalizationSnapshotSchema.safeParse(value).success).toBe(false);
+    expect(
+      transformationFinalizationSnapshotSchema.safeParse({
+        ...snapshot,
+        revision: 2,
+        previousRevisionId: snapshot.eventId,
+      }).success,
+    ).toBe(true);
+  },
+);
+
+it("preserves V2 non-FTL structured facts without accepting invented lot or reference source fields", () => {
+  const input = at(transformationV2.inputs, 0);
+  const source = {
+    id: input.source.id,
+    description: input.source.description,
+    kdes: input.source.kdes,
+  };
+  const nonFtl = {
+    kind: "non_ftl",
+    lineNo: 1,
+    product: {
+      ...input.product,
+      coverage: {
+        ...input.product.coverage,
+        coverageStatus: "not_covered",
+        ftlCategory: null,
+        ftlSourceUrl: null,
+        ftlSourceVersion: null,
+      },
+    },
+    source: { ...source, kind: "location" },
+    reference: "Supplier salt invoice",
+    quantity: "1",
+    unitOfMeasure: "lb",
+  };
+  const snapshot = { ...transformationV2, inputs: [nonFtl] };
+  expect(transformationFinalizationSnapshotSchema.safeParse(snapshot).success).toBe(true);
+  for (const bad of [
+    { ...nonFtl, lotId: input.lotId },
+    { ...nonFtl, tlc: "invented" },
+    { ...nonFtl, source: input.source },
+  ])
+    expect(
+      transformationFinalizationSnapshotSchema.safeParse({ ...snapshot, inputs: [bad] }).success,
+    ).toBe(false);
+});
 
 it("requires server-owned IDs to stay out of commands and enforces version/digest", () => {
   const id = "00000000-0000-4000-8000-000000000001";

@@ -166,9 +166,9 @@ export function validateUsExportSource(input: ExportWorkbookInput): {
         (event.lifecycle === "draft" && event.payload.kind !== "saved_draft") ||
         (input.mode === "export_ready_candidate" && event.lifecycle !== "current_finalized") ||
         (event.payload.kind === "frozen" &&
-          !(event.type === "receiving" ? [1, 2, 3] : [1]).includes(
-            event.payload.snapshot.snapshotVersion,
-          ))
+          !(
+            event.type === "receiving" ? [1, 2, 3] : event.type === "transformation" ? [1, 2] : [1]
+          ).includes(event.payload.snapshot.snapshotVersion))
       )
         throw new ExportWorkbookInputError("INVALID_SOURCE_RECORD", sourceRecord);
       seen.add(pin);

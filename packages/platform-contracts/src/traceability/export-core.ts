@@ -7,7 +7,7 @@ import { receivingFinalizationSnapshotV1Schema } from "./receiving-finalization-
 import { receivingFinalizationSnapshotV2Schema } from "./receiving-finalization-v2.js";
 import { receivingFinalizationSnapshotV3Schema } from "./receiving-finalization-v3.js";
 import { transformationDraftSchema } from "./transformation-draft.js";
-import { transformationFinalizationSnapshotV1Schema } from "./transformation-records.js";
+import { transformationFinalizationSnapshotSchema } from "./transformation-records.js";
 import { shippingDraftSchema } from "./shipping-draft.js";
 import { shippingFinalizationSnapshotV1Schema } from "./shipping-http.js";
 
@@ -88,7 +88,7 @@ const record = z
           z
             .object({
               kind: z.literal("frozen"),
-              snapshot: transformationFinalizationSnapshotV1Schema,
+              snapshot: transformationFinalizationSnapshotSchema,
             })
             .strict(),
           z.object({ kind: z.literal("saved_draft"), draft: transformationDraftSchema }).strict(),
