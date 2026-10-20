@@ -1837,7 +1837,14 @@ Protocol 7; host migration `0052_multi_station_shifts.sql` (columns only). A lin
 `line_stations_in_use` `{ active }`; `line.max_stations_changed` `{ from, to }`). A participant
 (`shift_participants`) is `active` (holds a slot), `left` (`POST /v1/device/shifts/{id}/leave`,
 frees the slot; repeating changes nothing; `shift.leave` `{ number }`; never entered:
-`shift_not_entered`) or `closed`. A slot is an active participant whose device is not revoked.
+`shift_not_entered`) or `closed`. Each participant row carries `joinedRev` (`shift_participants.joined_rev`, the
+host revision of the write that took the slot: a first entry or a return from `left`; migration 0052 backfills
+a row already there with its shift's revision) and the wire shape exposes it (`ShiftParticipant.joinedRev`,
+optional for older hosts). The leave takes an optional strict body `ShiftLeave { joinedRev }`
+(`shift-leave.json`): when the token is not the row's current one (a re-entry came after that leave was sent)
+the host answers the shift as it is with no write, no audit row and no revision, so a stale or in-flight leave
+cannot undo a re-entry; with no body the leave acts on the current state, as before; a malformed body is
+`validation_failed`. A client echoes the `joinedRev` of its own row from its last enter/list answer. A slot is an active participant whose device is not revoked.
 Entry into an open shift (`host/src/shift_participants.rs` `decide_entry`): an active participant
 enters again (no revision and no audit row, only its last-entered instant is touched); a closed one that names `multi-station-v1` reads the shift back with no write (`myState` `closed`), while a build that does not name it gets `shift_status` `closed` (every old build shows «закрыта»; the read-back's `active` would send it on producing into a closed part); a left or new device
 takes a slot while fewer than `max_stations` others hold one (`shift.join`); a new device that does

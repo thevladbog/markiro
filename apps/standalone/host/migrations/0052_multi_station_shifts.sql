@@ -18,6 +18,11 @@ ALTER TABLE shift_participants ADD COLUMN state TEXT NOT NULL DEFAULT 'active'
 -- `left`. Nullable only because an added NOT NULL column needs a constant
 -- default; every writer sets it and readers fall back on first_entered_at.
 ALTER TABLE shift_participants ADD COLUMN joined_at TEXT;
+-- The host revision stamped by the write that took the slot (a first entry or a return from
+-- `left`): the token a client echoes in its leave, so a leave of an earlier stay arriving late
+-- cannot undo a later re-entry. Nullable for the same reason as `joined_at`; every writer sets it.
+ALTER TABLE shift_participants ADD COLUMN joined_rev INTEGER
+  CHECK (joined_rev IS NULL OR joined_rev >= 0);
 ALTER TABLE shift_participants ADD COLUMN left_at TEXT
   CHECK ((left_at IS NOT NULL) = (state = 'left'));
 ALTER TABLE shift_participants ADD COLUMN closed_at TEXT
@@ -48,7 +53,11 @@ ALTER TABLE shifts ADD COLUMN close_reason_missing INTEGER NOT NULL DEFAULT 0
 -- took its slot at its first entry. One of an open shift stays `active`; one
 -- of a closed shift closed with it, by whoever closed the shift, with the
 -- figures of its own accepted close when it sent one.
-UPDATE shift_participants SET joined_at = first_entered_at;
+-- The token of a row already there is its shift's revision (0 when the shift has none): a client
+-- reads it from the next answer, and no later write of this shift can match it by accident
+-- because every join and return stamps a newer revision.
+UPDATE shift_participants SET joined_at = first_entered_at,
+  joined_rev = COALESCE((SELECT s.rev FROM shifts s WHERE s.id = shift_participants.shift_id), 0);
 
 UPDATE shift_participants SET
   state = 'closed',

@@ -110,6 +110,7 @@ import {
   shiftCloseSchema,
   shiftCreateSchema,
   shiftEnterSchema,
+  shiftLeaveSchema,
   shiftExportRecordSchema,
   shiftExportRowsSchema,
   shiftUpdateSchema,
@@ -421,6 +422,7 @@ const REQUESTS = [
   ["shift-enter-empty.json", shiftEnterSchema],
   ["shift-enter-multi.json", shiftEnterSchema],
   ["shift-enter-handheld-multi.json", shiftEnterSchema],
+  ["shift-leave.json", shiftLeaveSchema],
   ["shift-close-reason-set.json", shiftCloseReasonSetSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-update-main-sheet.json", shiftUpdateSchema],
@@ -3967,6 +3969,16 @@ describe("several devices in one shift (plan 2b)", () => {
     expect(closed?.participants).toHaveLength(1);
     expect(closed?.totals).toBeUndefined();
     expect(closed?.byDevice).toBeUndefined();
+  });
+
+  it("reads the leave token of a participant and keeps a strict leave body", () => {
+    const list = deviceShiftsSchema.parse(fixture("device-shifts-participants.json"));
+    expect(list.shifts[0]?.participants?.map((part) => part.joinedRev)).toStrictEqual([12, 15]);
+    expect(list.shifts[1]?.participants?.[0]?.joinedRev).toBeUndefined();
+    expect(shiftLeaveSchema.parse({ joinedRev: 12 })).toStrictEqual({ joinedRev: 12 });
+    for (const body of [{}, { joinedRev: -1 }, { joinedRev: 1.5 }, { joinedRev: 1, extra: true }]) {
+      expect(shiftLeaveSchema.safeParse(body).success).toBe(false);
+    }
   });
 
   it("reads a shift of a host before protocol 7 without them", () => {

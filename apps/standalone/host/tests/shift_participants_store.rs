@@ -37,7 +37,7 @@ async fn a_participants_state_moves_along_its_rules() {
             .unwrap(),
         1
     );
-    participants::join(&mut conn, shift, &other, "2026-10-08T07:00:00Z")
+    participants::join(&mut conn, shift, &other, "2026-10-08T07:00:00Z", 1)
         .await
         .unwrap();
     assert_eq!(participants::count_all(&mut conn, shift).await.unwrap(), 2);
@@ -68,7 +68,7 @@ async fn a_participants_state_moves_along_its_rules() {
             .await
             .is_err()
     );
-    participants::rejoin(&mut conn, shift, &other, "2026-10-08T08:00:00Z")
+    participants::rejoin(&mut conn, shift, &other, "2026-10-08T08:00:00Z", 2)
         .await
         .unwrap();
     participants::close_by_device(
@@ -180,7 +180,7 @@ async fn a_revoked_device_holds_no_slot() {
     let floor = open_floor(&admin, &setup, &admin.key, &setup.line).await;
     let (other, _) = pair_device(&admin.app, "station").await;
     let mut conn = admin.app.state.pool.acquire().await.unwrap();
-    participants::join(&mut conn, &floor.shift, &other, "2026-10-08T07:00:00Z")
+    participants::join(&mut conn, &floor.shift, &other, "2026-10-08T07:00:00Z", 1)
         .await
         .unwrap();
     sqlx::query("UPDATE devices SET revoked_at = '2026-10-08T07:10:00Z' WHERE id = ?")
@@ -211,7 +211,7 @@ async fn the_totals_are_the_facts_of_the_whole_shift_and_of_each_device() {
     let (other, other_key) = pair_device(&admin.app, "station").await;
     {
         let mut conn = admin.app.state.pool.acquire().await.unwrap();
-        participants::join(&mut conn, &floor.shift, &other, "2026-10-08T07:00:00Z")
+        participants::join(&mut conn, &floor.shift, &other, "2026-10-08T07:00:00Z", 1)
             .await
             .unwrap();
     }
@@ -434,7 +434,7 @@ async fn the_totals_count_closed_boxes_and_pallets_by_device_and_leave_out_the_t
         (&other, "2026-10-08T07:00:00Z"),
         (&idle, "2026-10-08T07:05:00Z"),
     ] {
-        participants::join(&mut conn, &floor.shift, device, at)
+        participants::join(&mut conn, &floor.shift, device, at, 1)
             .await
             .unwrap();
     }
@@ -514,7 +514,7 @@ async fn a_validation_shift_counts_the_unboxed_codes_once_each_by_their_owner() 
     let floor = open_validation_floor(&admin, &setup, &admin.key, &setup.line).await;
     let (other, _) = pair_device(&admin.app, "station").await;
     let mut conn = admin.app.state.pool.acquire().await.unwrap();
-    participants::join(&mut conn, &floor.shift, &other, "2026-10-08T07:00:00Z")
+    participants::join(&mut conn, &floor.shift, &other, "2026-10-08T07:00:00Z", 1)
         .await
         .unwrap();
     sqlx::query("PRAGMA foreign_keys = OFF")
@@ -582,10 +582,10 @@ async fn the_guarded_writers_refuse_a_participant_not_in_their_state() {
     assert_eq!(touch.code(), reference.code());
     assert_eq!(touch.status(), reference.status());
     // Rejoin, then rejoin again: the row is active, not left.
-    participants::rejoin(&mut conn, shift, a, "2026-10-08T08:00:00Z")
+    participants::rejoin(&mut conn, shift, a, "2026-10-08T08:00:00Z", 2)
         .await
         .unwrap();
-    let rejoin = participants::rejoin(&mut conn, shift, a, "2026-10-08T08:01:00Z")
+    let rejoin = participants::rejoin(&mut conn, shift, a, "2026-10-08T08:01:00Z", 2)
         .await
         .unwrap_err();
     assert_eq!(rejoin.code(), reference.code());

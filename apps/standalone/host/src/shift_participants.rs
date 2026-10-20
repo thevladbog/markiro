@@ -19,7 +19,8 @@ pub enum EntryDecision {
     Reenter,
     /// A participant that closed its part reads the shift back; nothing is written.
     ReadClosed,
-    /// A participant that left takes a slot again.
+    /// A participant that left takes a slot again; `rev` is the revision stamped by this write (its
+    /// new `joined_rev`).
     Rejoin,
     /// A new participant takes a slot.
     Join,
@@ -234,16 +235,18 @@ pub async fn join(
     shift_id: &str,
     device_id: &str,
     at: &str,
+    rev: i64,
 ) -> Result<(), ApiError> {
     let result = sqlx::query(
         "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, \
-         last_entered_at, state, joined_at) VALUES (?, ?, ?, ?, 'active', ?)",
+         last_entered_at, state, joined_at, joined_rev) VALUES (?, ?, ?, ?, 'active', ?, ?)",
     )
     .bind(shift_id)
     .bind(device_id)
     .bind(at)
     .bind(at)
     .bind(at)
+    .bind(rev)
     .execute(conn)
     .await
     .map_err(ApiError::internal)?;
@@ -256,12 +259,15 @@ pub async fn rejoin(
     shift_id: &str,
     device_id: &str,
     at: &str,
+    rev: i64,
 ) -> Result<(), ApiError> {
     let result = sqlx::query(
         "UPDATE shift_participants SET state = 'active', left_at = NULL, joined_at = ?, \
-         last_entered_at = ? WHERE shift_id = ? AND device_id = ? AND state = 'left'",
+         joined_rev = ?, last_entered_at = ? WHERE shift_id = ? AND device_id = ? \
+         AND state = 'left'",
     )
     .bind(at)
+    .bind(rev)
     .bind(at)
     .bind(shift_id)
     .bind(device_id)
@@ -289,6 +295,23 @@ pub async fn touch(
     .await
     .map_err(ApiError::internal)?;
     one_row(result, "touch")
+}
+
+/// The token (`joined_rev`) of the device's row, `None` when it has no row or none was set.
+pub async fn joined_rev_of(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+) -> Result<Option<i64>, ApiError> {
+    let rev: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT joined_rev FROM shift_participants WHERE shift_id = ? AND device_id = ?",
+    )
+    .bind(shift_id)
+    .bind(device_id)
+    .fetch_optional(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(rev.flatten())
 }
 
 /// An active participant pauses and frees its slot.
@@ -400,6 +423,7 @@ struct ParticipantRow {
     closed_reason: Option<String>,
     late_data_at: Option<String>,
     last_seen_at: Option<String>,
+    joined_rev: Option<i64>,
 }
 
 /// The shift's participants, first entry first (ties by device id).
@@ -410,7 +434,7 @@ pub async fn list(
     let rows: Vec<ParticipantRow> = sqlx::query_as(
         "SELECT p.device_id, d.kind, d.name, p.state, p.first_entered_at, \
          COALESCE(p.joined_at, p.first_entered_at) AS joined_at, p.left_at, p.closed_at, \
-         p.closed_by_kind, p.closed_actual_qty, p.closed_reason, p.late_data_at, d.last_seen_at \
+         p.closed_by_kind, p.closed_actual_qty, p.closed_reason, p.late_data_at, d.last_seen_at, p.joined_rev \
          FROM shift_participants p JOIN devices d ON d.id = p.device_id \
          WHERE p.shift_id = ? ORDER BY p.first_entered_at, p.device_id",
     )
@@ -439,6 +463,10 @@ pub async fn list(
                 closed_reason_code: row.closed_reason,
                 late_data_at: row.late_data_at,
                 last_seen_at: row.last_seen_at,
+                joined_rev: row
+                    .joined_rev
+                    .map(|rev| u64::try_from(rev).map_err(ApiError::internal))
+                    .transpose()?,
             })
         })
         .collect()

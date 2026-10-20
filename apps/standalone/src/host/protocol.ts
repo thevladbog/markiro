@@ -1092,6 +1092,11 @@ export const shiftParticipantSchema = z.object({
   closedReasonCode: z.string().nullable(),
   lateDataAt: z.iso.datetime().nullable(),
   lastSeenAt: z.iso.datetime().nullable(),
+  /**
+   * The host revision of the write that took this slot: the token a client echoes in its leave
+   * (`shiftLeaveSchema`). Absent from a host that predates it.
+   */
+  joinedRev: z.number().int().nonnegative().optional(),
 });
 export type ShiftParticipant = z.infer<typeof shiftParticipantSchema>;
 
@@ -1550,6 +1555,17 @@ export const shiftEnterSchema = z.strictObject({
   supports: z.array(z.string().min(1).max(64)).max(32).optional(),
 });
 export type ShiftEnter = z.infer<typeof shiftEnterSchema>;
+
+/**
+ * The optional body of `POST /v1/device/shifts/{id}/leave` (`markiro_proto::ShiftLeave`,
+ * `shift-leave.json`): the `joinedRev` of the participant row as the client last read it. A leave
+ * of an earlier stay (a re-entry came after it) is answered with the shift as it is and writes
+ * nothing; with no body the leave acts on the row's current state.
+ */
+export const shiftLeaveSchema = z.strictObject({
+  joinedRev: z.number().int().nonnegative(),
+});
+export type ShiftLeave = z.infer<typeof shiftLeaveSchema>;
 
 /**
  * The scan that owns a code on the host (`markiro_proto::CodeOwner`): the

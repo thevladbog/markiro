@@ -15,7 +15,7 @@ use axum::extract::State;
 use axum::Json;
 use markiro_proto::{
     shift_supports, DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftEnter,
-    ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus, ValidationPrint,
+    ShiftLeave, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus, ValidationPrint,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -580,9 +580,9 @@ pub async fn enter_shift(
                     let rejoined = joining == EntryDecision::Rejoin;
                     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
                     if rejoined {
-                        shift_participants::rejoin(&mut tx, &id, &device.id, &at).await?;
+                        shift_participants::rejoin(&mut tx, &id, &device.id, &at, rev).await?;
                     } else {
-                        shift_participants::join(&mut tx, &id, &device.id, &at).await?;
+                        shift_participants::join(&mut tx, &id, &device.id, &at, rev).await?;
                     }
                     shifts::stamp_revision(&mut tx, &id, rev).await?;
                     audit::record(
@@ -651,7 +651,7 @@ pub async fn enter_shift(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
-    shift_participants::join(&mut tx, &id, &device.id, &at).await?;
+    shift_participants::join(&mut tx, &id, &device.id, &at, rev).await?;
     let mut details = json!({
         "number": number,
         "templateId": snapshot.box_template.id,
@@ -700,17 +700,22 @@ pub fn not_entered() -> ApiError {
 /// its part and frees its slot of the line (`left`), with a revision stamped on the shift and
 /// `shift.leave`; it may enter again while a slot is free. A participant that left or closed
 /// already (a closed shift's participants all have) answers the shift as it is and writes nothing,
-/// so a leave retried after a lost answer is harmless. A device that never entered is `conflict` on
+/// so a leave retried after a lost answer is harmless. The optional body `{ joinedRev }` names the
+/// stay the client means to end (`ShiftParticipant.joinedRev` of its last answer): when the row's
+/// token differs a re-entry came after the leave was sent, and the leave answers the shift as it is
+/// with no write, no audit row and no revision. A device that never entered is `conflict` on
 /// `shift_not_entered`, an unknown shift `not_found`. The answer is the shift as the device sees it,
 /// without the snapshot.
 pub async fn leave_shift(
     State(state): State<AppState>,
     device: AuthDevice,
     ApiPath(id): ApiPath<String>,
+    leave: Option<ApiJson<ShiftLeave>>,
 ) -> Result<Json<DeviceShift>, ApiError> {
     if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
         return Err(ApiError::forbidden(WORKS_SHIFTS));
     }
+    let token = leave.map(|ApiJson(leave)| leave.joined_rev);
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     device
@@ -732,7 +737,16 @@ pub async fn leave_shift(
     let current = shift_participants::state_of(&mut tx, &id, &device.id)
         .await?
         .ok_or_else(not_entered)?;
-    if !shift_participants::leaves(current) {
+    // A leave naming a token that is not the row's current one is the leave of an earlier stay (a
+    // re-entry came after it was sent): it answers the shift as it is, with no write.
+    let stale = match token {
+        Some(token) => {
+            let current = shift_participants::joined_rev_of(&mut tx, &id, &device.id).await?;
+            current.and_then(|rev| u64::try_from(rev).ok()) != Some(token)
+        }
+        None => false,
+    };
+    if stale || !shift_participants::leaves(current) {
         // Nothing to write: the transaction rolls back when dropped.
         return Ok(Json(read_for(&mut tx, &id, &device.id, &at).await?));
     }

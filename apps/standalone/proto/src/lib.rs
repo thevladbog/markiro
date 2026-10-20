@@ -2063,6 +2063,20 @@ pub struct ShiftParticipant {
     pub closed_reason_code: Option<String>,
     pub late_data_at: Option<String>,
     pub last_seen_at: Option<String>,
+    /// The host revision stamped by the write that took this slot (first entry or return from
+    /// `left`): the token a client echoes in [`ShiftLeave`]. Absent from an older host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joined_rev: Option<u64>,
+}
+
+/// The optional body of `POST /v1/device/shifts/{id}/leave` (plan 2b, protocol 7): the `joinedRev`
+/// of the participant row as the client last read it. A leave whose token is not the row's current
+/// one belongs to an earlier stay: the host answers the shift as it is and writes nothing. Without
+/// a body the leave works on the row's current state, as before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftLeave {
+    pub joined_rev: u64,
 }
 
 /// One device's part of a shift's totals (plan 2b): units it accepted, its boxes closed and not

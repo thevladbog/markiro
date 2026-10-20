@@ -212,3 +212,24 @@ async fn the_new_columns_refuse_what_no_row_may_hold() {
     .unwrap();
     assert_eq!(counts, (4, 3));
 }
+
+#[tokio::test]
+async fn existing_participants_take_their_shifts_revision_as_the_leave_token() {
+    let (_dir, pool) = migrated_from_51().await;
+    let rows: Vec<(String, Option<i64>, i64)> = sqlx::query_as(
+        "SELECT p.shift_id, p.joined_rev, s.rev FROM shift_participants p \
+         JOIN shifts s ON s.id = p.shift_id ORDER BY p.shift_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 3);
+    for (shift, token, rev) in rows {
+        assert_eq!(token, Some(rev), "{shift}");
+    }
+    refused(
+        sqlx::query("UPDATE shift_participants SET joined_rev = -1")
+            .execute(&pool)
+            .await,
+    );
+}

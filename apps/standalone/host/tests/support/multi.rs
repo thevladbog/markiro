@@ -118,6 +118,32 @@ pub async fn leave(admin: &Admin, device: &Device, shift: &str) -> (StatusCode, 
     .await
 }
 
+/// `POST /v1/device/shifts/{shift}/leave` with a body (the participant token `joinedRev`).
+pub async fn leave_with(
+    admin: &Admin,
+    device: &Device,
+    shift: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    call(
+        admin,
+        &device.key,
+        "POST",
+        &format!("/v1/device/shifts/{shift}/leave"),
+        Some(body),
+    )
+    .await
+}
+
+/// The `joinedRev` the shift answer names for `device`'s participant row.
+pub fn joined_rev(answer: &Value, device: &str) -> Value {
+    answer["participants"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["deviceId"] == json!(device)))
+        .map(|row| row["joinedRev"].clone())
+        .unwrap_or(Value::Null)
+}
+
 /// Plan a shift of `body` and open it from `opener` naming `multi-station-v1`; its id and number.
 pub async fn open_shared(admin: &Admin, body: Value, opener: &Device) -> (String, String) {
     let shift = plan_shift(admin, body).await;

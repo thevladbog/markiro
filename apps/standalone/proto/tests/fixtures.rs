@@ -18,10 +18,10 @@ use markiro_proto::{
     ParticipantClosedBy, ParticipantState, PasswordChange, PasswordSet, ProductCreate,
     ProductGroup, ProductPhotoPut, ProductPhotoState, ProductRecord, ProductStatus, ProductUpdate,
     ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftCloseReasonSet, ShiftClosedFact,
-    ShiftCreate, ShiftEnter, ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin,
-    ShiftParticipant, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest,
-    SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose,
-    UnitLabelFact, ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
+    ShiftCreate, ShiftEnter, ShiftExportRecord, ShiftExportRows, ShiftLeave, ShiftMode,
+    ShiftOrigin, ShiftParticipant, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock,
+    SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate,
+    TemplatePurpose, UnitLabelFact, ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use markiro_proto::{
     receipt_codes, shift_close_reasons, shift_supports, BoxRegistryItem, BoxRegistryKind,
@@ -2281,6 +2281,20 @@ fn a_shared_shifts_participants_and_totals_round_trip_and_add_up() {
         && shift.my_state.is_none()
         && shift.max_stations.is_none()));
     let office: OfficeShift = round_trip("office-shift-participants.json");
+    // The token a client echoes in its leave; the closed shift's participant of an older host
+    // carries none.
+    assert_eq!(
+        office
+            .participants
+            .iter()
+            .map(|part| part.joined_rev)
+            .collect::<Vec<_>>(),
+        [Some(12), Some(15)]
+    );
+    assert_eq!(participants[0].joined_rev, Some(12));
+    assert!(closed.participants.as_ref().unwrap()[0]
+        .joined_rev
+        .is_none());
     assert!(office.close_reason_missing);
     assert_eq!(office.participants.len(), 2);
     assert_eq!(
@@ -2308,6 +2322,12 @@ fn the_multi_station_requests_refusals_and_receipts_round_trip() {
         handheld.supports,
         [shift_supports::HANDHELD_HOST, shift_supports::MULTI_STATION]
     );
+    let leave: ShiftLeave = round_trip("shift-leave.json");
+    assert_eq!(leave.joined_rev, 12);
+    let mut extra = fixture("shift-leave.json");
+    extra["enteredAt"] = serde_json::json!("2026-10-08T06:00:00Z");
+    assert!(serde_json::from_value::<ShiftLeave>(extra).is_err());
+    assert!(serde_json::from_value::<ShiftLeave>(serde_json::json!({})).is_err());
     let set: ShiftCloseReasonSet = round_trip("shift-close-reason-set.json");
     assert!(shift_close_reasons::ALL.contains(&set.reason_code.as_str()));
     let mut extra = fixture("shift-close-reason-set.json");
