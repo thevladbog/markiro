@@ -18,6 +18,20 @@ import {
   validateState,
 } from "./state-validation.mjs";
 
+const heldCapabilities = new WeakMap();
+
+// A token can only originate inside an active guarded persistence call. It is
+// single-use and cannot be serialized into an operation or retained for later.
+export async function withHeldHostState(capability, callback) {
+  const held = heldCapabilities.get(capability);
+  if (!held || held.used || typeof callback !== "function") throw stateError();
+  held.used = true;
+  const result = Promise.resolve().then(() => callback(held.read()));
+  held.pending = result;
+  result.catch(() => {});
+  return result;
+}
+
 async function releaseOwnLock(root, lockPath, owned) {
   const actual = await lstat(lockPath);
   if (actual.dev !== owned.dev || actual.ino !== owned.ino) throw lockReleaseError();
@@ -113,6 +127,30 @@ export async function withHostState(root, callback) {
       state = next;
     }
     const store = Object.freeze({
+      // Trusted recovery persistence shares this owner's lifetime and durability
+      // latch. Even a caught sidecar failure must retain the deployment lock.
+      guardPersistence: (action) =>
+        run(async () => {
+          if (typeof action !== "function") throw stateError();
+          const capability = Object.freeze({});
+          const held = {
+            used: false,
+            pending: undefined,
+            read: () => ({ root, state: snapshot(state) }),
+          };
+          heldCapabilities.set(capability, held);
+          try {
+            return await action(capability);
+          } catch (error) {
+            // Preserve uncertainty before draining a producer that may fail too.
+            throw latch(error);
+          } finally {
+            heldCapabilities.delete(capability);
+            // Drain even a producer whose caller forgot to await it. Errors
+            // pass through run's durability latch before lock retirement.
+            await held.pending;
+          }
+        }),
       read: () => run(() => structuredClone(validateState(state))),
       begin: (input) =>
         run(async () => {

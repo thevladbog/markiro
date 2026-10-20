@@ -9,6 +9,10 @@ import {
 import { fakeDocker } from "./backup-runtime-fixture.mjs";
 import { canonical, digest } from "../backup/schemas.mjs";
 import { createTargetRecoveryBackup } from "../host/target-backup.mjs";
+import { randomUUID, createHash } from "node:crypto";
+import * as targetBackup from "../host/target-backup.mjs";
+import { withRecoveryState } from "../host/recovery-state.mjs";
+import { backupProof } from "./host-fixtures.mjs";
 import { withHostState } from "../host/state.mjs";
 
 async function fixture(t, mode) {
@@ -355,3 +359,95 @@ test("target backup never issues another process command after unconfirmed termi
   assert.equal(unreaped, true);
   assert.equal(laterCommands, 0);
 });
+
+for (const mode of [
+  "valid",
+  "forged",
+  "wrong-phase",
+  "changed-sidecar",
+  "wrong-root",
+  "expired",
+  "cleanup",
+  "restore-cleanup",
+  "unreaped",
+]) {
+  test(`held target backup validates recovery boundary: ${mode}`, async (t) => {
+    const uncertain = ["cleanup", "restore-cleanup", "unreaped"].includes(mode);
+    const f = await fixture(t, uncertain ? mode : undefined);
+    const prior = structuredClone(f.input.operation.identity);
+    prior.operationId = randomUUID();
+    const state = {
+      version: 1,
+      sequence: 14,
+      previousHealthy: null,
+      current: {
+        identity: prior,
+        phase: "api-started",
+        status: "recovery-required",
+        backup: backupProof(prior),
+      },
+    };
+    const bytes = Buffer.from(JSON.stringify(state));
+    await f.save("state.json", bytes.toString());
+    const admission = {
+      version: 1,
+      kind: "platform-failed-activation-recovery",
+      identity: f.input.operation.identity,
+      predecessor: {
+        identity: prior,
+        sequence: 14,
+        stateSha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+      executorCi: { runId: "123456789", runAttempt: "1" },
+      expiresAt: new Date(Date.now() + 1800000).toISOString(),
+    };
+    await assert.rejects(invoke(f));
+    assert.equal(f.workerCommands(), 0);
+    const execution = withRecoveryState(f.f.root, admission, async (store) => {
+      await store.complete("admitted");
+      await store.enter("target-stopped");
+      await store.complete("target-stopped");
+      await store.enter("backup-verified");
+      const call = () =>
+        store.produceBackup(async (capability) => {
+          if (mode === "changed-sidecar" || mode === "wrong-phase") {
+            const ledger = JSON.parse(await readFile(join(f.f.root, "recovery-state.json")));
+            if (mode === "wrong-phase") ledger.phase = "target-stopped";
+            else ledger.admission.identity.operationId = randomUUID();
+            await f.save("recovery-state.json", ledger);
+          }
+          const input =
+            mode === "wrong-root"
+              ? { ...f.input, operation: { ...f.input.operation, root: join(f.f.root, "other") } }
+              : f.input;
+          const admitted =
+            mode === "expired"
+              ? { ...admission, expiresAt: new Date(Date.now() - 1000).toISOString() }
+              : admission;
+          return targetBackup.createHeldTargetRecoveryBackup(
+            input,
+            mode === "forged" ? {} : capability,
+            admitted,
+            f.options,
+          );
+        });
+      if (mode !== "valid") await assert.rejects(call());
+      else {
+        const result = await call();
+        assert.equal(
+          JSON.parse(await readFile(result.restoreEvidence.evidencePath)).status,
+          "completed",
+        );
+        assert.equal(f.boundaries(), 4);
+        assert.equal(f.docker.containers.size + f.docker.volumes.size, 0);
+      }
+    });
+    if (uncertain) {
+      await assert.rejects(execution, { durabilityUncertain: true });
+      await lstat(join(f.f.root, ".deploy.lock"));
+      assert.ok(f.workerCommands() > 0);
+    } else await execution;
+    assert.deepEqual(await readFile(join(f.f.root, "state.json")), bytes);
+    if (mode !== "valid" && !uncertain) assert.equal(f.workerCommands(), 0);
+  });
+}

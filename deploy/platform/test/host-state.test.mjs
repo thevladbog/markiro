@@ -583,3 +583,138 @@ for (const healthy of [false, true])
       healthyHandoff: healthy,
     });
   });
+
+test("caught recovery persistence uncertainty retains the shared deployment lock and original journal", async (t) => {
+  const { root } = await privateFixture(t);
+  await withHostState(root, async (store) => {
+    await store.begin(hostIdentity());
+    await store.fail();
+  });
+  const original = await readFile(join(root, "state.json"));
+  await assert.rejects(
+    withHostState(root, async (store) => {
+      assert.equal(typeof store.guardPersistence, "function");
+      await assert.rejects(
+        store.guardPersistence(async () => {
+          throw Object.assign(new Error("private persistence failure"), {
+            durabilityUncertain: true,
+          });
+        }),
+        rejected,
+      );
+      await assert.rejects(store.read(), rejected);
+    }),
+    (error) => rejected(error) && error.durabilityUncertain === true,
+  );
+  assert.deepEqual(await readFile(join(root, "state.json")), original);
+  assert.ok((await lstat(join(root, ".deploy.lock"))).isFile());
+  await assert.rejects(
+    withHostState(root, () => {}),
+    rejected,
+  );
+});
+
+test("guarded recovery persistence is drained before lock retirement and expires with its owner", async (t) => {
+  const { root } = await privateFixture(t);
+  let retained;
+  let finish;
+  let entered;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const waiting = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const owner = withHostState(root, async (store) => {
+    assert.equal(typeof store.guardPersistence, "function");
+    retained = store;
+    void store.guardPersistence(async () => {
+      entered();
+      await waiting;
+      await writeFile(join(root, "recovery-proof"), "durable-work-finished");
+    });
+  });
+  await Promise.race([started, owner]);
+  await assert.rejects(
+    withHostState(root, () => {}),
+    rejected,
+  );
+  finish();
+  await owner;
+  assert.equal(await readFile(join(root, "recovery-proof"), "utf8"), "durable-work-finished");
+  await assert.rejects(lstat(join(root, ".deploy.lock")), { code: "ENOENT" });
+  await assert.rejects(
+    retained.guardPersistence(async () => {
+      await writeFile(join(root, "escaped"), "bad");
+    }),
+    rejected,
+  );
+  await assert.rejects(lstat(join(root, "escaped")), { code: "ENOENT" });
+});
+
+test("held host capability rejects forgery and expiry while allowing one guarded producer", async (t) => {
+  const { withHeldHostState } = await import("../host/state.mjs");
+  assert.equal(typeof withHeldHostState, "function");
+  const { root } = await privateFixture(t);
+  await assert.rejects(withHeldHostState({}, () => {}));
+  let retained;
+  await withHostState(root, async (store) => {
+    await store.begin(hostIdentity());
+    await store.fail();
+    await store.guardPersistence(async (capability) => {
+      retained = capability;
+      await withHeldHostState(capability, async (held) => {
+        assert.equal(held.root, root);
+        assert.equal(held.state.current.status, "recovery-required");
+        await assert.rejects(withHostState(root, () => {}));
+        held.state.current.status = "completed";
+      });
+      await assert.rejects(withHeldHostState(capability, () => {}));
+    });
+    assert.equal((await store.read()).current.status, "recovery-required");
+  });
+  await assert.rejects(withHeldHostState(retained, () => {}));
+});
+
+test("unawaited held producer uncertainty drains and retains the original lock", async (t) => {
+  const { withHeldHostState } = await import("../host/state.mjs");
+  assert.equal(typeof withHeldHostState, "function");
+  const { root } = await privateFixture(t);
+  await assert.rejects(
+    withHostState(root, async (store) => {
+      await store
+        .guardPersistence(async (capability) => {
+          void withHeldHostState(capability, async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            throw Object.assign(new Error("private producer failure"), {
+              durabilityUncertain: true,
+            });
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    }),
+    (error) => rejected(error) && error.durabilityUncertain === true,
+  );
+  assert.ok((await lstat(join(root, ".deploy.lock"))).isFile());
+});
+
+test("producer failure cannot hide earlier guarded persistence uncertainty", async (t) => {
+  const { withHeldHostState } = await import("../host/state.mjs");
+  const { root } = await privateFixture(t);
+  await assert.rejects(
+    withHostState(root, async (store) => {
+      await store
+        .guardPersistence(async (capability) => {
+          void withHeldHostState(capability, async () => {
+            throw new Error("later producer failure");
+          }).catch(() => {});
+          throw Object.assign(new Error("earlier persistence failure"), {
+            durabilityUncertain: true,
+          });
+        })
+        .catch(() => {});
+    }),
+    (error) => rejected(error) && error.durabilityUncertain === true,
+  );
+  assert.ok((await lstat(join(root, ".deploy.lock"))).isFile());
+});
