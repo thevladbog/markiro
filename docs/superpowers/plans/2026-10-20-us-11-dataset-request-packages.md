@@ -20,20 +20,40 @@ build and focused formatting/diff checks pass. Four exact new-suite child
 databases were normally disposed and independently verified absent. The existing
 Vite config warning remains visible.
 
-Task 2's actual native run exposed the frozen Transformation V1 KDE gap; it is
-preserved but blocked, not GREEN. Prerequisite Tasks 4–6 below execute before
-resuming Task 2, then Task 3. The final ordinary API invocation and new-source
-GitHub acceptance are still pending. This checkpoint proves neither a generated
-dataset Request package nor full demo completion. Detailed recovery evidence is
-in the ignored plan ledger.
+Tasks 1, 2 and prerequisite Tasks 4–6 are independently Approved and committed
+through `ec6e6d160f51b937cf4b52e9d5feacffdf3d1a57`. Task 2's original native
+Transformation V1 KDE gap was resolved through strict V2 contracts, additive
+0145 enforcement and new native captures/readers; historical V1 facts were not
+hydrated or rewritten. Task 4 passed domain 1,442 and contracts 1,028 cases;
+Task 5 passed 190 native checks. Task 6's final four-file native invocation
+passed 71/71 with zero skips. Detailed per-invocation evidence and independent
+review are retained in the ignored plan ledger.
 
-Prerequisite Task 4 is independently Approved: domain 1,442 and contracts 1,028
-tests pass without skips; both package gates and API/admin typechecks pass.
-Task 5 is independently Approved: 190 native checks and 193 tooling tests pass
-without skips; DB typecheck/lint/build and formatting pass. The additive 0145
-checks strict V2 facts while preserving V1 guards/history. Native API emission
-and downstream readers (Task 6), then actual Request packages (Tasks 2/3), remain
-unaccepted. No CI or Ready acceptance is inferred from the SQL-only gate.
+The resumed Task 2 first complete invocation passed 27 cases and failed four
+fixture assertions; a focused follow-up passed those four on the same final
+production source. These are distinct results, not a synthesized 31-case green
+invocation. The exact new-SHA CI must still execute all 31 together. Its native
+Ready/private-byte proof and approved source now underpin Task 3 composition.
+Task 3's initial expanded native invocation passed six cases and timed out its
+partial-middle verify assertion at the unchanged 5000ms budget. That expensive
+awaited verification now uses a bounded setup hook while retaining its linked
+full DB/provider before/after assertions. The corrected full-file invocation
+passed 7/7 with zero skips, exit 0, in 155.12 seconds (151.91 seconds test work).
+It proves one effective owned synthetic Plan, three actual Ready `export_ready`
+runs, exact literal 1/12/12-chain event/lot closure, every private artifact and
+ZIP member/Plan PDF, same pending-middle identity/deadline resume and identical
+completed results with zero captured SQL/provider mutations and unchanged full
+DB snapshots. All selections are below 500 revisions and 16 MiB frozen bytes.
+Final passing console output suppressed exact byte counts, phase measurements
+and the final random child identity; these values are not reconstructed. The
+awaited fixture's normal drop/absence check completed successfully; exact named
+absence evidence for RED/first expanded children is retained separately.
+The 193 tooling cases and API typecheck/lint/build pass. Shared API prerequisite
+builds pass 5/5 from cache. Source remains unstaged for independent review.
+
+The root's single final ordinary API invocation, whole-increment independent
+review and exact new-source GitHub/full Trace/Cases acceptance remain pending.
+None of these service/artifact gates declares US-11 complete or deployed.
 
 ## Global Constraints
 
@@ -147,16 +167,16 @@ Contract parsing alone grants no authority.
 Consume Task 1's exact transaction method. Internally construct native worker
 services from concrete dependencies; do not inject a worker/fake Ready provider.
 
-- [ ] Read the spec and native dataset Plan pattern, journal prepare/runAtomicStage, terminal projection verifier, Request snapshot/validation/Prepare/run evidence, worker lifecycle and real private storage fixture. Follow the spec for strict original-owner guard, source closure, native Plan/PDF and bounded journal ownership.
-- [ ] Create a tracked real fixture for Scenario A through native seed services and owned Plan. Write a RED test asserting a native Ready run and exact published byte/ZIP proof, not a mocked worker result. Keep expensive prerequisites in existing bounded setup hooks.
-- [ ] Implement strict fixed recipe selection using existing native terminal projections and exact snapshot identities/revisions/relations; compare the real selected complete closure and Plan pin before persistence. Derive TLCs, never accept arbitrary scope/IDs. Preserve native 500/16 MiB checks. Reject every warning/error; preserve native informational findings in frozen/report/manifest evidence, without suppression or acknowledgement.
-- [ ] Implement Request creation plus pending identity atomically with `prepareStageIntent`; freeze actual once-only receipt/deadline, body and source digest. Record its receipt through guarded actual-row verification. No lookup/adoption of an unowned existing request number.
-- [ ] Invoke native Validate only for pending work and require frozen semantic digest. In the package prepare-intent callback call Task 1 with stable key/revision/digest/export_ready, returning the actual new run identity atomically. Preserve native run evidence; source drift is a conflict, not silent revalidation/adoption.
-- [ ] Verify ownership before `runScoped`, run only the owned scope outside journal locks, and leave non-Ready outcomes incomplete. Reproduce and verify real payloads, Plan PDF, checkpoint/expectation/publication, each private object/hash and ZIP; final guarded transaction must recheck verified bindings before recording package receipt.
-- [ ] Completed initialize/verify must bypass all commands and provider writes. Add exact DB snapshot and PUT/DELETE equality assertions, fixed receivedAt/dueAt, cross-tenant/revoked owner, same-TLC foreign-source injection, native source/Plan/Request/run drift, missing/corrupt private bytes, malformed selector/accessor denial and unrelated queued-run equality.
-- [ ] Add SQL fault tests for Request+intent rollback and run+package-intent rollback, committed reply-loss before receipt and final publication receipt loss, and live concurrent initializers. Use existing DB transport fault and clock helpers only where required by native policy; no production test hooks, blanket catches or sleeps proving contention.
-- [ ] Add the exact new native filename to the same CI owner/pins. Run this native suite, relevant native Request transaction/worker regressions once, ownership Node checks and API static/build/format/diff. Record precise evidence and owned cleanup; do not run all 260 chains locally per task.
-- [ ] Self-review and report source unstaged with exact selected fixture scope, all failure details and remaining integration acceptance. Root performs independent task review.
+- [x] Read the spec and native dataset Plan pattern, journal prepare/runAtomicStage, terminal projection verifier, Request snapshot/validation/Prepare/run evidence, worker lifecycle and real private storage fixture. Follow the spec for strict original-owner guard, source closure, native Plan/PDF and bounded journal ownership.
+- [x] Create a tracked real fixture for Scenario A through native seed services and owned Plan. Write a RED test asserting a native Ready run and exact published byte/ZIP proof, not a mocked worker result. Keep expensive prerequisites in existing bounded setup hooks.
+- [x] Implement strict fixed recipe selection using existing native terminal projections and exact snapshot identities/revisions/relations; compare the real selected complete closure and Plan pin before persistence. Derive TLCs, never accept arbitrary scope/IDs. Preserve native 500/16 MiB checks. Reject every warning/error; preserve native informational findings in frozen/report/manifest evidence, without suppression or acknowledgement.
+- [x] Implement Request creation plus pending identity atomically with `prepareStageIntent`; freeze actual once-only receipt/deadline, body and source digest. Record its receipt through guarded actual-row verification. No lookup/adoption of an unowned existing request number.
+- [x] Invoke native Validate only for pending work and require frozen semantic digest. In the package prepare-intent callback call Task 1 with stable key/revision/digest/export_ready, returning the actual new run identity atomically. Preserve native run evidence; source drift is a conflict, not silent revalidation/adoption.
+- [x] Verify ownership before `runScoped`, run only the owned scope outside journal locks, and leave non-Ready outcomes incomplete. Reproduce and verify real payloads, Plan PDF, checkpoint/expectation/publication, each private object/hash and ZIP; final guarded transaction must recheck verified bindings before recording package receipt.
+- [x] Completed initialize/verify must bypass all commands and provider writes. Add exact DB snapshot and PUT/DELETE equality assertions, fixed receivedAt/dueAt, cross-tenant/revoked owner, same-TLC foreign-source injection, native source/Plan/Request/run drift, missing/corrupt private bytes, malformed selector/accessor denial and unrelated queued-run equality.
+- [x] Add SQL fault tests for Request+intent rollback and run+package-intent rollback, committed reply-loss before receipt and final publication receipt loss, and live concurrent initializers. Use existing DB transport fault and clock helpers only where required by native policy; no production test hooks, blanket catches or sleeps proving contention.
+- [x] Add the exact new native filename to the same CI owner/pins. Run this native suite, relevant native Request transaction/worker regressions once, ownership Node checks and API static/build/format/diff. Record precise evidence and owned cleanup; do not run all 260 chains locally per task.
+- [x] Self-review and report source unstaged with exact selected fixture scope, all failure details and remaining integration acceptance. Root performs independent task review.
 
 ### Task 3: Compose the Plan and three real packages
 
@@ -164,7 +184,7 @@ services from concrete dependencies; do not inject a worker/fake Ready provider.
 
 - Create `apps/api/src/modules/traceability/demo/us-dataset-artifact-seed.ts`.
 - Create `apps/api/test/us-dataset-artifact-seed.e2e.test.ts`.
-- Extend `apps/api/test/support/us-dataset-request-fixture.ts` only for actual required-chain composition, not fabricated proof.
+- Reuse `apps/api/test/support/us-dataset-request-fixture.ts`; extend it only if actual required-chain composition needs a shared helper. The integration test can add the other 24 real chains in bounded hooks without a cosmetic fixture edit.
 - Modify the same three CI ownership files additively for the new native filename.
 - Update `docs/us/implementation-plan.md` and this plan's local acceptance section with measured boundaries.
 
@@ -184,12 +204,12 @@ state `plan_request_artifacts_verified`, `datasetComplete: false`, one
 order. Compose existing Plan and Task 2 stores only; do not reseed all chains or
 edit the existing Trace/Readiness coordinator to claim complete demo acceptance.
 
-- [ ] Build a fixture with the 25 distinct recipe chains using real native services. Share one owned Plan and concrete private stores. Use bounded grouped setup phases rather than enlarge an existing test or hook timeout; if a phase cannot fit the preserved envelope, report timings before choosing a structural fix.
-- [ ] Write RED asserting actual native rows: exactly one effective owned synthetic Plan and three Ready `export_ready` runs with the literal recipe references and respective 1/12/12 owned connected chain selections. All frozen revisions remain below 500 and frozen bytes below 16 MiB. No production result helper may compute the test's expected selections.
-- [ ] Implement the small artifact-only coordinator. Verify all private Plan/package artifacts and return only immutable honest partial-dataset evidence.
-- [ ] Add completed initialize/verify equality and full DB/provider no-write assertions. Prove failed/missing middle-unit prerequisites never produce a falsely completed three-package result; existing pending unit can resume without duplicates. Record actual generated private PDF/ZIP evidence and limits.
-- [ ] Assign this native test an exact prepared-services owner, run the actual three-package native suite and behavioral ownership checks, API static/build, tooling and focused format/diff. Do not duplicate a full ordinary API run; root performs that final gate once.
-- [ ] Update current roadmap/status to distinguish artifact adapter acceptance from CLI/viewer/browser, full-volume CI and hosting. No claim of complete US-11/demo/deployment from this task. Report exact evidence, counts, cleanup, limitations and leave source unstaged for review.
+- [x] Build a fixture with the 25 distinct recipe chains using real native services. Share one owned Plan and concrete private stores. Use bounded grouped setup phases rather than enlarge an existing test or hook timeout; if a phase cannot fit the preserved envelope, report timings before choosing a structural fix.
+- [x] Write RED asserting actual native rows: exactly one effective owned synthetic Plan and three Ready `export_ready` runs with the literal recipe references and respective 1/12/12 owned connected chain selections. All frozen revisions remain below 500 and frozen bytes below 16 MiB. No production result helper may compute the test's expected selections.
+- [x] Implement the small artifact-only coordinator. Verify all private Plan/package artifacts and return only immutable honest partial-dataset evidence.
+- [x] Add completed initialize/verify equality and full DB/provider no-write assertions. Prove failed/missing middle-unit prerequisites never produce a falsely completed three-package result; existing pending unit can resume without duplicates. Record actual generated private PDF/ZIP evidence and limits.
+- [x] Assign this native test an exact prepared-services owner, run the actual three-package native suite and behavioral ownership checks, API static/build, tooling and focused format/diff. Do not duplicate a full ordinary API run; root performs that final gate once.
+- [x] Update current roadmap/status to distinguish artifact adapter acceptance from CLI/viewer/browser, full-volume CI and hosting. No claim of complete US-11/demo/deployment from this task. Report exact evidence, counts, cleanup, limitations and leave source unstaged for review.
 
 ### Task 4: Strict versioned Transformation contracts and captured-only export
 
@@ -207,12 +227,12 @@ Execute this prerequisite before resuming Task 2.
 
 **Interfaces:** Export `transformationFinalizationSnapshotV2Schema`, `TransformationFinalizationSnapshotV2`, `transformationFinalizationSnapshotSchema` and `TransformationFinalizationSnapshot`. Preserve original V1 exports/behavior. V2 adds `product.kdes`, `processor.kdes`, `source.kdes` using existing strict product/location snapshot schemas and exact nested/outer ID binding. Versioned finalized-record/genealogy/export envelopes consume the union; domain's structural source type and projection branch on the captured version, never current master data.
 
-- [ ] Read the prerequisite spec, affected code/tests and package manifests. First write executed failing tests for V2 acceptance and captured-only split KDE projection. Observe missing new export or unsupported-version failure before implementation; retain raw RED.
-- [ ] Implement strict schemas sharing common refinements without duplicating the entire V1 rule block or weakening V1. Assert exact output source/processor KDE equality, nested product/location identity, reference semantics, coverage, unknown versions/missing/extra fields and quantity/line/lifecycle invariants.
-- [ ] Extend versioned envelopes and project V2 structured KDEs with existing context helpers, retaining original display columns. Literal legacy V1 still leaves unavailable split fields blank and reports the same missing KDEs. No guessing from opaque strings or changing validation severity/registry requirements.
-- [ ] Test forged product/location IDs, output processor mismatch, wrong/missing KDEs and post-capture master-like values that must not enter captured projection. Keep info findings visible, not filtered.
-- [ ] Run focused RED/GREEN, full domain and platform-contracts tests/typecheck/lint/build in dependency order, then API/admin typecheck for union compatibility. Make no runtime API capture/reader changes in this task; report any actual type-only cross-surface blocker for controller ruling.
-- [ ] Self-review, raw evidence and concise report; no stage/commit/push or agents. No broad native/API run for this pure task. Root reviews independently before Task 5.
+- [x] Read the prerequisite spec, affected code/tests and package manifests. First write executed failing tests for V2 acceptance and captured-only split KDE projection. Observe missing new export or unsupported-version failure before implementation; retain raw RED.
+- [x] Implement strict schemas sharing common refinements without duplicating the entire V1 rule block or weakening V1. Assert exact output source/processor KDE equality, nested product/location identity, reference semantics, coverage, unknown versions/missing/extra fields and quantity/line/lifecycle invariants.
+- [x] Extend versioned envelopes and project V2 structured KDEs with existing context helpers, retaining original display columns. Literal legacy V1 still leaves unavailable split fields blank and reports the same missing KDEs. No guessing from opaque strings or changing validation severity/registry requirements.
+- [x] Test forged product/location IDs, output processor mismatch, wrong/missing KDEs and post-capture master-like values that must not enter captured projection. Keep info findings visible, not filtered.
+- [x] Run focused RED/GREEN, full domain and platform-contracts tests/typecheck/lint/build in dependency order, then API/admin typecheck for union compatibility. Make no runtime API capture/reader changes in this task; report any actual type-only cross-surface blocker for controller ruling.
+- [x] Self-review, raw evidence and concise report; no stage/commit/push or agents. No broad native/API run for this pure task. Root reviews independently before Task 5.
 
 ### Task 5: Additive native database enforcement for Transformation V2
 
@@ -230,12 +250,12 @@ Execute after Task 4 review and before Task 6.
 
 **Interfaces:** The current `transformation_finalization_guard()` accepts only V1. The additive guarded replacement accepts exactly V1 or V2, retaining every existing header/source/line/coverage/output/genealogy/revision/immutability check. V2 requires strict new fields, same tenant and equality with actual frozen-at-finalization product/profile/location facts; use the existing receiving SQL snapshot matchers where semantically identical. Future API capture may emit V2 only after this gate passes.
 
-- [ ] Read DB instructions, drizzle config, migrations 0131/0132 and receiving snapshot matchers, runtime migration packaging and native fixture helpers. Use actual predecessor function shape; no speculative global SQL replacements.
-- [ ] Write an executed native RED for valid V2 SQL finalization with known captured structured facts, plus malicious missing/forged/wrong-tenant cases. Assert exact success/23514 rejection and full transaction rollback, not just parser outcomes. Use literal expected fields from native fixture data, not an unchecked production projection.
-- [ ] Generate the custom additive migration and implement guarded predecessor replacement plus complete V2 checks. Assert expected replacement cardinality/shape and fail closed if predecessor differs. Keep legacy V1 acceptance and immutable historical rows untouched; do not revalidate old facts against current data.
-- [ ] Verify fresh migration, prefix upgrade, runtime no-op replay, unaltered historical V1 bytes and existing V1 rejection/identity/coverage/output/revision checks. Test street/coordinates and direct/reference sources with exact native matcher parity. Drain/drop only owned children and prove exact catalog/backend absence.
-- [ ] Add exact native DB filename ownership without changing release locks or any timeout/phase cap. Run new DB native suite and affected old Transformation original/revisions migration suites, DB package test/typecheck/lint/build and focused ownership/tooling checks. API artifacts require rebuilt DB before later consumers.
-- [ ] Self-review and report exact source/test evidence and metadata changes, then leave unstaged for root independent review. No full API/260-chain run at this task.
+- [x] Read DB instructions, drizzle config, migrations 0131/0132 and receiving snapshot matchers, runtime migration packaging and native fixture helpers. Use actual predecessor function shape; no speculative global SQL replacements.
+- [x] Write an executed native RED for valid V2 SQL finalization with known captured structured facts, plus malicious missing/forged/wrong-tenant cases. Assert exact success/23514 rejection and full transaction rollback, not just parser outcomes. Use literal expected fields from native fixture data, not an unchecked production projection.
+- [x] Generate the custom additive migration and implement guarded predecessor replacement plus complete V2 checks. Assert expected replacement cardinality/shape and fail closed if predecessor differs. Keep legacy V1 acceptance and immutable historical rows untouched; do not revalidate old facts against current data.
+- [x] Verify fresh migration, prefix upgrade, runtime no-op replay, unaltered historical V1 bytes and existing V1 rejection/identity/coverage/output/revision checks. Test street/coordinates and direct/reference sources with exact native matcher parity. Drain/drop only owned children and prove exact catalog/backend absence.
+- [x] Add exact native DB filename ownership without changing release locks or any timeout/phase cap. Run new DB native suite and affected old Transformation original/revisions migration suites, DB package test/typecheck/lint/build and focused ownership/tooling checks. API artifacts require rebuilt DB before later consumers.
+- [x] Self-review and report exact source/test evidence and metadata changes, then leave unstaged for root independent review. No full API/260-chain run at this task.
 
 ### Task 6: Capture V2 natively and accept it in current read paths
 
@@ -254,12 +274,12 @@ Execute after Tasks 4/5 review, then resume the original Task 2 implementer.
 
 **Interfaces:** `planTransformationSnapshot` emits `TransformationFinalizationSnapshotV2` from the same locked context/builders and same display-string algorithm. Runtime persisted readers use Task 4's strict union; SQL Readiness candidate selection includes V2, while malformed/unknown versions remain invalid. Native saved V1 command receipts still replay exactly; amendments create new V2 revisions without changing output identity or predecessor bytes.
 
-- [ ] Write an actual native failing test demanding snapshotVersion 2 and exact product/processor/source kdes from locked fixture facts, then observe RED before changing the emitter. Keep explicit V1 fixtures and legacy replay assertions separate from new-emitter expectations.
-- [ ] Capture each builder's existing snapshot as kdes without rereads. Emit V2 for new originals/amendments; preserve IDs, strings, quantities/UOMs, coverage, reference values, output identity, audit and native transaction/lock ordering.
-- [ ] Upgrade actual readers/candidate filters to strict versioned parsing. Preserve the existing V1 Readiness business-KDE lens/diagnostic behavior; do not convert its missing-value findings into new hard parser failures. For V2, a narrow shared readiness lens may be used only after full strict V2 validation. Never declare malformed V2 complete or read current data to fill it.
-- [ ] Test actual source/master changes after finalization: frozen V2 KDEs/export stay unchanged. Verify old V1 receipt replay, V1 predecessor → V2 amendment, native Readiness/Trace/genealogy/lot-card and real Request capture/export with no missing KDEs. Numeric info findings remain visible. No Ready shortcut.
-- [ ] Run the new native suite and affected finalization/amendment/read-model/Request-source regressions with unchanged budgets; fresh API/admin static/build, ownership/tooling and focused format/diff. Report exact test counts/skips and owned cleanup. Root still owns one final ordinary API/full CI acceptance after the resumed adapter and composition.
-- [ ] Self-review and report, no agents/stage/commit/push. On independent approval, hand exact new union/capture/DB semantics back to Task 2; do not edit its preserved source yourself.
+- [x] Write an actual native failing test demanding snapshotVersion 2 and exact product/processor/source kdes from locked fixture facts, then observe RED before changing the emitter. Keep explicit V1 fixtures and legacy replay assertions separate from new-emitter expectations.
+- [x] Capture each builder's existing snapshot as kdes without rereads. Emit V2 for new originals/amendments; preserve IDs, strings, quantities/UOMs, coverage, reference values, output identity, audit and native transaction/lock ordering.
+- [x] Upgrade actual readers/candidate filters to strict versioned parsing. Preserve the existing V1 Readiness business-KDE lens/diagnostic behavior; do not convert its missing-value findings into new hard parser failures. For V2, a narrow shared readiness lens may be used only after full strict V2 validation. Never declare malformed V2 complete or read current data to fill it.
+- [x] Test actual source/master changes after finalization: frozen V2 KDEs/export stay unchanged. Verify old V1 receipt replay, V1 predecessor → V2 amendment, native Readiness/Trace/genealogy/lot-card and real Request capture/export with no missing KDEs. Numeric info findings remain visible. No Ready shortcut.
+- [x] Run the new native suite and affected finalization/amendment/read-model/Request-source regressions with unchanged budgets; fresh API/admin static/build, ownership/tooling and focused format/diff. Report exact test counts/skips and owned cleanup. Root still owns one final ordinary API/full CI acceptance after the resumed adapter and composition.
+- [x] Self-review and report, no agents/stage/commit/push. On independent approval, hand exact new union/capture/DB semantics back to Task 2; do not edit its preserved source yourself.
 
 ## Controller final gates
 

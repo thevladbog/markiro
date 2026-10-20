@@ -20,27 +20,32 @@ also passed. Full Trace acceptance covers all 260 regular chains plus the
 correction and orphan examples, complete verification and read-only replay. This
 is isolated test evidence, not an installed demo or release.
 
-US-11 remains **In progress**: the current native Trace/Readiness coordinator
-explicitly reports `datasetComplete: false`. The service-owned Plan adapter has
-separate native evidence but is not yet integrated into a complete initializer.
-Remaining acceptance includes the approved synthetic Plan and three actual Ready
-Request packages in the dataset, guarded initializer/CLI and resume behavior,
-complete resource/Request-limit measurements, viewer/browser journeys and required
-screenshots/video. Existing UI or service tests do not establish those combined
-demo outcomes.
+US-11 remains **In progress**. The separate artifact-only adapter composes the
+owned synthetic Plan and the three actual Request packages in recipe order,
+using native `export_ready` preparation, the reviewed exact-run worker and
+verified private PDF/ZIP bytes. Its explicit result is
+`plan_request_artifacts_verified`, with `datasetComplete: false`; the existing
+Trace/Readiness coordinator retains its own acceptance boundary. The adapter
+requires existing owned chains and does not seed the full dataset or create a CLI.
 
-The current implementation boundary is the reviewed
-[exact-run Request worker](../superpowers/plans/2026-10-13-us-11-request-scoped-worker.md),
-which now selects only its explicit tenant/run before locking or recovery. Its
-local scoped native suite passes 20/20 and worker regressions pass 249/249, without
-skips; tooling passes 192/192. Independent task and final source reviews are
-Approved. One full ordinary API run passes 4,807 tests, with 3,981 explicit opt-in
-skips; its owned database is normally dropped with absence verified. API static/
-build and repository formatting gates pass. New-source CI is a separate gate.
-Dataset Request orchestration follows that seam; this increment does not complete US-11.
-Hosting outside Russia, live viewer access and release enablement remain separate
-external gates. Operational workflow locks stay in place; no deployment or
-release is authorized by this checkpoint.
+The [Request packages plan](../superpowers/plans/2026-10-20-us-11-dataset-request-packages.md)
+records the independently approved transaction, Transformation V2 and per-unit
+Request prerequisites. The final native composition invocation passed 7/7 cases
+without skips in 155.12 seconds: exactly one effective owned Plan and three
+Ready `export_ready` runs over the literal 1/12/12-chain selections, every private
+artifact/ZIP member/Plan PDF, pending-middle resume and completed DB/provider
+no-write replay. All frozen selections remain below 500 revisions and 16 MiB.
+The existing 60-second setup and five-second assertion limits are unchanged.
+API typecheck/lint/build and 193 tooling checks pass without skips. The root's
+one final ordinary API invocation and exact new-source full Trace/Cases CI remain
+separate gates; older full-CI evidence above does not verify these new sources.
+
+Remaining demo acceptance includes a guarded complete initializer/CLI, complete
+dataset resource measurements, viewer/browser journeys and screenshots/video.
+Hosting outside Russia, live viewer access and release enablement remain
+external gates. Private provider transport in native tests is fixture-owned;
+it does not prove hosted storage. Operational workflow locks stay in place;
+no deployment or release is authorized by this checkpoint.
 
 ## Historical Receiving checkpoint — 2026-09-08
 
