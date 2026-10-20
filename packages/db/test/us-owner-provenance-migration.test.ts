@@ -116,7 +116,11 @@ describe.skipIf(!base)("US owner provenance migration in invocation-owned Postgr
           "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
         )
       ).rows[0]?.count;
-      expect(after).toBe((before ?? -1) + 1);
+      expect(before).toBe(144);
+      // 0144 remains covered by every original function/ACL assertion; 0145 is
+      // the independently owned additive structured Transformation guard.
+      expect(after).toBe(146);
+      expect(after).toBe((before ?? -1) + 2);
       await runtime(f);
       await assertContract(f);
       expect(

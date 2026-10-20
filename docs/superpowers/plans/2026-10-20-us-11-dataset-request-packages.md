@@ -27,6 +27,14 @@ GitHub acceptance are still pending. This checkpoint proves neither a generated
 dataset Request package nor full demo completion. Detailed recovery evidence is
 in the ignored plan ledger.
 
+Prerequisite Task 4 is independently Approved: domain 1,442 and contracts 1,028
+tests pass without skips; both package gates and API/admin typechecks pass.
+Task 5 is independently Approved: 190 native checks and 193 tooling tests pass
+without skips; DB typecheck/lint/build and formatting pass. The additive 0145
+checks strict V2 facts while preserving V1 guards/history. Native API emission
+and downstream readers (Task 6), then actual Request packages (Tasks 2/3), remain
+unaccepted. No CI or Ready acceptance is inferred from the SQL-only gate.
+
 ## Global Constraints
 
 - Work only in `/Users/thevladbog/PRSOME/q/.worktrees/us-docs-audit`, branch `codex/us-mvp`; preserve unrelated `docs/us/demo-hosting-options.md`.
@@ -241,6 +249,7 @@ Execute after Tasks 4/5 review, then resume the original Task 2 implementer.
 - Modify `apps/api/src/modules/traceability/trace/us-trace-evidence.ts`, `us-readiness-evidence.ts` and `us-lot-card.ts`.
 - Modify additional actual persisted-snapshot consumers only when a concrete direct V1-only parser/type blocks V2; report each named call site and keep the change to version-aware parsing.
 - Create `apps/api/test/us-transformation-structured-snapshot.e2e.test.ts`; extend actual finalization/amendment/trace/readiness/genealogy/lot-card/export regressions as needed to preserve separate V1 and new V2 proof.
+- Remove only the unused mutated master clone in `packages/domain/test/us-export-rows.test.ts` identified by Task 4's Minor review finding; retain its literal captured-cell assertions. Actual post-finalization master-data drift must be proved by the new native test, not this unused object.
 - Add only this new native filename to the existing prepared-services owner/helper/pins. Preserve all other selectors, assertions and budgets.
 
 **Interfaces:** `planTransformationSnapshot` emits `TransformationFinalizationSnapshotV2` from the same locked context/builders and same display-string algorithm. Runtime persisted readers use Task 4's strict union; SQL Readiness candidate selection includes V2, while malformed/unknown versions remain invalid. Native saved V1 command receipts still replay exactly; amendments create new V2 revisions without changing output identity or predecessor bytes.

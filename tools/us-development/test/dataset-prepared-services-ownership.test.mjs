@@ -58,12 +58,13 @@ const expectedFiles = [
   "test/us-request-worker-scoped.e2e.test.ts",
 ];
 const expectedDbFile = "test/us-owner-provenance-migration.test.ts";
+const expectedStructuredDbFile = "test/us-transformation-structured-snapshot-migration.e2e.test.ts";
 const expectedFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 const expectedCommand =
   "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-request-prepare-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts test/us-dataset-unit-composition.e2e.test.ts test/us-owner-provenance-procedure.e2e.test.ts test/us-owner-provenance-procedure-locks.e2e.test.ts test/us-owner-provenance-adapter.e2e.test.ts test/us-terminal-native-readers.e2e.test.ts test/us-terminal-verification-routing.e2e.test.ts test/us-terminal-closed-reader.e2e.test.ts test/us-dataset-unit-composition-semantics.e2e.test.ts test/us-dataset-unit-coordinator.e2e.test.ts test/us-dataset-composition-measurements.e2e.test.ts test/us-dataset-corrected-terminal-reader.e2e.test.ts test/us-dataset-native-final-reader.e2e.test.ts test/us-request-worker-scoped.e2e.test.ts --maxWorkers=1";
 const expectedDbCommand =
-  "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1";
+  "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts test/us-transformation-structured-snapshot-migration.e2e.test.ts --maxWorkers=1";
 const expectedJob = load(`jobs:
   dataset_prepared_services:
     runs-on: ubuntu-latest
@@ -107,7 +108,7 @@ const expectedJob = load(`jobs:
       - name: Verify US owner provenance migration on a disposable database
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts test/us-transformation-structured-snapshot-migration.e2e.test.ts --maxWorkers=1
 `).jobs.dataset_prepared_services;
 
 const source = readFileSync(".github/workflows/us-development.yml", "utf8");
@@ -185,6 +186,13 @@ function assertOwnership(all, sources = rawSources()) {
     steps.flatMap((step) => [...(step.run ?? "").matchAll(dbSelector)]).length,
     1,
     `${expectedDbFile} has exactly one explicit native selection`,
+  );
+  const structuredSelector =
+    /(?<![\w.-])us-transformation-structured-snapshot-migration\.e2e\.test\.ts(?![\w/.-])/g;
+  assert.equal(
+    steps.flatMap((step) => [...(step.run ?? "").matchAll(structuredSelector)]).length,
+    1,
+    `${expectedStructuredDbFile} has exactly one explicit native selection`,
   );
   assert.deepEqual(job, expectedJob, "complete unconditional failure-propagating native job");
   assert.deepEqual(
@@ -330,6 +338,11 @@ test("native gates skip aggregate collection without the dedicated isolated fixt
     expectedDbFile,
     expectedFixture,
   );
+  assertNativeFixtureGate(
+    readFileSync(`packages/db/${expectedStructuredDbFile}`, "utf8"),
+    expectedStructuredDbFile,
+    expectedFixture,
+  );
   assert.equal(
     JSON.parse(readFileSync("apps/api/package.json", "utf8")).scripts.test,
     "vitest run",
@@ -343,6 +356,34 @@ test("native gates skip aggregate collection without the dedicated isolated fixt
   assert.equal(jobs.length, 1);
   for (const scope of [ci, jobs[0], ...jobs[0].steps])
     assert.equal(scope.env?.US_TEST_DATABASE_URL, undefined);
+});
+
+test("structured snapshot native owner rejects omission, duplicates and wrong fixture independently", () => {
+  for (const mutation of ["omission", "duplicate", "foreign", "fixture"]) {
+    const all = readWorkflows();
+    const owner = all["us-development.yml"].jobs[preparedServicesJobId].steps.at(-1);
+    if (mutation === "omission") owner.run = owner.run.replace(` ${expectedStructuredDbFile}`, "");
+    if (mutation === "duplicate") owner.run += ` ${expectedStructuredDbFile}`;
+    if (mutation === "foreign")
+      all["foreign.yml"] = {
+        jobs: { foreign: { steps: [{ run: `vitest run ${expectedStructuredDbFile}` }] } },
+      };
+    if (mutation === "fixture")
+      owner.env.US_TEST_DATABASE_URL = expectedFixture.replace("55432", "5432");
+    assert.throws(
+      () => assertOwnership(all),
+      mutation === "fixture"
+        ? /complete unconditional failure-propagating native job/
+        : /exactly one explicit native selection/,
+    );
+  }
+  const nativeSource = readFileSync(`packages/db/${expectedStructuredDbFile}`, "utf8");
+  for (const mutant of [
+    nativeSource.replace("process.env.US_TEST_DATABASE_URL", "process.env.DATABASE_URL"),
+    nativeSource.replace("describe.skipIf(!base)", "describe.skipIf(base)"),
+    nativeSource.replace("const base = ", "let base = "),
+  ])
+    assert.throws(() => assertNativeFixtureGate(mutant, expectedStructuredDbFile, expectedFixture));
 });
 
 test("complete ownership rejects missing, wrong, duplicate, foreign and bypassed owners", (t) => {

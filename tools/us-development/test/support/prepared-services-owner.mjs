@@ -33,7 +33,7 @@ export const preparedServicesFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 export const preparedServicesCommand = `corepack pnpm --filter @markiro/api exec vitest run ${preparedServicesFiles.join(" ")} --maxWorkers=1`;
 export const ownerProvenanceDbCommand =
-  "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1";
+  "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts test/us-transformation-structured-snapshot-migration.e2e.test.ts --maxWorkers=1";
 export const preparedServicesJob = {
   "runs-on": "ubuntu-latest",
   needs: "isolation",
@@ -137,7 +137,7 @@ export const preparedServicesJobBlock = `
       - name: Verify US owner provenance migration on a disposable database
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts test/us-transformation-structured-snapshot-migration.e2e.test.ts --maxWorkers=1
 `;
 
 export function hasExactPreparedServicesOwner(workflow) {
