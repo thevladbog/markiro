@@ -52,9 +52,10 @@ where
 async fn counts(conn: &mut SqliteConnection, shift_id: &str) -> Result<(u64, u32, u32), ApiError> {
     let (accepted, boxes_closed, pallets): (i64, i64, i64) = sqlx::query_as(SHIFT_TOTALS)
         .bind(shift_id)
-        .fetch_one(conn)
+        .fetch_optional(conn)
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("shift not found"))?;
     Ok((count(accepted)?, count(boxes_closed)?, count(pallets)?))
 }
 
