@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
-import { createPrivateDirectory, writePrivateFile, readPrivateFile } from "../host/files.mjs";
+import {
+  createPrivateDirectory,
+  writePrivateFile,
+  readPrivateFile,
+  inventoryDocumentOptions,
+} from "../host/files.mjs";
 import { hashArchive, publishArchive } from "./files.mjs";
 import { readPrivateAbsolute, openRuntime } from "./local-runtime.mjs";
 import { mapInventory, compareInventories } from "./inventory.mjs";
@@ -74,7 +79,11 @@ export async function verifyDatabaseRestore({
   roleMapping = plain(roleMapping);
   keys(backup, ["archivePath", "archiveSha256", "inventoryPath", "inventorySha256"]);
   ensure(hash(backup.archiveSha256) && hash(backup.inventorySha256) && typeof run === "function");
-  const inventoryBytes = await readPrivateAbsolute(root, backup.inventoryPath);
+  const inventoryBytes = await readPrivateAbsolute(
+    root,
+    backup.inventoryPath,
+    inventoryDocumentOptions,
+  );
   ensure(digest(inventoryBytes) === backup.inventorySha256);
   const document = validateBackupInventory(JSON.parse(inventoryBytes), {
     operationId,
@@ -102,6 +111,7 @@ export async function verifyDatabaseRestore({
       input,
       "request.json",
       Buffer.from(canonical({ inventory: document.inventory, roleMapping })),
+      inventoryDocumentOptions,
     );
     runtime = await openRuntime({ root, operationId, purpose: "restore", run, recoveryRuntime });
     ensure(
@@ -112,12 +122,13 @@ export async function verifyDatabaseRestore({
     await runtime.prepare(input, "none");
     await runtime.execute();
     await runtime.output(output);
-    restored = JSON.parse(await readPrivateFile(output, "restored.json"));
+    restored = JSON.parse(await readPrivateFile(output, "restored.json", inventoryDocumentOptions));
     compareInventories(expected, restored.inventory);
     ensure(restored.postgresVersion.startsWith("17."));
     ensure((await hashArchive(root, backup.archivePath)).sha256 === backup.archiveSha256);
     ensure(
-      digest(await readPrivateAbsolute(root, backup.inventoryPath)) === backup.inventorySha256,
+      digest(await readPrivateAbsolute(root, backup.inventoryPath, inventoryDocumentOptions)) ===
+        backup.inventorySha256,
     );
   } catch (error) {
     problem = error;

@@ -1,3 +1,4 @@
+import { inventoryDocumentOptions } from "./files.mjs";
 import { hashArchive } from "../backup/files.mjs";
 import { readPrivateAbsolute } from "../backup/local-runtime.mjs";
 import { validateBackupInventory } from "../backup/restore.mjs";
@@ -20,7 +21,11 @@ export async function readVerifiedBackup({ root, identity, backup, restoreEviden
   restoreEvidence = plain(restoreEvidence);
   keys(backup, ["archivePath", "archiveSha256", "inventoryPath", "inventorySha256"]);
   keys(restoreEvidence, ["evidencePath", "evidenceSha256"]);
-  const inventoryBytes = await readPrivateAbsolute(root, backup.inventoryPath);
+  const inventoryBytes = await readPrivateAbsolute(
+    root,
+    backup.inventoryPath,
+    inventoryDocumentOptions,
+  );
   const evidenceBytes = await readPrivateAbsolute(root, restoreEvidence.evidencePath);
   ensure(
     digest(inventoryBytes) === backup.inventorySha256 &&
@@ -59,7 +64,8 @@ export async function readVerifiedBackup({ root, identity, backup, restoreEviden
   );
   // Recheck metadata after streaming a potentially large archive.
   ensure(
-    digest(await readPrivateAbsolute(root, backup.inventoryPath)) === backup.inventorySha256 &&
+    digest(await readPrivateAbsolute(root, backup.inventoryPath, inventoryDocumentOptions)) ===
+      backup.inventorySha256 &&
       digest(await readPrivateAbsolute(root, restoreEvidence.evidencePath)) ===
         restoreEvidence.evidenceSha256,
   );
