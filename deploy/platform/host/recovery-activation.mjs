@@ -214,12 +214,16 @@ export async function executeRecoveryActivation(input, adapters) {
         await store.fail();
         if (releaseVerified) {
           try {
-            await observeTarget("recovery");
-            await checkConfiguration();
-            if (targetOwned) {
-              await compose(["stop", "edge", "api"], true);
-              await store.fail();
-              await stopped();
+            if (typeof adapters.cleanupOwnedWorkloads === "function") {
+              await store.cleanup(() => adapters.cleanupOwnedWorkloads(context("recovery")));
+            } else {
+              await observeTarget("recovery");
+              await checkConfiguration();
+              if (targetOwned) {
+                await compose(["stop", "edge", "api"], true);
+                await store.fail();
+                await stopped();
+              }
             }
           } catch (cleanupError) {
             terminationUnconfirmed ||= cleanupError?.terminationConfirmed === false;

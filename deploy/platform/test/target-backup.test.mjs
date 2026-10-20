@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile, writeFile, lstat } from "node:fs/promises";
+import { readFile, writeFile, lstat, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { digest } from "../backup/schemas.mjs";
 import { createTargetRecoveryBackup } from "../host/target-backup.mjs";
@@ -228,6 +228,12 @@ test("target backup never issues another process command after unconfirmed termi
 
 for (const mode of [
   "valid",
+  "different-executor",
+  "wrong-runtime-executor",
+  "missing-recovery-runtime",
+  "wrong-runtime-operation",
+  "changed-source-runtime",
+  "changed-recovery-runtime",
   "forged",
   "wrong-phase",
   "changed-sidecar",
@@ -242,6 +248,41 @@ for (const mode of [
     const f = await fixture(t, uncertain ? mode : undefined);
     const prior = structuredClone(f.input.operation.identity);
     prior.operationId = randomUUID();
+    if (mode === "different-executor") {
+      prior.executorSha = "1".repeat(40);
+      await f.save("backup-runtime.json", {
+        ...f.runtime,
+        executorSha: prior.executorSha,
+        image: `sha256:${"9".repeat(64)}`,
+      });
+    }
+    if (mode !== "missing-recovery-runtime")
+      await f.save(
+        `recovery-backup-runtime-${f.input.operation.identity.operationId}.json`,
+        f.runtime,
+      );
+    if (mode === "wrong-runtime-executor")
+      await f.save(`recovery-backup-runtime-${f.input.operation.identity.operationId}.json`, {
+        ...f.runtime,
+        executorSha: "2".repeat(40),
+      });
+    if (mode === "wrong-runtime-operation")
+      await rename(
+        join(f.f.root, `recovery-backup-runtime-${f.input.operation.identity.operationId}.json`),
+        join(f.f.root, `recovery-backup-runtime-${randomUUID()}.json`),
+      );
+    const originalRuntime = await readFile(join(f.f.root, "backup-runtime.json"));
+    if (["changed-source-runtime", "changed-recovery-runtime"].includes(mode)) {
+      const verify = f.input.verifySources;
+      f.input.verifySources = async () => {
+        await verify();
+        const name =
+          mode === "changed-source-runtime"
+            ? "backup-runtime.json"
+            : `recovery-backup-runtime-${f.input.operation.identity.operationId}.json`;
+        await f.save(name, (await readFile(join(f.f.root, name))).toString() + " ");
+      };
+    }
     const state = {
       version: 1,
       sequence: 14,
@@ -297,13 +338,16 @@ for (const mode of [
             f.options,
           );
         });
-      if (mode !== "valid") await assert.rejects(call());
+      if (!["valid", "different-executor"].includes(mode)) await assert.rejects(call());
       else {
         const result = await call();
-        assert.equal(
-          JSON.parse(await readFile(result.restoreEvidence.evidencePath)).status,
-          "completed",
-        );
+        const evidence = JSON.parse(await readFile(result.restoreEvidence.evidencePath));
+        const inventory = JSON.parse(await readFile(result.backup.inventoryPath));
+        assert.equal(evidence.status, "completed");
+        for (const document of [inventory, evidence]) {
+          assert.equal(document.executorSha, f.input.operation.identity.executorSha);
+          assert.equal(document.runtime.image, f.runtime.image);
+        }
         assert.equal(f.boundaries(), 4);
         assert.equal(f.docker.containers.size + f.docker.volumes.size, 0);
       }
@@ -314,6 +358,9 @@ for (const mode of [
       assert.ok(f.workerCommands() > 0);
     } else await execution;
     assert.deepEqual(await readFile(join(f.f.root, "state.json")), bytes);
-    if (mode !== "valid" && !uncertain) assert.equal(f.workerCommands(), 0);
+    if (mode !== "changed-source-runtime")
+      assert.deepEqual(await readFile(join(f.f.root, "backup-runtime.json")), originalRuntime);
+    if (!["valid", "different-executor"].includes(mode) && !uncertain)
+      assert.equal(f.workerCommands(), 0);
   });
 }

@@ -119,6 +119,17 @@ export async function withRecoveryActivationState(root, input, callback, { now =
       });
     const store = Object.freeze({
       fail,
+      // Terminal cleanup keeps persistence ownership and immutable state checks,
+      // while expiry cannot prevent stopping workloads started by this owner.
+      cleanup: (action) =>
+        host.guardPersistence(async () => {
+          if (!active || state.status !== "recovery-required" || typeof action !== "function")
+            throw stateError();
+          await integrity();
+          const result = await action();
+          await integrity();
+          return result;
+        }),
       read: () => guarded(() => snapshotActivation(state)),
       guard: (action) =>
         guarded((capability) => {

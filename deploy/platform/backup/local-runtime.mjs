@@ -2,10 +2,59 @@ import { join, dirname, relative } from "node:path";
 import { chmod, mkdir } from "node:fs/promises";
 import { assertPrivateRootSync, readPrivateFile } from "../host/files.mjs";
 import { ensure, runtime, fail } from "./schemas.mjs";
-export async function openRuntime({ root, operationId, purpose, run }) {
+import { withHeldHostState } from "../host/state.mjs";
+const recoveryRuntimes = new WeakMap();
+export function withRecoveryBackupRuntime(capability, action) {
+  return withHeldHostState(capability, async (held) => {
+    const issued = [];
+    try {
+      return await action(held, async (admission) => {
+        const context = await createRecoveryBackupRuntime(held.root, admission);
+        issued.push(context);
+        return context;
+      });
+    } finally {
+      for (const context of issued) recoveryRuntimes.delete(context);
+    }
+  });
+}
+// Admission and the held producer read the same independently provisioned
+// descriptor. Neither changes its executor/image provenance. The opaque runtime
+// context below can be issued only while consuming the held-state capability.
+export async function validateRecoveryBackupRuntime(root, admission) {
+  const { identity, predecessor } = admission;
+  const original = await readPrivateFile(root, "backup-runtime.json");
+  const previous = runtime(JSON.parse(original));
+  ensure(previous.executorSha === predecessor.identity.executorSha);
+  const name = `recovery-backup-runtime-${identity.operationId}.json`;
+  const bytes = await readPrivateFile(root, name);
+  const config = runtime(JSON.parse(bytes));
+  ensure(config.executorSha === identity.executorSha && config.provenance === "live-source");
+  ensure(
+    config.dockerExecutable === "/usr/bin/docker" &&
+      config.endpoint === "unix:///var/run/docker.sock",
+  );
+  return { root, operationId: identity.operationId, name, bytes, original };
+}
+async function createRecoveryBackupRuntime(root, admission) {
+  const bound = await validateRecoveryBackupRuntime(root, admission);
+  const context = Object.freeze({});
+  recoveryRuntimes.set(context, bound);
+  return context;
+}
+export async function readBackupRuntime(root, operationId, recoveryRuntime) {
+  if (recoveryRuntime === undefined) return readPrivateFile(root, "backup-runtime.json");
+  const bound = recoveryRuntimes.get(recoveryRuntime);
+  ensure(bound && bound.root === root && bound.operationId === operationId);
+  ensure((await readPrivateFile(root, "backup-runtime.json")).equals(bound.original));
+  const bytes = await readPrivateFile(root, bound.name);
+  ensure(bytes.equals(bound.bytes));
+  return bytes;
+}
+export async function openRuntime({ root, operationId, purpose, run, recoveryRuntime }) {
   assertPrivateRootSync(root);
   ensure(["archive", "restore"].includes(purpose));
-  const config = runtime(JSON.parse(await readPrivateFile(root, "backup-runtime.json")));
+  const config = runtime(JSON.parse(await readBackupRuntime(root, operationId, recoveryRuntime)));
   const dockerConfig = join(root, "docker");
   await mkdir(dockerConfig, { mode: 0o700 }).catch((e) => {
     if (e.code !== "EEXIST") throw e;
@@ -13,6 +62,8 @@ export async function openRuntime({ root, operationId, purpose, run }) {
   assertPrivateRootSync(dockerConfig);
   const command = async (args) => {
     try {
+      if (recoveryRuntime !== undefined)
+        await readBackupRuntime(root, operationId, recoveryRuntime);
       return await run({
         executable: config.dockerExecutable,
         args: ["--host", config.endpoint, ...args],

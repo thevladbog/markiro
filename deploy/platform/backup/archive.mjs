@@ -22,6 +22,7 @@ export async function createDatabaseBackup({
   connectionFile,
   writerFence,
   run,
+  recoveryRuntime,
 }) {
   identity(operationId, target);
   target = plain(target);
@@ -50,7 +51,7 @@ export async function createDatabaseBackup({
       await privateCopy(root, config[field], join(input, name));
     await writePrivateFile(input, "request.json", Buffer.from(canonical({ operationId, target })));
     phase = "runtime";
-    runtime = await openRuntime({ root, operationId, purpose: "archive", run });
+    runtime = await openRuntime({ root, operationId, purpose: "archive", run, recoveryRuntime });
     before = fence(
       await writerFence.observe({ operationId, target, boundary: "before-snapshot" }),
       operationId,

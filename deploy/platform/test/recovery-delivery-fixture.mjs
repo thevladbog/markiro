@@ -18,6 +18,7 @@ export async function recoveryDeliveryFixture(t, existing) {
   }
   const prior = structuredClone(f.identity);
   prior.operationId = randomUUID();
+  prior.executorSha = "1".repeat(40);
   const state = Buffer.from(
     JSON.stringify({
       version: 1,
@@ -83,6 +84,26 @@ export async function recoveryDeliveryFixture(t, existing) {
   };
   if (!existing) await writeFile(join(f.root, "connection.json"), "{}", { mode: 0o600 });
   await publish();
+  // Independently provision the predecessor and reviewed recovery descriptors;
+  // the receiver must never relabel the predecessor worker as the new executor.
+  const runtime = {
+    version: 1,
+    executorSha: prior.executorSha,
+    dockerExecutable: "/usr/bin/docker",
+    endpoint: "unix:///var/run/docker.sock",
+    image: `sha256:${"d".repeat(64)}`,
+    provenance: "live-source",
+  };
+  await writeFile(join(f.root, "backup-runtime.json"), JSON.stringify(runtime), { mode: 0o600 });
+  await writeFile(
+    join(f.root, `recovery-backup-runtime-${f.identity.operationId}.json`),
+    JSON.stringify({
+      ...runtime,
+      executorSha: f.identity.executorSha,
+      image: `sha256:${"e".repeat(64)}`,
+    }),
+    { mode: 0o600 },
+  );
   return {
     ...f,
     api,

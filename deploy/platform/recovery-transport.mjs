@@ -238,7 +238,7 @@ const processOptions = (cwd) => ({
   outputLimitBytes: 1024 * 1024,
 });
 
-/** Hash actual checkout bytes AND immutable Git blobs; caller hashes are never provenance. */
+/** Hash immutable Git blobs selected from the checkout repository; caller hashes are never provenance. */
 export async function buildSourceBundle(selection, checkoutRoot, workDirectory, options = {}) {
   validateTransportSelection(selection);
   assertPrivateRootSync(workDirectory);

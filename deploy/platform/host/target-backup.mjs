@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { connection, ensure, hash, keys, plain, runtime } from "../backup/schemas.mjs";
-import { readPrivateAbsolute } from "../backup/local-runtime.mjs";
+import {
+  readPrivateAbsolute,
+  withRecoveryBackupRuntime,
+  readBackupRuntime,
+} from "../backup/local-runtime.mjs";
 import { createDatabaseBackup } from "../backup/archive.mjs";
 import { verifyDatabaseRestore } from "../backup/restore.mjs";
 import { assertBindFileSync, assertPrivateRootSync, readPrivateFile } from "./files.mjs";
@@ -11,7 +15,7 @@ import { fingerprintHostConfiguration } from "./config.mjs";
 import { createHostObservers, validateObservationPolicy } from "./observe.mjs";
 import { observePostgresAdmin } from "./probe.mjs";
 import { runHostProcess } from "./process.mjs";
-import { withHostState, withHeldHostState } from "./state.mjs";
+import { withHostState } from "./state.mjs";
 import { snapshot, sameTarget, validateIdentity } from "./state-validation.mjs";
 import { canonical } from "../backup/schemas.mjs";
 import { validateRecoveryAdmission } from "./recovery-admission.mjs";
@@ -75,7 +79,7 @@ export async function createTargetRecoveryBackup(input, options = {}) {
 
 export async function createHeldTargetRecoveryBackup(input, capability, admission, options = {}) {
   const admitted = snapshot(admission);
-  return withHeldHostState(capability, async ({ root, state }) => {
+  return withRecoveryBackupRuntime(capability, async ({ root, state }, createRuntime) => {
     ensure(root === input.operation.root);
     const ledgerBytes = await readPrivateFile(root, "recovery-state.json");
     const check = async () => {
@@ -97,9 +101,11 @@ export async function createHeldTargetRecoveryBackup(input, capability, admissio
       );
     };
     await check();
+    const recoveryRuntime = await createRuntime(admitted);
     return produceTargetBackup(
       {
         ...input,
+        recoveryRuntime,
         verifySources: async () => {
           await check();
           await input.verifySources();
@@ -116,7 +122,16 @@ export async function createHeldTargetRecoveryBackup(input, capability, admissio
 }
 
 async function produceTargetBackup(
-  { operation, observationPolicy, hbaPath, hbaSha256, connectionFile, roleMapping, verifySources },
+  {
+    operation,
+    observationPolicy,
+    hbaPath,
+    hbaSha256,
+    connectionFile,
+    roleMapping,
+    verifySources,
+    recoveryRuntime,
+  },
   options,
   withOwner,
 ) {
@@ -155,7 +170,11 @@ async function produceTargetBackup(
       try {
         // Snapshot the actual private files; every boundary must still read the
         // same bytes, including after isolated restore has removed its workers.
-        const runtimeBytes = await readPrivateFile(op.root, "backup-runtime.json");
+        const runtimeBytes = await readBackupRuntime(
+          op.root,
+          op.identity.operationId,
+          recoveryRuntime,
+        );
         const config = runtime(JSON.parse(runtimeBytes));
         ensure(
           config.executorSha === op.identity.executorSha &&
@@ -174,7 +193,6 @@ async function produceTargetBackup(
         const passwordBytes = await readPrivateAbsolute(op.root, descriptor.passFile);
         const caBytes = await readPrivateAbsolute(op.root, descriptor.caFile);
         const privateInputs = [
-          [join(op.root, "backup-runtime.json"), runtimeBytes],
           [connectionFile, connectionBytes],
           [descriptor.serviceFile, serviceBytes],
           [descriptor.passFile, passwordBytes],
@@ -199,6 +217,11 @@ async function produceTargetBackup(
           ensure(
             (await fingerprintHostConfiguration({ root: op.root, ...op.configuration }))
               .configurationSha256 === op.identity.configurationSha256,
+          );
+          ensure(
+            (await readBackupRuntime(op.root, op.identity.operationId, recoveryRuntime)).equals(
+              runtimeBytes,
+            ),
           );
           for (const [path, bytes] of privateInputs)
             ensure((await readPrivateAbsolute(op.root, path)).equals(bytes));
@@ -241,6 +264,7 @@ async function produceTargetBackup(
           target: op.identity.target,
           connectionFile,
           run,
+          recoveryRuntime,
           writerFence: {
             observe: async ({ boundary }) => {
               await inspect(boundary);
@@ -264,6 +288,7 @@ async function produceTargetBackup(
           backup,
           roleMapping: mapping,
           run,
+          recoveryRuntime,
         });
         producerInFlight = false;
         await inspect("after-restore");

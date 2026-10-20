@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chmod, mkdir, readFile, writeFile, unlink, symlink } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile, unlink, symlink, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { backupProof } from "./host-fixtures.mjs";
@@ -85,6 +85,26 @@ async function fixture(t, existing) {
   };
   if (!existing) await writeFile(join(f.root, "connection.json"), "{}", { mode: 0o600 });
   await publish();
+  const backupRuntime = await readFile(join(f.root, "backup-runtime.json")).catch(() => null);
+  const provisionedRuntime =
+    backupRuntime ??
+    Buffer.from(
+      JSON.stringify({
+        version: 1,
+        executorSha: f.identity.executorSha,
+        dockerExecutable: "/usr/bin/docker",
+        endpoint: "unix:///var/run/docker.sock",
+        image: `sha256:${"e".repeat(64)}`,
+        provenance: "live-source",
+      }),
+    );
+  if (!backupRuntime)
+    await writeFile(join(f.root, "backup-runtime.json"), provisionedRuntime, { mode: 0o600 });
+  await writeFile(
+    join(f.root, `recovery-backup-runtime-${f.identity.operationId}.json`),
+    provisionedRuntime,
+    { mode: 0o600 },
+  );
   return {
     ...f,
     api,
@@ -399,3 +419,108 @@ test("production state/operation roots cannot be overridden by operation JSON", 
   await f.publish();
   await assert.rejects(f.api.loadRecoveryOperation(f.directory, f.options));
 });
+
+for (const { service, uncertain } of [
+  { service: "api", uncertain: false },
+  { service: "edge", uncertain: false },
+  { service: "edge", uncertain: true },
+]) {
+  test(`actual activation wrapper cleans expired ${service} startup only when termination is confirmed: ${uncertain}`, async (t) => {
+    const f = await activationFixture(t);
+    const originalNow = Date.now;
+    let current;
+    t.after(() => {
+      Date.now = originalNow;
+    });
+    Date.now = () => current ?? originalNow();
+    const baseRun = f.options.runProcess;
+    let started = false;
+    let stops = 0;
+    let afterUncertain = 0;
+    f.options.runProcess = async (request) => {
+      if (started && uncertain) afterUncertain++;
+      const args = request.args.slice(2);
+      if (args[0] === "container" && args[1] === "stop") stops++;
+      const result = await baseRun(request);
+      if (args[0] === "compose" && args.includes("up") && args.at(-1) === service) {
+        started = true;
+        current = Date.parse(f.record.operation.activation.admission.expiresAt) + 1;
+        if (uncertain) throw Object.assign(new Error("unreaped"), { terminationConfirmed: false });
+      }
+      return result;
+    };
+    await assert.rejects(
+      f.api.runRecoveryHostCommand(["activate", f.directory], f.options),
+      (error) => {
+        if (uncertain) assert.equal(error.terminationConfirmed, false);
+        return true;
+      },
+    );
+    assert.equal(started, true);
+    if (uncertain) {
+      assert.equal(afterUncertain, 0);
+      assert.equal(stops, 0);
+      await readFile(join(f.root, ".deploy.lock"));
+    } else {
+      assert.equal(stops, service === "api" ? 1 : 2);
+      assert.equal(
+        JSON.parse(await readFile(join(f.root, "recovery-state.json"))).status,
+        "recovery-required",
+      );
+      await assert.rejects(readFile(join(f.root, ".deploy.lock")));
+      const daemon = JSON.parse(await readFile(join(f.root, "daemon.json")));
+      for (const c of daemon.containers.filter((c) =>
+        ["api", "edge"].includes(c.Config.Labels["com.docker.compose.service"]),
+      ))
+        assert.equal(c.State.Running, false);
+    }
+  });
+}
+
+for (const mode of ["missing", "wrong-executor", "wrong-operation"]) {
+  test(`prepare preflight rejects ${mode} recovery runtime before stopping workloads`, async (t) => {
+    const f = await integration(t);
+    const name = join(f.root, `recovery-backup-runtime-${f.identity.operationId}.json`);
+    if (mode === "missing") await unlink(name);
+    else if (mode === "wrong-operation")
+      await rename(name, join(f.root, `recovery-backup-runtime-${randomUUID()}.json`));
+    else {
+      const runtime = JSON.parse(await readFile(name));
+      runtime.executorSha = "1".repeat(40);
+      await writeFile(name, JSON.stringify(runtime), { mode: 0o600 });
+    }
+    let commands = 0;
+    f.options.runProcess = async () => {
+      commands++;
+      throw new Error("must not spawn");
+    };
+    await assert.rejects(f.api.runRecoveryHostCommand(["prepare", f.directory], f.options));
+    assert.equal(commands, 0);
+  });
+}
+
+for (const original of [true, false]) {
+  test(`prepare snapshots ${original ? "original" : "recovery"} runtime before any process`, async (t) => {
+    const f = await integration(t);
+    const baseRun = f.options.runProcess;
+    let changed = false;
+    let stops = 0;
+    f.options.runProcess = async (request) => {
+      if (request.args.includes("stop")) stops++;
+      const result = await baseRun(request);
+      if (!changed) {
+        changed = true;
+        const name = original
+          ? "backup-runtime.json"
+          : `recovery-backup-runtime-${f.identity.operationId}.json`;
+        const path = join(f.root, name);
+        await writeFile(path, (await readFile(path)).toString() + " ", { mode: 0o600 });
+      }
+      return result;
+    };
+    await assert.rejects(f.api.runRecoveryHostCommand(["prepare", f.directory], f.options));
+    assert.equal(changed, true);
+    assert.equal(stops, 0);
+    assert.equal(f.producer.workerCommands(), 0);
+  });
+}

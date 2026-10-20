@@ -1,4 +1,5 @@
 // Imported only by the trusted loader after all recovery source hashes match.
+import { validateRecoveryBackupRuntime } from "../backup/local-runtime.mjs";
 import { canonical, ensure, keys } from "../backup/schemas.mjs";
 import { readPrivateFile, assertPrivateRootSync } from "./files.mjs";
 import { fingerprintHostConfiguration, hostChildEnvironment } from "./config.mjs";
@@ -12,6 +13,7 @@ import { readVerifiedBackup } from "./backup-gate.mjs";
 import { createHeldTargetRecoveryBackup } from "./target-backup.mjs";
 import { executeRecoveryPreparation } from "./recovery-preparation.mjs";
 import { executeRecoveryActivation } from "./recovery-activation.mjs";
+const preparationRuntimes = new WeakMap();
 const same = (a, b) => ensure(canonical(a) === canonical(b));
 const admissionOf = (record) =>
   record.phase === "prepare" ? record.operation.admission : record.operation.activation.admission;
@@ -47,6 +49,7 @@ export async function validateRecoveryOperation(loaded, options = {}) {
   const stateBytes = await readPrivateFile(op.root, "state.json");
   if (record.phase === "prepare") {
     validateRecoveryAdmission(admission, { stateBytes, now: Date.now() });
+    preparationRuntimes.set(loaded, await validateRecoveryBackupRuntime(op.root, admission));
     ensure(
       typeof record.operation.connectionFile === "string" &&
         record.operation.connectionFile.startsWith(`${op.root}/`),
@@ -113,15 +116,23 @@ export async function executeRecoveryOperation(loaded, options = {}) {
   const op = operationOf(loaded.record);
   const admission = admissionOf(loaded.record);
   let terminated = true;
-  const check = async () => {
+  const admittedAt = Date.now();
+  const checkIdentity = async (now) => {
     ensure(terminated);
     await loaded.verifySources();
+    if (loaded.record.phase === "prepare") {
+      const expected = preparationRuntimes.get(loaded);
+      ensure(expected);
+      const current = await validateRecoveryBackupRuntime(op.root, admission);
+      ensure(current.bytes.equals(expected.bytes) && current.original.equals(expected.original));
+    }
     validateRecoveryAdmission(admission, {
       stateBytes: await readPrivateFile(op.root, "state.json"),
-      now: Date.now(),
+      now: now ?? Date.now(),
     });
     await checkConfiguration(op, options);
   };
+  const check = () => checkIdentity();
   const runProcess = async (request, recheck) => {
     await check();
     ensure(recheck === undefined || typeof recheck === "function");
@@ -154,7 +165,46 @@ export async function executeRecoveryOperation(loaded, options = {}) {
         ...options,
         runProcess,
       });
-      return await executeRecoveryActivation(loaded.record.operation, adapters);
+      // This runner never escapes this installed cleanup closure. It can issue
+      // only observer reads and the exact owned IDs collected by that observer;
+      // no caller-provided runner, command or freshness flag reaches it.
+      const cleanupOwnedWorkloads = async (context) => {
+        await checkIdentity(admittedAt);
+        const runCleanup = async (request) => {
+          await checkIdentity(admittedAt);
+          try {
+            const result = await (options.runProcess ?? runHostProcess)(request);
+            await checkIdentity(admittedAt);
+            return result;
+          } catch (error) {
+            if (error?.terminationConfirmed === false) terminated = false;
+            throw error;
+          }
+        };
+        const cleanupObservers = createHostObservers(op, loaded.record.observationPolicy, {
+          runProcess: runCleanup,
+          ...(options.readMachineId ? { readMachineId: options.readMachineId } : {}),
+        });
+        const ownedContext = { ...context, allowedServices: ["postgres", "api", "edge"] };
+        const state = await cleanupObservers.inventory(ownedContext);
+        for (const service of ["edge", "api"]) {
+          const owned = state.owned.find((value) => value.service === service);
+          if (owned?.active)
+            await cleanupObservers.command(
+              ["container", "stop", "--time", "10", owned.container.Id],
+              true,
+            );
+        }
+        await cleanupObservers.inspectStoppedWorkloads({
+          ...ownedContext,
+          allowedServices: ["postgres"],
+        });
+        await checkIdentity(admittedAt);
+      };
+      return await executeRecoveryActivation(loaded.record.operation, {
+        ...adapters,
+        cleanupOwnedWorkloads,
+      });
     }
     const policy = loaded.record.observationPolicy;
     const observers = createHostObservers(op, policy, { ...options, runProcess });
