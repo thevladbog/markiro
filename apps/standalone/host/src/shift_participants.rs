@@ -2,9 +2,14 @@
 //! `docs/superpowers/specs/2026-10-20-standalone-multi-station-shift-design.md` §4.2; host
 //! migration `0052`). The decisions are pure functions, pinned by the tests below and by
 //! `proto/fixtures/shift-close-reason-shared.json`, which the station and the handheld read too.
+//! The functions after the rules are the only writers of `shift_participants`' state columns; every
+//! caller runs inside its own write transaction and stamps the shift's `rev` with its revision.
 
-use markiro_proto::ParticipantState;
+use markiro_proto::{DeviceKind, ParticipantClosedBy, ParticipantState, ShiftParticipant};
+use sqlx::sqlite::SqliteQueryResult;
+use sqlx::SqliteConnection;
 
+use crate::error::ApiError;
 use crate::facts::rules::close_reason_required;
 
 /// What an entry into an OPEN shift does for a device (a planned shift's first entry opens it).
@@ -112,6 +117,331 @@ pub fn reason_need(
         Some(planned) if u64::from(planned) != shift_accepted => ReasonNeed::Shared,
         _ => ReasonNeed::None,
     }
+}
+
+/// The state of `device_id` in `shift_id`; `None` when it never entered.
+pub async fn state_of(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+) -> Result<Option<ParticipantState>, ApiError> {
+    let state: Option<String> = sqlx::query_scalar(
+        "SELECT state FROM shift_participants WHERE shift_id = ? AND device_id = ?",
+    )
+    .bind(shift_id)
+    .bind(device_id)
+    .fetch_optional(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    state
+        .map(|state| state.parse().map_err(ApiError::internal))
+        .transpose()
+}
+
+async fn count(
+    conn: &mut SqliteConnection,
+    sql: &str,
+    first: &str,
+    second: Option<&str>,
+) -> Result<u32, ApiError> {
+    let mut query = sqlx::query_scalar::<_, i64>(sql).bind(first);
+    if let Some(second) = second {
+        query = query.bind(second);
+    }
+    let count = query.fetch_one(conn).await.map_err(ApiError::internal)?;
+    u32::try_from(count).map_err(ApiError::internal)
+}
+
+/// How many devices other than `device_id` hold a slot of the shift: active participants whose
+/// device is not revoked (a revoked device's slot is free, spec §12.5).
+pub async fn active_others(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+) -> Result<u32, ApiError> {
+    count(
+        conn,
+        "SELECT COUNT(*) FROM shift_participants p JOIN devices d ON d.id = p.device_id \
+         WHERE p.shift_id = ? AND p.device_id <> ? AND p.state = 'active' \
+         AND d.revoked_at IS NULL",
+        shift_id,
+        Some(device_id),
+    )
+    .await
+}
+
+/// How many participants other than `device_id` have not closed their part (active or left,
+/// revoked or not: a revoked device's part closes only with the office's close).
+pub async fn open_others(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+) -> Result<u32, ApiError> {
+    count(
+        conn,
+        "SELECT COUNT(*) FROM shift_participants \
+         WHERE shift_id = ? AND device_id <> ? AND state IN ('active', 'left')",
+        shift_id,
+        Some(device_id),
+    )
+    .await
+}
+
+/// Every participant the shift ever had.
+pub async fn count_all(conn: &mut SqliteConnection, shift_id: &str) -> Result<u32, ApiError> {
+    count(
+        conn,
+        "SELECT COUNT(*) FROM shift_participants WHERE shift_id = ?",
+        shift_id,
+        None,
+    )
+    .await
+}
+
+/// The busiest active shift of `line_id`: its slots held by live devices (a lower limit must
+/// leave room for them, `routes/lines.rs`).
+pub async fn line_slots_in_use(
+    conn: &mut SqliteConnection,
+    line_id: &str,
+) -> Result<u32, ApiError> {
+    count(
+        conn,
+        "SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM shifts s \
+         JOIN shift_participants p ON p.shift_id = s.id JOIN devices d ON d.id = p.device_id \
+         WHERE s.line_id = ? AND s.status = 'active' AND p.state = 'active' \
+         AND d.revoked_at IS NULL GROUP BY s.id)",
+        line_id,
+        None,
+    )
+    .await
+}
+
+/// A writer that must change exactly one participant: anything else means the state moved
+/// under it inside its own transaction, which no request can cause.
+fn one_row(result: SqliteQueryResult, what: &str) -> Result<(), ApiError> {
+    if result.rows_affected() == 1 {
+        Ok(())
+    } else {
+        Err(ApiError::internal(format!(
+            "{what}: no participant in the expected state"
+        )))
+    }
+}
+
+/// A new participant takes a slot at `at`.
+pub async fn join(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+    at: &str,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, \
+         last_entered_at, state, joined_at) VALUES (?, ?, ?, ?, 'active', ?)",
+    )
+    .bind(shift_id)
+    .bind(device_id)
+    .bind(at)
+    .bind(at)
+    .bind(at)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    one_row(result, "join")
+}
+
+/// A participant that left takes a slot again.
+pub async fn rejoin(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+    at: &str,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        "UPDATE shift_participants SET state = 'active', left_at = NULL, joined_at = ?, \
+         last_entered_at = ? WHERE shift_id = ? AND device_id = ? AND state = 'left'",
+    )
+    .bind(at)
+    .bind(at)
+    .bind(shift_id)
+    .bind(device_id)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    one_row(result, "rejoin")
+}
+
+/// An active participant enters again.
+pub async fn touch(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+    at: &str,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        "UPDATE shift_participants SET last_entered_at = ? \
+         WHERE shift_id = ? AND device_id = ? AND state = 'active'",
+    )
+    .bind(at)
+    .bind(shift_id)
+    .bind(device_id)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    one_row(result, "touch")
+}
+
+/// An active participant pauses and frees its slot.
+pub async fn leave(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+    at: &str,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        "UPDATE shift_participants SET state = 'left', left_at = ? \
+         WHERE shift_id = ? AND device_id = ? AND state = 'active'",
+    )
+    .bind(at)
+    .bind(shift_id)
+    .bind(device_id)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    one_row(result, "leave")
+}
+
+/// A participant's own close of its part (its `shift_closed` fact), with its count and reason.
+pub async fn close_by_device(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+    closed_at: &str,
+    actual_qty: u32,
+    reason_code: Option<&str>,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        "UPDATE shift_participants SET state = 'closed', left_at = NULL, closed_at = ?, \
+         closed_by_kind = 'device', closed_actual_qty = ?, closed_reason = ? \
+         WHERE shift_id = ? AND device_id = ? AND state IN ('active', 'left')",
+    )
+    .bind(closed_at)
+    .bind(actual_qty)
+    .bind(reason_code)
+    .bind(shift_id)
+    .bind(device_id)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    one_row(result, "close_by_device")
+}
+
+/// The office's close of the whole shift closes every part still open; returns those parts as
+/// they were, first entry first (the `notClosed` of `shift.force_closed`).
+pub async fn close_open_by_office(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    at: &str,
+) -> Result<Vec<(String, ParticipantState)>, ApiError> {
+    let open: Vec<(String, String)> = sqlx::query_as(
+        "SELECT device_id, state FROM shift_participants \
+         WHERE shift_id = ? AND state IN ('active', 'left') ORDER BY first_entered_at, device_id",
+    )
+    .bind(shift_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE shift_participants SET state = 'closed', left_at = NULL, closed_at = ?, \
+         closed_by_kind = 'office_user' WHERE shift_id = ? AND state IN ('active', 'left')",
+    )
+    .bind(at)
+    .bind(shift_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    open.into_iter()
+        .map(|(device_id, state)| Ok((device_id, state.parse().map_err(ApiError::internal)?)))
+        .collect()
+}
+
+/// The first fact of a closed part marks it late, once; whether this call marked it.
+pub async fn mark_late(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    device_id: &str,
+    at: &str,
+) -> Result<bool, ApiError> {
+    let result = sqlx::query(
+        "UPDATE shift_participants SET late_data_at = ? WHERE shift_id = ? AND device_id = ? \
+         AND state = 'closed' AND late_data_at IS NULL",
+    )
+    .bind(at)
+    .bind(shift_id)
+    .bind(device_id)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(result.rows_affected() == 1)
+}
+
+#[derive(sqlx::FromRow)]
+struct ParticipantRow {
+    device_id: String,
+    kind: String,
+    name: String,
+    state: String,
+    first_entered_at: String,
+    joined_at: String,
+    left_at: Option<String>,
+    closed_at: Option<String>,
+    closed_by_kind: Option<String>,
+    closed_actual_qty: Option<u32>,
+    closed_reason: Option<String>,
+    late_data_at: Option<String>,
+    last_seen_at: Option<String>,
+}
+
+/// The shift's participants, first entry first (ties by device id).
+pub async fn list(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+) -> Result<Vec<ShiftParticipant>, ApiError> {
+    let rows: Vec<ParticipantRow> = sqlx::query_as(
+        "SELECT p.device_id, d.kind, d.name, p.state, p.first_entered_at, \
+         COALESCE(p.joined_at, p.first_entered_at) AS joined_at, p.left_at, p.closed_at, \
+         p.closed_by_kind, p.closed_actual_qty, p.closed_reason, p.late_data_at, d.last_seen_at \
+         FROM shift_participants p JOIN devices d ON d.id = p.device_id \
+         WHERE p.shift_id = ? ORDER BY p.first_entered_at, p.device_id",
+    )
+    .bind(shift_id)
+    .fetch_all(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    rows.into_iter()
+        .map(|row| {
+            let device_kind: DeviceKind = row.kind.parse().map_err(ApiError::internal)?;
+            let closed_by: Option<ParticipantClosedBy> = row
+                .closed_by_kind
+                .map(|kind| kind.parse().map_err(ApiError::internal))
+                .transpose()?;
+            Ok(ShiftParticipant {
+                device_id: row.device_id,
+                device_kind,
+                device_name: row.name,
+                state: row.state.parse().map_err(ApiError::internal)?,
+                first_entered_at: row.first_entered_at,
+                joined_at: row.joined_at,
+                left_at: row.left_at,
+                closed_at: row.closed_at,
+                closed_by,
+                closed_actual_qty: row.closed_actual_qty,
+                closed_reason_code: row.closed_reason,
+                late_data_at: row.late_data_at,
+                last_seen_at: row.last_seen_at,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

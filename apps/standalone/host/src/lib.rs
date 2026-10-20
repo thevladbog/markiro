@@ -35,6 +35,7 @@ pub mod server;
 #[cfg(windows)]
 pub mod service;
 pub mod shift_participants;
+pub mod shift_totals;
 pub mod shifts;
 pub mod templates;
 pub mod tls;
