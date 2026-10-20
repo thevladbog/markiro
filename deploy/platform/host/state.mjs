@@ -63,7 +63,9 @@ export async function withHostState(root, callback) {
   let retirementFailed = false;
   const lockPath = join(typeof root === "string" ? root : "", ".deploy.lock");
   const latch = (error) => {
-    uncertain ||= error?.durabilityUncertain === true;
+    // The producer drain can reject after the guarded action has returned.
+    // Unreaped work is uncertain regardless of which rejection path reaches us.
+    uncertain ||= error?.durabilityUncertain === true || error?.terminationConfirmed === false;
     return stateError(uncertain);
   };
   try {

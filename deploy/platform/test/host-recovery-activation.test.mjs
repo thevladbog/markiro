@@ -314,3 +314,30 @@ test("mutated current sidecar is never overwritten by a subsequent boundary", as
   });
   assert.deepEqual(await readFile(join(f.root, "recovery-state.json")), modified);
 });
+
+for (const caught of [false, true])
+  test(`detached unreaped activation producer retains last durable phase with guard rejection ${caught ? "caught" : "uncaught"}`, async (t) => {
+    const f = await fixture(t);
+    await assert.rejects(
+      run(f, async (store) => {
+        const pending = store.guard(async (capability) => {
+          void withHeldHostState(capability, async () => {
+            throw Object.assign(new Error("fixture detached process still running"), {
+              terminationConfirmed: false,
+            });
+          }).catch(() => {});
+        });
+        if (caught) {
+          await assert.rejects(pending);
+          await assert.rejects(store.complete("activation-admitted"));
+        } else await pending;
+      }),
+      { durabilityUncertain: true },
+    );
+    await lstat(join(f.root, ".deploy.lock"));
+    await immutable(f);
+    const durable = JSON.parse(await readFile(join(f.root, "recovery-state.json")));
+    assert.equal(durable.sequence, 7);
+    assert.equal(durable.phase, "activation-admitted");
+    assert.equal(durable.status, "entered");
+  });

@@ -718,3 +718,30 @@ test("producer failure cannot hide earlier guarded persistence uncertainty", asy
   );
   assert.ok((await lstat(join(root, ".deploy.lock"))).isFile());
 });
+
+for (const caught of [false, true])
+  test(`detached unreaped producer latches owner uncertainty with guard rejection ${caught ? "caught" : "uncaught"}`, async (t) => {
+    const { withHeldHostState } = await import("../host/state.mjs");
+    const { root } = await privateFixture(t);
+    let durable;
+    await assert.rejects(
+      withHostState(root, async (store) => {
+        await store.begin(hostIdentity());
+        durable = await readFile(join(root, "state.json"));
+        const pending = store.guardPersistence(async (capability) => {
+          void withHeldHostState(capability, async () => {
+            throw Object.assign(new Error("fixture detached process still running"), {
+              terminationConfirmed: false,
+            });
+          }).catch(() => {});
+        });
+        if (caught) {
+          await assert.rejects(pending);
+          await assert.rejects(store.complete("admitted"));
+        } else await pending;
+      }),
+      { durabilityUncertain: true },
+    );
+    await lstat(join(root, ".deploy.lock"));
+    assert.deepEqual(await readFile(join(root, "state.json")), durable);
+  });
