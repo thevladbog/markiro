@@ -1,14 +1,15 @@
-//! Shifts at a station (stage 2a spec §4.2, §4.7), with the device key, for
-//! stations only: `GET /v1/device/shifts`, `POST /v1/device/shifts`,
+//! Shifts at a station or a handheld (stage 2a spec §4.2, §4.7), with the device key:
+//! `GET /v1/device/shifts`, `POST /v1/device/shifts`,
 //! `POST /v1/device/shifts/{id}/enter` and `POST /v1/device/shifts/{id}/leave`. A
 //! station reads its shifts at the moments it reads its device record
 //! (after it subscribes to the link and after every revision event), since a
 //! shift is no feed record: shifts are per line, and an open one carries up
 //! to two layouts (a box's and, with pallets, a pallet's), its snapshot at
 //! most 320 KB. Since plan 2b an open or closed shift also carries its line's limit, its
-//! participants, the asking device's state, the whole shift's totals as of the read and each
-//! device's part; a scan takes no revision, so a device reads this list again to refresh its
-//! totals.
+//! participants and the asking device's state; an active shift in the list also carries the whole
+//! shift's totals as of the read and each device's part (a closed one in the list carries neither;
+//! the answer of an entry or a leave carries them for any status). A scan takes no revision, so a
+//! device reads this list again to refresh its totals.
 
 use axum::extract::State;
 use axum::Json;
@@ -131,12 +132,16 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<DeviceShif
 }
 
 /// An open or closed shift as `device_id` sees it (plan 2b): its participants, the device's own
-/// state, the whole shift's totals as of `as_of` and each device's part. A planned shift has none.
+/// state and, when `with_totals`, the whole shift's totals as of `as_of` and each device's part.
+/// A planned shift has none. The list asks for totals of an active shift only: every closed shift
+/// of the last 30 days would cost a query over its boxes and pallets on every poll of every
+/// device; the answer of one shift (entry, leave) asks for them whatever its status.
 async fn with_participation(
     conn: &mut SqliteConnection,
     mut shift: DeviceShift,
     device_id: &str,
     as_of: &str,
+    with_totals: bool,
 ) -> Result<DeviceShift, ApiError> {
     if shift.status == ShiftStatus::Planned {
         return Ok(shift);
@@ -146,8 +151,10 @@ async fn with_participation(
         .iter()
         .find(|participant| participant.device_id == device_id)
         .map(|participant| participant.state);
-    shift.totals = Some(shift_totals::totals(&mut *conn, &shift.id, as_of).await?);
-    shift.by_device = Some(shift_totals::by_device(&mut *conn, &shift.id).await?);
+    if with_totals {
+        shift.totals = Some(shift_totals::totals(&mut *conn, &shift.id, as_of).await?);
+        shift.by_device = Some(shift_totals::by_device(&mut *conn, &shift.id).await?);
+    }
     shift.participants = Some(participants);
     Ok(shift)
 }
@@ -162,7 +169,7 @@ async fn read_for(
     let shift = read(&mut *conn, id)
         .await?
         .ok_or_else(|| ApiError::internal("shift vanished"))?;
-    with_participation(conn, shift, device_id, as_of).await
+    with_participation(conn, shift, device_id, as_of, true).await
 }
 
 const STATION_ONLY: &str = "only a station works on shifts";
@@ -214,7 +221,9 @@ pub async fn list_device_shifts(
     let as_of = state.timestamp();
     let mut shifts = Vec::with_capacity(rows.len());
     for row in rows {
-        shifts.push(with_participation(&mut tx, record(row)?, &device.id, &as_of).await?);
+        let shift = record(row)?;
+        let with_totals = shift.status == ShiftStatus::Active;
+        shifts.push(with_participation(&mut tx, shift, &device.id, &as_of, with_totals).await?);
     }
     tx.rollback().await.map_err(ApiError::internal)?;
     Ok(Json(DeviceShifts { shifts }))

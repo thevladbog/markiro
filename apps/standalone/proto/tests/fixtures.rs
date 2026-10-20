@@ -2263,6 +2263,16 @@ fn a_shared_shifts_participants_and_totals_round_trip_and_add_up() {
             Some(ParticipantClosedBy::Device)
         )
     );
+    // A closed shift of the list keeps its participation but carries no totals: the host reads
+    // them for an active shift only.
+    let closed = &list.shifts[1];
+    assert_eq!(closed.status, ShiftStatus::Closed);
+    assert_eq!(
+        (closed.max_stations, closed.my_state),
+        (Some(2), Some(ParticipantState::Closed))
+    );
+    assert_eq!(closed.participants.as_ref().map(Vec::len), Some(1));
+    assert!(closed.totals.is_none() && closed.by_device.is_none());
     // A host before protocol 7 names none of them.
     let old: DeviceShifts = serde_json::from_value(fixture("device-shifts.json")).unwrap();
     assert!(old.shifts.iter().all(|shift| shift.participants.is_none()

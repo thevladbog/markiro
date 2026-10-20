@@ -1850,10 +1850,14 @@ units against `shifts.planned_qty`, and a close without it closes the shift with
 `close_reason_missing`, which the office clears with `PUT /v1/office/shifts/{id}/close-reason`
 (`shift.close_reason`). A closed part's later facts are accepted and stamp its `late_data_at`.
 Every participant change stamps the shift's `rev` with a revision. `GET /v1/device/shifts` and the
-entry's answer carry, for an open or closed shift, `maxStations`, `participants`, `myState`,
+entry's answer carry, for an open or closed shift, `maxStations`, `participants` and `myState`;
 `totals { accepted, boxesClosed, pallets, asOf }` and `byDevice` (`host/src/shift_totals.rs`, read
 from the facts through `boxes_shift`, `box_items_live`, `pallets_shift`, `code_owners_shift_unboxed`;
-a scan takes no revision, so devices read the list again to refresh totals); `OfficeShift` carries
+a scan takes no revision, so devices read the list again to refresh totals) come in the LIST for an
+`active` shift only (a closed shift of the last 30 days would cost a query over its units on every
+poll of every device; a client keeps a closed shift's figures from the last answer that had them),
+while the answer of one shift (an entry, a leave, a closed shift read back) carries them for any
+non-planned status; `OfficeShift` carries
 `participants`, `byDevice` and `closeReasonMissing`. The export's `stationClosedAt` is the closing
 device's instant.
 

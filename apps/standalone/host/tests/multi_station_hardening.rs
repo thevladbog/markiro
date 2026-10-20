@@ -119,7 +119,7 @@ async fn the_device_answers_name_every_participant_a_stranger_has_no_state_and_a
     assert_eq!(seen["maxStations"], json!(4));
 
     // The office closes the shift: it stays in its participants' lists, closed, with the same
-    // fields; the stranger no longer sees a closed shift of the line.
+    // fields but the totals; the stranger no longer sees a closed shift of the line.
     close_from_office(&admin, &shift, "Конец смены").await;
     for device in [&a, &b] {
         let closed = shift_in_list(&admin, device, &shift).await.unwrap();
@@ -132,21 +132,51 @@ async fn the_device_answers_name_every_participant_a_stranger_has_no_state_and_a
             device_ids(&closed["participants"]),
             vec![json!(a.id), json!(b.id), json!(c.id)]
         );
-        assert_eq!(
-            device_ids(&closed["byDevice"]),
-            device_ids(&closed["participants"])
-        );
-        // No scan was accepted and no box closed on this shift.
-        assert_eq!(
-            (
-                closed["totals"]["accepted"].clone(),
-                closed["totals"]["boxesClosed"].clone()
-            ),
-            (json!(0), json!(0)),
+        // The list reads totals for an active shift only (final review, finding 1).
+        assert!(
+            closed.get("byDevice").is_none() && closed.get("totals").is_none(),
             "{closed}"
         );
     }
     assert!(shift_in_list(&admin, &stranger, &shift).await.is_none());
+}
+
+#[tokio::test]
+async fn the_device_list_carries_totals_for_active_shifts_only_a_closed_one_keeps_its_participation(
+) {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let a = admin_station_on(&admin, &setup.line).await;
+    allow(&admin, &setup.line, 2).await;
+    let (closed, _) = open_shared(&admin, shift_body(&setup), &a).await;
+    close_from_office(&admin, &closed, "Конец смены").await;
+    admin.app.clock.advance(MINUTE);
+    let (active, _) = open_shared(&admin, shift_body(&setup), &a).await;
+
+    let (status, list) = call(&admin, &a.key, "GET", "/v1/device/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let find = |id: &str| {
+        list["shifts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == json!(id))
+            .cloned()
+            .unwrap()
+    };
+    let (closed_view, active_view) = (find(&closed), find(&active));
+    assert_eq!(closed_view["status"], json!("closed"));
+    assert_eq!(closed_view["myState"], json!("closed"));
+    assert_eq!(closed_view["maxStations"], json!(2));
+    assert_eq!(closed_view["participants"].as_array().unwrap().len(), 1);
+    for key in ["totals", "byDevice"] {
+        assert!(closed_view.get(key).is_none(), "{key}: {closed_view}");
+        assert!(active_view[key].is_object() || active_view[key].is_array());
+    }
+    assert_eq!(active_view["status"], json!("active"));
+    assert_eq!(active_view["myState"], json!("active"));
+    assert_eq!(active_view["maxStations"], json!(2));
+    assert_eq!(active_view["participants"].as_array().unwrap().len(), 1);
 }
 
 // ---------------------------------------------------------------------------------- (b) entry

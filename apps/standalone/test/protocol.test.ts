@@ -3959,6 +3959,16 @@ describe("several devices in one shift (plan 2b)", () => {
     expect(shift?.maxStations).toBe(2);
   });
 
+  it("reads a closed shift of the list with its participation and no totals", () => {
+    const closed = deviceShiftsSchema.parse(fixture("device-shifts-participants.json")).shifts[1];
+    expect(closed?.status).toBe("closed");
+    expect(closed?.myState).toBe("closed");
+    expect(closed?.maxStations).toBe(2);
+    expect(closed?.participants).toHaveLength(1);
+    expect(closed?.totals).toBeUndefined();
+    expect(closed?.byDevice).toBeUndefined();
+  });
+
   it("reads a shift of a host before protocol 7 without them", () => {
     const [old] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts;
     expect(old?.participants).toBeUndefined();
