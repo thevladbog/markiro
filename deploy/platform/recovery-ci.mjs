@@ -25,6 +25,7 @@ import {
   captureRecoveryResource,
   removeRecoveryResource,
   recoveryCiLabel,
+  recoveryCiErrorCategory,
 } from "./recovery-ci-helpers.mjs";
 import { runHostProcess } from "./host/process.mjs";
 import {
@@ -98,7 +99,7 @@ try {
   assert.ok(process.env.RUNNER_TEMP && process.env.GITHUB_SHA, "Explicit CI image export required");
   admittedHost = true;
   await mkdir(join(root, "docker"), { mode: 0o700 });
-  phase = "verify tested ICU worker export";
+  phase = "verify ICU export checkout identity";
   const exportRoot = join(process.env.RUNNER_TEMP, "platform-recovery-image-icu");
   const sourceSha = String(
     (
@@ -121,29 +122,38 @@ try {
     warning:
       "Every journal, archive and restore proof in this private root uses synthetic CI data only.",
   });
+  phase = "verify ICU export manifest";
   const manifest = validateWorkerManifest(
     JSON.parse(await readFile(join(exportRoot, "recovery-image.json"))),
     sourceSha,
   );
+  phase = "verify ICU export source hashes";
   for (const file of manifest.sources.files) {
     assert.match(file.path, /^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/u);
     assert.equal(digest(await readFile(join(repositoryRoot, file.path))), file.sha256);
   }
+  phase = "verify ICU export generated artifact hash";
   assert.equal(manifest.sources.generated.path, "packages/db/dist/runtime-migrate.js");
   assert.equal(
     digest(await readFile(join(repositoryRoot, manifest.sources.generated.path))),
     manifest.sources.generated.sha256,
   );
+  phase = "copy ICU export archive";
   await cp(join(exportRoot, "recovery-image.tar"), join(root, "recovery-image.tar"));
   await chmod(join(root, "recovery-image.tar"), 0o600);
+  phase = "verify ICU export archive hash";
   const archive = await hashArchive(root, join(root, "recovery-image.tar"));
   assert.equal(archive.sha256, manifest.archive.sha256);
   assert.equal(archive.bytes, manifest.archive.bytes);
+  phase = "inspect ICU export image availability";
   const images = String((await docker(["image", "ls", "--quiet", "--no-trunc"])).stdout)
     .trim()
     .split("\n");
-  if (!images.includes(manifest.image.id))
+  if (!images.includes(manifest.image.id)) {
+    phase = "load ICU export image";
     await docker(["load", "--input", join(root, "recovery-image.tar")]);
+  }
+  phase = "verify ICU export image config";
   const worker = await inspect("image", manifest.image.id);
   assert.equal(worker.Id, manifest.image.id);
   assert.equal(worker.Os, "linux");
@@ -151,7 +161,9 @@ try {
   assert.equal(worker.Config.User, "postgres");
   assert.ok(worker.Config.Entrypoint === null || worker.Config.Entrypoint.length === 0);
   assert.deepEqual(Object.keys(worker.Config.Volumes), ["/var/lib/postgresql/data"]);
+  phase = "pull ICU PostgreSQL base";
   await docker(["pull", ICU_POSTGRES_BASE]);
+  phase = "inspect ICU PostgreSQL base config";
   const pgImage = await inspect("image", ICU_POSTGRES_BASE);
   phase = "prepare private production composition";
   await mkdir(join(root, "postgres"), { mode: 0o700 });
@@ -565,7 +577,7 @@ try {
   completed = true;
 } catch (error) {
   problem = new Error(
-    `Synthetic recovery integration failed at ${phase}; private details withheld.`,
+    `Synthetic recovery integration failed at ${phase} (${recoveryCiErrorCategory(error)}); private details withheld.`,
   );
   if (error.terminationConfirmed === false || error.durabilityUncertain === true)
     admittedHost = false; // Keep uncertain resources and private evidence for reconciliation.

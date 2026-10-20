@@ -6,6 +6,7 @@ import {
   cleanupRecoveryResources,
   captureRecoveryResource,
   recoveryCiLabel,
+  recoveryCiErrorCategory,
 } from "../recovery-ci-helpers.mjs";
 import { ICU_NODE_BASE, ICU_POSTGRES_BASE, workerRecipe } from "../backup/worker-recipes.mjs";
 import { digest } from "../backup/schemas.mjs";
@@ -210,4 +211,28 @@ test("cleanup rechecks identity immediately before removal after initial verific
   );
   assert.equal(inspections, 2);
   assert.deepEqual(f.removed, []);
+});
+
+test("recovery CI failure categories expose only allowlisted metadata", () => {
+  for (const reason of [
+    "spawn",
+    "exit",
+    "stdin",
+    "output-limit",
+    "timeout",
+    "aborted",
+    "termination",
+  ])
+    assert.equal(
+      recoveryCiErrorCategory({ code: "ERR_HOST_PROCESS", reason }),
+      `process-${reason}`,
+    );
+  assert.equal(recoveryCiErrorCategory({ code: "ERR_ASSERTION" }), "assertion");
+  for (const error of [
+    new Error("secret output and private path"),
+    { code: "ERR_HOST_PROCESS", reason: "secret-output" },
+    { code: "secret-path", message: "secret-output" },
+    null,
+  ])
+    assert.equal(recoveryCiErrorCategory(error), "operation");
 });

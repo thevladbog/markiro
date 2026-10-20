@@ -141,3 +141,16 @@ export async function cleanupRecoveryResources(resources, command, invocationId)
   for (const resource of [...resources].reverse())
     await removeRecoveryResource(resource, command, invocationId);
 }
+
+// Public CI output must never include a child error message, output or path.
+export function recoveryCiErrorCategory(error) {
+  if (error?.code === "ERR_ASSERTION") return "assertion";
+  if (
+    error?.code === "ERR_HOST_PROCESS" &&
+    ["spawn", "exit", "stdin", "output-limit", "timeout", "aborted", "termination"].includes(
+      error.reason,
+    )
+  )
+    return `process-${error.reason}`;
+  return "operation";
+}
