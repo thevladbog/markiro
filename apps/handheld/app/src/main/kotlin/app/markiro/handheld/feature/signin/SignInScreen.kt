@@ -26,6 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,7 @@ import app.markiro.handheld.core.design.MarkiroTextButton
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PinDots
 import app.markiro.handheld.core.design.ScreenColumn
+import app.markiro.handheld.core.util.TimeText
 
 data class SignInCallbacks(
     val onDigit: (Char) -> Unit = {},
@@ -49,14 +53,15 @@ data class SignInCallbacks(
     val onPickOperator: (OperatorRecord) -> Unit = {},
     val onBack: () -> Unit = {},
     val onSwitchOperator: () -> Unit = {},
+    val onRefreshRoster: () -> Unit = {},
 )
 
 @Composable
-fun SignInScreen(state: SignInUi, callbacks: SignInCallbacks) {
+fun SignInScreen(state: SignInUi, callbacks: SignInCallbacks, roster: RosterInfo = RosterInfo()) {
     val c = MarkiroTheme.colors
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         when (state) {
-            is SignInUi.Login -> LoginStep(state, callbacks)
+            is SignInUi.Login -> LoginStep(state, callbacks, roster)
             is SignInUi.Pin -> PinStep(state, callbacks)
             is SignInUi.Search -> SearchStep(state, callbacks)
         }
@@ -64,10 +69,12 @@ fun SignInScreen(state: SignInUi, callbacks: SignInCallbacks) {
 }
 
 @Composable
-private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks) {
+private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks, roster: RosterInfo) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+        // First, so it stays in view on a short display: what the device holds, and the retry.
+        RosterLine(roster, cb.onRefreshRoster)
         Column(
             Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
                 .border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)),
@@ -83,9 +90,9 @@ private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
             )
-            if (state.error == SignInError.BADGE_UNKNOWN) Text(stringResource(R.string.signin_badge_unknown), style = t.caption, color = c.errFg)
-            if (state.error == SignInError.ROSTER_EMPTY) Text(stringResource(R.string.signin_roster_empty), style = t.caption, color = c.warnFg)
         }
+        // Every scan and every number ends here, in words: never a silent screen.
+        Message(state.error, state.busy)
         Field(label = stringResource(R.string.signin_login_field), value = state.login)
         Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.login.isNotEmpty())
         MarkiroTextButton(stringResource(R.string.signin_find_by_name), cb.onOpenSearch)
@@ -112,8 +119,7 @@ private fun PinStep(state: SignInUi.Pin, cb: SignInCallbacks) {
                 style = t.caption,
                 color = c.fg3,
             )
-            if (state.error == SignInError.WRONG_PIN) Text(stringResource(R.string.signin_wrong_pin), style = t.caption, color = c.errFg)
-            if (state.error == SignInError.BADGE_UNKNOWN) Text(stringResource(R.string.signin_badge_unknown), style = t.caption, color = c.errFg)
+            Message(state.error, state.busy)
         }
         Row(
             Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
@@ -147,6 +153,7 @@ private fun SearchStep(state: SignInUi.Search, cb: SignInCallbacks) {
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.signin_search_field)) },
             )
+            Message(state.error, busy = false)
             Text(stringResource(R.string.signin_search_hint), style = t.caption, color = c.fg3)
             state.results.forEach { operator ->
                 Row(
@@ -174,5 +181,63 @@ private fun Field(label: String, value: String) {
     ) {
         Text(label, style = t.body.copy(fontSize = 15.sp), color = c.fg3)
         Text(value, style = t.code.copy(fontSize = 22.sp), color = c.fg1)
+    }
+}
+
+/** The outcome of the last scan or number: a live region, so a screen reader says it too. Nothing is shown only while nothing happened. */
+@Composable
+private fun Message(error: SignInError?, busy: Boolean) {
+    val c = MarkiroTheme.colors
+    val t = MarkiroTheme.type
+    val text = when {
+        busy -> stringResource(R.string.signin_checking)
+        error == null -> return
+        else -> stringResource(
+            when (error) {
+                SignInError.WRONG_PIN -> R.string.signin_wrong_pin
+                SignInError.NOT_FOUND -> R.string.signin_not_found
+                SignInError.BADGE_UNKNOWN -> R.string.signin_badge_unknown
+                SignInError.ROSTER_EMPTY -> R.string.signin_roster_empty
+                SignInError.ACCESS_DENIED -> R.string.signin_access_denied
+                SignInError.BADGE_PRODUCT_CODE -> R.string.signin_badge_product_code
+                SignInError.BADGE_LAYOUT -> R.string.signin_badge_layout
+                SignInError.BADGE_NOT_A_BADGE -> R.string.signin_badge_not_badge
+            },
+        )
+    }
+    val color = when {
+        busy -> c.fg2
+        error == SignInError.ROSTER_EMPTY -> c.warnFg
+        else -> c.errFg
+    }
+    Text(
+        text,
+        style = t.strong,
+        color = color,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    )
+}
+
+/** What the device holds: the number of operators and when they were read, or that nothing is loaded; with the retry. */
+@Composable
+private fun RosterLine(roster: RosterInfo, onRefresh: () -> Unit) {
+    val c = MarkiroTheme.colors
+    val t = MarkiroTheme.type
+    val empty = (roster.count ?: 0) == 0
+    val text = when {
+        roster.refreshing -> stringResource(R.string.signin_roster_refreshing)
+        empty && roster.failed -> stringResource(R.string.signin_roster_none_failed)
+        empty -> stringResource(R.string.signin_roster_none)
+        roster.fetchedAt != null -> stringResource(R.string.signin_roster_summary_at, roster.count ?: 0, TimeText.ddmmHhmm(roster.fetchedAt))
+        else -> stringResource(R.string.signin_roster_summary, roster.count ?: 0)
+    }
+    // The button is full width (a touch target), so the text gets its own lines above it instead of a row it would be squeezed out of.
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text, style = t.caption, color = if (empty && !roster.refreshing) c.warnFg else c.fg3, textAlign = TextAlign.Center)
+        if (!empty && roster.failed && !roster.refreshing) {
+            Text(stringResource(R.string.signin_roster_stale), style = t.caption, color = c.warnFg, textAlign = TextAlign.Center)
+        }
+        MarkiroTextButton(stringResource(R.string.signin_refresh), onRefresh)
     }
 }

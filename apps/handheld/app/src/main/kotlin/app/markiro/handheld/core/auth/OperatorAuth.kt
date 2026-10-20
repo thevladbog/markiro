@@ -23,11 +23,44 @@ class OperatorAuth(
     suspend fun byLoginOnly(login: String): OperatorRecord? =
         roster.operators().firstOrNull { it.active && it.login == login }
 
-    suspend fun byBadge(code: String): OperatorRecord? {
-        if (code.isEmpty()) return null
-        val candidates = roster.operators().filter { it.active && (it.badgeHash != null || it.badgeHashes.isNotEmpty()) }
+    suspend fun byBadge(code: String): OperatorRecord? = (checkBadge(code) as? BadgeCheck.Match)?.operator
+
+    /** How many operators the mirror holds, blocked ones included: zero means the roster was never loaded (or the host has none). */
+    suspend fun rosterSize(): Int = roster.operators().size
+
+    /**
+     * What a scan is, as the station reads it (`readBadgeScan`, apps/standalone/src/floor/sign-in.ts): trimmed, a product's code (it carries
+     * the GS1 group separator), a code typed under another layout (Cyrillic) and anything that is not printable ASCII never reach the hash.
+     * Then the code is matched against the active operators' badges; only when none matches is a blocked operator's badge looked for, so a
+     * blocked person is told so instead of «not found». The answer is never silent: [BadgeCheck.EmptyRoster] says the mirror has nobody.
+     */
+    suspend fun checkBadge(raw: String): BadgeCheck {
+        val code = raw.trim()
+        if (code.contains(GROUP_SEPARATOR)) return BadgeCheck.Refused(NotABadge.PRODUCT_CODE)
+        if (code.any { it in '\u0400'..'\u04FF' }) return BadgeCheck.Refused(NotABadge.LAYOUT)
+        if (!BADGE_CODE.matches(code)) return BadgeCheck.Refused(NotABadge.NOT_BADGE)
+        val all = roster.operators()
+        if (all.isEmpty()) return BadgeCheck.EmptyRoster
+        fun hashesOf(operator: OperatorRecord) = listOfNotNull(operator.badgeHash) + operator.badgeHashes
         return withContext(hashDispatcher) {
-            candidates.firstOrNull { operator -> (listOfNotNull(operator.badgeHash) + operator.badgeHashes).any { verifier(code, it) } }
+            val active = all.filter { it.active }.firstOrNull { operator -> hashesOf(operator).any { verifier(code, it) } }
+            when {
+                active != null -> BadgeCheck.Match(active)
+                all.filter { !it.active }.any { operator -> hashesOf(operator).any { verifier(code, it) } } -> BadgeCheck.Blocked
+                else -> BadgeCheck.Unknown
+            }
+        }
+    }
+
+    /** The personnel number against the mirror, no verification: found, blocked (the host or the cabinet turned the operator off), unknown or no roster. */
+    suspend fun checkLogin(login: String): LoginCheck {
+        val all = roster.operators()
+        if (all.isEmpty()) return LoginCheck.EmptyRoster
+        val named = all.filter { it.login == login }
+        return when {
+            named.any { it.active } -> LoginCheck.Found(named.first { it.active })
+            named.isNotEmpty() -> LoginCheck.Blocked
+            else -> LoginCheck.Unknown
         }
     }
 
@@ -40,6 +73,8 @@ class OperatorAuth(
     }
 
     companion object {
+        private const val GROUP_SEPARATOR = '\u001d'
+        private val BADGE_CODE = Regex("^[ -~]{1,256}$")
         private val PIN = Regex("^\\d{4,6}$")
         private val LOGIN = Regex("^\\d{3,12}$")
 
@@ -53,4 +88,22 @@ class OperatorAuth(
             return login.padStart(3, '0')
         }
     }
+}
+
+/** Why a scan was not even tried as a badge. */
+enum class NotABadge { PRODUCT_CODE, LAYOUT, NOT_BADGE }
+
+sealed interface BadgeCheck {
+    data class Match(val operator: OperatorRecord) : BadgeCheck
+    data object Unknown : BadgeCheck
+    data object Blocked : BadgeCheck
+    data object EmptyRoster : BadgeCheck
+    data class Refused(val reason: NotABadge) : BadgeCheck
+}
+
+sealed interface LoginCheck {
+    data class Found(val operator: OperatorRecord) : LoginCheck
+    data object Unknown : LoginCheck
+    data object Blocked : LoginCheck
+    data object EmptyRoster : LoginCheck
 }

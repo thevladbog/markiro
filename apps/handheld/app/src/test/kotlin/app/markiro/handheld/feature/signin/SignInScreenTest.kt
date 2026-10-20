@@ -2,6 +2,9 @@ package app.markiro.handheld.feature.signin
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -67,5 +70,48 @@ class SignInScreenTest {
         }
         compose.onNodeWithText("Сменить оператора").performClick()
         assertEquals(true, switched)
+    }
+
+    @Test
+    fun everyOutcomeOfAScanHasWordsOnTheLoginStep() {
+        val cases = mapOf(
+            SignInError.BADGE_UNKNOWN to "Бейдж не найден",
+            SignInError.ROSTER_EMPTY to "Список операторов не загружен",
+            SignInError.ACCESS_DENIED to "Доступ запрещён",
+            SignInError.NOT_FOUND to "Табельный номер не найден",
+            SignInError.BADGE_PRODUCT_CODE to "Это код товара, а не бейдж",
+        )
+        var shown by mutableStateOf(SignInError.NOT_FOUND)
+        compose.setContent { MarkiroTheme { SignInScreen(SignInUi.Login("41", shown), SignInCallbacks()) } }
+        for ((error, text) in cases) {
+            shown = error
+            compose.waitForIdle()
+            compose.onNodeWithText(text, substring = true).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun theRosterStateAndItsRetryAreAlwaysThere() {
+        var refreshed = 0
+        compose.setContent {
+            MarkiroTheme {
+                SignInScreen(SignInUi.Login(), SignInCallbacks(onRefreshRoster = { refreshed++ }), RosterInfo(count = 0, failed = true))
+            }
+        }
+        compose.onNodeWithText("Нет связи с хостом — список операторов не загружен").assertIsDisplayed()
+        compose.onNodeWithText("Обновить список").performClick()
+        assertEquals(1, refreshed)
+    }
+
+    @Test
+    fun aLoadedRosterShowsItsCountAndTime() {
+        compose.setContent { MarkiroTheme { SignInScreen(SignInUi.Login(), SignInCallbacks(), RosterInfo(count = 12, fetchedAt = 1_700_000_000_000L)) } }
+        compose.onNodeWithText("Операторов в списке: 12", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aBusyCheckSaysSo() {
+        compose.setContent { MarkiroTheme { SignInScreen(SignInUi.Login(busy = true), SignInCallbacks()) } }
+        compose.onNodeWithText("Проверяем…").assertIsDisplayed()
     }
 }

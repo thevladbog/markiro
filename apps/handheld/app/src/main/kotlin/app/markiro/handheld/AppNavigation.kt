@@ -256,6 +256,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             composable(Routes.SIGN_IN) {
                 val vm: SignInViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
+                val roster by vm.roster.collectAsStateWithLifecycle()
                 SignInScreen(
                     state,
                     SignInCallbacks(
@@ -267,7 +268,9 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onPickOperator = vm::onPickOperator,
                         onBack = vm::back,
                         onSwitchOperator = vm::switchOperator,
+                        onRefreshRoster = vm::refreshRosterNow,
                     ),
+                    roster,
                 )
             }
             composable(Routes.HUB) {
