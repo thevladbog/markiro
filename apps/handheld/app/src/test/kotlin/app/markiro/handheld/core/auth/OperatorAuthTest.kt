@@ -58,4 +58,29 @@ class OperatorAuthTest {
         assertEquals(listOf(anna), auth.search("Анна"))
         assertEquals(emptyList<OperatorRecord>(), auth.search(""))
     }
+
+    @Test fun badgeChecksNameTheReasonInsteadOfNull() = runTest {
+        assertEquals(BadgeCheck.Match(anna), auth.checkBadge(" 735519\r\n"))
+        assertEquals(BadgeCheck.Unknown, auth.checkBadge("424242"))
+        assertEquals(BadgeCheck.Blocked, auth.checkBadge("1"))
+        assertEquals(BadgeCheck.Refused(NotABadge.PRODUCT_CODE), auth.checkBadge("0104600682000013\u001d2150"))
+        assertEquals(BadgeCheck.Refused(NotABadge.LAYOUT), auth.checkBadge("БЕЙДЖ"))
+        assertEquals(BadgeCheck.Refused(NotABadge.NOT_BADGE), auth.checkBadge("   "))
+        val none = OperatorAuth(object : OperatorRoster { override suspend fun operators() = emptyList<OperatorRecord>() }) { _, _ -> false }
+        assertEquals(BadgeCheck.EmptyRoster, none.checkBadge("735519"))
+        assertEquals(LoginCheck.EmptyRoster, none.checkLogin("4127"))
+    }
+
+    @Test fun loginChecksSeparateUnknownFromBlocked() = runTest {
+        assertEquals(LoginCheck.Found(anna), auth.checkLogin("4127"))
+        assertEquals(LoginCheck.Blocked, auth.checkLogin("2201"))
+        assertEquals(LoginCheck.Unknown, auth.checkLogin("0000"))
+    }
+
+    @Test fun aRefusedScanIsNeverHashed() = runTest {
+        verified.clear()
+        auth.checkBadge("0104600682000013\u001d2150")
+        auth.checkBadge("БЕЙДЖ")
+        assertEquals(0, verified.size)
+    }
 }
