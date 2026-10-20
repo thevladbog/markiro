@@ -15,8 +15,12 @@ import {
   preparedServicesFiles,
   preparedServicesFixture,
   preparedServicesJob,
-  preparedServicesJobBlock,
   preparedServicesJobId,
+  preparedServicesJobs,
+  preparedServicesJobBlocks,
+  preparedServicesJobIds,
+  preparedServicesPartition,
+  preparedServicesCommands,
   withoutPreparedServicesOwner,
   withoutPreparedServicesOwnerBytes,
 } from "./support/prepared-services-owner.mjs";
@@ -61,11 +65,71 @@ const expectedFiles = [
   "test/us-transformation-structured-snapshot.e2e.test.ts",
 ];
 const expectedDbFile = "test/us-owner-provenance-migration.test.ts";
+const expectedPartition = {
+  dataset_prepared_services: [
+    "test/us-plan-draft-transaction.e2e.test.ts",
+    "test/us-dataset-prepared-intent.e2e.test.ts",
+    "test/us-dataset-plan-seed.e2e.test.ts",
+    "test/us-dataset-request-seed.e2e.test.ts",
+    "test/us-dataset-artifact-seed.e2e.test.ts",
+    "test/us-request-create-transaction.e2e.test.ts",
+    "test/us-request-prepare-transaction.e2e.test.ts",
+    "test/us-request-worker-scoped.e2e.test.ts",
+    "test/us-transformation-structured-snapshot.e2e.test.ts",
+  ],
+  dataset_terminal_readers: [
+    "test/us-owner-provenance-procedure.e2e.test.ts",
+    "test/us-owner-provenance-procedure-locks.e2e.test.ts",
+    "test/us-owner-provenance-adapter.e2e.test.ts",
+    "test/us-terminal-native-readers.e2e.test.ts",
+    "test/us-terminal-verification-routing.e2e.test.ts",
+    "test/us-terminal-closed-reader.e2e.test.ts",
+    "test/us-dataset-corrected-terminal-reader.e2e.test.ts",
+    "test/us-dataset-native-final-reader.e2e.test.ts",
+  ],
+  dataset_unit_composition: [
+    "test/us-case-demo-owned-application.e2e.test.ts",
+    "test/us-dataset-journal-reader.e2e.test.ts",
+    "test/us-dataset-shipping-prerequisites.e2e.test.ts",
+    "test/us-dataset-unit-composition.e2e.test.ts",
+    "test/us-dataset-unit-composition-semantics.e2e.test.ts",
+    "test/us-dataset-unit-coordinator.e2e.test.ts",
+    "test/us-dataset-composition-measurements.e2e.test.ts",
+  ],
+};
+
+test("fixed isolated partition executes all 24 whole API files exactly once in 9 + 8 + 7 groups", () => {
+  assert.deepEqual(
+    Object.values(expectedPartition).map((files) => files.length),
+    [9, 8, 7],
+  );
+  const union = Object.values(expectedPartition).flat();
+  assert.equal(new Set(union).size, 24);
+  assert.deepEqual([...union].sort(), [...expectedFiles].sort());
+  for (const [id, files] of Object.entries(expectedPartition)) {
+    const job = workflow.jobs[id];
+    assert.ok(job, `${id} isolated native job is present`);
+    assert.equal(job["timeout-minutes"], 30);
+    const native = job.steps.filter((step) =>
+      step.run?.includes("--filter @markiro/api exec vitest run"),
+    );
+    assert.equal(native.length, 1, `${id} has one whole-file API invocation`);
+    assert.equal(
+      native[0].run,
+      `corepack pnpm --filter @markiro/api exec vitest run ${files.join(" ")} --maxWorkers=1`,
+    );
+    const db = job.steps.filter((step) =>
+      step.run?.includes("--filter @markiro/db exec vitest run"),
+    );
+    assert.equal(db.length, id === "dataset_prepared_services" ? 1 : 0);
+    if (db.length) assert.equal(db[0].run, expectedDbCommand);
+  }
+});
 const expectedStructuredDbFile = "test/us-transformation-structured-snapshot-migration.e2e.test.ts";
 const expectedFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 const expectedCommand =
-  "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-dataset-request-seed.e2e.test.ts test/us-dataset-artifact-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-request-prepare-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts test/us-dataset-unit-composition.e2e.test.ts test/us-owner-provenance-procedure.e2e.test.ts test/us-owner-provenance-procedure-locks.e2e.test.ts test/us-owner-provenance-adapter.e2e.test.ts test/us-terminal-native-readers.e2e.test.ts test/us-terminal-verification-routing.e2e.test.ts test/us-terminal-closed-reader.e2e.test.ts test/us-dataset-unit-composition-semantics.e2e.test.ts test/us-dataset-unit-coordinator.e2e.test.ts test/us-dataset-composition-measurements.e2e.test.ts test/us-dataset-corrected-terminal-reader.e2e.test.ts test/us-dataset-native-final-reader.e2e.test.ts test/us-request-worker-scoped.e2e.test.ts test/us-transformation-structured-snapshot.e2e.test.ts --maxWorkers=1";
+  "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-dataset-request-seed.e2e.test.ts test/us-dataset-artifact-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-request-prepare-transaction.e2e.test.ts test/us-request-worker-scoped.e2e.test.ts test/us-transformation-structured-snapshot.e2e.test.ts --maxWorkers=1";
 const expectedDbCommand =
   "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts test/us-transformation-structured-snapshot-migration.e2e.test.ts --maxWorkers=1";
 const expectedJob = load(`jobs:
@@ -107,12 +171,33 @@ const expectedJob = load(`jobs:
       - name: Verify prepared Plan, dataset intent, Plan seed and Request creation transactions
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-dataset-request-seed.e2e.test.ts test/us-dataset-artifact-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-request-prepare-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts test/us-dataset-unit-composition.e2e.test.ts test/us-owner-provenance-procedure.e2e.test.ts test/us-owner-provenance-procedure-locks.e2e.test.ts test/us-owner-provenance-adapter.e2e.test.ts test/us-terminal-native-readers.e2e.test.ts test/us-terminal-verification-routing.e2e.test.ts test/us-terminal-closed-reader.e2e.test.ts test/us-dataset-unit-composition-semantics.e2e.test.ts test/us-dataset-unit-coordinator.e2e.test.ts test/us-dataset-composition-measurements.e2e.test.ts test/us-dataset-corrected-terminal-reader.e2e.test.ts test/us-dataset-native-final-reader.e2e.test.ts test/us-request-worker-scoped.e2e.test.ts test/us-transformation-structured-snapshot.e2e.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-dataset-request-seed.e2e.test.ts test/us-dataset-artifact-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-request-prepare-transaction.e2e.test.ts test/us-request-worker-scoped.e2e.test.ts test/us-transformation-structured-snapshot.e2e.test.ts --maxWorkers=1
       - name: Verify US owner provenance migration on a disposable database
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts test/us-transformation-structured-snapshot-migration.e2e.test.ts --maxWorkers=1
 `).jobs.dataset_prepared_services;
+
+const expectedCommands = Object.fromEntries(
+  Object.entries(expectedPartition).map(([id, files]) => [
+    id,
+    `corepack pnpm --filter @markiro/api exec vitest run ${files.join(" ")} --maxWorkers=1`,
+  ]),
+);
+const expectedJobs = { dataset_prepared_services: expectedJob };
+for (const [id, name] of [
+  [
+    "dataset_terminal_readers",
+    "Verify US owner provenance and terminal readers on disposable databases",
+  ],
+  ["dataset_unit_composition", "Verify US owned dataset unit composition on disposable databases"],
+]) {
+  const job = structuredClone(expectedJob);
+  job.steps.pop();
+  job.steps[9].name = name;
+  job.steps[9].run = expectedCommands[id];
+  expectedJobs[id] = job;
+}
 
 const source = readFileSync(".github/workflows/us-development.yml", "utf8");
 const workflow = load(source);
@@ -160,16 +245,19 @@ function assertOwnership(all, sources = rawSources()) {
   if (all["us-cases-native.yml"]) assertSupplementalOwnership(all, sources);
   all = withoutCasesRegressionWorkflow(all, sources);
   const w = all["us-development.yml"];
-  const job = w.jobs[preparedServicesJobId];
-  assert.ok(job, "prepared services dedicated native job is present");
   const allJobs = Object.values(all).flatMap((entry) => Object.entries(entry.jobs ?? {}));
-  assert.equal(
-    allJobs.filter(([id]) => id === preparedServicesJobId).length,
-    1,
-    "globally unique native job owner",
-  );
+  for (const id of Object.keys(expectedPartition)) {
+    assert.ok(w.jobs[id], `${id} dedicated native job is present`);
+    assert.equal(
+      allJobs.filter(([jobId]) => jobId === id).length,
+      1,
+      "globally unique native job owner",
+    );
+  }
   const steps = allJobs.flatMap(([, entry]) => entry.steps ?? []);
-  for (const ownerName of expectedJob.steps.slice(-2).map((step) => step.name))
+  for (const ownerName of Object.values(expectedJobs).flatMap((job) =>
+    job.steps.slice(9).map((step) => step.name),
+  ))
     assert.equal(
       steps.filter((step) => step.name === ownerName).length,
       1,
@@ -197,10 +285,15 @@ function assertOwnership(all, sources = rawSources()) {
     1,
     `${expectedStructuredDbFile} has exactly one explicit native selection`,
   );
-  assert.deepEqual(job, expectedJob, "complete unconditional failure-propagating native job");
+  for (const [id, job] of Object.entries(expectedJobs))
+    assert.deepEqual(
+      w.jobs[id],
+      job,
+      `${id} complete unconditional failure-propagating native job`,
+    );
   assert.deepEqual(
     Object.keys(w.jobs),
-    ["isolation", "dataset_trace_readiness", preparedServicesJobId],
+    ["isolation", "dataset_trace_readiness", ...Object.keys(expectedPartition)],
     "only the reviewed additive job",
   );
   assert.equal(
@@ -212,6 +305,10 @@ function assertOwnership(all, sources = rawSources()) {
 }
 
 test("prepared services have an explicit native owner", () => {
+  assert.deepEqual(preparedServicesJobIds, Object.keys(expectedPartition));
+  assert.deepEqual(preparedServicesPartition, expectedPartition);
+  assert.deepEqual(preparedServicesCommands, expectedCommands);
+  assert.deepEqual(preparedServicesJobs, expectedJobs);
   assert.deepEqual(preparedServicesFiles, expectedFiles);
   assert.equal(preparedServicesCommand, expectedCommand);
   assert.equal(ownerProvenanceDbCommand, expectedDbCommand);
@@ -231,7 +328,7 @@ test("prepared historical pins accept only the complete current 45-minute Trace 
     const all = readWorkflows();
     all["us-development.yml"].jobs.dataset_trace_readiness["timeout-minutes"] = minutes;
     const bytes = withoutPreparedServicesOwnerBytes(source).replace(
-      /(  dataset_trace_readiness:\n    runs-on: ubuntu-latest\n    needs: isolation\n    timeout-minutes: )\d+/,
+      /( {2}dataset_trace_readiness:\n {4}runs-on: ubuntu-latest\n {4}needs: isolation\n {4}timeout-minutes: )\d+/,
       `$1${minutes}`,
     );
     if (minutes === 45) {
@@ -284,30 +381,33 @@ test("prepared primary ownership checks current supplemental mutation and third 
   assert.throws(() => assertOwnership(third), /exactly one explicit native selection/);
 });
 
-test("successful contracts build precedes every Node tool and API build precedes native execution", () => {
-  const job = workflow.jobs[preparedServicesJobId];
-  const steps = job.steps;
-  assert.deepEqual(job, expectedJob);
-  assert.equal(steps[4].run, "pnpm turbo build --filter '@markiro/platform-contracts...'");
-  assert.deepEqual(
-    steps
-      .map((step, index) => ({ step, index }))
-      .filter(({ step }) => step.run?.startsWith("node "))
-      .map(({ index }) => index),
-    [5, 6],
-  );
-  assert.equal(steps[7].run, "pnpm turbo build --filter '@markiro/api...'");
-  assert.equal(
-    steps[8].run,
-    "sudo apt-get update && sudo apt-get install -y poppler-utils && pdftotext -v",
-  );
-  assert.equal(steps[9].run, expectedCommand);
-  assert.deepEqual(steps[9].env, { US_TEST_DATABASE_URL: expectedFixture });
-  assert.equal(steps[10].run, expectedDbCommand);
-  assert.deepEqual(steps[10].env, { US_TEST_DATABASE_URL: expectedFixture });
-  assert.deepEqual(job.services, workflow.jobs.isolation.services);
-  assertOwnership(readWorkflows());
-});
+for (const id of Object.keys(expectedPartition))
+  test(`${id}: successful contracts build precedes every Node tool and API build precedes native execution`, () => {
+    const job = workflow.jobs[id];
+    const steps = job.steps;
+    assert.deepEqual(job, expectedJobs[id]);
+    assert.equal(steps[4].run, "pnpm turbo build --filter '@markiro/platform-contracts...'");
+    assert.deepEqual(
+      steps
+        .map((step, index) => ({ step, index }))
+        .filter(({ step }) => step.run?.startsWith("node "))
+        .map(({ index }) => index),
+      [5, 6],
+    );
+    assert.equal(steps[7].run, "pnpm turbo build --filter '@markiro/api...'");
+    assert.equal(
+      steps[8].run,
+      "sudo apt-get update && sudo apt-get install -y poppler-utils && pdftotext -v",
+    );
+    assert.equal(steps[9].run, expectedCommands[id]);
+    assert.deepEqual(steps[9].env, { US_TEST_DATABASE_URL: expectedFixture });
+    if (id === "dataset_prepared_services") {
+      assert.equal(steps[10].run, expectedDbCommand);
+      assert.deepEqual(steps[10].env, { US_TEST_DATABASE_URL: expectedFixture });
+    } else assert.equal(steps.length, 10);
+    assert.deepEqual(job.services, workflow.jobs.isolation.services);
+    assertOwnership(readWorkflows());
+  });
 
 test("exact additive removal restores the matrix and Trace bytes and AST without changing pins", () => {
   assert.ok(hasExactPreparedServicesOwner(workflow));
@@ -389,530 +489,548 @@ test("structured snapshot native owner rejects omission, duplicates and wrong fi
     assert.throws(() => assertNativeFixtureGate(mutant, expectedStructuredDbFile, expectedFixture));
 });
 
-test("complete ownership rejects missing, wrong, duplicate, foreign and bypassed owners", (t) => {
-  const exact = "complete unconditional failure-propagating native job";
-  const prior = "complete matrix and Trace predecessor workflow is unchanged";
-  const mutations = [
-    [
-      "missing job",
-      ({ w }) => delete w.jobs[preparedServicesJobId],
-      "dedicated native job is present",
-    ],
-    [
-      "renamed job",
-      ({ w, j }) => {
-        delete w.jobs[preparedServicesJobId];
-        w.jobs.other = j;
-      },
-      "dedicated native job is present",
-    ],
-    [
-      "foreign job",
-      ({ all, j }) => {
-        all.other = { jobs: { [preparedServicesJobId]: j } };
-      },
-      "globally unique native job owner",
-    ],
-    [
-      "duplicate renamed job",
-      ({ w, j }) => {
-        w.jobs.other = structuredClone(j);
-      },
-      "globally unique named native selection",
-    ],
-    [
-      "foreign named step",
-      ({ all, o }) => {
-        all.other = { jobs: { other: { steps: [structuredClone(o)] } } };
-      },
-      "globally unique named native selection",
-    ],
-    ["missing needs", ({ j }) => delete j.needs, exact],
-    [
-      "wrong needs",
-      ({ j }) => {
-        j.needs = "other";
-      },
-      exact,
-    ],
-    [
-      "always after failed isolation",
-      ({ j }) => {
-        j.if = "${{ always() }}";
-      },
-      exact,
-    ],
-    [
-      "different budget",
-      ({ j }) => {
-        j["timeout-minutes"] = 31;
-      },
-      exact,
-    ],
-    [
-      "different runner",
-      ({ j }) => {
-        j["runs-on"] = "self-hosted";
-      },
-      exact,
-    ],
-    [
-      "wrong image",
-      ({ j }) => {
-        j.services["us-postgres"].image = "postgres:latest";
-      },
-      exact,
-    ],
-    [
-      "non-loopback port",
-      ({ j }) => {
-        j.services["us-postgres"].ports = ["55432:5432"];
-      },
-      exact,
-    ],
-    ["service omitted", ({ j }) => delete j.services, exact],
-    [
-      "service credentials changed",
-      ({ j }) => {
-        j.services["us-postgres"].env.POSTGRES_USER = "other";
-      },
-      exact,
-    ],
-    [
-      "service health changed",
-      ({ j }) => {
-        j.services["us-postgres"].options += " --health-retries 0";
-      },
-      exact,
-    ],
-    [
-      "extra job",
-      ({ w }) => {
-        w.jobs.other = { steps: [] };
-      },
-      "only the reviewed additive job",
-    ],
-    [
-      "prior step changed",
-      ({ w }) => {
-        w.jobs.isolation.steps[3].run += " || true";
-      },
-      prior,
-    ],
-    ["prior step omitted", ({ w }) => w.jobs.isolation.steps.splice(0, 1), prior],
-    ["prior segment changed", ({ w }) => w.jobs.isolation.strategy.matrix.segment.pop(), prior],
-    [
-      "prior max parallel changed",
-      ({ w }) => {
-        w.jobs.isolation.strategy["max-parallel"] = 4;
-      },
-      prior,
-    ],
-    [
-      "prior Trace native selection changed",
-      ({ w }) => {
-        w.jobs.dataset_trace_readiness.steps.at(-1).run += " || true";
-      },
-      prior,
-    ],
-    [
-      "prior Trace fixture changed",
-      ({ w }) => {
-        w.jobs.dataset_trace_readiness.steps.at(-1).env.US_TEST_DATABASE_URL =
-          "postgres://wrong/other";
-      },
-      prior,
-    ],
-    [
-      "contracts build moved after Node tooling",
-      ({ j }) => {
-        [j.steps[4], j.steps[6]] = [j.steps[6], j.steps[4]];
-      },
-      exact,
-    ],
-    [
-      "API build moved after native suites",
-      ({ j }) => {
-        [j.steps[7], j.steps[9]] = [j.steps[9], j.steps[7]];
-      },
-      exact,
-    ],
-    [
-      "PDF extractor moved after native suites",
-      ({ j }) => {
-        [j.steps[8], j.steps[9]] = [j.steps[9], j.steps[8]];
-      },
-      exact,
-    ],
-    [
-      "prior budget changed",
-      ({ w }) => {
-        w.jobs.isolation["timeout-minutes"] = 31;
-      },
-      prior,
-    ],
-    [
-      "prior action changed",
-      ({ w }) => {
-        w.jobs.isolation.steps[0].uses += "bad";
-      },
-      prior,
-    ],
-    [
-      "prior guard changed",
-      ({ w }) => {
-        w.jobs.isolation.steps[12].if = "false";
-      },
-      prior,
-    ],
-    ["prior guard omitted", ({ w }) => delete w.jobs.isolation.steps[12].if, prior],
-    [
-      "workflow write permission",
-      ({ w }) => {
-        w.permissions.contents = "write";
-      },
-      prior,
-    ],
-    [
-      "workflow changed trigger",
-      ({ w }) => {
-        w.on.push.branches = ["main"];
-      },
-      prior,
-    ],
-    [
-      "release unlocked",
-      ({ all }) => {
-        all["release-images.yml"].jobs.publish.if = "${{ true }}";
-      },
-      "operational release locks preserved",
-    ],
-  ];
-  for (const [index, step] of expectedJob.steps.entries()) {
-    mutations.push(
+for (const preparedServicesJobId of Object.keys(expectedPartition))
+  test(`${preparedServicesJobId}: complete ownership rejects missing, wrong, duplicate, foreign and bypassed owners`, (t) => {
+    const expectedJob = expectedJobs[preparedServicesJobId];
+    const expectedFiles = expectedPartition[preparedServicesJobId];
+    const preparedServicesCommand = expectedCommands[preparedServicesJobId];
+    const exact = "complete unconditional failure-propagating native job";
+    const prior = "complete matrix and Trace predecessor workflow is unchanged";
+    const mutations = [
       [
-        `step ${index} omitted`,
-        ({ j }) => j.steps.splice(index, 1),
-        index >= 9 ? "globally unique named native selection" : exact,
+        "missing job",
+        ({ w }) => delete w.jobs[preparedServicesJobId],
+        "dedicated native job is present",
       ],
       [
-        `step ${index} duplicate`,
-        ({ j }) => j.steps.push(structuredClone(step)),
-        index >= 9 ? "globally unique named native selection" : exact,
-      ],
-    );
-    if (index < 9)
-      mutations.push([
-        `step ${index} late`,
-        ({ j }) => j.steps.push(j.steps.splice(index, 1)[0]),
-        exact,
-      ]);
-    for (const [key, value] of [
-      ["if", "false"],
-      ["continue-on-error", true],
-      ["shell", "bash {0}"],
-      ["timeout-minutes", 1],
-      ["env", { DATABASE_URL: preparedServicesFixture }],
-      ["env", { US_TEST_DATABASE_URL: "postgres://wrong/other" }],
-    ])
-      mutations.push([
-        `step ${index} ${key}`,
-        ({ j }) => {
-          j.steps[index][key] = value;
-        },
-        exact,
-      ]);
-    if (step.uses)
-      mutations.push([
-        `step ${index} wrong action`,
-        ({ j }) => {
-          j.steps[index].uses += "bad";
-        },
-        exact,
-      ]);
-    if (step.run)
-      mutations.push([
-        `step ${index} ignores failure`,
-        ({ j }) => {
-          j.steps[index].run += " || true";
-        },
-        exact,
-      ]);
-  }
-  for (const scope of ["workflow", "job"]) {
-    for (const [key, value] of [
-      ["env", { US_TEST_DATABASE_URL: preparedServicesFixture }],
-      ["env", { DATABASE_URL: preparedServicesFixture }],
-      ["if", "false"],
-      ["continue-on-error", true],
-      ["defaults", { run: { shell: "bash {0}" } }],
-      ["permissions", { contents: "write" }],
-      ["environment", "production"],
-      ["secrets", "inherit"],
-    ])
-      mutations.push([
-        `${scope} ${key}`,
+        "renamed job",
         ({ w, j }) => {
-          (scope === "workflow" ? w : j)[key] = value;
+          delete w.jobs[preparedServicesJobId];
+          w.jobs.other = j;
         },
-        scope === "workflow" ? prior : exact,
-      ]);
-  }
-  for (const file of expectedFiles) {
-    const once = `${file} has exactly one explicit native selection`;
-    mutations.push(
-      [
-        `missing ${file}`,
-        ({ o }) => {
-          o.run = o.run.replace(file, "");
-        },
-        once,
+        "dedicated native job is present",
       ],
       [
-        `duplicate ${file}`,
-        ({ o }) => {
-          o.run += ` ${file}`;
+        "foreign job",
+        ({ all, j }) => {
+          all.other = { jobs: { [preparedServicesJobId]: j } };
         },
-        once,
+        "globally unique native job owner",
       ],
-    );
-    const filename = file.slice("test/".length);
-    for (const alias of [
-      filename,
-      `"${file}"`,
-      `'${file}'`,
-      `./${file}`,
-      `apps/api/${file}`,
-      `"./apps/api/${file}"`,
-    ]) {
-      for (const foreign of [false, true])
+      [
+        "duplicate renamed job",
+        ({ w, j }) => {
+          w.jobs.other = structuredClone(j);
+        },
+        "globally unique named native selection",
+      ],
+      [
+        "foreign named step",
+        ({ all, o }) => {
+          all.other = { jobs: { other: { steps: [structuredClone(o)] } } };
+        },
+        "globally unique named native selection",
+      ],
+      ["missing needs", ({ j }) => delete j.needs, exact],
+      [
+        "wrong needs",
+        ({ j }) => {
+          j.needs = "other";
+        },
+        exact,
+      ],
+      [
+        "always after failed isolation",
+        ({ j }) => {
+          j.if = "${{ always() }}";
+        },
+        exact,
+      ],
+      [
+        "different budget",
+        ({ j }) => {
+          j["timeout-minutes"] = 31;
+        },
+        exact,
+      ],
+      [
+        "different runner",
+        ({ j }) => {
+          j["runs-on"] = "self-hosted";
+        },
+        exact,
+      ],
+      [
+        "wrong image",
+        ({ j }) => {
+          j.services["us-postgres"].image = "postgres:latest";
+        },
+        exact,
+      ],
+      [
+        "non-loopback port",
+        ({ j }) => {
+          j.services["us-postgres"].ports = ["55432:5432"];
+        },
+        exact,
+      ],
+      ["service omitted", ({ j }) => delete j.services, exact],
+      [
+        "service credentials changed",
+        ({ j }) => {
+          j.services["us-postgres"].env.POSTGRES_USER = "other";
+        },
+        exact,
+      ],
+      [
+        "service health changed",
+        ({ j }) => {
+          j.services["us-postgres"].options += " --health-retries 0";
+        },
+        exact,
+      ],
+      [
+        "extra job",
+        ({ w }) => {
+          w.jobs.other = { steps: [] };
+        },
+        "only the reviewed additive job",
+      ],
+      [
+        "prior step changed",
+        ({ w }) => {
+          w.jobs.isolation.steps[3].run += " || true";
+        },
+        prior,
+      ],
+      ["prior step omitted", ({ w }) => w.jobs.isolation.steps.splice(0, 1), prior],
+      ["prior segment changed", ({ w }) => w.jobs.isolation.strategy.matrix.segment.pop(), prior],
+      [
+        "prior max parallel changed",
+        ({ w }) => {
+          w.jobs.isolation.strategy["max-parallel"] = 4;
+        },
+        prior,
+      ],
+      [
+        "prior Trace native selection changed",
+        ({ w }) => {
+          w.jobs.dataset_trace_readiness.steps.at(-1).run += " || true";
+        },
+        prior,
+      ],
+      [
+        "prior Trace fixture changed",
+        ({ w }) => {
+          w.jobs.dataset_trace_readiness.steps.at(-1).env.US_TEST_DATABASE_URL =
+            "postgres://wrong/other";
+        },
+        prior,
+      ],
+      [
+        "contracts build moved after Node tooling",
+        ({ j }) => {
+          [j.steps[4], j.steps[6]] = [j.steps[6], j.steps[4]];
+        },
+        exact,
+      ],
+      [
+        "API build moved after native suites",
+        ({ j }) => {
+          [j.steps[7], j.steps[9]] = [j.steps[9], j.steps[7]];
+        },
+        exact,
+      ],
+      [
+        "PDF extractor moved after native suites",
+        ({ j }) => {
+          [j.steps[8], j.steps[9]] = [j.steps[9], j.steps[8]];
+        },
+        exact,
+      ],
+      [
+        "prior budget changed",
+        ({ w }) => {
+          w.jobs.isolation["timeout-minutes"] = 31;
+        },
+        prior,
+      ],
+      [
+        "prior action changed",
+        ({ w }) => {
+          w.jobs.isolation.steps[0].uses += "bad";
+        },
+        prior,
+      ],
+      [
+        "prior guard changed",
+        ({ w }) => {
+          w.jobs.isolation.steps[12].if = "false";
+        },
+        prior,
+      ],
+      ["prior guard omitted", ({ w }) => delete w.jobs.isolation.steps[12].if, prior],
+      [
+        "workflow write permission",
+        ({ w }) => {
+          w.permissions.contents = "write";
+        },
+        prior,
+      ],
+      [
+        "workflow changed trigger",
+        ({ w }) => {
+          w.on.push.branches = ["main"];
+        },
+        prior,
+      ],
+      [
+        "release unlocked",
+        ({ all }) => {
+          all["release-images.yml"].jobs.publish.if = "${{ true }}";
+        },
+        "operational release locks preserved",
+      ],
+    ];
+    for (const [index, step] of expectedJob.steps.entries()) {
+      mutations.push(
+        [
+          `step ${index} omitted`,
+          ({ j }) => j.steps.splice(index, 1),
+          index >= 9 ? "globally unique named native selection" : exact,
+        ],
+        [
+          `step ${index} duplicate`,
+          ({ j }) => j.steps.push(structuredClone(step)),
+          index >= 9 ? "globally unique named native selection" : exact,
+        ],
+      );
+      if (index < 9)
         mutations.push([
-          `${foreign ? "foreign" : "local"} duplicate ${alias}`,
-          ({ all, w }) => {
-            const job = { steps: [{ run: `corepack pnpm exec vitest run ${alias}` }] };
-            if (foreign) all.other = { jobs: { other: job } };
-            else w.jobs.other = job;
+          `step ${index} late`,
+          ({ j }) => j.steps.push(j.steps.splice(index, 1)[0]),
+          exact,
+        ]);
+      for (const [key, value] of [
+        ["if", "false"],
+        ["continue-on-error", true],
+        ["shell", "bash {0}"],
+        ["timeout-minutes", 1],
+        ["env", { DATABASE_URL: preparedServicesFixture }],
+        ["env", { US_TEST_DATABASE_URL: "postgres://wrong/other" }],
+      ])
+        mutations.push([
+          `step ${index} ${key}`,
+          ({ j }) => {
+            j.steps[index][key] = value;
           },
-          once,
+          exact,
+        ]);
+      if (step.uses)
+        mutations.push([
+          `step ${index} wrong action`,
+          ({ j }) => {
+            j.steps[index].uses += "bad";
+          },
+          exact,
+        ]);
+      if (step.run)
+        mutations.push([
+          `step ${index} ignores failure`,
+          ({ j }) => {
+            j.steps[index].run += " || true";
+          },
+          exact,
         ]);
     }
-  }
-  for (const [label, mutate] of [
-    [
-      "missing DB selector",
-      ({ j }) => {
-        j.steps[10].run = expectedDbCommand.replace(expectedDbFile, "");
-      },
-    ],
-    [
-      "duplicate DB selector",
-      ({ j }) => {
-        j.steps[10].run += ` ${expectedDbFile}`;
-      },
-    ],
-    [
-      "foreign DB selector",
-      ({ all }) => {
-        all.other = { jobs: { other: { steps: [{ run: expectedDbCommand }] } } };
-      },
-    ],
-  ])
-    mutations.push([label, mutate, `${expectedDbFile} has exactly one explicit native selection`]);
-  for (const run of [
-    `echo '${preparedServicesCommand}'`,
-    `# ${preparedServicesCommand}`,
-    `if false; then ${preparedServicesCommand}; fi`,
-    `${preparedServicesCommand}; exit 0`,
-    `set +e\n${preparedServicesCommand}`,
-    `${preparedServicesCommand} | cat`,
-    `${preparedServicesCommand} &`,
-    `${preparedServicesCommand} --testNamePattern=small`,
-    `${preparedServicesCommand} --retry=1`,
-    `${preparedServicesCommand} --testTimeout=1800000`,
-    `${preparedServicesCommand} --passWithNoTests`,
-    `${preparedServicesCommand} >/dev/null 2>&1`,
-    preparedServicesCommand.replace("--maxWorkers=1", "--maxWorkers=2"),
-    preparedServicesCommand.replace(" --maxWorkers=1", ""),
-  ])
-    mutations.push([
-      run,
-      ({ o }) => {
-        o.run = run;
-      },
-      exact,
-    ]);
-  for (const [label, mutate, message] of mutations) {
-    const all = readWorkflows();
-    const w = all["us-development.yml"];
-    const j = w.jobs[preparedServicesJobId];
-    const o = j.steps[9];
-    mutate({ all, w, j, o });
-    assert.throws(
-      () => assertOwnership(all),
-      (error) => error instanceof assert.AssertionError && error.message.includes(message),
-      `${label}: ${message}`,
+    for (const scope of ["workflow", "job"]) {
+      for (const [key, value] of [
+        ["env", { US_TEST_DATABASE_URL: preparedServicesFixture }],
+        ["env", { DATABASE_URL: preparedServicesFixture }],
+        ["if", "false"],
+        ["continue-on-error", true],
+        ["defaults", { run: { shell: "bash {0}" } }],
+        ["permissions", { contents: "write" }],
+        ["environment", "production"],
+        ["secrets", "inherit"],
+      ])
+        mutations.push([
+          `${scope} ${key}`,
+          ({ w, j }) => {
+            (scope === "workflow" ? w : j)[key] = value;
+          },
+          scope === "workflow" ? prior : exact,
+        ]);
+    }
+    for (const file of expectedFiles) {
+      const once = `${file} has exactly one explicit native selection`;
+      mutations.push(
+        [
+          `missing ${file}`,
+          ({ o }) => {
+            o.run = o.run.replace(file, "");
+          },
+          once,
+        ],
+        [
+          `duplicate ${file}`,
+          ({ o }) => {
+            o.run += ` ${file}`;
+          },
+          once,
+        ],
+      );
+      const filename = file.slice("test/".length);
+      for (const alias of [
+        filename,
+        `"${file}"`,
+        `'${file}'`,
+        `./${file}`,
+        `apps/api/${file}`,
+        `"./apps/api/${file}"`,
+      ]) {
+        for (const foreign of [false, true])
+          mutations.push([
+            `${foreign ? "foreign" : "local"} duplicate ${alias}`,
+            ({ all, w }) => {
+              const job = { steps: [{ run: `corepack pnpm exec vitest run ${alias}` }] };
+              if (foreign) all.other = { jobs: { other: job } };
+              else w.jobs.other = job;
+            },
+            once,
+          ]);
+      }
+    }
+    for (const [label, mutate] of preparedServicesJobId === "dataset_prepared_services"
+      ? [
+          [
+            "missing DB selector",
+            ({ j }) => {
+              j.steps[10].run = expectedDbCommand.replace(expectedDbFile, "");
+            },
+          ],
+          [
+            "duplicate DB selector",
+            ({ j }) => {
+              j.steps[10].run += ` ${expectedDbFile}`;
+            },
+          ],
+          [
+            "foreign DB selector",
+            ({ all }) => {
+              all.other = { jobs: { other: { steps: [{ run: expectedDbCommand }] } } };
+            },
+          ],
+        ]
+      : [])
+      mutations.push([
+        label,
+        mutate,
+        `${expectedDbFile} has exactly one explicit native selection`,
+      ]);
+    for (const run of [
+      `echo '${preparedServicesCommand}'`,
+      `# ${preparedServicesCommand}`,
+      `if false; then ${preparedServicesCommand}; fi`,
+      `${preparedServicesCommand}; exit 0`,
+      `set +e\n${preparedServicesCommand}`,
+      `${preparedServicesCommand} | cat`,
+      `${preparedServicesCommand} &`,
+      `${preparedServicesCommand} --testNamePattern=small`,
+      `${preparedServicesCommand} --retry=1`,
+      `${preparedServicesCommand} --testTimeout=1800000`,
+      `${preparedServicesCommand} --passWithNoTests`,
+      `${preparedServicesCommand} >/dev/null 2>&1`,
+      preparedServicesCommand.replace("--maxWorkers=1", "--maxWorkers=2"),
+      preparedServicesCommand.replace(" --maxWorkers=1", ""),
+    ])
+      mutations.push([
+        run,
+        ({ o }) => {
+          o.run = run;
+        },
+        exact,
+      ]);
+    for (const [label, mutate, message] of mutations) {
+      const all = readWorkflows();
+      const w = all["us-development.yml"];
+      const j = w.jobs[preparedServicesJobId];
+      const o = j.steps[9];
+      mutate({ all, w, j, o });
+      assert.throws(
+        () => assertOwnership(all),
+        (error) => error instanceof assert.AssertionError && error.message.includes(message),
+        `${label}: ${message}`,
+      );
+    }
+    t.diagnostic(
+      `${mutations.length} fresh parsed ownership mutations rejected at intended assertions`,
     );
-  }
-  t.diagnostic(
-    `${mutations.length} fresh parsed ownership mutations rejected at intended assertions`,
-  );
-});
+  });
 
-test("historical normalization leaves malformed jobs and AST-neutral byte tampering observable", () => {
-  for (const mutate of [
-    (j) => {
-      j.needs = "other";
-    },
-    (j) => {
-      j["timeout-minutes"] = 31;
-    },
-    (j) => {
-      j.steps.at(-1).run += " || true";
-    },
-    (j) => {
-      j.env = {};
-    },
-    (j) => {
-      j.steps[0].uses += "bad";
-    },
-    (j) => {
-      j.steps[4].if = "false";
-    },
-    (j) => {
-      j.steps[4].env = {};
-    },
-    (j) => {
-      j.steps.at(-1).env = {};
-    },
-    (j) => j.steps.push({ run: "echo bypass" }),
-  ]) {
-    const changed = structuredClone(workflow);
-    mutate(changed.jobs[preparedServicesJobId]);
-    assert.equal(hasExactPreparedServicesOwner(changed), false);
-    assert.deepEqual(withoutPreparedServicesOwner(changed), changed);
-    assert.deepEqual(
-      withoutParallelSegments(changed).jobs[preparedServicesJobId],
-      changed.jobs[preparedServicesJobId],
+for (const preparedServicesJobId of Object.keys(expectedPartition))
+  test(`${preparedServicesJobId}: historical normalization leaves malformed jobs and AST-neutral byte tampering observable`, () => {
+    const preparedServicesJobBlock = preparedServicesJobBlocks[preparedServicesJobId];
+    const preparedServicesCommand = expectedCommands[preparedServicesJobId];
+    for (const mutate of [
+      (j) => {
+        j.needs = "other";
+      },
+      (j) => {
+        j["timeout-minutes"] = 31;
+      },
+      (j) => {
+        j.steps.at(-1).run += " || true";
+      },
+      (j) => {
+        j.env = {};
+      },
+      (j) => {
+        j.steps[0].uses += "bad";
+      },
+      (j) => {
+        j.steps[4].if = "false";
+      },
+      (j) => {
+        j.steps[4].env = {};
+      },
+      (j) => {
+        j.steps.at(-1).env = {};
+      },
+      (j) => j.steps.push({ run: "echo bypass" }),
+    ]) {
+      const changed = structuredClone(workflow);
+      mutate(changed.jobs[preparedServicesJobId]);
+      assert.equal(hasExactPreparedServicesOwner(changed), false);
+      assert.deepEqual(withoutPreparedServicesOwner(changed), changed);
+      assert.deepEqual(
+        withoutParallelSegments(changed).jobs[preparedServicesJobId],
+        changed.jobs[preparedServicesJobId],
+      );
+      assert.notEqual(
+        hash(withoutParallelSegments(changed)),
+        "64ba03ef3513c852d107ae434bfaa67995fdcd67944471a35ca9e4a7f9fb0de5",
+      );
+    }
+    for (const changed of [
+      source.replace(
+        preparedServicesJobBlock,
+        preparedServicesJobBlock.replace("    needs: isolation", "    needs: other"),
+      ),
+      source.replace(preparedServicesCommand, `${preparedServicesCommand} || true`),
+      source.replace(preparedServicesJobBlock, `${preparedServicesJobBlock}    if: false\n`),
+      source.replace(
+        preparedServicesJobBlock,
+        preparedServicesJobBlock.replace("# v4", "# changed"),
+      ),
+      source + "\n",
+      source + "# changed\n",
+    ]) {
+      assert.equal(
+        withoutPreparedServicesOwnerBytes(changed),
+        changed,
+        "only exact complete raw block is removable",
+      );
+      assert.notEqual(
+        digest(withoutParallelSegmentsBytes(changed)),
+        "41011c2455d1274a65fa829dee0cd8b57f544d04436f3f481570433ab0d68d1a",
+      );
+    }
+    for (const changed of [
+      source.replace("# v4", "# prior action comment changed"),
+      source.replace("pnpm install --frozen-lockfile", "pnpm install --frozen-lockfile || true"),
+    ])
+      assert.notEqual(
+        digest(historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(changed))),
+        predecessorBytes,
+        "prior byte tamper remains observable",
+      );
+    assert.throws(
+      () => load(source + preparedServicesJobBlock),
+      /duplicated mapping key/,
+      "duplicate raw job keys are rejected",
     );
-    assert.notEqual(
-      hash(withoutParallelSegments(changed)),
-      "64ba03ef3513c852d107ae434bfaa67995fdcd67944471a35ca9e4a7f9fb0de5",
+    assert.equal(
+      withoutPreparedServicesOwnerBytes(source.replace(preparedServicesJobBlock, "")),
+      source.replace(preparedServicesJobBlock, ""),
     );
-  }
-  for (const changed of [
-    source.replace(
+    const missing = structuredClone(workflow);
+    delete missing.jobs[preparedServicesJobId];
+    assert.deepEqual(withoutPreparedServicesOwner(missing), missing);
+  });
+
+for (const preparedServicesJobId of Object.keys(expectedPartition))
+  test(`${preparedServicesJobId}: malformed prepared additions survive Trace and parallel historical normalization`, (t) => {
+    const preparedServicesJobBlock = preparedServicesJobBlocks[preparedServicesJobId];
+    const historicalHash = "41bf8666490eecd3a5b5d41069d77e689784f3281992869804989793ffa5d756";
+    const historicalBytes = "ef3c241beaf197c5432a417315fee9dd526af275f2c8583b00ccaa0a91907079";
+    const assertHistorical = (w) => {
+      const historical = withoutPreparedServicesOwner(w);
+      assert.deepEqual(
+        Object.keys(historical.jobs),
+        ["isolation", "dataset_trace_readiness"],
+        "historical Trace view permits only the exact prepared addition",
+      );
+      assert.equal(hash(withoutTraceReadinessOwner(historical)), historicalHash);
+    };
+    assertHistorical(workflow);
+    const malformed = source.replace(
       preparedServicesJobBlock,
       preparedServicesJobBlock.replace("    needs: isolation", "    needs: other"),
-    ),
-    source.replace(preparedServicesCommand, `${preparedServicesCommand} || true`),
-    source.replace(preparedServicesJobBlock, `${preparedServicesJobBlock}    if: false\n`),
-    source.replace(preparedServicesJobBlock, preparedServicesJobBlock.replace("# v4", "# changed")),
-    source + "\n",
-    source + "# changed\n",
-  ]) {
+    );
+    const parsed = load(malformed);
+    const normalized = withoutPreparedServicesOwner(parsed);
+    assert.deepEqual(normalized, parsed, "malformed parsed prepared addition is retained");
+    assert.deepEqual(
+      withoutTraceReadinessOwner(normalized).jobs[preparedServicesJobId],
+      parsed.jobs[preparedServicesJobId],
+    );
+    assert.deepEqual(
+      withoutParallelSegments(parsed).jobs[preparedServicesJobId],
+      parsed.jobs[preparedServicesJobId],
+    );
+    assert.throws(
+      () => assertHistorical(parsed),
+      (error) =>
+        error instanceof assert.AssertionError &&
+        error.message.includes("historical Trace view permits only the exact prepared addition"),
+    );
+    assert.throws(
+      () => assertOwnership({ ...readWorkflows(), "us-development.yml": parsed }),
+      (error) =>
+        error instanceof assert.AssertionError &&
+        error.message.includes("complete unconditional failure-propagating native job"),
+    );
+    assert.equal(withoutPreparedServicesOwnerBytes(malformed), malformed);
     assert.equal(
-      withoutPreparedServicesOwnerBytes(changed),
-      changed,
-      "only exact complete raw block is removable",
+      withoutTraceReadinessOwnerBytes(withoutPreparedServicesOwnerBytes(malformed)),
+      malformed,
+      "Trace EOF removal cannot conceal a retained malformed prepared block",
     );
     assert.notEqual(
-      digest(withoutParallelSegmentsBytes(changed)),
+      digest(withoutParallelSegmentsBytes(malformed)),
       "41011c2455d1274a65fa829dee0cd8b57f544d04436f3f481570433ab0d68d1a",
     );
-  }
-  for (const changed of [
-    source.replace("# v4", "# prior action comment changed"),
-    source.replace("pnpm install --frozen-lockfile", "pnpm install --frozen-lockfile || true"),
-  ])
-    assert.notEqual(
-      digest(historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(changed))),
-      predecessorBytes,
-      "prior byte tamper remains observable",
+    for (const changed of [
+      source.replace("# v4", "# matrix comment altered"),
+      source.replace("  dataset_trace_readiness:\n", "  dataset_trace_readiness: # altered\n"),
+    ]) {
+      assert.deepEqual(load(changed), workflow, "byte mutants preserve the parsed workflow");
+      assert.notEqual(
+        digest(historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(changed))),
+        predecessorBytes,
+        "complete pre-task raw pin rejects matrix and Trace byte drift",
+      );
+      assert.notEqual(
+        digest(withoutTraceReadinessOwnerBytes(withoutPreparedServicesOwnerBytes(changed))),
+        historicalBytes,
+        "unchanged historical raw pin rejects byte drift",
+      );
+    }
+    t.diagnostic(
+      "1 malformed addition rejected by both owners; 2 AST-neutral predecessor byte mutants rejected",
     );
-  assert.throws(
-    () => load(source + preparedServicesJobBlock),
-    /duplicated mapping key/,
-    "duplicate raw job keys are rejected",
-  );
-  assert.equal(
-    withoutPreparedServicesOwnerBytes(source.replace(preparedServicesJobBlock, "")),
-    source.replace(preparedServicesJobBlock, ""),
-  );
-  const missing = structuredClone(workflow);
-  delete missing.jobs[preparedServicesJobId];
-  assert.deepEqual(withoutPreparedServicesOwner(missing), missing);
-});
-
-test("malformed prepared additions survive Trace and parallel historical normalization", (t) => {
-  const historicalHash = "41bf8666490eecd3a5b5d41069d77e689784f3281992869804989793ffa5d756";
-  const historicalBytes = "ef3c241beaf197c5432a417315fee9dd526af275f2c8583b00ccaa0a91907079";
-  const assertHistorical = (w) => {
-    const historical = withoutPreparedServicesOwner(w);
-    assert.deepEqual(
-      Object.keys(historical.jobs),
-      ["isolation", "dataset_trace_readiness"],
-      "historical Trace view permits only the exact prepared addition",
-    );
-    assert.equal(hash(withoutTraceReadinessOwner(historical)), historicalHash);
-  };
-  assertHistorical(workflow);
-  const malformed = source.replace(
-    preparedServicesJobBlock,
-    preparedServicesJobBlock.replace("    needs: isolation", "    needs: other"),
-  );
-  const parsed = load(malformed);
-  const normalized = withoutPreparedServicesOwner(parsed);
-  assert.deepEqual(normalized, parsed, "malformed parsed prepared addition is retained");
-  assert.deepEqual(
-    withoutTraceReadinessOwner(normalized).jobs.dataset_prepared_services,
-    parsed.jobs.dataset_prepared_services,
-  );
-  assert.deepEqual(
-    withoutParallelSegments(parsed).jobs.dataset_prepared_services,
-    parsed.jobs.dataset_prepared_services,
-  );
-  assert.throws(
-    () => assertHistorical(parsed),
-    (error) =>
-      error instanceof assert.AssertionError &&
-      error.message.includes("historical Trace view permits only the exact prepared addition"),
-  );
-  assert.throws(
-    () => assertOwnership({ ...readWorkflows(), "us-development.yml": parsed }),
-    (error) =>
-      error instanceof assert.AssertionError &&
-      error.message.includes("complete unconditional failure-propagating native job"),
-  );
-  assert.equal(withoutPreparedServicesOwnerBytes(malformed), malformed);
-  assert.equal(
-    withoutTraceReadinessOwnerBytes(withoutPreparedServicesOwnerBytes(malformed)),
-    malformed,
-    "Trace EOF removal cannot conceal a retained malformed prepared block",
-  );
-  assert.notEqual(
-    digest(withoutParallelSegmentsBytes(malformed)),
-    "41011c2455d1274a65fa829dee0cd8b57f544d04436f3f481570433ab0d68d1a",
-  );
-  for (const changed of [
-    source.replace("# v4", "# matrix comment altered"),
-    source.replace("  dataset_trace_readiness:\n", "  dataset_trace_readiness: # altered\n"),
-  ]) {
-    assert.deepEqual(load(changed), workflow, "byte mutants preserve the parsed workflow");
-    assert.notEqual(
-      digest(historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(changed))),
-      predecessorBytes,
-      "complete pre-task raw pin rejects matrix and Trace byte drift",
-    );
-    assert.notEqual(
-      digest(withoutTraceReadinessOwnerBytes(withoutPreparedServicesOwnerBytes(changed))),
-      historicalBytes,
-      "unchanged historical raw pin rejects byte drift",
-    );
-  }
-  t.diagnostic(
-    "1 malformed addition rejected by both owners; 2 AST-neutral predecessor byte mutants rejected",
-  );
-});
+  });
 
 test("every native fixture gate denies environment substitution, mutable and shadowed aliases", (t) => {
   let count = 0;
@@ -988,6 +1106,6 @@ test("every native fixture gate denies environment substitution, mutable and sha
     }
   }
   t.diagnostic(
-    `${count} gate source mutations rejected at intended assertions across all four suites`,
+    `${count} gate source mutations rejected at intended assertions across all 24 suites`,
   );
 });
