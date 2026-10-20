@@ -49,28 +49,95 @@ export function recoveryRoleMapping(inventory) {
     ),
   };
 }
-export async function cleanupRecoveryResources(resources, command) {
-  for (const [kind, name] of [...resources].reverse()) {
-    const rows = JSON.parse((await command([kind, "inspect", name])).stdout);
-    assert.equal(rows.length, 1);
-    assert.equal(
-      (rows[0].Config?.Labels ?? rows[0].Labels)?.["com.docker.compose.project"],
-      "markiro-platform",
-    );
-    await command([kind, "rm", ...(kind === "container" ? ["--force"] : []), name]);
+export const recoveryCiLabel = "io.markiro.recovery-ci";
+export function captureRecoveryResource(kind, name, value, invocationId) {
+  const labels = value.Config?.Labels ?? value.Labels;
+  assert.equal(labels?.["com.docker.compose.project"], "markiro-platform");
+  assert.equal(labels?.[recoveryCiLabel], invocationId);
+  assert.equal(value.Name, kind === "container" ? `/${name}` : name);
+  const identity =
+    kind === "volume"
+      ? {
+          name: value.Name,
+          createdAt: value.CreatedAt,
+          mountpoint: value.Mountpoint,
+          driver: value.Driver,
+          scope: value.Scope,
+          options: value.Options ?? {},
+          labels,
+        }
+      : { id: value.Id, labels };
+  if (kind === "volume") {
+    assert.ok(typeof identity.createdAt === "string" && identity.createdAt.length > 0);
+    assert.ok(typeof identity.mountpoint === "string" && identity.mountpoint.length > 0);
+  } else assert.match(identity.id, /^[a-f0-9]{64}$/u);
+  return structuredClone({ kind, name, invocationId, identity });
+}
+export async function removeRecoveryResource(resource, command, invocationId) {
+  const { kind, name } = resource;
+  assert.equal(resource.invocationId, invocationId);
+  const rows = JSON.parse((await command([kind, "inspect", name])).stdout);
+  assert.equal(rows.length, 1);
+  const actual = captureRecoveryResource(kind, name, rows[0], invocationId);
+  assert.deepEqual(actual, resource);
+  // Containers/networks are deleted by immutable ID, never by a reusable name.
+  await command([
+    kind,
+    "rm",
+    ...(kind === "container" ? ["--force"] : []),
+    kind === "volume" ? name : resource.identity.id,
+  ]);
+  const names = String(
+    (
+      await command([
+        kind,
+        "ls",
+        ...(kind === "container" ? ["--all"] : []),
+        "--format",
+        kind === "container" ? "{{.Names}}" : "{{.Name}}",
+      ])
+    ).stdout,
+  )
+    .trim()
+    .split("\n");
+  assert.ok(!names.includes(name));
+}
+export async function cleanupRecoveryResources(resources, command, invocationId) {
+  // Inventory is only a refusal check, never an expanded deletion list.
+  for (const kind of ["container", "volume", "network"]) {
     const names = String(
       (
         await command([
           kind,
           "ls",
           ...(kind === "container" ? ["--all"] : []),
+          "--filter",
+          "label=com.docker.compose.project=markiro-platform",
           "--format",
           kind === "container" ? "{{.Names}}" : "{{.Name}}",
         ])
       ).stdout,
     )
       .trim()
-      .split("\n");
-    assert.ok(!names.includes(name));
+      .split("\n")
+      .filter(Boolean);
+    for (const name of names)
+      assert.ok(
+        resources.some((r) => r.kind === kind && r.name === name),
+        "Unrecorded same-project resource; cleanup refused",
+      );
+    for (const resource of resources.filter((r) => r.kind === kind))
+      assert.ok(names.includes(resource.name), "Recorded resource disappeared; cleanup refused");
   }
+  // Verify the entire set before the first mutation.
+  for (const resource of resources) {
+    const rows = JSON.parse((await command([resource.kind, "inspect", resource.name])).stdout);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(
+      captureRecoveryResource(resource.kind, resource.name, rows[0], invocationId),
+      resource,
+    );
+  }
+  for (const resource of [...resources].reverse())
+    await removeRecoveryResource(resource, command, invocationId);
 }

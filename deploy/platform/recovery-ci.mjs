@@ -22,6 +22,9 @@ import {
   validateWorkerManifest,
   recoveryRoleMapping,
   cleanupRecoveryResources,
+  captureRecoveryResource,
+  removeRecoveryResource,
+  recoveryCiLabel,
 } from "./recovery-ci-helpers.mjs";
 import { runHostProcess } from "./host/process.mjs";
 import {
@@ -42,6 +45,8 @@ import { hostEnv, envBytes, hostIdentity, backupProof } from "./test/host-fixtur
 const repositoryRoot = await realpath(resolve("."));
 const root = await mkdtemp(join(await realpath(tmpdir()), "markiro-recovery-ci-"));
 await chmod(root, 0o700);
+const invocationId = randomUUID();
+const resources = [];
 let phase = "host preflight",
   admittedHost = false,
   completed = false,
@@ -64,6 +69,14 @@ const docker = (args) =>
     900000,
   );
 const inspect = async (kind, name) => JSON.parse((await docker([kind, "inspect", name])).stdout)[0];
+const recordResource = async (kind, name) => {
+  const resource = captureRecoveryResource(kind, name, await inspect(kind, name), invocationId);
+  resources.push(resource);
+  await writeFile(join(root, "resources.json"), canonical({ invocationId, resources }) + "\n", {
+    mode: 0o600,
+  });
+  return resource;
+};
 const save = (name, bytes) =>
   writeFile(
     join(root, name),
@@ -244,6 +257,17 @@ try {
     dockerConfig: join(root, "docker"),
     ambient: {},
   });
+  await save(
+    "compose.recovery-ci.yml",
+    JSON.stringify({
+      services: { postgres: { labels: { [recoveryCiLabel]: invocationId } } },
+      networks: {
+        default: { labels: { [recoveryCiLabel]: invocationId } },
+        database: { labels: { [recoveryCiLabel]: invocationId } },
+      },
+      volumes: { "postgres-data": { labels: { [recoveryCiLabel]: invocationId } } },
+    }),
+  );
   const compose = (args) =>
     command(
       "/usr/bin/docker",
@@ -257,12 +281,29 @@ try {
         join(root, "compose.yml"),
         "-f",
         join(root, "compose.compact.yml"),
+        "-f",
+        join(root, "compose.recovery-ci.yml"),
         ...args,
       ],
       childEnv,
       180000,
     );
-  phase = "initialize UID70 PostgreSQL volume";
+  phase = "initialize uniquely owned PostgreSQL resources";
+  for (const name of ["default", "database"]) {
+    await docker([
+      "network",
+      "create",
+      ...(name === "database" ? ["--internal"] : []),
+      "--label",
+      "com.docker.compose.project=markiro-platform",
+      "--label",
+      `com.docker.compose.network=${name}`,
+      "--label",
+      `${recoveryCiLabel}=${invocationId}`,
+      `markiro-platform_${name}`,
+    ]);
+    await recordResource("network", `markiro-platform_${name}`);
+  }
   await docker([
     "volume",
     "create",
@@ -270,18 +311,23 @@ try {
     "com.docker.compose.project=markiro-platform",
     "--label",
     "com.docker.compose.volume=postgres-data",
+    "--label",
+    `${recoveryCiLabel}=${invocationId}`,
     "markiro-platform_postgres-data",
   ]);
+  await recordResource("volume", "markiro-platform_postgres-data");
   // Root bootstrap is confined to the fresh named volume, before the real service starts.
+  const bootstrapName = `markiro-platform-ci-bootstrap-${invocationId}`;
   await docker([
-    "run",
-    "--rm",
+    "create",
     "--name",
-    "markiro-platform-ci-bootstrap",
+    bootstrapName,
     "--user",
     "0:0",
     "--label",
     "com.docker.compose.project=markiro-platform",
+    "--label",
+    `${recoveryCiLabel}=${invocationId}`,
     "--network",
     "none",
     "--mount",
@@ -291,21 +337,16 @@ try {
     "70:70",
     "/var/lib/postgresql/data",
   ]);
+  const bootstrap = await recordResource("container", bootstrapName);
+  await docker(["start", "--attach", bootstrap.identity.id]);
+  await removeRecoveryResource(bootstrap, docker, invocationId);
+  resources.splice(resources.indexOf(bootstrap), 1);
+  await writeFile(join(root, "resources.json"), canonical({ invocationId, resources }) + "\n", {
+    mode: 0o600,
+  });
+  await compose(["create", "--no-deps", "postgres"]);
+  await recordResource("container", "markiro-platform-postgres-1");
   await compose(["up", "--detach", "--no-deps", "--wait", "postgres"]);
-  // Compose only creates service-used networks. The host observer also requires default.
-  const networkNames = String((await docker(["network", "ls", "--format", "{{.Name}}"])).stdout)
-    .trim()
-    .split("\n");
-  if (!networkNames.includes("markiro-platform_default"))
-    await docker([
-      "network",
-      "create",
-      "--label",
-      "com.docker.compose.project=markiro-platform",
-      "--label",
-      "com.docker.compose.network=default",
-      "markiro-platform_default",
-    ]);
   const psql = (sql) =>
     command(
       "/usr/bin/docker",
@@ -531,27 +572,7 @@ try {
 }
 if (admittedHost) {
   try {
-    const resources = [];
-    for (const kind of ["network", "volume", "container"]) {
-      const names = String(
-        (
-          await docker([
-            kind,
-            "ls",
-            ...(kind === "container" ? ["--all"] : []),
-            "--filter",
-            "label=com.docker.compose.project=markiro-platform",
-            "--format",
-            kind === "container" ? "{{.Names}}" : "{{.Name}}",
-          ])
-        ).stdout,
-      )
-        .trim()
-        .split("\n")
-        .filter(Boolean);
-      for (const name of names) resources.push([kind, name]);
-    }
-    await cleanupRecoveryResources(resources, docker);
+    await cleanupRecoveryResources(resources, docker, invocationId);
     if (completed) await rm(root, { recursive: true });
   } catch {
     problem = new Error(

@@ -4,6 +4,8 @@ import {
   recoveryRoleMapping,
   validateWorkerManifest,
   cleanupRecoveryResources,
+  captureRecoveryResource,
+  recoveryCiLabel,
 } from "../recovery-ci-helpers.mjs";
 import { ICU_NODE_BASE, ICU_POSTGRES_BASE, workerRecipe } from "../backup/worker-recipes.mjs";
 import { digest } from "../backup/schemas.mjs";
@@ -66,48 +68,6 @@ test("restore role mapping explicitly removes bootstrap privilege attributes", (
     { source: "postgres", target: "restored_bootstrap" },
   ]);
 });
-test("cleanup refuses a resource whose ownership changed", async () => {
-  const calls = [];
-  await assert.rejects(
-    cleanupRecoveryResources([["volume", "markiro-platform_postgres-data"]], async (args) => {
-      calls.push(args);
-      return { stdout: JSON.stringify([{ Labels: { "com.docker.compose.project": "foreign" } }]) };
-    }),
-  );
-  assert.equal(calls.length, 1);
-});
-
-test("cleanup removes labelled resources in reverse dependency order and verifies absence", async () => {
-  const removed = [];
-  const resources = [
-    ["network", "markiro-platform_database"],
-    ["volume", "markiro-platform_postgres-data"],
-    ["container", "markiro-platform-postgres-1"],
-  ];
-  await cleanupRecoveryResources(resources, async (args) => {
-    if (args[1] === "inspect")
-      return {
-        stdout: JSON.stringify([{ Labels: { "com.docker.compose.project": "markiro-platform" } }]),
-      };
-    if (args[1] === "rm") {
-      removed.push([args[0], args.at(-1)]);
-      return { stdout: "" };
-    }
-    assert.equal(args[1], "ls");
-    return { stdout: "" };
-  });
-  assert.deepEqual(removed, [...resources].reverse());
-});
-test("cleanup fails closed if Docker still lists a removed resource", async () => {
-  await assert.rejects(
-    cleanupRecoveryResources([["volume", "markiro-platform_postgres-data"]], async (args) => ({
-      stdout:
-        args[1] === "inspect"
-          ? JSON.stringify([{ Labels: { "com.docker.compose.project": "markiro-platform" } }])
-          : "markiro-platform_postgres-data\n",
-    })),
-  );
-});
 test("role mapping retains actual owner and delegated grantee identities", () => {
   const value = recoveryRoleMapping({
     roles: [],
@@ -126,4 +86,128 @@ test("role mapping retains actual owner and delegated grantee identities", () =>
     ["delegator", "owner", "reader"],
   );
   assert.deepEqual(value.allowedDeltas, []);
+});
+
+function cleanupFixture() {
+  const invocationId = "own";
+  const values = new Map();
+  const resources = [];
+  for (const [kind, name, index] of [
+    ["network", "markiro-platform_database", "1"],
+    ["volume", "markiro-platform_postgres-data", "2"],
+    ["container", "markiro-platform-postgres-1", "3"],
+  ]) {
+    const labels = {
+      "com.docker.compose.project": "markiro-platform",
+      [recoveryCiLabel]: invocationId,
+    };
+    const value = {
+      Name: kind === "container" ? `/${name}` : name,
+      ...(kind === "volume"
+        ? {
+            CreatedAt: "2026-10-20T00:00:00Z",
+            Mountpoint: `/var/lib/docker/volumes/${name}/_data`,
+            Driver: "local",
+            Scope: "local",
+            Options: {},
+            Labels: labels,
+          }
+        : {
+            Id: index.repeat(64),
+            ...(kind === "container" ? { Config: { Labels: labels } } : { Labels: labels }),
+          }),
+    };
+    values.set(`${kind}:${name}`, value);
+    resources.push(captureRecoveryResource(kind, name, value, invocationId));
+  }
+  const removed = [];
+  const command = async (args) => {
+    const [kind, action] = args;
+    if (action === "ls")
+      return {
+        stdout: [...values.entries()]
+          .filter(([key]) => key.startsWith(kind + ":"))
+          .map(([key]) => key.slice(kind.length + 1))
+          .join("\n"),
+      };
+    if (action === "inspect") return { stdout: JSON.stringify([values.get(`${kind}:${args[2]}`)]) };
+    assert.equal(action, "rm");
+    const target = args.at(-1);
+    const entry = [...values.entries()].find(
+      ([key, value]) =>
+        key.startsWith(kind + ":") && (value.Id === target || key === `${kind}:${target}`),
+    );
+    assert.ok(entry);
+    removed.push([kind, target]);
+    values.delete(entry[0]);
+    return { stdout: "" };
+  };
+  return { invocationId, values, resources, removed, command };
+}
+test("cleanup removes only recorded IDs in reverse dependency order", async () => {
+  const f = cleanupFixture();
+  await cleanupRecoveryResources(f.resources, f.command, f.invocationId);
+  assert.deepEqual(f.removed, [
+    ["container", "3".repeat(64)],
+    ["volume", "markiro-platform_postgres-data"],
+    ["network", "1".repeat(64)],
+  ]);
+});
+for (const mode of [
+  "container-replaced",
+  "network-replaced",
+  "volume-replaced",
+  "foreign-invocation",
+  "foreign-project",
+  "same-project-extra",
+])
+  test(`cleanup refuses ${mode} before any deletion`, async () => {
+    const f = cleanupFixture();
+    const container = f.values.get("container:markiro-platform-postgres-1");
+    if (mode === "container-replaced") container.Id = "4".repeat(64);
+    if (mode === "network-replaced")
+      f.values.get("network:markiro-platform_database").Id = "4".repeat(64);
+    if (mode === "volume-replaced")
+      f.values.get("volume:markiro-platform_postgres-data").CreatedAt = "2026-10-20T00:00:01Z";
+    if (mode === "foreign-invocation") container.Config.Labels[recoveryCiLabel] = "foreign";
+    if (mode === "foreign-project")
+      container.Config.Labels["com.docker.compose.project"] = "foreign";
+    if (mode === "same-project-extra")
+      f.values.set("container:markiro-platform-foreign", {
+        ...container,
+        Name: "/markiro-platform-foreign",
+        Id: "4".repeat(64),
+      });
+    await assert.rejects(cleanupRecoveryResources(f.resources, f.command, f.invocationId));
+    assert.deepEqual(f.removed, []);
+  });
+test("cleanup fails closed if deletion does not establish absence", async () => {
+  const f = cleanupFixture();
+  await assert.rejects(
+    cleanupRecoveryResources(
+      f.resources,
+      async (args) => (args[1] === "rm" ? { stdout: "" } : f.command(args)),
+      f.invocationId,
+    ),
+  );
+});
+
+test("cleanup rechecks identity immediately before removal after initial verification", async () => {
+  const f = cleanupFixture();
+  const resource = f.resources.find((value) => value.kind === "container");
+  for (const key of [...f.values.keys()]) if (!key.startsWith("container:")) f.values.delete(key);
+  let inspections = 0;
+  await assert.rejects(
+    cleanupRecoveryResources(
+      [resource],
+      async (args) => {
+        if (args[1] === "inspect" && ++inspections === 2)
+          f.values.get("container:markiro-platform-postgres-1").Id = "4".repeat(64);
+        return f.command(args);
+      },
+      f.invocationId,
+    ),
+  );
+  assert.equal(inspections, 2);
+  assert.deepEqual(f.removed, []);
 });
