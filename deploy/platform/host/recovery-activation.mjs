@@ -91,6 +91,7 @@ export async function executeRecoveryActivation(input, adapters) {
         boundary: sharedBoundary,
         checkActivationDeadline,
         checkConfiguration,
+        checkPreparedFreshness,
         observeTarget,
       } = preparedHostBoundary({
         root,
@@ -124,6 +125,7 @@ export async function executeRecoveryActivation(input, adapters) {
         const current = await readVerifiedBackup({ root, identity, ...preparedPolicy });
         ensure(canonical(current.backupProof) === canonical(preparationProof));
         await checkConfiguration();
+        checkPreparedFreshness();
         checkActivationDeadline();
       };
       const guarded = (action) =>

@@ -404,3 +404,37 @@ test("phase-aware writer fence receives new recovery identity and only authorize
     ["activation-admitted", "images-verified", "api-started", "edge-started", "healthy"],
   );
 });
+
+for (const acceptance of ["TLS", "evidence-age"])
+  test(`${acceptance} expiry inside final stopped observer rejects pull with activation still valid`, async (t) => {
+    const f = await fixture(t),
+      start = Date.now();
+    let current = start,
+      stopped = 0;
+    t.mock.method(Date, "now", () => current);
+    if (acceptance === "TLS")
+      f.record.observations.tls.value.expiresAt = new Date(start + 1000).toISOString();
+    const inspect = f.adapters.workload.inspect;
+    f.adapters.workload.inspect = async (request) => ({
+      ...(await inspect(request)),
+      observedAt: new Date(current).toISOString(),
+    });
+    const observe = f.adapters.writerFence.observe;
+    f.adapters.writerFence.observe = async (request) => ({
+      ...(await observe(request)),
+      observedAt: new Date(current).toISOString(),
+    });
+    f.adapters.inspectStoppedWorkloads = async (request) => {
+      if (request.phase === "images-verified" && ++stopped === 2)
+        current = start + (acceptance === "TLS" ? 2000 : 61000);
+      return { target: f.identity.target, project: "markiro-platform", active: [] };
+    };
+    await assert.rejects(execute(f.input, f.adapters));
+    assert.ok(Date.parse(f.activation.admission.expiresAt) > current);
+    assert.ok(Date.parse(f.record.observations.egress.value.sourceHold.expiresAt) > current);
+    assert.equal(
+      f.trace.some((row) => row[0] === "pull"),
+      false,
+    );
+    assert.equal((await disk(f.root)).status, "recovery-required");
+  });

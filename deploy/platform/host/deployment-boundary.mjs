@@ -25,7 +25,7 @@ export function preparedHostBoundary({
   onOwnership = () => {},
   onEnvironment = () => {},
 }) {
-  let environment;
+  let environment, recheckPreparedFreshness;
   const project = "markiro-platform";
   const checkActivationDeadline = () => {
     if (preparedTarget.version !== 2) return;
@@ -87,11 +87,22 @@ export function preparedHostBoundary({
       },
       workload: adapters.workload,
     });
+    recheckPreparedFreshness = verified.recheckFreshness;
     // Observers may take time or touch external state: reject changed bytes
     // again before the protected transition or command.
     await checkConfiguration();
     checkActivationDeadline();
     return verified.backupProof;
   };
-  return { boundary, checkActivationDeadline, checkConfiguration, observeTarget };
+  const checkPreparedFreshness = () => {
+    ensure(typeof recheckPreparedFreshness === "function");
+    recheckPreparedFreshness();
+  };
+  return {
+    boundary,
+    checkActivationDeadline,
+    checkConfiguration,
+    checkPreparedFreshness,
+    observeTarget,
+  };
 }
