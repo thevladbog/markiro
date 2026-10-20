@@ -341,3 +341,80 @@ for (const caught of [false, true])
     assert.equal(durable.phase, "activation-admitted");
     assert.equal(durable.status, "entered");
   });
+
+test("expired activation records terminal intent once and rejects all future work", async (t) => {
+  const f = await fixture(t);
+  let clock = now + 1200000;
+  await run(
+    f,
+    async (store) => {
+      clock = Date.parse(f.input.admission.expiresAt) + 1;
+      await store.fail();
+      const first = await readFile(join(f.root, "recovery-state.json"));
+      await store.fail();
+      assert.deepEqual(await readFile(join(f.root, "recovery-state.json")), first);
+      await assert.rejects(store.guard(() => assert.fail("terminal callback")));
+      await assert.rejects(store.complete("activation-admitted"));
+      await assert.rejects(store.enter("images-verified"));
+      assert.equal(JSON.parse(first).status, "recovery-required");
+    },
+    () => clock,
+  );
+});
+test("failure wrapper does not increment an already terminal transition", async (t) => {
+  const f = await fixture(t);
+  let first;
+  await assert.rejects(
+    run(f, async (store) => {
+      await store.fail();
+      first = await readFile(join(f.root, "recovery-state.json"));
+      throw new Error("ordinary");
+    }),
+  );
+  assert.deepEqual(await readFile(join(f.root, "recovery-state.json")), first);
+});
+test("terminal publication rejects changed permanent consumption and retains lock", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    run(f, async (store) => {
+      await writeFile(
+        join(f.root, `recovery-activation-${f.input.admission.identity.operationId}.json`),
+        "changed",
+        { mode: 0o600 },
+      );
+      await assert.rejects(store.fail());
+    }),
+    { durabilityUncertain: true },
+  );
+  await lstat(join(f.root, ".deploy.lock"));
+  assert.equal(JSON.parse(await readFile(join(f.root, "recovery-state.json"))).status, "entered");
+});
+
+test("terminal writer refuses healthy completion", async (t) => {
+  const f = await fixture(t);
+  await run(f, async (store) => {
+    for (const phase of phases) {
+      if (phase !== "activation-admitted") await store.enter(phase);
+      await store.complete(phase);
+    }
+    await assert.rejects(store.fail());
+  });
+  assert.equal(JSON.parse(await readFile(join(f.root, "recovery-state.json"))).status, "completed");
+});
+
+test("caught durable uncertainty prevents terminal transition", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    run(f, async (store) => {
+      await assert.rejects(
+        store.guard(async () => {
+          throw Object.assign(new Error("uncertain"), { durabilityUncertain: true });
+        }),
+      );
+      await assert.rejects(store.fail());
+    }),
+    { durabilityUncertain: true },
+  );
+  await lstat(join(f.root, ".deploy.lock"));
+  assert.equal(JSON.parse(await readFile(join(f.root, "recovery-state.json"))).status, "entered");
+});

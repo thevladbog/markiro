@@ -133,6 +133,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/probe.mjs",
   "deploy/platform/host/probe-worker.mjs",
   "deploy/platform/host/deploy.mjs",
+  "deploy/platform/host/deployment-boundary.mjs",
   "deploy/platform/host/config.mjs",
   "deploy/platform/host/files.mjs",
   "deploy/platform/host/process.mjs",

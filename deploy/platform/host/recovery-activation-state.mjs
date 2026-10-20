@@ -29,17 +29,28 @@ export async function withRecoveryActivationState(root, input, callback, { now =
     let active = true,
       state,
       preparationBytes,
-      originalBytes;
-    const check = async () => {
+      originalBytes,
+      consumptionBytes,
+      consumptionName;
+    const integrity = async () => {
       const currentOriginal = await readPrivateFile(root, "state.json");
       if (originalBytes && !currentOriginal.equals(originalBytes)) throw stateError();
       const preserved = await readPrivateFile(root, "recovery-preparation.json");
       if (!preserved.equals(preparationBytes)) throw stateError();
       if (state && !(await readPrivateFile(root, "recovery-state.json")).equals(bytes(state)))
         throw stateError();
+      if (
+        consumptionBytes &&
+        !(await readPrivateFile(root, consumptionName)).equals(consumptionBytes)
+      )
+        throw stateError();
+    };
+    const check = async () => {
+      await integrity();
+      if (state?.status === "recovery-required") throw stateError();
       return validateRecoveryActivationAdmission(envelope, {
-        stateBytes: currentOriginal,
-        preparationBytes: preserved,
+        stateBytes: originalBytes,
+        preparationBytes,
         now: now(),
       });
     };
@@ -68,22 +79,19 @@ export async function withRecoveryActivationState(root, input, callback, { now =
         now: now(),
       });
       const operationId = envelope.admission.identity.operationId;
-      const consumptionName = `recovery-activation-${operationId}.json`;
+      consumptionName = `recovery-activation-${operationId}.json`;
       await absent(root, "recovery-preparation.json");
       await absent(root, consumptionName);
       await writePrivateFile(root, "recovery-preparation.json", preparationBytes);
-      await writePrivateFile(
-        root,
-        consumptionName,
-        bytes({
-          version: 1,
-          kind: "platform-recovery-activation-consumption",
-          operationId,
-          preparationSha256: envelope.preparation.sha256,
-          activationSha256: activationHash(Buffer.from(JSON.stringify(envelope))),
-          dispatch: envelope.dispatch,
-        }),
-      );
+      consumptionBytes = bytes({
+        version: 1,
+        kind: "platform-recovery-activation-consumption",
+        operationId,
+        preparationSha256: envelope.preparation.sha256,
+        activationSha256: activationHash(Buffer.from(JSON.stringify(envelope))),
+        dispatch: envelope.dispatch,
+      });
+      await writePrivateFile(root, consumptionName, consumptionBytes);
       await check();
       const preparation = JSON.parse(preparationBytes.toString("utf8"));
       await save({
@@ -95,7 +103,22 @@ export async function withRecoveryActivationState(root, input, callback, { now =
         activation: envelope,
       });
     });
+    // Failure is a terminal integrity-preserving write, never authorization for
+    // more work. Expiry cannot prevent publishing failure of admitted work.
+    const fail = () =>
+      host.guardPersistence(async () => {
+        if (!active) throw stateError();
+        try {
+          await integrity();
+        } catch {
+          throw stateError(true);
+        }
+        if (state.phase === "healthy" && state.status === "completed") throw stateError();
+        if (state.status === "recovery-required") return;
+        await save({ ...state, sequence: state.sequence + 1, status: "recovery-required" });
+      });
     const store = Object.freeze({
+      fail,
       read: () => guarded(() => snapshotActivation(state)),
       guard: (action) =>
         guarded((capability) => {
@@ -124,9 +147,7 @@ export async function withRecoveryActivationState(root, input, callback, { now =
     } catch (error) {
       if (error?.terminationConfirmed === false || error?.durabilityUncertain === true)
         throw stateError(true);
-      await guarded(() =>
-        save({ ...state, sequence: state.sequence + 1, status: "recovery-required" }),
-      ).catch(() => {});
+      await fail().catch(() => {});
       throw error;
     } finally {
       active = false;
