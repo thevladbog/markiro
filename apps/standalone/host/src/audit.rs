@@ -57,6 +57,9 @@ pub mod actions {
     pub const COUNTERPARTY_UPDATE: &str = "counterparty.update";
     pub const LINE_CREATE: &str = "line.create";
     pub const LINE_UPDATE: &str = "line.update";
+    /// An administrator changed a line's limit of devices in one shift (plan 2b): `{ from, to }`.
+    /// A name or archive change in the same request writes its own `line.update`.
+    pub const LINE_MAX_STATIONS_CHANGED: &str = "line.max_stations_changed";
     pub const OPERATOR_CREATE: &str = "operator.create";
     pub const OPERATOR_UPDATE: &str = "operator.update";
     pub const OPERATOR_BADGE_CREATE: &str = "operator_badge.create";

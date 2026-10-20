@@ -2326,3 +2326,23 @@ fn the_multi_station_requests_refusals_and_receipts_round_trip() {
     assert!("paused".parse::<ParticipantState>().is_err());
     assert_eq!(ParticipantClosedBy::OfficeUser.as_str(), "office_user");
 }
+
+#[test]
+fn a_lines_limit_round_trips_and_an_older_host_means_one() {
+    let line: OfficeLine = round_trip("office-line.json");
+    assert_eq!(line.max_stations, 2);
+    let mut older = fixture("office-line.json");
+    older.as_object_mut().unwrap().remove("maxStations");
+    let older: OfficeLine = serde_json::from_value(older).unwrap();
+    assert_eq!(older.max_stations, 1);
+    let update: LineUpdate = round_trip("line-update-max-stations.json");
+    assert_eq!(update.max_stations, Some(3));
+    let plain: LineUpdate = round_trip("line-update.json");
+    assert_eq!(plain.max_stations, None);
+    let in_use: ErrorBody = round_trip("error-line-stations-in-use.json");
+    let details = in_use.error.details.expect("details");
+    assert_eq!(
+        (details["constraint"].as_str(), details["active"].as_u64()),
+        (Some("line_stations_in_use"), Some(3))
+    );
+}

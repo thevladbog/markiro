@@ -543,6 +543,18 @@ pub fn count(field: &str, value: Option<u32>, max: u32) -> Result<(), ApiError> 
 /// only keeps a typing slip out of production.
 pub const MAX_PLANNED_QTY: u32 = 10_000_000;
 
+/// The most devices one shift of a line takes at a time (plan 2b): the CHECK of `0052`.
+pub const MAX_STATIONS: u32 = 16;
+
+/// A line's limit of devices in one shift: 1-[`MAX_STATIONS`].
+pub fn max_stations(field: &str, value: u32) -> Result<u32, ApiError> {
+    if (1..=MAX_STATIONS).contains(&value) {
+        Ok(value)
+    } else {
+        Err(ApiError::validation(field, format!("1-{MAX_STATIONS}")))
+    }
+}
+
 /// A civil date `YYYY-MM-DD` of the years 1-9999 (`shifts::civil_date`),
 /// not trimmed: a date is no free text, and the office sends what its date
 /// field holds.

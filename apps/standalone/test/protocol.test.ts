@@ -334,6 +334,7 @@ const RESPONSES = [
   ["sscc-state.json", ssccStateSchema],
   ["office-user-record.json", officeUserRecordSchema],
   ["error-unauthorized.json", errorBodySchema],
+  ["error-line-stations-in-use.json", errorBodySchema],
   ["pairing-code.json", pairingCodeSchema],
   ["changes-response.json", changesResponseSchema],
   ["counterparty-record.json", counterpartyRecordSchema],
@@ -399,6 +400,7 @@ const REQUESTS = [
   ["employee-update.json", employeeUpdateSchema],
   ["line-create.json", lineCreateSchema],
   ["line-update.json", lineUpdateSchema],
+  ["line-update-max-stations.json", lineUpdateSchema],
   ["device-update.json", deviceUpdateSchema],
   ["pairing-code-request.json", pairingCodeRequestSchema],
   ["operator-create.json", operatorCreateSchema],
@@ -3965,6 +3967,14 @@ describe("several devices in one shift (plan 2b)", () => {
     expect(
       officeShiftSchema.parse(fixture("office-shift.json")).closeReasonMissing,
     ).toBeUndefined();
+  });
+
+  it("reads a line's limit and bounds it in an update", () => {
+    expect(officeLineSchema.parse(fixture("office-line.json")).maxStations).toBe(2);
+    expect(lineUpdateSchema.safeParse({ maxStations: 16, expectedRev: 1 }).success).toBe(true);
+    for (const maxStations of [0, 17, 1.5]) {
+      expect(lineUpdateSchema.safeParse({ maxStations, expectedRev: 1 }).success).toBe(false);
+    }
   });
 
   it("bounds the line's limit and the participant's state like the host", () => {

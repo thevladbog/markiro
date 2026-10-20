@@ -1447,7 +1447,15 @@ pub struct OfficeLine {
     pub id: String,
     pub name: String,
     pub archived: bool,
+    /// How many devices one shift of the line takes at a time (plan 2b, protocol 7); a host
+    /// before it sends none, which reads as stage 2a's one.
+    #[serde(default = "default_max_stations")]
+    pub max_stations: u32,
     pub rev: i64,
+}
+
+fn default_max_stations() -> u32 {
+    1
 }
 
 /// `POST /v1/office/lines`.
@@ -1469,6 +1477,9 @@ pub struct LineUpdate {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived: Option<bool>,
+    /// The line's new limit of devices in one shift, 1–16 (plan 2b); administrators only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_stations: Option<u32>,
     pub expected_rev: i64,
 }
 

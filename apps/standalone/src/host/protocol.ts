@@ -700,6 +700,7 @@ export const officeLineSchema = z.object({
   id: z.uuid(),
   name: z.string(),
   archived: z.boolean(),
+  maxStations: maxStationsSchema.optional(),
   rev: z.number().int(),
 });
 export type OfficeLine = z.infer<typeof officeLineSchema>;
@@ -1926,6 +1927,7 @@ export const lineUpdateSchema = z
   .object({
     name: z.string().optional(),
     archived: z.boolean().optional(),
+    maxStations: maxStationsSchema.optional(),
     expectedRev: z.number().int(),
   })
   .strict();

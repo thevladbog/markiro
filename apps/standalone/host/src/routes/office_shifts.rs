@@ -1,9 +1,10 @@
 //! Shifts in the office (stage 2a spec §4.2, §4.7): `GET /v1/office/shifts`
 //! and `GET …/{id}` (every role); `POST`, `PUT …/{id}` (with
 //! `expectedRev`), `DELETE …/{id}` and `POST …/{id}/close` (administrators
-//! and technologists, `planShifts`), and `PUT …/{id}/close-reason` (the same roles). A shift is no feed record: every change
-//! still takes a host revision, so open streams wake and stations read their
-//! shifts again (`GET /v1/device/shifts`). Every answer carries the shift's
+//! and technologists, `planShifts`), and `PUT …/{id}/close-reason` (the same
+//! roles). A shift is no feed record: every change still takes a host
+//! revision, so open streams wake and stations read their shifts again
+//! (`GET /v1/device/shifts`). Every answer carries the shift's
 //! totals, which its facts give (plan 2a2): they are read, never stored.
 //! Since plan 2b every answer of an opened shift also lists its participants and each
 //! device's part of the totals, and names a reason its devices did not give
