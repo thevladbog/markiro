@@ -478,10 +478,41 @@ pub fn civil_text(date: time::Date) -> String {
     )
 }
 
-/// `conflict` on `shift_busy`: another station entered the shift (stage 2a
-/// puts one device on a shift).
+/// `conflict` on `shift_busy`: another device works the shift and this one did not name
+/// `multi-station-v1` (plan 2b), so it works it as a build of stage 2a would: alone. Every build
+/// shows it as «занято».
 pub fn busy() -> ApiError {
     ApiError::conflict("shift_busy", "another station works on this shift")
+}
+
+/// `conflict` on `shift_line_full` (plan 2b): every slot of the line's limit is held by another
+/// live device working the shift; `details` name the limit and the slots held.
+pub fn line_full(max_stations: u32, active: u32) -> ApiError {
+    ApiError::conflict(
+        "shift_line_full",
+        "every slot of this line is taken in this shift",
+    )
+    .with_details(json!({
+        "constraint": "shift_line_full",
+        "maxStations": max_stations,
+        "active": active,
+    }))
+}
+
+/// Stamp `rev` on the shift's row: a change of its participants is a change of the shift, so
+/// open streams wake and the office's `expectedRev` sees it.
+pub async fn stamp_revision(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    rev: i64,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE shifts SET rev = ? WHERE id = ?")
+        .bind(rev)
+        .bind(shift_id)
+        .execute(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(())
 }
 
 /// `conflict` on `template_not_fit`: the planned shift's box template is

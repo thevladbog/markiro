@@ -26,7 +26,7 @@ use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::routes::devices::require_active_line;
 use crate::server::AppState;
-use crate::shift_participants;
+use crate::shift_participants::{self, EntryDecision};
 use crate::shift_totals;
 use crate::shifts::{self, NewShift};
 use crate::validate;
@@ -422,13 +422,12 @@ fn require_supports(
     }
 }
 
-/// A shift as an entry reads it.
+/// A shift as an entry reads it, with its line's limit (plan 2b).
 #[derive(sqlx::FromRow)]
 struct EntryRow {
     status: String,
     mode: String,
     line_id: String,
-    owner_device_id: Option<String>,
     product_id: String,
     box_template_id: String,
     pallet_template_id: Option<String>,
@@ -441,28 +440,28 @@ struct EntryRow {
     number_month_key: String,
     number_seq: i64,
     created_from: String,
+    max_stations: u32,
 }
 
-/// `POST /v1/device/shifts/{id}/enter`: a station on the shift's line opens
-/// a planned shift (the host freezes its snapshot and makes the station its
-/// owner) or enters again the active shift it opened; the answer carries the
-/// snapshot, so a station that lost its database gets it back. A closed
-/// shift is `shift_status`, another line `shift_line`, a shift another
-/// station opened `shift_busy`, and a plan whose layouts together would
-/// not fit the snapshot `snapshot_too_large`, once its templates fit. Opening
-/// takes a revision, so the other stations of the line see the shift busy;
-/// entering again takes none.
+/// `POST /v1/device/shifts/{id}/enter`: a station or a handheld on the shift's line opens a
+/// planned shift (the host freezes its snapshot, the device becomes its opener and first
+/// participant) or enters an open one; the answer carries the snapshot, so a device that lost its
+/// database gets it back, and (plan 2b) the participants and totals.
 ///
-/// The body (`ShiftEnter`, protocol 4, plan РЕЖ) names what the station
-/// works; a station of protocol 3 sends none (no `Content-Type`), which names
-/// nothing. A validation shift needs `validation-v1`, on its opening and on
-/// every entry again (a station rolled back to an older build must not work
-/// it as an aggregation one): otherwise `station_update`, after the shift's
-/// own refusals above and before anything is frozen or written. A
-/// validation shift that prints a duplicate (part B) also needs
-/// `validation-dm-duplicate-v1`, and its snapshot freezes the duplicate
-/// template whole (`shifts::snapshot`: `duplicate_template_not_fit` when it
-/// no longer fits, after the pallet template; the bound counts its layout).
+/// An open shift (plan 2b, spec §4.2 «Вход», `shift_participants::decide_entry`): an active
+/// participant enters again (no revision, no audit row); one that closed its part reads the shift
+/// back and nothing is written; one that left takes a slot again and a new device takes one, while
+/// fewer than the line's `max_stations` other live devices hold a slot — a revision stamped on the
+/// shift and `shift.join` (`{ number, rejoined }`). A device that never entered and did not name
+/// `multi-station-v1` is `shift_busy` as in stage 2a; one that named it meets a full line as
+/// `shift_line_full`. A closed shift is `shift_status`, another line `shift_line`.
+///
+/// The body (`ShiftEnter`, protocol 4) names what the device works; a station of protocol 3 sends
+/// none. A validation shift needs `validation-v1` (and `validation-dm-duplicate-v1` when it prints
+/// a duplicate), a handheld always `handheld-host-v1`: otherwise `station_update`, after the
+/// shift's own refusals and before anything is frozen or written. Opening checks the license
+/// (`require_new_shifts`) and freezes the snapshot (`snapshot_too_large`, the template refusals);
+/// joining an open shift checks neither (plan 2b: joining is no new shift).
 pub async fn enter_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -484,10 +483,11 @@ pub async fn enter_shift(
         )
         .await?;
     let shift: Option<EntryRow> = sqlx::query_as(
-        "SELECT status, mode, line_id, owner_device_id, product_id, box_template_id, \
-         pallet_template_id, pallet_sheet_template_id, validation_print_mode, \
-         validation_print_verification, validation_print_template_id, counterparty_id, \
-         snapshot, number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+        "SELECT s.status, s.mode, s.line_id, s.product_id, s.box_template_id, \
+         s.pallet_template_id, s.pallet_sheet_template_id, s.validation_print_mode, \
+         s.validation_print_verification, s.validation_print_template_id, s.counterparty_id, \
+         s.snapshot, s.number_month_key, s.number_seq, s.created_from, l.max_stations \
+         FROM shifts s JOIN lines l ON l.id = s.line_id WHERE s.id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -506,13 +506,25 @@ pub async fn enter_shift(
     if line_id.as_deref() != Some(shift.line_id.as_str()) {
         return Err(line_conflict());
     }
-    if shift
-        .owner_device_id
-        .as_deref()
-        .is_some_and(|owner| owner != device.id)
-    {
-        return Err(shifts::busy());
-    }
+    // Plan 2b: who may work an open shift is its participants' and its line's business.
+    let decision = if status == ShiftStatus::Planned {
+        None
+    } else {
+        let current = shift_participants::state_of(&mut tx, &id, &device.id).await?;
+        let active_others = shift_participants::active_others(&mut tx, &id, &device.id).await?;
+        let multi = enter
+            .supports
+            .iter()
+            .any(|name| name == shift_supports::MULTI_STATION);
+        match shift_participants::decide_entry(current, active_others, shift.max_stations, multi) {
+            EntryDecision::Busy => return Err(shifts::busy()),
+            EntryDecision::LineFull {
+                max_stations,
+                active,
+            } => return Err(shifts::line_full(max_stations, active)),
+            decision => Some(decision),
+        }
+    };
     let validation_print = shifts::stored_print(
         &shift.validation_print_mode,
         shift.validation_print_verification.as_deref(),
@@ -531,29 +543,57 @@ pub async fn enter_shift(
         duplicate.is_some(),
         &enter,
     )?;
+    let origin = shift.created_from.parse().map_err(ApiError::internal)?;
+    let number = shifts::format_number(&shift.number_month_key, shift.number_seq, origin);
     let snapshot = match shift.snapshot {
-        // The station that opened the shift enters it again.
         Some(text) => {
-            sqlx::query(
-                "UPDATE shift_participants SET last_entered_at = ? \
-                 WHERE shift_id = ? AND device_id = ?",
-            )
-            .bind(&at)
-            .bind(&id)
-            .bind(&device.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(ApiError::internal)?;
             let snapshot: ShiftSnapshot =
                 serde_json::from_str(&text).map_err(ApiError::internal)?;
-            let mut entered = read_for(&mut tx, &id, &device.id, &at).await?;
-            tx.commit().await.map_err(ApiError::internal)?;
+            let mut entered = match decision {
+                Some(EntryDecision::Reenter) => {
+                    shift_participants::touch(&mut tx, &id, &device.id, &at).await?;
+                    let entered = read_for(&mut tx, &id, &device.id, &at).await?;
+                    tx.commit().await.map_err(ApiError::internal)?;
+                    entered
+                }
+                // Nothing to write: the transaction rolls back when dropped.
+                Some(EntryDecision::ReadClosed) => read_for(&mut tx, &id, &device.id, &at).await?,
+                Some(joining @ (EntryDecision::Join | EntryDecision::Rejoin)) => {
+                    let rejoined = joining == EntryDecision::Rejoin;
+                    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+                    if rejoined {
+                        shift_participants::rejoin(&mut tx, &id, &device.id, &at).await?;
+                    } else {
+                        shift_participants::join(&mut tx, &id, &device.id, &at).await?;
+                    }
+                    shifts::stamp_revision(&mut tx, &id, rev).await?;
+                    audit::record(
+                        &mut tx,
+                        &at,
+                        Entry {
+                            actor: Actor::Device(&device.id),
+                            action: actions::SHIFT_JOIN,
+                            target_type: Some("shift"),
+                            target_id: Some(&id),
+                            outcome: Outcome::Ok,
+                            details: json!({ "number": number, "rejoined": rejoined }),
+                        },
+                    )
+                    .await
+                    .map_err(ApiError::internal)?;
+                    let entered = read_for(&mut tx, &id, &device.id, &at).await?;
+                    commit_with_revision(tx, &state.revisions, rev)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    entered
+                }
+                _ => return Err(ApiError::internal("an open shift's entry was not decided")),
+            };
             entered.snapshot = Some(snapshot);
             return Ok(Json(entered));
         }
         None => {
-            // Opening is the one move a license that ran out closes (plan
-            // ЛЦ-2, spec §3.3); the owner's entry again above never is.
+            // Opening is the one move a license that ran out closes (plan ЛЦ-2, spec §3.3).
             crate::license::gate::require_new_shifts(&state, &mut tx).await?;
             let own_logo = crate::license::gate::custom_branding(&state, &mut tx).await?;
             let snapshot = shifts::snapshot(
@@ -566,8 +606,8 @@ pub async fn enter_shift(
                 duplicate,
             )
             .await?;
-            // Custom branding is a license feature: without it the shift freezes no
-            // logo, and every print of it falls back to the bundled Markiro one.
+            // Custom branding is a license feature: without it the shift freezes no logo, and
+            // every print of it falls back to the bundled Markiro one.
             if own_logo {
                 snapshot
             } else {
@@ -590,20 +630,9 @@ pub async fn enter_shift(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
-    sqlx::query(
-        "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) \
-         VALUES (?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(&device.id)
-    .bind(&at)
-    .bind(&at)
-    .execute(&mut *tx)
-    .await
-    .map_err(ApiError::internal)?;
-    let origin = shift.created_from.parse().map_err(ApiError::internal)?;
+    shift_participants::join(&mut tx, &id, &device.id, &at).await?;
     let mut details = json!({
-        "number": shifts::format_number(&shift.number_month_key, shift.number_seq, origin),
+        "number": number,
         "templateId": snapshot.box_template.id,
         "templateRev": snapshot.box_template.rev,
     });
