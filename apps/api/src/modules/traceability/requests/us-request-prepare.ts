@@ -153,6 +153,26 @@ export class UsRequestPrepareStore {
   ): Promise<typeof runs.$inferSelect> {
     return this.prepareCommand(tenantId, actorUserId, requestId, body, build, true, httpRequestId);
   }
+  prepareCommandInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    input: unknown,
+    build: UsExportBuildIdentity,
+    httpRequestId: string | null = null,
+  ): Promise<typeof runs.$inferSelect> {
+    return this.prepareWithinTransaction(
+      tx,
+      tenantId,
+      actorUserId,
+      requestId,
+      input,
+      build,
+      true,
+      httpRequestId,
+    );
+  }
   private async prepareCommand(
     tenantId: string,
     actorUserId: string,
@@ -238,7 +258,7 @@ export class UsRequestPrepareStore {
     tenantId: string,
     actorUserId: string,
     requestId: string,
-    body: UsTraceRequestPrepareBody | UsRequestPrepareHttpBody,
+    body: unknown,
     build: UsExportBuildIdentity,
     http: boolean,
     httpRequestId: string | null,
