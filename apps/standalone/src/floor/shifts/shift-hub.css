@@ -345,8 +345,9 @@
 
 /*
  * The product's panel: the card's whole left half. Its face and border colour are the backing's
- * (`data-photo-backing`: the brand gradient behind a cut-out or the monogram, nothing behind a photo
- * with its own background); the photo is fitted whole, never cropped, and the tags sit on it.
+ * (`data-photo-backing`): a cut-out, a photo whose kind is not known yet and the monogram are fitted
+ * whole on the brand gradient; a photo with its own background fills the panel (below). The tags
+ * sit on it either way.
  */
 .shift-hub .shift-card__photo {
   position: relative;
@@ -369,6 +370,21 @@
   padding: var(--sp-6);
   box-sizing: border-box;
   object-fit: contain;
+}
+
+/*
+ * A photo with its own background (`data-photo-backing="none"`) fills the panel edge to edge,
+ * cropped round its centre: fitted whole in the tall half it read as a picture in a gradient frame
+ * (owner, 2026-10-20). The card's own radius rounds its outer corners.
+ */
+.shift-hub .shift-card__photo[data-photo-backing="none"] {
+  padding: 0;
+}
+
+.shift-hub .shift-card__photo[data-photo-backing="none"] .product-photo {
+  padding: 0;
+  object-fit: cover;
+  object-position: center;
 }
 
 .shift-hub .shift-card__photo-monogram {

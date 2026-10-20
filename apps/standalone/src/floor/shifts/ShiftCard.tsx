@@ -78,9 +78,10 @@ export interface ShiftCardProps {
 
 /**
  * One shift of the line, as the owner-approved «Смены линии» board draws it (2026-10, kit): the
- * left half is the product's panel the full height of the card, on the kit's one brand gradient
- * (a transparent or unknown photo) or with the photo's own background, the photo fitted whole
- * and the tags (mode, pallets) as chips on it; on the right the status chip and the shift's
+ * left half is the product's panel the full height of the card: a cut-out photo (or one whose
+ * kind is not known yet) or the monogram fitted whole on the kit's one brand gradient, a photo
+ * with its own background filling the panel (owner, 2026-10-20), and the tags (mode, pallets) as
+ * chips on it; on the right the status chip and the shift's
  * number, the product's print name, who it is for, the dates and the plan as label and value,
  * the progress where both counters exist locally, and the 84 px action pinned to the bottom.
  * What the standalone adds — a shift that needs the host, one the office closed, a close the
@@ -121,7 +122,6 @@ export function ShiftCard({
           local={local}
           productId={copy.productId}
           className="shift-card__photo"
-          faceAlways
           fallback={
             <span className="shift-card__photo-monogram" aria-hidden="true">
               {productMonogram(title)}

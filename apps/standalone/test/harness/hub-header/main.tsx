@@ -422,12 +422,21 @@ createRoot(document.getElementById("root")!).render(<Page />);
         problems.push(`card details overflow by ${entry.detailsOverflow}px`);
       if (Math.abs(entry.photoH - entry.h) > 2)
         problems.push(`photo ${entry.photoH} high in a ${entry.h} card`);
-      // The brand gradient is the whole left panel's face, whatever the photo is (owner, beta 4.5).
+      // A photo with its own background fills the panel; a cut-out and the monogram stand on the
+      // brand gradient (owner, 2026-10-20).
       const face = getComputedStyle(photo);
-      if (!face.backgroundImage.includes("linear-gradient"))
+      const fills = photoKind === "opaque" || photoKind === "jpeg";
+      const backing = photo.getAttribute("data-photo-backing");
+      if (backing !== (fills ? "none" : "gradient"))
+        problems.push(`the product panel's backing is ${backing}`);
+      if (!fills && !face.backgroundImage.includes("linear-gradient"))
         problems.push(`the product panel has no brand gradient: ${face.backgroundImage}`);
-      if (photo.getAttribute("data-photo-backing") !== "gradient")
-        problems.push(`the product panel's backing is ${photo.getAttribute("data-photo-backing")}`);
+      const picture = photo.querySelector(".product-photo");
+      if (fills && picture !== null) {
+        const fit = getComputedStyle(picture);
+        if (fit.objectFit !== "cover" || box(picture).width < box(photo).width - 0.5)
+          problems.push(`the opaque photo does not fill the panel: ${fit.objectFit}`);
+      }
       if (entry.facts.some((f) => f.clipped)) problems.push("a fact is cut with an ellipsis");
       if (action && entry.actionBottomGap !== null && entry.actionBottomGap < 0)
         problems.push("action runs out of the card");

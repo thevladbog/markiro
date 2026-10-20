@@ -44,9 +44,12 @@ export function useStoredProductPhoto(local: LocalExecutor, productId: string): 
 export function ProductPhotoImage({
   photo,
   fallback,
+  onBroken,
 }: {
   photo: StoredPhoto | null;
   fallback: ReactNode;
+  /** Told the checksum of a picture that did not decode (the frame's backing follows it). */
+  onBroken?: (checksum: string) => void;
 }) {
   const [brokenChecksum, setBrokenChecksum] = useState<string | null>(null);
   if (photo === null || brokenChecksum === photo.checksum) return <>{fallback}</>;
@@ -56,7 +59,10 @@ export function ProductPhotoImage({
       src={photo.src}
       alt=""
       draggable={false}
-      onError={() => setBrokenChecksum(photo.checksum)}
+      onError={() => {
+        setBrokenChecksum(photo.checksum);
+        onBroken?.(photo.checksum);
+      }}
     />
   );
 }
@@ -77,7 +83,8 @@ export function ProductPhoto({
  * A product's frame: the photo (or `fallback`) in the element every card of
  * the floor shows a product on. Its backing is `data-photo-backing`: the kit's
  * one brand gradient behind a cut-out or the monogram, nothing visible behind
- * a photo with its own background (`photoBacking`).
+ * a photo with its own background (`photoBacking`), which the frame's styles
+ * may let fill the frame (the hub card's panel).
  */
 export function ProductPanel({
   local,
@@ -85,20 +92,13 @@ export function ProductPanel({
   className,
   fallback,
   overlay = null,
-  faceAlways = false,
 }: {
   local: LocalExecutor | undefined;
   productId: string;
   className: string;
   fallback: ReactNode;
-  /** Laid over the frame's face (the hub card's tags on the gradient). */
+  /** Laid over the frame's face (the hub card's tags on the gradient or the photo). */
   overlay?: ReactNode;
-  /**
-   * The gradient is the frame's face whatever the photo is: for a frame wider than its photo (the
-   * hub card's half), where an opaque picture fitted whole leaves bands that would show the card's
-   * flat surface. The picture then sits on the gradient as a picture does.
-   */
-  faceAlways?: boolean;
 }) {
   if (local === undefined) {
     return (
@@ -115,7 +115,6 @@ export function ProductPanel({
       className={className}
       fallback={fallback}
       overlay={overlay}
-      faceAlways={faceAlways}
     />
   );
 }
@@ -126,20 +125,22 @@ function PhotoPanel({
   className,
   fallback,
   overlay,
-  faceAlways,
 }: {
   local: LocalExecutor;
   productId: string;
   className: string;
   fallback: ReactNode;
   overlay: ReactNode;
-  faceAlways: boolean;
 }) {
-  const photo = useStoredProductPhoto(local, productId);
+  const stored = useStoredProductPhoto(local, productId);
+  // A picture that does not decode leaves the monogram, which stands on the gradient whatever the
+  // picture's kind (a JPEG would otherwise leave it on the card's flat face).
+  const [brokenChecksum, setBrokenChecksum] = useState<string | null>(null);
+  const photo = stored !== null && stored.checksum === brokenChecksum ? null : stored;
   const backing = usePhotoBacking(photo);
   return (
-    <div className={className} data-photo-backing={faceAlways ? "gradient" : backing}>
-      <ProductPhotoImage photo={photo} fallback={fallback} />
+    <div className={className} data-photo-backing={backing}>
+      <ProductPhotoImage photo={photo} fallback={fallback} onBroken={setBrokenChecksum} />
       {overlay}
     </div>
   );
