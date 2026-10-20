@@ -1839,11 +1839,11 @@ Protocol 7; host migration `0052_multi_station_shifts.sql` (columns only). A lin
 frees the slot; repeating changes nothing; `shift.leave` `{ number }`; never entered:
 `shift_not_entered`) or `closed`. A slot is an active participant whose device is not revoked.
 Entry into an open shift (`host/src/shift_participants.rs` `decide_entry`): an active participant
-enters again (no revision and no audit row, only its last-entered instant is touched); a closed one reads the shift back with no write; a left or new device
+enters again (no revision and no audit row, only its last-entered instant is touched); a closed one that names `multi-station-v1` reads the shift back with no write (`myState` `closed`), while a build that does not name it gets `shift_status` `closed` (every old build shows «закрыта»; the read-back's `active` would send it on producing into a closed part); a left or new device
 takes a slot while fewer than `max_stations` others hold one (`shift.join`); a new device that does
 not name `multi-station-v1` is `shift_busy`. A `shift_closed` fact closes the sender's part; with no
 other participant active or left it closes the shift (`closed_by_kind = 'device'`, `closed_by` the
-last closer). Receipts: `partClosed`, `reasonMissing`, `alreadyClosed`. The reason
+last closer). A shift opened by an old build can be joined by a capable device (decision D4 checks only the joiner's capability); when the old opener closes its own `shift_closed` only its part closes. Receipts: `partClosed`, `reasonMissing`, `alreadyClosed`. The reason
 (`reason_need`, fixture `shift-close-reason-shared.json`): a one-device shift keeps stage 2a's
 refusal; in a shared shift only the closing close may need one, by the whole shift's accepted
 units against `shifts.planned_qty`, and a close without it closes the shift with

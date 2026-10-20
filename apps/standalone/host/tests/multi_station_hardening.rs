@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use support::app::{
     accepted, admin, audit_row, audit_rows, audit_trail, box_closed, box_id, close_from_office,
     fact, host_revision, instant, issue_block, issue_pallet_block, ok_scan, open_floor,
-    pallet_closed, pallet_id, pallet_shift_body, pallet_template, receipts, record_id, shift_body,
-    shift_closed, shift_setup, Admin,
+    pallet_closed, pallet_id, pallet_shift_body, pallet_template, plan_shift, receipts, record_id,
+    shift_body, shift_closed, shift_setup, Admin,
 };
 use support::multi::{
     admin_station_on, allow, call, constraint, enter, leave, open_shared, participant, shared,
@@ -295,6 +295,53 @@ async fn a_closed_participant_entering_again_reads_the_shift_back_and_writes_not
             .await
             .unwrap();
     assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn an_old_build_entering_again_after_its_own_part_closed_meets_a_closed_shift_and_writes_nothing(
+) {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let a = admin_station_on(&admin, &setup.line).await;
+    let b = station_on(&admin, &setup.line).await;
+    allow(&admin, &setup.line, 2).await;
+    // An old build opens the shift (it names nothing); a capable device joins it (D4 checks only
+    // the joiner's capability).
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let shift = shift["id"].as_str().unwrap().to_owned();
+    let (status, opened) = enter(&admin, &a, &shift, &[]).await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    admin.app.clock.advance(MINUTE);
+    let (status, joined) = enter(&admin, &b, &shift, &[MULTI]).await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    // The old opener closes its own part: the shift stays open for the other device.
+    receipts(
+        &admin.app,
+        &a.key,
+        &[fact(
+            &record_id(1),
+            "shift_closed",
+            &shift,
+            shift_closed(None, 0, 0, None, &instant(30, 0)),
+        )],
+    )
+    .await;
+    assert_eq!(status_of(&admin, &shift).await, "active");
+    admin.app.clock.advance(MINUTE);
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let before = participant(&admin, &shift, &a.id).await;
+    // Its re-entry would resume producing into a closed part: every old build shows «закрыта».
+    let (status, refused) = enter(&admin, &a, &shift, &[]).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused["error"]["details"],
+        json!({ "constraint": "shift_status", "status": "closed" })
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(participant(&admin, &shift, &a.id).await, before);
+    // A device that names the capability still reads the shift back (the test above).
 }
 
 // ---------------------------------------------------------------------------------- (c) close

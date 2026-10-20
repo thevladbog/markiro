@@ -531,7 +531,16 @@ pub async fn enter_shift(
                 max_stations,
                 active,
             } => return Err(shifts::line_full(max_stations, active)),
-            decision => Some(decision),
+            // A build that does not name `multi-station-v1` cannot be told that only its own
+            // part is closed: it would take the shift for its own, active, and resume producing
+            // into a closed part. Every older build shows `shift_status` as «закрыта».
+            EntryDecision::ReadClosed if !multi => {
+                return Err(shifts::status_conflict(ShiftStatus::Closed))
+            }
+            decision @ (EntryDecision::Reenter
+            | EntryDecision::ReadClosed
+            | EntryDecision::Rejoin
+            | EntryDecision::Join) => Some(decision),
         }
     };
     let validation_print = shifts::stored_print(
@@ -596,7 +605,10 @@ pub async fn enter_shift(
                         .map_err(ApiError::internal)?;
                     entered
                 }
-                _ => return Err(ApiError::internal("an open shift's entry was not decided")),
+                // Refused above, or no decision at all: an open shift's entry is always decided.
+                Some(EntryDecision::Busy | EntryDecision::LineFull { .. }) | None => {
+                    return Err(ApiError::internal("an open shift's entry was not decided"))
+                }
             };
             entered.snapshot = Some(snapshot);
             return Ok(Json(entered));
