@@ -13,6 +13,7 @@ import {
   receivingFinalizationSnapshotV3Schema,
   shippingFinalizationSnapshotV1Schema,
   transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotSchema,
   provisionUsTraceabilityProfileSchema,
   traceabilityCivilDateSchema,
   type UsReadinessDraftRef,
@@ -497,7 +498,56 @@ function fact(row: Event, root: Root, children: Children, current = true): Readi
     };
   }
   if (row.type === "transformation") {
-    const s = parse(transformationReadiness, row.finalizationSnapshot);
+    // Preserve legacy V1 missing-business-value diagnostics. V2 must pass its
+    // complete strict contract before projecting to the common evidence lens.
+    const raw = row.finalizationSnapshot;
+    const structured =
+      raw !== null &&
+      typeof raw === "object" &&
+      "snapshotVersion" in raw &&
+      raw.snapshotVersion === 2
+        ? parse(transformationFinalizationSnapshotSchema, raw)
+        : null;
+    const s = parse(
+      transformationReadiness,
+      structured
+        ? {
+            ...structured,
+            snapshotVersion: 1,
+            processor: {
+              id: structured.processor.id,
+              description: structured.processor.description,
+            },
+            inputs: structured.inputs.map(({ product, source, ...line }) => ({
+              ...line,
+              product: {
+                id: product.id,
+                description: product.description,
+                coverage: product.coverage,
+              },
+              source:
+                source.kind === "reference"
+                  ? {
+                      kind: source.kind,
+                      id: source.id,
+                      description: source.description,
+                      referenceKind: source.referenceKind,
+                      referenceValue: source.referenceValue,
+                    }
+                  : { kind: source.kind, id: source.id, description: source.description },
+            })),
+            outputs: structured.outputs.map(({ product, source, ...line }) => ({
+              ...line,
+              product: {
+                id: product.id,
+                description: product.description,
+                coverage: product.coverage,
+              },
+              source: { kind: source.kind, id: source.id, description: source.description },
+            })),
+          }
+        : raw,
+    );
     if (
       s.eventId !== row.id ||
       s.eventNumber !== row.eventNumber ||
@@ -514,7 +564,7 @@ function fact(row: Event, root: Root, children: Children, current = true): Readi
       throw unavailable();
     if (
       current &&
-      transformationFinalizationSnapshotV1Schema.safeParse(row.finalizationSnapshot).success
+      transformationFinalizationSnapshotSchema.safeParse(row.finalizationSnapshot).success
     )
       validateCurrentTraceEvent(row, root, children);
     const inputs = s.inputs.map((line, index): ReadinessLineFact => {
@@ -973,7 +1023,8 @@ export async function readUsReadinessEvidence(
           OR (e.finalization_snapshot IS NOT NULL AND (
             jsonb_typeof(e.finalization_snapshot)<>'object'
             OR (e.type='receiving' AND COALESCE(e.finalization_snapshot->>'snapshotVersion','') NOT IN ('1','2','3'))
-            OR (e.type<>'receiving' AND COALESCE(e.finalization_snapshot->>'snapshotVersion','')<>'1')))
+            OR (e.type='transformation' AND COALESCE(e.finalization_snapshot->>'snapshotVersion','') NOT IN ('1','2'))
+            OR (e.type='shipping' AND COALESCE(e.finalization_snapshot->>'snapshotVersion','')<>'1')))
         )
       ) AS invalid`);
     if (integrity.rows[0]?.invalid !== false) throw unavailable();

@@ -69,8 +69,12 @@ snapshot and bytes unchanged. Voids, genealogy edges, quantity/UOMs, source lock
 audits and authorization semantics are unchanged.
 
 Trace, genealogy, Readiness and lot-card consumers accept and verify either
-version. Readiness must validate the actual chosen strict schema, including v2
-KDEs, before using any narrow shared evidence projection. SQL candidate filters
+version. Preserve the existing V1 Readiness business-KDE lens and diagnostic
+semantics: missing business values must not be converted into a new hard parser
+failure solely by this change. For V2, validate its full strict schema, including
+KDEs, before using any narrow shared evidence projection. Current trace validation
+can use the versioned strict predicate in the same places as the old V1 predicate.
+SQL candidate filters
 must not silently exclude v2 or treat malformed v2 as complete. Display strings
 remain available, so this does not require new UI controls or inferred text.
 

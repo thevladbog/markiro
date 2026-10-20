@@ -5,7 +5,7 @@ import {
   receivingFinalizationSnapshotV3Schema,
   provisionUsTraceabilityProfileSchema,
   shippingFinalizationSnapshotV1Schema,
-  transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotSchema,
 } from "@markiro/platform-contracts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { UsMasterDataTransaction } from "../master-data/us-master-data-support";
@@ -164,7 +164,7 @@ export function validateCurrentTraceEvent(
     };
   }
   if (row.type === "transformation") {
-    const parsed = transformationFinalizationSnapshotV1Schema.safeParse(row.finalizationSnapshot);
+    const parsed = transformationFinalizationSnapshotSchema.safeParse(row.finalizationSnapshot);
     if (!parsed.success) throw unavailable();
     const s = parsed.data;
     if (

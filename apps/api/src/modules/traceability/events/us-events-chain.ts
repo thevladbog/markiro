@@ -48,7 +48,8 @@ export async function assertTransformationRootsReadable(
               OR s.finalization_snapshot IS NULL OR e.superseded_by IS DISTINCT FROM s.finalized_by OR e.superseded_at IS DISTINCT FROM s.finalized_at))
             OR (e.status='void' AND e.void_reason IS NULL)
             OR (e.finalization_snapshot IS NOT NULL AND (
-              e.finalization_snapshot->'snapshotVersion' IS DISTINCT FROM '1'::jsonb
+              (e.finalization_snapshot->'snapshotVersion' IS DISTINCT FROM '1'::jsonb
+                AND e.finalization_snapshot->'snapshotVersion' IS DISTINCT FROM '2'::jsonb)
               OR e.finalization_snapshot->>'eventId' IS DISTINCT FROM e.id::text
               OR e.finalization_snapshot->>'eventNumber' IS DISTINCT FROM e.event_number
               OR e.finalization_snapshot->'revision' IS DISTINCT FROM to_jsonb(e.revision)
@@ -79,7 +80,9 @@ export async function assertTransformationRootsReadable(
               OR (SELECT jsonb_agg(jsonb_build_object(
                     'lineNo',j->'lineNo','kind',j->'kind','lotId',j->'lotId',
                     'productId',j#>'{product,id}','source',
-                      (CASE WHEN jsonb_typeof(j->'source')='object' THEN j->'source' ELSE '{}'::jsonb END)-'description',
+                      CASE WHEN e.finalization_snapshot->'snapshotVersion'='2'::jsonb THEN
+                        (CASE WHEN jsonb_typeof(j->'source')='object' THEN j->'source' ELSE '{}'::jsonb END)-'description'-'kdes'
+                      ELSE (CASE WHEN jsonb_typeof(j->'source')='object' THEN j->'source' ELSE '{}'::jsonb END)-'description' END,
                     'tlc',j->'tlc','reference',j->'reference','quantity',j->'quantity','unitOfMeasure',j->'unitOfMeasure') ORDER BY n)
                   FROM jsonb_array_elements(frozen.inputs) WITH ORDINALITY a(j,n))
                 IS DISTINCT FROM

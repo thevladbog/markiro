@@ -1,6 +1,6 @@
 import { schema } from "@markiro/db";
 import {
-  transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotSchema,
   type TransformationGenealogyResult,
 } from "@markiro/platform-contracts";
 import { NotFoundException } from "@nestjs/common";
@@ -139,7 +139,7 @@ export async function genealogyEvents(
         snapshot: null,
       };
     }
-    const parsed = transformationFinalizationSnapshotV1Schema.safeParse(row.finalizationSnapshot);
+    const parsed = transformationFinalizationSnapshotSchema.safeParse(row.finalizationSnapshot);
     if (
       !parsed.success ||
       parsed.data.eventId !== row.id ||

@@ -202,9 +202,6 @@ function input(
 describe("US saved source rows", () => {
   it("projects V2 split KDEs only from captured facts and keeps original display text", () => {
     const captured = structuredClone(transformationV2);
-    const master = structuredClone(transformationV2);
-    master.processor.kdes.businessName = "Current master must not enter export";
-    at(master.inputs, 0).product.kdes.productName = "Current product must not enter export";
     const rows = buildUsExportRows({
       events: [
         {

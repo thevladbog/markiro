@@ -11,6 +11,7 @@ export type TransformationFixtureDatabase = Awaited<ReturnType<typeof createUsPr
 export async function seedFinalizableTransformation(
   f: TransformationFixtureDatabase,
   referenceInput = false,
+  completePackaging = false,
 ) {
   const c = await seedCompleteReceiving(f.db);
   const processor = randomUUID(),
@@ -36,6 +37,9 @@ export async function seedFinalizableTransformation(
     .update(schema.productTraceabilityProfiles)
     .set({
       coverageStatus: "covered",
+      ...(completePackaging
+        ? { packagingSizeValue: "25.000", packagingSizeUom: "lb", packagingStyle: "case" }
+        : {}),
       ftlCategory: "Fresh-cut fruits",
       ftlSourceUrl:
         "https://www.fda.gov/food/food-safety-modernization-act-fsma/food-traceability-list",

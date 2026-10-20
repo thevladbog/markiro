@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { buildLocationDescriptionSnapshot, buildProductSnapshot } from "@markiro/domain";
 import {
-  transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotV2Schema,
   type TransformationDraftRecord,
 } from "@markiro/platform-contracts";
 import { locationResponse } from "../master-data/us-master-data-support";
@@ -26,6 +26,7 @@ export function planTransformationSnapshot(
     const value = built.snapshot;
     return {
       id: row.product.id,
+      kdes: value,
       coverage: resolved.coverage,
       description: [
         value.productName,
@@ -48,6 +49,7 @@ export function planTransformationSnapshot(
     const value = built.snapshot;
     return {
       id: row.id,
+      kdes: value,
       description: [
         value.businessName,
         value.address.kind === "street"
@@ -62,8 +64,8 @@ export function planTransformationSnapshot(
     };
   }
   const processor = location(saved.draft.processorLocationId);
-  const parsed = transformationFinalizationSnapshotV1Schema.safeParse({
-    snapshotVersion: 1,
+  const parsed = transformationFinalizationSnapshotV2Schema.safeParse({
+    snapshotVersion: 2,
     eventId: saved.id,
     eventNumber: saved.eventNumber,
     revision: saved.revision,

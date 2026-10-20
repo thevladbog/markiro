@@ -202,6 +202,17 @@ describe.skipIf(!base)("Transformation transaction seams on owned PostgreSQL", (
             product: {
               id: c.product,
               description: "Synthetic apples",
+              kdes: {
+                snapshotVersion: 1,
+                sourceProductId: c.product,
+                productName: "Synthetic apples",
+                brandName: null,
+                commodity: null,
+                variety: null,
+                packagingSize: null,
+                packagingStyle: null,
+                gtin: null,
+              },
               coverage: {
                 coverageStatus: "covered",
                 coverageRationale: "Synthetic QA review",
@@ -219,6 +230,19 @@ describe.skipIf(!base)("Transformation transaction seams on owned PostgreSQL", (
               id: c.location,
               description:
                 "Synthetic supplier, 1 Test Street, Chicago, IL, 60601, US, +1 555 010 0100",
+              kdes: {
+                schemaVersion: 1,
+                locationId: c.location,
+                partyId: c.party,
+                businessName: "Synthetic supplier",
+                phoneNumber: "+1 555 010 0100",
+                address: { kind: "street", streetAddress: "1 Test Street" },
+                city: "Chicago",
+                stateOrRegion: "IL",
+                zipOrPostalCode: "60601",
+                countryCode: "US",
+                countryDisplay: "United States",
+              },
             },
             quantity: "500",
             unitOfMeasure: "lb",

@@ -140,6 +140,48 @@ describe.skipIf(!url)("Transformation original finalization", () => {
       "Synthetic supplier, 1 Test Street, Chicago, IL, 60601, US, +1 555 010 0100";
     const processorDescription =
       "Synthetic processor, 2 Processing Street, Madison, WI, 53703, US, +1 555 020 0200";
+    const [processor] = await f.db
+      .select()
+      .from(schema.traceabilityLocations)
+      .where(eq(schema.traceabilityLocations.id, c.processor));
+    if (!processor) throw new Error("Missing processor fixture");
+    const productKdes = {
+      snapshotVersion: 1,
+      sourceProductId: c.product,
+      productName: "Synthetic apples",
+      brandName: null,
+      commodity: null,
+      variety: null,
+      packagingSize: null,
+      packagingStyle: null,
+      gtin: null,
+    };
+    const processorKdes = {
+      schemaVersion: 1,
+      locationId: c.processor,
+      partyId: processor.partyId,
+      businessName: "Synthetic processor",
+      phoneNumber: "+1 555 020 0200",
+      address: { kind: "street", streetAddress: "2 Processing Street" },
+      city: "Madison",
+      stateOrRegion: "WI",
+      zipOrPostalCode: "53703",
+      countryCode: "US",
+      countryDisplay: "United States",
+    };
+    const sourceKdes = {
+      schemaVersion: 1,
+      locationId: c.location,
+      partyId: c.party,
+      businessName: "Synthetic supplier",
+      phoneNumber: "+1 555 010 0100",
+      address: { kind: "street", streetAddress: "1 Test Street" },
+      city: "Chicago",
+      stateOrRegion: "IL",
+      zipOrPostalCode: "60601",
+      countryCode: "US",
+      countryDisplay: "United States",
+    };
     const coverage = {
       coverageStatus: "covered",
       coverageRationale: "Synthetic QA review",
@@ -154,6 +196,7 @@ describe.skipIf(!url)("Transformation original finalization", () => {
       kind: "location",
       id: c.processor,
       description: processorDescription,
+      kdes: processorKdes,
     });
     expect(output.source.description).not.toBe(inputSourceDescription);
     expect(result).toMatchObject({
@@ -163,13 +206,13 @@ describe.skipIf(!url)("Transformation original finalization", () => {
       finalizedBy: c.actor,
     });
     expect(result.snapshot).toEqual({
-      snapshotVersion: 1,
+      snapshotVersion: 2,
       eventId: c.saved.id,
       eventNumber: c.saved.eventNumber,
       revision: 1,
       eventDate: "2026-09-26",
       timeZone: "America/Chicago",
-      processor: { id: c.processor, description: processorDescription },
+      processor: { id: c.processor, description: processorDescription, kdes: processorKdes },
       reason: "commingling_and_repacking",
       reasonNote: "Synthetic two-lot run",
       notes: "Office fixture",
@@ -177,9 +220,14 @@ describe.skipIf(!url)("Transformation original finalization", () => {
         kind: "ftl_lot",
         lineNo: index + 1,
         lotId: line.lotId,
-        product: { id: c.product, description: "Synthetic apples", coverage },
+        product: { id: c.product, description: "Synthetic apples", coverage, kdes: productKdes },
         tlc: line.tlc,
-        source: { kind: "location", id: c.location, description: inputSourceDescription },
+        source: {
+          kind: "location",
+          id: c.location,
+          description: inputSourceDescription,
+          kdes: sourceKdes,
+        },
         quantity: "500",
         unitOfMeasure: "lb",
       })),
@@ -187,9 +235,14 @@ describe.skipIf(!url)("Transformation original finalization", () => {
         {
           lineNo: 1,
           lotId: output.lotId,
-          product: { id: c.product, description: "Synthetic apples", coverage },
+          product: { id: c.product, description: "Synthetic apples", coverage, kdes: productKdes },
           tlc: "NEW-OUTPUT",
-          source: { kind: "location", id: c.processor, description: processorDescription },
+          source: {
+            kind: "location",
+            id: c.processor,
+            description: processorDescription,
+            kdes: processorKdes,
+          },
           quantity: "100",
           unitOfMeasure: "case",
         },

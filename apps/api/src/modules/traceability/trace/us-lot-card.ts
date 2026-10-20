@@ -3,7 +3,7 @@ import {
   receivingFinalizationSnapshotSchema,
   receivingFinalizationSnapshotV3Schema,
   shippingFinalizationSnapshotV1Schema,
-  transformationFinalizationSnapshotV1Schema,
+  transformationFinalizationSnapshotSchema,
   usLotCardSchema,
   usLotCardEvidencePageSchema,
   type UsLotCard,
@@ -64,7 +64,7 @@ function originProducts(row: Event, lotId: string): Origin[] {
       }));
   }
   if (row.type === "transformation") {
-    const snapshot = transformationFinalizationSnapshotV1Schema.parse(row.finalizationSnapshot);
+    const snapshot = transformationFinalizationSnapshotSchema.parse(row.finalizationSnapshot);
     return snapshot.outputs
       .filter((line) => line.lotId === lotId)
       .map((line) => ({
@@ -125,7 +125,7 @@ export function frozenCardEvidence({ row, evidence }: FrozenEvent, lotId: string
           number: document.number,
         }))
       : (row.type === "transformation"
-          ? transformationFinalizationSnapshotV1Schema.parse(row.finalizationSnapshot)
+          ? transformationFinalizationSnapshotSchema.parse(row.finalizationSnapshot)
           : shippingFinalizationSnapshotV1Schema.parse(row.finalizationSnapshot)
         ).documents.map((document) => ({
           documentId: document.id,
