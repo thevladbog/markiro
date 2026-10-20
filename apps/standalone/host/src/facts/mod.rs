@@ -28,8 +28,8 @@ pub mod shift_closed;
 pub mod unit_label;
 
 use markiro_proto::{
-    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ShiftMode, ShiftOrigin,
-    ShiftStatus,
+    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ParticipantState, ShiftMode,
+    ShiftOrigin, ShiftStatus,
 };
 use serde_json::Value;
 use sqlx::SqliteConnection;
@@ -107,13 +107,21 @@ impl Applied {
     }
 }
 
-/// A station's close of an active shift.
+/// A participant's close of its part of an active shift (plan 2b).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloseShift {
-    /// The station's instant in the host's format (whole seconds).
+    /// The device's instant in the host's format (whole seconds).
     pub closed_at: String,
     pub reason_code: Option<String>,
-    /// The details of the `shift.close` audit row.
+    /// The device's own count, kept on its part.
+    pub actual_qty: u32,
+    /// No other participant stays active or left: the shift closes with this part.
+    pub closes_shift: bool,
+    /// The shared shift closes without the reason its total needed (spec §12.9).
+    pub reason_missing: bool,
+    /// The details of the `shift.part_closed` row (a part that leaves the shift open).
+    pub part_audit: Value,
+    /// The details of the `shift.close` row (the close of the shift).
     pub audit: Value,
 }
 
@@ -134,6 +142,10 @@ pub struct FactShift {
     /// Whether a validation shift prints a Data Matrix duplicate of each
     /// accepted code (plan РЕЖ, part B); fixed once open.
     pub prints_duplicate: bool,
+    /// The sending device's part in the shift (plan 2b).
+    pub my_state: ParticipantState,
+    /// The shift's plan on the host now: a shared shift's reason is judged by it.
+    pub planned_qty: Option<u32>,
 }
 
 /// What every kind's handler knows of its record.
@@ -170,10 +182,9 @@ fn object(details: Option<Value>) -> Option<serde_json::Map<String, Value>> {
 /// applied and its receipt kept. A record without a readable id is answered
 /// `invalid_record` and nothing of it is kept.
 ///
-/// A record that closes its shift, or the first fact accepted for a closed
-/// shift (which marks it `late_data_at`), changes the shift's row: the batch
-/// takes one host revision for all of them (`revision`, taken on first need)
-/// and stamps it on the row, so the caller commits with it.
+/// A record that closes a part or its shift, a closed shift's first late fact and a closed
+/// part's first late fact change the shift's row: the batch takes one revision for all of them
+/// (`revision`, taken on first need) and stamps it on the row, so the caller commits with it.
 pub async fn receive(
     conn: &mut SqliteConnection,
     device_id: &str,
@@ -364,11 +375,14 @@ async fn apply(
     let answer = match answer {
         Ok(applied) => {
             match &applied.close {
-                Some(close) => close_shift(conn, &context, close, revision).await?,
-                None if shift.status == ShiftStatus::Closed
-                    && record.kind != FactKind::ShiftClosed =>
-                {
-                    mark_late(conn, &context, revision).await?
+                Some(close) => close_part(conn, &context, close, revision).await?,
+                None if record.kind != FactKind::ShiftClosed => {
+                    if shift.status == ShiftStatus::Closed {
+                        mark_late(conn, &context, revision).await?;
+                    }
+                    if shift.my_state == ParticipantState::Closed {
+                        mark_part_late(conn, &context, revision).await?;
+                    }
                 }
                 None => {}
             }
@@ -420,13 +434,14 @@ async fn entered_shift(
         Option<String>,
         bool,
         bool,
-        bool,
+        Option<u32>,
+        Option<String>,
     );
     let row: Option<ShiftRow> = sqlx::query_as(
         "SELECT s.status, s.mode, s.number_month_key, s.number_seq, s.created_from, \
          json_extract(s.snapshot, '$.product.gtin14'), json_extract(s.snapshot, '$.issuerPrefix'), \
-         s.pallets_enabled, s.validation_print_mode = 'duplicate_dm', \
-         EXISTS (SELECT 1 FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \
+         s.pallets_enabled, s.validation_print_mode = 'duplicate_dm', s.planned_qty, \
+         (SELECT p.state FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \
          FROM shifts s WHERE s.id = ?",
     )
     .bind(device_id)
@@ -444,14 +459,15 @@ async fn entered_shift(
         issuer_prefix,
         pallets_enabled,
         prints_duplicate,
-        entered,
+        planned_qty,
+        participant,
     )) = row
     else {
         return Ok(None);
     };
-    if !entered {
+    let Some(participant) = participant else {
         return Ok(Some(None));
-    }
+    };
     // An entered shift was opened, so it has its snapshot.
     let origin: ShiftOrigin = created_from.parse().map_err(ApiError::internal)?;
     let snapshot = || ApiError::internal("an entered shift has no snapshot");
@@ -464,6 +480,8 @@ async fn entered_shift(
         issuer_prefix: issuer_prefix.ok_or_else(snapshot)?,
         pallets_enabled,
         prints_duplicate,
+        my_state: participant.parse().map_err(ApiError::internal)?,
+        planned_qty,
     })))
 }
 
@@ -483,22 +501,52 @@ async fn batch_revision(
     }
 }
 
-/// A station's close of its active shift: the shift closes with the
-/// station's instant and reason code, and the audit row names the station.
-async fn close_shift(
+/// A participant's close of its part (plan 2b): the part closes with the device's instant, count
+/// and reason, and a revision is stamped on the shift. A part that leaves the shift open writes
+/// `shift.part_closed`; when nobody else is active or left the shift closes too, as a station's close
+/// did in stage 2a — the device as closer, its reason, or the mark that the reason is missing
+/// (spec §12.9) — and writes `shift.close`.
+async fn close_part(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
     close: &CloseShift,
     revision: &mut Option<i64>,
 ) -> Result<(), ApiError> {
     let rev = batch_revision(&mut *conn, revision).await?;
+    crate::shift_participants::close_by_device(
+        &mut *conn,
+        &context.shift.id,
+        context.device_id,
+        &close.closed_at,
+        close.actual_qty,
+        close.reason_code.as_deref(),
+    )
+    .await?;
+    if !close.closes_shift {
+        crate::shifts::stamp_revision(&mut *conn, &context.shift.id, rev).await?;
+        return audit::record(
+            conn,
+            context.received_at,
+            Entry {
+                actor: Actor::Device(context.device_id),
+                action: actions::SHIFT_PART_CLOSED,
+                target_type: Some("shift"),
+                target_id: Some(&context.shift.id),
+                outcome: Outcome::Ok,
+                details: close.part_audit.clone(),
+            },
+        )
+        .await
+        .map_err(ApiError::internal);
+    }
     sqlx::query(
         "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'device', \
-         closed_by = ?, close_reason_code = ?, rev = ? WHERE id = ?",
+         closed_by = ?, close_reason_code = ?, close_reason_missing = ?, rev = ? WHERE id = ?",
     )
     .bind(&close.closed_at)
     .bind(context.device_id)
     .bind(&close.reason_code)
+    .bind(close.reason_missing)
     .bind(rev)
     .bind(&context.shift.id)
     .execute(&mut *conn)
@@ -543,5 +591,26 @@ async fn mark_late(
         .execute(conn)
         .await
         .map_err(ApiError::internal)?;
+    Ok(())
+}
+
+/// The first fact of a closed part marks the part late, once (plan 2b), with a revision stamped on
+/// the shift; nothing reopens the part.
+async fn mark_part_late(
+    conn: &mut SqliteConnection,
+    context: &Context<'_>,
+    revision: &mut Option<i64>,
+) -> Result<(), ApiError> {
+    if crate::shift_participants::mark_late(
+        &mut *conn,
+        &context.shift.id,
+        context.device_id,
+        context.received_at,
+    )
+    .await?
+    {
+        let rev = batch_revision(&mut *conn, revision).await?;
+        crate::shifts::stamp_revision(conn, &context.shift.id, rev).await?;
+    }
     Ok(())
 }

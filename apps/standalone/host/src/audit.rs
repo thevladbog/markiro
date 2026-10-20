@@ -96,9 +96,14 @@ pub mod actions {
     /// A participant paused its part and freed its slot (plan 2b): `{ number }`; the device is
     /// the actor. A leave repeated writes none.
     pub const SHIFT_LEAVE: &str = "shift.leave";
-    /// The office closed an active shift (a station's close is a fact, plan
-    /// 2a2).
+    /// A shift closed by the close of its last participant (a station's or a handheld's close is
+    /// a fact, plan 2a2; plan 2b: a shared shift's row adds `participants`, `acceptedTotal`,
+    /// `reasonMissing`). The office's close writes `shift.force_closed` since plan 2b.
     pub const SHIFT_CLOSE: &str = "shift.close";
+    /// A participant closed its part while another still works the shift (plan 2b): `{ number,
+    /// actualQty, closedBoxCount, reasonCode }`; the device is the actor. The close of the last
+    /// part writes `shift.close` instead.
+    pub const SHIFT_PART_CLOSED: &str = "shift.part_closed";
     /// A station got a block of SSCC serials.
     pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
     /// The cloud's data moved into this site (plan IMP); the row holds the
