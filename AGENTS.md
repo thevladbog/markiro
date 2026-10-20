@@ -13,6 +13,15 @@ Use synthetic data and the standalone `deploy/us-development/compose.yml`;
 never copy production or primary-development env files, databases or volumes.
 The US lock must not be removed as part of synchronizing updates from `main`.
 
+### Commit identity
+
+The owner requires every new commit made by an agent in this US worktree to use
+`Vlad Bogatyrev <47273232+thevladbog@users.noreply.github.com>` as both author and
+committer. Set the four `GIT_AUTHOR_*` / `GIT_COMMITTER_*` name/email variables for
+the individual commit and verify its recorded identity afterward. Do not change
+shared/global Git configuration or rewrite existing history. Commit and push
+authorization still follows the task's explicit scope.
+
 ## Purpose and scope
 
 These instructions apply to the entire repository unless a closer `AGENTS.md`

@@ -3,10 +3,48 @@
 > Read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Target design is not a completion claim; dated increment records below describe verified implementation scope.
 
 - Source: MUS-001 v0.1 (2026-09-03), sections 11, 11.1, 11.2 and 15
-- Status: US-00, US-01, US-02 and US-03 in progress as of 2026-09-08; no slice complete
+- Status: partial implementation; current checkpoint below supersedes historical next-step notes
 - Owner: Vladislav Bogatyrev
 
-Next scoped increment: [Receiving amendments, voids and current receiving basis](../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md).
+## Current checkpoint — 2026-10-20
+
+The MVP target is US-11 inclusive, with US-10 Station/physical integration deferred
+to P1 and US-12 landing/supplementary assets optional in P1. Slice numbers are not
+an instruction to implement either deferred surface before completing the demo.
+
+At source `1e18e108b8a4874d811c7ea5733d839839b98c37`,
+[US development isolation](https://github.com/thevladbog/markiro/actions/runs/38845586944)
+passed all eight jobs, including prepared services and full Trace;
+[Cases native regression](https://github.com/thevladbog/markiro/actions/runs/38845586971)
+also passed. Full Trace acceptance covers all 260 regular chains plus the
+correction and orphan examples, complete verification and read-only replay. This
+is isolated test evidence, not an installed demo or release.
+
+US-11 remains **In progress**: the current native Trace/Readiness coordinator
+explicitly reports `datasetComplete: false`. The service-owned Plan adapter has
+separate native evidence but is not yet integrated into a complete initializer.
+Remaining acceptance includes the approved synthetic Plan and three actual Ready
+Request packages in the dataset, guarded initializer/CLI and resume behavior,
+complete resource/Request-limit measurements, viewer/browser journeys and required
+screenshots/video. Existing UI or service tests do not establish those combined
+demo outcomes.
+
+The current implementation boundary is the reviewed
+[exact-run Request worker](../superpowers/plans/2026-10-13-us-11-request-scoped-worker.md),
+which now selects only its explicit tenant/run before locking or recovery. Its
+local scoped native suite passes 20/20 and worker regressions pass 249/249, without
+skips; tooling passes 192/192. Independent task and final source reviews are
+Approved. One full ordinary API run passes 4,807 tests, with 3,981 explicit opt-in
+skips; its owned database is normally dropped with absence verified. API static/
+build and repository formatting gates pass. New-source CI is a separate gate.
+Dataset Request orchestration follows that seam; this increment does not complete US-11.
+Hosting outside Russia, live viewer access and release enablement remain separate
+external gates. Operational workflow locks stay in place; no deployment or
+release is authorized by this checkpoint.
+
+## Historical Receiving checkpoint — 2026-09-08
+
+The next scoped increment at that checkpoint was [Receiving amendments, voids and current receiving basis](../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md).
 The owner approved preserving lot identity/status/source locks on void and checking
 current receipt basis separately and approved the written technical design on
 2026-09-07. The [execution plan](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md)
@@ -108,21 +146,21 @@ The requirement matrix owns per-requirement status and slice assignments. A boun
 
 ## 1. Slices
 
-| Slice | Result                                   | Requirements                        | Hours | Depends     | Status      |
-| ----- | ---------------------------------------- | ----------------------------------- | ----- | ----------- | ----------- |
-| US-00 | Deployment boundary + baseline + profile | REG-001..012, PRO-001..003, NFR-016 | 5–7   | -           | In progress |
-| US-01 | Parties and locations                    | LOC-001..008                        | 8–10  | US-00       | In progress |
-| US-02 | Product FTL profiles and TLC lots        | PRD-001..010, LOT-001..009          | 12–15 | US-01       | In progress |
-| US-03 | Receiving CTE                            | REC-001..008, DOC-001..002          | 8–10  | US-02       | In progress |
-| US-04 | Transformation and P0 server case bridge | TRN-001..014, LOT-010               | 14–18 | US-02/03    | In progress |
-| US-05 | Shipping CTE                             | SHP-001..010                        | 8–11  | US-04       | In progress |
-| US-06 | Trace graph, search, completeness        | TRC-001..010                        | 9–12  | US-03/04/05 | Not started |
-| US-07 | FDA-aligned XLSX adapter                 | EXP-001..012                        | 12–16 | US-06       | In progress |
-| US-08 | Traceability Plan                        | PLN-001..010                        | 7–10  | US-00/02    | In progress |
-| US-09 | Trace request / mock recall              | RQ-001..008                         | 8–11  | US-06/07/08 | In progress |
-| US-10 | Station/label lot link                   | STN-001..009                        | 8–12  | US-02/04    | Not started |
-| US-11 | Demo seed, screenshots/video, release    | EVD-001..012                        | 10–14 | US-09       | Not started |
-| US-12 | Optional landing and extra assets (P1)   | demo assets                         | 6–10  | US-11       | Not started |
+| Slice | Result                                     | Requirements                        | Hours | Depends     | Status      |
+| ----- | ------------------------------------------ | ----------------------------------- | ----- | ----------- | ----------- |
+| US-00 | Deployment boundary + baseline + profile   | REG-001..012, PRO-001..003, NFR-016 | 5–7   | -           | In progress |
+| US-01 | Parties and locations                      | LOC-001..008                        | 8–10  | US-00       | In progress |
+| US-02 | Product FTL profiles and TLC lots          | PRD-001..010, LOT-001..009          | 12–15 | US-01       | In progress |
+| US-03 | Receiving CTE                              | REC-001..008, DOC-001..002          | 8–10  | US-02       | In progress |
+| US-04 | Transformation and P0 server case bridge   | TRN-001..014, LOT-010               | 14–18 | US-02/03    | In progress |
+| US-05 | Shipping CTE                               | SHP-001..010                        | 8–11  | US-04       | In progress |
+| US-06 | Trace graph, search, completeness          | TRC-001..010                        | 9–12  | US-03/04/05 | In progress |
+| US-07 | FDA-aligned XLSX adapter                   | EXP-001..012                        | 12–16 | US-06       | In progress |
+| US-08 | Traceability Plan                          | PLN-001..010                        | 7–10  | US-00/02    | In progress |
+| US-09 | Trace request / mock recall                | RQ-001..008                         | 8–11  | US-06/07/08 | In progress |
+| US-10 | Station/label lot link (P1)                | STN-001..009                        | 8–12  | US-02/04    | Not started |
+| US-11 | Demo seed, screenshots/video, release gate | EVD-001..012                        | 10–14 | US-09       | In progress |
+| US-12 | Optional landing and extra assets (P1)     | demo assets                         | 6–10  | US-11       | Not started |
 
 Slice status values: Not started, In progress, Done. A slice is Done only when its Definition of Done from MUS-001 §10.2 is met and its verification report (see [acceptance.md](acceptance.md)) is filed.
 

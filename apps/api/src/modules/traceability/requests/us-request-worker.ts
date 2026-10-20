@@ -23,6 +23,7 @@ import {
 import type { UsRequestWorkerLifecycleContract } from "./us-request-worker-lifecycle";
 import type { UsRequestWorkerPublication } from "./us-request-worker-publication";
 import {
+  parseUsWorkerScope,
   US_REQUEST_WORKER_POLICY,
   usWorkerFailureCodeSchema,
   type UsWorkerScope,
@@ -101,11 +102,20 @@ export class UsRequestWorker {
     private readonly deps: Dependencies,
   ) {}
   async runOne(): Promise<UsRequestWorkerResult> {
+    return this.run();
+  }
+  async runScoped(scopeInput: unknown): Promise<UsRequestWorkerResult> {
+    const scope = parseUsWorkerScope(scopeInput);
+    return this.run(scope);
+  }
+  private async run(selectedScope?: UsWorkerScope): Promise<UsRequestWorkerResult> {
     if (!this.deps.storage) return { kind: "storage_unavailable" };
     assertUsRequestWorkerExecutionIdentity(this.deps.execution);
     let lease: UsWorkerLease | null;
     try {
-      lease = await this.deps.lifecycle.claimNext();
+      lease = selectedScope
+        ? await this.deps.lifecycle.claimScoped(selectedScope)
+        : await this.deps.lifecycle.claimNext();
     } catch (error) {
       throw sanitizedUsWorkerError(error);
     }

@@ -48,6 +48,7 @@ const clearLease = {
 
 export interface UsRequestWorkerLifecycleContract {
   claimNext(): Promise<UsWorkerLease | null>;
+  claimScoped(scope: unknown): Promise<UsWorkerLease | null>;
   renew(lease: UsWorkerLease): Promise<UsWorkerLease>;
   authorize(lease: UsWorkerLease): Promise<void>;
   read(scope: UsWorkerScope): Promise<UsWorkerRunState>;
@@ -233,17 +234,27 @@ export class UsRequestWorkerLifecycle implements UsRequestWorkerLifecycleContrac
     });
   }
   async claimNext(): Promise<UsWorkerLease | null> {
+    return this.claim();
+  }
+  async claimScoped(scopeInput: unknown): Promise<UsWorkerLease | null> {
+    const scope = parseUsWorkerScope(scopeInput);
+    return this.claim(scope);
+  }
+  private async claim(scope?: UsWorkerScope): Promise<UsWorkerLease | null> {
     return this.transaction(async (tx) => {
       const [row] = await tx
         .select()
         .from(runs)
         .where(
-          or(
-            and(
-              eq(runs.status, "queued"),
-              sql`(${runs.nextAttemptAt} IS NULL OR ${runs.nextAttemptAt} <= clock_timestamp())`,
+          and(
+            scope ? scoped(scope) : undefined,
+            or(
+              and(
+                eq(runs.status, "queued"),
+                sql`(${runs.nextAttemptAt} IS NULL OR ${runs.nextAttemptAt} <= clock_timestamp())`,
+              ),
+              and(eq(runs.status, "processing"), sql`${runs.leaseExpiresAt} <= clock_timestamp()`),
             ),
-            and(eq(runs.status, "processing"), sql`${runs.leaseExpiresAt} <= clock_timestamp()`),
           ),
         )
         .orderBy(asc(runs.startedAt), asc(runs.id))
