@@ -298,6 +298,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::device_shifts::enter_shift),
         )
         .route(
+            "/v1/device/shifts/{id}/leave",
+            post(crate::routes::device_shifts::leave_shift),
+        )
+        .route(
             "/v1/device/sscc/blocks",
             post(crate::routes::sscc_blocks::issue_block),
         )

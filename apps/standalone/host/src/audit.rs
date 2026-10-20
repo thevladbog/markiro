@@ -93,6 +93,9 @@ pub mod actions {
     /// it left (plan 2b): `{ number, rejoined }`; the device is the actor. An active
     /// participant's entry again writes none.
     pub const SHIFT_JOIN: &str = "shift.join";
+    /// A participant paused its part and freed its slot (plan 2b): `{ number }`; the device is
+    /// the actor. A leave repeated writes none.
+    pub const SHIFT_LEAVE: &str = "shift.leave";
     /// The office closed an active shift (a station's close is a fact, plan
     /// 2a2).
     pub const SHIFT_CLOSE: &str = "shift.close";

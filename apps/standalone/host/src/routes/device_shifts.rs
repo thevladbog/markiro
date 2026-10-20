@@ -1,6 +1,6 @@
 //! Shifts at a station (stage 2a spec §4.2, §4.7), with the device key, for
-//! stations only: `GET /v1/device/shifts`, `POST /v1/device/shifts` and
-//! `POST /v1/device/shifts/{id}/enter`. A
+//! stations only: `GET /v1/device/shifts`, `POST /v1/device/shifts`,
+//! `POST /v1/device/shifts/{id}/enter` and `POST /v1/device/shifts/{id}/leave`. A
 //! station reads its shifts at the moments it reads its device record
 //! (after it subscribes to the link and after every revision event), since a
 //! shift is no feed record: shifts are per line, and an open one carries up
@@ -668,4 +668,74 @@ pub async fn enter_shift(
         .map_err(ApiError::internal)?;
     opened.snapshot = Some(snapshot);
     Ok(Json(opened))
+}
+
+/// `conflict` on `shift_not_entered`: the device never entered the shift (plan 2b).
+pub fn not_entered() -> ApiError {
+    ApiError::conflict("shift_not_entered", "this device never entered the shift")
+}
+
+/// `POST /v1/device/shifts/{id}/leave` (plan 2b, spec §4.2 «Выход»): an active participant pauses
+/// its part and frees its slot of the line (`left`), with a revision stamped on the shift and
+/// `shift.leave`; it may enter again while a slot is free. A participant that left or closed
+/// already (a closed shift's participants all have) answers the shift as it is and writes nothing,
+/// so a leave retried after a lost answer is harmless. A device that never entered is `conflict` on
+/// `shift_not_entered`, an unknown shift `not_found`. The answer is the shift as the device sees it,
+/// without the snapshot.
+pub async fn leave_shift(
+    State(state): State<AppState>,
+    device: AuthDevice,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<DeviceShift>, ApiError> {
+    if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
+        return Err(ApiError::forbidden(WORKS_SHIFTS));
+    }
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    device
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            WORKS_SHIFTS,
+        )
+        .await?;
+    let number: Option<(String, i64, String)> = sqlx::query_as(
+        "SELECT number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let (month_key, seq, created_from) =
+        number.ok_or_else(|| ApiError::not_found("no such shift"))?;
+    let current = shift_participants::state_of(&mut tx, &id, &device.id)
+        .await?
+        .ok_or_else(not_entered)?;
+    if !shift_participants::leaves(current) {
+        // Nothing to write: the transaction rolls back when dropped.
+        return Ok(Json(read_for(&mut tx, &id, &device.id, &at).await?));
+    }
+    let origin = created_from.parse().map_err(ApiError::internal)?;
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    shift_participants::leave(&mut tx, &id, &device.id, &at).await?;
+    shifts::stamp_revision(&mut tx, &id, rev).await?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: Actor::Device(&device.id),
+            action: actions::SHIFT_LEAVE,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "number": shifts::format_number(&month_key, seq, origin) }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let left = read_for(&mut tx, &id, &device.id, &at).await?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(left))
 }
