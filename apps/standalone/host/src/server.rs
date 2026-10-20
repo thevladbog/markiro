@@ -606,6 +606,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_shifts::close_shift),
         )
         .route(
+            "/v1/office/shifts/{id}/close-reason",
+            put(crate::routes::office_shifts::set_close_reason),
+        )
+        .route(
             "/v1/office/shifts/{id}/boxes",
             get(crate::routes::office_boxes::list_boxes),
         )

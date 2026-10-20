@@ -1,7 +1,7 @@
 //! Shifts in the office (stage 2a spec §4.2, §4.7): `GET /v1/office/shifts`
 //! and `GET …/{id}` (every role); `POST`, `PUT …/{id}` (with
 //! `expectedRev`), `DELETE …/{id}` and `POST …/{id}/close` (administrators
-//! and technologists, `planShifts`). A shift is no feed record: every change
+//! and technologists, `planShifts`), and `PUT …/{id}/close-reason` (the same roles). A shift is no feed record: every change
 //! still takes a host revision, so open streams wake and stations read their
 //! shifts again (`GET /v1/device/shifts`). Every answer carries the shift's
 //! totals, which its facts give (plan 2a2): they are read, never stored.
@@ -13,8 +13,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
-    OfficeShift, ShiftClose, ShiftCreate, ShiftMode, ShiftStatus, ShiftTotals, ShiftUpdate,
-    UnitLabelTotals, ValidationPrint,
+    shift_close_reasons, OfficeShift, ShiftClose, ShiftCloseReasonSet, ShiftCreate, ShiftMode,
+    ShiftStatus, ShiftTotals, ShiftUpdate, UnitLabelTotals, ValidationPrint,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -878,10 +878,12 @@ pub async fn delete_shift(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /v1/office/shifts/{id}/close`: the office closes an active shift
-/// with its reason in words, over `expectedRev`; a planned or a closed one
-/// is `shift_status`. Facts a station sends for the shift afterwards are
-/// taken and marked late (plan 2a2).
+/// `POST /v1/office/shifts/{id}/close`: the office closes an active shift whole (plan 2b, spec
+/// §4.2 «Принудительное закрытие») with its reason in words, over `expectedRev`; a planned or a
+/// closed one is `shift_status`. Every part still active or left closes as the office's, and
+/// `shift.force_closed` names them (`notClosed`, first entry first): what the office's warning
+/// «Не закрыли: …» showed, exact because every change of a part stamps the shift's `rev`. Facts a
+/// device sends for the shift afterwards are taken and marked late (plan 2a2); nothing reopens it.
 pub async fn close_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -903,6 +905,7 @@ pub async fn close_shift(
         return Err(shifts::status_conflict(current.status));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    let not_closed = shift_participants::close_open_by_office(&mut tx, &id, &at).await?;
     sqlx::query(
         "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
          closed_by = ?, close_reason_text = ?, rev = ? WHERE id = ?",
@@ -915,16 +918,20 @@ pub async fn close_shift(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let not_closed: Vec<serde_json::Value> = not_closed
+        .iter()
+        .map(|(device_id, state)| json!({ "deviceId": device_id, "state": state.as_str() }))
+        .collect();
     audit::record(
         &mut tx,
         &at,
         Entry {
             actor: context.actor(),
-            action: actions::SHIFT_CLOSE,
+            action: actions::SHIFT_FORCE_CLOSED,
             target_type: Some("shift"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "reason": reason }),
+            details: json!({ "reason": reason, "notClosed": not_closed }),
         },
     )
     .await
@@ -936,6 +943,73 @@ pub async fn close_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(closed))
+}
+
+/// `PUT /v1/office/shifts/{id}/close-reason` (plan 2b, spec §12.9): the office gives one of the six
+/// reason codes to a shift its last device closed without the reason the shift-wide total needed
+/// (`closeReasonMissing`), over `expectedRev`; administrators and technologists (`planShifts`).
+/// The refusals in order: a code that is none of the six (`validation_failed` on `reasonCode`, even
+/// for an unknown id), the lookup (404), a stale revision, a shift that lacks no reason (`conflict`
+/// on `close_reason_not_missing`). It writes `shift.close_reason` `{ reasonCode }`.
+pub async fn set_close_reason(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(set): ApiJson<ShiftCloseReasonSet>,
+) -> Result<Json<OfficeShift>, ApiError> {
+    context.require_shift_planning()?;
+    if !shift_close_reasons::ALL.contains(&set.reason_code.as_str()) {
+        return Err(ApiError::validation(
+            "reasonCode",
+            "one of the six close reason codes",
+        ));
+    }
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_shift_planning_in(&mut tx).await?;
+    let current = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such shift"))?;
+    if current.rev != set.expected_rev {
+        return Err(ApiError::stale_revision(current.rev));
+    }
+    if !current.close_reason_missing {
+        return Err(ApiError::conflict(
+            "close_reason_not_missing",
+            "the shift lacks no close reason",
+        ));
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE shifts SET close_reason_code = ?, close_reason_missing = 0, rev = ? WHERE id = ?",
+    )
+    .bind(&set.reason_code)
+    .bind(rev)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::SHIFT_CLOSE_REASON,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "reasonCode": set.reason_code }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let updated = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(updated))
 }
 
 #[cfg(test)]

@@ -104,6 +104,12 @@ pub mod actions {
     /// actualQty, closedBoxCount, reasonCode }`; the device is the actor. The close of the last
     /// part writes `shift.close` instead.
     pub const SHIFT_PART_CLOSED: &str = "shift.part_closed";
+    /// The office closed an active shift whole (plan 2b; `shift.close` before it): every part
+    /// still open closed as the office's; `{ reason, notClosed: [{ deviceId, state }] }`.
+    pub const SHIFT_FORCE_CLOSED: &str = "shift.force_closed";
+    /// The office gave the reason a shift its devices closed without lacked (plan 2b, spec
+    /// §12.9): `{ reasonCode }`.
+    pub const SHIFT_CLOSE_REASON: &str = "shift.close_reason";
     /// A station got a block of SSCC serials.
     pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
     /// The cloud's data moved into this site (plan IMP); the row holds the

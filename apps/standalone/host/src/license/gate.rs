@@ -190,6 +190,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("PUT", "/v1/office/shifts/{id}"),
     ("DELETE", "/v1/office/shifts/{id}"),
     ("POST", "/v1/office/shifts/{id}/close"),
+    ("PUT", "/v1/office/shifts/{id}/close-reason"),
     ("GET", "/v1/office/shifts/{id}/boxes"),
     ("GET", "/v1/office/shifts/{id}/pallets"),
     ("GET", "/v1/office/shifts/{id}/export-source"),
