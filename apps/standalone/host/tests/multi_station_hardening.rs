@@ -136,7 +136,15 @@ async fn the_device_answers_name_every_participant_a_stranger_has_no_state_and_a
             device_ids(&closed["byDevice"]),
             device_ids(&closed["participants"])
         );
-        assert!(closed["totals"].is_object(), "{closed}");
+        // No scan was accepted and no box closed on this shift.
+        assert_eq!(
+            (
+                closed["totals"]["accepted"].clone(),
+                closed["totals"]["boxesClosed"].clone()
+            ),
+            (json!(0), json!(0)),
+            "{closed}"
+        );
     }
     assert!(shift_in_list(&admin, &stranger, &shift).await.is_none());
 }
@@ -425,10 +433,14 @@ async fn only_the_office_gives_a_close_reason_and_only_to_a_shift_that_lacks_one
     let body = json!({ "reasonCode": "equipment_stop", "expectedRev": detail["rev"] });
     // A device credential is no office session.
     let (status, refused) = call(&admin, &admin.key, "PUT", &path, Some(body.clone())).await;
-    assert!(
-        status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN,
-        "{status} {refused}"
-    );
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{refused}");
+    assert_eq!(refused["error"]["details"]["credential"], "session");
+    // An office session the host does not know is refused the same way.
+    let (status, unknown_session) = admin
+        .call_as("no-such-office-session", "PUT", &path, Some(body.clone()))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{unknown_session}");
+    assert_eq!(unknown_session["error"]["details"]["credential"], "session");
     // An unknown shift.
     let missing = "00000000-0000-4000-8000-0000000000aa";
     let (status, unknown) = admin
@@ -484,6 +496,7 @@ async fn only_the_office_gives_a_close_reason_and_only_to_a_shift_that_lacks_one
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{again}");
+    assert_eq!(constraint(&again), json!("close_reason_not_missing"));
     assert_eq!(audit_trail(&admin.app, "shift.close_reason").await.len(), 1);
     assert_eq!(audit_rows(&admin.app).await, rows);
     assert_eq!(host_revision(&admin.app).await, revision);
@@ -671,7 +684,7 @@ async fn a_rename_with_a_limit_change_writes_both_rows_in_one_revision_and_keeps
 async fn the_limit_may_drop_to_the_busiest_count_and_ignores_left_and_revoked_participants() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
-    let (a, b, shift, _) = shared(&admin, &setup, None).await;
+    let (_a, b, shift, _) = shared(&admin, &setup, None).await;
     let (status, raised) = put_line(&admin, &setup.line, json!({ "maxStations": 4 })).await;
     assert_eq!(status, StatusCode::OK, "{raised}");
     let c = station_on(&admin, &setup.line).await;
@@ -722,5 +735,4 @@ async fn the_limit_may_drop_to_the_busiest_count_and_ignores_left_and_revoked_pa
             ),
         ]
     );
-    let _ = a;
 }
