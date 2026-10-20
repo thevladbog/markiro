@@ -438,3 +438,41 @@ for (const acceptance of ["TLS", "evidence-age"])
     );
     assert.equal((await disk(f.root)).status, "recovery-required");
   });
+
+for (const acceptance of ["TLS", "evidence-age"])
+  test(`${acceptance} expiry during trusted process wrapper rejects before actual pull`, async (t) => {
+    const f = await fixture(t),
+      start = Date.now();
+    let current = start,
+      actualPulls = 0,
+      provided = false;
+    t.mock.method(Date, "now", () => current);
+    if (acceptance === "TLS")
+      f.record.observations.tls.value.expiresAt = new Date(start + 1000).toISOString();
+    const inspect = f.adapters.workload.inspect;
+    f.adapters.workload.inspect = async (request) => ({
+      ...(await inspect(request)),
+      observedAt: new Date(current).toISOString(),
+    });
+    const observe = f.adapters.writerFence.observe;
+    f.adapters.writerFence.observe = async (request) => ({
+      ...(await observe(request)),
+      observedAt: new Date(current).toISOString(),
+    });
+    const run = f.adapters.runProcess;
+    f.adapters.runProcess = async (request, recheck) => {
+      if (request.args.includes("pull")) {
+        await Promise.resolve();
+        current = start + (acceptance === "TLS" ? 2000 : 61000);
+        provided = typeof recheck === "function";
+        if (provided) recheck();
+        actualPulls++;
+      }
+      return run(request);
+    };
+    await assert.rejects(execute(f.input, f.adapters));
+    assert.equal(provided, true);
+    assert.equal(actualPulls, 0);
+    assert.equal((await disk(f.root)).status, "recovery-required");
+    assert.ok(Date.parse(f.activation.admission.expiresAt) > current);
+  });

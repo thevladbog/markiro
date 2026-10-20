@@ -280,7 +280,7 @@ export async function loadHostOperation(directory, options = {}) {
   }
 }
 
-async function verifyAdmission(loaded, runProcess, request) {
+export async function verifyAdmission(loaded, runProcess, request) {
   const { record, receipt } = loaded,
     op = record.deployment,
     admission = op.identity.admission;

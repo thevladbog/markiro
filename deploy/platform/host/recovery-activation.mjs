@@ -149,27 +149,39 @@ export async function executeRecoveryActivation(input, adapters) {
       };
       const compose = async (args, recovery = false) => {
         if (!recovery) await guardedBoundary("command");
-        const command = () =>
-          run({
-            executable: "/usr/bin/docker",
-            args: [
-              "--host",
-              "unix:///var/run/docker.sock",
-              "compose",
-              "--project-name",
-              project,
-              "--file",
-              composeFiles[0],
-              "--file",
-              composeFiles[1],
-              ...args,
-            ],
-            cwd: root,
-            env: environment,
-            timeoutMs: 300000,
-            outputLimitBytes: 65536,
-            ...(recovery || !adapters.signal ? {} : { signal: adapters.signal }),
-          });
+        const command = () => {
+          // Trusted installed wrappers may await their own byte/configuration
+          // checks. Keep the full validator's synchronous freshness authority
+          // immediately before their actual process spawn as well.
+          const recheck = () => {
+            checkPreparedFreshness();
+            checkActivationDeadline();
+          };
+          if (!recovery) recheck();
+          return run(
+            {
+              executable: "/usr/bin/docker",
+              args: [
+                "--host",
+                "unix:///var/run/docker.sock",
+                "compose",
+                "--project-name",
+                project,
+                "--file",
+                composeFiles[0],
+                "--file",
+                composeFiles[1],
+                ...args,
+              ],
+              cwd: root,
+              env: environment,
+              timeoutMs: 300000,
+              outputLimitBytes: 65536,
+              ...(recovery || !adapters.signal ? {} : { signal: adapters.signal }),
+            },
+            recovery ? undefined : recheck,
+          );
+        };
         if (recovery) {
           ensure(canonical(args) === canonical(["stop", "edge", "api"]));
           await store.fail();
