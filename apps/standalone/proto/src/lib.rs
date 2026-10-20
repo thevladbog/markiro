@@ -3010,12 +3010,21 @@ impl WarehouseSubjectKind {
 
 /// Why a record the host has is not printed again: its code was freed by an
 /// exception (`released`), or the box or the pallet was taken apart
-/// (`disassembled`).
+/// (`disassembled`), or it came with the cloud history import without a fact
+/// its label needs (`imported_*`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WarehouseUnavailable {
     Released,
     Disassembled,
+    /// An imported unit whose shift the cloud export did not carry: there is
+    /// no product, date or number to print it with.
+    ImportedNoShift,
+    /// An imported record whose shift has no production date.
+    ImportedNoProductionDate,
+    /// An imported record whose product the catalog does not know (or knows
+    /// without a ЧЗ group): no label template fits it.
+    ImportedProductUnknown,
 }
 
 /// A record the host found, with what its label is rendered from: the
@@ -3046,6 +3055,15 @@ pub struct WarehouseSource {
     pub box_count: Option<u32>,
     pub operator_name: Option<String>,
     pub device_id: String,
+    /// The record came with the cloud history import: no station made it, so
+    /// `device_id` is the nil UUID and `operator_name` is empty. Left out for
+    /// a native record.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub imported: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// The answer of `POST /v1/device/warehouse/lookup`.

@@ -21,6 +21,7 @@ import type {
   WarehouseLookupResult,
   WarehouseSource,
   WarehouseSubjectKind,
+  WarehouseUnavailableReason,
 } from "../../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
@@ -216,7 +217,7 @@ export function readWarehouseScan(raw: string): WarehouseScan {
 export type LookupAnswer =
   | { kind: "found"; source: WarehouseSource }
   | { kind: "not_found" }
-  | { kind: "unavailable"; reason: "released" | "disassembled" }
+  | { kind: "unavailable"; reason: WarehouseUnavailableReason }
   | { kind: "offline" }
   | { kind: "host_outdated" }
   | { kind: "restore_pending" }
@@ -744,7 +745,7 @@ export type ScanOutcome =
   | { kind: "restore_pending" }
   | { kind: "lookup_failed" }
   | { kind: "not_found" }
-  | { kind: "unavailable"; reason: "released" | "disassembled" }
+  | { kind: "unavailable"; reason: WarehouseUnavailableReason }
   | { kind: "host_error"; error: unknown }
   | { kind: "refused"; reason: PrepareRefusal }
   | { kind: "printed"; job: WarehouseJob; repair: WarehouseRepair | null };

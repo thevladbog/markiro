@@ -7,6 +7,7 @@ import {
   WAREHOUSE_OUTCOMES,
   WAREHOUSE_REASONS,
   WAREHOUSE_RECEIPT_CODES,
+  WAREHOUSE_UNAVAILABLE,
   warehouseBatchSchema,
   warehouseLookupResultSchema,
   warehouseLookupSchema,
@@ -27,8 +28,12 @@ describe("the warehouse reprint on the wire (plan СКЛ)", () => {
     for (const name of [
       "warehouse-lookup-found-unit.json",
       "warehouse-lookup-found-pallet.json",
+      "warehouse-lookup-found-imported-unit.json",
       "warehouse-lookup-not-found.json",
       "warehouse-lookup-unavailable.json",
+      "warehouse-lookup-unavailable-imported-no-shift.json",
+      "warehouse-lookup-unavailable-imported-no-production-date.json",
+      "warehouse-lookup-unavailable-imported-product-unknown.json",
     ]) {
       expect(warehouseLookupResultSchema.parse(fixture(name)), name).toEqual(fixture(name));
     }
@@ -38,6 +43,30 @@ describe("the warehouse reprint on the wire (plan СКЛ)", () => {
     expect(factReceiptsSchema.parse(fixture("warehouse-records-response.json"))).toEqual(
       fixture("warehouse-records-response.json"),
     );
+  });
+
+  it("marks an imported record and gives it no station and no operator", () => {
+    const found = warehouseLookupResultSchema.parse(
+      fixture("warehouse-lookup-found-imported-unit.json"),
+    );
+    if (found.status !== "found") throw new Error("the fixture is found");
+    expect(found.source.imported).toBe(true);
+    expect(found.source.operatorName).toBeNull();
+    const native = warehouseLookupResultSchema.parse(fixture("warehouse-lookup-found-unit.json"));
+    if (native.status !== "found") throw new Error("the fixture is found");
+    expect(native.source.imported).toBeUndefined();
+  });
+
+  it("has an operator-readable message and title for every unavailable reason", () => {
+    const ru = JSON.parse(readFileSync(new URL("../src/i18n/ru.json", testModuleUrl), "utf8")) as {
+      floor: {
+        warehouse: { errors: Record<string, string>; banner: { title: Record<string, string> } };
+      };
+    };
+    for (const reason of WAREHOUSE_UNAVAILABLE) {
+      expect(ru.floor.warehouse.errors[reason], reason).toMatch(/\S/);
+      expect(ru.floor.warehouse.banner.title[reason], reason).toMatch(/\S/);
+    }
   });
 
   it("asks one thing at a time, and nothing the host does not know", () => {
