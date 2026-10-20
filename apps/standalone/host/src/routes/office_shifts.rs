@@ -5,6 +5,9 @@
 //! still takes a host revision, so open streams wake and stations read their
 //! shifts again (`GET /v1/device/shifts`). Every answer carries the shift's
 //! totals, which its facts give (plan 2a2): they are read, never stored.
+//! Since plan 2b every answer of an opened shift also lists its participants and each
+//! device's part of the totals, and names a reason its devices did not give
+//! (`closeReasonMissing`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -23,6 +26,8 @@ use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
 use crate::routes::devices::require_active_line;
 use crate::server::AppState;
+use crate::shift_participants;
+use crate::shift_totals;
 use crate::shifts::{self, NewShift};
 use crate::validate;
 
@@ -38,7 +43,7 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
      pallet_sheet_template_id, validation_print_mode, validation_print_verification, \
      validation_print_template_id, owner_device_id, \
      opened_at, closed_at, close_reason_code, \
-     close_reason_text, late_data_at, created_at, rev, \
+     close_reason_text, late_data_at, close_reason_missing, created_at, rev, \
      CASE mode WHEN 'validation' \
       THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = shifts.id \
             AND o.box_id IS NULL) \
@@ -118,6 +123,7 @@ struct ShiftRow {
     close_reason_code: Option<String>,
     close_reason_text: Option<String>,
     late_data_at: Option<String>,
+    close_reason_missing: bool,
     created_at: String,
     rev: i64,
     accepted_units: i64,
@@ -197,17 +203,33 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         },
         participants: Vec::new(),
         by_device: Vec::new(),
-        close_reason_missing: false,
+        close_reason_missing: row.close_reason_missing,
     })
+}
+
+/// A shift's participants and each device's part (plan 2b), in every answer of a shift that
+/// opened; a planned shift has none.
+async fn with_participants(
+    conn: &mut SqliteConnection,
+    mut shift: OfficeShift,
+) -> Result<OfficeShift, ApiError> {
+    if shift.status != ShiftStatus::Planned {
+        shift.participants = shift_participants::list(&mut *conn, &shift.id).await?;
+        shift.by_device = shift_totals::by_device(&mut *conn, &shift.id).await?;
+    }
+    Ok(shift)
 }
 
 async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<OfficeShift>, ApiError> {
     let row: Option<ShiftRow> = sqlx::query_as(&format!("{SELECT} WHERE id = ?"))
         .bind(id)
-        .fetch_optional(conn)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
-    row.map(record).transpose()
+    match row {
+        Some(row) => Ok(Some(with_participants(conn, record(row)?).await?)),
+        None => Ok(None),
+    }
 }
 
 /// How far back the list without a period reaches for closed shifts, by
@@ -264,13 +286,14 @@ pub async fn list_shifts(
     let end = |bound: Option<time::Date>, open: &str| {
         bound.map_or_else(|| open.to_owned(), shifts::civil_text)
     };
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let rows: Vec<ShiftRow> = if produced == (None, None) && planned == (None, None) {
         let cutoff = state.now().date() - time::Duration::days(RECENT_DAYS);
         sqlx::query_as(&format!(
             "{SELECT} WHERE status <> 'closed' OR production_date >= ? {order}"
         ))
         .bind(shifts::civil_text(cutoff))
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
     } else {
         // Every row has a shift date (`0028` filled the old ones and a
@@ -284,14 +307,16 @@ pub async fn list_shifts(
         .bind(end(produced.1, "9999-12-31"))
         .bind(end(planned.0, "0001-01-01"))
         .bind(end(planned.1, "9999-12-31"))
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
     }
     .map_err(ApiError::internal)?;
-    rows.into_iter()
-        .map(record)
-        .collect::<Result<Vec<_>, _>>()
-        .map(Json)
+    let mut shifts = Vec::with_capacity(rows.len());
+    for row in rows {
+        shifts.push(with_participants(&mut tx, record(row)?).await?);
+    }
+    tx.rollback().await.map_err(ApiError::internal)?;
+    Ok(Json(shifts))
 }
 
 pub async fn get_shift(
