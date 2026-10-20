@@ -1000,9 +1000,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 6 (handhelds on the host, plan ТСД) is this build's;
-        // 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
+        // Protocol 7 (several devices in one shift, plan 2b) is this build's;
+        // 6 (handhelds on the host, plan ТСД), 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
         // (stage 1) are still taken.
+        assert_eq!(call(Some("7")).await.0, StatusCode::OK);
         assert_eq!(call(Some("6")).await.0, StatusCode::OK);
         assert_eq!(call(Some("5")).await.0, StatusCode::OK);
         assert_eq!(call(Some("4")).await.0, StatusCode::OK);
