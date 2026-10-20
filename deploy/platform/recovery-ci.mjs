@@ -307,8 +307,9 @@ try {
       childEnv,
       180000,
     );
-  phase = "initialize uniquely owned PostgreSQL resources";
   for (const name of ["default", "database"]) {
+    phase =
+      name === "default" ? "create recovery default network" : "create recovery database network";
     await docker([
       "network",
       "create",
@@ -321,8 +322,11 @@ try {
       `${recoveryCiLabel}=${invocationId}`,
       `markiro-platform_${name}`,
     ]);
+    phase =
+      name === "default" ? "inspect recovery default network" : "inspect recovery database network";
     await recordResource("network", `markiro-platform_${name}`);
   }
+  phase = "create recovery PostgreSQL volume";
   await docker([
     "volume",
     "create",
@@ -334,9 +338,11 @@ try {
     `${recoveryCiLabel}=${invocationId}`,
     "markiro-platform_postgres-data",
   ]);
+  phase = "inspect recovery PostgreSQL volume";
   await recordResource("volume", "markiro-platform_postgres-data");
   // Root bootstrap is confined to the fresh named volume, before the real service starts.
   const bootstrapName = `markiro-platform-ci-bootstrap-${invocationId}`;
+  phase = "create recovery ownership bootstrap";
   await docker([
     "create",
     "--name",
@@ -356,15 +362,21 @@ try {
     "70:70",
     "/var/lib/postgresql/data",
   ]);
+  phase = "inspect recovery ownership bootstrap";
   const bootstrap = await recordResource("container", bootstrapName);
+  phase = "start recovery ownership bootstrap";
   await docker(["start", "--attach", bootstrap.identity.id]);
+  phase = "remove recovery ownership bootstrap";
   await removeRecoveryResource(bootstrap, docker, invocationId);
   resources.splice(resources.indexOf(bootstrap), 1);
   await writeFile(join(root, "resources.json"), canonical({ invocationId, resources }) + "\n", {
     mode: 0o600,
   });
-  await compose(["create", "--no-deps", "postgres"]);
+  phase = "create recovery PostgreSQL service";
+  await compose(["create", "postgres"]);
+  phase = "inspect recovery PostgreSQL service";
   await recordResource("container", "markiro-platform-postgres-1");
+  phase = "start recovery PostgreSQL service and await readiness";
   await compose(["up", "--detach", "--no-deps", "--wait", "postgres"]);
   const psql = (sql) =>
     command(

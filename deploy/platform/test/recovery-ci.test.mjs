@@ -311,3 +311,33 @@ test("CI creates an exclusively owned archive copy before strict hashing", async
   );
   assert.ok(copied > 0 && owned > copied && hashed > owned);
 });
+
+test("CI initialization assigns fixed phases before Docker mutations and inspections", async () => {
+  const source = await readFile(new URL("../recovery-ci.mjs", import.meta.url), "utf8");
+  for (const phase of [
+    "create recovery default network",
+    "create recovery database network",
+    "inspect recovery default network",
+    "inspect recovery database network",
+    "create recovery PostgreSQL volume",
+    "inspect recovery PostgreSQL volume",
+    "create recovery ownership bootstrap",
+    "inspect recovery ownership bootstrap",
+    "start recovery ownership bootstrap",
+    "remove recovery ownership bootstrap",
+    "create recovery PostgreSQL service",
+    "inspect recovery PostgreSQL service",
+    "start recovery PostgreSQL service and await readiness",
+  ])
+    assert.ok(source.includes(`"${phase}"`), phase);
+  assert.ok(!source.includes('phase = "initialize uniquely owned PostgreSQL resources"'));
+});
+
+test("CI uses supported Compose create arguments and retains no-deps on service start", async () => {
+  const source = await readFile(new URL("../recovery-ci.mjs", import.meta.url), "utf8");
+  assert.ok(source.includes('await compose(["create", "postgres"])'));
+  assert.ok(!source.includes('await compose(["create", "--no-deps", "postgres"])'));
+  assert.ok(
+    source.includes('await compose(["up", "--detach", "--no-deps", "--wait", "postgres"])'),
+  );
+});
