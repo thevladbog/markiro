@@ -623,6 +623,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+      - name: Verify isolated failed-activation recovery integration
+        run: sudo --preserve-env=RUNNER_TEMP,GITHUB_SHA "$(command -v node)" deploy/platform/recovery-ci.mjs --local-ci
       - name: Verify isolated platform-only preparation stack
         env:
           MARKIRO_SOURCE_SHA: ${{ github.sha }}
