@@ -88,7 +88,7 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 7);
+    assert_eq!(hello.protocol, 8);
     assert!(hello.initialized);
 }
 
@@ -106,7 +106,8 @@ fn envelope_decides_compatibility_before_the_rest() {
     assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(6, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(7, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(8, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(8, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(9, &future), Compatibility::HostTooOld);
     // A host of a later protocol that still takes this build's.
     assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
@@ -1968,8 +1969,8 @@ fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
 }
 
 #[test]
-fn this_build_speaks_protocol_six_and_the_current_hello_fixtures_say_so() {
-    assert_eq!(PROTOCOL_VERSION, 6);
+fn this_build_speaks_protocol_seven_and_the_current_hello_fixtures_say_so() {
+    assert_eq!(PROTOCOL_VERSION, 7);
     assert_eq!(MIN_PROTOCOL_VERSION, 1);
     for name in ["hello.json", "hello-restored.json", "hello-replaced.json"] {
         let hello: Hello = serde_json::from_value(fixture(name)).unwrap();

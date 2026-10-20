@@ -13,7 +13,13 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 6 since plan ТСД (handhelds on the
+/// Protocol version this build speaks: 7 came with plan 2b (several devices
+/// in one shift): a `shift_closed` fact closes the sender's part and the
+/// shift only with its last part, the capability `multi-station-v1`, `POST
+/// /v1/device/shifts/{id}/leave`, a shift's `participants`, `totals` and
+/// `byDevice`, and a line's `maxStations`; a station of protocol 7 against a
+/// host of 6 is `host_too_old`, so it never sends a part's close to a host
+/// that would close the whole shift. 6 since plan ТСД (handhelds on the
 /// host): the channel `POST /v1/device/pallet-events`, `GET
 /// /v1/device/box-registry`, `GET /v1/device/org/print`, `recoverDeviceId` of
 /// a claim and the capability `handheld-host-v1`; a handheld of protocol 6
@@ -27,7 +33,7 @@ use sha2::{Digest, Sha256};
 /// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
 /// new meaning of one raises it, because an older host refuses such a record
 /// for good.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.

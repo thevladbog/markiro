@@ -1018,7 +1018,7 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 6);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 7);
     }
 
     #[tokio::test]
@@ -1028,6 +1028,6 @@ mod tests {
         assert_eq!(body["error"]["details"]["protocol"], 8);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("7")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("9")).await.0, StatusCode::BAD_REQUEST);
     }
 }
