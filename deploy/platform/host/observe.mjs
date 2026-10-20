@@ -326,7 +326,9 @@ export function createHostObservers(operation, policyInput, options = {}) {
             "--auth-host=scram-sha-256 --auth-local=peer --locale-provider=icu --icu-locale=en-US --lc-collate=C --lc-ctype=C --encoding=UTF8",
         };
       } else if (service === "edge") {
-        same(c.Config.Cmd, image.Config.Cmd);
+        // Docker image inspect omits an unset Cmd; container inspect returns null.
+        // A supplied command must still exactly match the pinned image command.
+        same(c.Config.Cmd ?? null, image.Config.Cmd ?? null);
         expectedEnv = {
           ...inherited,
           ...Object.fromEntries(
