@@ -228,7 +228,22 @@ test("recovery CI failure categories expose only allowlisted metadata", () => {
       recoveryCiErrorCategory({ code: "ERR_HOST_PROCESS", reason }),
       `process-${reason}`,
     );
+  for (const [ErrorType, category] of [
+    [TypeError, "type-error"],
+    [ReferenceError, "reference-error"],
+    [RangeError, "range-error"],
+  ])
+    assert.equal(
+      recoveryCiErrorCategory(new ErrorType("secret output and private path")),
+      category,
+    );
   assert.equal(recoveryCiErrorCategory({ code: "ERR_ASSERTION" }), "assertion");
+  assert.equal(recoveryCiErrorCategory({ code: "ERR_HOST_PRIVATE_FILE" }), "private-file");
+  for (const code of ["ENOENT", "EACCES", "EPERM", "EIO", "ENOSPC"])
+    assert.equal(
+      recoveryCiErrorCategory({ code, path: "secret-path", message: "secret-output" }),
+      `filesystem-${code}`,
+    );
   for (const error of [
     new Error("secret output and private path"),
     { code: "ERR_HOST_PROCESS", reason: "secret-output" },

@@ -144,7 +144,13 @@ export async function cleanupRecoveryResources(resources, command, invocationId)
 
 // Public CI output must never include a child error message, output or path.
 export function recoveryCiErrorCategory(error) {
+  if (error instanceof TypeError) return "type-error";
+  if (error instanceof ReferenceError) return "reference-error";
+  if (error instanceof RangeError) return "range-error";
   if (error?.code === "ERR_ASSERTION") return "assertion";
+  if (error?.code === "ERR_HOST_PRIVATE_FILE") return "private-file";
+  if (["ENOENT", "EACCES", "EPERM", "EIO", "ENOSPC"].includes(error?.code))
+    return `filesystem-${error.code}`;
   if (
     error?.code === "ERR_HOST_PROCESS" &&
     ["spawn", "exit", "stdin", "output-limit", "timeout", "aborted", "termination"].includes(
