@@ -143,6 +143,34 @@ mod tests {
                     active: 1,
                 },
             ),
+            ((Some(Left), 0, 1, true), EntryDecision::Rejoin),
+            ((Some(Left), 0, 2, true), EntryDecision::Rejoin),
+            // A left participant is already in the shift, so the capability check (which only
+            // guards a first entry) does not apply; the slots decide.
+            (
+                (Some(Left), 1, 1, false),
+                EntryDecision::LineFull {
+                    max_stations: 1,
+                    active: 1,
+                },
+            ),
+            ((Some(Active), 0, 1, true), EntryDecision::Reenter),
+            ((Some(Closed), 1, 1, true), EntryDecision::ReadClosed),
+            ((Some(Closed), 5, 1, false), EntryDecision::ReadClosed),
+            (
+                (None, 3, 2, true),
+                EntryDecision::LineFull {
+                    max_stations: 2,
+                    active: 3,
+                },
+            ),
+            (
+                (Some(Left), 3, 2, true),
+                EntryDecision::LineFull {
+                    max_stations: 2,
+                    active: 3,
+                },
+            ),
         ];
         for ((current, others, max, multi), expected) in cases {
             assert_eq!(
@@ -188,9 +216,20 @@ mod tests {
         ))
         .unwrap();
         let cases = file["cases"].as_array().unwrap();
-        assert!(cases.len() >= 8);
+        assert_eq!(cases.len(), 12);
         let number = |value: &serde_json::Value| value.as_u64().map(|n| u32::try_from(n).unwrap());
         for case in cases {
+            for key in [
+                "closesShift",
+                "participantsEver",
+                "factPlanned",
+                "actualQty",
+                "hostPlanned",
+                "shiftAccepted",
+                "need",
+            ] {
+                assert!(case.get(key).is_some(), "missing {key}: {case}");
+            }
             let expected = match case["need"].as_str().unwrap() {
                 "none" => ReasonNeed::None,
                 "required" => ReasonNeed::Required,
