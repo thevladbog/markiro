@@ -77,6 +77,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_print_jobs",
             "floor_restore_epochs",
             "floor_scans",
+            "floor_shift_participation",
             "floor_shifts",
             "floor_sign_in_failures",
             "floor_sscc_blocks",
@@ -880,13 +881,15 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 /// not examine either: the table `ref_product_photos`, and `ref_products`, which got
 /// `photo_checksum` appended to its text, and migration `0018` (beta 3, the shift date on the
 /// station): `floor_shifts`, which got `planned_date` appended to its text.
-/// The independent native generation table of `0020` is pinned by the dataset tests, and the
-/// demo flag `0021` appends to `ref_products` (spec 2026-10-21) is set aside with `0017`'s column.
+/// The independent native generation table of `0020` is pinned by the dataset tests, the
+/// demo flag `0021` appends to `ref_products` (spec 2026-10-21) is set aside with `0017`'s column,
+/// and the participation cache of `0022` (plan 2b) by `the_participation_cache_takes_a_newer_read_only`.
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     rows.into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
         .filter(|row| row["tbl_name"] != "ref_product_photos")
         .filter(|row| row["tbl_name"] != "installation_dataset_epochs")
+        .filter(|row| row["tbl_name"] != "floor_shift_participation")
         .map(|mut row| {
             if row["type"] == "table" && row["name"] == "ref_products" {
                 let old = before
@@ -1893,6 +1896,18 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
             "INSERT INTO floor_restore_epochs (host_id, device_id, epoch, seen_at, refused) \
              VALUES (?, ?, '5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e', '2026-10-11T08:00:00.000Z', 2)",
             json!([HOST, DEVICE]),
+        ),
+        // What the host's list said of a shared shift (plan 2b, `0022`): a copy of the host's
+        // figures, emptied with the others.
+        statement(
+            "INSERT INTO floor_shift_participation (host_id, device_id, shift_id, max_stations, \
+             my_state, participants, totals, by_device, as_of, seen_at) VALUES (?, ?, 'shift-1', \
+             2, 'active', '[]', ?, '[]', '2026-10-08T09:41:07Z', 1790000000000)",
+            json!([
+                HOST,
+                DEVICE,
+                r#"{"accepted":0,"boxesClosed":0,"pallets":0,"asOf":"2026-10-08T09:41:07Z"}"#
+            ]),
         ),
     ])
     .await
@@ -5805,4 +5820,114 @@ async fn webview_sql_cannot_advance_native_dataset_metadata() {
         .unwrap()
         .is_empty());
     assert!(!db.dataset().is_frozen());
+}
+
+/// The webview's upsert of a shared shift's participation (plan 2b, migration `0022`,
+/// `UPSERT_PARTICIPATION_SQL` in `src/floor/shifts/shift-participation.ts`, which
+/// `test/floor-shift-participation.test.ts` finds in this file): `->` and `->>` chained on the
+/// shell's bundled SQLite, a shift without the fields kept out, a closed list item without
+/// figures (host `35020185a`) taking its participants and state over a row already there while
+/// the stored figures stay, this station's own leave token (`joined_rev`, host `651eb1c06`) kept
+/// when an answer does not name it, and an older read never over a newer one. Parameters: host
+/// id, device id, seen at, device id, the list.
+const UPSERT_PARTICIPATION: &str = "INSERT INTO floor_shift_participation (host_id, device_id, \
+    shift_id, max_stations, my_state, participants, totals, by_device, as_of, seen_at, joined_rev) \
+    SELECT p.host_id, p.device_id, p.shift_id, p.max_stations, p.my_state, p.participants, \
+    COALESCE(p.totals, f.totals), COALESCE(p.by_device, f.by_device), COALESCE(p.as_of, f.as_of), \
+    p.seen_at, COALESCE(p.joined_rev, f.joined_rev) FROM (SELECT ? AS host_id, ? AS device_id, \
+    s.value ->> 'id' AS shift_id, s.value ->> 'maxStations' AS max_stations, \
+    s.value ->> 'myState' AS my_state, s.value -> 'participants' AS participants, \
+    s.value -> 'totals' AS totals, s.value -> 'byDevice' AS by_device, \
+    s.value -> 'totals' ->> 'asOf' AS as_of, ? AS seen_at, (SELECT me.value ->> 'joinedRev' \
+    FROM json_each(s.value -> 'participants') AS me WHERE me.value ->> 'deviceId' = ?) AS joined_rev \
+    FROM json_each(?) AS s WHERE s.value ->> 'maxStations' IS NOT NULL \
+    AND s.value -> 'participants' IS NOT NULL) AS p LEFT JOIN floor_shift_participation AS f \
+    ON f.host_id = p.host_id AND f.device_id = p.device_id AND f.shift_id = p.shift_id \
+    WHERE (p.totals IS NOT NULL AND p.by_device IS NOT NULL) OR f.shift_id IS NOT NULL \
+    ON CONFLICT (host_id, device_id, shift_id) DO UPDATE SET max_stations = excluded.max_stations, \
+    my_state = excluded.my_state, participants = excluded.participants, totals = excluded.totals, \
+    by_device = excluded.by_device, as_of = excluded.as_of, seen_at = excluded.seen_at, \
+    joined_rev = excluded.joined_rev WHERE excluded.as_of >= floor_shift_participation.as_of \
+    OR excluded.seen_at >= floor_shift_participation.seen_at + 60000";
+
+#[tokio::test]
+async fn the_participation_cache_takes_a_newer_read_only() {
+    let (_dir, db) = open().await;
+    let list = |as_of: &str, accepted: u32| {
+        json!([
+            {
+                "id": "shift-1",
+                "status": "active",
+                "maxStations": 2,
+                "myState": "active",
+                "participants": [{ "deviceId": "device", "state": "active", "joinedRev": 12 }],
+                "totals": { "accepted": accepted, "boxesClosed": 0, "pallets": 0, "asOf": as_of },
+                "byDevice": []
+            },
+            { "id": "planned-1" },
+            // A closed shift the list names without figures and no row holds: none is made.
+            {
+                "id": "closed-1",
+                "status": "closed",
+                "maxStations": 2,
+                "myState": "closed",
+                "participants": [{ "deviceId": "device", "state": "closed" }]
+            }
+        ])
+        .to_string()
+    };
+    for (seen, as_of, accepted) in [
+        (1, "2026-10-08T09:41:07Z", 5),
+        (2, "2026-10-08T09:40:00Z", 3),
+    ] {
+        db.transaction(vec![statement(
+            UPSERT_PARTICIPATION,
+            json!(["host", "device", seen, "device", list(as_of, accepted)]),
+        )])
+        .await
+        .unwrap();
+    }
+    // The same shift closed, as the list names it now (no totals, no byDevice, no joinedRev):
+    // its participants and this station's state are taken, the figures and the token stay.
+    let closed = json!([{
+        "id": "shift-1",
+        "status": "closed",
+        "maxStations": 2,
+        "myState": "closed",
+        "participants": [{ "deviceId": "device", "state": "closed" }]
+    }])
+    .to_string();
+    db.transaction(vec![statement(
+        UPSERT_PARTICIPATION,
+        json!(["host", "device", 3, "device", closed]),
+    )])
+    .await
+    .unwrap();
+    let rows = db
+        .query(
+            "SELECT shift_id, max_stations, my_state, participants ->> '$[0].state' AS my_row, \
+             totals ->> 'accepted' AS accepted, json_array_length(by_device) AS by_device, as_of, \
+             seen_at, joined_rev FROM floor_shift_participation",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(rows.into_iter().map(Value::Object).collect()),
+        json!([{
+            "shift_id": "shift-1",
+            "max_stations": 2,
+            "my_state": "closed",
+            "my_row": "closed",
+            "accepted": 5,
+            "by_device": 0,
+            "as_of": "2026-10-08T09:41:07Z",
+            "seen_at": 3,
+            "joined_rev": 12
+        }])
+    );
+    assert_eq!(
+        table_class("floor_shift_participation"),
+        Some(TableClass::Disposable)
+    );
 }
