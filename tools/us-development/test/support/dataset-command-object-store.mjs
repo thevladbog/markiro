@@ -6,11 +6,19 @@ import { isDeepStrictEqual } from "node:util";
 
 const IMAGE =
   "chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d";
-// Exact public registry config digests for the selected linux amd64/arm64 images.
-const IMAGE_IDS = [
-  "sha256:7b5ca1f11aa4c91593612d2d4a9e253ec9152a4bd13a19e551290a042a4c52f5",
-  "sha256:8f17c8c82e037886f6aaceb3f6282a5c2a1b52bbef5339d323b0067a75bbbc79",
-];
+// SHA256-verified public OCI index -> platform manifest -> config relationships.
+// Docker's containerd store identifies the image by index, not config digest.
+const IMAGE_INDEX = "sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d";
+const IMAGE_PLATFORMS = {
+  amd64: {
+    manifest: "sha256:aba492e2a4e4c90bff795745e8e660affa1f09e7650f5981bd7bccd1a06cd931",
+    config: "sha256:7b5ca1f11aa4c91593612d2d4a9e253ec9152a4bd13a19e551290a042a4c52f5",
+  },
+  arm64: {
+    manifest: "sha256:f1f303474940e9e088edbd2c1658f7ac38cb0dd90f91a2b0a51916d74b8575a1",
+    config: "sha256:8f17c8c82e037886f6aaceb3f6282a5c2a1b52bbef5339d323b0067a75bbbc79",
+  },
+};
 const COMMAND = [
   "mini",
   "-dir=/data",
@@ -115,6 +123,44 @@ export function datasetObjectStoreContainer(input) {
   };
 }
 
+function matchesDatasetObjectStoreImage(item, imageInspection) {
+  if (!imageInspection || item.Image !== imageInspection.Id || imageInspection.Os !== "linux")
+    return false;
+  const architecture = imageInspection.Architecture;
+  if (typeof architecture !== "string" || !Object.hasOwn(IMAGE_PLATFORMS, architecture))
+    return false;
+  const platform = IMAGE_PLATFORMS[architecture];
+  const references = [
+    IMAGE,
+    `chrislusf/seaweedfs@${IMAGE_INDEX}`,
+    `docker.io/${IMAGE}`,
+    `docker.io/chrislusf/seaweedfs@${IMAGE_INDEX}`,
+  ];
+  if (
+    !Array.isArray(imageInspection.RepoDigests) ||
+    !imageInspection.RepoDigests.some((reference) => references.includes(reference))
+  )
+    return false;
+  const selectedManifestMatches = (descriptor) =>
+    descriptor?.digest === platform.manifest &&
+    descriptor.mediaType === "application/vnd.oci.image.manifest.v1+json" &&
+    descriptor.size === 2193 &&
+    descriptor.platform?.os === "linux" &&
+    descriptor.platform.architecture === architecture;
+  if (imageInspection.Id === platform.config)
+    return (
+      imageInspection.Descriptor == null &&
+      (item.ImageManifestDescriptor == null ||
+        selectedManifestMatches(item.ImageManifestDescriptor))
+    );
+  return (
+    imageInspection.Id === IMAGE_INDEX &&
+    imageInspection.Descriptor?.digest === IMAGE_INDEX &&
+    imageInspection.Descriptor.mediaType === "application/vnd.oci.image.index.v1+json" &&
+    selectedManifestMatches(item.ImageManifestDescriptor)
+  );
+}
+
 /** All errors are fixed identifiers: never serialize inspect/config secrets. */
 export function assertDatasetObjectStoreContainer(item, input) {
   const expected = contract(input),
@@ -123,7 +169,7 @@ export function assertDatasetObjectStoreContainer(item, input) {
     /^[a-f0-9]{64}$/.test(input.id) &&
     item?.Id === input.id &&
     item.Config?.Image === IMAGE &&
-    IMAGE_IDS.includes(item.Image) &&
+    matchesDatasetObjectStoreImage(item, input.imageInspection) &&
     item.Config.Labels?.["markiro.us-dataset-positive"] === expected.owner &&
     same(item.Config.Entrypoint, ["/usr/bin/weed"]) &&
     same(item.Config.Cmd, COMMAND) &&
@@ -166,7 +212,7 @@ export function assertDatasetObjectStoreContainer(item, input) {
       ["container_id_format", () => /^[a-f0-9]{64}$/.test(input.id)],
       ["container_id", () => item?.Id === input.id],
       ["configured_image", () => item.Config?.Image === IMAGE],
-      ["image_id", () => IMAGE_IDS.includes(item.Image)],
+      ["image_id", () => matchesDatasetObjectStoreImage(item, input.imageInspection)],
       ["owner_label", () => item.Config.Labels?.["markiro.us-dataset-positive"] === expected.owner],
       ["entrypoint", () => same(item.Config.Entrypoint, ["/usr/bin/weed"])],
       ["command", () => same(item.Config.Cmd, COMMAND)],

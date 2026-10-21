@@ -120,6 +120,8 @@ test(
       assert.ok(fixture.includes(value), value);
     assert.ok(!fixture.includes("DROP DATABASE FORCE"));
     assert.ok(fixture.includes('readFile("apps/api/test/support/us-dataset-snapshot.ts"'));
+    assert.equal(fixture.split('docker(["image", "inspect", storeContract.image])').length - 1, 1);
+    assert.ok(fixture.includes("{ ...storeContract, id, uid, gid, imageInspection }"));
   },
 );
 test(
@@ -213,6 +215,14 @@ test(
       uid: 1001,
       gid: 1001,
       configPath: "/tmp/owned-positive/s3.json",
+      imageInspection: {
+        Id: "sha256:7b5ca1f11aa4c91593612d2d4a9e253ec9152a4bd13a19e551290a042a4c52f5",
+        Os: "linux",
+        Architecture: "amd64",
+        RepoDigests: [
+          "chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d",
+        ],
+      },
     };
     const container = {
       Id: target.id,

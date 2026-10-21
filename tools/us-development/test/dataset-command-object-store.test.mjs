@@ -62,6 +62,40 @@ function inspected() {
   };
 }
 
+// Independent literal OCI metadata, not produced by the helper under test.
+const indexDigest = "sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d";
+const platforms = {
+  amd64: {
+    manifest: "sha256:aba492e2a4e4c90bff795745e8e660affa1f09e7650f5981bd7bccd1a06cd931",
+    config: "sha256:7b5ca1f11aa4c91593612d2d4a9e253ec9152a4bd13a19e551290a042a4c52f5",
+  },
+  arm64: {
+    manifest: "sha256:f1f303474940e9e088edbd2c1658f7ac38cb0dd90f91a2b0a51916d74b8575a1",
+    config: "sha256:8f17c8c82e037886f6aaceb3f6282a5c2a1b52bbef5339d323b0067a75bbbc79",
+  },
+};
+function imageInspected(architecture = "amd64", index = false) {
+  return {
+    Id: index ? indexDigest : platforms[architecture].config,
+    Os: "linux",
+    Architecture: architecture,
+    RepoDigests: [`chrislusf/seaweedfs@${indexDigest}`],
+    ...(index
+      ? {
+          Descriptor: { digest: indexDigest, mediaType: "application/vnd.oci.image.index.v1+json" },
+        }
+      : {}),
+  };
+}
+function selectedManifest(architecture = "amd64") {
+  return {
+    digest: platforms[architecture].manifest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    size: 2193,
+    platform: { os: "linux", architecture },
+  };
+}
+
 // These doubles model only external SDK outcomes. The real helper's checks,
 // body draining, race orchestration, cleanup and failure return are exercised.
 function boundary(fault) {
@@ -223,8 +257,134 @@ test(
   "object store attestation refuses unknown identity, mutable image, exposed ports and unowned mounts",
   { timeout: 5000 },
   () => {
-    const target = { ...input, id: "a".repeat(64) };
+    const target = { ...input, id: "a".repeat(64), imageInspection: imageInspected() };
     assert.doesNotThrow(() => assertDatasetObjectStoreContainer(inspected(), target));
+    const identityFailures = [];
+    const verifyIdentity = (candidate, imageInspection, accepted) => {
+      try {
+        if (accepted)
+          assert.doesNotThrow(() =>
+            assertDatasetObjectStoreContainer(candidate, { ...target, imageInspection }),
+          );
+        else
+          assert.throws(
+            () => assertDatasetObjectStoreContainer(candidate, { ...target, imageInspection }),
+            (error) => {
+              assert.equal(error.message, "us_dataset_object_store_attestation_failed");
+              assert.deepEqual(error.fields, ["image_id"]);
+              assert.doesNotMatch(
+                JSON.stringify(error) + error.stack,
+                /hostile-image-secret|unexpected-private-reference/,
+              );
+              return true;
+            },
+          );
+      } catch (error) {
+        identityFailures.push(error);
+      }
+    };
+    for (const architecture of ["amd64", "arm64"]) {
+      const classic = inspected();
+      classic.Image = platforms[architecture].config;
+      verifyIdentity(classic, imageInspected(architecture), true);
+      const indexed = inspected();
+      indexed.Image = indexDigest;
+      indexed.ImageManifestDescriptor = selectedManifest(architecture);
+      verifyIdentity(indexed, imageInspected(architecture, true), true);
+    }
+    const indexed = inspected();
+    indexed.Image = indexDigest;
+    indexed.ImageManifestDescriptor = selectedManifest();
+    for (const mutate of [
+      (c, i) => {
+        c.Image = i.Id = `sha256:${"b".repeat(64)}`;
+      },
+      (c) => {
+        c.Image = platforms.amd64.config;
+      },
+      (_c, i) => {
+        i.RepoDigests = [];
+      },
+      (_c, i) => {
+        i.RepoDigests = [`unexpected-private-reference@${indexDigest}`];
+      },
+      (_c, i) => {
+        i.Descriptor.digest = `sha256:${"b".repeat(64)}`;
+      },
+      (_c, i) => {
+        i.Descriptor.mediaType = "application/vnd.oci.image.manifest.v1+json";
+      },
+      (_c, i) => {
+        delete i.Descriptor;
+      },
+      (_c, i) => {
+        i.Architecture = "ppc64le";
+      },
+      (_c, i) => {
+        i.Os = "windows";
+      },
+      (c) => {
+        delete c.ImageManifestDescriptor;
+      },
+      (c) => {
+        c.ImageManifestDescriptor = selectedManifest("arm64");
+      },
+      (c) => {
+        c.ImageManifestDescriptor.digest = `sha256:${"b".repeat(64)}`;
+      },
+      (c) => {
+        c.ImageManifestDescriptor.mediaType = "application/vnd.oci.image.index.v1+json";
+      },
+      (c) => {
+        c.ImageManifestDescriptor.size = 2194;
+      },
+      (c) => {
+        c.ImageManifestDescriptor.platform.os = "windows";
+      },
+      (c) => {
+        c.ImageManifestDescriptor.platform.architecture = "arm64";
+      },
+      (c, i) => {
+        c.Image = i.Id = platforms.amd64.manifest;
+      },
+      (_c, i) => {
+        i.Id = "hostile-image-secret";
+        i.RepoDigests = ["unexpected-private-reference"];
+      },
+    ]) {
+      const c = structuredClone(indexed),
+        i = imageInspected("amd64", true);
+      mutate(c, i);
+      verifyIdentity(c, i, false);
+    }
+    for (const mutate of [
+      (_c, i) => {
+        i.Id = platforms.arm64.config;
+      },
+      (_c, i) => {
+        i.Architecture = "arm64";
+      },
+      (_c, i) => {
+        i.RepoDigests = ["chrislusf/seaweedfs:4.48"];
+      },
+      (_c, i) => {
+        i.RepoDigests = [`chrislusf/seaweedfs@sha256:${"b".repeat(64)}`];
+      },
+      (_c, i) => {
+        i.Descriptor = { digest: "hostile-image-secret" };
+      },
+      (c) => {
+        c.ImageManifestDescriptor = selectedManifest("arm64");
+      },
+    ]) {
+      const c = inspected(),
+        i = imageInspected();
+      mutate(c, i);
+      verifyIdentity(c, i, false);
+    }
+    verifyIdentity(inspected(), undefined, false);
+    if (identityFailures.length)
+      throw new AggregateError(identityFailures, "pinned image provenance not enforced");
     const diagnosticFailures = [];
     const refusesWithFields = (candidate, fields) => {
       try {

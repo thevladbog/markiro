@@ -173,6 +173,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
     directory,
     closed,
     storeContract,
+    imageInspection,
     configBytes,
     disposalStarted;
   const remaining = (started) => {
@@ -184,7 +185,15 @@ export async function createDatasetPositiveFixture(env = process.env) {
     try {
       return await child("docker", args, { cap: remaining(disposalStarted ?? setupStarted) });
     } catch (error) {
-      const operations = new Set(["create", "inspect", "start", "stop", "rm", "container"]);
+      const operations = new Set([
+        "create",
+        "inspect",
+        "image",
+        "start",
+        "stop",
+        "rm",
+        "container",
+      ]);
       console.info(
         "Positive fixture provider operation failed",
         JSON.stringify({
@@ -219,7 +228,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
     const result = JSON.parse((await docker(["inspect", id])).stdout);
     assert.equal(result.length, 1);
     const item = result[0];
-    assertDatasetPositiveContainer(item, { ...storeContract, id, uid, gid });
+    assertDatasetPositiveContainer(item, { ...storeContract, id, uid, gid, imageInspection });
     await assertConfig();
     return item;
   }
@@ -227,6 +236,22 @@ export async function createDatasetPositiveFixture(env = process.env) {
     await assertConfig();
     const result = await docker(storeContract.args);
     const id = result.stdout.trim();
+    const acquired = await docker(["image", "inspect", storeContract.image]);
+    let images;
+    try {
+      images = JSON.parse(acquired.stdout);
+    } catch {
+      throw new Error("us_dataset_object_store_image_inspection_failed");
+    }
+    if (
+      !Array.isArray(images) ||
+      images.length !== 1 ||
+      !images[0] ||
+      typeof images[0] !== "object"
+    )
+      throw new Error("us_dataset_object_store_image_inspection_failed");
+    // Cache actual acquired metadata; cleanup must attest the same immutable ID.
+    imageInspection = images[0];
     // Until inspection succeeds this ID is unknown and cannot be cleaned here.
     const item = await inspect(id);
     ids.set(id, item.Image);
