@@ -77,7 +77,7 @@ export async function sendPendingLeaves(
   );
   let sent = 0;
   let stale = 0;
-  let failure: unknown = null;
+  let failure: Error | null = null;
   for (const row of pending) {
     const settle: LocalStatement = {
       sql: SETTLE_LEAVE_SQL,
@@ -90,7 +90,9 @@ export async function sendPendingLeaves(
     } catch (error) {
       if (!permanent(error)) {
         // The link acts on a refused key or a changed host: that one outranks the earlier failure.
-        if (failure === null || shellActionFor(error, null) !== null) failure = error;
+        if (failure === null || shellActionFor(error, null) !== null) {
+          failure = error instanceof Error ? error : new Error(String(error));
+        }
         continue;
       }
       await local.transaction([settle]);
