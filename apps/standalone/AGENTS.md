@@ -1984,13 +1984,13 @@ the host takes from a left part, nothing kept changes — and the work screen sa
 tries again, and the notice goes once the return is taken. A part closed on the host meanwhile is
 kept as closed. A refused key goes to the shell; any other failure waits for the next read.
 
-- m1 (known): two host reads with the same whole-second `as_of` overwrite each other in arrival
-  order (`>=`); the next read after a revision event corrects it.
-- m11 (known): an offline station whose paused part meets a full line in a stale cache cannot
-  resume it from the card until a read frees a slot; this follows the host's rule.
-
 Known limits and release order:
 
+- Two host reads with the same whole-second `as_of` overwrite each other in arrival order (`>=`),
+  so an older read of the same second can land last; the next read after a revision event
+  corrects it (final review m1).
+- An offline station whose paused part meets a full line in a stale cache cannot resume it from
+  the card until a read frees a slot; this follows the host's rule (final review m11).
 - Participant names are cut at one line at 860 px and narrower (tap-to-expand later); the 1280x720
   second card of an unshared pair clips 3 px, outside the guard matrix.
 - The shell CSS of the band and cards uses `:has()` (Chromium 105+, WebView2 is newer).
