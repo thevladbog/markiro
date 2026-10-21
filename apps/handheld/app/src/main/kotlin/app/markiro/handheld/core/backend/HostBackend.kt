@@ -94,12 +94,13 @@ class HostBackend(
         return entered.toShiftDto(config.get()?.lineName)
     }
 
-    override suspend fun leave(shiftId: String) {
+    override suspend fun leave(shiftId: String): String? {
         // This device's own token from the last answer that named it; a stale one is ignored by the host (the answer stays `active`).
         val token = participation?.get(shiftId)?.joinedRev
         // The host is asked whether or not a store is wired: a refusal reaches the caller either way.
         val answered = calls.run { api().leave(shiftId, token) }
         keep { save(answered) }
+        return answered.myState
     }
 
     /** The snapshot of the entry just made (or, for a bundle asked alone, the owner's re-entry, which gives the same snapshot) becomes the bundle the loaders read. */

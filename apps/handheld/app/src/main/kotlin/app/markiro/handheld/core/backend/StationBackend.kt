@@ -38,8 +38,10 @@ interface StationBackend {
     /**
      * Frees this device's slot of a shift several devices may work (plan 2b). The cloud has no slots, so the default does nothing; the host
      * answers `POST /v1/device/shifts/{id}/leave`. Throws what the other calls throw (`IOException`, `HttpException`).
+     * Returns this device's state in the shift as the host answered it (`active|left|closed`), `null` when none was said: `active` means the
+     * host ignored the leave (a stale token) and the part still holds its slot.
      */
-    suspend fun leave(shiftId: String) = Unit
+    suspend fun leave(shiftId: String): String? = null
 }
 
 /** A backend that answers nothing: the base of test doubles and of the host backend before it exists. */

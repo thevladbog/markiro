@@ -75,24 +75,11 @@ class HostParticipation(
                 store.save(calls.run { api().leave(shiftId, owed.joinedRev) })
                 store.clearLeavePending(shiftId, owed.marker)
             } catch (e: HttpException) {
-                if (settles(e)) store.clearLeavePending(shiftId, owed.marker)
+                if (OwedLeaveRefusals.settles(e)) store.clearLeavePending(shiftId, owed.marker)
             } catch (e: IOException) {
-                if (settles(e)) store.clearLeavePending(shiftId, owed.marker) else if (hostNotReached(e)) return
+                if (OwedLeaveRefusals.settles(e)) store.clearLeavePending(shiftId, owed.marker) else if (hostNotReached(e)) return
             }
         }
-    }
-
-    private fun settles(e: HttpException): Boolean {
-        val code = runCatching {
-            json.decodeFromString(app.markiro.handheld.core.network.ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code
-        }.getOrNull()
-        return e.code() == 409 && code == "shift_not_entered"
-    }
-
-    /** `not_found` (404) and `validation_failed` (400) of the host's own envelope: a body that is not one (a proxy's page) settles nothing. */
-    private fun settles(e: IOException): Boolean {
-        val cause = e.cause as? HostApiError ?: return false
-        return (cause.status == 404 && cause.code == "not_found") || (cause.status == 400 && cause.code == "validation_failed")
     }
 
     private fun hostNotReached(e: IOException): Boolean = when ((e.cause as? HostApiError)?.failure) {
@@ -117,5 +104,26 @@ class HostParticipation(
         } catch (_: HttpException) {
             // Refused (a full line, a closed shift): nothing was changed; production goes on and the next beat asks again.
         }
+    }
+}
+
+/**
+ * The host's definite refusals of ONE shift's leave: it holds no slot of this device (`shift_not_entered`), or no such shift (`not_found`), or the
+ * request was invalid (`validation_failed`). Only these settle an owed leave; every other failure may still succeed, so the leave stays owed.
+ */
+internal object OwedLeaveRefusals {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun settles(e: HttpException): Boolean {
+        val code = runCatching {
+            json.decodeFromString(app.markiro.handheld.core.network.ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code
+        }.getOrNull()
+        return e.code() == 409 && code == "shift_not_entered"
+    }
+
+    /** `not_found` (404) and `validation_failed` (400) of the host's own envelope (found anywhere in the cause chain: a wrapper may add a layer): a body that is not one (a proxy's page) settles nothing. */
+    fun settles(e: IOException): Boolean {
+        val cause = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<HostApiError>().firstOrNull() ?: return false
+        return (cause.status == 404 && cause.code == "not_found") || (cause.status == 400 && cause.code == "validation_failed")
     }
 }

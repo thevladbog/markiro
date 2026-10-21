@@ -171,10 +171,11 @@ class ShiftParticipationStore(
      * The marker is the time of the pause, and strictly later than the one it replaces: a leave in flight settles only the marker it was sent for
      * ([clearLeavePending]), so a pause asked again must never be mistaken for the one already answered, whatever the clock says.
      */
-    suspend fun markLeavePending(shiftId: String) = db.recovery.commit {
+    suspend fun markLeavePending(shiftId: String): String = db.recovery.commit {
         val previous = db.metaDao().get(leaveKey(shiftId))?.toLongOrNull()
-        val marker = clock().let { if (previous != null && previous >= it) previous + 1 else it }
-        db.metaDao().put(MetaEntity(leaveKey(shiftId), marker.toString()))
+        val marker = clock().let { if (previous != null && previous >= it) previous + 1 else it }.toString()
+        db.metaDao().put(MetaEntity(leaveKey(shiftId), marker))
+        marker
     }
 
     suspend fun pendingLeaves(): List<String> = db.metaDao().withPrefix(LEAVE_PREFIX).map { it.key.removePrefix(LEAVE_PREFIX) }

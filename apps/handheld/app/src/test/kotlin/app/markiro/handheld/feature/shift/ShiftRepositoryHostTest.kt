@@ -7,6 +7,11 @@ import app.markiro.handheld.core.backend.HostBackend
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.host.HostBlockSupplier
 import app.markiro.handheld.core.host.HostCalls
+import app.markiro.handheld.core.host.HostParticipation
+import app.markiro.handheld.core.host.ShiftParticipationStore
+import app.markiro.handheld.core.network.host.TransportFailure
+import kotlinx.serialization.json.jsonArray
+import kotlinx.coroutines.CancellationException
 import app.markiro.handheld.core.network.CredentialDto
 import app.markiro.handheld.core.network.DeviceDto
 import app.markiro.handheld.core.network.PairResponse
@@ -162,5 +167,122 @@ class ShiftRepositoryHostTest {
         assertEquals(EnterResult.PartClosed, repository(script).enter(id))
         assertEquals(null, db.shiftDao().get(id)?.enteredAt)
         assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+    }
+
+    // ---- Task 9: a leave frees the host's slot, and what the host did not settle stays owed ----
+
+    private fun leavePath() = "/v1/device/shifts/$id/leave"
+    private fun listPath() = "/v1/device/shifts"
+
+    private fun shiftAnswer(myState: String): String {
+        val first = Json.parseToJsonElement(fixture("device-shifts-participants.json")).jsonObject.getValue("shifts").jsonArray[0].jsonObject
+        return JsonObject(first + ("myState" to JsonPrimitive(myState))).toString()
+    }
+
+    private suspend fun workingIn() {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled(id))
+        db.deviceConfigDao().get()!!.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = id)) }
+    }
+
+    /** The backend keeps what the host answered, as in production. */
+    private fun storeRepository(script: HostTransport): ShiftRepository {
+        val api = HostApi(script)
+        val pool = SsccPool(db)
+        val supplier = HostBlockSupplier(db, MetaStore(db), api, pool, SsccBlockApplier(pool))
+        val store = ShiftParticipationStore(db)
+        val backend = HostBackend({ api }, db.deviceConfigDao(), db, supplier, HostCalls { }, null, db.operatorDao(), participation = store)
+        return ShiftRepository(backend, db, Json { ignoreUnknownKeys = true }, pool, SsccBlockApplier(pool), store)
+    }
+
+    private fun scripted(vararg answers: HostResult) = Script(emptyMap(), mutableMapOf(leavePath() to ArrayDeque(answers.toList())))
+    private fun refused(status: Int, code: String, constraint: String? = null) = HostResult.Ok(
+        status,
+        """{"error":{"code":"$code","message":"m"${constraint?.let { ""","details":{"constraint":"$it"}""" } ?: ""}}}""",
+        null,
+    )
+
+    @Test
+    fun leavingMarksTheShiftLeftAtOnceAndFreesTheHostsSlot() = runTest {
+        workingIn()
+        storeRepository(scripted(ok(shiftAnswer("left")))).leave(id)
+        assertNotNull(db.shiftDao().get(id)!!.leftAt)
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+        assertEquals("left", ShiftParticipationStore(db).get(id)!!.myState)
+    }
+
+    @Test
+    fun aLeaveTheHostDidNotHearStaysOwedAndTheOperatorIsNotBlocked() = runTest {
+        workingIn()
+        storeRepository(scripted(HostResult.Failed(TransportFailure.UNREACHABLE))).leave(id)
+        assertNotNull(db.shiftDao().get(id)!!.leftAt)
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+    }
+
+    @Test
+    fun aHostThatHoldsNoSlotOfTheDeviceOwesNothing() = runTest {
+        workingIn()
+        storeRepository(scripted(refused(409, "conflict", "shift_not_entered"))).leave(id)
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+        assertNotNull(db.shiftDao().get(id)!!.leftAt)
+    }
+
+    @Test
+    fun anUnknownShiftAndAnInvalidLeaveAreDefinitePermanentRefusals() = runTest {
+        workingIn()
+        storeRepository(scripted(refused(404, "not_found"))).leave(id)
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+        workingIn()
+        storeRepository(scripted(refused(400, "validation_failed"))).leave(id)
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+    }
+
+    @Test
+    fun aStaleLeaveTheHostIgnoredLeavesThePartActiveAndTheLeaveStaysOwed() = runTest {
+        workingIn()
+        // The host no-ops a token of an earlier stay and answers the part as it is: still `active`.
+        storeRepository(scripted(ok(shiftAnswer("active")))).leave(id)
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+        assertNotNull(db.shiftDao().get(id)!!.leftAt)
+    }
+
+    @Test
+    fun aClosedPartOrALeftPartOwesNothing() = runTest {
+        workingIn()
+        storeRepository(scripted(ok(shiftAnswer("closed")))).leave(id)
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+    }
+
+    @Test
+    fun theMarkerIsWrittenBeforeTheHostIsAskedSoAKilledProcessLosesNoLeave() = runTest {
+        workingIn()
+        val killed = object : HostTransport {
+            override suspend fun get(path: String) = error("no read")
+            override suspend fun post(path: String, body: String): HostResult = throw CancellationException("process killed mid-call")
+        }
+        runCatching { storeRepository(killed).leave(id) }
+        val row = db.shiftDao().get(id)!!
+        assertNotNull(row.leftAt)
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+    }
+
+    @Test
+    fun anOfflinePauseIsSentByTheBeatWithoutRejoiningAndSurvivesTheListPrune() = runTest {
+        workingIn()
+        storeRepository(scripted(HostResult.Failed(TransportFailure.UNREACHABLE))).leave(id)
+        // A list that does not name the shift (the orphan prune) must not drop the owed leave.
+        ShiftParticipationStore(db).save(emptyList())
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+        // The beat finds the host again: it sends the leave (and does not enter, the device is out).
+        val transport = Script(
+            emptyMap(),
+            mutableMapOf(leavePath() to ArrayDeque(listOf(ok(shiftAnswer("left"))))),
+        )
+        val api = HostApi(transport)
+        HostParticipation(db, { api }, HostCalls { }).beat()
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+        assertNotNull(db.shiftDao().get(id)!!.leftAt)
     }
 }

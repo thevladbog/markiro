@@ -143,6 +143,8 @@ class ShiftRepository(
     private val json: Json,
     private val pool: SsccPool,
     private val blocks: SsccBlockApplier = SsccBlockApplier(pool),
+    /** The leaves still owed to a host live here (plan 2b); a cloud device never writes one. */
+    private val participation: app.markiro.handheld.core.host.ShiftParticipationStore = app.markiro.handheld.core.host.ShiftParticipationStore(db),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     constructor(
@@ -152,7 +154,7 @@ class ShiftRepository(
         pool: SsccPool,
         blocks: SsccBlockApplier = SsccBlockApplier(pool),
         clock: () -> Long = System::currentTimeMillis,
-    ) : this(CloudBackend(api), db, json, pool, blocks, clock)
+    ) : this(CloudBackend(api), db, json, pool, blocks, app.markiro.handheld.core.host.ShiftParticipationStore(db), clock)
 
     fun boxSerialTopUp(
         shiftId: String,
@@ -343,7 +345,36 @@ class ShiftRepository(
         }
     }
 
-    suspend fun leave(shiftId: String) = db.recovery.commit { leaveOwned(shiftId) }
+    suspend fun leave(shiftId: String) {
+        // A cloud backend answers `cloudApi()`; the host does not. Only a host has a slot to free.
+        val owesHost = backend.cloudApi() == null
+        val marker = db.recovery.commit {
+            leaveOwned(shiftId)
+            // Written with the local mark: a crash or a blocked recovery between the two never loses a leave the host is owed.
+            if (owesHost) participation.markLeavePending(shiftId) else null
+        }
+        if (marker != null) releaseSlot(shiftId, marker)
+    }
+
+    /**
+     * Best effort and after the local mark, which is what the operator sees; production data is never touched. Only what the host SETTLED clears the
+     * marker (compare-and-clear on the one written above, so a pause asked again meanwhile stays owed): an answer whose part is not `active` any more,
+     * or a definite refusal (`shift_not_entered`, `not_found`, `validation_failed`). An answer that still says `active` means the host no-oped a stale
+     * token (an automatic rejoin re-entered the part): the leave stays owed and the heartbeat sends it again with the fresh token. Anything else
+     * (unreachable, a timeout, a 5xx) stays owed too.
+     */
+    private suspend fun releaseSlot(shiftId: String, marker: String) {
+        try {
+            val state = db.recovery.work { backend.leave(shiftId) }
+            if (state != "active") participation.clearLeavePending(shiftId, marker)
+        } catch (e: HttpException) {
+            if (app.markiro.handheld.core.host.OwedLeaveRefusals.settles(e)) participation.clearLeavePending(shiftId, marker)
+        } catch (e: IOException) {
+            if (app.markiro.handheld.core.host.OwedLeaveRefusals.settles(e)) participation.clearLeavePending(shiftId, marker)
+        } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) {
+            // The device is being paired again: the marker goes with the dataset if that replaces it, and stays owed otherwise.
+        }
+    }
 
     /**
      * A local mark only. The hub card and the list's «Продолжить» follow
