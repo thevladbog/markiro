@@ -39,7 +39,7 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
             constraint == "seat_limit" -> HostFailure.SeatLimit
             constraint == "feature_disabled" -> HostFailure.FeatureDisabled
             constraint == "license_restricted" -> HostFailure.LicenseRestricted
-            constraint != null -> HostFailure.Constraint(constraint)
+            constraint != null -> HostFailure.Constraint(constraint, error.details.int("maxStations"), error.details.int("active"))
             result.code >= 500 -> HostFailure.ServerError(result.code)
             else -> HostFailure.BadResponse
         }
@@ -89,6 +89,18 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
         val body = buildJsonObject { put("supports", JsonArray(ENTER_SUPPORTS.map(::JsonPrimitive))) }.toString()
         return parse(transport.post("/v1/device/shifts/$shiftId/enter", body), DeviceShiftDto.serializer())
     }
+
+    /**
+     * Frees this device's slot of a shared shift (`POST /v1/device/shifts/{id}/leave`, protocol 7), answered with the shift as the device sees it.
+     * [joinedRev] is this device's own `participants[].joinedRev` from its last entry answer, sent as `{"joinedRev":N}` (`ShiftLeave`); the host
+     * ignores a token of an earlier stay (no write, `myState` stays `active`). `null` sends no body (no token known: an older host). State-idempotent
+     * on the host, so a retry after a lost answer is harmless; `shift_not_entered` means the host holds no slot of this device.
+     */
+    suspend fun leave(shiftId: String, joinedRev: Long?): Result<DeviceShiftDto> =
+        parse(
+            transport.post("/v1/device/shifts/$shiftId/leave", joinedRev?.let { """{"joinedRev":$it}""" } ?: ""),
+            DeviceShiftDto.serializer(),
+        )
 
     suspend fun block(requestId: String, issuerPrefix: String, extension: Int): Result<SsccBlockDto> {
         val body = buildJsonObject {
@@ -155,7 +167,10 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
 
         /** A validation shift without duplicate printing is a plain scan flow of this app; the duplicate (`validation-dm-duplicate-v1`) is not named, so the host refuses that shift with `station_update`. */
         const val CAPABILITY_VALIDATION = "validation-v1"
-        private val ENTER_SUPPORTS = listOf(CAPABILITY, CAPABILITY_VALIDATION)
+
+        /** Several devices in one shift (protocol 7): named on every entry, so a free slot of the line takes this device; an older host ignores the name. */
+        const val CAPABILITY_MULTI_STATION = "multi-station-v1"
+        internal val ENTER_SUPPORTS = listOf(CAPABILITY, CAPABILITY_VALIDATION, CAPABILITY_MULTI_STATION)
         const val KNOWN_BLOCKS_BATCH = 64
 
         /**

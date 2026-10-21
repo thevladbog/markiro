@@ -146,6 +146,12 @@ class HostBackendShiftsTest {
         assertEquals(409 to "{}", refused(refusal(409, "conflict", """{"constraint":"shift_status","status":"closed"}""")))
         assertEquals(409 to """{"code":"shift_busy"}""", refused(refusal(409, "conflict", """{"constraint":"shift_busy"}""")))
         assertEquals(409 to """{"code":"shift_line"}""", refused(refusal(409, "conflict", """{"constraint":"shift_line"}""")))
+        // A full line keeps the two numbers the dialog says; an old host's busy keeps none.
+        assertEquals(
+            409 to """{"code":"shift_line_full","maxStations":2,"active":2}""",
+            refused(refusal(409, "conflict", """{"constraint":"shift_line_full","maxStations":2,"active":2}""")),
+        )
+        assertEquals(409 to """{"code":"shift_not_entered"}""", refused(refusal(409, "conflict", """{"constraint":"shift_not_entered"}""")))
         assertEquals(409 to """{"code":"license_restricted"}""", refused(refusal(409, "conflict", """{"constraint":"license_restricted"}""")))
     }
 

@@ -245,4 +245,14 @@ class HostFixturesTest {
         assertEquals("unknown", ScanRawKind.classify("не код"))
         assertEquals("unknown", ScanRawKind.classify(""))
     }
+
+    @Test
+    fun theEntryNamesWhatTheHostsHandheldFixtureAsksAndTheMultiStationCapability() {
+        val named = fixture("shift-enter-handheld-multi.json").getValue("supports").jsonArray.map { it.jsonPrimitive.content }
+        assertTrue(named.contains(HostApi.CAPABILITY_MULTI_STATION))
+        // The host checks that what a shift needs is a subset of what the device names, so more names are harmless;
+        // fewer are not: every name of the host's fixture must be one of this app's.
+        assertTrue(HostApi.ENTER_SUPPORTS.toString(), HostApi.ENTER_SUPPORTS.containsAll(named))
+        assertEquals("multi-station-v1", HostApi.CAPABILITY_MULTI_STATION)
+    }
 }

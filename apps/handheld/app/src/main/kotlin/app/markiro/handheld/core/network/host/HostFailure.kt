@@ -18,8 +18,11 @@ sealed interface HostFailure {
     data object ProtocolUnsupported : HostFailure
     data class RestorePending(val retryAfterSeconds: Long?) : HostFailure
 
-    /** A `409 conflict` with a constraint of its own (`shift_busy`, `shift_line`, `station_update`, …). */
-    data class Constraint(val name: String) : HostFailure
+    /**
+     * A `409 conflict` with a constraint of its own (`shift_busy`, `shift_line`, `station_update`, …). `shift_line_full` also carries
+     * `maxStations` and `active`.
+     */
+    data class Constraint(val name: String, val maxStations: Int? = null, val active: Int? = null) : HostFailure
     data class ServerError(val status: Int) : HostFailure
     data object BadResponse : HostFailure
 }
