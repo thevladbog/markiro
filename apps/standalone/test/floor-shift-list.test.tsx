@@ -26,6 +26,17 @@ import type { LocalExecutor } from "../src/local/executor.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { deviceLicense } from "./support/license.js";
 import { openLocalDb } from "./support/local-db.js";
+import { readParticipation } from "../src/floor/shifts/shift-participation.js";
+import { formatQuantity } from "../src/floor/shifts/shift-text.js";
+import {
+  enteredOf,
+  HANDHELD,
+  participant,
+  SHARED,
+  SHARED_ENTERED,
+  sharedShift,
+  STATION_ROW,
+} from "./support/multi-station.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -1319,5 +1330,153 @@ describe("the shifts while the site's license opens no new shift (plan ЛЦ-3)",
         "Новые смены не открываются: пробный период закончился. Сообщите администратору.",
       ),
     ).toBeTruthy();
+  });
+});
+
+describe("the shifts several devices work (plan 2b)", () => {
+  const OTHER_ROW = () => participant(OTHER_STATION, "Станция линии 2", "active");
+  const joinable = () =>
+    sharedShift({
+      participants: [{ row: OTHER_ROW(), accepted: 300 }],
+      ownerDeviceId: OTHER_STATION,
+    });
+  const MULTI_ENTRY = {
+    supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
+  };
+
+  it("offers to join a shift another station works while a slot is free, and names who works it", async () => {
+    const shift = joinable();
+    const { executor } = await copiesOf([shift]);
+    renderList(executor);
+    await screen.findByText(shift.number);
+    const joining = card(shift.number);
+    expect(within(joining).getByRole("button", { name: "Присоединиться" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    const who = within(joining).getByText("В смене 1 из 2: Станция линии 2 · станция");
+    expect(who.getAttribute("title")).toBe("В смене 1 из 2: Станция линии 2 · станция");
+    expect(within(joining).queryByRole("button", { name: "Занята другой станцией" })).toBeNull();
+  });
+
+  it("joins through the host naming the capability, and keeps the answer's figures", async () => {
+    const shift = joinable();
+    const { executor } = await copiesOf([shift]);
+    const answer = enteredOf(
+      sharedShift({
+        participants: [
+          { row: OTHER_ROW(), accepted: 300 },
+          { row: STATION_ROW, accepted: 0 },
+        ],
+        ownerDeviceId: OTHER_STATION,
+        myState: "active",
+        asOf: "2026-10-08T09:45:00Z",
+      }),
+    );
+    const enter = vi.fn(async () => answer);
+    const { handlers } = renderList(executor, { enter });
+    fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(enter).toHaveBeenCalledWith(shift.id, MULTI_ENTRY);
+    expect(await readParticipation(executor, PAIRING, shift.id)).toMatchObject({
+      myState: "active",
+      participants: [{ deviceId: OTHER_STATION }, { deviceId: DEVICE_ID }],
+    });
+  });
+
+  it("cannot join without the link, and says why", async () => {
+    const shift = joinable();
+    const { executor } = await copiesOf([shift]);
+    renderList(executor, { online: false });
+    await screen.findByText(shift.number);
+    const joining = card(shift.number);
+    expect(within(joining).getByRole("button", { name: "Присоединиться" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(within(joining).getByText("Нужна связь с хостом")).toBeTruthy();
+  });
+
+  it("says the line is full, with no action, when every slot is held", async () => {
+    const shift = sharedShift({
+      participants: [
+        { row: OTHER_ROW(), accepted: 300 },
+        { row: participant(HANDHELD, "ТСД 1", "active", "handheld"), accepted: 20 },
+      ],
+      ownerDeviceId: OTHER_STATION,
+    });
+    const { executor } = await copiesOf([shift]);
+    renderList(executor);
+    await screen.findByText(shift.number);
+    const full = card(shift.number);
+    expect(within(full).getByText("Линия занята: 2 из 2")).toBeTruthy();
+    expect(
+      within(full).getByText("В смене 2 из 2: Станция линии 2 · станция, ТСД 1 · ТСД"),
+    ).toBeTruthy();
+    expect(within(full).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("says this station's part is closed when the host says so, with no action", async () => {
+    const shift = sharedShift({
+      participants: [
+        { row: participant(DEVICE_ID, "Станция линии 1", "closed"), accepted: 40 },
+        { row: OTHER_ROW(), accepted: 300 },
+      ],
+      ownerDeviceId: OTHER_STATION,
+      myState: "closed",
+    });
+    const { executor } = await copiesOf([shift]);
+    renderList(executor);
+    await screen.findByText(shift.number);
+    const closed = card(shift.number);
+    expect(
+      within(closed).getByText(
+        "Ваша часть этой смены закрыта. Смена закроется, когда закроют остальные.",
+      ),
+    ).toBeTruthy();
+    expect(within(closed).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("shows a shared shift's progress as the whole shift's, and names this station among who works it", async () => {
+    const both = sharedShift({
+      participants: [
+        { row: STATION_ROW, accepted: 427 },
+        { row: OTHER_ROW(), accepted: 120 },
+      ],
+      myState: "active",
+    });
+    const { executor } = await copiesOf([both], [enteredOf(both)]);
+    renderList(executor);
+    await screen.findByText(both.number);
+    const mine = card(both.number);
+    // The others' part by the host (120) and this station's own codes (none stored here).
+    expect(
+      within(mine).getByText(`120 из ${formatQuantity(1200)}`.replace(/\s/g, " ")),
+    ).toBeTruthy();
+    expect(
+      within(mine).getByText("В смене 2 из 2: эта станция, Станция линии 2 · станция"),
+    ).toBeTruthy();
+    expect(within(mine).getByRole("button", { name: "Продолжить" })).toBeTruthy();
+  });
+
+  it("keeps a solo station's card as it was on a line of one", async () => {
+    const solo = sharedShift({
+      participants: [{ row: STATION_ROW, accepted: 5 }],
+      maxStations: 1,
+      myState: "active",
+    });
+    const { executor } = await copiesOf([solo], [enteredOf(solo)]);
+    renderList(executor);
+    await screen.findByText(solo.number);
+    expect(within(card(solo.number)).queryByText(/В смене/)).toBeNull();
+    expect(within(card(solo.number)).getByRole("button", { name: "Продолжить" })).toBeTruthy();
+  });
+
+  it("reads the shared shift of the host's fixture as a card this station continues", async () => {
+    const { executor } = await copiesOf([SHARED], [SHARED_ENTERED]);
+    renderList(executor);
+    await screen.findByText(SHARED.number);
+    // The handheld closed its part: only this station works the shift now, so no line names others.
+    expect(within(card(SHARED.number)).queryByText(/В смене/)).toBeNull();
   });
 });

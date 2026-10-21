@@ -1275,6 +1275,16 @@
       },
       "counterparty": "Для: {{name}}",
       "needsLink": "Нужна связь с хостом",
+      "participants": "В смене {{active}} из {{max}}: {{names}}",
+      "participant": "{{name}} · {{kind}}",
+      "thisStation": "эта станция",
+      "deviceKind": {
+        "station": "станция",
+        "handheld": "ТСД",
+        "office": "офис"
+      },
+      "lineFull": "Линия занята: {{active}} из {{max}}",
+      "partClosed": "Ваша часть этой смены закрыта. Смена закроется, когда закроют остальные.",
       "new": "Новая смена",
       "setup": "Рабочее место",
       "queue": "Очередь отправки",
@@ -1300,6 +1310,7 @@
         "continue": "Продолжить",
         "finish": "Завершить",
         "busy": "Занята другой станцией",
+        "join": "Присоединиться",
         "closing": "Закрывается"
       },
       "refused": {

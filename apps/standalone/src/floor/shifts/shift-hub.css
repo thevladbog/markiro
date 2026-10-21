@@ -566,6 +566,17 @@
   font: var(--floor-body);
 }
 
+/* Plan 2b: who works a shared shift, on one line; the full list is the line's title. */
+.shift-hub .shift-card__participants {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The action: 84 px, bold words (a secondary one is not grey on white), at the card's bottom. */
 .shift-hub .shift-card__action.mk-btn {
   flex: none;
@@ -686,6 +697,11 @@
 
   .shift-hub .shift-card__counterparty {
     display: none;
+  }
+
+  .shift-hub .shift-card__participants {
+    font-size: 15px;
+    line-height: 18px;
   }
 
   .shift-hub .shift-card__fact dt {

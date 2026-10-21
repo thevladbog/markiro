@@ -10,6 +10,12 @@ import { readRefusedCloses } from "../close/shift-close.js";
 import { readOutboxStatus, type OutboxStatus } from "../outbox-status.js";
 import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
+import {
+  readParticipations,
+  sharedCount,
+  sharedParticipation,
+  type Participation,
+} from "./shift-participation.js";
 import { opensBlocked } from "../license.js";
 import { queueBadge } from "./hub-layout.js";
 import { readAcceptedCounts } from "./shift-accepted.js";
@@ -110,8 +116,13 @@ export function ShiftList({
   useEffect(() => {
     let cancelled = false;
     const pairing = { hostId, deviceId };
-    Promise.all([readShiftCopies(local, pairing, lineId), readRefusedCloses(local, pairing)])
-      .then(async ([read, refused]) => {
+    Promise.all([
+      readShiftCopies(local, pairing, lineId),
+      readRefusedCloses(local, pairing),
+      // Plan 2b: an unreadable cache leaves the cards as in stage 2a, never the list unread.
+      readParticipations(local, pairing).catch(() => new Map<string, Participation>()),
+    ])
+      .then(async ([read, refused, participation]) => {
         // Only a shift this station entered and that has a plan can show «Принято N из M».
         const counted = read.filter((copy) => copy.entered && (copy.plannedQty ?? 0) > 0);
         const accepted = await readAcceptedCounts(
@@ -119,11 +130,19 @@ export function ShiftList({
           pairing,
           counted.map((copy) => copy.id),
         );
-        return { read, refused, accepted };
+        // A shared shift's progress is the whole shift's: the others' part by the host and this
+        // station's own codes (plan 2b, the plan is reached by the shift-wide total).
+        for (const [id, own] of accepted) {
+          const shared = sharedParticipation(participation.get(id) ?? null);
+          if (shared !== null) accepted.set(id, sharedCount(shared, deviceId, own).total);
+        }
+        return { read, refused, accepted, participation };
       })
       .then(
-        ({ read, refused, accepted }) => {
-          if (!cancelled) setCopies({ kind: "ready", copies: read, refused, accepted });
+        ({ read, refused, accepted, participation }) => {
+          if (!cancelled) {
+            setCopies({ kind: "ready", copies: read, refused, accepted, participation });
+          }
         },
         () => {
           if (!cancelled) setCopies({ kind: "failed" });
