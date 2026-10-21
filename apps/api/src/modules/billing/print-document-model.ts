@@ -162,6 +162,7 @@ const PRINT_UNIT_LABELS: Readonly<Record<string, string>> = {
   service: "услуга",
   right: "право",
   work: "работа",
+  period: "период",
   month: "мес.",
   year: "год",
 };
@@ -173,6 +174,7 @@ function printUnitLabel(unit: string): string {
 function commercialPrintUnit(value: unknown, legacyUnit: string): string {
   const terms = readStoredCommercialTerms(value);
   if (terms?.version === 2) return "мес.";
+  if (terms?.version === 3) return "период";
   if (terms?.subject !== "software_license") return printUnitLabel(legacyUnit);
   return terms.billingPeriod === "year" ? "год" : "мес.";
 }

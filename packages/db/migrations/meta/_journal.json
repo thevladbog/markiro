@@ -1380,6 +1380,13 @@
       "when": 1792204487634,
       "tag": "0196_invoice_document_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1792572401482,
+      "tag": "0197_explicit_term_plan_lines",
+      "breakpoints": true
     }
   ]
 }

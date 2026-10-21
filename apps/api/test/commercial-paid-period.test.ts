@@ -991,6 +991,326 @@ describe.skipIf(!process.env.DATABASE_URL)("frozen paid commercial periods", () 
     expect((await billing.get(draft.id)).status).toBe("draft");
   });
 
+  async function explicitTermFixture() {
+    const tenantId = await createOrganization(db);
+    await db.insert(schema.tenantBillingProfiles).values({
+      tenantId,
+      revision: 1,
+      kind: "legal_entity",
+      fullName: "Buyer",
+      displayName: "Buyer",
+      inn: "7710140679",
+      addressRaw: "Moscow",
+      legalAddressRaw: "Moscow",
+      isConfirmed: true,
+      confirmedByPlatformUserId: actor.userId,
+      confirmedAt: new Date(),
+      createdByPlatformUserId: actor.userId,
+    });
+    const [seller] = await db
+      .select({ revision: schema.operatorBillingProfiles.revision })
+      .from(schema.operatorBillingProfiles)
+      .where(eq(schema.operatorBillingProfiles.isCurrent, true));
+    const sellerPolicyRevision = seller?.revision ?? 1;
+    const versionId = randomUUID(),
+      itemId = randomUUID();
+    await db.insert(schema.catalogItems).values({
+      id: itemId,
+      code: `term-${itemId}`,
+      kind: "plan",
+      nameRu: "Term plan",
+      nameEn: "Plan",
+    });
+    await db.insert(schema.catalogItemVersions).values({
+      id: versionId,
+      catalogItemId: itemId,
+      kind: "plan",
+      version: 1,
+      nameRu: "Term plan",
+      nameEn: "Plan",
+      documentNameRu: terms.documentNameRu,
+      documentNameEn: terms.documentNameEn,
+      subject: "software_license",
+      sellerPolicyRevision,
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "10000.00",
+      vatIncluded: false,
+    });
+    await db.insert(schema.planEntitlements).values({
+      catalogVersionId: versionId,
+      maxLines: 1,
+      maxStations: 1,
+      maxKiosks: 0,
+      maxCabinetUsers: 1,
+    });
+    await db
+      .update(schema.catalogItemVersions)
+      .set({ status: "published", publishedAt: new Date() })
+      .where(eq(schema.catalogItemVersions.id, versionId));
+    const explicit: {
+      version: 3;
+      subject: "software_license";
+      documentNameRu: string;
+      documentNameEn: string | null;
+      sellerPolicyRevision: number;
+      billingPeriod: "custom";
+      billingTimezone: "Europe/Moscow";
+      activationRule: "on_application" | "after_current";
+      termStart: string;
+      termEnd: string;
+    } = {
+      version: 3,
+      subject: "software_license",
+      documentNameRu: terms.documentNameRu,
+      documentNameEn: terms.documentNameEn,
+      sellerPolicyRevision,
+      billingPeriod: "custom",
+      billingTimezone: "Europe/Moscow",
+      activationRule: "on_application",
+      termStart: "2026-11-01",
+      termEnd: "2027-05-27",
+    };
+    return { tenantId, versionId, explicit };
+  }
+  async function issueAndPayExplicit(
+    fixture: Awaited<ReturnType<typeof explicitTermFixture>>,
+    activationPolicy: "immediate" | "after_current" = "immediate",
+  ) {
+    const draft = await billing.create(
+      actor,
+      {
+        tenantId: fixture.tenantId,
+        applicationMode: "manual",
+        lines: [
+          {
+            kind: "plan",
+            catalogVersionId: fixture.versionId,
+            quantity: 1,
+            agreedUnitPrice: "70000.00",
+            vatRateBps: null,
+            vatIncluded: false,
+            activationPolicy,
+            commercialTerms: fixture.explicit,
+          },
+        ],
+      },
+      4,
+    );
+    const issued = await billing.issue(actor, draft.id);
+    await payments.recordManual(actor, draft.id, {
+      amount: "70000.00",
+      paidAt: new Date("2026-08-01T09:00:00Z"),
+      bankReference: randomUUID(),
+      idempotencyKey: randomUUID(),
+    });
+    return { id: draft.id, issued };
+  }
+
+  it("sells a plan for an explicit date term at an agreed total with a term unit", async () => {
+    clock();
+    const fixture = await explicitTermFixture();
+    const sold = await issueAndPayExplicit(fixture);
+    const detail = await billing.get(sold.id);
+    expect(detail.lines[0]).toMatchObject({
+      quantity: 1,
+      unit: "period",
+      commercialTerms: fixture.explicit,
+      agreedUnitPrice: "70000.00",
+      lineTotal: "70000.00",
+    });
+    expect(detail.total).toBe("70000.00");
+    const model = toInvoicePrintModel(detail);
+    expect(model.lines[0]?.unit).toBe("период");
+    expect(model.lines[0]?.description).toContain("с 01.11.2026 по 27.05.2027");
+    expect(model.lines[0]?.description).not.toContain("1 месяц");
+
+    const result = await application.apply(actor, sold.id, {
+      lines: [{ lineId: detail.lines[0]!.id }],
+      reason: "Confirmed payment application",
+    });
+    expect(result.status).toBe("applied");
+    const [subscription, ...rest] = await db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, fixture.tenantId));
+    expect(rest).toEqual([]);
+    expect(subscription).toMatchObject({
+      status: "scheduled",
+      source: "paid_invoice_line",
+    });
+    expect(subscription?.startsAt?.toISOString()).toBe("2026-10-31T21:00:00.000Z");
+    expect(subscription?.endsAt?.toISOString()).toBe("2027-05-27T21:00:00.000Z");
+    expect(subscription?.commercialPeriod).toMatchObject({
+      billingPeriod: "custom",
+      cycle: 0,
+      startsAt: "2026-10-31T21:00:00.000Z",
+      endsAt: "2027-05-27T21:00:00.000Z",
+    });
+  });
+
+  it("starts a backdated explicit term active at its own start without shifting its dates", async () => {
+    clock("2026-12-01T09:00:00.000Z");
+    const fixture = await explicitTermFixture();
+    const sold = await issueAndPayExplicit(fixture);
+    const detail = await billing.get(sold.id);
+    await application.apply(actor, sold.id, {
+      lines: [{ lineId: detail.lines[0]!.id }],
+      reason: "Confirmed payment application",
+    });
+    const [subscription] = await db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, fixture.tenantId));
+    expect(subscription?.status).toBe("active");
+    expect(subscription?.startsAt?.toISOString()).toBe("2026-10-31T21:00:00.000Z");
+    expect(subscription?.endsAt?.toISOString()).toBe("2027-05-27T21:00:00.000Z");
+  });
+
+  it("rejects an explicit term that has already ended at application time", async () => {
+    clock("2027-06-01T09:00:00.000Z");
+    const fixture = await explicitTermFixture();
+    const sold = await issueAndPayExplicit(fixture);
+    const detail = await billing.get(sold.id);
+    const result = await application.apply(actor, sold.id, {
+      lines: [{ lineId: detail.lines[0]!.id }],
+      reason: "Confirmed payment application",
+    });
+    expect(result.results[0]).toMatchObject({ status: "failed" });
+    expect(
+      await db
+        .select()
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, fixture.tenantId)),
+    ).toEqual([]);
+  });
+
+  it("freezes an explicit term on an offer line with the term unit and agreed total", async () => {
+    clock();
+    const fixture = await explicitTermFixture();
+    const created = await offers.create(
+      actor,
+      {
+        tenantId: fixture.tenantId,
+        lines: [
+          {
+            kind: "plan",
+            catalogVersionId: fixture.versionId,
+            nameRu: "Term plan",
+            nameEn: "Plan",
+            unit: "month",
+            quantity: 1,
+            agreedUnitPrice: "70000.00",
+            vatRateBps: null,
+            vatIncluded: false,
+            activationPolicy: "immediately",
+            priceOverrideReason: "Whole-term amount agreed with the customer",
+            commercialTerms: fixture.explicit,
+          },
+        ],
+      },
+      4,
+    );
+    expect(created.lines[0]).toMatchObject({
+      quantity: 1,
+      unit: "period",
+      commercialTerms: fixture.explicit,
+      lineTotal: "70000.00",
+    });
+  });
+
+  it("never overlaps a base term or a second scheduled term and keeps explicit dates", async () => {
+    clock("2026-12-01T09:00:00.000Z");
+    const fixture = await explicitTermFixture();
+    const first = await issueAndPayExplicit(fixture);
+    const firstDetail = await billing.get(first.id);
+    await application.apply(actor, first.id, {
+      lines: [{ lineId: firstDetail.lines[0]!.id }],
+      reason: "Confirmed payment application",
+    });
+    const later = {
+      ...fixture,
+      explicit: { ...fixture.explicit, termStart: "2027-05-01", termEnd: "2027-12-31" },
+    };
+    const overlapping = await issueAndPayExplicit(later);
+    const overlappingDetail = await billing.get(overlapping.id);
+    const overlap = await application.apply(actor, overlapping.id, {
+      lines: [{ lineId: overlappingDetail.lines[0]!.id }],
+      reason: "Confirmed payment application",
+    });
+    expect(overlap.results[0]).toMatchObject({
+      status: "failed",
+      errorCode: "subscription_term_overlaps_current",
+    });
+    const adjacent = await issueAndPayExplicit(
+      {
+        ...later,
+        explicit: { ...later.explicit, termStart: "2027-05-28", activationRule: "after_current" },
+      },
+      "after_current",
+    );
+    const adjacentDetail = await billing.get(adjacent.id);
+    await application.apply(actor, adjacent.id, {
+      lines: [{ lineId: adjacentDetail.lines[0]!.id }],
+      reason: "Confirmed payment application",
+    });
+    const rows = await db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, fixture.tenantId))
+      .orderBy(schema.tenantSubscriptions.startsAt);
+    expect(
+      rows.map((row) => [row.status, row.startsAt?.toISOString(), row.endsAt?.toISOString()]),
+    ).toEqual([
+      ["active", "2026-10-31T21:00:00.000Z", "2027-05-27T21:00:00.000Z"],
+      ["scheduled", "2027-05-27T21:00:00.000Z", "2027-12-31T21:00:00.000Z"],
+    ]);
+  });
+
+  it("refuses explicit terms on the wrong line kind, quantity, dates or stale catalog terms", async () => {
+    clock();
+    const fixture = await explicitTermFixture();
+    const base = {
+      tenantId: fixture.tenantId,
+      applicationMode: "manual" as const,
+    };
+    const line = {
+      kind: "plan" as const,
+      catalogVersionId: fixture.versionId,
+      quantity: 1,
+      agreedUnitPrice: "70000.00",
+      vatRateBps: null,
+      vatIncluded: false,
+      activationPolicy: "immediate" as const,
+      commercialTerms: fixture.explicit,
+    };
+    await expect(
+      billing.create(actor, { ...base, lines: [{ ...line, quantity: 2 }] }, 4),
+    ).rejects.toMatchObject({ name: "ZodError" });
+    await expect(
+      billing.create(actor, { ...base, lines: [{ ...line, kind: "addon" as never }] }, 4),
+    ).rejects.toMatchObject({ name: "ZodError" });
+    await expect(
+      billing.create(
+        actor,
+        {
+          ...base,
+          lines: [
+            {
+              ...line,
+              commercialTerms: { ...fixture.explicit, documentNameRu: "Подмена названия" },
+            },
+          ],
+        },
+        4,
+      ),
+    ).rejects.toMatchObject({ response: { code: "commercial_review_stale" } });
+    expect(
+      await db.select().from(schema.invoices).where(eq(schema.invoices.tenantId, fixture.tenantId)),
+    ).toEqual([]);
+  });
+
   it("serializes real stored seller profiles on negotiated PUT and GET without leaking legacy aliases", async () => {
     const controller = new BillingProfilesController(
       new BillingProfilesService(db, new PlatformAuditService()),

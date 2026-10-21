@@ -937,6 +937,10 @@
       "actions": "Actions"
     },
     "quantityFor": "Quantity for {{name}}",
+    "termStartFor": "Valid from, {{name}}",
+    "termEndFor": "Valid through (inclusive), {{name}}",
+    "termHint": "Dated term: quantity stays 1, enter the price for the whole term. Empty means the catalog term.",
+    "termLabel": "Term {{start}} — {{end}}",
     "priceFor": "Price for {{name}}",
     "commentFor": "Comment for {{name}}",
     "priceOverrideReasonFor": "Price change reason for {{name}}",
@@ -990,7 +994,11 @@
       "activation_policy_unsupported": "Activation policy is unavailable",
       "commercial_plan_sequence_invalid": "Use one plan or two in order: on payment application, then after the current term.",
       "commercial_plan_sequence_review_required": "Review the plan sequence. Apply the first line before its renewal; another line of this sale cannot replace a purchased term.",
-      "commercial_plan_quantity_invalid": "A plan quantity must be 1."
+      "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
+      "term_both_dates_required": "Enter both term dates or clear both",
+      "term_date_invalid": "The date must be formatted YYYY-MM-DD",
+      "term_end_before_start": "The end date cannot be before the start date",
+      "term_requires_catalog_terms": "This catalog item has no document terms, so a dated term is unavailable"
     }
   },
   "reports": {
@@ -1664,6 +1672,8 @@
     "units": {
       "month": "Month",
       "year": "Year",
+      "period": "Period",
+      "custom": "Period",
       "unit": "Unit",
       "hour": "Hour",
       "person": "Person",

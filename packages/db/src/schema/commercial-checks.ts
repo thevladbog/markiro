@@ -32,8 +32,25 @@ export function commercialLineTermsCheck(
         and ${value} ? 'serviceTerms'
         and ${value} - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','serviceTerms'] = '{}'::jsonb
         and ${monthlyServiceTermsCheck(value)})
+      or (${value}->'version' = '3'::jsonb
+        and ${kind}::text = 'plan' and ${quantity} = 1
+        and ${value}->>'subject' = 'software_license'
+        and ${value}->>'billingPeriod' = 'custom'
+        and ${value}->>'billingTimezone' = 'Europe/Moscow'
+        and ${value}->>'activationRule' in ('on_application','after_current')
+        and ${value} ?& array['termStart','termEnd']
+        and ${value} - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','termStart','termEnd'] = '{}'::jsonb
+        and ${civilDateJsonCheck(value, "termStart")}
+        and ${civilDateJsonCheck(value, "termEnd")}
+        and ${value}->>'termStart' <= ${value}->>'termEnd')
     )
   ), false)`;
+}
+
+function civilDateJsonCheck(value: AnyPgColumn, key: string): SQL {
+  const field = sql`${value}->>${sql.raw(`'${key}'`)}`;
+  return sql`(jsonb_typeof(${value}->${sql.raw(`'${key}'`)}) = 'string'
+    and ${field} ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')`;
 }
 
 function monthlyServiceTermsCheck(value: AnyPgColumn): SQL {
@@ -67,7 +84,7 @@ export function commercialPeriodCheck(value: AnyPgColumn): SQL {
     jsonb_typeof(${value}) = 'object'
     and ${value} ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']
     and ${value} - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb
-    and ${value}->>'billingPeriod' in ('month','year') and ${value}->>'billingTimezone' = 'Europe/Moscow'
+    and ${value}->>'billingPeriod' in ('month','year','custom') and ${value}->>'billingTimezone' = 'Europe/Moscow'
     and ${value}->'calendarPolicyVersion' = '1'::jsonb
     and jsonb_typeof(${value}->'cycle') = 'number' and (${value}->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'
     and jsonb_typeof(${value}->'anchorAt') = 'string' and (${value}->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'

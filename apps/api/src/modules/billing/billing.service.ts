@@ -307,7 +307,10 @@ export class BillingService {
         const commercialTerms = sourceLine ? sourceLine.commercialTerms : resolvedTerms;
         const nameRu = resolvedTerms?.documentNameRu ?? version?.nameRu ?? line.nameRu;
         const nameEn = resolvedTerms?.documentNameEn ?? version?.nameEn ?? line.nameEn;
-        const unit = resolvedTerms?.billingPeriod ?? version?.unit ?? line.unit;
+        const unit =
+          resolvedTerms?.billingPeriod === "custom" || sourceLine?.unit === "period"
+            ? "period"
+            : (resolvedTerms?.billingPeriod ?? version?.unit ?? line.unit);
         if (!nameRu || !nameEn || !unit)
           throw new BadRequestException({ code: "invoice_line_name_required" });
         const vatRateBps =

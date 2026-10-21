@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCommercialPeriod } from "@markiro/domain";
+import { resolveCommercialPeriod, resolveExplicitCommercialPeriod } from "@markiro/domain";
 import * as contracts from "../src/index.js";
 
 const plan = {
@@ -264,4 +264,74 @@ it.each([
   expect(
     contracts.offerCreateV2Schema.safeParse({ tenantId, lines: [...lines, lines[0]] }).success,
   ).toBe(false);
+});
+
+describe("explicit term plan line", () => {
+  const explicit = {
+    version: 3,
+    ...metadata,
+    billingPeriod: "custom",
+    billingTimezone: "Europe/Moscow",
+    activationRule: "on_application",
+    termStart: "2026-11-01",
+    termEnd: "2027-05-27",
+  };
+
+  it("accepts a strict inclusive civil-date term and rejects malformed ones", () => {
+    expect(contracts.commercialLineTermsV4Schema.parse(explicit)).toEqual(explicit);
+    for (const invalid of [
+      { ...explicit, termEnd: "2026-10-31" },
+      { ...explicit, termStart: "2026-11-1" },
+      { ...explicit, termEnd: "2027-02-30" },
+      { ...explicit, billingPeriod: "month" },
+      { ...explicit, subject: "service" },
+      { ...explicit, termStart: undefined },
+      { ...explicit, extra: true },
+    ])
+      expect(contracts.commercialLineTermsV4Schema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("is limited to plan lines with quantity one", () => {
+    const line = { kind: "plan", quantity: 1, commercialTerms: explicit } as const;
+    const issues = (value: Parameters<typeof contracts.validateCommercialLineKind>[0]) => {
+      const found: unknown[] = [];
+      contracts.validateCommercialLineKind(value, {
+        addIssue: (issue: unknown) => found.push(issue),
+      } as never);
+      return found;
+    };
+    expect(issues(line)).toEqual([]);
+    expect(issues({ ...line, quantity: 2 })).not.toEqual([]);
+    expect(issues({ ...line, kind: "addon" })).not.toEqual([]);
+  });
+
+  it("orders an explicit-term plan by its activation rule", () => {
+    expect(
+      contracts.isCommercialPlanSequenceValid([
+        { kind: "plan", commercialTerms: explicit },
+        { kind: "plan", commercialTerms: { ...explicit, activationRule: "after_current" } },
+      ]),
+    ).toBe(true);
+    expect(
+      contracts.isCommercialPlanSequenceValid([
+        { kind: "plan", commercialTerms: { ...explicit, activationRule: "after_current" } },
+        { kind: "plan", commercialTerms: explicit },
+      ]),
+    ).toBe(false);
+  });
+
+  it("validates a custom commercial period against its civil term", () => {
+    const period = resolveExplicitCommercialPeriod({
+      termStart: "2026-11-01",
+      termEnd: "2027-05-27",
+    });
+    expect(contracts.commercialPeriodSchema.parse(period)).toEqual(period);
+    for (const invalid of [
+      { ...period, endsAt: "2027-05-27T20:00:00.000Z" },
+      { ...period, cycle: 1 },
+      { ...period, anchorAt: "2026-11-01T21:00:00.000Z" },
+      { ...period, startsAt: "2026-10-31T21:00:01.000Z", anchorAt: "2026-10-31T21:00:01.000Z" },
+    ])
+      expect(contracts.commercialPeriodSchema.safeParse(invalid).success).toBe(false);
+  });
 });

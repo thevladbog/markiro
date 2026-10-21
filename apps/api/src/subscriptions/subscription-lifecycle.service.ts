@@ -11,11 +11,15 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { resolveCommercialPeriod, type CommercialPeriod } from "@markiro/domain";
 import {
-  commercialLineTermsSchema,
+  resolveCommercialPeriod,
+  resolveExplicitCommercialPeriod,
+  type CommercialPeriod,
+} from "@markiro/domain";
+import {
+  commercialLineTermsV4Schema,
   commercialPeriodSchema,
-  type CommercialLineTerms,
+  type CommercialLineTermsV4,
 } from "@markiro/platform-contracts";
 import { SubscriptionEntitlementsInvalidException } from "./subscription-errors";
 import {
@@ -34,6 +38,7 @@ type SubscriptionTransaction = Parameters<Db["transaction"]>[0] extends (arg: in
   : never;
 type SubscriptionRow = typeof schema.tenantSubscriptions.$inferSelect;
 type EndedSubscriptionRow = SubscriptionRow & { endsAt: Date };
+type PaidLicenseTerms = Extract<CommercialLineTermsV4, { version: 1 | 3 }>;
 export type PaidLicenseOrigin =
   | { kind: "invoice"; invoiceLineId: string; paymentId: string }
   | { kind: "offer"; offerLineId: string; paymentId: string };
@@ -41,7 +46,7 @@ type AssignmentContext = {
   commercialVersion?: CommercialVersion;
   subscriptionSource: "manual" | "paid_invoice_line" | "paid_offer_line";
   sourceOfferLineId?: string;
-  paid?: { terms: CommercialLineTerms; operationAt: Date; origin: PaidLicenseOrigin };
+  paid?: { terms: PaidLicenseTerms; operationAt: Date; origin: PaidLicenseOrigin };
   sourceInvoiceLineId: string | null;
   eventSource: "platform_manual" | "paid_invoice_line" | "paid_offer_line";
   auditScope: "platform" | "billing";
@@ -265,8 +270,12 @@ export class SubscriptionLifecycleService {
       reason: string;
     },
   ): Promise<SubscriptionRow | typeof schema.subscriptionAddons.$inferSelect> {
-    const parsed = commercialLineTermsSchema.safeParse(input.line.commercialTerms);
-    if (!parsed.success || parsed.data.subject !== "software_license") {
+    const parsed = commercialLineTermsV4Schema.safeParse(input.line.commercialTerms);
+    if (
+      !parsed.success ||
+      parsed.data.version === 2 ||
+      parsed.data.subject !== "software_license"
+    ) {
       throw new ConflictException({ code: "commercial_terms_review_required" });
     }
     if (input.line.kind === "plan" && input.line.quantity !== 1) {
@@ -384,7 +393,29 @@ export class SubscriptionLifecycleService {
     const before = current ? subscriptionSnapshot(current) : null;
     let startsAt: Date;
     let status: "active" | "scheduled";
-    if (input.activationPolicy === "after_current" && current) {
+    const explicitPeriod =
+      context.paid?.terms.version === 3 ? paidPeriod(context.paid.terms, operationAt, null) : null;
+    if (explicitPeriod) {
+      // Dates are authoritative: an explicit term never shifts to the payment or current-term end.
+      startsAt = new Date(explicitPeriod.startsAt);
+      const overlapsCurrent = Boolean(current && (!current.endsAt || current.endsAt > startsAt));
+      if (input.activationPolicy === "after_current") {
+        if (!current) throw new ConflictException({ code: "subscription_timeline_changed" });
+        if (existingScheduled)
+          throw new ConflictException({ code: "subscription_schedule_exists" });
+        if (overlapsCurrent)
+          throw new ConflictException({ code: "subscription_term_overlaps_current" });
+        status = "scheduled";
+      } else if (startsAt > operationAt) {
+        if (existingScheduled)
+          throw new ConflictException({ code: "subscription_schedule_exists" });
+        if (overlapsCurrent)
+          throw new ConflictException({ code: "subscription_term_overlaps_current" });
+        status = "scheduled";
+      } else {
+        status = "active";
+      }
+    } else if (input.activationPolicy === "after_current" && current) {
       if (existingScheduled) {
         throw new ConflictException({ code: "subscription_schedule_exists" });
       }
@@ -937,11 +968,9 @@ function addonSnapshot(addon: typeof schema.subscriptionAddons.$inferSelect) {
   };
 }
 
-function paidPeriod(
-  terms: CommercialLineTerms,
-  startsAt: Date,
-  previous: unknown,
-): CommercialPeriod {
+function paidPeriod(terms: PaidLicenseTerms, startsAt: Date, previous: unknown): CommercialPeriod {
+  if (terms.version === 3)
+    return resolveExplicitCommercialPeriod({ termStart: terms.termStart, termEnd: terms.termEnd });
   if (!terms.billingPeriod)
     throw new ConflictException({ code: "commercial_terms_review_required" });
   const retained = commercialPeriodSchema.safeParse(previous);

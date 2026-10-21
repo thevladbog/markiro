@@ -1,7 +1,7 @@
 export type CommercialBillingPeriod = "month" | "year";
 
 export type CommercialPeriod = {
-  billingPeriod: CommercialBillingPeriod;
+  billingPeriod: CommercialBillingPeriod | "custom";
   billingTimezone: "Europe/Moscow";
   calendarPolicyVersion: 1;
   anchorAt: string;
@@ -85,6 +85,83 @@ export function resolveCommercialPeriod(input: {
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
   };
+}
+
+const CIVIL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function parseCivilDate(value: string): { year: number; month: number; day: number } {
+  const match = CIVIL_DATE_PATTERN.exec(value);
+  const year = Number(match?.[1]);
+  const month = Number(match?.[2]);
+  const day = Number(match?.[3]);
+  if (
+    match === null ||
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month)
+  ) {
+    throw new RangeError("Invalid commercial civil date");
+  }
+  return { year, month, day };
+}
+
+/** An explicit term covers the Moscow civil dates termStart..termEnd inclusive. */
+export function resolveExplicitCommercialPeriod(input: {
+  termStart: string;
+  termEnd: string;
+}): CommercialPeriod {
+  const start = parseCivilDate(input.termStart);
+  const end = parseCivilDate(input.termEnd);
+  if (input.termEnd < input.termStart) {
+    throw new RangeError("Commercial term must not end before it starts");
+  }
+  const midnight = { hour: 0, minute: 0, second: 0, millisecond: 0 };
+  const dayAfterEnd = new Date(0);
+  dayAfterEnd.setUTCFullYear(end.year, end.month - 1, end.day + 1);
+  if (dayAfterEnd.getUTCFullYear() > 9_999) {
+    throw new RangeError("Commercial period exceeds the supported date range");
+  }
+  const startsAt = instantFromMoscowDateTime({ ...start, ...midnight });
+  const endsAt = instantFromMoscowDateTime({
+    year: dayAfterEnd.getUTCFullYear(),
+    month: dayAfterEnd.getUTCMonth() + 1,
+    day: dayAfterEnd.getUTCDate(),
+    ...midnight,
+  });
+  return {
+    billingPeriod: "custom",
+    billingTimezone: BILLING_TIMEZONE,
+    calendarPolicyVersion: CALENDAR_POLICY_VERSION,
+    anchorAt: startsAt.toISOString(),
+    cycle: 0,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+  };
+}
+
+/** Recovers the civil dates of an explicit period; throws unless both bounds are Moscow midnights. */
+export function explicitCommercialPeriodTerm(period: { startsAt: string; endsAt: string }): {
+  termStart: string;
+  termEnd: string;
+} {
+  const pad = (value: number, width: number) => String(value).padStart(width, "0");
+  const civil = (date: Date) => {
+    const parts = dateTimeParts(date);
+    return {
+      text: `${pad(parts.year, 4)}-${pad(parts.month, 2)}-${pad(parts.day, 2)}`,
+      midnight:
+        parts.hour === 0 && parts.minute === 0 && parts.second === 0 && parts.millisecond === 0,
+    };
+  };
+  const starts = civil(parseIsoInstant(period.startsAt));
+  const endsAt = parseIsoInstant(period.endsAt);
+  const ends = civil(endsAt);
+  if (!starts.midnight || !ends.midnight) {
+    throw new RangeError("Explicit commercial period must lie on Moscow midnights");
+  }
+  return { termStart: starts.text, termEnd: civil(new Date(endsAt.getTime() - 1)).text };
 }
 
 export function commercialTaxDefaults(policy: SellerTaxPolicy): CommercialTax {

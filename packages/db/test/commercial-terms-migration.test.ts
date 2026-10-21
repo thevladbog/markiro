@@ -259,6 +259,60 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
       ]),
     ).rejects.toMatchObject({ code: "23514" });
   });
+  it("accepts explicit-term plan snapshots and custom periods only in their exact shape", async () => {
+    const terms = {
+      version: 3,
+      subject: "software_license",
+      documentNameRu: "Лицензия",
+      documentNameEn: null,
+      sellerPolicyRevision: 1,
+      billingPeriod: "custom",
+      billingTimezone: "Europe/Moscow",
+      activationRule: "on_application",
+      termStart: "2026-11-01",
+      termEnd: "2027-05-27",
+    };
+    const setTerms = (value: unknown) =>
+      pool.query("UPDATE invoice_lines SET commercial_terms=$1 WHERE id=$2", [
+        JSON.stringify(value),
+        invoiceLineId,
+      ]);
+    await setTerms(terms);
+    await expect(
+      pool.query("UPDATE invoice_lines SET quantity=2 WHERE id=$1", [invoiceLineId]),
+    ).rejects.toMatchObject({ code: "23514" });
+    for (const invalid of [
+      { ...terms, termEnd: "2026-10-31" },
+      { ...terms, termStart: "2026-11-1" },
+      { ...terms, termStart: "2026-13-01" },
+      { ...terms, billingPeriod: "month" },
+      { ...terms, extra: true },
+      { ...terms, termEnd: undefined },
+    ])
+      await expect(setTerms(invalid)).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query("UPDATE invoice_lines SET kind='addon' WHERE id=$1", [invoiceLineId]),
+    ).rejects.toMatchObject({ code: "23514" });
+    const period = {
+      billingPeriod: "custom",
+      billingTimezone: "Europe/Moscow",
+      calendarPolicyVersion: 1,
+      anchorAt: "2026-10-31T21:00:00.000Z",
+      cycle: 0,
+      startsAt: "2026-10-31T21:00:00.000Z",
+      endsAt: "2027-05-27T21:00:00.000Z",
+    };
+    await pool.query("UPDATE tenant_subscriptions SET commercial_period=$1 WHERE id=$2", [
+      JSON.stringify(period),
+      subscriptionId,
+    ]);
+    await expect(
+      pool.query("UPDATE tenant_subscriptions SET commercial_period=$1 WHERE id=$2", [
+        JSON.stringify({ ...period, billingPeriod: "weekly" }),
+        subscriptionId,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
   it("stores explicit tax policies and anchored periods without changing legacy date columns", async () => {
     const period = {
       billingPeriod: "month",

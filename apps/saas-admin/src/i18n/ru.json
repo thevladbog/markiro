@@ -937,6 +937,10 @@
       "actions": "Действия"
     },
     "quantityFor": "Количество {{name}}",
+    "termStartFor": "Действует с, {{name}}",
+    "termEndFor": "Действует по (включительно), {{name}}",
+    "termHint": "Срок по датам: количество остаётся 1, цену указывайте за весь срок. Пусто — срок из каталога.",
+    "termLabel": "Срок {{start}} — {{end}}",
     "priceFor": "Цена {{name}}",
     "commentFor": "Комментарий {{name}}",
     "priceOverrideReasonFor": "Причина изменения цены {{name}}",
@@ -990,7 +994,11 @@
       "activation_policy_unsupported": "Политика активации недоступна",
       "commercial_plan_sequence_invalid": "Допустим один тариф или два по порядку: сначала с момента применения оплаты, затем после текущего срока.",
       "commercial_plan_sequence_review_required": "Последовательность тарифов требует проверки. Примените первую строку раньше продления; ранее купленный срок нельзя заменить другой строкой этой продажи.",
-      "commercial_plan_quantity_invalid": "Количество тарифа должно быть равно 1."
+      "commercial_plan_quantity_invalid": "Количество тарифа должно быть равно 1.",
+      "term_both_dates_required": "Укажите обе даты срока или очистите обе",
+      "term_date_invalid": "Дата должна быть в формате ГГГГ-ММ-ДД",
+      "term_end_before_start": "Дата окончания не может быть раньше начала",
+      "term_requires_catalog_terms": "У позиции каталога нет документных условий, срок по датам недоступен"
     }
   },
   "reports": {
@@ -1664,6 +1672,8 @@
     "units": {
       "month": "Месяц",
       "year": "Год",
+      "period": "Период",
+      "custom": "Период",
       "unit": "Штука",
       "hour": "Час",
       "person": "Человек",
@@ -2431,6 +2441,7 @@
       "activation_delivery_changed": "Состояние доставки изменилось. Обновите страницу и повторите.",
       "owner_already_activated": "Владелец уже активирован",
       "subscription_schedule_exists": "Следующий тариф уже запланирован",
+      "subscription_term_overlaps_current": "Срок по датам пересекается с текущим тарифом клиента. Начните его после окончания текущего срока.",
       "subscription_compatible_plan_required": "Нет совместимого тарифа для дополнения",
       "published_catalog_version_required": "Версия больше не доступна для назначения",
       "effective_at_out_of_range": "Дата начала вне допустимого диапазона",
