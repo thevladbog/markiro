@@ -1,6 +1,7 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DeviceRecord } from "../src/host/protocol.js";
 import { drawerTabs } from "../src/office/shifts/ShiftDrawer.js";
 import {
   ACTIVE,
@@ -13,8 +14,20 @@ import {
   participant,
   HANDHELD_ID,
   PARTICIPANT_B,
+  STATION_ID,
 } from "./support/shifts.js";
 import type { FakeOfficeSession } from "./support/office.js";
+
+const deviceRecord = (id: string, revokedAt: string | null): DeviceRecord => ({
+  id,
+  kind: "station",
+  name: "Станция",
+  lineId: null,
+  appVersion: "0.1.0",
+  pairedAt: "2026-09-26T09:15:00Z",
+  lastSeenAt: null,
+  revokedAt,
+});
 
 const UNITS = new Intl.NumberFormat("ru");
 /** Four minutes after the station last spoke (09:41); the handheld spoke at the same time. */
@@ -101,6 +114,23 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
     const nameless = { ...SHARED, participants: [participant({ deviceName: "" })] };
     await openCard(shiftsSession([nameless]), "OCT26-004", "Станции");
     expect(stationsRows()[0]?.[0]).toMatch(/^Устройство 7c9e6679….*Станция/);
+  });
+
+  it("keeps a revoked device listed, marked, and still not closed: it blocks the automatic close", async () => {
+    const session = shiftsSession([SHARED]);
+    session.api.listDevices.mockResolvedValue([
+      deviceRecord(STATION_ID, "2026-10-08T12:00:00Z"),
+      deviceRecord(HANDHELD_ID, null),
+    ]);
+    await openCard(session, "OCT26-004", "Станции");
+    await waitFor(() => expect(stationsRows()[0]?.[0]).toContain("Устройство отозвано"));
+    expect(stationsRows()[1]?.[0]).not.toContain("отозвано");
+    expect(stationsRows().map((row) => row[2])).toEqual(["▸Работает", "▸Работает"]);
+  });
+
+  it("marks nothing while the devices are unread", async () => {
+    await openCard(shiftsSession([SHARED]), "OCT26-004", "Станции");
+    expect(stationsRows()[0]?.[0]).not.toContain("отозвано");
   });
 
   it("says a paused device is paused, and shows no silence for it", async () => {

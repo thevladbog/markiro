@@ -72,6 +72,13 @@ describe("the devices' participation in a shift (plan 2b)", () => {
     expect(within(rowOf("Станция упаковки")).queryByText(/смене/)).toBeNull();
   });
 
+  it("does not say a revoked device works the shift: the host frees its slot", async () => {
+    const revoked = { ...STATION, revokedAt: "2026-10-08T12:00:00Z" };
+    await openDevices(session([SHARED], [revoked, HANDHELD, IDLE]));
+    await waitFor(() => expect(within(rowOf("ТСД 1")).getByText("В смене OCT26-004")).toBeTruthy());
+    expect(within(rowOf("Станция линии 1")).queryByText(/смене/)).toBeNull();
+  });
+
   it("tells a paused device and one that closed its part from one at work, in a word and a glyph", async () => {
     const shift = {
       ...SHARED,

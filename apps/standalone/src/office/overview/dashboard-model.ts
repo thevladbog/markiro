@@ -159,6 +159,7 @@ function cardFor(
   products: readonly OfficeProduct[],
   nowMs: number,
   today: string,
+  revoked: ReadonlySet<string>,
 ): LineCard {
   const own = shifts.filter((shift) => shift.lineId === line.id);
   const shift =
@@ -209,7 +210,7 @@ function cardFor(
   const stations =
     shift.participants === undefined || limit <= 1
       ? null
-      : { active: activeParticipants(shift).length, max: limit };
+      : { active: activeParticipants(shift, revoked).length, max: limit };
   return {
     line,
     status: idle ? "idle" : "running",
@@ -240,9 +241,10 @@ export function lineCards(
   products: readonly OfficeProduct[],
   nowMs: number,
   today: string,
+  revoked: ReadonlySet<string> = new Set(),
 ): { cards: LineCard[]; hidden: number; all: LineCard[] } {
   const all = lines
-    .map((line) => cardFor(line, shifts, products, nowMs, today))
+    .map((line) => cardFor(line, shifts, products, nowMs, today, revoked))
     .filter((card) => !card.line.archived || card.shift !== null)
     .sort(
       (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || byName(a.line.name, b.line.name),

@@ -37,6 +37,7 @@ import { ShiftsPanel } from "./overview/ShiftsPanel.js";
 import { SystemPanel } from "./overview/SystemPanel.js";
 import { blockState, useOverviewData } from "./overview/use-overview-data.js";
 import { officeKeys, useOfficeQuery } from "./office-query.js";
+import { revokedDeviceIds } from "./shifts/participation.js";
 import { useViewportWidth } from "./use-viewport-width.js";
 import "./overview/overview.css";
 
@@ -74,9 +75,14 @@ export function OfficeOverview() {
   const days = useMemo(() => recentDays(shifts, today, 7), [shifts, today]);
   const todayFigures = dayFigures(shifts, today);
   const yesterdayFigures = dayFigures(shifts, data.yesterday);
+  // The host frees a revoked device's slot: the devices list (an administrator's) says which.
+  const revoked = useMemo(
+    () => revokedDeviceIds(admin ? data.devices.data : undefined),
+    [admin, data.devices.data],
+  );
   const cards = useMemo(
-    () => lineCards(shifts, data.lines.data ?? [], data.products.data ?? [], nowMs, today),
-    [shifts, data.lines.data, data.products.data, nowMs, today],
+    () => lineCards(shifts, data.lines.data ?? [], data.products.data ?? [], nowMs, today, revoked),
+    [shifts, data.lines.data, data.products.data, nowMs, today, revoked],
   );
 
   const sources = [data.conflicts, data.backups, data.license, ...(admin ? [data.devices] : [])];
@@ -111,7 +117,7 @@ export function OfficeOverview() {
         shiftId: card.shift?.id ?? "",
         minutes: card.idleMinutes ?? 0,
       })),
-    silentParticipants: silentParticipants(shifts, data.lines.data ?? [], nowMs),
+    silentParticipants: silentParticipants(shifts, data.lines.data ?? [], nowMs, revoked),
     reasonMissing: reasonMissingShifts(shifts),
     nowMs,
     pcNowMs: Date.now(),

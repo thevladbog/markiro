@@ -317,7 +317,8 @@ describe("office devices", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
     );
-    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalled());
+    // The table's read failed; the dialog's observer mounts on the errored query and asks once more.
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
     chooseValue("Линия", other.id);
     expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
     expect(within(dialog()).queryByRole("alert")).toBeNull();

@@ -12,6 +12,7 @@ import {
   PARTICIPANT_SILENT_MS,
   participantsOf,
   presenceOf,
+  revokedDeviceIds,
 } from "../src/office/shifts/participation.js";
 import {
   ACTIVE,
@@ -142,5 +143,40 @@ describe("a device's presence in the shifts", () => {
     expect(presenceOf(undefined, STATION_ID)).toBeNull();
     // A shift of an older host names no participants, so the page claims nothing.
     expect(presenceOf([ACTIVE], STATION_ID)).toBeNull();
+  });
+});
+
+describe("a revoked device holds no slot (the host frees it, spec §12.5)", () => {
+  const dev = (id: string, revokedAt: string | null) => ({ id, revokedAt });
+  const REVOKED = revokedDeviceIds([
+    dev(STATION_ID, "2026-10-08T12:00:00Z"),
+    dev(HANDHELD_ID, null),
+  ]);
+
+  it("names the revoked ids of the devices list, and none while it is unread", () => {
+    expect([...REVOKED]).toEqual([STATION_ID]);
+    expect(revokedDeviceIds(undefined).size).toBe(0);
+  });
+
+  it("leaves a revoked active participant out of the active ones, and keeps it among the not closed", () => {
+    expect(activeParticipants(SHARED, REVOKED).map((each) => each.deviceId)).toEqual([HANDHELD_ID]);
+    expect(activeParticipants(SHARED).map((each) => each.deviceId)).toEqual([
+      STATION_ID,
+      HANDHELD_ID,
+    ]);
+    expect(notClosedParticipants(SHARED).map((each) => each.deviceId)).toEqual([
+      STATION_ID,
+      HANDHELD_ID,
+    ]);
+  });
+
+  it("shows no presence for a revoked device, and the usual one for the others", () => {
+    expect(presenceOf([SHARED], STATION_ID, REVOKED)).toBeNull();
+    expect(presenceOf([SHARED], HANDHELD_ID, REVOKED)).toEqual({
+      shiftId: SHARED.id,
+      number: SHARED.number,
+      state: "active",
+    });
+    expect(presenceOf([SHARED], STATION_ID)?.state).toBe("active");
   });
 });

@@ -6,6 +6,7 @@ import {
   lineCards,
   type AttentionInput,
 } from "../src/office/overview/dashboard-model.js";
+import { revokedDeviceIds } from "../src/office/shifts/participation.js";
 import { reasonMissingShifts, silentParticipants } from "../src/office/overview/overview-model.js";
 import {
   ACTIVE,
@@ -194,5 +195,36 @@ describe("«Требует внимания» with several devices (plan 2b)", (
 
   it("is as calm as before when it is given neither", () => {
     expect(attentionItems(CALM)).toEqual([]);
+  });
+});
+
+describe("a revoked device in a shared shift (the host frees its slot)", () => {
+  const REVOKED = revokedDeviceIds([
+    { id: STATION_ID, revokedAt: "2026-10-08T12:00:00Z" },
+    { id: HANDHELD_ID, revokedAt: null },
+  ]);
+
+  it("is not counted in «станций в смене: N из M»", () => {
+    const card = lineCards([WORKING], [THREE], [MILK], NOW, "2026-10-08", REVOKED).cards[0];
+    expect(card?.stations).toEqual({ active: 1, max: 3 });
+    // Nothing known of the devices (a technologist, or not yet read): as before.
+    expect(lineCards([WORKING], [THREE], [MILK], NOW, "2026-10-08").cards[0]?.stations).toEqual({
+      active: 2,
+      max: 3,
+    });
+  });
+
+  it("raises no silent-participant row, while a live silent device still does", () => {
+    const shift: OfficeShift = {
+      ...WORKING,
+      participants: [
+        participant({ lastSeenAt: ago(19) }),
+        { ...PARTICIPANT_B, lastSeenAt: ago(31) },
+      ],
+    };
+    expect(silentParticipants([shift], [THREE], NOW, REVOKED).map((each) => each.deviceId)).toEqual(
+      [HANDHELD_ID],
+    );
+    expect(silentParticipants([shift], [THREE], NOW)).toHaveLength(2);
   });
 });

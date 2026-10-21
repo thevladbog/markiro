@@ -108,12 +108,13 @@ export interface SilentParticipant {
  * participant silent for more than ten minutes, `PARTICIPANT_SILENT_MS`). Only a line whose limit is above
  * one counts: on a line of one the silent station is the plain device row's, as before, so a site that
  * did not turn several devices on sees no new row. `nowMs` is the Overview's clock (the host's time of its
- * latest read), so the mark moves with the 30-second poll, not by itself.
+ * latest read), so the mark moves with the 30-second poll, not by itself. A device in `revoked` is left out.
  */
 export function silentParticipants(
   shifts: readonly OfficeShift[],
   lines: readonly OfficeLine[],
   nowMs: number,
+  revoked: ReadonlySet<string> = new Set(),
 ): SilentParticipant[] {
   const found: SilentParticipant[] = [];
   for (const shift of shifts) {
@@ -121,7 +122,9 @@ export function silentParticipants(
     const line = lines.find((each) => each.id === shift.lineId);
     if (line === undefined || lineMaxStations(line) <= 1) continue;
     for (const each of participantsOf(shift)) {
-      if (!isSilent(each, nowMs)) continue;
+      // A revoked device holds no slot (the host frees it) and the plain silent-device row leaves it
+      // out too: its open part is the card's «Станции» and the forced close's to show, not a standing alarm.
+      if (revoked.has(each.deviceId) || !isSilent(each, nowMs)) continue;
       found.push({
         deviceId: each.deviceId,
         name: each.deviceName,

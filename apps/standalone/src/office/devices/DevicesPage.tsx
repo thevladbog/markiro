@@ -18,7 +18,7 @@ import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
 import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
-import { presenceOf, type Presence } from "../shifts/participation.js";
+import { presenceOf, revokedDeviceIds, type Presence } from "../shifts/participation.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type { DeviceRecord, PairingCode } from "../../host/protocol.js";
 import { pairingCodeRequest } from "../../host/requests.js";
@@ -172,6 +172,8 @@ export function DevicesPage() {
 
   // One reading of the clock for the whole table.
   const now = Date.now();
+  // A revoked device holds no slot of a shift (the host frees it): it is «в смене» nowhere here.
+  const revoked = revokedDeviceIds(devices.data);
   const columns: TableColumn<DeviceRecord>[] = [
     {
       key: "name",
@@ -201,7 +203,7 @@ export function DevicesPage() {
       // The line, and under it the shift the device works, in a word and a glyph (plan 2b): one
       // column, not two, so the table's other columns keep their room at 1280 px.
       render: (device) => {
-        const presence = presenceOf(shifts.data, device.id);
+        const presence = presenceOf(shifts.data, device.id, revoked);
         return (
           <span className="shift-cell">
             <span>{lineLabel(lines.data ?? [], device.lineId, t)}</span>

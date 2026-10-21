@@ -3,7 +3,7 @@ import { z } from "zod";
 import { HostError } from "../../host/client.js";
 import type { DeviceRecord, OfficeShift } from "../../host/protocol.js";
 import { lineNameRule, maxStationsRule } from "../../lib/rules.js";
-import { activeParticipants } from "../shifts/participation.js";
+import { activeParticipants, revokedDeviceIds } from "../shifts/participation.js";
 
 /** The text under the limit when it is lower than the devices at work (`{{count}}` says how many). */
 export const STATIONS_IN_USE = "office.lines.errors.stationsInUse";
@@ -37,14 +37,11 @@ export function activeStationsOnLine(
   devices: readonly DeviceRecord[] | undefined,
 ): number | null {
   if (shifts === undefined || devices === undefined) return null;
-  const revoked = new Set(devices.filter((each) => each.revokedAt !== null).map((each) => each.id));
+  const revoked = revokedDeviceIds(devices);
   let busiest = 0;
   for (const shift of shifts) {
     if (shift.lineId !== lineId || shift.status !== "active") continue;
-    busiest = Math.max(
-      busiest,
-      activeParticipants(shift).filter((each) => !revoked.has(each.deviceId)).length,
-    );
+    busiest = Math.max(busiest, activeParticipants(shift, revoked).length);
   }
   return busiest;
 }

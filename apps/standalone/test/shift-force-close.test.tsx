@@ -166,3 +166,23 @@ it("names a device that did not open the shift", async () => {
   const dialog = await openWhole(shiftsSession([shift]));
   expect(within(dialog).getByText("Не закрыли: ТСД 1 (работает).")).toBeTruthy();
 });
+
+it("still lists a revoked device's open part among those that did not close: only the office can close it", async () => {
+  const session = shiftsSession([SHARED]);
+  session.api.listDevices.mockResolvedValue([
+    {
+      id: SHARED.participants?.[0]?.deviceId ?? "",
+      kind: "station",
+      name: "Станция линии 1",
+      lineId: null,
+      appVersion: "0.1.0",
+      pairedAt: "2026-09-26T09:15:00Z",
+      lastSeenAt: null,
+      revokedAt: "2026-10-08T12:00:00Z",
+    },
+  ]);
+  const dialog = await openWhole(session);
+  expect(
+    within(dialog).getByText("Не закрыли: Станция линии 1 (работает), ТСД 1 (работает)."),
+  ).toBeTruthy();
+});

@@ -24,9 +24,32 @@ export function isSharedShift(shift: WithParticipants): boolean {
   return participantsOf(shift).length > 1;
 }
 
-/** Participants that hold a slot of the line now. */
-export function activeParticipants(shift: WithParticipants): ShiftParticipant[] {
-  return participantsOf(shift).filter((each) => each.state === "active");
+/**
+ * The ids of the revoked devices of a devices list: the host frees a revoked device's slot
+ * (`active_others`, `line_slots_in_use`), so the office leaves it out of «who is at work» too.
+ * Empty while the list is unread (a technologist never reads it, or it has not come yet): the office
+ * then claims nothing about revocation and counts as the host's participants say.
+ */
+export function revokedDeviceIds(
+  devices: readonly { id: string; revokedAt: string | null }[] | undefined,
+): ReadonlySet<string> {
+  return new Set((devices ?? []).filter((each) => each.revokedAt !== null).map((each) => each.id));
+}
+
+const NONE_REVOKED: ReadonlySet<string> = new Set();
+
+/**
+ * Participants that hold a slot of the line now: active ones whose device is not in `revoked`. A
+ * revoked device's open part is still real (it blocks the automatic close, `notClosedParticipants`),
+ * but it holds no slot.
+ */
+export function activeParticipants(
+  shift: WithParticipants,
+  revoked: ReadonlySet<string> = NONE_REVOKED,
+): ShiftParticipant[] {
+  return participantsOf(shift).filter(
+    (each) => each.state === "active" && !revoked.has(each.deviceId),
+  );
 }
 
 /** Participants that have not closed their part (`active` and `left`): what a forced close would close. */
@@ -95,12 +118,16 @@ const STATE_RANK: Record<ParticipantState, number> = { active: 0, left: 1, close
 /**
  * The device's part in the active shifts of `shifts`: an active part wins over a paused one over a
  * closed one, the latest entry within a state. `null` when it is in none, and while the list is
- * not read (`undefined`); a shift without participants (an older host) claims nothing.
+ * not read (`undefined`); a shift without participants (an older host) claims nothing. A revoked
+ * device (`revoked` names it) is in no shift: the host frees its slot, and the card's «Станции»
+ * tab is where its open part stays visible.
  */
 export function presenceOf(
   shifts: readonly OfficeShift[] | undefined,
   deviceId: string,
+  revoked: ReadonlySet<string> = NONE_REVOKED,
 ): Presence | null {
+  if (revoked.has(deviceId)) return null;
   let best: { presence: Presence; joinedMs: number } | null = null;
   for (const shift of shifts ?? []) {
     if (shift.status !== "active") continue;

@@ -5,12 +5,15 @@ import { useTranslation } from "react-i18next";
 import { Card, StatusChip, type TableColumn } from "@markiro/ui";
 
 import type { OfficeShift, ShiftParticipant } from "../../host/protocol.js";
+import { useOfficeSession } from "../office-session.js";
+import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import {
   closedParticipants,
   LOOK_PHASE,
   participantLook,
   participantsOf,
+  revokedDeviceIds,
 } from "./participation.js";
 
 /** Counts with the thousands apart by a no-break space, as Russian writes them: «1 200». */
@@ -34,6 +37,13 @@ export function ShiftStations({ shift, at }: ShiftStationsProps) {
   // One reading of the clock for the whole table.
   const nowMs = Date.now();
   const participants = participantsOf(shift);
+  // Which devices were revoked since they entered: an administrator's list; nothing is marked
+  // while it is unread. A revoked device's open part stays listed, for it blocks the automatic close.
+  const isAdmin = useOfficeSession().user.role === "admin";
+  const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
+    enabled: isAdmin,
+  });
+  const revoked = revokedDeviceIds(isAdmin ? devices.data : undefined);
   const parts = new Map((shift.byDevice ?? []).map((part) => [part.deviceId, part]));
   const figure = (value: number | undefined) =>
     value === undefined ? t("office.common.none") : UNITS.format(value);
@@ -53,6 +63,9 @@ export function ShiftStations({ shift, at }: ShiftStationsProps) {
               : each.deviceName}
           </span>
           <span className="shift-cell__quiet">{t(`office.devices.kinds.${each.deviceKind}`)}</span>
+          {revoked.has(each.deviceId) && (
+            <span className="shift-cell__quiet">{t("office.shiftCard.participants.revoked")}</span>
+          )}
         </span>
       ),
     },
