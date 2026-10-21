@@ -109,7 +109,9 @@ Android tests must also verify its interpretation.
   while the row says the device is out keeps it owed; the answer's token is kept and the next beat resends with it.
   Each owed leave is sent independently, so one stuck leave never blocks the rest. A re-entry before it was sent
   (`leftAt = null`) makes `flushLeaves` drop it (`stillOut` is false); `rejoinLeftPart` only skips while a leave is
-  owed. `StationBackend.leave` has no default: every backend, the production `BackendSelector` included, answers it.
+  owed. A leave tapped while that automatic rejoin is in flight is owed again after the entry (`oweLeaveIfOut` re-reads
+  the row in the commit that keeps the answer), so the slot the rejoin took is freed on the next beat with the new
+  token. `StationBackend.leave` has no default: every backend, the production `BackendSelector` included, answers it.
 - A closed part reads back as `myState: closed` and `toShiftDto` maps it to `status = "closed"`; it never opens
   work again. A full line never stops local production. Receipts `partClosed`/`reasonMissing` are noted by
   `HostAckMapper`. Closing a shared part offline sends no reason (the host marks `close_reason_missing`, the

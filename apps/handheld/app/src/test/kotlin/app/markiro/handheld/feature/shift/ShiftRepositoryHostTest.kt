@@ -327,4 +327,75 @@ class ShiftRepositoryHostTest {
         // Only `left` or `closed` say the host holds no slot of this device any more.
         assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
     }
+
+    /** [shiftAnswer] with this device (`d1`) as a participant in [state] holding the token [rev]. */
+    private fun answerWithMe(state: String, rev: Long): String {
+        val root = Json.parseToJsonElement(shiftAnswer(state)).jsonObject
+        val mine = kotlinx.serialization.json.buildJsonObject {
+            put("deviceId", JsonPrimitive("d1"))
+            put("deviceKind", JsonPrimitive("handheld"))
+            put("deviceName", JsonPrimitive("ТСД"))
+            put("state", JsonPrimitive(state))
+            put("joinedRev", JsonPrimitive(rev))
+        }
+        return JsonObject(root + ("participants" to kotlinx.serialization.json.JsonArray(root.getValue("participants").jsonArray + mine))).toString()
+    }
+
+    /** The race of final review I1: the rejoin's entry is answered [entryAnswer] only after the operator's leave was answered. */
+    private suspend fun leaveDuringRejoin(entryAnswer: HostResult): Pair<HostParticipation, MutableList<String>> {
+        workingIn()
+        // The host has this device's part as left (token 1): the beat will enter it again.
+        ShiftParticipationStore(db).save(Json { ignoreUnknownKeys = true }.decodeFromString(
+            app.markiro.handheld.core.network.host.DeviceShiftDto.serializer(), answerWithMe("left", 1),
+        ))
+        val listBody = """{"shifts":[${answerWithMe("left", 1)}]}"""
+        val bodies = mutableListOf<String>()
+        lateinit var repository: ShiftRepository
+        var hostEntered = false
+        val transport = object : HostTransport {
+            override suspend fun get(path: String): HostResult = when (path) {
+                listPath() -> ok(listBody)
+                else -> error("nothing scripted for GET $path")
+            }
+            override suspend fun post(path: String, body: String): HostResult = when (path) {
+                enterPath() -> {
+                    // The rejoin's request is on its way; the operator taps «Выйти» and its leave is answered first (the part is still left
+                    // at the host, token 1, so nothing changes there). Only then does the host carry out the entry: active, token 2.
+                    repository.leave(id)
+                    hostEntered = true
+                    entryAnswer
+                }
+                leavePath() -> {
+                    bodies += body
+                    ok(answerWithMe("left", if (hostEntered) 2 else 1))
+                }
+                else -> error("nothing scripted for POST $path")
+            }
+        }
+        val api = HostApi(transport)
+        repository = storeRepository(transport)
+        val beat = HostParticipation(db, { api }, HostCalls { })
+        beat.beat()
+        assertNotNull(db.shiftDao().get(id)!!.leftAt)
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+        return beat to bodies
+    }
+
+    @Test
+    fun aLeaveTappedWhileTheAutomaticRejoinIsInFlightStillFreesTheSlotTheRejoinTook() = runTest {
+        val (beat, bodies) = leaveDuringRejoin(ok(answerWithMe("active", 2)))
+        // The host now holds a slot for a device that is out; a leave must still be owed for it.
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+        // The next beat ends the stay the rejoin made, with its token.
+        beat.beat()
+        assertEquals("""{"joinedRev":2}""", bodies.last())
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+    }
+
+    @Test
+    fun aRejoinWhoseAnswerIsLostWhileTheLeaveWasTappedStillOwesTheLeave() = runTest {
+        // The host carried the entry out but its answer never arrived: the device cannot know, so the leave is owed again.
+        leaveDuringRejoin(HostResult.Failed(TransportFailure.TIMEOUT))
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+    }
 }

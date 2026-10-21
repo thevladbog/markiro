@@ -101,12 +101,29 @@ class HostParticipation(
         val row = db.shiftDao().get(shiftId) ?: return
         if (row.status != "active" || row.leftAt != null || shiftId in store.pendingLeaves()) return
         try {
-            store.save(calls.run { api().enter(shiftId) })
+            val entered = calls.run { api().enter(shiftId) }
+            db.recovery.commit {
+                store.save(entered)
+                oweLeaveIfOut(shiftId)
+            }
         } catch (_: IOException) {
-            // The host did not answer: nothing was changed and the next beat reads the list and asks again.
+            // The host did not answer; it may still have carried the entry out (a lost answer), so a leave tapped meanwhile is owed again.
+            oweLeaveIfOut(shiftId)
         } catch (_: HttpException) {
             // Refused (a full line, a closed shift): nothing was changed; production goes on and the next beat asks again.
         }
+    }
+
+    /**
+     * The checks above and the entry are not one step: «Выйти» may be tapped while the entry is on its way, and its leave (with the token of
+     * the stay that was left) may reach the host first, find the part left already and settle (final review I1). The entry then lands and the
+     * host holds a slot for a device that is out, with nothing owed and no rejoin to notice it (the shift is no longer the active one). So after
+     * the entry the row is read again in the same commit that keeps the answer: a device that is out owes a leave once more, with a new marker
+     * (one a leave in flight cannot settle) and, from the answer just kept, the token of the stay the entry made. The station closes the same
+     * window by tracking the return in a gate that «Выйти» drains; a re-read is enough here, since the leave's own commit writes `leftAt` first.
+     */
+    private suspend fun oweLeaveIfOut(shiftId: String) = db.recovery.commit {
+        if (db.shiftDao().get(shiftId)?.leftAt != null) store.markLeavePending(shiftId)
     }
 }
 
