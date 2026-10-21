@@ -2,8 +2,10 @@ export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
 export {
   commercialTaxDefaults,
+  explicitCommercialPeriodTerm,
   isCommercialTaxAllowed,
   resolveCommercialPeriod,
+  resolveExplicitCommercialPeriod,
 } from "./commercial-terms.js";
 export type {
   CommercialBillingPeriod,

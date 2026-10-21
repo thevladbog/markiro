@@ -3,6 +3,7 @@ import { Button, Input, Select, Textarea } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 
 import {
+  explicitTermOf,
   getSupportedActivationPolicies,
   type DocumentDraft,
   type DocumentKind,
@@ -29,6 +30,7 @@ export function DocumentLinesTable({
   onPriceOverrideReasonChange,
   onVatIncludedChange,
   onPolicyChange,
+  onTermChange,
   onMove,
   onRemove,
 }: {
@@ -45,6 +47,7 @@ export function DocumentLinesTable({
     line: DocumentLineDraft,
     policy: NonNullable<DocumentLineDraft["activationPolicy"]>,
   ) => void;
+  onTermChange: (line: DocumentLineDraft, termStart: string, termEnd: string) => void;
   onMove: (line: DocumentLineDraft, direction: -1 | 1) => void;
   onRemove: (line: DocumentLineDraft) => void;
 }) {
@@ -79,7 +82,15 @@ export function DocumentLinesTable({
                 <tr className="document-lines-table__row">
                   <th scope="row">
                     <strong>{i18n.language === "en" ? line.nameEn : line.nameRu}</strong>
-                    {line.commercialTerms?.billingPeriod ? (
+                    {line.commercialTerms?.version === 3 ? (
+                      <p>
+                        {t("documents.termLabel", {
+                          start: line.commercialTerms.termStart,
+                          end: line.commercialTerms.termEnd,
+                        })}{" "}
+                        · {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
+                      </p>
+                    ) : line.commercialTerms?.billingPeriod ? (
                       <p>
                         {t(`catalog.units.${line.commercialTerms.billingPeriod}`)} ·{" "}
                         {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
@@ -209,6 +220,32 @@ export function DocumentLinesTable({
                           name: i18n.language === "en" ? line.nameEn : line.nameRu,
                         })}
                       </p>
+                    ) : null}
+                    {line.kind === "plan" ? (
+                      <div className="document-lines-table__term">
+                        <Input
+                          type="date"
+                          label={t("documents.termStartFor", { name: line.nameRu })}
+                          disabled={Boolean(draft.sourceOfferId)}
+                          value={explicitTermOf(line).start}
+                          onChange={(event) =>
+                            onTermChange(line, event.target.value, explicitTermOf(line).end)
+                          }
+                        />
+                        <Input
+                          type="date"
+                          label={t("documents.termEndFor", { name: line.nameRu })}
+                          disabled={Boolean(draft.sourceOfferId)}
+                          value={explicitTermOf(line).end}
+                          {...(errors[`${prefix}.term`]
+                            ? { error: t(`documents.errors.${errors[`${prefix}.term`]}`) }
+                            : {})}
+                          onChange={(event) =>
+                            onTermChange(line, explicitTermOf(line).start, event.target.value)
+                          }
+                        />
+                        <p className="document-lines-table__muted">{t("documents.termHint")}</p>
+                      </div>
                     ) : null}
                     <Textarea
                       label={t("documents.commentFor", { name: line.nameRu })}

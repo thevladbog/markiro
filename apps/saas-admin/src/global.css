@@ -3292,6 +3292,19 @@ textarea {
   max-width: 100%;
 }
 
+.document-lines-table__term {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 220px));
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.document-lines-table__term > .document-lines-table__muted {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .document-lines-table__comment-row .mk-textarea__control {
   min-height: 64px;
   resize: vertical;

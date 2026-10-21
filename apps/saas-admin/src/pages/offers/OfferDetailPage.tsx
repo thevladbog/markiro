@@ -127,8 +127,11 @@ function OfferDetail({ offerId }: { offerId: string }) {
                       </strong>
                       {line.commercialTerms?.billingPeriod ? (
                         <small>
-                          {t(`catalog.units.${line.commercialTerms.billingPeriod}`)} ·{" "}
-                          {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
+                          {t(`catalog.units.${line.commercialTerms.billingPeriod}`)}
+                          {line.commercialTerms.version === 3
+                            ? ` ${line.commercialTerms.termStart} — ${line.commercialTerms.termEnd}`
+                            : ""}{" "}
+                          · {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
                         </small>
                       ) : null}
                       {(

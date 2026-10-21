@@ -1394,6 +1394,20 @@
       "when": 1792579595127,
       "tag": "0198_standalone_offline_demo",
       "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1792596748467,
+      "tag": "0199_explicit_term_plan_lines",
+      "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1792596749467,
+      "tag": "0200_validate_explicit_term_plan_lines",
+      "breakpoints": true
     }
   ]
 }
