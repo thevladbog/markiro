@@ -3833,7 +3833,12 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   a dedicated query should list them.
 - «Устройства»: the «Линия» cell carries a participation tag under the line's
   name (working, paused, part closed; `presenceOf`); the page reads the shifts
-  for it and claims nothing when they do not load. No column was added.
+  for it and claims nothing when they do not load. No column was added. The
+  page does not poll (its devices list and the «Связь» column are read when it
+  opens and after a write, like the rest of the pages but «Обзор» and an active
+  shift's card, which read every 30 s), so the tag is as of the last read; the
+  revoke dialog names the active shifts the device has an open part in from the
+  same read.
 - «Обзор»: a line's card says «станций в смене: N из M» only for a line whose
   limit is above one and whose shift names participants (N the active ones); a
   participant of such a line silent for ten minutes is one attention row and
