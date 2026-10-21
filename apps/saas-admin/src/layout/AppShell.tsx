@@ -108,6 +108,10 @@ function AppShellContent() {
               item("national-catalog", t("shell.nationalCatalog"), "/national-catalog"),
             )
           : []),
+        ...when(
+          "standaloneReleases.manage",
+          item("standalone-releases", t("shell.standaloneReleases"), "/standalone-releases"),
+        ),
         ...when("reports.read", item("reports", t("shell.reports"), "/reports")),
         ...when("audit.read", item("audit", t("shell.audit"), "/audit")),
         ...when("platformTeam.write", item("team", t("shell.team"), "/team")),
