@@ -100,7 +100,9 @@ Android tests must also verify its interpretation.
 - `SharedShiftRules` is the only place of the shift-wide total and of the reason rule, pinned by
   `proto/fixtures/shift-close-reason-shared.json`; never re-derive it. The handheld has no displaced kind, so
   `lost` is the shift's own conflicted/rejected codes (`CodeDao.lostForShift`); it is required in
-  `SharedShiftRules` and wired in the strip, the hub card and `ShiftCloser`. The 90 s freshness applies only to
+  `SharedShiftRules` and wired in the strip, the hub card and `ShiftCloser`. The hub card captions a shared
+  shift's figure «Всего в смене» and adds «данные на ЧЧ:ММ» while the figures are stale; a single-device shift
+  keeps «На этом ТСД». The 90 s freshness applies only to
   the close reason, not to the strip.
 - Leaving writes the local mark and an owed-leave marker in one commit, then asks the host. An owed leave is
   compare-and-cleared and settles only when the answer's `myState` is `left` or `closed` (in `ShiftRepository`; a

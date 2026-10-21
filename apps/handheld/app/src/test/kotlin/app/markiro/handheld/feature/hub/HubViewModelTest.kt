@@ -528,4 +528,37 @@ class HubViewModelTest {
         db.conflictDao().insertIgnore(listOf(app.markiro.handheld.core.storage.ConflictEntity("h1", null, "2026-09-12T09:00:00.000Z", "2026-09-12T10:00:00.000Z")))
         assertEquals(121, model.state.first { it.activeShift?.acceptedUnits == 121 }.activeShift?.acceptedUnits)
     }
+
+    /** Final review I3: the card says whose figure it shows and, offline, from when. */
+    @Test
+    fun aSharedShiftsCardIsMarkedSharedAndCarriesTheTimeOfStaleFigures() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val store = app.markiro.handheld.core.host.ShiftParticipationStore(db)
+        val model = vm(api(), participation = store::observe)
+        suspend fun put(p: app.markiro.handheld.core.host.ShiftParticipation) = db.metaDao().put(
+            app.markiro.handheld.core.storage.MetaEntity(
+                app.markiro.handheld.core.host.ShiftParticipationStore.key("s1"),
+                kotlinx.serialization.json.Json.encodeToString(app.markiro.handheld.core.host.ShiftParticipation.serializer(), p),
+            ),
+        )
+        put(sharedFigures(accepted = 120, mine = 0))
+        val fresh = model.state.first { it.activeShift?.shared == true }.activeShift!!
+        assertNull(fresh.staleAtMillis)
+        put(sharedFigures(accepted = 120, mine = 0).copy(stale = true))
+        val stale = model.state.first { it.activeShift?.staleAtMillis != null }.activeShift!!
+        assertEquals(true, stale.shared)
+        assertEquals(app.markiro.handheld.core.util.Iso.parse("2026-10-08T10:00:00Z"), stale.staleAtMillis)
+    }
+
+    @Test
+    fun aSingleDeviceShiftsCardIsNotMarkedShared() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val alone = app.markiro.handheld.core.host.ShiftParticipation(shiftId = "s1", maxStations = 1, myState = "active", participantsEver = 1, active = 1, fetchedAt = clock, stale = true)
+        val model = vm(api(), participation = { flowOf(alone) })
+        val card = model.state.first { it.activeShift != null }.activeShift!!
+        assertEquals(false, card.shared)
+        assertNull(card.staleAtMillis)
+    }
 }

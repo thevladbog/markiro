@@ -4,6 +4,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
@@ -429,6 +431,23 @@ class EnglishRenderTest {
             assertNoCyrillic()
             assertEquals(true, compose.onAllNodes(androidx.compose.ui.test.hasText("", substring = true).not()).fetchSemanticsNodes().isNotEmpty())
         }
+    }
+
+    @Test
+    fun aSharedShiftsHubCardRendersInEnglish() {
+        val at = 1_760_000_000_000L
+        val shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1").copy(productName = "Water 0.5 l", lineName = "Line 2", number = "14")
+        compose.setContent {
+            MarkiroTheme {
+                app.markiro.handheld.feature.hub.ActiveShiftCard(
+                    app.markiro.handheld.feature.hub.HubActiveShift(shift, 547, shared = true, staleAtMillis = at), onContinue = {},
+                )
+            }
+        }
+        compose.onNodeWithText("In the shift total").assertIsDisplayed()
+        compose.onNodeWithText("data as of ${app.markiro.handheld.core.util.TimeText.hhmm(at)}").assertIsDisplayed()
+        compose.onNodeWithText("On this handheld").assertDoesNotExist()
+        assertNoCyrillic()
     }
 
     @Test

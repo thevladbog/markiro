@@ -89,8 +89,17 @@ sealed interface HubEvent {
     data class Entered(val shiftId: String) : HubEvent
 }
 
-/** Same accepted-unit total as the work screen; a missing summary is explicitly local. */
-data class HubActiveShift(val shift: ShiftEntity, val acceptedUnits: Int, val summaryAt: Long? = null)
+/**
+ * Same accepted-unit total as the work screen; a missing summary is explicitly local. A [shared] shift's total is the shift-wide one (the strip's),
+ * and [staleAtMillis] is the time of its figures while they are the last known ones (no beat reached the host).
+ */
+data class HubActiveShift(
+    val shift: ShiftEntity,
+    val acceptedUnits: Int,
+    val summaryAt: Long? = null,
+    val shared: Boolean = false,
+    val staleAtMillis: Long? = null,
+)
 
 enum class HubTile { SHIFT, INVENTORY, WRITEOFF, PALLETS, SETTINGS }
 
@@ -222,6 +231,8 @@ class HubViewModel(
                         shift = shift,
                         acceptedUnits = strip?.total ?: maxOf(shared?.acceptedUnits ?: 0, local),
                         summaryAt = shared?.takeIf { it.acceptedUnits != null }?.at,
+                        shared = strip != null,
+                        staleAtMillis = strip?.staleAtMillis,
                     )
                 }
             }
