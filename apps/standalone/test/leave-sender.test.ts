@@ -124,6 +124,91 @@ describe("this station's pause of a shared shift (plan 2b, host D5)", () => {
     expect(await row()).toEqual([{ leave_requested_at: AT, my_state: "active" }]);
   });
 
+  describe("with several pauses, one failing does not hold the others", () => {
+    const SECOND = "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a";
+    const both = z.object({ shift_id: z.string(), leave_requested_at: z.string().nullable() });
+
+    /** Two pauses, the first (older) of the shared shift, the second of a copy of it. */
+    async function twoPaused() {
+      const opened = await paused();
+      // A copy of the row under another shift id, asked a second later.
+      const columns = (
+        opened.db.prepare("PRAGMA table_info(floor_shift_participation)").all() as {
+          name: string;
+        }[]
+      ).map((c) => c.name);
+      const select = columns
+        .map((c) =>
+          c === "shift_id" ? "?" : c === "leave_requested_at" ? "'2026-10-08T10:00:01.000Z'" : c,
+        )
+        .join(", ");
+      opened.db
+        .prepare(
+          `INSERT INTO floor_shift_participation (${columns.join(", ")}) SELECT ${select} FROM floor_shift_participation`,
+        )
+        .run(SECOND);
+      const rows = () =>
+        opened.executor.query(
+          "SELECT shift_id, leave_requested_at FROM floor_shift_participation ORDER BY shift_id",
+          [],
+          both,
+        );
+      return { ...opened, rows };
+    }
+    const refusal = (code: string, status: number, details?: Record<string, unknown>) =>
+      new HostError({
+        kind: "api",
+        code,
+        status,
+        message: "no",
+        ...(details === undefined ? {} : { details }),
+      });
+
+    it("settles a permanent refusal of the first and still sends the second", async () => {
+      const { executor, rows } = await twoPaused();
+      const leave = vi.fn(async (id: string) => {
+        if (id === SHARED.id) throw refusal("validation_failed", 400);
+        return LEFT;
+      });
+      expect(await sendPendingLeaves(executor, PAIRING, leave, NOW)).toEqual({
+        sent: 1,
+        stale: 0,
+      });
+      expect(leave).toHaveBeenCalledTimes(2);
+      expect((await rows()).map((r) => r.leave_requested_at)).toEqual([null, null]);
+    });
+
+    it("keeps a pause that may still succeed and sends the next, then surfaces the error", async () => {
+      for (const failure of [
+        new HostError({ kind: "transport", code: "timeout", message: "slow" }),
+        refusal("internal", 500),
+        refusal("unauthorized", 401, { credential: "device" }),
+        refusal("forbidden", 403),
+        refusal("conflict", 409, { constraint: "something_new" }),
+      ]) {
+        const { executor, rows } = await twoPaused();
+        const leave = vi.fn(async (id: string) => {
+          if (id === SHARED.id) throw failure;
+          return LEFT;
+        });
+        await expect(sendPendingLeaves(executor, PAIRING, leave, NOW)).rejects.toBe(failure);
+        expect(leave).toHaveBeenCalledTimes(2);
+        const kept = (await rows()).filter((r) => r.leave_requested_at !== null);
+        expect(kept.map((r) => r.shift_id)).toEqual([SHARED.id]);
+      }
+    });
+
+    it("surfaces a refused key even when an earlier pause failed for another reason", async () => {
+      const { executor } = await twoPaused();
+      const away = new HostError({ kind: "transport", code: "unreachable", message: "down" });
+      const rejected = refusal("unauthorized", 401, { credential: "device" });
+      const leave = vi.fn(async (id: string) => {
+        throw id === SHARED.id ? away : rejected;
+      });
+      await expect(sendPendingLeaves(executor, PAIRING, leave, NOW)).rejects.toBe(rejected);
+    });
+  });
+
   it("is not settled by the answer of an older request when a newer one was asked meanwhile", async () => {
     const { db, executor, row } = await paused();
     const leave = vi.fn(async () => {

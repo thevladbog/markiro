@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { shellActionFor } from "../app/shell.js";
 import { participationStatement } from "../floor/shifts/shift-participation.js";
 import { HostError } from "../host/client.js";
 import type { DeviceShift, ShiftLeave } from "../host/protocol.js";
@@ -32,12 +33,20 @@ const pendingRow = z.object({
   joined_rev: z.number().int().nonnegative().nullable(),
 });
 
-/** The host owes nothing for this pause: the device never entered, or the shift is gone. */
-function moot(error: unknown): boolean {
+/**
+ * The host will never take this pause, whatever the link or the key: the device never entered, the
+ * shift is gone, or the host rejected the request itself (`validation_failed`: a malformed path or
+ * body, which the same bytes would meet again). These are the only answers of the leave route
+ * (`leave_shift`) that belong to this one shift. Everything else — a transport failure, a 5xx, a
+ * refused key (`unauthorized`), `forbidden` (the device's kind or standing, not the shift), an
+ * unknown `conflict` — may pass later or says nothing of this shift, so the pause stays queued.
+ */
+function permanent(error: unknown): boolean {
   return (
     error instanceof HostError &&
     error.kind === "api" &&
     (error.code === "not_found" ||
+      error.code === "validation_failed" ||
       (error.code === "conflict" && error.details["constraint"] === "shift_not_entered"))
   );
 }
@@ -47,7 +56,9 @@ function moot(error: unknown): boolean {
  * first, each with this station's leave token (`{ joinedRev }`; no body when none is kept): each
  * answer's figures go into the cache with the pause settled in one transaction; a pause the host
  * owes nothing for is settled without figures; any other failure — the host away, a refused key —
- * goes back to the link, which retries it and keeps the rest for then. A pause an entry dropped
+ * is kept and goes back to the link, after the other pauses were tried (each pause stands on its own:
+ * one that fails does not hold the rest; a refused key or a changed certificate, which the link
+ * acts on, goes before any other failure). A pause an entry dropped
  * meanwhile is not sent (the read is fresh), and one asked again after the send is not settled by
  * the older answer. An answer whose `myState` is still `active` to a sent token means the host saw
  * a later entry and wrote nothing (a stale pause): it is settled as "already re-entered" and counted
@@ -66,6 +77,7 @@ export async function sendPendingLeaves(
   );
   let sent = 0;
   let stale = 0;
+  let failure: unknown = null;
   for (const row of pending) {
     const settle: LocalStatement = {
       sql: SETTLE_LEAVE_SQL,
@@ -76,7 +88,11 @@ export async function sendPendingLeaves(
     try {
       answer = await leave(row.shift_id, token);
     } catch (error) {
-      if (!moot(error)) throw error;
+      if (!permanent(error)) {
+        // The link acts on a refused key or a changed host: that one outranks the earlier failure.
+        if (failure === null || shellActionFor(error, null) !== null) failure = error;
+        continue;
+      }
       await local.transaction([settle]);
       continue;
     }
@@ -84,5 +100,6 @@ export async function sendPendingLeaves(
     if (token !== null && answer.myState === "active") stale += 1;
     else sent += 1;
   }
+  if (failure !== null) throw failure;
   return { sent, stale };
 }

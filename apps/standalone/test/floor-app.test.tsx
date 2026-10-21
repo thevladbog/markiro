@@ -2223,6 +2223,23 @@ describe("leaving a shared shift (plan 2b)", () => {
     expect(row?.leave_requested_at).not.toBeNull();
   });
 
+  it("pauses this station's part when the work leaves for another line (line_changed)", async () => {
+    const local = await floorCopies();
+    await keepEnteredShift(local, PAIRING, SHARED_ENTERED, "2026-10-08T06:02:00.000Z", SEEN);
+    const handlers = handlersOf({ enter: async () => SHARED_ENTERED });
+    const view = render(floorOf(local, handlers, { workScreen: IdleWork }));
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    await screen.findByText(`Смена ${SHARED_ENTERED.number}`);
+    view.rerender(floorOf(local, handlers, { workScreen: IdleWork, lineChangePending: true }));
+    await waitFor(() => expect(handlers.requestLeaves).toHaveBeenCalledTimes(1));
+    const [row] = await local.query(
+      "SELECT leave_requested_at FROM floor_shift_participation",
+      [],
+      pauseRow,
+    );
+    expect(row?.leave_requested_at).not.toBeNull();
+  });
+
   it("does not pause the part on a change of operator: the next one goes on at this station", async () => {
     const local = await floorCopies();
     await keepEnteredShift(local, PAIRING, SHARED_ENTERED, "2026-10-08T06:02:00.000Z", SEEN);
