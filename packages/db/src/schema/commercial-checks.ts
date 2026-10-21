@@ -48,9 +48,18 @@ export function commercialLineTermsCheck(
 }
 
 function civilDateJsonCheck(value: AnyPgColumn, key: string): SQL {
-  const field = sql`${value}->>${sql.raw(`'${key}'`)}`;
-  return sql`(jsonb_typeof(${value}->${sql.raw(`'${key}'`)}) = 'string'
-    and ${field} ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')`;
+  const raw = sql`(${value}->>${sql.raw(`'${key}'`)})`;
+  // The shape is checked first so no cast runs on malformed text; impossible calendar days and
+  // year 0000 are rejected arithmetically because a ::date cast would raise instead of failing.
+  return sql`case when jsonb_typeof(${value}->${sql.raw(`'${key}'`)}) = 'string'
+    and ${raw} ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' and ${raw} !~ '^0000-'
+    then (
+      substr(${raw}, 6, 2) in ('01','03','05','07','08','10','12')
+      or (substr(${raw}, 6, 2) in ('04','06','09','11') and substr(${raw}, 9, 2) <> '31')
+      or (substr(${raw}, 6, 2) = '02' and (substr(${raw}, 9, 2) <= '28'
+        or (substr(${raw}, 9, 2) = '29' and substr(${raw}, 1, 4)::int % 4 = 0
+          and (substr(${raw}, 1, 4)::int % 100 <> 0 or substr(${raw}, 1, 4)::int % 400 = 0))))
+    ) else false end`;
 }
 
 function monthlyServiceTermsCheck(value: AnyPgColumn): SQL {

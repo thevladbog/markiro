@@ -47,13 +47,27 @@ ALTER TABLE "commercial_offer_lines" ADD CONSTRAINT "commercial_offer_lines_comm
         and "commercial_offer_lines"."commercial_terms"->>'activationRule' in ('on_application','after_current')
         and "commercial_offer_lines"."commercial_terms" ?& array['termStart','termEnd']
         and "commercial_offer_lines"."commercial_terms" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','termStart','termEnd'] = '{}'::jsonb
-        and (jsonb_typeof("commercial_offer_lines"."commercial_terms"->'termStart') = 'string'
-    and "commercial_offer_lines"."commercial_terms"->>'termStart' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
-        and (jsonb_typeof("commercial_offer_lines"."commercial_terms"->'termEnd') = 'string'
-    and "commercial_offer_lines"."commercial_terms"->>'termEnd' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        and case when jsonb_typeof("commercial_offer_lines"."commercial_terms"->'termStart') = 'string'
+    and ("commercial_offer_lines"."commercial_terms"->>'termStart') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' and ("commercial_offer_lines"."commercial_terms"->>'termStart') !~ '^0000-'
+    then (
+      substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 6, 2) in ('01','03','05','07','08','10','12')
+      or (substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 6, 2) in ('04','06','09','11') and substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 9, 2) <> '31')
+      or (substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 6, 2) = '02' and (substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 9, 2) <= '28'
+        or (substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 9, 2) = '29' and substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 1, 4)::int % 4 = 0
+          and (substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 1, 4)::int % 100 <> 0 or substr(("commercial_offer_lines"."commercial_terms"->>'termStart'), 1, 4)::int % 400 = 0))))
+    ) else false end
+        and case when jsonb_typeof("commercial_offer_lines"."commercial_terms"->'termEnd') = 'string'
+    and ("commercial_offer_lines"."commercial_terms"->>'termEnd') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' and ("commercial_offer_lines"."commercial_terms"->>'termEnd') !~ '^0000-'
+    then (
+      substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 6, 2) in ('01','03','05','07','08','10','12')
+      or (substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 6, 2) in ('04','06','09','11') and substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 9, 2) <> '31')
+      or (substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 6, 2) = '02' and (substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 9, 2) <= '28'
+        or (substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 9, 2) = '29' and substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 1, 4)::int % 4 = 0
+          and (substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 1, 4)::int % 100 <> 0 or substr(("commercial_offer_lines"."commercial_terms"->>'termEnd'), 1, 4)::int % 400 = 0))))
+    ) else false end
         and "commercial_offer_lines"."commercial_terms"->>'termStart' <= "commercial_offer_lines"."commercial_terms"->>'termEnd')
     )
-  ), false));--> statement-breakpoint
+  ), false)) NOT VALID;--> statement-breakpoint
 ALTER TABLE "subscription_addons" ADD CONSTRAINT "subscription_addons_commercial_period_check" CHECK ("subscription_addons"."commercial_period" is null or coalesce((
     jsonb_typeof("subscription_addons"."commercial_period") = 'object'
     and "subscription_addons"."commercial_period" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']
@@ -64,7 +78,7 @@ ALTER TABLE "subscription_addons" ADD CONSTRAINT "subscription_addons_commercial
     and jsonb_typeof("subscription_addons"."commercial_period"->'anchorAt') = 'string' and ("subscription_addons"."commercial_period"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
     and jsonb_typeof("subscription_addons"."commercial_period"->'startsAt') = 'string' and ("subscription_addons"."commercial_period"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
     and jsonb_typeof("subscription_addons"."commercial_period"->'endsAt') = 'string' and ("subscription_addons"."commercial_period"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
-  ), false));--> statement-breakpoint
+  ), false)) NOT VALID;--> statement-breakpoint
 ALTER TABLE "tenant_subscriptions" ADD CONSTRAINT "tenant_subscriptions_commercial_period_check" CHECK ("tenant_subscriptions"."commercial_period" is null or coalesce((
     jsonb_typeof("tenant_subscriptions"."commercial_period") = 'object'
     and "tenant_subscriptions"."commercial_period" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']
@@ -75,7 +89,7 @@ ALTER TABLE "tenant_subscriptions" ADD CONSTRAINT "tenant_subscriptions_commerci
     and jsonb_typeof("tenant_subscriptions"."commercial_period"->'anchorAt') = 'string' and ("tenant_subscriptions"."commercial_period"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
     and jsonb_typeof("tenant_subscriptions"."commercial_period"->'startsAt') = 'string' and ("tenant_subscriptions"."commercial_period"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
     and jsonb_typeof("tenant_subscriptions"."commercial_period"->'endsAt') = 'string' and ("tenant_subscriptions"."commercial_period"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
-  ), false));--> statement-breakpoint
+  ), false)) NOT VALID;--> statement-breakpoint
 ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_commercial_terms_check" CHECK ("invoice_lines"."commercial_terms" is null or coalesce((
     jsonb_typeof("invoice_lines"."commercial_terms") = 'object'
     and "invoice_lines"."commercial_terms" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']
@@ -121,10 +135,24 @@ ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_commercial_terms_check
         and "invoice_lines"."commercial_terms"->>'activationRule' in ('on_application','after_current')
         and "invoice_lines"."commercial_terms" ?& array['termStart','termEnd']
         and "invoice_lines"."commercial_terms" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','termStart','termEnd'] = '{}'::jsonb
-        and (jsonb_typeof("invoice_lines"."commercial_terms"->'termStart') = 'string'
-    and "invoice_lines"."commercial_terms"->>'termStart' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
-        and (jsonb_typeof("invoice_lines"."commercial_terms"->'termEnd') = 'string'
-    and "invoice_lines"."commercial_terms"->>'termEnd' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        and case when jsonb_typeof("invoice_lines"."commercial_terms"->'termStart') = 'string'
+    and ("invoice_lines"."commercial_terms"->>'termStart') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' and ("invoice_lines"."commercial_terms"->>'termStart') !~ '^0000-'
+    then (
+      substr(("invoice_lines"."commercial_terms"->>'termStart'), 6, 2) in ('01','03','05','07','08','10','12')
+      or (substr(("invoice_lines"."commercial_terms"->>'termStart'), 6, 2) in ('04','06','09','11') and substr(("invoice_lines"."commercial_terms"->>'termStart'), 9, 2) <> '31')
+      or (substr(("invoice_lines"."commercial_terms"->>'termStart'), 6, 2) = '02' and (substr(("invoice_lines"."commercial_terms"->>'termStart'), 9, 2) <= '28'
+        or (substr(("invoice_lines"."commercial_terms"->>'termStart'), 9, 2) = '29' and substr(("invoice_lines"."commercial_terms"->>'termStart'), 1, 4)::int % 4 = 0
+          and (substr(("invoice_lines"."commercial_terms"->>'termStart'), 1, 4)::int % 100 <> 0 or substr(("invoice_lines"."commercial_terms"->>'termStart'), 1, 4)::int % 400 = 0))))
+    ) else false end
+        and case when jsonb_typeof("invoice_lines"."commercial_terms"->'termEnd') = 'string'
+    and ("invoice_lines"."commercial_terms"->>'termEnd') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' and ("invoice_lines"."commercial_terms"->>'termEnd') !~ '^0000-'
+    then (
+      substr(("invoice_lines"."commercial_terms"->>'termEnd'), 6, 2) in ('01','03','05','07','08','10','12')
+      or (substr(("invoice_lines"."commercial_terms"->>'termEnd'), 6, 2) in ('04','06','09','11') and substr(("invoice_lines"."commercial_terms"->>'termEnd'), 9, 2) <> '31')
+      or (substr(("invoice_lines"."commercial_terms"->>'termEnd'), 6, 2) = '02' and (substr(("invoice_lines"."commercial_terms"->>'termEnd'), 9, 2) <= '28'
+        or (substr(("invoice_lines"."commercial_terms"->>'termEnd'), 9, 2) = '29' and substr(("invoice_lines"."commercial_terms"->>'termEnd'), 1, 4)::int % 4 = 0
+          and (substr(("invoice_lines"."commercial_terms"->>'termEnd'), 1, 4)::int % 100 <> 0 or substr(("invoice_lines"."commercial_terms"->>'termEnd'), 1, 4)::int % 400 = 0))))
+    ) else false end
         and "invoice_lines"."commercial_terms"->>'termStart' <= "invoice_lines"."commercial_terms"->>'termEnd')
     )
-  ), false));
+  ), false)) NOT VALID;

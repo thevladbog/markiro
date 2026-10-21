@@ -278,6 +278,8 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
         invoiceLineId,
       ]);
     await setTerms(terms);
+    await setTerms({ ...terms, termStart: "2028-02-29", termEnd: "2028-03-01" });
+    await setTerms(terms);
     await expect(
       pool.query("UPDATE invoice_lines SET quantity=2 WHERE id=$1", [invoiceLineId]),
     ).rejects.toMatchObject({ code: "23514" });
@@ -285,6 +287,10 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
       { ...terms, termEnd: "2026-10-31" },
       { ...terms, termStart: "2026-11-1" },
       { ...terms, termStart: "2026-13-01" },
+      { ...terms, termEnd: "2027-02-30" },
+      { ...terms, termEnd: "2027-04-31" },
+      { ...terms, termEnd: "2027-02-29" },
+      { ...terms, termStart: "0000-01-01" },
       { ...terms, billingPeriod: "month" },
       { ...terms, extra: true },
       { ...terms, termEnd: undefined },
