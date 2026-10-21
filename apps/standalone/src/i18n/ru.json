@@ -369,6 +369,13 @@
       "boxEmpty": "Короб откроется с первым кодом",
       "boxItems": "{{quantity}} из {{capacity}}",
       "accepted": "Принято в смене",
+      "shared": {
+        "total": "Всего в смене",
+        "mine": "Моя станция",
+        "summary": "Моя станция: {{mine}} · Всего в смене: {{total}} из {{planned}}",
+        "summaryNoPlan": "Моя станция: {{mine}} · Всего в смене: {{total}}",
+        "asOf": "данные от {{time}}"
+      },
       "closedBoxes": "Коробов закрыто",
       "plan": "План",
       "noPlan": "План не указан",
@@ -825,6 +832,7 @@
     },
     "close": {
       "open": "Закрыть смену",
+      "openPart": "Закрыть мою часть",
       "title": "Закрытие смены {{number}}",
       "loading": "Считаем итоги смены…",
       "product": "Товар",

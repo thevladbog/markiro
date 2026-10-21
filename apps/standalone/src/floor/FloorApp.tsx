@@ -173,6 +173,7 @@ export function FloorApp({
   link,
   sync,
   shiftReads,
+  requestShifts,
   outboxVersion = 0,
   lineChangePending,
   rejectionPending,
@@ -507,6 +508,8 @@ export function FloorApp({
         touch={lock.touch}
         leaving={view.leaving}
         officeClosed={view.officeClosed}
+        shiftReads={shiftReads.done}
+        {...(requestShifts === undefined ? {} : { onRefreshShifts: requestShifts })}
         isLeaving={isLeaving}
         linkHeld={rejectionPending}
         onLeave={() => leave({ kind: "list" })}

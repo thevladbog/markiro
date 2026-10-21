@@ -98,7 +98,9 @@ import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
+import { sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
 import { formatQuantity } from "../shifts/shift-text.js";
+import { useShiftParticipation } from "./use-shift-participation.js";
 import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
 import {
   printsUnitLabels,
@@ -272,6 +274,16 @@ export interface WorkScreenProps {
    * shift's close are finished as usual.
    */
   officeClosed?: boolean;
+  /**
+   * `ShellState.shiftReads.done` (plan 2b): what the host's last read said of a shared shift is
+   * read again after every read of the list. Absent: read once.
+   */
+  shiftReads?: number;
+  /**
+   * Asks the link to read the host's list now (`HostLinkControls.requestShifts`, plan 2b): a
+   * shared shift's totals are asked every `SHIFT_TOTALS_POLL_MS` while the link is up.
+   */
+  onRefreshShifts?: () => void;
 }
 
 /** What stops the scanning until the operator acts (stage 2a spec §5.7.3). */
@@ -824,6 +836,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const palletsMissing = !validation && shift.copy.palletsEnabled && pallets === null;
   const [stop, setStopState] = useState<Stop | null>(palletsMissing ? PALLETS_MISSING : null);
   const [planReached, setPlanReached] = useState(false);
+  // A shared shift's plan notice was dismissed (plan 2b): it is derived from the whole shift's
+  // count, and comes back no more.
+  const [planDismissed, setPlanDismissed] = useState(false);
   // The label the work stopped for: what its panel says under it, and whether a decision runs.
   const [labelNote, setLabelNote] = useState<LabelNote | null>(null);
   const [labelBusy, setLabelBusy] = useState(false);
@@ -847,6 +862,17 @@ export function WorkScreen(props: WorkScreenProps) {
   const [counts, setCounts] = useState<ValidationCounts | null>(null);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
+  // Plan 2b: what the host's last read said of a shift several devices may work; `null` for a
+  // solo shift, whose screen is stage 2a's.
+  const participation = useShiftParticipation({
+    local: props.local,
+    pairing: props.pairing,
+    shiftId: shift.copy.id,
+    shiftReads: props.shiftReads ?? 0,
+    online: props.online,
+    ...(props.onRefreshShifts === undefined ? {} : { onRefresh: props.onRefreshShifts }),
+  });
+  const sharedPart = sharedParticipation(participation);
 
   // How the shift's labels are rendered: a test's own, else from the shift's snapshot, with
   // the organization logo it froze or the Markiro one (plan А4, #703).
@@ -1982,6 +2008,7 @@ export function WorkScreen(props: WorkScreenProps) {
   const openClose = () => {
     if (leavingNow() || stopRef.current !== null) return;
     setPlanReached(false);
+    setPlanDismissed(true);
     setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
     void live.current
       .track(readSummary())
@@ -2359,6 +2386,22 @@ export function WorkScreen(props: WorkScreenProps) {
   const openBox = totals?.openBox ?? null;
   const items = openBox?.itemCount ?? 0;
   const canClose = items > 0 && stop === null && !leaving;
+  // Plan 2b: the whole shift's count — the others' part by the host and this station's own codes —
+  // and the plan reached by it, said once until dismissed or the close opens.
+  const shared =
+    sharedPart === null
+      ? null
+      : sharedCount(sharedPart, props.pairing.deviceId, totals?.accepted ?? 0);
+  const sharedReached =
+    shared !== null &&
+    plannedQty !== null &&
+    plannedQty > 0 &&
+    shared.total >= plannedQty &&
+    !planDismissed &&
+    stop?.kind !== "close" &&
+    stop?.kind !== "closed";
+  const planShowing = shared === null ? planReached : sharedReached;
+  const closeLabel = t(shared === null ? "floor.close.open" : "floor.close.openPart");
   const palletBoxes = pallet?.boxCount ?? 0;
   // The waiting message follows what `refresh` reads: with no open pallet, or one below
   // its capacity (it closed, or a box was taken off it), nothing waits any more.
@@ -2459,6 +2502,16 @@ export function WorkScreen(props: WorkScreenProps) {
             // the line as it did, whatever the band asks.
             {...(totals === null ? {} : { local: props.local })}
             productId={shift.copy.productId}
+            {...(shared === null
+              ? {}
+              : {
+                  shared: {
+                    mine: shared.mine,
+                    total: shared.total,
+                    asOf: shared.asOf,
+                    stale: !props.online,
+                  },
+                })}
           />
           {demo && (
             <div className="work-screen__demo" role="note">
@@ -2640,7 +2693,7 @@ export function WorkScreen(props: WorkScreenProps) {
           disabled={stop !== null || leaving}
           onClick={openClose}
         >
-          {t("floor.close.open")}
+          {closeLabel}
         </FooterAction>
       </FloorFooter>
       {/*
@@ -2711,11 +2764,11 @@ export function WorkScreen(props: WorkScreenProps) {
             </>,
             retry(closePalletNow),
           )}
-        {planReached &&
+        {planShowing &&
           card(
             "ok",
             t("floor.work.planReached", {
-              quantity: formatQuantity(totals?.accepted ?? 0),
+              quantity: formatQuantity(shared?.total ?? totals?.accepted ?? 0),
               planned: formatQuantity(plannedQty ?? 0),
             }),
             null,
@@ -2728,13 +2781,18 @@ export function WorkScreen(props: WorkScreenProps) {
                   style={leaving || stop !== null ? WAITING_STYLE : undefined}
                   onClick={openClose}
                 >
-                  {t("floor.close.open")}
+                  {closeLabel}
                 </Button>
               )}
               <Button
                 size="floor"
                 variant="secondary"
-                onClick={() => dismiss(() => setPlanReached(false))}
+                onClick={() =>
+                  dismiss(() => {
+                    setPlanReached(false);
+                    setPlanDismissed(true);
+                  })
+                }
               >
                 {t("floor.work.continue")}
               </Button>

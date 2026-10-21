@@ -340,6 +340,14 @@
   background: var(--ok-fg);
 }
 
+/* Plan 2b: the age of the host's part of a shared total, said only without the link. It stays on a
+   short window, where the plan's bar and percent give their line up. */
+.work-shift-band__stale {
+  margin: 0;
+  font: 600 13px/16px var(--font-ui);
+  white-space: nowrap;
+}
+
 /* The open box: its title and count in one row, the places as cells, its action under them. */
 .work-box-fill {
   display: grid;
@@ -1039,6 +1047,10 @@
   .work-shift-band__bar,
   .work-shift-band__meta {
     display: none;
+  }
+
+  .work-shift-band__stale {
+    font: 600 12px/14px var(--font-ui);
   }
 
   .work-shift-band__small {
