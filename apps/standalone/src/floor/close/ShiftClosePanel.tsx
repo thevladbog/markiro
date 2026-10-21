@@ -446,7 +446,7 @@ export interface ShiftClosedPanelProps {
    * outbox, waiting for the others, the shift closed (with or without the reason it needed), or
    * refused. `null` or absent: a solo shift's close, said as before.
    */
-  part?: PartState | null;
+  part?: PartState | "unknown" | null;
 }
 
 /**

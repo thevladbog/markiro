@@ -895,7 +895,8 @@ export function WorkScreen(props: WorkScreenProps) {
     let cancelled = false;
     readPartState(props.local, { hostId: partHost, deviceId: partDevice }, shift.copy.id).then(
       (state) => {
-        if (!cancelled) setPartState(state);
+        // An unknown read (no row: the shift copy is gone) keeps what was known before.
+        if (!cancelled && state !== null) setPartState(state);
       },
       () => undefined,
     );
@@ -2954,7 +2955,7 @@ export function WorkScreen(props: WorkScreenProps) {
               leaving={leaving}
               onDone={onLeave}
               boxless={validation}
-              part={sharedPart === null ? null : (partState ?? "queued")}
+              part={sharedPart === null ? null : (partState ?? "unknown")}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>

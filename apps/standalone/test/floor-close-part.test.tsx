@@ -12,6 +12,7 @@ import {
 import {
   closeShift,
   readCloseSummary,
+  PART_STATE_SQL,
   readPartState,
   type CloseSummary,
 } from "../src/floor/close/shift-close.js";
@@ -434,5 +435,110 @@ describe("the closed part's panel (plan 2b)", () => {
     expect(screen.getByRole("group", { name: "Ваша часть смены OCT26-004 закрыта" })).toBeTruthy();
     expect(screen.getByText(words)).toBeTruthy();
     expect(screen.getByText("Принято: 280 шт., коробов: 23.")).toBeTruthy();
+  });
+});
+
+describe("the closed panel when the part's state is not known (plan 2b, Task 11 review)", () => {
+  const UNKNOWN =
+    "Состояние закрытия вашей части уточняется. Откройте «Очередь отправки», если оно не появится.";
+  const QUEUED = "Ваша часть закрыта на этой станции. Данные будут отправлены автоматически.";
+
+  function panelOf(part: ComponentProps<typeof ShiftClosedPanel>["part"]) {
+    render(
+      <ThemeProvider>
+        <ShiftClosedPanel
+          number="OCT26-004"
+          record={{ actualQty: 280, closedBoxCount: 23 }}
+          linkHeld={false}
+          leaving={false}
+          onDone={vi.fn()}
+          part={part}
+        />
+      </ThemeProvider>,
+    );
+  }
+
+  it("says the state is being found out, never that the data will go by itself", () => {
+    panelOf("unknown");
+    expect(screen.getByText(UNKNOWN)).toBeTruthy();
+    expect(screen.queryByText(/отправлены автоматически/)).toBeNull();
+  });
+
+  it("says a solo shift's close in stage 2a's words (no part)", () => {
+    panelOf(null);
+    expect(
+      screen.getByRole("group", { name: "Смена OCT26-004 закрыта на этой станции" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Смена закрыта на этой станции. Данные будут отправлены автоматически."),
+    ).toBeTruthy();
+  });
+
+  it("work screen: a failed read is neutral at first and keeps a state it knew before", async () => {
+    const { db, executor, shift } = await sharedStation("active");
+    let failing = true;
+    const flaky = {
+      ...executor,
+      query: ((sql: string, params: readonly unknown[], row: never) =>
+        failing && sql === PART_STATE_SQL
+          ? Promise.reject(new Error("read failed"))
+          : executor.query(sql, params, row)) as typeof executor.query,
+    };
+    const work = renderWork({ local: flaky, shift }, { overrides: { online: true } });
+    await work.settled();
+    await work.press("Закрыть мою часть");
+    await screen.findByRole("region", { name: "Закрытие моей части смены OCT26-004" });
+    await work.press("Подтвердить закрытие части");
+    await screen.findByRole("group", { name: "Ваша часть смены OCT26-004 закрыта" });
+    expect(screen.getByText(UNKNOWN)).toBeTruthy();
+    expect(screen.queryByText(QUEUED)).toBeNull();
+    failing = false;
+    await answer(executor, db, "accepted", { partClosed: true });
+    await act(async () => {
+      work.rerender({ outboxVersion: 1 });
+    });
+    await waitFor(() => expect(screen.getByText(/Хост принял закрытие/)).toBeTruthy());
+    failing = true;
+    await act(async () => {
+      work.rerender({ outboxVersion: 2 });
+    });
+    await act(async () => undefined);
+    expect(screen.getByText(/Хост принял закрытие/)).toBeTruthy();
+    expect(screen.queryByText(UNKNOWN)).toBeNull();
+  });
+
+  it("work screen: a refreshed list re-reads the state (waiting, then the shift closed)", async () => {
+    const { db, executor, shift } = await sharedStation("active");
+    const work = renderWork({ local: executor, shift }, { overrides: { online: true } });
+    await work.settled();
+    await work.press("Закрыть мою часть");
+    await screen.findByRole("region", { name: "Закрытие моей части смены OCT26-004" });
+    await work.press("Подтвердить закрытие части");
+    await screen.findByRole("group", { name: "Ваша часть смены OCT26-004 закрыта" });
+    await answer(executor, db, "accepted", { partClosed: true });
+    await act(async () => {
+      work.rerender({ outboxVersion: 1 });
+    });
+    await waitFor(() => expect(screen.getByText(/Хост принял закрытие/)).toBeTruthy());
+    const closed = sharedShift({
+      participants: [
+        { row: participant(STATION_ROW.deviceId, "Станция линии 1", "closed"), accepted: 0 },
+        { row: participant(OTHER_STATION, "Станция линии 2", "closed"), accepted: 300 },
+      ],
+      myState: "closed",
+      asOf: "2026-10-08T14:10:05Z",
+    });
+    await replaceShiftCopies(
+      executor,
+      PAIRING,
+      [{ ...closed, status: "closed", closedAt: "2026-10-08T14:10:00Z" }],
+      1_790_000_100_000,
+    );
+    await act(async () => {
+      work.rerender({ outboxVersion: 1, shiftReads: 1 });
+    });
+    await waitFor(() =>
+      expect(screen.getByText("Смена закрыта: все её части закрыты.")).toBeTruthy(),
+    );
   });
 });
