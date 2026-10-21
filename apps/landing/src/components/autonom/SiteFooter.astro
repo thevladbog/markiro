@@ -1,0 +1,41 @@
+---
+import { PRICING_PATH } from "../../content/autonom";
+import { operatorRequisites, SITE_CONTACTS } from "../../content/contacts";
+import BrandMark from "../BrandMark.astro";
+
+interface Props {
+  /** «short» is the single line of /skachat/: requisites and the address only. */
+  variant?: "full" | "short";
+}
+
+const { variant = "full" } = Astro.props;
+const links = [
+  ["/kak-rabotaet/", "Как работает"],
+  [PRICING_PATH, "Цены"],
+  ["/instruktsii/", "Инструкции"],
+  ["/stati/", "Статьи"],
+  ["/legal/", "Документы"],
+  ["/privacy/", "Политика обработки данных"],
+] as const;
+---
+
+<footer class:list={["ax-footer", `ax-footer--${variant}`]} data-theme="dark">
+  <div class="ax-container ax-footer__inner">
+    {variant === "full" && (
+      <div class="ax-footer__top">
+        <a href="/" aria-label="Маркиро, на главную страницу"><BrandMark locale="ru" /></a>
+        <nav class="ax-footer__nav" aria-label="Подвал">
+          {links.map(([href, label]) => <a href={href}>{label}</a>)}
+        </nav>
+      </div>
+    )}
+    <div class="ax-footer__bottom">
+      <p class="ax-footer__requisites">© 2026 Маркиро · {operatorRequisites("ru")}</p>
+      <div class="ax-footer__extra">
+        <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
+        <a href="/en/" hreflang="en" lang="en">English</a>
+        <button type="button" data-consent-settings>Настройки cookies</button>
+      </div>
+    </div>
+  </div>
+</footer>
