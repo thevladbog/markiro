@@ -18,7 +18,12 @@ import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
 import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
-import { presenceOf, revokedDeviceIds, type Presence } from "../shifts/participation.js";
+import {
+  openShiftNumbers,
+  presenceOf,
+  revokedDeviceIds,
+  type Presence,
+} from "../shifts/participation.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type { DeviceRecord, PairingCode } from "../../host/protocol.js";
 import { pairingCodeRequest } from "../../host/requests.js";
@@ -402,6 +407,7 @@ export function DevicesPage() {
         <RevokeDeviceDialog
           device={dialog.device}
           own={dialog.device.id === thisDevice}
+          openShifts={openShiftNumbers(shifts.data, dialog.device.id)}
           onClose={() => setDialog(null)}
           onRevoked={(device) => {
             // The record the revoke returned goes in first: the row is dead

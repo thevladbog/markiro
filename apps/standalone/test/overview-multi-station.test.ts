@@ -7,7 +7,11 @@ import {
   type AttentionInput,
 } from "../src/office/overview/dashboard-model.js";
 import { revokedDeviceIds } from "../src/office/shifts/participation.js";
-import { reasonMissingShifts, silentParticipants } from "../src/office/overview/overview-model.js";
+import {
+  reasonMissingShifts,
+  silentParticipants,
+  waitingOnAbsentDevices,
+} from "../src/office/overview/overview-model.js";
 import {
   ACTIVE,
   HANDHELD_ID,
@@ -226,5 +230,57 @@ describe("a revoked device in a shared shift (the host frees its slot)", () => {
       [HANDHELD_ID],
     );
     expect(silentParticipants([shift], [THREE], NOW)).toHaveLength(2);
+  });
+});
+
+describe("a shared shift that waits only for a revoked or paused device", () => {
+  const REVOKED = revokedDeviceIds([{ id: STATION_ID, revokedAt: "2026-10-08T12:00:00Z" }]);
+  const handheldClosed = {
+    ...PARTICIPANT_B,
+    state: "closed" as const,
+    closedBy: "device" as const,
+  };
+  const waiting: OfficeShift = { ...SHARED, participants: [participant(), handheldClosed] };
+
+  it("lists an active shift whose only open part is a revoked device's", () => {
+    expect(waitingOnAbsentDevices([waiting], REVOKED)).toEqual([
+      { shiftId: SHARED.id, number: "OCT26-004" },
+    ]);
+  });
+
+  it("lists it when the open parts are paused ones, even while the devices list is unread", () => {
+    const paused: OfficeShift = {
+      ...SHARED,
+      participants: [participant({ state: "left" }), handheldClosed],
+    };
+    expect(waitingOnAbsentDevices([paused])).toEqual([{ shiftId: SHARED.id, number: "OCT26-004" }]);
+  });
+
+  it("says nothing while a live active part remains, or when nothing is open, or for a closed shift", () => {
+    expect(waitingOnAbsentDevices([SHARED], REVOKED)).toEqual([]);
+    expect(waitingOnAbsentDevices([waiting])).toEqual([]);
+    expect(waitingOnAbsentDevices([SHARED_NO_REASON], REVOKED)).toEqual([]);
+    expect(waitingOnAbsentDevices([{ ...waiting, status: "closed" }], REVOKED)).toEqual([]);
+    expect(waitingOnAbsentDevices([ACTIVE], REVOKED)).toEqual([]);
+  });
+
+  it("leaves alone a lone station that paused (no device is revoked, nobody else is in)", () => {
+    const alone: OfficeShift = { ...ACTIVE, participants: [participant({ state: "left" })] };
+    expect(waitingOnAbsentDevices([alone])).toEqual([]);
+    expect(waitingOnAbsentDevices([alone], REVOKED)).toHaveLength(1);
+  });
+
+  it("becomes an attention row with the way to the card's «Станции»", () => {
+    const [item] = attentionItems({
+      ...CALM,
+      waitingShifts: waitingOnAbsentDevices([waiting], REVOKED),
+    });
+    expect(item).toMatchObject({
+      id: `shift-waits-${SHARED.id}`,
+      kind: "shift_waits",
+      severity: "warn",
+      to: `/shifts?shift=${SHARED.id}&tab=stations`,
+      titleValues: { number: "OCT26-004" },
+    });
   });
 });

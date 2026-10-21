@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { DeviceRecord } from "../src/host/protocol.js";
 import { stationShift } from "../src/office/devices/station-shift.js";
 import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./support/office.js";
+import { pressRowAction } from "./support/row-menu.js";
 import { chooseValue } from "./support/select.js";
 import {
   ACTIVE,
@@ -157,6 +158,54 @@ describe("the warning before a station moves, by the shift it works (plan 2b)", 
       within(rowOf("Станция линии 1")).findByText("На паузе в смене OCT26-004"),
     );
     expect(within(dialog).queryByText(warning)).toBeNull();
+  });
+});
+
+describe("the warning before a device is revoked, by the shifts it has an open part in (plan 2b)", () => {
+  const sentence =
+    "Устройство участвует в открытых сменах: OCT26-004. Его часть останется открытой и не даст смене закрыться сама: закройте такую смену целиком на странице «Смены».";
+
+  async function openRevoke(fake: FakeOfficeSession, name: string): Promise<HTMLElement> {
+    await openDevices(fake);
+    await waitFor(() => expect(fake.api.listShifts).toHaveBeenCalled());
+    await within(rowOf("ТСД 1")).findByText(/смене OCT26-004/);
+    pressRowAction(within(rowOf(name)), `Отозвать устройство «${name}»`);
+    return screen.findByRole("dialog");
+  }
+
+  it("names the active shift in which the device has an open part", async () => {
+    const dialog = await openRevoke(session(), "ТСД 1");
+    expect(within(dialog).getByText(sentence)).toBeTruthy();
+  });
+
+  it("names a shift where its part is paused too", async () => {
+    const shift = {
+      ...SHARED,
+      participants: [
+        participant({ state: "left" }),
+        { ...PARTICIPANT_B, state: "closed" as const, closedBy: "device" as const },
+      ],
+    };
+    const paused = await openRevoke(session([shift]), "Станция линии 1");
+    expect(within(paused).getByText(sentence)).toBeTruthy();
+  });
+
+  it("says nothing of shifts for a device whose part is closed", async () => {
+    const closed = {
+      ...SHARED,
+      participants: [PARTICIPANT_A, { ...PARTICIPANT_B, state: "closed" as const }],
+    };
+    const quiet = await openRevoke(session([closed]), "ТСД 1");
+    expect(within(quiet).queryByText(/открытых сменах/)).toBeNull();
+  });
+
+  it("says nothing while the shifts did not load", async () => {
+    const fake = session();
+    fake.api.listShifts.mockRejectedValue(new Error("down"));
+    await openDevices(fake);
+    pressRowAction(within(rowOf("ТСД 1")), "Отозвать устройство «ТСД 1»");
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText(/открытых сменах/)).toBeNull();
   });
 });
 

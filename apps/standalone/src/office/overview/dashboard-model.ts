@@ -23,6 +23,7 @@ import {
   shiftProgress,
   type SilentParticipant,
   storeNearlyFull,
+  type WaitingShift,
 } from "./overview-model.js";
 import { recentCivilDays } from "./overview-time.js";
 
@@ -297,6 +298,7 @@ export type AttentionKind =
   | "store_full"
   | "line_idle"
   | "participant_silent"
+  | "shift_waits"
   | "close_reason_missing";
 
 export type AttentionSeverity = "err" | "warn" | "info";
@@ -329,6 +331,8 @@ export interface AttentionInput {
    * row, and takes the place of the plain silent-device row of the same device.
    */
   silentParticipants?: readonly SilentParticipant[];
+  /** Active shifts whose open parts are all a revoked or a paused device's: they wait for the office's close. */
+  waitingShifts?: readonly WaitingShift[];
   /** Closed shifts the host marked as closed without the reason (plan 2b). */
   reasonMissing?: readonly ReasonMissingShift[];
   /** The host's clock (a device's age is measured by it), and this PC's. */
@@ -419,6 +423,19 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
       detailValues: { shift: each.shiftNumber, line: each.lineName },
       to: `/shifts?shift=${encodeURIComponent(each.shiftId)}&tab=stations`,
       actionKey: "office.overview.attention.participant.action",
+    });
+  }
+  for (const each of input.waitingShifts ?? []) {
+    items.push({
+      id: `shift-waits-${each.shiftId}`,
+      kind: "shift_waits",
+      severity: "warn",
+      titleKey: "office.overview.attention.shiftWaits.title",
+      titleValues: { number: each.number },
+      detailKey: "office.overview.attention.shiftWaits.detail",
+      detailValues: {},
+      to: `/shifts?shift=${encodeURIComponent(each.shiftId)}&tab=stations`,
+      actionKey: "office.overview.attention.shiftWaits.action",
     });
   }
   for (const each of input.reasonMissing ?? []) {

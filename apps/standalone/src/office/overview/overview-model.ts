@@ -1,7 +1,13 @@
 import type { ExportSettings } from "../../host/export-files.js";
 import type { DeviceKind, DeviceRecord, OfficeLine, OfficeShift } from "../../host/protocol.js";
 import { lineMaxStations } from "../../host/requests.js";
-import { isSilent, lastSign, participantsOf } from "../shifts/participation.js";
+import {
+  isSharedShift,
+  isSilent,
+  lastSign,
+  notClosedParticipants,
+  participantsOf,
+} from "../shifts/participation.js";
 import { shiftUnits } from "../shifts/shift-list.js";
 
 /** A device that reported within this long, by the host's clock, counts as on line. */
@@ -136,6 +142,35 @@ export function silentParticipants(
     }
   }
   return found.sort((a, b) => Date.parse(a.since) - Date.parse(b.since));
+}
+
+/** An active shift whose every open part belongs to a revoked or paused device. */
+export interface WaitingShift {
+  shiftId: string;
+  number: string;
+}
+
+/**
+ * Active shifts that nobody can finish by the stations: every part not closed (`active` or `left`) is a
+ * revoked device's or a paused one's, so the host's automatic close (it counts them as open) never
+ * comes and the shift stays «active» until the office closes it whole. A lone station that merely paused
+ * is not listed (nothing is revoked and nobody else entered: a break, not a stuck shift). `revoked` is
+ * empty while the devices list is unread (a technologist): only paused parts are known then.
+ */
+export function waitingOnAbsentDevices(
+  shifts: readonly OfficeShift[],
+  revoked: ReadonlySet<string> = new Set(),
+): WaitingShift[] {
+  const found: WaitingShift[] = [];
+  for (const shift of shifts) {
+    if (shift.status !== "active") continue;
+    const open = notClosedParticipants(shift);
+    if (open.length === 0) continue;
+    if (!open.every((each) => each.state === "left" || revoked.has(each.deviceId))) continue;
+    if (!isSharedShift(shift) && !open.some((each) => revoked.has(each.deviceId))) continue;
+    found.push({ shiftId: shift.id, number: shift.number });
+  }
+  return found;
 }
 
 /** A closed shift its devices closed without the reason the plan's gap needed. */

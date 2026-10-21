@@ -73,6 +73,10 @@ const KEYS = [
   "office.overview.attention.closeReason.title",
   "office.overview.attention.closeReason.detail",
   "office.overview.attention.closeReason.action",
+  "office.overview.attention.shiftWaits.title",
+  "office.overview.attention.shiftWaits.detail",
+  "office.overview.attention.shiftWaits.action",
+  "office.devices.revokeOpenShifts",
 ] as const;
 
 const PLURALS = [
@@ -97,6 +101,12 @@ describe("the texts of the multi-station office (plan 2b)", () => {
     expect(text("office.shifts.notClosed")).toBe("Не закрыли: {{devices}}.");
     expect(text("office.shifts.reasonMissing")).toBe("Причина не указана");
     expect(text("office.overview.lines.stations")).toBe("станций в смене: {{active}} из {{max}}");
+    expect(text("office.overview.attention.shiftWaits.title")).toBe(
+      "Смена {{number}} ждёт отозванное или приостановленное устройство",
+    );
+    expect(text("office.overview.attention.shiftWaits.detail")).toBe(
+      "Остальные устройства закрыли свои части: закройте смену целиком",
+    );
   });
 
   it("keeps the placeholders the components pass", () => {
@@ -108,5 +118,7 @@ describe("the texts of the multi-station office (plan 2b)", () => {
     expect(text("office.shifts.reasonIntro")).toContain("{{accepted}}");
     expect(text("office.devices.presence.active")).toContain("{{number}}");
     expect(text("office.overview.attention.participant.title")).toContain("{{duration}}");
+    expect(text("office.overview.attention.shiftWaits.title")).toContain("{{number}}");
+    expect(text("office.devices.revokeOpenShifts")).toContain("{{shifts}}");
   });
 });

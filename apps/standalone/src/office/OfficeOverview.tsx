@@ -29,6 +29,7 @@ import {
   deviceSummary,
   reasonMissingShifts,
   silentParticipants,
+  waitingOnAbsentDevices,
 } from "./overview/overview-model.js";
 import { OutputChart } from "./overview/OutputChart.js";
 import { OfficeIcon } from "./OfficeIcon.js";
@@ -118,6 +119,7 @@ export function OfficeOverview() {
         minutes: card.idleMinutes ?? 0,
       })),
     silentParticipants: silentParticipants(shifts, data.lines.data ?? [], nowMs, revoked),
+    waitingShifts: waitingOnAbsentDevices(shifts, revoked),
     reasonMissing: reasonMissingShifts(shifts),
     nowMs,
     pcNowMs: Date.now(),

@@ -148,3 +148,20 @@ export function presenceOf(
   }
   return best?.presence ?? null;
 }
+
+/**
+ * The numbers of the active shifts in which the device has a part not closed (`active` or `left`:
+ * either blocks the automatic close). Empty while the list is not read (`undefined`): nothing is claimed.
+ */
+export function openShiftNumbers(
+  shifts: readonly OfficeShift[] | undefined,
+  deviceId: string,
+): string[] {
+  return (shifts ?? [])
+    .filter(
+      (shift) =>
+        shift.status === "active" &&
+        notClosedParticipants(shift).some((each) => each.deviceId === deviceId),
+    )
+    .map((shift) => shift.number);
+}
