@@ -1962,9 +1962,30 @@ sign-out does not); the link sends pauses when online (`sendPendingLeaves`,
 none is kept). The sender settles only a permanent refusal (`not_found`, `shift_not_entered`,
 `validation_failed`); every other failure keeps the pause queued and does not block the pauses
 behind it. An answer whose `myState` is still `active` settles it as already re-entered (the host
-saw a later stay and wrote nothing), and any entry, online or offline, drops a pending one. Known
-limit: a pause in flight while the operator re-enters an active part carries the still-current
-token and may reach the host after the entry. `SYNC_SCHEMA_VERSION` stays 5.
+saw a later stay and wrote nothing), and any entry, online or offline, drops a pending one.
+`SYNC_SCHEMA_VERSION` stays 5.
+
+A station can work a part the host has as `left` (final review I1), deterministically: the operator
+leaves with the link up (the host frees the slot), the link drops, and «Продолжить» on the card
+(enabled offline for an entered copy) works from the stored snapshot; and by a race: a pause in
+flight carries the still-current token (an active part's re-entry stamps no new `joinedRev`), the
+entry reaches the host first, and the pause frees the slot after it. Left so, another device could
+take the slot and the line would run over `maxStations`. So while the work screen of an active
+shift is open (not leaving, not closed by the office), the floor (`FloorApp`, `rejoinLeftPart` in
+`src/floor/shifts/shift-rejoin.ts`) enters it again with `STATION_SHIFT_ENTER` whenever the link
+is up and the cache says `myState: "left"` with no pause of the operator's own waiting: when the
+link comes back and after every read of the host's list (the pause sender's settle asks for one).
+The return is tracked by the work gate, so a leave drains it before its pause is written. Decision:
+a full line (`shift_line_full`) does not stop the station — it keeps producing, its scans are facts
+the host takes from a left part, nothing kept changes — and the work screen says «Линия занята: N
+из M» with why and that the station returns by itself (`floor.work.lineFull`); every later read
+tries again, and the notice goes once the return is taken. A part closed on the host meanwhile is
+kept as closed. A refused key goes to the shell; any other failure waits for the next read.
+
+- m1 (known): two host reads with the same whole-second `as_of` overwrite each other in arrival
+  order (`>=`); the next read after a revision event corrects it.
+- m11 (known): an offline station whose paused part meets a full line in a stale cache cannot
+  resume it from the card until a read frees a slot; this follows the host's rule.
 
 Known limits and release order:
 

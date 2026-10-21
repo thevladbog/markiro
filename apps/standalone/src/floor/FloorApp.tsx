@@ -52,6 +52,7 @@ import { readShiftCopy, readStoredWork, type WorkShift } from "./shifts/shift-co
 import { QueueScreen } from "./queue/QueueScreen.js";
 import { ShiftList } from "./shifts/ShiftList.js";
 import { markLeave } from "./shifts/shift-participation.js";
+import { rejoinLeftPart } from "./shifts/shift-rejoin.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
 import { playSignalTone } from "./work/signal-sound.js";
@@ -218,9 +219,9 @@ export function FloorApp({
   }, []);
   // The view and the callbacks as the last commit has them, for timers and
   // answers that land later.
-  const current = useRef({ view, onSignOut, dispatch, requestLeaves });
+  const current = useRef({ view, onSignOut, dispatch, requestLeaves, requestShifts });
   useLayoutEffect(() => {
-    current.current = { view, onSignOut, dispatch, requestLeaves };
+    current.current = { view, onSignOut, dispatch, requestLeaves, requestShifts };
   });
   // What the leave that waits for the work ends in; `null` when none waits.
   const standing = useRef<Leave | null>(null);
@@ -462,6 +463,38 @@ export function FloorApp({
     const action = shellActionFor(error, null);
     if (action !== null) current.current.dispatch(action);
   }, []);
+  // Plan 2b (final review I1): the shift this station works may be `left` on the host — the
+  // operator left it with the link up and continued it offline, or a pause in flight freed the
+  // slot after the entry. With the link up, after every read of the host's list and when the link
+  // comes back, the station takes its slot again (`rejoinLeftPart`); the work is tracked by the
+  // gate, so a leave drains it before its pause is written. A full line changes nothing and the
+  // work screen says so; the next read tries again. A return in flight is not started twice.
+  const rejoinShiftId =
+    view.kind === "work" && !view.leaving && !view.officeClosed ? view.shift.copy.id : null;
+  const rejoining = useRef(false);
+  useEffect(() => {
+    if (rejoinShiftId === null || !online || rejoining.current || ending.current) return;
+    rejoining.current = true;
+    void gate
+      .track(
+        rejoinLeftPart(
+          { local, pairing: { hostId, deviceId }, online, enter, now: () => new Date() },
+          rejoinShiftId,
+        ),
+      )
+      .then(
+        (result) => {
+          if (result.kind === "rejected") hostError(result.error);
+          // The work screen reads the cache again after the next list.
+          if (result.kind === "rejoined") current.current.requestShifts?.();
+        },
+        // This computer's database: the next read tries again.
+        () => undefined,
+      )
+      .finally(() => {
+        rejoining.current = false;
+      });
+  }, [rejoinShiftId, online, shiftReads.done, local, hostId, deviceId, enter, gate, hostError]);
   // A record written: the status bar reads its counts again, and the outbox goes.
   const recorded = useCallback(() => {
     current.current.dispatch({ type: "outbox_changed" });

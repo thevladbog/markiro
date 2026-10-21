@@ -11,7 +11,7 @@ import { WorkScreen, type WorkScreenProps } from "../src/floor/work/WorkScreen.j
 import { createSystemAwake } from "../src/hardware/awake.js";
 import type { DeviceStatus, HostStatus } from "../src/host/protocol.js";
 import { sendFactBatch } from "../src/local/facts-sender.js";
-import { sendPendingLeaves } from "../src/local/leave-sender.js";
+import { sendPendingLeaves, type LeaveShift } from "../src/local/leave-sender.js";
 import { DEVICE_ID, DEVICE_STATUS, HOST_ID } from "./support/fixtures.js";
 import { km, OPERATOR_ID, VALIDATION_ENTERED } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
@@ -109,6 +109,7 @@ function station(host: MultiHost, deviceId: string) {
   const screen = () => within(view.container);
   return {
     local,
+    pairing,
     scanner,
     requestLeaves,
     screen,
@@ -126,10 +127,10 @@ function station(host: MultiHost, deviceId: string) {
         state.outbox += 1;
         update();
       }),
-    /** The pauses this station owes, as the link sends them. */
-    sendLeaves: () =>
+    /** The pauses this station owes, as the link sends them (through `leave` when given). */
+    sendLeaves: (leave: LeaveShift = host.leave(deviceId)) =>
       act(async () => {
-        await sendPendingLeaves(local, pairing, host.leave(deviceId), () => new Date());
+        await sendPendingLeaves(local, pairing, leave, () => new Date());
         state.reads += 1;
         update();
       }),
@@ -310,5 +311,115 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     );
     expect(stale.myState).toBe("active");
     expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("active");
+  });
+
+  it("a part left on the host and continued offline takes its slot again when the link is back (final review I1)", async () => {
+    const host = multiHost(VALIDATION_ENTERED, 2, NAMES);
+    host.open(DEVICE_ID);
+    const a = station(host, DEVICE_ID);
+    const b = station(host, OTHER_STATION);
+    for (const one of [a, b]) await one.readShifts();
+    await a.press("Продолжить");
+    await b.press("Присоединиться");
+
+    // B leaves with the link up: the host frees its slot and the cache says so.
+    await b.press("Выйти из смены");
+    await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
+    await b.sendLeaves();
+    expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("left");
+
+    // The link drops; the operator continues from the stored snapshot and scans.
+    await b.goOffline();
+    await b.press("Продолжить");
+    await b.scanner.listening();
+    await b.scan(km("B1"));
+    await waitFor(() => expect(b.mine()).toBe("1"));
+
+    // The link is back: the station takes its slot again on the host.
+    await b.goOnline();
+    await b.readShifts();
+    await waitFor(() => expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("active"));
+  });
+
+  it("a full line on the return is said on the work screen, the line goes on, and the slot is taken once one is free (final review I1)", async () => {
+    const host = multiHost(VALIDATION_ENTERED, 2, NAMES);
+    host.open(DEVICE_ID);
+    const a = station(host, DEVICE_ID);
+    const b = station(host, OTHER_STATION);
+    const c = station(host, THIRD_STATION);
+    for (const one of [a, b, c]) await one.readShifts();
+    await a.press("Продолжить");
+    await b.press("Присоединиться");
+    await b.press("Выйти из смены");
+    await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
+    await b.sendLeaves();
+    await b.goOffline();
+    await b.press("Продолжить");
+
+    // C takes the slot B freed while B works offline.
+    await c.readShifts();
+    await c.press("Присоединиться");
+
+    // B's return meets a full line: said with its numbers; B's scans still count.
+    await b.goOnline();
+    await b.readShifts();
+    expect(await b.screen().findByText("Линия занята: 2 из 2")).toBeTruthy();
+    expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("left");
+    await b.scanner.listening();
+    await b.scan(km("B1"));
+    await waitFor(() => expect(b.mine()).toBe("1"));
+
+    // C leaves: B's next read takes the slot, and the notice goes.
+    await c.press("Выйти из смены");
+    await waitFor(() => expect(c.requestLeaves).toHaveBeenCalledTimes(1));
+    await c.sendLeaves();
+    await b.readShifts();
+    await waitFor(() => expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("active"));
+    await b.readShifts();
+    await waitFor(() => expect(b.screen().queryByText("Линия занята: 2 из 2")).toBeNull());
+  });
+
+  it("a pause in flight that reaches the host after the entry is undone by the next read (final review I1)", async () => {
+    const host = multiHost(VALIDATION_ENTERED, 2, NAMES);
+    host.open(DEVICE_ID);
+    const a = station(host, DEVICE_ID);
+    const b = station(host, OTHER_STATION);
+    for (const one of [a, b]) await one.readShifts();
+    await a.press("Продолжить");
+    await b.press("Присоединиться");
+    await b.press("Выйти из смены");
+    await waitFor(() => expect(b.requestLeaves).toHaveBeenCalledTimes(1));
+
+    // The pause is read and on its way; the operator comes back and the entry reaches the host
+    // first (an active part's re-entry stamps no new token), then the pause frees the slot.
+    let asked: () => void = () => undefined;
+    const askedNow = new Promise<void>((resolve) => {
+      asked = resolve;
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sending = sendPendingLeaves(
+      b.local,
+      b.pairing,
+      async (shiftId, leave) => {
+        asked();
+        await held;
+        return host.leave(OTHER_STATION)(shiftId, leave);
+      },
+      () => new Date(),
+    );
+    await askedNow;
+    await b.press("Продолжить");
+    release();
+    await act(async () => {
+      await sending;
+    });
+    expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("left");
+
+    // The next read finds the part left while the station works it, and enters again.
+    await b.readShifts();
+    await waitFor(() => expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("active"));
   });
 });

@@ -104,7 +104,7 @@ import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
-import { sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
+import { activeOthers, sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import { useShiftParticipation } from "./use-shift-participation.js";
 import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
@@ -2444,6 +2444,18 @@ export function WorkScreen(props: WorkScreenProps) {
     stop?.kind !== "close" &&
     stop?.kind !== "closed";
   const planShowing = shared === null ? planReached : sharedReached;
+  // Plan 2b (final review I1): the host has this station's part as `left` and the other devices
+  // hold every slot, by its last read — the station's return was refused. The work goes on (the
+  // host takes the facts of a left part), and the floor tries the return again after every read.
+  const othersActive =
+    participation === null ? 0 : activeOthers(participation, props.pairing.deviceId).length;
+  const lineFullHere =
+    participation !== null &&
+    participation.myState === "left" &&
+    participation.leaveRequestedAt === null &&
+    othersActive >= participation.maxStations
+      ? { active: othersActive, maxStations: participation.maxStations }
+      : null;
   const closeLabel = t(shared === null ? "floor.close.open" : "floor.close.openPart");
   const palletBoxes = pallet?.boxCount ?? 0;
   // The waiting message follows what `refresh` reads: with no open pallet, or one below
@@ -2567,6 +2579,17 @@ export function WorkScreen(props: WorkScreenProps) {
           {officeClosed && stop?.kind !== "closed" && (
             <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
               {t("floor.work.officeClosed.body")}
+            </Alert>
+          )}
+          {lineFullHere !== null && !officeClosed && stop?.kind !== "closed" && (
+            <Alert
+              tone="warn"
+              title={t("floor.work.lineFull.title", {
+                active: lineFullHere.active,
+                maxStations: lineFullHere.maxStations,
+              })}
+            >
+              {t("floor.work.lineFull.body")}
             </Alert>
           )}
           <div className="work-screen__instruments" data-layout={validation ? "validation" : "box"}>
