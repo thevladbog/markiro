@@ -61,7 +61,7 @@ const RU: FilmPageDefinition = {
   railLabel: "Главы",
   scrollHint: "Листайте вниз: пройдём по производству от линии до офиса",
   heroSecondary: { label: "Как это работает", href: "#line" },
-  finalSecondary: { label: "Как проходит внедрение", href: "/#implementation" },
+  finalSecondary: { label: "Как начать", href: "/#start" },
   chapters: [
     {
       id: "district",

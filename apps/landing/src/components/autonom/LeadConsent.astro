@@ -1,0 +1,40 @@
+---
+import type { PublicLegalLinks } from "../../lib/site-config";
+import Icon from "./Icon.astro";
+
+/** Honeypot, consent and SmartCaptcha of a lead form; rendered only in builds with submission on. */
+interface Props {
+  idPrefix: string;
+  legalLinks: PublicLegalLinks;
+  captchaClientKey: string;
+}
+
+const { idPrefix, legalLinks, captchaClientKey } = Astro.props;
+---
+
+<div class="ax-honeypot" aria-hidden="true">
+  <label for={`${idPrefix}-website`}>Website</label>
+  <input id={`${idPrefix}-website`} name="website" type="text" tabindex="-1" autocomplete="off" />
+</div>
+<div class="ax-consent">
+  <input id={`${idPrefix}-consent`} name="consent" type="checkbox" required />
+  <label for={`${idPrefix}-consent`}>
+    <span class="ax-consent__box" aria-hidden="true"><Icon name="check" size={14} /></span>
+    <span>
+      Согласен на <a href={legalLinks.consent}>обработку персональных данных</a> по
+      <a href={legalLinks.privacy}>политике Маркиро</a>
+    </span>
+  </label>
+  <p class="ax-field__error" id={`${idPrefix}-consent-error`} data-error-for="consent"></p>
+</div>
+<div class="ax-captcha">
+  <div class="smart-captcha" data-sitekey={captchaClientKey} data-hl="ru"></div>
+  <p class="ax-field__error" data-captcha-error tabindex="-1"></p>
+</div>
+<div class="ax-alert" role="alert" data-lead-alert hidden>
+  <Icon name="wifi-off" size={20} />
+  <div>
+    <strong>Не получилось отправить</strong>
+    <p>Данные в форме сохранены. Попробуйте ещё раз или напишите на <a href="mailto:hello@markiro.app">hello@markiro.app</a>.</p>
+  </div>
+</div>

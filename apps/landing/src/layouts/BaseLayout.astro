@@ -20,8 +20,11 @@ interface Props {
   metadata: PageMetadata;
   graph: PageGraph;
   noindex?: boolean;
-  /** The home page is light; every other page keeps the dark theme until its own redesign. */
-  theme?: "dark" | "light";
+  /**
+   * "auto" pages (the standalone home, /skachat/, /stoimost/) follow the visitor's choice
+   * of system, light or dark theme; the older pages keep the theme they were designed in.
+   */
+  theme?: "auto" | "dark" | "light";
 }
 
 const { metadata: page, graph, noindex = false, theme = "dark" } = Astro.props;
@@ -45,16 +48,17 @@ const jsonLd = serializeJsonLd(
 ---
 
 <!doctype html>
-<html lang={page.locale} data-theme={theme}>
+<html lang={page.locale} data-theme={theme === "auto" ? "light" : theme} data-theme-choice={theme === "auto" ? "system" : undefined}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {theme === "auto" && <script is:inline src="/theme-init.js"></script>}
     {fontPreloads(page.locale).map((href) => (
       <link rel="preload" as="font" type="font/woff2" href={href} crossorigin />
     ))}
     <meta name="description" content={page.description} />
     <meta name="robots" content={noindex ? "noindex,follow" : "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"} />
-    <meta name="theme-color" content={theme === "light" ? "#fafaf8" : "#131216"} />
+    <meta name="theme-color" content={theme === "dark" ? "#131216" : "#fafaf8"} />
     <meta property="og:type" content={page.ogType ?? "website"} />
     {page.publishedAt && <meta property="article:published_time" content={page.publishedAt} />}
     {page.modifiedAt && <meta property="article:modified_time" content={page.modifiedAt} />}
@@ -94,8 +98,14 @@ const jsonLd = serializeJsonLd(
     <ConsentPanel locale={page.locale} />
     <slot />
     <script>
+      import { captureFirstTouch } from "../lib/first-touch";
       import { GTM_CONTAINER_ID, initConsentPanel, initTagManager } from "../scripts/tracking";
 
+      try {
+        captureFirstTouch(window.sessionStorage, new URL(window.location.href), document.referrer);
+      } catch {
+        // sessionStorage itself can throw when storage is blocked.
+      }
       initConsentPanel(document, window);
       initTagManager(document, window, GTM_CONTAINER_ID);
     </script>

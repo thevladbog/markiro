@@ -1,3 +1,5 @@
+import { HOME_FAQ } from "./autonom";
+
 export type CanonicalPath =
   | "/"
   | "/markirovka-chestny-znak/"
@@ -79,21 +81,22 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/",
     alternatePath: "/en/",
     locale: "ru",
-    title: "ПО для маркировки и агрегации по Честному знаку — Markiro",
+    title: "Маркиро Автоном: маркировка и агрегация на вашем ПК",
     description:
-      "Проверка кодов на линии, сборка коробов и паллет, печать этикеток и работа без сети. Для соков, молочной продукции, пива, косметики и другой маркируемой продукции.",
-    heading: "Маркировка и агрегация. Линия идёт.",
+      "Станция на линии проверяет каждый код и собирает короба и паллеты с SSCC. Программа и база на вашем ПК, интернет для смены не нужен. 14 дней бесплатно, от 60 000 ₽ в год.",
+    heading: "Маркировка и агрегация. Всё на вашем ПК.",
     navigationLabel: "Markiro",
-    eyebrow: "Маркировка / агрегация / прослеживаемость",
+    eyebrow: "Маркиро Автоном · для Windows",
     introduction:
-      "Производственная система для любой маркируемой продукции: проверка кодов, сборка коробов и паллет, печать этикеток и работа станции без сети.",
+      "Станция на линии проверяет каждый код до короба и собирает короба и паллеты с SSCC. Программа, база и копии работают на вашем ПК: интернет для смены не нужен.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-09-26",
+    reviewedAt: "2026-10-21",
     summary: [],
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
     relatedArticlePaths: [],
     sections: [],
+    faq: HOME_FAQ,
   },
   {
     path: "/markirovka-chestny-znak/",

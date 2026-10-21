@@ -10,6 +10,8 @@ export interface PublicSiteConfig {
   captchaClientKey: string | null;
   consentVersion: string | null;
   demoEndpoint: string | null;
+  /** `POST /api/landing-leads` (spec 2026-10-20, 15.3); enabled with the demo form. */
+  leadEndpoint: string | null;
   legalLinks: PublicLegalLinks | null;
   phone: PublicPhone | null;
 }
@@ -72,6 +74,7 @@ export function readPublicSiteConfig(
       captchaClientKey: null,
       consentVersion: null,
       demoEndpoint: null,
+      leadEndpoint: null,
       legalLinks: null,
       phone: readPhone(env.PUBLIC_PHONE),
     };
@@ -89,6 +92,7 @@ export function readPublicSiteConfig(
     captchaClientKey,
     consentVersion: CURRENT_DEMO_CONSENT_ID,
     demoEndpoint: "/api/demo-requests",
+    leadEndpoint: "/api/landing-leads",
     legalLinks:
       locale === "en"
         ? { consent: "/en/personal-data-consent/", privacy: "/en/privacy/" }

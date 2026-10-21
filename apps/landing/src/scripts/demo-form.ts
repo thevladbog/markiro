@@ -11,7 +11,7 @@ export interface DemoRequestPayload extends DemoLead {
   readonly website: string;
 }
 
-type DemoErrorCode =
+export type DemoErrorCode =
   | "captcha_invalid"
   | "captcha_unavailable"
   | "invalid_request"
@@ -332,7 +332,7 @@ export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): (
   };
 }
 
-function readErrorCode(value: unknown): DemoErrorCode | undefined {
+export function readDemoErrorCode(value: unknown): DemoErrorCode | undefined {
   if (typeof value !== "object" || value === null || !("code" in value)) return undefined;
   const code = value.code;
   return typeof code === "string" && PUBLIC_ERROR_CODES.has(code as DemoErrorCode)
@@ -355,7 +355,7 @@ export function browserDemoFormRuntime(browserWindow: Window & typeof globalThis
 
       let code: DemoErrorCode | undefined;
       try {
-        code = readErrorCode(await response.json());
+        code = readDemoErrorCode(await response.json());
       } catch {
         code = undefined;
       }

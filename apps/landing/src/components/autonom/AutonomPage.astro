@@ -1,0 +1,35 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import type { PageGraph, PageMetadata } from "../../lib/seo";
+import type { PublicPhone } from "../../lib/site-config";
+import "../../styles/autonom.css";
+import SiteFooter from "./SiteFooter.astro";
+import SiteHeader from "./SiteHeader.astro";
+
+interface Props {
+  metadata: PageMetadata;
+  graph: PageGraph;
+  phone: PublicPhone | null;
+  footer?: "full" | "short";
+}
+
+const { metadata, graph, phone, footer = "full" } = Astro.props;
+---
+
+<BaseLayout metadata={metadata} graph={graph} theme="auto">
+  <div class="ax-page">
+    <SiteHeader path={metadata.path} phone={phone} />
+    <main id="main" class="ax-main">
+      <slot />
+    </main>
+    <SiteFooter variant={footer} />
+  </div>
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../../scripts/site";
+    import { browserThemeRuntime, initThemeSwitch } from "../../scripts/theme";
+
+    initLanding(document, browserLandingRuntime(window));
+    initThemeSwitch(document, browserThemeRuntime(window));
+  </script>
+</BaseLayout>
