@@ -252,9 +252,10 @@ The mandatory production-bundle CI job builds the API image and the platform edg
 (with a GitHub Actions layer cache that only main writes; the release workflows
 still build from scratch) and, after the role, backup and recovery harnesses, runs
 `node deploy/platform/ci-stack.mjs --local-ci` with the local image source SHA.
-The landing browser and Lighthouse gates and the SaaS-admin browser suites run in
-their own required jobs (`landing-browser`, `landing-lighthouse`,
-`saas-admin-browser`); the cabinet and station galleries run in the optional
+The `deploy/platform` Node contracts run in the required `platform-contracts` job,
+split across two runners with `node --test --test-shard`. The landing browser and
+Lighthouse gates and the SaaS-admin browser suites run in their own required jobs
+(`landing-browser`, `landing-lighthouse`, `saas-admin-browser`); the cabinet and station galleries run in the optional
 `cabinet-galleries` and `station-galleries` jobs, outside `ci-required`.
 This harness verifies a local Unix Docker endpoint, uses a unique project,
 synthetic credentials in a protected temporary file and loopback-only edge ports.

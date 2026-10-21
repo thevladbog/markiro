@@ -70,10 +70,10 @@ test("CI keeps the production contracts but no longer runs the retired Yandex co
 
 test("ci.yml runs platform contracts without an ambient Compose project", async () => {
   const workflow = await parse(".github/workflows/ci.yml");
-  assert.equal(workflow.jobs["production-bundle"].env, undefined);
+  assert.equal(workflow.jobs["platform-contracts"].env, undefined);
   assert.equal(
-    namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts").run,
-    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+    namedStep(workflow, "platform-contracts", "Verify portable platform preparation contracts").run,
+    "env -u COMPOSE_PROJECT_NAME node --test --test-shard=${{ matrix.shard }}/2 deploy/platform/test/*.test.mjs",
   );
 });
 

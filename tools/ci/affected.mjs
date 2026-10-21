@@ -8,6 +8,9 @@ export const HEAVY_JOBS = Object.freeze([
   "verify_app_tests",
   "tenant_team_infrastructure",
   "production_bundle",
+  // The deploy/platform Node contracts, split off production-bundle onto two
+  // sharded runners; every change that selects production_bundle selects them.
+  "platform_contracts",
   "station_rust",
   "station_windows_build",
   "signer_rust",
@@ -315,6 +318,7 @@ export function classifyChangedFiles(files) {
       return buildResult(ALL_JOBS, true);
     }
     for (const job of jobs) enabled.add(job);
+    if (enabled.has("production_bundle")) enabled.add("platform_contracts");
   }
 
   return buildResult(enabled);

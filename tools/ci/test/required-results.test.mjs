@@ -13,6 +13,7 @@ const jobPairs = [
   ["verify_app_tests", "verify-app-tests"],
   ["tenant_team_infrastructure", "tenant-team-infrastructure"],
   ["production_bundle", "production-bundle"],
+  ["platform_contracts", "platform-contracts"],
   ["station_rust", "station-rust"],
   ["station_windows_build", "station-windows-build"],
   ["signer_rust", "signer-rust"],

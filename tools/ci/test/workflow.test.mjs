@@ -23,6 +23,7 @@ const heavyJobs = [
   ["verify-app-tests", "verify_app_tests"],
   ["tenant-team-infrastructure", "tenant_team_infrastructure"],
   ["production-bundle", "production_bundle"],
+  ["platform-contracts", "platform_contracts"],
   ["station-rust", "station_rust"],
   ["station-windows-build", "station_windows_build"],
   ["signer-rust", "signer_rust"],
@@ -454,7 +455,6 @@ test("Android gate verifies original signed and budget fixture byte parity befor
 
 test("platform preparation builds its own edge and runs the stack after both images", () => {
   const job = workflow.jobs["production-bundle"];
-  const contracts = stepByName(job, "Verify portable platform preparation contracts");
   const build = stepByName(job, "Build local platform-only edge preparation image");
   const api = stepByName(job, "Build local SHA-tagged API image");
   const stack = stepByName(job, "Verify isolated platform-only preparation stack");
@@ -462,20 +462,13 @@ test("platform preparation builds its own edge and runs the stack after both ima
   assert.match(roles.run, /pnpm --filter @markiro\/db build/);
   assert.match(roles.run, /node deploy\/platform\/postgres\/roles-ci\.mjs --local-ci/);
   assert.ok(job.steps.indexOf(roles) < job.steps.indexOf(stack));
-  assert.equal(
-    contracts.run,
-    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
-  );
   assert.equal(build.with.file, "deploy/platform/edge.Dockerfile");
   assert.equal(build.with.tags, "ghcr.io/thevladbog/markiro-platform-edge:${{ github.sha }}");
   assert.equal(api.with.file, "deploy/production/api.Dockerfile");
   assert.equal(api.with.tags, "ghcr.io/thevladbog/markiro-api:${{ github.sha }}");
   assert.equal(stack.run, "node deploy/platform/ci-stack.mjs --local-ci");
   assert.equal(stack.env.MARKIRO_SOURCE_SHA, "${{ github.sha }}");
-  for (const image of [api, build]) {
-    assert.ok(job.steps.indexOf(stack) > job.steps.indexOf(image));
-    assert.ok(job.steps.indexOf(image) > job.steps.indexOf(contracts));
-  }
+  for (const image of [api, build]) assert.ok(job.steps.indexOf(stack) > job.steps.indexOf(image));
   assert.equal(stepByName(job, "Preserve platform preparation evidence").if, "always()");
 });
 
@@ -763,6 +756,7 @@ test("the platform release evidence covers the split gates through ci-required",
   const { HEAVY_JOBS } = await import("../affected.mjs");
   for (const jobId of [
     "production-bundle",
+    "platform-contracts",
     "landing-browser",
     "landing-lighthouse",
     "saas-admin-browser",
@@ -770,4 +764,27 @@ test("the platform release evidence covers the split gates through ci-required",
     assert.ok(gate.needs.includes(jobId), jobId);
     assert.ok(HEAVY_JOBS.includes(jobId.replaceAll("-", "_")), jobId);
   }
+});
+
+test("the deploy/platform contracts run on two shards that together cover every file", () => {
+  const job = workflow.jobs["platform-contracts"];
+  assert.equal(job["runs-on"], workflow.jobs["production-bundle"]["runs-on"]);
+  assert.deepEqual(job.strategy.matrix.shard, [1, 2]);
+  // One failing shard must not cancel the other's report.
+  assert.equal(job.strategy["fail-fast"], false);
+  const contracts = stepByName(job, "Verify portable platform preparation contracts");
+  assert.equal(
+    contracts.run,
+    "env -u COMPOSE_PROJECT_NAME node --test --test-shard=${{ matrix.shard }}/2 deploy/platform/test/*.test.mjs",
+  );
+  // node splits the same sorted glob by index, so the shards are disjoint and
+  // complete only while the shard count matches the matrix.
+  const total = Number(/--test-shard=\$\{\{ matrix\.shard \}\}\/(\d+)/u.exec(contracts.run)[1]);
+  assert.equal(total, job.strategy.matrix.shard.length);
+  // production-bundle no longer runs the suite itself.
+  assert.ok(
+    !workflow.jobs["production-bundle"].steps.some((step) =>
+      (step.run ?? "").includes("deploy/platform/test/"),
+    ),
+  );
 });
