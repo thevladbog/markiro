@@ -1,5 +1,6 @@
 pub mod api;
 pub mod checks;
+pub mod dbcheck;
 pub mod device;
 pub mod engine;
 pub mod gen;
