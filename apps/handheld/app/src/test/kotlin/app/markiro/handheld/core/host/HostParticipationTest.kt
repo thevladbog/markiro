@@ -121,15 +121,31 @@ class HostParticipationTest {
     fun anOwedLeaveIsSentWhileTheDeviceIsStillOutAndThenForgotten() = runTest {
         db.shiftDao().upsert(HostFactsFixtures.shift().copy(leftAt = 5L))
         store().markLeavePending(shift)
-        val transport = Exact(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShift()))), listPath to ArrayDeque(listOf(ok(listBody())))))
+        val transport = Exact(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShiftWithMyState("left")))), listPath to ArrayDeque(listOf(ok(listBody())))))
         participation(transport).beat()
         assertEquals(listOf("POST $leavePath", "GET $listPath"), transport.requests)
         assertEquals(emptyList<String>(), store().pendingLeaves())
         assertNotNull(store().get(shift))
     }
 
+    /** One shift of the list with this device's own participant in [state] holding the token [rev]. */
+    private fun oneShiftWithMe(state: String, rev: Long): String {
+        val root = Json.parseToJsonElement(oneShift()).jsonObject
+        val mine = kotlinx.serialization.json.buildJsonObject {
+            put("deviceId", kotlinx.serialization.json.JsonPrimitive(me))
+            put("deviceKind", kotlinx.serialization.json.JsonPrimitive("handheld"))
+            put("deviceName", kotlinx.serialization.json.JsonPrimitive("ТСД 2"))
+            put("state", kotlinx.serialization.json.JsonPrimitive(state))
+            put("joinedRev", kotlinx.serialization.json.JsonPrimitive(rev))
+        }
+        val participants = kotlinx.serialization.json.JsonArray(root.getValue("participants").jsonArray + mine)
+        return kotlinx.serialization.json.JsonObject(
+            root + ("participants" to participants) + ("myState" to kotlinx.serialization.json.JsonPrimitive(state)),
+        ).toString()
+    }
+
     @Test
-    fun anOwedLeaveCarriesTheStoredTokenAndAnAnswerStillActiveSettlesItAsAlreadyReEntered() = runTest {
+    fun anOwedLeaveCarriesTheStoredTokenAndAnAnswerStillActiveKeepsItOwedForTheFreshToken() = runTest {
         db.shiftDao().upsert(HostFactsFixtures.shift().copy(leftAt = 5L))
         store().markLeavePending(shift)
         // The participation of this shift as an earlier answer left it: this device's token 7.
@@ -141,10 +157,20 @@ class HostParticipationTest {
                 ),
             )
         }
-        val transport = Exact(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShift()))), listPath to ArrayDeque(listOf(ok(listBody())))))
+        val transport = Exact(
+            mutableMapOf(
+                leavePath to ArrayDeque(listOf(ok(oneShiftWithMe("active", 9)), ok(oneShiftWithMe("left", 9)))),
+                listPath to ArrayDeque(listOf(ok(listBody()), ok(listBody()))),
+            ),
+        )
         participation(transport).beat()
         assertEquals(listOf("""{"joinedRev":7}"""), transport.bodies)
-        // The host answered the part still active (its token moved on): nothing is owed any more.
+        // Final review I2: the row says the device is out, yet the host still holds its slot (its token moved on): the leave stays owed and the
+        // answer's token is kept, so the next beat ends the stay the host actually has.
+        assertEquals(listOf(shift), store().pendingLeaves())
+        assertEquals(9L, store().get(shift)!!.joinedRev)
+        participation(transport).beat()
+        assertEquals(listOf("""{"joinedRev":7}""", """{"joinedRev":9}"""), transport.bodies)
         assertEquals(emptyList<String>(), store().pendingLeaves())
     }
 
@@ -199,7 +225,8 @@ class HostParticipationTest {
         val transport = Exact(
             mutableMapOf(
                 leavePath to ArrayDeque(listOf(refusal(500, envelope("internal")))),
-                otherLeavePath to ArrayDeque(listOf(ok(oneShift()))),
+                // The host's answer of a leave it carried out: the part is `left`.
+                otherLeavePath to ArrayDeque(listOf(ok(oneShiftWithMyState("left")))),
                 listPath to ArrayDeque(listOf(ok(listBody()))),
             ),
         )

@@ -71,9 +71,12 @@ class HostParticipation(
             }
             try {
                 // With this device's token as read together with the marker: a leave of an earlier stay changes nothing on the host, which
-                // answers the part still `active` ("already re-entered"); the answer is kept and nothing more is owed either way.
-                store.save(calls.run { api().leave(shiftId, owed.joinedRev) })
-                store.clearLeavePending(shiftId, owed.marker)
+                // answers the part still `active`. The row says the device is out, so `active` means the host still holds a slot this device
+                // does not use (final review I2): the leave stays owed, and the answer kept here carries the current token, so the next beat
+                // ends the stay the host actually has. Any other state settles it.
+                val answered = calls.run { api().leave(shiftId, owed.joinedRev) }
+                store.save(answered)
+                if (answered.myState != "active") store.clearLeavePending(shiftId, owed.marker)
             } catch (e: HttpException) {
                 if (OwedLeaveRefusals.settles(e)) store.clearLeavePending(shiftId, owed.marker)
             } catch (e: IOException) {

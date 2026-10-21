@@ -103,16 +103,19 @@ Android tests must also verify its interpretation.
   `SharedShiftRules` and wired in the strip, the hub card and `ShiftCloser`. The 90 s freshness applies only to
   the close reason, not to the strip.
 - Leaving writes the local mark and an owed-leave marker in one commit, then asks the host. An owed leave is
-  compare-and-cleared and settles only when the answer's `myState` is not `active` or on a definite refusal
-  (`not_found`, `shift_not_entered`, `validation_failed`); each owed leave is sent independently, so one stuck
-  leave never blocks the rest; `rejoinLeftPart` cancels it when the device re-enters before it was sent.
+  compare-and-cleared and settles only when the answer's `myState` is `left` or `closed` (in `ShiftRepository`; a
+  `null` answer settles nothing) or not `active` (in the heartbeat's `flushLeaves`, whose answer always names a
+  state), or on a definite refusal (`not_found`, `shift_not_entered`, `validation_failed`). An `active` answer
+  while the row says the device is out keeps it owed; the answer's token is kept and the next beat resends with it.
+  Each owed leave is sent independently, so one stuck leave never blocks the rest. A re-entry before it was sent
+  (`leftAt = null`) makes `flushLeaves` drop it (`stillOut` is false); `rejoinLeftPart` only skips while a leave is
+  owed. `StationBackend.leave` has no default: every backend, the production `BackendSelector` included, answers it.
 - A closed part reads back as `myState: closed` and `toShiftDto` maps it to `status = "closed"`; it never opens
   work again. A full line never stops local production. Receipts `partClosed`/`reasonMissing` are noted by
   `HostAckMapper`. Closing a shared part offline sends no reason (the host marks `close_reason_missing`, the
   office supplies it); a single-device shift keeps the hard refusal and the reason.
 - Known gaps: no layout/short-screen tests for the strip (only Robolectric at `w360dp`); nothing was run on a device
-  or emulator; the vendor scanner path is untouched; the token race of the owed-leave sender is untested;
-  `HostParticipation.flushLeaves` clears after any successful answer (an optional `myState` guard is open); a null
+  or emulator; the vendor scanner path is untouched; the token race of the owed-leave sender is untested; a null
   `asOf` is taken from the incoming answer where the station refuses it within 60 s; a non-closed answer without
   totals and nothing stored creates a row with null figures; the hub card shows the corrected total only for shared
   shifts.
