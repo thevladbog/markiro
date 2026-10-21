@@ -315,3 +315,10 @@
     font: 400 15px/20px var(--font-ui);
   }
 }
+
+/* Plan 2b: what the close of a part does to the shift, under the result. */
+.shift-close__part {
+  margin: 0;
+  color: var(--fg);
+  font: var(--floor-body);
+}

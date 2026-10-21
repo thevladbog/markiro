@@ -1,8 +1,4 @@
-import {
-  isShiftCloseReasonCode,
-  shiftCloseReasonRequired,
-  type ShiftCloseReasonCode,
-} from "@markiro/domain";
+import { isShiftCloseReasonCode, type ShiftCloseReasonCode } from "@markiro/domain";
 import { z } from "zod";
 
 import type { ShiftClosedFact } from "../../host/protocol.js";
@@ -12,8 +8,16 @@ import { outboxStatement, shiftClosedRecord } from "../facts.js";
 import { LIVE_BOXES } from "../pallets/pallets.js";
 import { OPEN_JOB_SQL } from "../print/print-jobs.js";
 import { readShiftCopy } from "../shifts/shift-copies.js";
+import {
+  closesShift,
+  participantsEver,
+  readParticipation,
+  sharedCount,
+  sharedParticipation,
+} from "../shifts/shift-participation.js";
 import { UNRESOLVED_UNIT_LABEL_SQL } from "../unit-labels/unit-label-store.js";
 import type { BoxContext } from "../work/box-close.js";
+import { stationReasonRequired } from "./shared-reason.js";
 
 /**
  * What keeps the shift from closing now (stage 2a spec §5.7.7): an open box
@@ -34,6 +38,16 @@ export type CloseBlocker =
   | { kind: "open_pallet"; boxes: number }
   | { kind: "closed" };
 
+/** What a part's close of a shared shift does (plan 2b), as the station knows it. */
+export interface PartClose {
+  /** By the last read, no other participant stays active or left: this close closes the shift. */
+  closesShift: boolean;
+  /** The whole shift's count: the others' part by the host and this station's own codes. */
+  total: number;
+  /** The link was up when the summary was read: only then can a shared close ask for a reason. */
+  online: boolean;
+}
+
 /** The summary of the close (the cloud's close summary), from this station's own records. */
 export interface CloseSummary {
   /** The plan as this station's copy has it now: the record carries it as the plan it saw. */
@@ -45,6 +59,8 @@ export interface CloseSummary {
   /** The plan is given and not met: one of the domain's six reasons is needed. */
   reasonRequired: boolean;
   blocker: CloseBlocker | null;
+  /** A shift several devices may work (plan 2b): this station closes only its part. Absent: a solo shift. */
+  part?: PartClose;
 }
 
 const summaryRow = z.object({
@@ -130,11 +146,17 @@ const unresolvedRow = z.object({ n: z.number().int().nonnegative() });
  * what keeps it from closing. Every label is counted, not read: a waiting
  * job this build cannot read still keeps the shift open. An open pallet keeps
  * it open only while it holds a box not taken apart (plan ПЛ-Ц).
+ *
+ * Since plan 2b it also reads what the host's last read said of a shift several devices may work:
+ * the part's close (`part`) — whether it closes the shift and the whole shift's count — and the
+ * reason by `stationReasonRequired`, so a shared close asks it only online (`online`) of the last
+ * closer.
  */
 export async function readCloseSummary(
   local: LocalExecutor,
   pairing: Pairing,
   shiftId: string,
+  online = false,
 ): Promise<CloseSummary> {
   const copy = await readShiftCopy(local, pairing, shiftId);
   const [row] = await local.query(
@@ -168,12 +190,31 @@ export async function readCloseSummary(
             : row.pallet_boxes > 0
               ? { kind: "open_pallet", boxes: row.pallet_boxes }
               : null;
+  // Plan 2b: what the host's last read said of the shift; unreadable, the shift is a solo one.
+  const participation = await readParticipation(local, pairing, shiftId).catch(() => null);
+  const shared = sharedParticipation(participation);
+  const part: PartClose | null =
+    shared === null
+      ? null
+      : {
+          closesShift: closesShift(shared, pairing.deviceId),
+          total: sharedCount(shared, pairing.deviceId, row.actual).total,
+          online,
+        };
   return {
     plannedQty: copy.plannedQty,
     actualQty: row.actual,
     closedBoxes: row.closed,
-    reasonRequired: shiftCloseReasonRequired(copy.plannedQty, row.actual),
+    reasonRequired: stationReasonRequired({
+      plannedQty: copy.plannedQty,
+      actualQty: row.actual,
+      participantsEver: participantsEver(participation),
+      closesShift: part?.closesShift ?? true,
+      online,
+      total: part?.total ?? row.actual,
+    }),
     blocker,
+    ...(part === null ? {} : { part }),
   };
 }
 
@@ -220,14 +261,18 @@ export type CloseResult =
  *     shows the `closed` stop, not an error;
  * (d) re-reads and re-shows the summary on `stale`, keeping the reason chosen
  *     only while the plan still needs one.
+ *
+ * `online` is the link's state for a shared shift's reason (plan 2b): the record is the same — it
+ * closes this station's part — and the host closes the shift with the last part.
  */
 export async function closeShift(
   context: BoxContext,
   reasonCode: ShiftCloseReasonCode | null,
   guards: readonly LocalStatement[] = [],
+  online = false,
 ): Promise<CloseResult> {
   const { local, pairing, shift } = context;
-  const summary = await readCloseSummary(local, pairing, shift.copy.id);
+  const summary = await readCloseSummary(local, pairing, shift.copy.id, online);
   if (summary.blocker !== null) return { kind: "blocked", blocker: summary.blocker };
   if (reasonCode !== null && !isShiftCloseReasonCode(reasonCode)) {
     return { kind: "reason_required" };

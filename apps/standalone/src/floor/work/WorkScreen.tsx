@@ -1378,7 +1378,7 @@ export function WorkScreen(props: WorkScreenProps) {
   /** The shift's close summary as this station's records have it now. */
   const readSummaryNow = useCallback((): Promise<CloseSummary> => {
     const now = live.current;
-    return readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
+    return readCloseSummary(now.local, pairingOf(now), now.shift.copy.id, now.online);
   }, []);
 
   /**
@@ -1419,7 +1419,7 @@ export function WorkScreen(props: WorkScreenProps) {
       try {
         const now = live.current;
         const guards = [openPalletGuard(pairingOf(now), now.shift.copy.id)];
-        const result = await closeShift(boxContextOf(live), reason, guards);
+        const result = await closeShift(boxContextOf(live), reason, guards, live.current.online);
         if (result.kind === "closed") {
           live.current.onRecorded();
           setStop({ kind: "closed", record: result.record });
@@ -2001,7 +2001,10 @@ export function WorkScreen(props: WorkScreenProps) {
   const readSummary = () =>
     queue.run(async () => {
       const now = live.current;
-      await showSummary(await readCloseSummary(now.local, pairingOf(now), now.shift.copy.id), null);
+      await showSummary(
+        await readCloseSummary(now.local, pairingOf(now), now.shift.copy.id, now.online),
+        null,
+      );
     });
 
   /** «Закрыть смену», pressed while nothing stops the work: the summary first. */
@@ -2898,6 +2901,7 @@ export function WorkScreen(props: WorkScreenProps) {
               palletCapacity={pallets?.capacity ?? null}
               onClosePallet={confirmPalletClose}
               boxless={validation}
+              ownPart={sharedPart !== null}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
