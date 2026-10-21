@@ -1364,6 +1364,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       ],
       ["outbox", "outbox_shift (shift_id=? AND host_id=? AND device_id=?"],
       ["floor_unit_labels", "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?"],
+      // The primary key (host, device, shift) is the table's only index and covers the delete.
+      [
+        "floor_shift_participation",
+        "sqlite_autoindex_floor_shift_participation_1 (host_id=? AND device_id=? AND shift_id=?",
+      ],
     ]);
     for (const table of RETAINED_TABLES) {
       const steps = plan(purgeTableSql(table)).split("\n");
@@ -1425,7 +1430,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       REFUSED_CLOSES_SQL,
       ...RETAINED_TABLES.map(purgeTableSql),
     ];
-    expect(new Set(retention).size).toBe(12);
+    expect(new Set(retention).size).toBe(13);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
   });
 

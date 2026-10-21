@@ -3034,6 +3034,11 @@ async fn the_floors_repeating_reads_search_an_index() {
             "DELETE FROM floor_unit_labels WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?",
         ),
+        (
+            "DELETE FROM floor_shift_participation WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ?",
+            "sqlite_autoindex_floor_shift_participation_1 (host_id=? AND device_id=? AND shift_id=?",
+        ),
         // The pallets (plan ПЛ-Ц): the open pallet and its two counts on every box close and render,
         // a pallet's close and a box joining it by their keys, the shift close's check and summary,
         // and the label queue's read through the shift's jobs.
