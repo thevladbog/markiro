@@ -1006,7 +1006,15 @@ pub struct BootstrapRequest {
     /// «Установить демо-данные» (spec 2026-10-21): the host adds the demo product, its SSCC
     /// counters and a planned demo shift on the first line. Left out, nothing of the kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub demo_data: Option<bool>,
+    pub demo_data: Option<DemoDataRequest>,
+}
+
+/// The wizard's demo data: the demo shift's production date is the wizard's today, as every
+/// production date comes from the client (the host keeps no time-zone database).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DemoDataRequest {
+    pub production_date: String,
 }
 
 /// A stock label template of the wizard: enabled, for every category, and

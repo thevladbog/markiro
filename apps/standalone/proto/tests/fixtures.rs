@@ -2218,7 +2218,13 @@ fn the_host_network_lists_each_address_with_how_it_was_got() {
 #[test]
 fn demo_data_fixtures_round_trip_and_an_older_record_is_no_demo() {
     let sent: BootstrapRequest = round_trip("bootstrap-request-demo.json");
-    assert_eq!(sent.demo_data, Some(true));
+    assert_eq!(
+        sent.demo_data.map(|demo| demo.production_date).as_deref(),
+        Some("2026-10-21")
+    );
+    let mut value = fixture("bootstrap-request-demo.json");
+    value["demoData"] = Value::Bool(true);
+    assert!(serde_json::from_value::<BootstrapRequest>(value).is_err());
     let plain: BootstrapRequest = round_trip("bootstrap-request.json");
     assert_eq!(plain.demo_data, None);
 

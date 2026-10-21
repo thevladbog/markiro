@@ -1775,8 +1775,11 @@ export const bootstrapRequestSchema = z
     templates: z.array(stockTemplateSchema).optional(),
     /** Left out when the box «I reserved the address» was not ticked. */
     addressConfirmed: z.boolean().optional(),
-    /** «Установить демо-данные» (spec 2026-10-21): sent only when ticked. */
-    demoData: z.literal(true).optional(),
+    /**
+     * «Установить демо-данные» (spec 2026-10-21): sent only when ticked, with the wizard's today
+     * as the demo shift's production date.
+     */
+    demoData: z.strictObject({ productionDate: civilDateTextSchema }).optional(),
   })
   .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;

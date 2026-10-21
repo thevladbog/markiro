@@ -20,5 +20,7 @@
   "lines": [
     "Линия 1"
   ],
-  "demoData": true
+  "demoData": {
+    "productionDate": "2026-10-21"
+  }
 }
