@@ -69,12 +69,19 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
       phone: "+79991234567",
       ...overrides,
     });
-    await new LandingLeadRepository(db, mail, {
-      recipient: "owner@example.test",
-      replyTo: "hello@example.test",
-      landingOrigin: "https://markiro.example",
-      adminOrigin: "https://admin.markiro.example",
-    }).accept(input);
+    // The form arrives an hour before the fixed clock, so the journal order of the
+    // lead's own event and later actions does not depend on the wall clock.
+    await new LandingLeadRepository(
+      db,
+      mail,
+      {
+        recipient: "owner@example.test",
+        replyTo: "hello@example.test",
+        landingOrigin: "https://markiro.example",
+        adminOrigin: "https://admin.markiro.example",
+      },
+      () => new Date(now.getTime() - 3_600_000),
+    ).accept(input);
     const [row] = await db
       .select()
       .from(schema.landingLeads)
