@@ -5,14 +5,22 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import java.io.IOException
 
 /** A detail that is a string, or `null` for anything else (an object, an array, a number, a missing key): a defect of the host must not throw. */
 fun JsonObject?.text(key: String): String? = (this?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+
+/** A detail that is a JSON number read as an `Int`, or `null` for anything else (a string, an object, a missing key). */
+fun JsonObject?.int(key: String): Int? = (this?.get(key) as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+
+/** A detail that is the JSON boolean `true`; a missing key, a string `"true"` or anything else is `false`. */
+fun JsonObject?.flag(key: String): Boolean = (this?.get(key) as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == true
 
 /** The calls of the host's protocol (spec 5, 8.1). Every call answers a `Result`; a failure is a [HostApiError]. */
 class HostApi(private val transport: HostTransport, private val json: Json = Json { ignoreUnknownKeys = true }) {
