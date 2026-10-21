@@ -202,6 +202,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # ubuntu-latest moved to 26.04, where /tmp is a tmpfs. Astro moves the
+      # prerendered assets out of apps/landing/.astro with rename(), so the
+      # landing render tests' build into os.tmpdir() failed with EXDEV (run
+      # 39546812945). Temporary directories stay on the workspace disk; turbo
+      # passes TMPDIR through (turbo.json globalPassThroughEnv).
+      - run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       # No Postgres and no DATABASE_URL on purpose: every suite in this slice
       # is database-free, and a suite that grows a database dependency must
       # move to verify-api-tests instead of silently skipping here. The
