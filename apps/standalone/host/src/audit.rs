@@ -87,6 +87,8 @@ pub mod actions {
     pub const SHIFT_CREATE: &str = "shift.create";
     pub const SHIFT_UPDATE: &str = "shift.update";
     pub const SHIFT_DELETE: &str = "shift.delete";
+    /// «Удалить демо-данные» (spec 2026-10-21): the demo product and all its shifts made.
+    pub const DEMO_DATA_DELETE: &str = "demo_data.delete";
     /// A station opened a planned shift: its snapshot is frozen.
     pub const SHIFT_OPEN: &str = "shift.open";
     /// The office closed an active shift (a station's close is a fact, plan

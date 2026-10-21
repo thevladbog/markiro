@@ -656,3 +656,219 @@ async fn the_usage_statistics_count_no_demo_shift() {
     assert_eq!(september["boxes"]["closed"], 0);
     assert_eq!(september["pallets"]["closed"], 0);
 }
+
+/// Rows still referring to the demo data, by table.
+async fn demo_rows(app: &TestApp) -> Vec<(&'static str, i64)> {
+    let mut rows = Vec::new();
+    for (table, sql) in [
+        ("products", "SELECT COUNT(*) FROM products"),
+        ("product_photos", "SELECT COUNT(*) FROM product_photos"),
+        ("shifts", "SELECT COUNT(*) FROM shifts"),
+        ("scans", "SELECT COUNT(*) FROM scans"),
+        ("boxes", "SELECT COUNT(*) FROM boxes"),
+        ("box_items", "SELECT COUNT(*) FROM box_items"),
+        ("pallets", "SELECT COUNT(*) FROM pallets"),
+        ("code_owners", "SELECT COUNT(*) FROM code_owners"),
+        (
+            "fact_receipts",
+            "SELECT COUNT(*) FROM fact_receipts WHERE shift_id IS NOT NULL",
+        ),
+        (
+            "shift_close_events",
+            "SELECT COUNT(*) FROM shift_close_events",
+        ),
+        (
+            "shift_participants",
+            "SELECT COUNT(*) FROM shift_participants",
+        ),
+        (
+            "shift_number_counters",
+            "SELECT COUNT(*) FROM shift_number_counters",
+        ),
+        (
+            "sscc_counters",
+            "SELECT COUNT(*) FROM sscc_counters WHERE issuer_prefix = '290000000'",
+        ),
+        (
+            "sscc_blocks",
+            "SELECT COUNT(*) FROM sscc_blocks WHERE issuer_prefix = '290000000'",
+        ),
+    ] {
+        rows.push((table, count(app, sql).await));
+    }
+    rows
+}
+
+#[tokio::test]
+async fn the_summary_says_what_the_demo_data_holds() {
+    let admin = demo_admin().await;
+    let (status, summary) = admin.call("GET", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    let product: String = sqlx::query_scalar("SELECT id FROM products")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        summary,
+        json!({
+            "present": true, "productId": product, "shifts": 1, "boxes": 0, "pallets": 0,
+            "codes": 0, "activeShifts": []
+        })
+    );
+    run_demo_shift(&admin, false).await;
+    // A technologist reads it too.
+    let technologist = admin.technologist().await;
+    let (status, summary) = admin
+        .call_as(&technologist, "GET", "/v1/office/demo-data", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(
+        (
+            &summary["boxes"],
+            &summary["pallets"],
+            &summary["codes"],
+            &summary["activeShifts"]
+        ),
+        (&json!(2), &json!(1), &json!(10), &json!(["DEMO-001"]))
+    );
+}
+
+#[tokio::test]
+async fn a_host_without_demo_data_deletes_nothing() {
+    let admin = support::app::admin().await;
+    let rev = host_revision(&admin.app).await;
+    let rows = support::app::audit_rows(&admin.app).await;
+    let (status, summary) = admin.call("GET", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(summary["present"], false);
+    let (status, body) = admin.call("DELETE", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(host_revision(&admin.app).await, rev);
+    assert_eq!(support::app::audit_rows(&admin.app).await, rows);
+}
+
+#[tokio::test]
+async fn an_open_demo_shift_stops_the_delete_and_only_an_administrator_deletes() {
+    let admin = demo_admin().await;
+    let technologist = admin.technologist().await;
+    let (status, body) = admin
+        .call_as(&technologist, "DELETE", "/v1/office/demo-data", None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    run_demo_shift(&admin, false).await;
+    let before = demo_rows(&admin.app).await;
+    let rev = host_revision(&admin.app).await;
+    let (status, body) = admin.call("DELETE", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(constraint(&body), "demo_shift_active");
+    assert_eq!(body["error"]["details"]["shifts"], json!(["DEMO-001"]));
+    assert_eq!(demo_rows(&admin.app).await, before);
+    assert_eq!(host_revision(&admin.app).await, rev);
+    assert!(audit_trail(&admin.app, "demo_data.delete").await.is_empty());
+}
+
+#[tokio::test]
+async fn the_delete_removes_every_trace_of_the_demo_data_in_one_revision() {
+    let admin = demo_admin().await;
+    let run = run_demo_shift(&admin, true).await;
+    let product: String = sqlx::query_scalar("SELECT id FROM products")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let rev = host_revision(&admin.app).await;
+    let (status, removed) = admin.call("DELETE", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(
+        removed,
+        json!({
+            "present": true, "productId": product, "shifts": 1, "boxes": 2, "pallets": 1,
+            "codes": 10, "activeShifts": []
+        })
+    );
+    assert!(demo_rows(&admin.app)
+        .await
+        .iter()
+        .all(|(_, rows)| *rows == 0));
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
+    // The organization's work data stays.
+    assert_eq!(count(&admin.app, "SELECT COUNT(*) FROM lines").await, 2);
+    assert_eq!(
+        count(&admin.app, "SELECT COUNT(*) FROM label_templates").await,
+        2
+    );
+    assert_eq!(
+        count(
+            &admin.app,
+            "SELECT COUNT(*) FROM sscc_counters WHERE issuer_prefix = '460068200'"
+        )
+        .await,
+        2
+    );
+    // The product leaves the stations' feed as a tombstone.
+    assert_eq!(
+        support::app::tombstones(&admin.app).await,
+        vec![("products".to_owned(), product.clone(), rev + 1)]
+    );
+    let trail = audit_trail(&admin.app, "demo_data.delete").await;
+    assert_eq!(
+        trail,
+        vec![(
+            "office_user".to_owned(),
+            Some(admin.id.clone()),
+            "demo_data.delete".to_owned(),
+            Some("product".to_owned()),
+            Some(product.clone()),
+            "ok".to_owned(),
+            json!({ "shifts": 1, "boxes": 2, "pallets": 1, "codes": 10 }),
+        )]
+    );
+    let (status, summary) = admin.call("GET", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(summary["present"], false);
+    // A second press changes nothing.
+    let (status, _) = admin.call("DELETE", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A station's late fact of the removed shift is acknowledged and dropped.
+    let late = support::app::fact(
+        &support::app::record_id(900),
+        "scan",
+        &run.shift,
+        json!({
+            "scannedAt": support::app::instant(30, 0), "verdict": "ok", "duplicateSource": null,
+            "rawKind": "km", "rawLength": 40, "code": demo_code(11),
+            "boxId": support::app::box_id(3)
+        }),
+    );
+    let answers = support::app::receipts(&admin.app, &admin.key, &[late]).await;
+    assert_eq!(
+        answers,
+        vec![json!({ "id": support::app::record_id(900), "outcome": "accepted" })]
+    );
+    assert_eq!(count(&admin.app, "SELECT COUNT(*) FROM scans").await, 0);
+
+    // The demo prefix is free again.
+    let (status, body) = admin
+        .call(
+            "PUT",
+            "/v1/office/org",
+            Some(json!({
+                "name": "ООО «Атолл»", "inn": "7707083893", "gln": "2900000000018",
+                "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow", "expectedRev": 1
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn a_planned_demo_shift_goes_with_the_demo_data() {
+    let admin = demo_admin().await;
+    let (status, removed) = admin.call("DELETE", "/v1/office/demo-data", None).await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(removed["shifts"], 1);
+    assert!(demo_rows(&admin.app)
+        .await
+        .iter()
+        .all(|(_, rows)| *rows == 0));
+}
