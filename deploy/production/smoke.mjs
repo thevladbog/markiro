@@ -122,6 +122,18 @@ export const ROUTE_CHECKS = Object.freeze([
     kind: "not-found",
     expected: "404, not HTML on admin authority",
   }),
+  Object.freeze({
+    method: "GET",
+    path: "/api/landing-leads",
+    kind: "not-found",
+    expected: "404, not HTML on admin authority",
+  }),
+  Object.freeze({
+    method: "POST",
+    path: "/api/landing-leads",
+    kind: "not-found",
+    expected: "404, not HTML on admin authority",
+  }),
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
 
@@ -194,6 +206,12 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["POST", "/api/demo-request", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests/", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests/extra", "not-found"]),
+  Object.freeze(["GET", "/api/landing-leads", "not-found"]),
+  Object.freeze(["HEAD", "/api/landing-leads", "not-found"]),
+  Object.freeze(["PUT", "/api/landing-leads", "not-found"]),
+  Object.freeze(["POST", "/api/landing-lead", "not-found"]),
+  Object.freeze(["POST", "/api/landing-leads/", "not-found"]),
+  Object.freeze(["POST", "/api/landing-leads/extra", "not-found"]),
   Object.freeze(["POST", "/api/other", "not-found"]),
   Object.freeze(["GET", "/missing/", "branded-not-found"]),
 ]);
@@ -1455,6 +1473,25 @@ async function runLandingSmoke(options, client) {
   assertLandingDemoSubmission(
     demoSubmission,
     demoSubmissionBody,
+    options.landingDemoSubmissionState,
+  );
+  // The lead form shares the demo form's switch, captcha and edge route, so an
+  // empty body proves the same two states without creating a lead or a mail.
+  const leadSubmission = await publicRequest(client, new URL("/api/landing-leads", baseUrl), {
+    method: "POST",
+    body: "{}",
+    headers: { "content-type": "application/json" },
+  });
+  const leadSubmissionBody = await getText(leadSubmission);
+  assertHeaders(
+    leadSubmission,
+    new URL(baseUrl).protocol === "https:",
+    "landing POST /api/landing-leads",
+    LANDING_CSP,
+  );
+  assertLandingDemoSubmission(
+    leadSubmission,
+    leadSubmissionBody,
     options.landingDemoSubmissionState,
   );
   return { releaseSha: root.headers.get("x-markiro-release-sha") };

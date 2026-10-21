@@ -442,7 +442,11 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
             "content-type": "application/pdf",
           },
         });
-      if (landing && path === "/api/demo-requests" && (init?.method ?? "GET") === "POST")
+      if (
+        landing &&
+        (path === "/api/demo-requests" || path === "/api/landing-leads") &&
+        (init?.method ?? "GET") === "POST"
+      )
         return landingResponse({
           status: landingDemoSubmissionState === "enabled" ? 400 : 404,
           body: JSON.stringify({
@@ -506,7 +510,7 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           body: "not found",
           headers: { "content-type": "text/plain" },
         });
-      if (path === "/api/demo-requests")
+      if (path === "/api/demo-requests" || path === "/api/landing-leads")
         return response({
           status: 404,
           body: "not found",
@@ -651,6 +655,35 @@ test("public smoke rejects demo-request proxy leakage on the admin authority", a
   );
 });
 
+test("public smoke rejects lead-form proxy leakage on the admin authority", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = (url, init) => {
+    if (
+      new URL(url).hostname === "app.markiro.example" &&
+      new URL(url).pathname === "/api/landing-leads" &&
+      init?.method === "POST"
+    )
+      return response({
+        body: '{"status":"proxied"}',
+        headers: { "content-type": "application/json" },
+      });
+    return original(url, init);
+  };
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+      },
+      client,
+    ),
+    /non-HTML 404/,
+  );
+});
+
 test("landing smoke exercises the approved enabled API state without captcha or mail", async () => {
   const client = smokeClient(undefined, "enabled");
 
@@ -672,6 +705,14 @@ test("landing smoke exercises the approved enabled API state without captcha or 
   );
   assert.equal(submission.init.body, "{}");
   assert.equal(submission.init.headers["content-type"], "application/json");
+  const leadSubmission = client.requests.find(
+    ({ url, init }) =>
+      new URL(url).hostname === "markiro.example" &&
+      new URL(url).pathname === "/api/landing-leads" &&
+      init?.method === "POST",
+  );
+  assert.equal(leadSubmission.init.body, "{}");
+  assert.equal(leadSubmission.init.headers["content-type"], "application/json");
 });
 
 test("landing smoke allows SmartCaptcha runtime assets in enabled mode", async () => {
@@ -1133,6 +1174,8 @@ test("defines the complete immutable public-route smoke contract", () => {
       ["GET", "/docs", "docs", "same-origin executable documentation shell"],
       ["GET", "/api/demo-requests", "not-found", "404, not HTML on admin authority"],
       ["POST", "/api/demo-requests", "not-found", "404, not HTML on admin authority"],
+      ["GET", "/api/landing-leads", "not-found", "404, not HTML on admin authority"],
+      ["POST", "/api/landing-leads", "not-found", "404, not HTML on admin authority"],
       ["POST", "/unknown", "not-found", "404, not HTML"],
     ],
   );
@@ -1198,6 +1241,12 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["POST", "/api/demo-request", "not-found"],
     ["POST", "/api/demo-requests/", "not-found"],
     ["POST", "/api/demo-requests/extra", "not-found"],
+    ["GET", "/api/landing-leads", "not-found"],
+    ["HEAD", "/api/landing-leads", "not-found"],
+    ["PUT", "/api/landing-leads", "not-found"],
+    ["POST", "/api/landing-lead", "not-found"],
+    ["POST", "/api/landing-leads/", "not-found"],
+    ["POST", "/api/landing-leads/extra", "not-found"],
     ["POST", "/api/other", "not-found"],
     ["GET", "/missing/", "branded-not-found"],
   ]);
@@ -1418,7 +1467,7 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
 
   assert.equal(
     client.requests.length,
-    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 9,
+    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 10,
   );
   assert.deepEqual(
     client.requests
