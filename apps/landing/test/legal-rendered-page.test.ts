@@ -1,15 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { testBuildDirectory } from "./build-output";
-
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
-const outputDirectory = testBuildDirectory("markiro-legal-render-");
+const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-legal-render-"));
 
 const LEGAL_ROUTES = [
   "/legal/",
