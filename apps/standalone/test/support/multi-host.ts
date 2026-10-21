@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { reasonNeed } from "../../src/floor/close/shared-reason.js";
 import { HostError } from "../../src/host/client.js";
 import {
   deviceShiftSchema,
@@ -28,16 +27,49 @@ const recordSchema = z.object({
 export type MultiHost = ReturnType<typeof multiHost>;
 
 /**
+ * The host's `reason_need` (`host/src/shift_participants.rs`, fixture
+ * `shift-close-reason-shared.json`), written here on its own and not imported from the station, so
+ * the station's mirror (`src/floor/close/shared-reason.ts`) is checked against something it did not
+ * write: a close that does not close the shift needs nothing; a shift that only ever had this
+ * device keeps stage 2a's rule (`close_reason_required`: a plan the device saw, not met by its own
+ * count) and is refused without the reason; a shared shift's closing close needs one when the
+ * host's plan is not the whole shift's accepted units, and goes on without it, marked missing.
+ */
+export function hostReasonNeed(
+  closesShift: boolean,
+  participantsEver: number,
+  factPlanned: number | null,
+  ownActual: number,
+  hostPlanned: number | null,
+  shiftAccepted: number,
+): "none" | "required" | "shared" {
+  if (!closesShift) return "none";
+  if (participantsEver <= 1) {
+    return factPlanned !== null && factPlanned !== ownActual ? "required" : "none";
+  }
+  return hostPlanned !== null && hostPlanned !== shiftAccepted ? "shared" : "none";
+}
+
+/** A device instant in the host's column format: whole seconds, UTC (`format_timestamp`). */
+function hostSeconds(instant: string): string {
+  return new Date(Date.parse(instant)).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
  * A host of one shared shift for the webview tests of plan 2b, in memory: the host contract's
  * entry (a slot by `maxStations`, `shift_line_full` with its numbers, `shift_busy` without the
- * capability, a closed part read back; a first entry or a return from `left` stamps a new
- * `joinedRev`), leave (`left`, `shift_not_entered`; a `joinedRev` that is not the row's current
- * one changes nothing), list (participants, `myState`; totals by device at an `asOf` that moves on
- * with every answer, for an active shift only — a closed shift in the list carries none, while the
- * answer of an entry or a leave always does) and facts (an accepted
- * scan counts; a `shift_closed` closes the sender's part and the shift with the last one, the
- * reason by `reasonNeed`, the receipts `partClosed`, `reasonMissing`, `alreadyClosed`). Not the
- * host: what the stations must see of it.
+ * capability, a closed part read back to a capable device and `shift_status` to one that is not; a
+ * first entry or a return from `left` stamps a new `joinedRev`), leave (`left`,
+ * `shift_not_entered`; a `joinedRev` that is not the row's current one changes nothing), list
+ * (participants, `myState`; totals by device for an active shift only — a closed shift in the list
+ * carries none, while the answer of an entry or a leave always does) and facts (an accepted scan
+ * claims its code in the registry, the earliest device instant winning; a `shift_closed` closes
+ * the sender's part at the device's `closedAt` in whole seconds and the shift with the last one at
+ * the latest of the device-closed parts, the reason by the host's own rule `hostReasonNeed`; a
+ * close the shift no longer takes is refused without a reason a one-device shift needs, else
+ * `alreadyClosed`/`partClosed`). The host's clock is whole seconds and moves only on `tick`, so
+ * answers share an `asOf` as the real host's do within a second; `list` may be kept and applied
+ * later, out of order. Not the host: what the stations must see of it.
  */
 export function multiHost(
   base: EnteredShift,
@@ -56,12 +88,11 @@ export function multiHost(
     return rev;
   };
   let seconds = 0;
-  const instant = () => {
-    seconds += 1;
-    return new Date(Date.parse("2026-10-08T07:00:00Z") + seconds * 1000)
+  /** The host's clock now, in whole seconds; it moves only on `tick`. */
+  const instant = () =>
+    new Date(Date.parse("2026-10-08T07:00:00Z") + seconds * 1000)
       .toISOString()
       .replace(".000Z", "Z");
-  };
   const refused = (
     code: string,
     constraint: string | null,
@@ -138,40 +169,58 @@ export function multiHost(
     });
   };
   const closePart = (deviceId: string, id: string, data: Record<string, unknown>): FactReceipt => {
-    if (status === "closed") return { id, outcome: "accepted", details: { alreadyClosed: true } };
     const mine = parts.get(deviceId);
     if (mine === undefined) return { id, outcome: "rejected", code: "invalid_record" };
-    if (mine.row.state === "closed")
-      return { id, outcome: "accepted", details: { partClosed: true } };
-    const planned = data["plannedQtySnapshot"];
+    const planned =
+      typeof data["plannedQtySnapshot"] === "number" ? data["plannedQtySnapshot"] : null;
     const actual = typeof data["actualQty"] === "number" ? data["actualQty"] : 0;
     const reasonCode = typeof data["reasonCode"] === "string" ? data["reasonCode"] : null;
+    const missingReason: FactReceipt = {
+      id,
+      outcome: "rejected",
+      code: "invalid_record",
+      details: { field: "data.reasonCode" },
+    };
+    // A close the shift no longer takes: a one-device shift keeps stage 2a's rule.
+    if (status === "closed" || mine.row.state === "closed") {
+      if (
+        hostReasonNeed(true, parts.size, planned, actual, null, 0) === "required" &&
+        reasonCode === null
+      ) {
+        return missingReason;
+      }
+      return status === "closed"
+        ? { id, outcome: "accepted", details: { alreadyClosed: true } }
+        : { id, outcome: "accepted", details: { partClosed: true } };
+    }
     const closesShift = [...parts.values()].every(
       (part) => part.row.deviceId === deviceId || part.row.state === "closed",
     );
-    const need = reasonNeed({
+    const need = hostReasonNeed(
       closesShift,
-      participantsEver: parts.size,
-      factPlanned: typeof planned === "number" ? planned : null,
-      actualQty: actual,
-      hostPlanned: fields.plannedQty,
-      shiftAccepted: accepted(),
-    });
-    if (need === "required" && reasonCode === null) {
-      return { id, outcome: "rejected", code: "invalid_record" };
-    }
-    const at = instant();
+      parts.size,
+      planned,
+      actual,
+      fields.plannedQty,
+      closesShift && parts.size > 1 ? accepted() : 0,
+    );
+    if (need === "required" && reasonCode === null) return missingReason;
     mine.row = {
       ...mine.row,
       state: "closed",
-      closedAt: at,
+      closedAt: hostSeconds(String(data["closedAt"])),
       closedBy: "device",
       closedActualQty: actual,
       closedReasonCode: reasonCode,
     };
     if (!closesShift) return { id, outcome: "accepted", details: { partClosed: true } };
     status = "closed";
-    closedAt = at;
+    // The latest close among the device-closed parts: an offline station's earlier close may
+    // arrive last.
+    closedAt = [...parts.values()]
+      .filter((part) => part.row.closedBy === "device" && part.row.closedAt !== null)
+      .map((part) => part.row.closedAt ?? "")
+      .reduce((latest, at) => (at > latest ? at : latest), "");
     if (need === "shared" && reasonCode === null) {
       reasonMissing = true;
       return { id, outcome: "accepted", details: { reasonMissing: true } };
@@ -192,8 +241,12 @@ export function multiHost(
         if (shiftId !== base.id) throw refused("not_found", null);
         if (status === "closed") throw refused("conflict", "shift_status");
         const mine = parts.get(deviceId);
+        const capable = (enter.supports ?? []).includes("multi-station-v1");
+        // A closed part reads the shift back to a capable build; an older one gets stage 2a's
+        // `shift_status` (the read-back's `active` would send it on producing).
+        if (mine?.row.state === "closed" && !capable) throw refused("conflict", "shift_status");
         if (mine === undefined || mine.row.state === "left") {
-          if (mine === undefined && !(enter.supports ?? []).includes("multi-station-v1")) {
+          if (mine === undefined && !capable) {
             throw refused("conflict", "shift_busy");
           }
           const active = [...parts.values()].filter(
@@ -242,6 +295,16 @@ export function multiHost(
           }
           return { id: record.id, outcome: "accepted" };
         }),
-    state: () => ({ status, reasonMissing, accepted: accepted(), parts: new Map(parts) }),
+    /** The host's clock moves on by `by` seconds. */
+    tick(by = 1): void {
+      seconds += by;
+    },
+    state: () => ({
+      status,
+      closedAt,
+      reasonMissing,
+      accepted: accepted(),
+      parts: new Map(parts),
+    }),
   };
 }

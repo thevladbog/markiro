@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { reasonNeed, stationReasonRequired } from "../src/floor/close/shared-reason.js";
+import { hostReasonNeed } from "./support/multi-host.js";
 import { fixture } from "./support/proto-fixture.js";
 
 const CASES = z
@@ -21,6 +22,22 @@ const CASES = z
   .parse(fixture("shift-close-reason-shared.json")).cases;
 
 describe("the reason a close needs (plan 2b, host D7)", () => {
+  it("the webview tests' fake host keeps its own copy of the host's rule, case for case (final review I3)", () => {
+    for (const { need, ...rule } of CASES) {
+      expect(
+        hostReasonNeed(
+          rule.closesShift,
+          rule.participantsEver,
+          rule.factPlanned,
+          rule.actualQty,
+          rule.hostPlanned,
+          rule.shiftAccepted,
+        ),
+        JSON.stringify(rule),
+      ).toBe(need);
+    }
+  });
+
   it("is the host's rule, case for case of the shared fixture", () => {
     expect(CASES.length).toBeGreaterThanOrEqual(8);
     for (const { need, ...rule } of CASES) {
