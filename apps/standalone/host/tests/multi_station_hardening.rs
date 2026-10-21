@@ -13,7 +13,7 @@ use support::app::{
     accepted, admin, audit_row, audit_rows, audit_trail, box_closed, box_id, close_from_office,
     fact, host_revision, instant, issue_block, issue_pallet_block, ok_scan, open_floor,
     pallet_closed, pallet_id, pallet_shift_body, pallet_template, plan_shift, receipts, record_id,
-    shift_body, shift_closed, shift_setup, Admin,
+    request, shift_body, shift_closed, shift_setup, with_device, Admin,
 };
 use support::multi::{
     admin_station_on, allow, call, constraint, enter, leave, open_shared, participant, shared,
@@ -285,6 +285,7 @@ async fn a_closed_participant_entering_again_reads_the_shift_back_and_writes_not
     assert_eq!(status, StatusCode::OK, "{back}");
     assert_eq!(back["myState"], json!("closed"));
     assert!(back["snapshot"].is_object());
+    assert!(back["totals"].is_object() && back["byDevice"].is_array());
     assert_eq!(host_revision(&admin.app).await, revision);
     assert_eq!(audit_rows(&admin.app).await, rows);
     assert_eq!(participant(&admin, &shift, &a.id).await, before);
@@ -295,6 +296,88 @@ async fn a_closed_participant_entering_again_reads_the_shift_back_and_writes_not
             .await
             .unwrap();
     assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn a_repeated_leave_of_a_closed_shifts_participant_still_carries_totals_and_by_device() {
+    // Single-shift answers (enter, leave) carry totals for any non-planned status; only the
+    // list is active-only.
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (a, b, shift, _) = shared(&admin, &setup, None).await;
+    for (device, id) in [(&a, 1), (&b, 2)] {
+        receipts(
+            &admin.app,
+            &device.key,
+            &[fact(
+                &record_id(id),
+                "shift_closed",
+                &shift,
+                shift_closed(None, 0, 0, None, &instant(30, 0)),
+            )],
+        )
+        .await;
+    }
+    assert_eq!(status_of(&admin, &shift).await, "closed");
+    admin.app.clock.advance(MINUTE);
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, left) = leave(&admin, &a, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{left}");
+    assert_eq!(left["status"], json!("closed"));
+    assert_eq!(left["myState"], json!("closed"));
+    assert!(left["totals"].is_object() && left["byDevice"].is_array());
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// A leave with a JSON content type and the given raw body.
+async fn leave_raw(
+    admin: &Admin,
+    device: &Device,
+    shift: &str,
+    content_type: Option<&str>,
+    body: &str,
+) -> (StatusCode, Value) {
+    let mut builder = with_device(
+        request("POST", &format!("/v1/device/shifts/{shift}/leave")),
+        &device.key,
+    );
+    if let Some(content_type) = content_type {
+        builder = builder.header("content-type", content_type);
+    }
+    admin
+        .app
+        .send(
+            builder
+                .body(axum::body::Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn a_leave_with_a_json_content_type_and_no_object_is_refused_and_writes_nothing() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (_a, b, shift, _) = shared(&admin, &setup, None).await;
+    admin.app.clock.advance(MINUTE);
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let before = participant(&admin, &shift, &b.id).await;
+    for body in ["", "null"] {
+        let (status, refused) = leave_raw(&admin, &b, &shift, Some("application/json"), body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body:?}: {refused}");
+        assert_eq!(refused["error"]["code"], json!("validation_failed"));
+        assert_eq!(host_revision(&admin.app).await, revision);
+        assert_eq!(audit_rows(&admin.app).await, rows);
+        assert_eq!(participant(&admin, &shift, &b.id).await, before);
+    }
+    // No content type and no body is the legacy leave: it works.
+    let (status, left) = leave_raw(&admin, &b, &shift, None, "").await;
+    assert_eq!(status, StatusCode::OK, "{left}");
+    assert_eq!(left["myState"], json!("left"));
+    assert_ne!(participant(&admin, &shift, &b.id).await, before);
 }
 
 #[tokio::test]
