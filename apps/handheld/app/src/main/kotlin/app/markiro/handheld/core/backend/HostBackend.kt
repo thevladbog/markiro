@@ -32,6 +32,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.OperatorDao
 import app.markiro.handheld.core.storage.PalletLabelTemplateEntity
 import app.markiro.handheld.core.util.Iso
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
 
@@ -52,6 +53,21 @@ class HostBackend(
 ) : StationBackend by NoBackend {
     private val entries = ConcurrentHashMap<String, DeviceShiftDto>()
 
+    /**
+     * The participation store is a cache derived from the host's answers: a Room error while writing it (a full disk) must not fail the call
+     * that already succeeded at the host, since the next answer rewrites it. A cancellation is never swallowed.
+     */
+    private suspend inline fun keep(write: ShiftParticipationStore.() -> Unit) {
+        val store = participation ?: return
+        try {
+            store.write()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Derived data: dropped; the next list or beat of the host rebuilds it.
+        }
+    }
+
     override suspend fun kindNow() = BackendKind.HOST
     override suspend fun cloudApi(): StationApi? = null
 
@@ -66,13 +82,13 @@ class HostBackend(
         reference?.refreshDevice()
         val line = config.get()?.lineName
         val listed = calls.run { api().shifts() }.shifts
-        participation?.save(listed)
+        keep { save(listed) }
         return ShiftListResponse(listed.map { it.toShiftDto(line) })
     }
 
     override suspend fun enter(shiftId: String, body: ShiftEntryRequest): ShiftDto {
         val entered = calls.run { api().enter(shiftId) }
-        participation?.save(entered)
+        keep { save(entered) }
         // A closed part is read back without a bundle to work: nothing to keep for `bundle`.
         if (entered.myState != "closed") entries[shiftId] = entered
         return entered.toShiftDto(config.get()?.lineName)
@@ -83,7 +99,7 @@ class HostBackend(
         val token = participation?.get(shiftId)?.joinedRev
         // The host is asked whether or not a store is wired: a refusal reaches the caller either way.
         val answered = calls.run { api().leave(shiftId, token) }
-        participation?.save(answered)
+        keep { save(answered) }
     }
 
     /** The snapshot of the entry just made (or, for a bundle asked alone, the owner's re-entry, which gives the same snapshot) becomes the bundle the loaders read. */

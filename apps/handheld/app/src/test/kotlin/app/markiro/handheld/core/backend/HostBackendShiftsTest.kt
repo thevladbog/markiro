@@ -285,4 +285,34 @@ class HostBackendShiftsTest {
         val error = runCatching { backend(refused).leave(id) }.exceptionOrNull() as HttpException
         assertEquals(409, error.code())
     }
+
+    /** A store whose every write fails the way a full disk does: [save] reads the device id first. */
+    private fun brokenStore(failure: () -> Throwable) = ShiftParticipationStore(db, myDeviceId = { throw failure() })
+
+    @Test
+    fun aFailureOfTheDerivedParticipationCacheNeverFailsTheCallsThatFeedIt() = runTest {
+        val store = brokenStore { android.database.sqlite.SQLiteFullException("disk is full") }
+        val leavePath = "/v1/device/shifts/$id/leave"
+        val routes = Routes(
+            mutableMapOf(
+                "/v1/device/shifts" to ArrayDeque(listOf(ok(fixture(participants)))),
+                shiftPath to ArrayDeque(listOf(ok(fixture("device-shift-entered.json")))),
+                leavePath to ArrayDeque(listOf(ok(oneShift()))),
+            ),
+        )
+        val backend = backend(routes, participation = store)
+        assertEquals(listOf("active", "closed"), backend.shifts().items.map { it.status })
+        assertEquals(id, backend.enter(id, ShiftEntryRequest("list")).id)
+        // The leave was made at the host; its answer's cache write failed and nothing is owed to anyone for it.
+        backend.leave(id)
+        assertEquals(leavePath, routes.posts.last().first)
+    }
+
+    @Test
+    fun aCancelledCacheWriteStaysACancellation() = runTest {
+        val store = brokenStore { kotlinx.coroutines.CancellationException("cancelled") }
+        val routes = Routes(mutableMapOf("/v1/device/shifts" to ArrayDeque(listOf(ok(fixture(participants))))))
+        val failure = runCatching { backend(routes, participation = store).shifts() }.exceptionOrNull()
+        assertTrue(failure.toString(), failure is kotlinx.coroutines.CancellationException)
+    }
 }
