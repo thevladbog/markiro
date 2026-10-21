@@ -266,12 +266,20 @@ describe("a re-read summary says the same (sameSummary, plan 2b)", () => {
       sameSummary(base, { ...base, part: { closesShift: false, total: 999, online: true } }),
     ).toBe(true);
   });
-  it("differs when the part now closes the shift, when the link changed, or when the shift stopped being shared", () => {
+  it("ignores a link that changed while the reason it asks stays the same (flapping Wi-Fi, final review m6)", () => {
+    expect(
+      sameSummary(base, { ...base, part: { closesShift: false, total: 560, online: false } }),
+    ).toBe(true);
+  });
+  it("differs when the part now closes the shift, when the link changed what reason it asks, or when the shift stopped being shared", () => {
     expect(
       sameSummary(base, { ...base, part: { closesShift: true, total: 560, online: true } }),
     ).toBe(false);
     expect(
-      sameSummary(base, { ...base, part: { closesShift: false, total: 560, online: false } }),
+      sameSummary(
+        { ...base, reasonRequired: true },
+        { ...base, reasonRequired: false, part: { closesShift: false, total: 560, online: false } },
+      ),
     ).toBe(false);
     const solo: CloseSummary = { ...base };
     delete solo.part;

@@ -39,7 +39,7 @@ export function deviation(plannedQty: number, actualQty: number): string {
 
 /**
  * Whether two readings of the summary say the same to the operator: the plan,
- * the fact, the closed boxes, whether a reason is needed, and what keeps the
+ * the fact, the closed boxes, whether a reason is needed (the link only through it), and what keeps the
  * shift open (the open box's codes and the open pallet's boxes included). A
  * close goes on the reading that was shown, never on another.
  */
@@ -53,12 +53,14 @@ export function sameSummary(shown: CloseSummary, read: CloseSummary): boolean {
         (a.kind !== "open_box" || (b.kind === "open_box" && a.items === b.items)) &&
         // The question names the boxes of the open pallet (plan ПЛ-Ц): other boxes, another question.
         (a.kind !== "open_pallet" || (b.kind === "open_pallet" && a.boxes === b.boxes));
-  // Plan 2b: whether the part closes the shift and the link decide the words and the reason; the
-  // whole shift's count moves with the other devices at every read and is not compared.
+  // Plan 2b: whether the part closes the shift decides the words and the reason; the whole
+  // shift's count moves with the other devices at every read and is not compared. The link counts
+  // only through the reason it asks (`reasonRequired`, compared below): a flapping Wi-Fi that asks
+  // the same reason does not make the operator confirm again (final review m6).
   const samePart =
     shown.part === undefined || read.part === undefined
       ? shown.part === read.part
-      : shown.part.closesShift === read.part.closesShift && shown.part.online === read.part.online;
+      : shown.part.closesShift === read.part.closesShift;
   return (
     shown.plannedQty === read.plannedQty &&
     shown.actualQty === read.actualQty &&
