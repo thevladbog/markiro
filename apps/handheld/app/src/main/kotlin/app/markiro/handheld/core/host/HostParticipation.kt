@@ -21,8 +21,6 @@ class HostParticipation(
     private val store: ShiftParticipationStore = ShiftParticipationStore(db),
     private val config: DeviceConfigDao = db.deviceConfigDao(),
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
-
     /** One beat that reached the host. A failure of either part is that part's: the next beat repeats it. */
     suspend fun beat() {
         val cfg = config.get() ?: return
