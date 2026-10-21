@@ -427,3 +427,156 @@ to rewrite the tooling extractor; report a concrete conflict before doing so.
       Current15 native, whole compiled initialize/verify, provider/provenance and
       all existing acceptance gates remain mandatory. Unknown historical551 cause
       is not relabelled as checkpoint, renderer, timeout or performance failure.
+
+### Task 7: Reduced same-invocation outer-operation evidence
+
+**Approved scope:** Root adopted the reduced contract in
+`.superpowers/sdd/2026-10-20-us-11-dataset-command/task-7-one-pass-design-review.md`.
+Read that full review and the spec's reduced Task7 amendment. Broad leaf/native
+classification, wrapper instrumentation, DB census/replay and automatic repeat
+diagnostic CI are rejected for this increment. A tag is the last entered boundary,
+not an exact cause/throwing instruction. Within read_plan/bind_inputs/
+assemble_package ambiguity is explicitly accepted. Current338 cause is unknown;
+native complete15/15 execution/normal absence does not make its CANCELLED45min
+job green. The doc-only amendment and ignored `task-7-outer-operation-brief.md`/
+handoff were frozen and read by root before source execution was released.
+That execution release does not waive independent review or actual acceptance.
+
+**Exact nine-path implementation manifest:**
+
+1. Create `apps/api/src/modules/traceability/requests/us-request-verification-failure.ts`.
+2. Modify `apps/api/src/modules/traceability/demo/us-dataset-request-seed.ts`.
+3. Modify `apps/api/src/modules/traceability/demo/us-dataset-request-verify.ts`.
+4. Modify `apps/api/src/main.us-dataset.ts`.
+5. Modify `tools/us-development/test/support/dataset-command-positive-fixture.mjs`.
+6. Modify `tools/us-development/test/dataset-command-positive-ownership.test.mjs`.
+7. Create `apps/api/test/us-request-verification-failure.test.ts`.
+8. Modify `docs/superpowers/specs/2026-10-20-us-11-dataset-command-design.md`.
+9. Modify this plan.
+
+No other source/test path is authorized. Runtime categories/sanitizer, current
+Request-contract annotation, both existing refusal test files, all native
+payload/Plan/bind/composer/PDF/worker/storage/domain/XLSX implementations,
+workflow/ownership selectors, dependencies and personal environment stay
+byte-identical. Stop for root on a concrete extra-path need. Root alone owns
+independent review, explicit-path staging and required-identity commit/push.
+
+**Interfaces, all synchronous/best effort:** The new module exports closed types
+`UsRequestVerificationOperation` (exact19 spec literals),
+`UsRequestVerificationArtifact` (exact6 published names), opaque
+`UsRequestVerificationFrame`, and `UsRequestVerificationFailure` (exact operation/
+artifact combinations). It exposes:
+
+```ts
+export declare function createUsRequestVerificationFrame(
+  unitKey: unknown,
+): UsRequestVerificationFrame | undefined;
+export declare function activateUsRequestVerificationFrame(frame: unknown): void;
+export declare function enterUsRequestVerificationOperation(
+  frame: unknown,
+  operation: unknown,
+  artifact?: unknown,
+): void;
+export declare function closeUsRequestVerificationFrame(frame: unknown): void;
+export declare function finalizeUsRequestVerificationFailure(frame: unknown, error: unknown): void;
+export declare function takeUsRequestVerificationFailure(
+  error: unknown,
+  diagnostic: unknown,
+): UsRequestVerificationFailure | undefined;
+export declare function projectUsRequestVerificationFailure(
+  value: unknown,
+): UsRequestVerificationFailure | undefined;
+```
+
+Only the three exact Request-unit strings are accepted at creation. Unknown
+arguments support strict refusal tests without casts; they never bypass private
+identity. No raw error fields, native classifier or successful authority/proof
+are consumed. The existing verifyRequestBytes gains a mandatory fourth argument
+`frame: UsRequestVerificationFrame | undefined`; update its sole production call
+at RequestSeed312. Undefined frame is a no-op diagnostic path, not a business
+refusal or success override.
+
+**Frame algorithm:** Private registry identity lookup precedes every frame read.
+Create after unit validation; activate only at the existing package transition.
+Each enter first clears operation/artifact, then accepts only a valid spec
+combination. Inactive/closed/forged frames do nothing. RequestSeed enters its six
+early operations, passes the same handle to verification for its11 operations,
+then explicitly enters final_publication_probe or commit_package_receipt.
+Verification only inserts synchronous enter calls, never a catch/async wrapper.
+Close/remove frame before each original successful return, clearing state.
+
+Only the existing RequestSeed catch finalizes. Validate live identity, close once,
+copy an eligible finite immutable package snapshot/location and keep originating-
+frame identity privately. Inactive/invalid frames keep only an ineligible pending
+identity, not a usable snapshot, so another invocation's tag cannot leak through.
+Store by error key identity only; primitive ineligible keys discard it. No error
+property/prototype/cause/native-brand access or new
+mutation occurs. Repeated closed-frame finalization is ignored; two distinct
+unconsumed frames for one error become an ambiguous sentinel, even if either
+frame is inactive/invalid, never newest-wins.
+Every take first deletes the pending record, including ambiguity, non-generic,
+malformed and location mismatch, then checks canonical generic Request/package
+agreement and projects a fresh exact tuple. Repeated takes yield none; error reuse
+after consumption requires a new frame. No ambient global current-operation,
+AsyncLocalStorage, callbacks, I/O, await, timer or retained error/body values.
+
+**Placement:** Enter immediately before each existing call/check. For the
+private-object loop, enter read_private_object before its existing expected-byte
+lookup/read, compare_private_object before byte equality, and, only for package.zip,
+verify_private_archive before archive verification. Clear artifact at every
+transition, including final probe/receipt. Normalization may remove only new
+diagnostic imports/declarations/calls, the sole fourth argument and braces needed
+solely to place an enter inside the existing archive condition; restore every
+original statement, condition, await, query, return and ordering exactly.
+
+**Executable and fixture:** Main always obtains the original sanitizer result
+first, calls take even for non-generic/mismatched cases, then adds only a returned
+verificationFailure to the existing failure JSON. Success JSON stays byte-identical.
+No new root code, origin, class, error text, progress, resource or output channel.
+The actual owned fixture loads the new pure projector from the same checked
+compiled build; its reader requires both old sanitizer and new projector and
+reconstructs current root forms or strict generic Request/package extension;
+the extension's parsed code must already equal us_dataset_command_failed, not
+merely become generic when sanitized.
+Missing projector, malformed/extra/unknown tuples or noncanonical JSON are
+unavailable. Preserve <=4096 one-line JSON, duplicate rejection, overflow→
+unavailable/no parser call, output bounds, child decisions, GNU-time/observer
+measurements, original exception/error precedence and awaited normal cleanup.
+Keep the original three-declaration extractor unchanged; compile/test the actual
+new module/projector separately in the existing ownership cases.
+
+- [x] **Doc-only handoff:** Update only the two approved documents and ignored
+      brief/handoff; freeze for root read before touching source/tests or running
+      validation workloads. Preserve all evidence and hosting bytes.
+- [ ] **Forward RED after source release:** Add12 top-level service-free cases in
+      the new pure test: all19 projections; malformed/hostile tuple table; private
+      frame identity/no traps; inactive refusal; active last-boundary snapshot;
+      phase/artifact reset including invalid transition; successful closure;
+      one-shot finalization/error preservation; concurrent/distinct-frame ambiguity;
+      every-take consumption/reuse; forged public metadata/old root priority; actual
+      placement/full-module preservation. Independently pin literals/combinations.
+      A minimal refusing/no-op export scaffold may collect, but missing exports/
+      imports or assertions copied from production arrays are not behavioral RED.
+- [ ] **Minimal implementation:** Implement the exact private frame state machine,
+      pure closed projection, RequestSeed/verification/main wiring and strict
+      fixture retention together. Add hostile/canonical/overflow/missing-projector
+      and actual-source projector checks inside current ownership cases, without
+      changing their selectors or adding fake successful owner/runtime/proof paths.
+      All12 classes of tests must GREEN without weakening existing assertions.
+- [ ] **Focused gates:** Run the new12 pure tests separately, then unchanged117
+      policy/runtime tests through their original unfiltered two-file selector.
+      Run focused existing ownership/child tests and all US+CI tooling. API
+      typecheck/lint/build after correct existing shared-build ordering, fullformat,
+      isolation, diff checks and whole-module original-statement/order proof are
+      required. Check excluded native/runtime/worker/storage modules and success
+      JSON for exact byte preservation. Static placement is not exercised native
+      success. Report exact commands/counts/skips/warnings/source identities.
+- [ ] **Freeze/review/actual gates:** Original implementer freezes nine-path diff
+      and report for independent review; no automatic local ordinary broad API,
+      native/full Trace, real provider/services/CLI or CI retry. Root owns any
+      separately justified integration and one explicitly authorized exact-source
+      CI after review/identity push. All existing ordinary API/native/full Trace/
+      Cases/compiled initialize then verify once/private bytes/no-write/provider/
+      ownership/disposal gates and all original caps remain mandatory. Pre-Task7
+      evidence stays source-specific; a cancelled job is not green. Stop on the
+      actual new result for targeted investigation/ruling, not automatic expansion.

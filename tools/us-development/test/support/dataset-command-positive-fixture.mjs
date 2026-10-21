@@ -47,16 +47,22 @@ export function assertDatasetPositiveContainer(item, target) {
 // Test-only access to the real bounded child runner; not a fixture/proof override.
 export { child as runDatasetPositiveChild, commandDiagnostic as datasetPositiveCommandDiagnostic };
 
-function commandDiagnostic(text, diagnose) {
+function commandDiagnostic(text, diagnose, projectVerificationFailure) {
   try {
-    if (typeof text !== "string" || text.length > 4096 || !/^\{[^\r\n]*\}\n?$/.test(text))
+    if (
+      typeof diagnose !== "function" ||
+      typeof projectVerificationFailure !== "function" ||
+      typeof text !== "string" ||
+      text.length > 4096 ||
+      !/^\{[^\r\n]*\}\n?$/.test(text)
+    )
       return { status: "unavailable" };
     const parsed = JSON.parse(text);
     const keys = Object.keys(parsed);
     if (
       !keys.includes("code") ||
-      keys.some((key) => !["code", "unitKey", "stage"].includes(key)) ||
-      keys.some((key) => typeof parsed[key] !== "string") ||
+      keys.some((key) => !["code", "unitKey", "stage", "verificationFailure"].includes(key)) ||
+      keys.some((key) => key !== "verificationFailure" && typeof parsed[key] !== "string") ||
       keys.includes("unitKey") !== keys.includes("stage") ||
       ![JSON.stringify(parsed), `${JSON.stringify(parsed)}\n`].includes(text)
     )
@@ -64,10 +70,25 @@ function commandDiagnostic(text, diagnose) {
     // This is the concrete compiled runtime sanitizer at the actual CLI call site.
     // Never forward the parsed object, raw text, cause, message or extra fields.
     const safe = diagnose({ message: parsed.code, unitKey: parsed.unitKey, stage: parsed.stage });
+    let verificationFailure;
+    if (keys.includes("verificationFailure")) {
+      if (
+        parsed.code !== "us_dataset_command_failed" ||
+        !["request_scenario_a", "request_april", "request_september"].includes(parsed.unitKey) ||
+        parsed.stage !== "package" ||
+        safe.code !== parsed.code ||
+        safe.unitKey !== parsed.unitKey ||
+        safe.stage !== parsed.stage
+      )
+        return { status: "unavailable" };
+      verificationFailure = projectVerificationFailure(parsed.verificationFailure);
+      if (!verificationFailure) return { status: "unavailable" };
+    }
     return {
       status: "available",
       code: safe.code,
       ...(safe.unitKey && safe.stage ? { unitKey: safe.unitKey, stage: safe.stage } : {}),
+      ...(verificationFailure ? { verificationFailure } : {}),
     };
   } catch {
     return { status: "unavailable" };
@@ -124,7 +145,13 @@ export async function retainDatasetPositiveCommandFailure(error, mode, timeFile,
 async function child(
   file,
   args,
-  { env = process.env, cap = 60_000, limit = 256 * 1024, diagnose } = {},
+  {
+    env = process.env,
+    cap = 60_000,
+    limit = 256 * 1024,
+    diagnose,
+    projectVerificationFailure,
+  } = {},
 ) {
   const started = performance.now();
   const process_ = spawn(file, args, { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -204,7 +231,7 @@ async function child(
           ? {
               diagnostic: overflow
                 ? { status: "unavailable" }
-                : commandDiagnostic(stderr.toString("utf8"), diagnose),
+                : commandDiagnostic(stderr.toString("utf8"), diagnose, projectVerificationFailure),
             }
           : {}),
       },
@@ -557,6 +584,9 @@ export async function createDatasetPositiveFixture(env = process.env) {
       });
     const { usSixMonthDefinition } = compiled("modules/traceability/demo/us-six-month-definition");
     const { usDatasetCommandDiagnostic } = compiled("deployment/us-dataset-command-runtime");
+    const { projectUsRequestVerificationFailure } = compiled(
+      "modules/traceability/requests/us-request-verification-failure",
+    );
     const pairs = [
       "--database-name",
       "markiro_us_dev",
@@ -604,7 +634,12 @@ export async function createDatasetPositiveFixture(env = process.env) {
               ...(mode === "initialize" ? ["--confirm-local-synthetic-dataset"] : []),
               ...pairs,
             ],
-            { env: environment, cap: 900_000, diagnose: usDatasetCommandDiagnostic },
+            {
+              env: environment,
+              cap: 900_000,
+              diagnose: usDatasetCommandDiagnostic,
+              projectVerificationFailure: projectUsRequestVerificationFailure,
+            },
           );
         } catch (error) {
           throw await retainDatasetPositiveCommandFailure(error, mode, timeFile, observer);

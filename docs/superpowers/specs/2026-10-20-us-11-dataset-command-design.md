@@ -127,7 +127,9 @@ synthetic marker, state/false completion flag, dataset/version/digest, canonical
 Plan/Request/run IDs and content hashes. No private keys, raw evidence, payloads,
 provider messages, SQL, stack traces, URLs, credentials or authentication data.
 On failure emit a fixed allowlisted category and, only when validated against
-the fixed recipe, unit/stage diagnostics; exit nonzero and emit no success.
+the fixed recipe, unit/stage diagnostics; the reduced Task7 amendment below
+permits one strictly finite optional operation tuple at the executable boundary.
+Exit nonzero and emit no success.
 Measurements (elapsed time, peak process RSS, database/artifact bytes) are honest
 observations reported separately, never part of stable replay digests. No
 unmeasured free-tier or two-minute claim.
@@ -150,9 +152,10 @@ trusted service/runtime propagation, not the successful seed or its checks.
 Only those three additional literal codes may survive command projection.
 Existing command-category precedence and unknown fallback remain. Read only own
 data `message` or own data `response.code`; do not invoke `getResponse`, getters,
-inherited values or serialize the raw response/error/cause. Keep output fields
-exactly `code` and optional canonical `unitKey`/`stage`, with the existing bounded
-cause traversal and recipe validation. This does not allow arbitrary worker,
+inherited values or serialize the raw response/error/cause. Keep this runtime
+projector's output fields exactly `code` and optional canonical `unitKey`/`stage`,
+with the existing bounded cause traversal and recipe validation. This runtime
+projection does not allow arbitrary worker,
 database or provider codes, new fields, raw messages, URLs, stacks or evidence.
 
 After its existing unit validation, the Request service may best-effort attach
@@ -171,6 +174,134 @@ implementer owns this follow-up; its production/API gates and independent review
 are separate from tooling proof. Root owns the single final ordinary API run,
 user-identity commit/push and exact-source CI. Actual whole initialize/verify and
 all other acceptance gates remain required; viewer acceptance remains afterward.
+
+### Reduced outer-operation diagnostic amendment (2026-10-21, Task7)
+
+Root approved the independent review's reduced nine-path design, not the broad
+leaf/classifier or failure-only DB census/replay proposals. Actual exact338 CLI
+initialize failed with generic root code at `request_september/package`; its
+cause remains unknown. Native prepared September and full-sequence15/15 test
+execution passed with normal owned disposal, but the complete job was CANCELLED
+at45minutes, not green. These observations authorize no success, timeout,
+provider, renderer or performance claim and no automatic CI retry.
+
+The original `usDatasetCommandDiagnostic` and its12 categories, precedence,
+own-data/cause rules, output and self-contained three-declaration extractor
+remain byte-identical. Only the real executable may append:
+
+```text
+verificationFailure: { operation: <closed literal>, artifact?: <closed filename> }
+```
+
+Emit this tuple only for existing root `us_dataset_command_failed` and matching
+canonical `request_scenario_a`, `request_april` or `request_september` / `package`
+location from that invocation. Recognized root categories retain their exact
+prior output. No origin, native failure taxonomy, exception/cause inspection or
+wrapper transfer is allowed. The tag means the **last entered operation boundary**,
+not the throwing instruction, cause, completion, chronology or successful read.
+Residual ambiguity within read_plan/bind_inputs/assemble_package is accepted.
+
+The exact19 operations are:
+
+```text
+package_stage, validate_request, prepare_package,
+probe_before_worker, run_worker, probe_after_worker,
+render_payloads, read_plan, bind_inputs, check_checkpoint, assemble_package,
+compare_manifest, compare_entries, compare_archive,
+read_private_object, compare_private_object, verify_private_archive,
+final_publication_probe, commit_package_receipt
+```
+
+`read_private_object` and `compare_private_object` require exactly one artifact
+from `manifest.json`, `package.zip`, `plan.pdf`, `records.xlsx`,
+`request-report.pdf`, `validation.json`, using the existing validated published
+name, never an object key/path. `verify_private_archive` requires `package.zip`.
+Every other operation forbids artifact. No other tuple keys/values are accepted.
+
+#### Private frame and consumption algorithm
+
+1. After existing Request unit validation, create one private opaque frame with
+   only finite Request-unit/lifecycle/operation state, no dataset/body/error values
+   or authority. Every helper first looks up frame identity in a private registry
+   before reading any frame state; forged, proxy or accessor-bearing handles do
+   not cause property/prototype/getter/trap access. Helpers are best effort and
+   cannot throw into business work.
+2. Activate the frame only at the existing package location transition. Enter
+   `package_stage` before the existing first package-stage read. Before each
+   existing outer operation, enter its fixed literal, clearing the prior operation
+   and artifact first. An invalid transition/combination leaves no usable tag,
+   never a stale phase/artifact. Inactive/closed/unknown frames cannot transition.
+3. Pass that same frame explicitly as the sole new diagnostic-only argument at
+   the one production verifyRequestBytes call. Verification updates only this
+   frame before existing calls/checks; it adds no catch/wrapper/promise/await,
+   business call, success/proof callback, ambient operation or resource. After
+   verification, RequestSeed explicitly enters final_publication_probe or
+   commit_package_receipt, clearing any previous artifact.
+4. Close/abandon the frame before every existing successful return. Closure
+   clears finite state and removes its live registry entry; a successful frame
+   cannot later finalize an error. Do not add finally/return changes or I/O.
+5. Only the existing RequestSeed catch may finalize. It first verifies the live
+   frame identity, then closes it exactly once. If package-active with a valid
+   operation, copy its finite state and validated Request/package location into
+   a private error-keyed WeakMap. An inactive/invalid finalized frame has no usable
+   snapshot but still leaves its private originating identity as an ineligible
+   pending record, so it cannot inherit another invocation's tag. Error access is limited
+   to key identity/type eligibility, never error properties, prototype, cause,
+   native brand, message or response. Preserve the existing annotation/rethrow
+   exactly; no error mutation beyond that already-approved annotation.
+6. A pending record retains private originating-frame identity and an immutable
+   finite snapshot when eligible, or no snapshot when ineligible. Repeated
+   finalization by the same now-closed frame is ignored.
+   If a second distinct frame finalizes the same error before consumption, replace
+   the pending record with an ambiguous sentinel, even if either frame was
+   inactive/invalid; further finalizations keep it
+   ambiguous. Do not overwrite it with the newest tag. This handles concurrent
+   invocations and reused errors without manufacturing provenance.
+7. Main obtains the original sanitizer result first, then takes the private
+   record by error identity. **Every take deletes it before any eligibility,
+   category/location matching or projection check**, including ambiguous,
+   malformed, non-generic or mismatched records. Only a single unambiguous valid
+   snapshot matching generic root and the same canonical Request/package pair
+   may produce a fresh closed tuple. Repeated takes return nothing; reuse after
+   consumption needs a newly registered frame. Unsafe/unavailable detail is
+   omitted, not fabricated; original errors/disposal cannot be masked.
+
+No public error fields are trusted as frame/evidence. No classifier, cause walk,
+wrapper instrumentation, AsyncLocalStorage, timer, process, DB/provider query,
+replay, private-byte reread or additional output channel is introduced.
+
+#### Fixture, scope and acceptance
+
+The owned fixture accepts exactly its current canonical root-key forms or those
+forms plus verificationFailure. An extension requires parsed code exactly
+`us_dataset_command_failed` (not an unknown code sanitized to generic) and canonical
+Request/package, exact own tuple keys/literals/artifact combinations and one
+canonical JSON line <=4096. Use the original sanitizer and new pure tuple
+projector loaded from the **same checked compiled build** at the actual fixture
+call site; reconstruct output, never forward parsed/raw objects. Both functions
+must be available; a missing projector or malformed extension is unavailable,
+not partial acceptance. Preserve duplicate/noncanonical/extra-field rejection,
+overflow→unavailable with no parser call, bounded child output, nonzero failure,
+GNU-time/observer evidence, original decisions/caps and exact normal cleanup.
+
+Task7's exact manifest is the four API paths, three fixture/test paths and two
+documents listed in the plan. Exclude runtime/Request-contract annotation,
+payload/Plan/bind/composer/PDF/worker/storage/domain/XLSX modules, workflows,
+dependencies and personal environment. Stop for root on any concrete extra-path
+need. Preserve both refusal test files and their117 count unchanged; add the new
+pure test separately, not as a replacement or successful owner/proof fixture.
+
+The doc-only amendment/brief was frozen and root-read before source execution
+was released. Source work requires genuine service-free forward RED, exact frame/
+tuple/fixture tests and original-statement/order preservation proof, unchanged117,
+tooling/API statics/build/fullformat/isolation/diff and independent source review.
+No automatic local broad API/native/provider/service run. Root owns any separately
+justified integration and one authorized exact-source CI with every original
+native/full Trace/Cases/compiled initialize/verify/byte/hash/no-write/provider/
+ownership/disposal gate and unchanged caps. Prior15/15 execution is not a green
+cancelled job. Source diagnosis is not a fix or CLI/viewer acceptance. After a
+real result, stop for targeted investigation/ruling, not automatic diagnostic
+expansion or repeated CI.
 
 ## Verification and sequencing
 

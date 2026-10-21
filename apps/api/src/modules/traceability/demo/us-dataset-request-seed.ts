@@ -36,6 +36,14 @@ import { UsRequestWorkerPublication } from "../requests/us-request-worker-public
 import { UsRequestWorkerCleanup } from "../requests/us-request-worker-cleanup.js";
 import { UsRequestPlanReader } from "../requests/us-request-plan-reader.js";
 import { assertUsRequestWorkerExecutionIdentity } from "../requests/us-request-worker-execution.js";
+import {
+  activateUsRequestVerificationFrame,
+  closeUsRequestVerificationFrame,
+  createUsRequestVerificationFrame,
+  enterUsRequestVerificationOperation,
+  finalizeUsRequestVerificationFailure,
+  type UsRequestVerificationFrame,
+} from "../requests/us-request-verification-failure.js";
 
 export type {
   UsDatasetRequestServices,
@@ -70,10 +78,12 @@ export class UsDatasetRequestSeedStore {
     initialize: boolean,
   ) {
     let location: Parameters<typeof annotateUsDatasetRequestFailure>[1];
+    let frame: UsRequestVerificationFrame | undefined;
     try {
       const header = await this.journal.read(context);
       const unitKey = parseRequestValue(requestUnitSchema, rawUnit);
       location = { unitKey, stage: "request" };
+      frame = createUsRequestVerificationFrame(unitKey);
       if (!header) throw requestError("incomplete");
       assertUsRequestWorkerExecutionIdentity(this.services.execution);
       const selected = await readRequestSelection(this.db, context, unitKey, this.services);
@@ -199,8 +209,11 @@ export class UsDatasetRequestSeedStore {
         current = await readRequest();
       }
       location = { unitKey, stage: "package" };
+      activateUsRequestVerificationFrame(frame);
+      enterUsRequestVerificationOperation(frame, "package_stage");
       let packageStage = await this.journal.readStage(context, header.id, unitKey, "package");
       if (!packageStage && initialize) {
+        enterUsRequestVerificationOperation(frame, "validate_request");
         const validation = await new UsRequestValidationStore(this.db).validateHttp(
           context.tenantId,
           context.actorUserId,
@@ -213,6 +226,7 @@ export class UsDatasetRequestSeedStore {
         if (validation.findings.some((finding) => finding.severity !== "info"))
           throw requestError("conflict");
         const operationKey = randomUUID();
+        enterUsRequestVerificationOperation(frame, "prepare_package");
         packageStage = await this.journal.prepareStageIntent(
           context,
           header.id,
@@ -292,8 +306,10 @@ export class UsDatasetRequestSeedStore {
           },
           { isolationLevel: "repeatable read" },
         );
+      enterUsRequestVerificationOperation(frame, "probe_before_worker");
       let live = await probe();
       if (!live.published && !live.stage.receipt) {
+        enterUsRequestVerificationOperation(frame, "run_worker");
         const lifecycle = new UsRequestWorkerLifecycle(this.db);
         const worker = new UsRequestWorker(this.db, {
           lifecycle,
@@ -305,18 +321,22 @@ export class UsDatasetRequestSeedStore {
           execution: this.services.execution,
         });
         await worker.runScoped({ tenantId: context.tenantId, runId: live.owned.run.id });
+        enterUsRequestVerificationOperation(frame, "probe_after_worker");
         live = await probe();
       }
       const verified = live.published;
       if (!verified) throw requestError("incomplete");
-      await verifyRequestBytes(this.db, this.services, verified);
+      await verifyRequestBytes(this.db, this.services, verified, frame);
       if (live.stage.receipt) {
+        enterUsRequestVerificationOperation(frame, "final_publication_probe");
         const final = await probe();
         if (!final.published || !final.stage.receipt) throw requestError("conflict");
         equalRequest(final.published.result, verified.result);
         equalRequest(final.published.checkpoint, verified.checkpoint);
+        closeUsRequestVerificationFrame(frame);
         return verified.result;
       }
+      enterUsRequestVerificationOperation(frame, "commit_package_receipt");
       const receipt = resultReceipt(verified.result);
       const final = async (
         tx: Parameters<typeof readOwnedRequest>[0],
@@ -355,8 +375,10 @@ export class UsDatasetRequestSeedStore {
             equalRequest(saved, await final(tx, checked)),
         },
       );
+      closeUsRequestVerificationFrame(frame);
       return verified.result;
     } catch (error) {
+      finalizeUsRequestVerificationFailure(frame, error);
       throw annotateUsDatasetRequestFailure(error, location);
     }
   }

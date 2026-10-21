@@ -164,7 +164,24 @@ test(
         ],
       },
     );
+    const verificationSource = readFileSync(
+      "apps/api/src/modules/traceability/requests/us-request-verification-failure.ts",
+      "utf8",
+    );
+    const verificationJs = ts.transpileModule(verificationSource, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const projectVerificationFailure = compileFunction(
+      `${verificationJs}; return exports.projectUsRequestVerificationFailure`,
+      ["exports", "require"],
+    )({}, createRequire(resolve("apps/api/package.json")));
     const unavailable = { status: "unavailable" };
+    const extension = {
+      code: "us_dataset_command_failed",
+      unitKey: "request_september",
+      stage: "package",
+      verificationFailure: { operation: "read_private_object", artifact: "records.xlsx" },
+    };
     const diagnosticCases = [
       [
         '{"code":"us_dataset_command_connection_failed","unitKey":"chain_0259","stage":"shipping"}\n',
@@ -198,6 +215,30 @@ test(
       ["hostile-secret SQL error", unavailable],
       ['{"code":"us_dataset_command_failed"', unavailable],
       ["x".repeat(4097), unavailable],
+      [JSON.stringify(extension) + "\n", { status: "available", ...extension }],
+      ...[
+        { ...extension, code: "private-secret" },
+        { ...extension, code: "us_dataset_request_conflict" },
+        { ...extension, unitKey: "chain_0259" },
+        { ...extension, unitKey: "request_october" },
+        { ...extension, stage: "request" },
+        { ...extension, verificationFailure: null },
+        { ...extension, verificationFailure: { operation: "read_private_object" } },
+        { ...extension, verificationFailure: { operation: "unknown" } },
+        { ...extension, verificationFailure: { operation: "read_plan", artifact: "package.zip" } },
+        {
+          ...extension,
+          verificationFailure: { operation: "verify_private_archive", artifact: "plan.pdf" },
+        },
+        { ...extension, verificationFailure: { operation: "read_plan", extra: "private-secret" } },
+        {
+          ...extension,
+          verificationFailure: { operation: "read_private_object", artifact: "private/key" },
+        },
+        { ...extension, extra: "private-secret" },
+      ].map((value) => [JSON.stringify(value) + "\n", unavailable]),
+      ['{"code":"us_dataset_command_failed","code":"us_dataset_command_failed"}\n', unavailable],
+      ['{ "code":"us_dataset_command_failed"}\n', unavailable],
     ];
     const failures = [];
     const check = async (action) => {
@@ -209,7 +250,11 @@ test(
     };
     for (const [stderr, wanted] of diagnosticCases)
       await check(async () => {
-        const diagnostic = fixtureSupport.datasetPositiveCommandDiagnostic(stderr, diagnose);
+        const diagnostic = fixtureSupport.datasetPositiveCommandDiagnostic(
+          stderr,
+          diagnose,
+          projectVerificationFailure,
+        );
         assert.deepEqual(diagnostic, wanted);
         assert.doesNotMatch(JSON.stringify(diagnostic), /hostile-secret|SQL error/);
       });
@@ -222,7 +267,7 @@ test(
             "-e",
             `process.stdout.write('stdout-hostile-secret');process.stderr.write(${JSON.stringify(stderr)});process.exitCode=1`,
           ],
-          { diagnose },
+          { diagnose, projectVerificationFailure },
         ),
         (error) => {
           assert.equal(error.message, "us_dataset_positive_child_failed");
@@ -238,6 +283,49 @@ test(
       );
     });
     await check(async () => {
+      const stderr = JSON.stringify(extension) + "\n";
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(stderr, diagnose),
+        unavailable,
+      );
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          '{"code":"us_dataset_command_failed"}\n',
+          diagnose,
+        ),
+        unavailable,
+      );
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          stderr,
+          undefined,
+          projectVerificationFailure,
+        ),
+        unavailable,
+      );
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(stderr, diagnose, () => {
+          throw new Error("hostile-secret");
+        }),
+        unavailable,
+      );
+      await assert.rejects(
+        fixtureSupport.runDatasetPositiveChild(
+          process.execPath,
+          ["-e", `process.stderr.write(${JSON.stringify(stderr)});process.exitCode=1`],
+          { diagnose, projectVerificationFailure },
+        ),
+        (error) => {
+          assert.equal(error.message, "us_dataset_positive_child_failed");
+          assert.equal(error.evidence.code, 1);
+          assert.equal(error.evidence.timedOut, false);
+          assert.equal(error.evidence.overflow, false);
+          assert.deepEqual(error.evidence.diagnostic, { status: "available", ...extension });
+          return true;
+        },
+      );
+    });
+    await check(async () => {
       await assert.rejects(
         fixtureSupport.runDatasetPositiveChild(
           process.execPath,
@@ -246,6 +334,7 @@ test(
             'process.stderr.write(\'{"code":"us_dataset_command_failed"}\\n\');process.exitCode=1',
           ],
           {
+            projectVerificationFailure,
             diagnose: () => {
               throw new Error("hostile-secret");
             },
@@ -260,7 +349,8 @@ test(
       );
     });
     await check(async () => {
-      let parsed = 0;
+      let parsed = 0,
+        projected = 0;
       await assert.rejects(
         fixtureSupport.runDatasetPositiveChild(
           process.execPath,
@@ -269,6 +359,10 @@ test(
             'process.stderr.write(\'{"code":"us_dataset_command_failed"}\\n\');setTimeout(()=>process.stderr.write("x".repeat(8192)),100)',
           ],
           {
+            projectVerificationFailure: (value) => {
+              projected++;
+              return projectVerificationFailure(value);
+            },
             limit: 4096,
             cap: 1000,
             diagnose: (error) => {
@@ -283,6 +377,7 @@ test(
           assert.equal(error.evidence.timedOut, false);
           assert.deepEqual(error.evidence.diagnostic, unavailable);
           assert.equal(parsed, 0, "incomplete retained stderr must not be parsed");
+          assert.equal(projected, 0, "overflow must not invoke the new projector either");
           return true;
         },
       );
@@ -299,6 +394,7 @@ test(
         await assert.rejects(
           fixtureSupport.runDatasetPositiveChild(process.execPath, ["-e", script], {
             diagnose,
+            projectVerificationFailure,
             ...options,
           }),
           (error) => {
@@ -323,7 +419,7 @@ test(
       const success = await fixtureSupport.runDatasetPositiveChild(
         process.execPath,
         ["-e", "process.stdout.write('original-success')"],
-        { diagnose },
+        { diagnose, projectVerificationFailure },
       );
       assert.equal(success.stdout, "original-success");
       assert.equal(success.stderr, "");

@@ -30,6 +30,10 @@ import { verifyUsRequestPackageArchive } from "../requests/us-request-package-zi
 import { parseUsWorkerCheckpoint } from "../requests/us-request-worker-types.js";
 import { UsRequestWorkerCheckpoints } from "../requests/us-request-worker-checkpoint.js";
 import { UsRequestWorkerLifecycle } from "../requests/us-request-worker-lifecycle.js";
+import {
+  enterUsRequestVerificationOperation,
+  type UsRequestVerificationFrame,
+} from "../requests/us-request-verification-failure.js";
 
 async function readOwnedAudit(
   tx: UsDemoTransaction,
@@ -303,23 +307,31 @@ export async function verifyRequestBytes(
   db: Db,
   services: UsDatasetRequestServices,
   verified: Awaited<ReturnType<typeof readOwnedPublication>>,
+  frame: UsRequestVerificationFrame | undefined,
 ) {
   const { publication } = verified;
   const { run, expectation } = publication;
+  enterUsRequestVerificationOperation(frame, "render_payloads");
   const payloads = await renderUsRequestPayloads(run, run.tenantId);
+  enterUsRequestVerificationOperation(frame, "read_plan");
   const plan = await new UsRequestPlanReader(db, services.planArtifacts).read(run, run.tenantId);
+  enterUsRequestVerificationOperation(frame, "bind_inputs");
   const inputs = bindUsRequestPackageInputs(run, run.tenantId, payloads, plan, {
     schemaVersion: 1,
     workerStartedAt: expectation.manifest.timing.workerStartedAt,
     reportDataPreparedAt: expectation.manifest.timing.reportDataPreparedAt,
   });
+  enterUsRequestVerificationOperation(frame, "check_checkpoint");
   new UsRequestWorkerCheckpoints(db, new UsRequestWorkerLifecycle(db)).assertReproduction(
     verified.checkpoint,
     inputs,
     services.execution.digest,
   );
+  enterUsRequestVerificationOperation(frame, "assemble_package");
   const reproduced = await assembleUsRequestPackage(inputs);
+  enterUsRequestVerificationOperation(frame, "compare_manifest");
   equalRequest(reproduced.manifest, expectation.manifest);
+  enterUsRequestVerificationOperation(frame, "compare_entries");
   equalRequest(
     reproduced.files.map(({ bytes, ...d }) => {
       void bytes;
@@ -327,9 +339,11 @@ export async function verifyRequestBytes(
     }),
     expectation.entries,
   );
+  enterUsRequestVerificationOperation(frame, "compare_archive");
   const { bytes: zipBytes, ...zip } = reproduced.zip;
   equalRequest(zip, expectation.zip);
   for (const descriptor of publication.artifacts) {
+    enterUsRequestVerificationOperation(frame, "read_private_object", descriptor.name);
     const expected =
       descriptor.name === "package.zip"
         ? zipBytes
@@ -339,11 +353,14 @@ export async function verifyRequestBytes(
       { tenantId: run.tenantId, runId: run.id },
       descriptor,
     );
+    enterUsRequestVerificationOperation(frame, "compare_private_object", descriptor.name);
     if (!bytes.equals(expected)) throw requestError("conflict");
-    if (descriptor.name === "package.zip")
+    if (descriptor.name === "package.zip") {
+      enterUsRequestVerificationOperation(frame, "verify_private_archive", "package.zip");
       verifyUsRequestPackageArchive(bytes, {
         files: reproduced.files,
         manifest: reproduced.manifest,
       });
+    }
   }
 }

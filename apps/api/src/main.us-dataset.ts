@@ -2,6 +2,7 @@ import {
   runUsDatasetCommand,
   usDatasetCommandDiagnostic,
 } from "./deployment/us-dataset-command-runtime";
+import { takeUsRequestVerificationFailure } from "./modules/traceability/requests/us-request-verification-failure";
 
 async function main(): Promise<void> {
   const result = await runUsDatasetCommand(process.argv.slice(2), process.env);
@@ -29,6 +30,10 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`${JSON.stringify(usDatasetCommandDiagnostic(error))}\n`);
+  const diagnostic = usDatasetCommandDiagnostic(error);
+  const verificationFailure = takeUsRequestVerificationFailure(error, diagnostic);
+  process.stderr.write(
+    `${JSON.stringify({ ...diagnostic, ...(verificationFailure ? { verificationFailure } : {}) })}\n`,
+  );
   process.exitCode = 1;
 });
