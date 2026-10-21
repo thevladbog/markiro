@@ -293,11 +293,14 @@ describe("explicit term plan line", () => {
 
   it("is limited to plan lines with quantity one", () => {
     const line = { kind: "plan", quantity: 1, commercialTerms: explicit } as const;
-    const issues = (value: Parameters<typeof contracts.validateCommercialLineKind>[0]) => {
+    const issues = (value: unknown) => {
       const found: unknown[] = [];
-      contracts.validateCommercialLineKind(value, {
-        addIssue: (issue: unknown) => found.push(issue),
-      } as never);
+      contracts.validateCommercialLineKind(
+        value as never,
+        {
+          addIssue: (issue: unknown) => found.push(issue),
+        } as never,
+      );
       return found;
     };
     expect(issues(line)).toEqual([]);
