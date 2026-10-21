@@ -44,12 +44,6 @@
       "port": 5473
     },
     {
-      "name": "standalone",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd apps/standalone && ./node_modules/.bin/vite"],
-      "port": 5274
-    },
-    {
       "name": "station",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@markiro/station", "dev"],
