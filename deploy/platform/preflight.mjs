@@ -170,6 +170,26 @@ export function validateConfig(env, manifest) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(env[key] ?? "")) fail(key);
     if (!env.SMARTCAPTCHA_SERVER_KEY?.startsWith("ysc2_")) fail("SMARTCAPTCHA_SERVER_KEY");
   }
+  // Landing lead alerts are optional and never gate readiness: Telegram only
+  // needs a token and a chat when it is switched on. The token is never echoed;
+  // `fail` names the key only.
+  if (env.LEAD_TELEGRAM_ENABLED && !["true", "false"].includes(env.LEAD_TELEGRAM_ENABLED))
+    fail("LEAD_TELEGRAM_ENABLED");
+  if (env.LEAD_TELEGRAM_ENABLED === "true") {
+    if (!/^\d{1,20}:[A-Za-z0-9_-]{20,100}$/u.test(env.LEAD_TELEGRAM_BOT_TOKEN ?? ""))
+      fail("LEAD_TELEGRAM_BOT_TOKEN");
+    if (!/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/u.test(env.LEAD_TELEGRAM_CHAT_ID ?? ""))
+      fail("LEAD_TELEGRAM_CHAT_ID");
+  }
+  if (
+    env.LEAD_RETENTION_MONTHS !== undefined &&
+    !(
+      /^[0-9]{1,2}$/u.test(env.LEAD_RETENTION_MONTHS) &&
+      Number(env.LEAD_RETENTION_MONTHS) >= 1 &&
+      Number(env.LEAD_RETENTION_MONTHS) <= 60
+    )
+  )
+    fail("LEAD_RETENTION_MONTHS");
   // Disabled product surfaces must not accidentally inherit legacy credentials,
   // workers or deferred CRM configuration from a shared env file.
   for (const key of [

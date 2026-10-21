@@ -96,7 +96,7 @@
 (admin_routes) {
 	root * /srv/admin
 	route {
-		@adminDemo path /api/demo-requests
+		@adminDemo path /api/demo-requests /api/landing-leads
 		handle @adminDemo {
 			respond 404
 		}
@@ -307,7 +307,7 @@
 	route {
 		@landingDemo {
 			method POST
-			path /api/demo-requests
+			path /api/demo-requests /api/landing-leads
 		}
 		handle @landingDemo {
 			request_body {

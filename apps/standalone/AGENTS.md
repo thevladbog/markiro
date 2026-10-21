@@ -172,6 +172,9 @@ administrators and technologists (`require_disaggregation_in`), no revision, the
 its target, details `{ formatId, formatVersion, packingCount }`. The host checks that the
 document is applied (`conflict` `document_not_applied`) and that `packingCount` is the number
 of its distinct SSCCs (a refusal writes no row); it never sees the file.
+«Удалить демо-данные» writes `demo_data.delete` (the administrator, target `product`/the demo
+product's id, details `{ shifts, boxes, pallets, codes }`); the rows of earlier actions on the demo
+objects stay. `host.bootstrap` names `demoData` (its production date) when the wizard installed it.
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -795,8 +798,8 @@ record of its `operatorId`.
 The catalog grants no access, so its flags stay flags: an archived product
 and a disabled template ride the feed with `archived` and `enabled`, since a
 station keeps them for history and leaves them out of its pickers. A
-product is never deleted and never has a tombstone; a deleted template
-leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
+product is never deleted and never has a tombstone, except the demo product, which «Удалить
+демо-данные» deletes («Demo data»); a deleted template leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
 `markiro_proto::category_default_id`, the same text `FEED_KEYS` builds in
 SQL), and clearing it writes a tombstone of that key. The organization's
 three defaults ride its record (`defaultBoxTemplateId`,
@@ -1073,6 +1076,54 @@ leaves the badge working and does not count). The watch is the shell's
 never takes the screen down. Verified in a browser (Chromium, a harness with a
 fake local database) at 1280×800, 1920×1080 and 1024×600; not on WebView2, a
 real panel or a real scanner.
+
+## Demo data
+
+Spec `docs/superpowers/specs/2026-10-21-standalone-wizard-demo-data-design.md` (owner's decisions
+of 2026-10-21: О4 option В, Д1–Д3). The wizard's «Установить демо-данные» sends
+`demoData: { productionDate }` (the wizard's today in the organization's zone; the host keeps no
+zone database), and `bootstrap` makes the set in its own transaction and revision
+(`host/src/demo.rs`): the demo product (`products.demo = 1`, migration `0053`, GTIN
+`02900000000018` of restricted circulation, its photo built in with `include_bytes!`), the SSCC
+counters of the demo prefix `290000000` (extensions 0 and 1) and a planned demo shift on the first
+line with the stock box and pallet defaults. Without both defaults, or with an organization whose
+prefix is the demo one, the wizard is `validation_failed` on `demoData` and nothing is created. The
+trial starts with the wizard either way.
+
+- `products.demo` is the one flag: a shift is a demo shift when its product is (the product is no
+  field of a shift edit). The flag is set only by the wizard; `PUT` of the demo product and of its
+  photo is `conflict` on `demo_product`, so a real GTIN can never hide behind it.
+- A demo shift's number is drawn from the counter `DEMO` (`DEMO-001`, `/S` from a station;
+  `shifts::insert`), and its snapshot's `issuerPrefix` is the demo prefix
+  (`shift_snapshot`), so it spends nothing of the organization's numbering. `0053` rebuilds
+  `shift_number_counters` (with its rowids) to let the key `DEMO` past its five-character
+  `CHECK`. `GET /v1/office/sscc` leaves the demo prefix out while the demo product exists, and its
+  `PUT` answers `not_found`; the organization takes no GLN of the demo prefix meanwhile.
+- Isolation: the office's export record and the export-file upload refuse a format
+  `*_xml_gismt_*` of a demo shift (`conflict` `demo_shift`, `demo::refuse_gismt`); its TXT and CSV
+  are saved as `DEMO_…`. Adding a demo box or pallet to a disaggregation document refuses the
+  whole addition (`conflict` `demo_box`, `details.ssccs`). Every shift-bound query of
+  `usage_stats.rs` leaves demo shifts out (the partial index `products_demo` keeps the plans off the
+  catalog), and the office's «Обзор» leaves them out of the figures, the chart, the line cards and
+  the first steps.
+- `GET /v1/office/demo-data` (every office role) and `DELETE` (administrators) in
+  `routes/demo_data.rs`: one transaction and one revision delete every fact, box, pallet, export
+  file, warehouse pallet and reprint of the demo shifts, the shifts, the `DEMO` counter, the demo
+  prefix's blocks and counters, the photo and the product; the product leaves the feed as a
+  tombstone (the only product that ever does). An open demo shift refuses it (`conflict`
+  `demo_shift_active`, `details.shifts`). Nothing there answers `present: false` with no
+  revision or row. The audit keeps its rows; the delete writes `demo_data.delete`.
+- The removed shifts' ids stay in `demo_removed_shifts`: a station's late fact of one is
+  acknowledged `accepted` and dropped (`facts::apply`), so its queue drains. The table is business
+  data of the cloud import's replacement (`BUSINESS_TABLES`), and a replacement over demo data
+  also drops the demo prefix's counters and the `DEMO` counter rather than keep them as floors.
+- The station knows a demo shift by its number (`isDemoShiftNumber`): «Демо-код» on the work
+  screen feeds the next demo code it holds no scan of (`nextDemoCode`) through the scan gate; a
+  label of a demo shift without a printer shows as a preview in the label panel, and «Готово» is
+  «Продолжить без этикетки» without its question (a `sent` job needs printer bytes). The shell's
+  migration `0021` adds `ref_products.demo`; after a sync and in the hourly pass
+  `purgeRemovedDemo` deletes the copies of demo-prefix shifts whose product left the copies once
+  their queue is answered.
 
 ## Catalog and label templates
 

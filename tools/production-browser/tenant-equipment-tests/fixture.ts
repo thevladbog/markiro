@@ -269,6 +269,9 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           capabilities: platformCapabilitiesForRole.platform_admin,
           twoFactorReady: true,
         };
+      } else if (url.pathname === "/api/platform/leads/summary" && method === "GET") {
+        // The rail's lead badge asks for it on every page.
+        json = { newCount: 0 };
       } else if (url.pathname === `/api/platform/tenants/${TENANT_ID}` && method === "GET") {
         json = fixture.offlineAssignments ? offlineTenant : tenant;
       } else if (

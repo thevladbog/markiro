@@ -325,6 +325,21 @@ async fn apply(
         }
     }
     let Some(shift) = entered_shift(conn, &record.shift_id, device_id).await? else {
+        // A late fact of a demo shift «Удалить демо-данные» removed (spec 2026-10-21) is
+        // acknowledged and dropped: the station's queue drains without an error.
+        let removed: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM demo_removed_shifts WHERE id = ?")
+                .bind(&record.shift_id)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?;
+        if removed.is_some() {
+            return Ok(Applying {
+                kind,
+                shift_id: None,
+                answer: Ok(Applied::accepted()),
+            });
+        }
         return Ok(Applying::refused(
             kind,
             Reject::new(receipt_codes::UNKNOWN_SHIFT),

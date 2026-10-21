@@ -87,7 +87,7 @@
 	route {
 		@landingDemo {
 			method POST
-			path /api/demo-requests
+			path /api/demo-requests /api/landing-leads
 		}
 		handle @landingDemo {
 			request_body {

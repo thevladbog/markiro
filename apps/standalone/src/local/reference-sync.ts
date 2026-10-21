@@ -216,13 +216,14 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
       upsert:
         "INSERT INTO ref_products (id, gtin14, name, print_name, chz_group_code, box_capacity, " +
         "pallet_box_capacity, shelf_life_days, default_box_template_id, " +
-        "default_pallet_template_id, archived, status, photo_checksum, rev) " +
+        "default_pallet_template_id, archived, status, photo_checksum, demo, rev) " +
         "SELECT r.value ->> 'id', r.value ->> 'gtin14', r.value ->> 'name', " +
         "r.value ->> 'printName', r.value ->> 'chzProductGroupCode', r.value ->> 'boxCapacity', " +
         "r.value ->> 'palletBoxCapacity', r.value ->> 'shelfLifeDays', " +
         "r.value ->> 'defaultBoxTemplateId', r.value ->> 'defaultPalletTemplateId', " +
         "r.value ->> 'archived', r.value ->> 'status', r.value ->> 'photoChecksum', " +
-        "r.value ->> 'rev' " +
+        // The demo flag (spec 2026-10-21) comes only when true.
+        "coalesce(r.value ->> 'demo', 0), r.value ->> 'rev' " +
         "FROM json_each(?) AS r " +
         notQuarantinedNewer("products") +
         " ON CONFLICT (id) DO UPDATE SET gtin14 = excluded.gtin14, name = excluded.name, " +
@@ -233,7 +234,7 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "default_box_template_id = excluded.default_box_template_id, " +
         "default_pallet_template_id = excluded.default_pallet_template_id, " +
         "archived = excluded.archived, status = excluded.status, " +
-        "photo_checksum = excluded.photo_checksum, rev = excluded.rev " +
+        "photo_checksum = excluded.photo_checksum, demo = excluded.demo, rev = excluded.rev " +
         "WHERE excluded.rev > ref_products.rev",
     },
   ],

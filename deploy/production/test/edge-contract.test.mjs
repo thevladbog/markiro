@@ -57,6 +57,7 @@ const kioskForbiddenPaths = Object.freeze([
   "/api/auth/session",
   "/api/admin/tenants",
   "/api/demo-requests",
+  "/api/landing-leads",
   "/1c_exchange",
   "/station",
   "/station/bootstrap",
@@ -580,16 +581,25 @@ function assertAuthorityContract(adapted, { alb }) {
   assert.ok(adminProxies.every(({ proxies }) => proxies.length === 1));
   const adminRoutes = applicationOrderedRouteTable(admin);
   for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
-    const request = { method, path: "/api/demo-requests" };
-    const selected = selectedAdaptedRoute(adminRoutes, request);
-    assert.deepEqual(
-      selected.match,
-      [{ path: ["/api/demo-requests"] }],
-      "admin demo-request denial must match the exact path for every method",
-    );
-    assertOnlyPlain404(selected, request);
+    for (const path of ["/api/demo-requests", "/api/landing-leads"]) {
+      const request = { method, path };
+      const selected = selectedAdaptedRoute(adminRoutes, request);
+      assert.deepEqual(
+        selected.match,
+        [{ path: ["/api/demo-requests", "/api/landing-leads"] }],
+        "admin public-form denial must match the exact paths for every method",
+      );
+      assertOnlyPlain404(selected, request);
+    }
   }
-  for (const path of ["/api/demo-request", "/api/demo-requests/", "/api/demo-requests/extra"]) {
+  for (const path of [
+    "/api/demo-request",
+    "/api/demo-requests/",
+    "/api/demo-requests/extra",
+    "/api/landing-lead",
+    "/api/landing-leads/",
+    "/api/landing-leads/extra",
+  ]) {
     const request = { method: "POST", path };
     const selected = selectedAdaptedRoute(adminRoutes, request);
     assert.equal(
@@ -643,38 +653,54 @@ function assertAuthorityContract(adapted, { alb }) {
   assertKioskRoutingBoundary(kiosk);
   const landingProxies = proxyRoutes(landing);
   assert.equal(landingProxies.length, 1);
-  assert.deepEqual(landingProxies[0].paths, ["/api/demo-requests"]);
+  assert.deepEqual(landingProxies[0].paths, ["/api/demo-requests", "/api/landing-leads"]);
   assert.deepEqual(landingProxies[0].methods, ["POST"]);
   assert.deepEqual(landingProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
   const landingRoutes = applicationOrderedRouteTable(landing);
-  const landingDemoRequest = { method: "POST", path: "/api/demo-requests" };
-  const selectedLandingDemoRequest = selectedAdaptedRoute(landingRoutes, landingDemoRequest);
-  assert.deepEqual(
-    nestedObjects(selectedLandingDemoRequest).filter(
-      (candidate) => candidate.handler === "request_body",
-    ),
-    [{ handler: "request_body", max_size: 4000 }],
-  );
-  assert.equal(
-    nestedObjects(selectedLandingDemoRequest).filter(
-      (candidate) => candidate.handler === "reverse_proxy",
-    ).length,
-    1,
-  );
-  assert.ok(
-    nestedObjects(selectedLandingDemoRequest).every(
-      (candidate) => candidate.handler !== "file_server" && candidate.handler !== "static_response",
-    ),
-  );
-  for (const method of ["GET", "HEAD", "PUT"]) {
-    const request = { method, path: "/api/demo-requests" };
-    assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
+  for (const path of ["/api/demo-requests", "/api/landing-leads"]) {
+    const landingFormRequest = { method: "POST", path };
+    const selectedLandingFormRequest = selectedAdaptedRoute(landingRoutes, landingFormRequest);
+    assert.deepEqual(
+      nestedObjects(selectedLandingFormRequest).filter(
+        (candidate) => candidate.handler === "request_body",
+      ),
+      [{ handler: "request_body", max_size: 4000 }],
+      path,
+    );
+    assert.equal(
+      nestedObjects(selectedLandingFormRequest).filter(
+        (candidate) => candidate.handler === "reverse_proxy",
+      ).length,
+      1,
+      path,
+    );
+    assert.deepEqual(
+      nestedObjects(selectedLandingFormRequest).filter(
+        (candidate) => candidate.handler === "rewrite",
+      ),
+      [{ handler: "rewrite", strip_path_prefix: "/api" }],
+      path,
+    );
+    assert.ok(
+      nestedObjects(selectedLandingFormRequest).every(
+        (candidate) =>
+          candidate.handler !== "file_server" && candidate.handler !== "static_response",
+      ),
+      path,
+    );
+    for (const method of ["GET", "HEAD", "PUT"]) {
+      const request = { method, path };
+      assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
+    }
   }
   for (const path of [
     "/api",
     "/api/demo-request",
     "/api/demo-requests/",
     "/api/demo-requests/extra",
+    "/api/landing-lead",
+    "/api/landing-leads/",
+    "/api/landing-leads/extra",
     "/api/other",
     "/api/auth/session",
     "/1c_exchange",

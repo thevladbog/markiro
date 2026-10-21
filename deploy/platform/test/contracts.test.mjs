@@ -280,6 +280,54 @@ test("optional support import requires explicit protected Chatwoot configuration
   );
 });
 
+test("optional lead Telegram alerts need a well-formed token and chat only when enabled", () => {
+  const token = "42:not-a-real-telegram-bot-token";
+  assert.doesNotThrow(() => validateConfig(env(), manifest()));
+  assert.doesNotThrow(() =>
+    validateConfig({ ...env(), LEAD_TELEGRAM_ENABLED: "false" }, manifest()),
+  );
+  for (const patch of [
+    { LEAD_TELEGRAM_ENABLED: "yes" },
+    { LEAD_TELEGRAM_ENABLED: "true" },
+    { LEAD_TELEGRAM_ENABLED: "true", LEAD_TELEGRAM_BOT_TOKEN: token },
+    { LEAD_TELEGRAM_ENABLED: "true", LEAD_TELEGRAM_CHAT_ID: "-1001234567890" },
+    {
+      LEAD_TELEGRAM_ENABLED: "true",
+      LEAD_TELEGRAM_BOT_TOKEN: "not-a-token",
+      LEAD_TELEGRAM_CHAT_ID: "-1001234567890",
+    },
+    {
+      LEAD_TELEGRAM_ENABLED: "true",
+      LEAD_TELEGRAM_BOT_TOKEN: token,
+      LEAD_TELEGRAM_CHAT_ID: "chat",
+    },
+  ])
+    assert.throws(() => validateConfig({ ...env(), ...patch }, manifest()));
+  for (const chat of ["-1001234567890", "42", "@markiro_leads"])
+    assert.doesNotThrow(() =>
+      validateConfig(
+        {
+          ...env(),
+          LEAD_TELEGRAM_ENABLED: "true",
+          LEAD_TELEGRAM_BOT_TOKEN: token,
+          LEAD_TELEGRAM_CHAT_ID: chat,
+        },
+        manifest(),
+      ),
+    );
+  for (const months of ["1", "12", "60"])
+    assert.doesNotThrow(() =>
+      validateConfig({ ...env(), LEAD_RETENTION_MONTHS: months }, manifest()),
+    );
+  for (const months of ["", "0", "61", "1.5", "abc"])
+    assert.throws(() => validateConfig({ ...env(), LEAD_RETENTION_MONTHS: months }, manifest()));
+  // The token is a literal in the protected env file, never a Compose value.
+  assert.equal(
+    load(read("deploy/platform/compose.yml")).services.api.environment.LEAD_TELEGRAM_BOT_TOKEN,
+    undefined,
+  );
+});
+
 test("S3 CSP origin matches the runtime presigner addressing mode", () => {
   assert.throws(() =>
     validateConfig({ ...env(), S3_PUBLIC_ORIGIN: "https://different.example.org" }, manifest()),

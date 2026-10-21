@@ -38,6 +38,7 @@ import {
   platformGrantActivationContracts,
   platformGrantRollbackContracts,
   platformServicePeriodContracts,
+  platformLeadContracts,
   platformSupportChatContracts,
   supportTranscriptContracts,
 } from "@markiro/platform-contracts";
@@ -456,6 +457,32 @@ export const CURRENT_SAAS_ROUTES = [
     "200",
     platformStandaloneDiagnosticsContracts.detail.response,
   ),
+  route("get", "/platform/leads", "200", platformLeadContracts.list.response, {
+    query: platformLeadContracts.list.query,
+  }),
+  route("get", "/platform/leads/summary", "200", platformLeadContracts.summary.response),
+  route("get", "/platform/leads/{id}", "200", platformLeadContracts.detail.response),
+  route("patch", "/platform/leads/{id}", "200", platformLeadContracts.update.response, {
+    body: platformLeadContracts.update.body,
+  }),
+  route("post", "/platform/leads/{id}/contacted", "200", platformLeadContracts.contacted.response, {
+    body: platformLeadContracts.contacted.body,
+  }),
+  route(
+    "post",
+    "/platform/leads/{id}/link-tenant",
+    "200",
+    platformLeadContracts.linkTenant.response,
+    { body: platformLeadContracts.linkTenant.body },
+  ),
+  route(
+    "post",
+    "/platform/leads/{id}/create-tenant",
+    "200",
+    platformLeadContracts.createTenant.response,
+    { body: platformLeadContracts.createTenant.body },
+  ),
+  route("post", "/platform/leads/{id}/anonymize", "200", platformLeadContracts.anonymize.response),
   route("post", "/platform/reports", "201", platformReportContracts.create.response, {
     body: platformReportContracts.create.body,
   }),
