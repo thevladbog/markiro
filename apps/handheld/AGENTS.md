@@ -125,4 +125,6 @@ Android tests must also verify its interpretation.
   or emulator; the vendor scanner path is untouched; the token race of the owed-leave sender is untested; a null
   `asOf` is taken from the incoming answer where the station refuses it within 60 s; a non-closed answer without
   totals and nothing stored creates a row with null figures; the hub card shows the corrected total only for shared
-  shifts.
+  shifts; a shift the office closes while the device works it is learnt only on re-entry (`409` → «Смена уже
+  закрыта»): the beat drops its figures (the host lists open shifts only) but never touches the local row, and the
+  `Closed` result leaves the row and `activeShiftId` as they are.
