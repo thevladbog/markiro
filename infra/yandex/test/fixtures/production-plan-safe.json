@@ -2,7 +2,8 @@
   "variables": {
     "terraform_service_account_id": { "value": "terraform-sa-id" },
     "app_service_account_id": { "value": "app-runtime-sa-id" },
-    "saas_admin_domain": { "value": "saas-admin.markiro.app" }
+    "saas_admin_domain": { "value": "saas-admin.markiro.app" },
+    "landing_domain": { "value": "markiro.app" }
   },
   "resource_changes": [
     {
@@ -265,6 +266,7 @@
               "forward_host_header": false,
               "edge_cache_settings": 0,
               "browser_cache_settings": 0,
+              "cors": ["markiro.app"],
               "static_response_headers": {
                 "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
                 "x-content-type-options": "nosniff"

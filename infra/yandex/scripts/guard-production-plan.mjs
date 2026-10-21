@@ -1316,6 +1316,11 @@ function validateCdn(plan, resource, expectedOriginGroupId, bucketName) {
       check("browser-cache", () => {
         if (options.browser_cache_settings !== 0) rejected();
       });
+      // Only the landing reads release pointers cross-origin. A wider list,
+      // "*" or "$http_origin" would let any site read them from a browser.
+      check("download-cors", () => {
+        exactStrings(options.cors, [planVariable(plan, "landing_domain")]);
+      });
       const headersResult = capture("headers-shape", () => {
         if (!object(options.static_response_headers)) rejected();
         return options.static_response_headers;
@@ -1331,6 +1336,11 @@ function validateCdn(plan, resource, expectedOriginGroupId, bucketName) {
             "default-src 'none'; frame-ancestors 'none'; sandbox"
           )
             rejected();
+        });
+        // A static Access-Control-* header would apply to every origin and
+        // bypass the cors list above.
+        check("static-cors-header", () => {
+          if (Object.keys(headers).some((name) => /^access-control-/i.test(name))) rejected();
         });
       }
     }

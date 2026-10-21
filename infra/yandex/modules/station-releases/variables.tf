@@ -76,6 +76,17 @@ variable "standalone_upload_origin" {
   }
 }
 
+variable "download_origin_domain" {
+  description = "Bare host of the landing whose pages read release pointers cross-origin through the CDN (no scheme)."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.download_origin_domain))
+    error_message = "download_origin_domain must be a lowercase fully-qualified host without scheme, port or wildcard."
+  }
+}
+
 variable "public_dns_enabled" {
   description = "Whether the final releases.markiro.app CNAME is published after separate approval."
   type        = bool

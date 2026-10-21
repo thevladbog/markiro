@@ -966,6 +966,12 @@ test("guard CLI distinguishes release CDN failure classes without leaking plan v
       },
     },
     {
+      scope: "download-cors",
+      mutate(plan) {
+        releaseCdnOptions(plan).cors = ["do-not-print-this-plan-value"];
+      },
+    },
+    {
       scope: "headers-shape",
       mutate(plan) {
         releaseCdnOptions(plan).static_response_headers = "do-not-print-this-plan-value";
@@ -982,6 +988,13 @@ test("guard CLI distinguishes release CDN failure classes without leaking plan v
       scope: "content-security-policy-header",
       mutate(plan) {
         releaseCdnOptions(plan).static_response_headers["content-security-policy"] =
+          "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "static-cors-header",
+      mutate(plan) {
+        releaseCdnOptions(plan).static_response_headers["access-control-allow-origin"] =
           "do-not-print-this-plan-value";
       },
     },
@@ -1060,9 +1073,12 @@ test("guard CLI reports every independent release CDN failure without leaking pl
   releaseCdnOptions(invalid).custom_host_header = "do-not-print-this-plan-value";
   releaseCdnOptions(invalid).forward_host_header = true;
   releaseCdnOptions(invalid).browser_cache_settings = "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).cors = ["do-not-print-this-plan-value"];
   releaseCdnOptions(invalid).static_response_headers["x-content-type-options"] =
     "do-not-print-this-plan-value";
   releaseCdnOptions(invalid).static_response_headers["content-security-policy"] =
+    "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).static_response_headers["Access-Control-Allow-Origin"] =
     "do-not-print-this-plan-value";
   releaseCdnCertificate(invalid).type = "do-not-print-this-plan-value";
   releaseCdnCertificate(invalid).certificate_manager_id = {
@@ -1097,8 +1113,10 @@ test("guard CLI reports every independent release CDN failure without leaking pl
       "release-cdn-custom-host-header",
       "release-cdn-forward-host-header",
       "release-cdn-browser-cache",
+      "release-cdn-download-cors",
       "release-cdn-content-type-header",
       "release-cdn-content-security-policy-header",
+      "release-cdn-static-cors-header",
       "release-cdn-certificate-type",
       "release-cdn-certificate-id",
       "release-cdn-provider-cname",
@@ -1541,6 +1559,45 @@ test("production plan guard allows only the SaaS admin presigned PUT as bucket C
   const providerNullExpose = copy(safe);
   ruleOf(providerNullExpose).expose_headers = null;
   assert.doesNotThrow(() => guardProductionPlan(providerNullExpose));
+});
+
+test("production plan guard lets only the landing origin read releases through the CDN", async () => {
+  const safe = await readFixture("safe");
+  assert.deepEqual(releaseCdnOptions(safe).cors, ["markiro.app"]);
+  assert.doesNotThrow(() => guardProductionPlan(safe));
+
+  const cases = [
+    ["download-cors", (plan) => delete releaseCdnOptions(plan).cors],
+    ["download-cors", (plan) => (releaseCdnOptions(plan).cors = null)],
+    ["download-cors", (plan) => (releaseCdnOptions(plan).cors = [])],
+    ["download-cors", (plan) => (releaseCdnOptions(plan).cors = ["*"])],
+    ["download-cors", (plan) => (releaseCdnOptions(plan).cors = ["$http_origin"])],
+    ["download-cors", (plan) => (releaseCdnOptions(plan).cors = ["https://markiro.app"])],
+    ["download-cors", (plan) => releaseCdnOptions(plan).cors.push("evil.example.net")],
+    ["download-cors", (plan) => (releaseCdnOptions(plan).cors = ["saas-admin.markiro.app"])],
+    ["download-cors", (plan) => delete plan.variables.landing_domain],
+    ["download-cors", (plan) => (plan.variables.landing_domain.value = "evil.example.net")],
+    [
+      "static-cors-header",
+      (plan) =>
+        (releaseCdnOptions(plan).static_response_headers["access-control-allow-origin"] = "*"),
+    ],
+    [
+      "static-cors-header",
+      (plan) =>
+        (releaseCdnOptions(plan).static_response_headers["access-control-allow-credentials"] =
+          "true"),
+    ],
+  ];
+  for (const [index, [scope, mutate]] of cases.entries()) {
+    const plan = copy(safe);
+    mutate(plan);
+    assert.throws(
+      () => guardProductionPlan(plan),
+      { message: `production plan rejected (release-cdn-${scope})` },
+      `case ${index}`,
+    );
+  }
 });
 
 test("production plan guard distinguishes release-policy failure classes", async () => {

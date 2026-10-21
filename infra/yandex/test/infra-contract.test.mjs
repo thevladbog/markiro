@@ -391,7 +391,10 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
 });
 
 test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata behind an issued certificate", async () => {
-  const releases = await source("infra/yandex/modules/station-releases/main.tf");
+  const [releases, variables] = await Promise.all([
+    source("infra/yandex/modules/station-releases/main.tf"),
+    source("infra/yandex/modules/station-releases/variables.tf"),
+  ]);
 
   const originGroup = block(releases, 'resource "yandex_cdn_origin_group" "releases"');
   assert.match(
@@ -430,6 +433,15 @@ test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata be
   assert.match(cdn, /custom_host_header\s*=\s*yandex_storage_bucket\.releases\.bucket_domain_name/);
   assert.doesNotMatch(cdn, /forward_host_header\s*=\s*true/);
   assert.doesNotMatch(cdn, /browser_cache_settings|cache_http_headers/);
+  // The landing reads standalone/<channel>/latest.json cross-origin. The CDN
+  // answers with Access-Control-Allow-Origin only for the landing host; the
+  // header is never a static one, which could not be scoped to an origin.
+  assert.match(cdn, /cors\s*=\s*\[var\.download_origin_domain\]/);
+  assert.doesNotMatch(cdn, /"access-control-/i);
+  const downloadOrigin = block(variables, 'variable "download_origin_domain"');
+  assert.match(downloadOrigin, /type\s*=\s*string/);
+  assert.match(downloadOrigin, /nullable\s*=\s*false/);
+  assert.match(downloadOrigin, /validation\s*\{/);
   assert.match(
     cdn,
     /static_response_headers\s*=\s*\{[\s\S]*"x-content-type-options"\s*=\s*"nosniff"/,
@@ -472,6 +484,7 @@ test("production wires the fixed Station release origin behind a separate public
     releaseModule,
     /standalone_upload_origin\s*=\s*"https:\/\/\$\{var\.saas_admin_domain\}"/,
   );
+  assert.match(releaseModule, /download_origin_domain\s*=\s*var\.landing_domain/);
   assert.doesNotMatch(
     releaseModule,
     /app_service_account_id|runtime_secret_id|module\.compute|public_dns_enabled\s*=\s*var\.public_dns_enabled/,

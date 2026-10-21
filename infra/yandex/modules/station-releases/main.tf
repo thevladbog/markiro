@@ -239,6 +239,14 @@ resource "yandex_cdn_resource" "releases" {
     # explicit metadata receive no CDN fallback cache lifetime.
     edge_cache_settings = 0
 
+    # The landing's download page reads standalone/<channel>/latest.json with a
+    # cross-origin fetch. The CDN echoes the request Origin into
+    # Access-Control-Allow-Origin only when its host is the landing domain, on
+    # cached and uncached responses alike. The fetch is a simple GET, so no
+    # preflight reaches the edge. The bucket's own CORS rule covers only the
+    # SaaS admin's presigned PUT and plays no part here.
+    cors = [var.download_origin_domain]
+
     static_response_headers = {
       "content-security-policy"   = "default-src 'none'; frame-ancestors 'none'; sandbox"
       "permissions-policy"        = "camera=(), geolocation=(), microphone=()"

@@ -34,6 +34,7 @@ apply с подтверждением владельца. Ожидаемые и�
 | `yandex_storage_bucket_iam_binding.publisher_uploader` (второй участник) | update   |
 | `yandex_storage_bucket_policy.releases` (политика вычисляется при apply) | update   |
 | `yandex_storage_bucket.releases` (`cors_rule`)                           | update   |
+| `yandex_cdn_resource.releases` (`options.cors = ["markiro.app"]`)        | update   |
 
 Любой `delete` или `replace` в этом модуле — повод остановиться. Guard
 `guard-production-plan.mjs` пропускает политику, неизвестную на этапе плана,
@@ -99,11 +100,28 @@ RELEASES_S3_SECRET_ACCESS_KEY=<содержимое $secret_key_file>
 4. Ключ API не пишет вне `standalone/*`: `PutObject` в `station/` с этим ключом
    должен получить `AccessDenied`.
 
-Страница `/skachat/` читает `latest.json` из браузера с `https://markiro.app`,
-то есть кросс-доменно. Это изменение открывает CORS бакета только для `PUT` из
-SaaS-админки; заголовок `Access-Control-Allow-Origin` для `GET` с лендинга на
-CDN `releases.markiro.app` не настроен. Пока его нет, страница считает выпуск
-недоступным. Это отдельная правка CDN-ресурса и guard.
+5. Лендинг читает `latest.json` кросс-доменно. CDN отвечает
+   `Access-Control-Allow-Origin` только для хоста лендинга (`var.landing_domain`,
+   в проде `markiro.app`), из кэша и мимо него одинаково:
+
+   ```bash
+   curl -sS -o /dev/null -D - -H 'Origin: https://markiro.app' \
+     https://releases.markiro.app/standalone/stable/latest.json | grep -i '^access-control-allow-origin'
+   # ожидается: access-control-allow-origin: https://markiro.app
+   curl -sS -o /dev/null -D - -H 'Origin: https://evil.example' \
+     https://releases.markiro.app/standalone/stable/latest.json | grep -ci '^access-control-allow-origin'
+   # ожидается: 0
+   ```
+
+   Затем откройте `https://markiro.app/skachat/`: страница показывает версию
+   из `latest.json`, а в консоли браузера нет CORS-ошибки.
+
+Страница `/skachat/` читает `latest.json` из браузера с `https://markiro.app`.
+CORS бакета здесь ни при чём: он открыт только для `PUT` из SaaS-админки, а
+`GET` идёт через CDN, который сам добавляет `Access-Control-Allow-Origin`
+(`options.cors` CDN-ресурса). `www.markiro.app` лендинг не обслуживает, поэтому
+в списке один хост. Guard пропускает в `cors` только `landing_domain` из плана
+и отклоняет любые статические заголовки `access-control-*`.
 
 Автоматика это не проверяет: контрактные тесты и guard видят только
 конфигурацию и план, а живой CORS, права ключа и раздача через CDN проверяются
