@@ -146,6 +146,54 @@ export async function purgeAcknowledged(
   return purged;
 }
 
+/** The SSCC prefix of demo shifts (spec 2026-10-21, decision О4): the host's `DEMO_PREFIX`. */
+export const DEMO_SSCC_PREFIX = "290000000";
+
+/**
+ * A demo shift of the pairing whose demo data the office removed: entered here (a planned copy
+ * goes with the host's list), of the demo prefix, its product gone from the copies (it left the
+ * feed as a tombstone), and every record of it answered — the host acknowledges a late record
+ * of a removed demo shift, so the queue drains first. Parameters: host id, device id.
+ */
+const REMOVED_DEMO =
+  "s.host_id = ? AND s.device_id = ? AND s.entered_at IS NOT NULL " +
+  `AND s.snapshot ->> 'issuerPrefix' = '${DEMO_SSCC_PREFIX}' ` +
+  "AND NOT EXISTS (SELECT 1 FROM ref_products p WHERE p.id = s.product_id) " +
+  "AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id " +
+  "AND o.device_id = s.device_id AND o.shift_id = s.id AND o.acked_at IS NULL)";
+
+export const REMOVED_DEMO_SQL = `SELECT s.id FROM floor_shifts s WHERE ${REMOVED_DEMO}`;
+
+/**
+ * Deletes this pairing's copies of removed demo shifts at once, with every record of them
+ * (spec 2026-10-21: «Удалить демо-данные» leaves no trace on the station either), one shift per
+ * transaction, the copy first and only while it still qualifies. Answers how many went.
+ */
+export async function purgeRemovedDemo(local: LocalExecutor, pairing: Pairing): Promise<number> {
+  const { hostId, deviceId } = pairing;
+  const due = await local.query(REMOVED_DEMO_SQL, [hostId, deviceId], dueRow);
+  let purged = 0;
+  for (const { id } of due) {
+    try {
+      await local.transaction([
+        {
+          sql: `DELETE FROM floor_shifts AS s WHERE s.id = ? AND ${REMOVED_DEMO}`,
+          values: [id, hostId, deviceId],
+          expectedChanges: 1,
+        },
+        ...RETAINED_TABLES.map((table) => ({
+          sql: purgeTableSql(table),
+          values: [hostId, deviceId, id],
+        })),
+      ]);
+      purged += 1;
+    } catch (error) {
+      if (!(error instanceof LocalDbError && error.code === "changes_mismatch")) throw error;
+    }
+  }
+  return purged;
+}
+
 /** A repeating timer: calls `fire` every `ms`; returns the function that stops it. */
 export type Every = (ms: number, fire: () => void) => () => void;
 

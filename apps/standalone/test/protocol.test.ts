@@ -285,7 +285,9 @@ describe("demo data (spec 2026-10-21)", () => {
 
   it("the wizard sends demoData with the demo shift's production date", () => {
     const request = fixture("bootstrap-request-demo.json") as Record<string, unknown>;
-    expect(bootstrapRequestSchema.parse(request).demoData).toEqual({ productionDate: "2026-10-21" });
+    expect(bootstrapRequestSchema.parse(request).demoData).toEqual({
+      productionDate: "2026-10-21",
+    });
     expect(bootstrapRequestSchema.safeParse({ ...request, demoData: true }).success).toBe(false);
     expect(
       bootstrapRequestSchema.safeParse({ ...request, demoData: { productionDate: "21.10.2026" } })
