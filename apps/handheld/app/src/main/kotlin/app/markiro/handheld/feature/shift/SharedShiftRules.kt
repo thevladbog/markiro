@@ -28,10 +28,10 @@ object SharedShiftRules {
 
     /**
      * What the others delivered (the host's total less this device's own delivered share) plus everything this device has counted, delivered or not,
-     * less the [lost] codes (answered `conflict`, held in `conflicts_mirror`): the host gave those to another device, so they are inside the others'
-     * part already and would count twice (the station's `sharedCount(lost)`, final review I2). Never below the device's own count.
+     * less the [lost] codes (`CodeDao.lostForShift`: answered `conflict` or `rejected`): the host gave those to another device, so they are inside the others'
+     * part already and would count twice (the station's `sharedCount(lost)`, final review I2); required, never defaulted, so a caller cannot forget it. Never below the device's own count.
      */
-    fun shiftTotal(p: ShiftParticipation?, localAccepted: Int, lost: Int = 0): Int {
+    fun shiftTotal(p: ShiftParticipation?, localAccepted: Int, lost: Int): Int {
         val own = (localAccepted - lost).coerceAtLeast(0)
         val accepted = p?.accepted ?: return own
         val others = (accepted - (p.myAccepted ?: 0L)).coerceAtLeast(0L)
@@ -43,7 +43,7 @@ object SharedShiftRules {
      * count. A shared shift: only the last closer, only with fresh figures, by the shift-wide total against the plan; every other case closes
      * without a reason and the host marks a shared shift's missing one for the office.
      */
-    fun reasonRequired(plan: Int?, localAccepted: Int, p: ShiftParticipation?, now: Long, lost: Int = 0): Boolean {
+    fun reasonRequired(plan: Int?, localAccepted: Int, p: ShiftParticipation?, now: Long, lost: Int): Boolean {
         // A close that leaves the shift open never asks (the host's `closesShift = false` is `none`), whatever the device count says.
         if (p != null && p.othersOpen > 0) return false
         if (p == null || p.participantsEver <= 1) return ShiftCloser.reasonRequired(plan, localAccepted)
@@ -51,7 +51,7 @@ object SharedShiftRules {
         return plan != null && plan != shiftTotal(p, localAccepted, lost)
     }
 
-    fun strip(p: ShiftParticipation?, localAccepted: Int, plan: Int?, lost: Int = 0): SharedStrip? {
+    fun strip(p: ShiftParticipation?, localAccepted: Int, plan: Int?, lost: Int): SharedStrip? {
         if (p == null || !isShared(p)) return null
         return SharedStrip(
             mine = (localAccepted - lost).coerceAtLeast(0),
