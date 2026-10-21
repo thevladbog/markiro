@@ -3822,9 +3822,15 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   shift with `closeReasonMissing`: a select of the six
   `SHIFT_CLOSE_REASON_CODES` and `PUT …/close-reason`; a reason set meanwhile
   (`close_reason_not_missing`) is an alert in words of its own and a re-read of
-  the list. «Обзор» lists such a shift under «Требует внимания»; it reads the
-  `listShifts` window (planned and active plus 31 days of closed ones), so an
-  older shift closed without its reason is marked in «Смены» only.
+  the list. «Обзор» lists such a shift under «Требует внимания»; it reads
+  `listShifts` for the planned dates from today minus 6 days to tomorrow
+  (`use-overview-data.ts`: `plannedFrom`/`plannedTo`), not «31 days of closed
+  ones». A shift closed without its reason therefore leaves the «Обзор» about
+  seven days after its planned date, and the default «Смены» list (its own
+  31-day window of closed shifts) about 31 days after it; after that it is
+  reachable only by widening the period. Follow-up: the host's `list_shifts`
+  should also return `close_reason_missing = 1` shifts whatever their date, or
+  a dedicated query should list them.
 - «Устройства»: the «Линия» cell carries a participation tag under the line's
   name (working, paused, part closed; `presenceOf`); the page reads the shifts
   for it and claims nothing when they do not load. No column was added.
