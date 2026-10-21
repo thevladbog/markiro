@@ -285,4 +285,46 @@ class ShiftRepositoryHostTest {
         assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
         assertNotNull(db.shiftDao().get(id)!!.leftAt)
     }
+
+    /** As in production (`BackendModule`): the repository holds the selector, which picks the host of a paired device. */
+    private fun selectedRepository(script: Script): ShiftRepository {
+        val api = HostApi(script)
+        val pool = SsccPool(db)
+        val supplier = HostBlockSupplier(db, MetaStore(db), api, pool, SsccBlockApplier(pool))
+        val store = ShiftParticipationStore(db)
+        val host = HostBackend({ api }, db.deviceConfigDao(), db, supplier, HostCalls { }, null, db.operatorDao(), participation = store)
+        val cloud = object : app.markiro.handheld.core.backend.StationBackend by app.markiro.handheld.core.backend.NoBackend {}
+        val selector = app.markiro.handheld.core.backend.BackendSelector(db.deviceConfigDao(), cloud, host)
+        return ShiftRepository(selector, db, Json { ignoreUnknownKeys = true }, pool, SsccBlockApplier(pool), store)
+    }
+
+    @Test
+    fun aLeaveThroughTheProductionSelectorReachesTheHostAndWhatItDidNotHearStaysOwed() = runTest {
+        assertEquals("host", db.deviceConfigDao().get()!!.backend)
+        workingIn()
+        val unheard = scripted(HostResult.Failed(TransportFailure.UNREACHABLE))
+        selectedRepository(unheard).leave(id)
+        // Final review C1: the selector answered `null` without a call and the marker was cleared; the host never heard of the leave.
+        assertTrue(unheard.posts.getValue(leavePath()).isEmpty())
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+
+        workingIn()
+        val heard = scripted(ok(shiftAnswer("left")))
+        selectedRepository(heard).leave(id)
+        assertTrue(heard.posts.getValue(leavePath()).isEmpty())
+        assertEquals(emptyList<String>(), ShiftParticipationStore(db).pendingLeaves())
+        assertEquals("left", ShiftParticipationStore(db).get(id)!!.myState)
+    }
+
+    @Test
+    fun anAnswerThatSaysNothingOfThePartSettlesNoLeave() = runTest {
+        workingIn()
+        val silent = object : app.markiro.handheld.core.backend.StationBackend by app.markiro.handheld.core.backend.NoBackend {
+            override suspend fun leave(shiftId: String): String? = null
+        }
+        val pool = SsccPool(db)
+        ShiftRepository(silent, db, Json { ignoreUnknownKeys = true }, pool, SsccBlockApplier(pool), ShiftParticipationStore(db)).leave(id)
+        // Only `left` or `closed` say the host holds no slot of this device any more.
+        assertEquals(listOf(id), ShiftParticipationStore(db).pendingLeaves())
+    }
 }

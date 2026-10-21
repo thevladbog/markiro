@@ -358,15 +358,15 @@ class ShiftRepository(
 
     /**
      * Best effort and after the local mark, which is what the operator sees; production data is never touched. Only what the host SETTLED clears the
-     * marker (compare-and-clear on the one written above, so a pause asked again meanwhile stays owed): an answer whose part is not `active` any more,
+     * marker (compare-and-clear on the one written above, so a pause asked again meanwhile stays owed): an answer whose part is `left` or `closed`,
      * or a definite refusal (`shift_not_entered`, `not_found`, `validation_failed`). An answer that still says `active` means the host no-oped a stale
-     * token (an automatic rejoin re-entered the part): the leave stays owed and the heartbeat sends it again with the fresh token. Anything else
-     * (unreachable, a timeout, a 5xx) stays owed too.
+     * token (an automatic rejoin re-entered the part): the leave stays owed and the heartbeat sends it again with the fresh token. An answer that names
+     * no state (`null`: no host call was made) settles nothing either (final review C1). Anything else (unreachable, a timeout, a 5xx) stays owed too.
      */
     private suspend fun releaseSlot(shiftId: String, marker: String) {
         try {
             val state = db.recovery.work { backend.leave(shiftId) }
-            if (state != "active") participation.clearLeavePending(shiftId, marker)
+            if (state == "left" || state == "closed") participation.clearLeavePending(shiftId, marker)
         } catch (e: HttpException) {
             if (app.markiro.handheld.core.host.OwedLeaveRefusals.settles(e)) participation.clearLeavePending(shiftId, marker)
         } catch (e: IOException) {
