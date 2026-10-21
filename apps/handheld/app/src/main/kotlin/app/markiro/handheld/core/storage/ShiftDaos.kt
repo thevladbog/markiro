@@ -52,6 +52,13 @@ interface CodeDao {
     @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
     suspend fun countForShift(shiftId: String): Int
 
+    /**
+     * The shift's effective codes the host gave to another terminal (their hash is in `conflicts_mirror`, the code stays in `codes_mirror`):
+     * they are inside the others' part of a shared shift's total, so `SharedShiftRules` takes them off this device's own count (its `lost`).
+     */
+    @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") e WHERE e.shiftId = :shiftId AND e.codeHash IN (SELECT codeHash FROM conflicts_mirror)")
+    suspend fun lostForShift(shiftId: String): Int
+
     @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
     fun observeCountForShift(shiftId: String): Flow<Int>
 

@@ -34,6 +34,12 @@ interface StationBackend {
     suspend fun palletBootstrap(): PalletBootstrapDto
     suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto
     suspend fun hubCounts(): HubCounts
+
+    /**
+     * Frees this device's slot of a shift several devices may work (plan 2b). The cloud has no slots, so the default does nothing; the host
+     * answers `POST /v1/device/shifts/{id}/leave`. Throws what the other calls throw (`IOException`, `HttpException`).
+     */
+    suspend fun leave(shiftId: String) = Unit
 }
 
 /** A backend that answers nothing: the base of test doubles and of the host backend before it exists. */

@@ -123,4 +123,17 @@ class ShiftStorageTest {
         boxCapacity = null, palletBoxCapacity = null, palletsEnabled = false, validationPrintMode = "none",
         closePolicyKind = null, closeOwnerDeviceId = null, openedAt = null, listFetchedAt = 1L,
     )
+
+    @Test
+    fun theCodesTheHostGaveToAnotherTerminalAreCountedAsLostOfTheirOwnShiftOnly() = runTest {
+        val codes = db.codeDao()
+        listOf("h1", "h2", "h3").forEach { codes.insert(CodeEntity(it, "s1", "04600682000013", it, "2026-09-10T10:00:00.000Z")) }
+        codes.insert(CodeEntity("h4", "s2", "04600682000013", "h4", "2026-09-10T10:00:00.000Z"))
+        // h1 is lost in s1; h4 in s2; h9 is a conflict this device holds no code for.
+        db.conflictDao().insertIgnore(listOf("h1", "h4", "h9").map { ConflictEntity(it, null, "2026-09-10T09:00:00.000Z", "2026-09-10T10:00:00.000Z") })
+        assertEquals(3, codes.countForShift("s1"))
+        assertEquals(1, codes.lostForShift("s1"))
+        assertEquals(1, codes.lostForShift("s2"))
+        assertEquals(0, codes.lostForShift("s3"))
+    }
 }

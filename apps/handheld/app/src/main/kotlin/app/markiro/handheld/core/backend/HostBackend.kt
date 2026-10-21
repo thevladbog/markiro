@@ -5,6 +5,7 @@ import app.markiro.handheld.core.host.HostBoxRegistry
 import app.markiro.handheld.core.host.HostCalls
 import app.markiro.handheld.core.host.HostOrgPrint
 import app.markiro.handheld.core.host.HostReferenceSync
+import app.markiro.handheld.core.host.ShiftParticipationStore
 import app.markiro.handheld.core.host.toBundle
 import app.markiro.handheld.core.host.toBundleProduct
 import app.markiro.handheld.core.host.toBundleTemplate
@@ -45,6 +46,8 @@ class HostBackend(
     private val operators: OperatorDao,
     private val orgPrint: HostOrgPrint? = null,
     private val registry: HostBoxRegistry? = null,
+    /** Where the host's figures of shared shifts are kept (plan 2b); `null` in the tests of the older flows. */
+    private val participation: ShiftParticipationStore? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : StationBackend by NoBackend {
     private val entries = ConcurrentHashMap<String, DeviceShiftDto>()
@@ -62,13 +65,25 @@ class HostBackend(
         // The office may have assigned (or changed) this device's line since it was paired: the list is of the line the host knows now.
         reference?.refreshDevice()
         val line = config.get()?.lineName
-        return ShiftListResponse(calls.run { api().shifts() }.shifts.map { it.toShiftDto(line) })
+        val listed = calls.run { api().shifts() }.shifts
+        participation?.save(listed)
+        return ShiftListResponse(listed.map { it.toShiftDto(line) })
     }
 
     override suspend fun enter(shiftId: String, body: ShiftEntryRequest): ShiftDto {
         val entered = calls.run { api().enter(shiftId) }
-        entries[shiftId] = entered
+        participation?.save(entered)
+        // A closed part is read back without a bundle to work: nothing to keep for `bundle`.
+        if (entered.myState != "closed") entries[shiftId] = entered
         return entered.toShiftDto(config.get()?.lineName)
+    }
+
+    override suspend fun leave(shiftId: String) {
+        // This device's own token from the last answer that named it; a stale one is ignored by the host (the answer stays `active`).
+        val token = participation?.get(shiftId)?.joinedRev
+        // The host is asked whether or not a store is wired: a refusal reaches the caller either way.
+        val answered = calls.run { api().leave(shiftId, token) }
+        participation?.save(answered)
     }
 
     /** The snapshot of the entry just made (or, for a bundle asked alone, the owner's re-entry, which gives the same snapshot) becomes the bundle the loaders read. */
