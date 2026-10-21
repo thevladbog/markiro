@@ -1,0 +1,30 @@
+---
+import type { FaqEntry } from "../../content/pages";
+
+interface Props {
+  id: string;
+  kicker: string;
+  title: string;
+  entries: readonly FaqEntry[];
+}
+
+const { id, kicker, title, entries } = Astro.props;
+---
+
+<section class="ax-section ax-section--card" id={id} aria-labelledby={`${id}-title`}>
+  <div class="ax-container ax-faq">
+    <div class="ax-faq__intro">
+      <p class="ax-kicker">{kicker}</p>
+      <h2 class="ax-h2 ax-h2--md" id={`${id}-title`}>{title}</h2>
+      <p class="ax-muted"><slot /></p>
+    </div>
+    <div class="ax-faq__list" data-faq>
+      {entries.map((entry) => (
+        <div class="ax-faq__item" data-faq-item>
+          <h3>{entry.question}</h3>
+          <p>{entry.answer}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { DEMO_SOURCE_PATHS } from "../../api/src/modules/demo-requests/demo-request-routes";
+import { LANDING_LEAD_SOURCE_PATHS } from "../../../packages/platform-contracts/src/landing-leads";
 import { findFilmPage } from "../src/content/film";
 import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
@@ -42,6 +43,17 @@ const SAMPLE_CLUSTER_ROUTES = [
   "/instruktsii/stantsiya-vkhod-i-start-smeny/",
 ] as const;
 const FILM_ROUTES = ["/kak-rabotaet/", "/en/how-it-works/"] as const;
+const AUTONOM_ROUTES = ["/skachat/", "/stoimost/"] as const;
+
+/** The English home keeps the cloud-era layout; its section tests live on there. */
+function legacyHome(): Document {
+  return documents.get("/en/") as Document;
+}
+
+/** The Russian demo form now lives on the film page only. */
+function filmRu(): Document {
+  return documents.get("/kak-rabotaet/") as Document;
+}
 
 function isDemoSourcePath(route: string): boolean {
   return DEMO_SOURCE_PATHS.some((sourcePath) => sourcePath === route);
@@ -92,6 +104,7 @@ beforeAll(() => {
     ...HUB_ROUTES,
     ...SAMPLE_CLUSTER_ROUTES,
     ...FILM_ROUTES,
+    ...AUTONOM_ROUTES,
   ]) {
     const outputPath =
       route === "/"
@@ -968,10 +981,13 @@ describe("rendered landing page", () => {
 
   it("keeps localized brand links accessible and prevents wordmark translation", () => {
     const ruDocument = documents.get("/");
+    const ruTopic = documents.get("/sscc-i-agregatsiya/");
     const enDocument = documents.get("/en/");
     const ruBrandLinks = [
-      ruDocument?.querySelector("header .landing-header__brand"),
-      ruDocument?.querySelector("footer .landing-footer__meta > a"),
+      ruDocument?.querySelector("header .ax-header__brand"),
+      ruDocument?.querySelector("footer .ax-footer__top > a"),
+      ruTopic?.querySelector("header .landing-header__brand"),
+      ruTopic?.querySelector("footer .landing-footer__meta > a"),
     ];
     const enBrandLinks = [
       enDocument?.querySelector("header .landing-header__brand"),
@@ -1015,7 +1031,7 @@ describe("rendered landing page", () => {
 
   it("links the localized footer to the Station product page instead of the binary", () => {
     const ruLink = documents
-      .get("/")
+      .get("/sscc-i-agregatsiya/")
       ?.querySelector<HTMLAnchorElement>('footer a[href="/rabochee-mesto-upakovki/"]');
     const enLink = documents
       .get("/en/")
@@ -1026,12 +1042,13 @@ describe("rendered landing page", () => {
   });
 
   it("links the shared header navigation on every page", () => {
+    // Russian pages share the standalone navigation of the HN mockup; English keeps its own.
     const ru = [
-      ["/#product", "Продукт"],
       ["/kak-rabotaet/", "Как работает"],
+      ["/stoimost/", "Цены"],
+      ["/skachat/", "Скачать"],
       ["/instruktsii/", "Инструкции"],
-      ["/stati/", "Статьи"],
-      ["/faq/", "Вопросы"],
+      ["/#voprosy", "Вопросы"],
     ];
     const en = [
       ["/en/#product", "Product"],
@@ -1042,6 +1059,8 @@ describe("rendered landing page", () => {
     ];
     for (const [route, expected] of [
       ["/", ru],
+      ["/skachat/", ru],
+      ["/stoimost/", ru],
       ["/sscc-i-agregatsiya/", ru],
       ["/en/", en],
       ["/en/sscc-and-aggregation/", en],
@@ -1049,7 +1068,9 @@ describe("rendered landing page", () => {
       const links = [
         ...(documents
           .get(route)
-          ?.querySelectorAll("header .landing-nav > a:not(.landing-nav__phone)") ?? []),
+          ?.querySelectorAll(
+            "header .landing-nav > a:not(.landing-nav__phone), header .ax-nav > a",
+          ) ?? []),
       ].map((link) => [link.getAttribute("href"), link.textContent?.trim()]);
       expect(links, route).toEqual(expected);
     }
@@ -1064,10 +1085,12 @@ describe("rendered landing page", () => {
         }),
       );
 
-    expect(columns("/")).toEqual([
+    expect(columns("/sscc-i-agregatsiya/")).toEqual([
       {
         heading: "Продукт",
         links: [
+          "/skachat/",
+          "/stoimost/",
           "/markirovka-chestny-znak/",
           "/sscc-i-agregatsiya/",
           "/rabochee-mesto-upakovki/",
@@ -1098,8 +1121,16 @@ describe("rendered landing page", () => {
       { heading: "Company", links: ["/en/legal/", "/en/privacy/", "/en/personal-data-consent/"] },
     ]);
     expect(
-      documents.get("/")?.querySelector("footer [data-footer-column] [data-consent-settings]"),
+      documents
+        .get("/sscc-i-agregatsiya/")
+        ?.querySelector("footer [data-footer-column] [data-consent-settings]"),
     ).not.toBeNull();
+    for (const route of ["/", "/skachat/", "/stoimost/"]) {
+      expect(
+        documents.get(route)?.querySelector("footer [data-consent-settings]"),
+        route,
+      ).not.toBeNull();
+    }
   });
 
   it("keeps topic pages on the dark theme", () => {
@@ -1159,7 +1190,14 @@ describe("rendered landing page", () => {
     expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(document.querySelector("nav[aria-label]")).not.toBeNull();
     expect(document.querySelector("main#main")).not.toBeNull();
+    for (const sectionId of ["bez-oblaka", "produkt", "start", "tseny", "kto", "voprosy", "demo"]) {
+      expect(
+        document.querySelector(`section#${sectionId}[aria-labelledby]`),
+        sectionId,
+      ).not.toBeNull();
+    }
 
+    // The English home keeps the cloud-era layout until its own redesign.
     for (const sectionId of [
       "hero",
       "product",
@@ -1171,15 +1209,12 @@ describe("rendered landing page", () => {
       "materials",
       "demo",
     ]) {
-      expect(document.querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
+      expect(legacyHome().querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
     }
   });
 
   it("links the office row to the admin panel group of the instructions hub", () => {
-    for (const [route, hub, prefix] of [
-      ["/", "/instruktsii/", "Кабинет:"],
-      ["/en/", "/en/instructions/", "Cabinet:"],
-    ] as const) {
+    for (const [route, hub, prefix] of [["/en/", "/en/instructions/", "Cabinet:"]] as const) {
       const href =
         documents.get(route)?.querySelector("#product-office a.text-link")?.getAttribute("href") ??
         "";
@@ -1209,16 +1244,6 @@ describe("rendered landing page", () => {
 
   it("shows every product part on a framed screen and links it to its page", () => {
     for (const [route, links] of [
-      [
-        "/",
-        [
-          "/markirovka-chestny-znak/",
-          "/kak-rabotaet/#warehouse",
-          "/instruktsii/#hub-group-cabinet",
-          "/kiosk-samovydachi/",
-          "/integratsiya-1c/",
-        ],
-      ],
       [
         "/en/",
         [
@@ -1268,10 +1293,7 @@ describe("rendered landing page", () => {
   });
 
   it("renders the offline, traceability and film sections", () => {
-    for (const [route, filmPath] of [
-      ["/", "/kak-rabotaet/"],
-      ["/en/", "/en/how-it-works/"],
-    ] as const) {
+    for (const [route, filmPath] of [["/en/", "/en/how-it-works/"]] as const) {
       const page = documents.get(route);
       const offline = page?.querySelector("section#offline");
       expect(offline?.getAttribute("data-theme"), route).toBe("dark");
@@ -1306,7 +1328,6 @@ describe("rendered landing page", () => {
 
   it("states one product-group boundary: running on beer and cider, other groups checked before launch", () => {
     for (const [route, groups, check] of [
-      ["/", "любой маркируемой продукции", "Особенности вашей товарной группы сверяем до запуска"],
       ["/en/", "any marked goods", "We check the rules of your product group before launch"],
     ] as const) {
       const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
@@ -1410,8 +1431,8 @@ describe("rendered landing page", () => {
     for (const [route, lead, link, retired] of [
       [
         "/",
-        "Инструкции для станции и кабинета, политика обработки персональных данных и поручение на обработку опубликованы на сайте.",
-        "Юридические документы",
+        "Открыты до покупки: можно прочитать, как устроена работа на линии, ещё до установки.",
+        "Документы и реквизиты",
         "договор и регламенты опубликованы",
       ],
       [
@@ -1434,7 +1455,6 @@ describe("rendered landing page", () => {
 
   it("renders the rollout, documents, articles and demo sections", () => {
     for (const [route, instructionsPath, legalPath, articlesHeading] of [
-      ["/", "/instruktsii/", "/legal/", "Разборы задач с линии."],
       ["/en/", "/en/instructions/", "/en/legal/", "Field notes from the line."],
     ] as const) {
       const page = documents.get(route);
@@ -1452,7 +1472,7 @@ describe("rendered landing page", () => {
   });
 
   it("numbers the home sections in page order", () => {
-    for (const route of ["/", "/en/"] as const) {
+    for (const route of ["/en/"] as const) {
       const kickers = [
         ...(documents.get(route)?.querySelectorAll("main section:not(#hero) .section-index") ?? []),
       ].map((kicker) => kicker.textContent?.trim().slice(0, 2));
@@ -1461,7 +1481,7 @@ describe("rendered landing page", () => {
   });
 
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
-    const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
+    const form = filmRu().querySelector<HTMLFormElement>("form[data-demo-form]");
     expect(form).not.toBeNull();
 
     for (const fieldId of ["name", "company", "email", "phone"]) {
@@ -1477,6 +1497,7 @@ describe("rendered landing page", () => {
   });
 
   it("keeps captcha, consent, and public submission data out of disabled builds", () => {
+    const document = filmRu();
     const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
     const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
     expect(form?.hasAttribute("data-endpoint")).toBe(false);
@@ -1507,7 +1528,7 @@ describe("rendered landing page", () => {
 
   it("renders enabled consent, honeypot, captcha, and localized source contracts", () => {
     for (const [route, expectedLocale] of [
-      ["/", "ru"],
+      ["/kak-rabotaet/", "ru"],
       ["/en/", "en"],
     ] as const) {
       const enabledDocument = enabledDocuments.get(route) as Document;
@@ -1574,16 +1595,16 @@ describe("rendered landing page", () => {
         return [route];
       });
 
-    expect(formRoutes).toEqual(expect.arrayContaining(["/", "/en/", ...FILM_ROUTES]));
+    expect(formRoutes).toEqual(expect.arrayContaining(["/en/", ...FILM_ROUTES]));
     expect(formRoutes.filter((route) => !isDemoSourcePath(route))).toEqual([]);
   });
 
   it("does not mention CRM or internal rollout dependencies in disabled builds", () => {
-    for (const route of ["/", "/en/"] as const) {
+    for (const route of ["/kak-rabotaet/", "/en/"] as const) {
       const body = documents.get(route)?.body.textContent ?? "";
       expect(body).not.toMatch(/CRM|подключени[ея] CRM|connection to the CRM/i);
       expect(body).toContain(
-        route === "/"
+        route === "/kak-rabotaet/"
           ? "Онлайн-отправка временно недоступна. Напишите нам на hello@markiro.app."
           : "Online submission is temporarily unavailable. Email us at hello@markiro.app.",
       );
@@ -1645,7 +1666,6 @@ describe("rendered landing page", () => {
     ];
     const points = projectHomeMap();
     for (const [route, heading, alt, labels] of [
-      ["/", "Линия идёт.", "Макет завода", ["Линия", "Упаковка", "Склад", "Киоск", "Офис"]],
       [
         "/en/",
         "Keep the line moving.",
@@ -1690,7 +1710,7 @@ describe("rendered landing page", () => {
   });
 
   it("keeps card links short so the anchor text is the title alone", () => {
-    const cards = [...document.querySelectorAll("#materials [data-materials-card]")];
+    const cards = [...legacyHome().querySelectorAll("#materials [data-materials-card]")];
     expect(cards).toHaveLength(3);
     for (const card of cards) {
       const link = card.querySelector("a[href]");
@@ -1710,14 +1730,14 @@ describe("rendered landing page", () => {
   });
 
   it("gives the above-the-fold factory image stable dimensions", () => {
-    const heroImage = document.querySelector<HTMLImageElement>("[data-hero-image]");
+    const heroImage = legacyHome().querySelector<HTMLImageElement>("[data-hero-image]");
     expect(Number(heroImage?.getAttribute("width"))).toBeGreaterThan(0);
     expect(Number(heroImage?.getAttribute("height"))).toBeGreaterThan(0);
     expect(heroImage?.getAttribute("fetchpriority")).toBe("high");
   });
 
   it("gives every home image alt text and loads only the map eagerly", () => {
-    for (const route of ["/", "/en/"] as const) {
+    for (const route of ["/en/"] as const) {
       const images = [...(documents.get(route)?.querySelectorAll("main img") ?? [])];
       expect(images.length, route).toBeGreaterThan(15);
       expect(
@@ -1758,12 +1778,17 @@ describe("rendered landing page", () => {
       expect(
         routeDocument.querySelector('meta[property="og:locale"]')?.getAttribute("content"),
       ).toBe(expectedLocale === "ru" ? "ru_RU" : "en_US");
+      // /skachat/ and /stoimost/ are Russian only (spec 2026-10-20, open question О7).
+      const hasAlternate = !(AUTONOM_ROUTES as readonly string[]).includes(route);
       expect(
-        routeDocument.querySelector(`link[rel="alternate"][hreflang="${alternateLocale}"]`),
-      ).not.toBeNull();
+        routeDocument.querySelector(`link[rel="alternate"][hreflang="${alternateLocale}"]`) !==
+          null,
+        route,
+      ).toBe(hasAlternate);
       expect(
-        routeDocument.querySelector('link[rel="alternate"][hreflang="x-default"]'),
-      ).not.toBeNull();
+        routeDocument.querySelector('link[rel="alternate"][hreflang="x-default"]') !== null,
+        route,
+      ).toBe(hasAlternate);
       expect(routeDocument.querySelector('meta[property="og:image:alt"]')).not.toBeNull();
       expect(routeDocument.querySelector('meta[name="twitter:title"]')).not.toBeNull();
       expect(routeDocument.querySelector('meta[name="twitter:description"]')).not.toBeNull();
@@ -1816,20 +1841,21 @@ describe("rendered landing page", () => {
   });
 
   it("links the cluster from the header, footer and a home materials section", () => {
-    expect(document.querySelector("section#materials[aria-labelledby]")).not.toBeNull();
-    const materialLinks = [...document.querySelectorAll("#materials a[href]")].map((a) =>
-      a.getAttribute("href"),
-    );
-    expect(
-      materialLinks.filter((href) => href?.startsWith("/stati/") && href !== "/stati/"),
-    ).toHaveLength(3);
-    expect(materialLinks).toContain("/stati/");
-    expect(document.querySelector('#documents a[href="/instruktsii/"]')).not.toBeNull();
-    expect(document.querySelector('header nav a[href="/stati/"]')).not.toBeNull();
+    // The standalone home links instructions from its header and documents block and
+    // articles from the footer; the English home keeps its materials section.
+    expect(document.querySelector('#kto a[href="/instruktsii/"]')).not.toBeNull();
+    expect(document.querySelector('header nav a[href="/instruktsii/"]')).not.toBeNull();
     expect(document.querySelector('footer nav a[href="/stati/"]')).not.toBeNull();
     expect(document.querySelector('footer nav a[href="/instruktsii/"]')).not.toBeNull();
 
     const english = documents.get("/en/") as Document;
+    expect(english.querySelector("section#materials[aria-labelledby]")).not.toBeNull();
+    const materialLinks = [...english.querySelectorAll("#materials a[href]")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(
+      materialLinks.filter((href) => href?.startsWith("/en/articles/") && href !== "/en/articles/"),
+    ).toHaveLength(3);
     expect(english.querySelector('header nav a[href="/en/articles/"]')).not.toBeNull();
     expect(english.querySelector('footer nav a[href="/en/instructions/"]')).not.toBeNull();
   });
@@ -1908,7 +1934,9 @@ describe("rendered landing page", () => {
         graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList"),
         route,
       ).toBe(showsBreadcrumbs);
-      expect(showsBreadcrumbs, route).toBe(!["/", "/en/", ...FILM_ROUTES].includes(route));
+      expect(showsBreadcrumbs, route).toBe(
+        !["/", "/en/", ...FILM_ROUTES, ...AUTONOM_ROUTES].includes(route),
+      );
     }
   });
 
@@ -1916,7 +1944,7 @@ describe("rendered landing page", () => {
     let pagesWithFaq = 0;
     for (const [route, routeDocument] of documents) {
       const visible = [...routeDocument.querySelectorAll("[data-faq-item]")].map((item) => ({
-        name: item.querySelector("h2")?.textContent?.trim(),
+        name: item.querySelector("h2, h3")?.textContent?.trim(),
         text: item.querySelector("p")?.textContent?.trim(),
       }));
       const graph = JSON.parse(
@@ -2159,22 +2187,28 @@ describe("rendered film page", () => {
     ).toHaveLength(14);
   });
 
-  it.each([
-    ["/", "/kak-rabotaet/", "Посмотреть, как это работает"],
-    ["/en/", "/en/how-it-works/", "See how it works"],
-  ] as const)("%s links its hero to the film", (route, href, label) => {
-    const home = documents.get(route) as Document;
-    const link = home.querySelector<HTMLAnchorElement>(`#hero a[href="${href}"]`);
-    expect(link?.textContent?.replace(/\s+/g, " ").trim()).toBe(`${label} →`);
-  });
+  it.each([["/en/", "/en/how-it-works/", "See how it works"]] as const)(
+    "%s links its hero to the film",
+    (route, href, label) => {
+      const home = documents.get(route) as Document;
+      const link = home.querySelector<HTMLAnchorElement>(`#hero a[href="${href}"]`);
+      expect(link?.textContent?.replace(/\s+/g, " ").trim()).toBe(`${label} →`);
+    },
+  );
 
   it("keeps the header demo button on the film page instead of sending visitors home", () => {
-    for (const route of FILM_ROUTES) {
-      const film = documents.get(route) as Document;
-      expect(film.querySelector(".landing-header__cta")?.getAttribute("href")).toBe("#demo");
-    }
-    expect(documents.get("/")?.querySelector(".landing-header__cta")?.getAttribute("href")).toBe(
-      "/#demo",
+    // Russian pages lead to the installer; the English film keeps its own demo form.
+    expect(
+      documents
+        .get("/en/how-it-works/")
+        ?.querySelector(".landing-header__cta")
+        ?.getAttribute("href"),
+    ).toBe("#demo");
+    expect(
+      documents.get("/kak-rabotaet/")?.querySelector(".landing-header__cta")?.getAttribute("href"),
+    ).toBe("/skachat/");
+    expect(documents.get("/")?.querySelector(".ax-header__cta")?.getAttribute("href")).toBe(
+      "/skachat/",
     );
     expect(documents.get("/en/")?.querySelector(".landing-header__cta")?.getAttribute("href")).toBe(
       "/en/#demo",
@@ -2191,5 +2225,213 @@ describe("rendered film page", () => {
       }
       expect(film.querySelector('.film-hero__hint span[aria-hidden="true"]')).not.toBeNull();
     }
+  });
+});
+
+describe("standalone pages: home, /skachat/, /stoimost/", () => {
+  function jsonLd(route: string): Array<Record<string, unknown>> {
+    const script = documents.get(route)?.querySelector('script[type="application/ld+json"]');
+    return (
+      JSON.parse(script?.textContent ?? "{}") as { "@graph": Array<Record<string, unknown>> }
+    )["@graph"];
+  }
+
+  it("lets the visitor pick the theme and applies it before the first paint", () => {
+    for (const route of ["/", ...AUTONOM_ROUTES]) {
+      const page = documents.get(route) as Document;
+      expect(page.documentElement.getAttribute("data-theme"), route).toBe("light");
+      expect(page.documentElement.getAttribute("data-theme-choice"), route).toBe("system");
+      const init = page.querySelector('head script[src="/theme-init.js"]');
+      expect(init, route).not.toBeNull();
+      expect(init?.hasAttribute("type"), route).toBe(false);
+      expect(
+        [...page.querySelectorAll("[data-theme-option]")].map((option) =>
+          option.getAttribute("data-theme-option"),
+        ),
+        route,
+      ).toEqual(["system", "light", "dark", "system", "light", "dark"]);
+    }
+    expect(existsSync(path.join(outputDirectory, "theme-init.js"))).toBe(true);
+    // Topic pages keep their fixed theme and load no switch.
+    const topic = documents.get("/sscc-i-agregatsiya/") as Document;
+    expect(topic.querySelector('script[src="/theme-init.js"]')).toBeNull();
+  });
+
+  it("leads every download button to /skachat/ and every invoice link to the form", () => {
+    const home = documents.get("/") as Document;
+    const downloads = [
+      ...home.querySelectorAll<HTMLAnchorElement>('a[data-analytics="landing_download_click"]'),
+    ];
+    expect(downloads.length).toBeGreaterThanOrEqual(5);
+    for (const link of downloads) expect(link.getAttribute("href")).toBe("/skachat/");
+    expect(
+      [...home.querySelectorAll("a[data-invoice-tariff]")].map((link) => link.getAttribute("href")),
+    ).toEqual([
+      "/stoimost/?tarif=line#schet",
+      "/stoimost/?tarif=workshop#schet",
+      "/stoimost/?tarif=start#schet",
+    ]);
+    expect(home.querySelector('.ax-hero a[href="/stoimost/"]')?.textContent?.trim()).toBe(
+      "Цены от 60 000 ₽ в год",
+    );
+    expect(
+      documents.get("/stoimost/")?.querySelector("section#schet form[data-lead-form]"),
+    ).not.toBeNull();
+  });
+
+  it("shows the published prices on the home page and /stoimost/", () => {
+    for (const route of ["/", "/stoimost/"]) {
+      const page = documents.get(route) as Document;
+      const plans = [...page.querySelectorAll<HTMLElement>("[data-tariff]")].map((plan) => [
+        plan.dataset.tariff,
+        plan.querySelector(".ax-plan__amount, .ax-plan__price--words span")?.textContent?.trim(),
+      ]);
+      expect(plans, route).toEqual([
+        ["line", "120 000"],
+        ["workshop", "240 000"],
+        ["plant", "По запросу"],
+        ["start", "60 000"],
+      ]);
+      expect(page.querySelector('[data-tariff="line"]')?.getAttribute("data-theme"), route).toBe(
+        "dark",
+      );
+    }
+  });
+
+  it("describes /stoimost/ prices as a Product with yearly offers in roubles", () => {
+    const product = jsonLd("/stoimost/").find((entry) => entry["@type"] === "Product") as
+      | {
+          name: string;
+          offers: { lowPrice: number; highPrice: number; offers: Array<Record<string, unknown>> };
+        }
+      | undefined;
+    expect(product?.name).toBe("Маркиро Автоном");
+    expect(product?.offers).toMatchObject({ lowPrice: 60_000, highPrice: 240_000 });
+    expect(
+      product?.offers.offers.map((offer) => [offer.name, offer.price, offer.priceCurrency]),
+    ).toEqual([
+      ["«Старт»", 60_000, "RUB"],
+      ["«Линия»", 120_000, "RUB"],
+      ["«Цех»", 240_000, "RUB"],
+    ]);
+    const visible = documents.get("/stoimost/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
+    for (const price of ["60 000", "120 000", "240 000"]) expect(visible).toContain(price);
+    expect(jsonLd("/skachat/").some((entry) => entry["@type"] === "Product")).toBe(false);
+  });
+
+  it("renders the download form with the spec 15.3 contract only in enabled builds", () => {
+    const disabled = documents
+      .get("/skachat/")
+      ?.querySelector<HTMLFormElement>("form[data-lead-form]");
+    expect(disabled?.dataset.intent).toBe("download");
+    expect(disabled?.hasAttribute("data-endpoint")).toBe(false);
+    expect(
+      disabled?.querySelector<HTMLFieldSetElement>("fieldset[data-lead-fields]")?.disabled,
+    ).toBe(true);
+    expect(disabled?.querySelector('input[name="consent"]')).toBeNull();
+    expect(disabled?.querySelector(".smart-captcha")).toBeNull();
+    expect(documents.get("/skachat/")?.documentElement.outerHTML).not.toContain(
+      "ysc1_stray-client-key",
+    );
+
+    const form = enabledDocuments
+      .get("/skachat/")
+      ?.querySelector<HTMLFormElement>("form[data-lead-form]");
+    expect(form?.dataset.endpoint).toBe("/api/landing-leads");
+    expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.08/01");
+    expect(
+      [...(form?.querySelectorAll("input[name], select[name]") ?? [])].map((input) =>
+        input.getAttribute("name"),
+      ),
+    ).toEqual(["email", "company", "website", "consent"]);
+    expect(form?.querySelector('input[name="email"]')?.getAttribute("autocomplete")).toBe("email");
+    expect(
+      form?.querySelector('.ax-honeypot input[name="website"]')?.getAttribute("tabindex"),
+    ).toBe("-1");
+    expect(form?.querySelector(".smart-captcha")?.getAttribute("data-sitekey")).toBe(
+      "ysc1_render-test-key",
+    );
+    expect(form?.querySelector('a[href="/personal-data-consent/"]')).not.toBeNull();
+    expect(form?.querySelector('a[href="/privacy/"]')).not.toBeNull();
+    expect(
+      enabledDocuments
+        .get("/skachat/")
+        ?.querySelector('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
+    ).toBeNull();
+  });
+
+  it("renders the invoice form with INN, tariff and address", () => {
+    const form = enabledDocuments
+      .get("/stoimost/")
+      ?.querySelector<HTMLFormElement>("form[data-lead-form]");
+    expect(form?.dataset.intent).toBe("invoice");
+    expect(form?.dataset.endpoint).toBe("/api/landing-leads");
+    expect(
+      [...(form?.querySelectorAll("input[name], select[name]") ?? [])].map((input) =>
+        input.getAttribute("name"),
+      ),
+    ).toEqual(["inn", "tariffCode", "email", "website", "consent"]);
+    const options = [
+      ...(form?.querySelectorAll<HTMLOptionElement>('select[name="tariffCode"] option') ?? []),
+    ];
+    expect(options.map((option) => option.value)).toEqual(["start", "line", "workshop"]);
+    expect(options.find((option) => option.selected)?.value).toBe("line");
+    expect(form?.querySelector('input[name="inn"]')?.getAttribute("inputmode")).toBe("numeric");
+  });
+
+  // Every page with a lead form posts its own `location.pathname` as `sourcePath`;
+  // the API accepts only the paths of LANDING_LEAD_SOURCE_PATHS (spec 15.3).
+  it("renders lead forms only on pages whose path the lead API accepts", () => {
+    const formRoutes = readdirSync(enabledOutputDirectory, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".html"))
+      .map((entry) => path.join(entry.parentPath, entry.name))
+      .flatMap((file) => {
+        if (!readFileSync(file, "utf8").includes("data-lead-form")) return [];
+        const relative = path.relative(enabledOutputDirectory, file).split(path.sep).join("/");
+        return [relative === "index.html" ? "/" : `/${relative.replace(/index\.html$/, "")}`];
+      });
+    expect(formRoutes.sort()).toEqual(["/skachat/", "/stoimost/"]);
+    expect(
+      formRoutes.filter(
+        (route) => !(LANDING_LEAD_SOURCE_PATHS as readonly string[]).includes(route),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the download result hidden until the form is accepted", () => {
+    const page = documents.get("/skachat/") as Document;
+    expect(page.querySelector("[data-download-start]")?.hasAttribute("hidden")).toBe(false);
+    expect(page.querySelector("[data-download-ready]")?.hasAttribute("hidden")).toBe(true);
+    for (const section of page.querySelectorAll("[data-download-after]")) {
+      expect(section.hasAttribute("hidden")).toBe(true);
+    }
+    expect(page.querySelector("[data-pending-only]")?.textContent).toContain("Версия готовится");
+    expect(page.querySelector("[data-release-link]")).not.toBeNull();
+    expect(page.body.textContent).toContain("Get-FileHash");
+  });
+
+  it("loads only the hero screen eagerly and gives every image alt text", () => {
+    const images = [...(documents.get("/")?.querySelectorAll("main img") ?? [])];
+    expect(images.length).toBeGreaterThan(10);
+    const eager = images.filter((image) => image.getAttribute("loading") === "eager");
+    expect(eager).toHaveLength(1);
+    expect(eager[0]?.getAttribute("fetchpriority")).toBe("high");
+    expect(Number(eager[0]?.getAttribute("width"))).toBeGreaterThan(0);
+    for (const image of images) expect(image.hasAttribute("alt")).toBe(true);
+    const clients = documents.get("/")?.querySelector(".ax-clients")?.textContent ?? "";
+    expect(clients).toContain("Rebel Apple");
+    expect(clients).toContain("Михайловский перевал");
+  });
+
+  it("lists the new pages in the sitemap and llms.txt", () => {
+    const sitemap = readFileSync(path.join(outputDirectory, "sitemap.xml"), "utf8");
+    for (const route of AUTONOM_ROUTES) {
+      expect(sitemap).toContain(`<loc>https://markiro.app${route}</loc>`);
+    }
+    const llms = readFileSync(path.join(outputDirectory, "llms.txt"), "utf8");
+    expect(llms).toContain("https://markiro.app/skachat/");
+    expect(llms).toContain(
+      "«Старт» 60 000 ₽, «Линия» 120 000 ₽, «Цех» 240 000 ₽, «Завод» по запросу",
+    );
   });
 });

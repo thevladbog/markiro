@@ -97,6 +97,30 @@ describe(".env.example", () => {
     expect(blankLeads.LEAD_RETENTION_MONTHS).toBe(12);
   });
 
+  it("ships standalone release storage unset and its production placeholders bootable", () => {
+    const env = loadEnv(EXAMPLE_ENV);
+    expect(env.RELEASES_S3_BUCKET).toBeUndefined();
+    expect(env.RELEASES_PUBLIC_ORIGIN).toBe("https://releases.markiro.app");
+    const production = parseExampleEnv(
+      readFileSync(join(__dirname, "../../../.env.production.example"), "utf8"),
+    );
+    const keys = [
+      "RELEASES_S3_ENDPOINT",
+      "RELEASES_S3_REGION",
+      "RELEASES_S3_BUCKET",
+      "RELEASES_S3_ACCESS_KEY_ID",
+      "RELEASES_S3_SECRET_ACCESS_KEY",
+      "RELEASES_PUBLIC_ORIGIN",
+    ];
+    for (const key of keys) expect(production[key], key).toBe("");
+    const blank = loadEnv({
+      ...EXAMPLE_ENV,
+      ...Object.fromEntries(keys.map((key) => [key, production[key]])),
+    });
+    expect(blank.RELEASES_S3_ENDPOINT).toBeUndefined();
+    expect(blank.RELEASES_PUBLIC_ORIGIN).toBe("https://releases.markiro.app");
+  });
+
   it("boots the API exactly as `cp .env.example .env` leaves it", () => {
     expect(() => loadEnv(EXAMPLE_ENV)).not.toThrow();
   });

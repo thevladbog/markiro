@@ -79,12 +79,15 @@ export function StandaloneAssignmentsSummary({
   isError,
   previewed,
   changed,
+  demo = false,
 }: {
   tenantId: string;
   detail: TenantDetail | undefined;
   isError: boolean;
   previewed: StandaloneAssignmentRef[] | null;
   changed: boolean;
+  /** A demo needs no tariff: without one it extends the trial (spec 2026-10-20 §4.2). */
+  demo?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const formatDate = useStandaloneDate();
@@ -164,7 +167,10 @@ export function StandaloneAssignmentsSummary({
           {t("tenants.detail.standalone.assignments.changed")}
         </Alert>
       ) : null}
-      {!previewedRows && detail && rows.length === 0 ? (
+      {!previewedRows && detail && rows.length === 0 && demo ? (
+        <Alert tone="info">{t("tenants.detail.standalone.issue.demoNoTariff")}</Alert>
+      ) : null}
+      {!previewedRows && detail && rows.length === 0 && !demo ? (
         <>
           <Alert tone="warn" role="alert">
             {t("tenants.detail.standalone.assignments.empty")}

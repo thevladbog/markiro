@@ -38,6 +38,7 @@ export const platformCapabilitySchema = z.enum([
   "reports.identified",
   "leads.read",
   "leads.write",
+  "standaloneReleases.manage",
 ]);
 export type PlatformCapability = z.infer<typeof platformCapabilitySchema>;
 
@@ -64,6 +65,7 @@ export const platformCapabilitiesForRole = {
     "reports.identified",
     "leads.read",
     "leads.write",
+    "standaloneReleases.manage",
   ],
   support: [
     "tenants.read",

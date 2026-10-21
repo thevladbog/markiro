@@ -1190,6 +1190,7 @@
     "sessionConfirmed": "2FA · session secured",
     "agreements": "Agreements",
     "leads": "Leads",
+    "standaloneReleases": "Standalone releases",
     "leadsNew_one": "{{count}} new",
     "leadsNew_other": "{{count}} new"
   },
@@ -1952,7 +1953,8 @@
         "source": {
           "subscription": "subscription",
           "offline": "offline terms",
-          "offline_assignments": "tenant assignments"
+          "offline_assignments": "tenant assignments",
+          "offline_demo": "demo for a tenant without a cabinet"
         },
         "scrollLabel": "Standalone sites",
         "noValue": "—",
@@ -1961,7 +1963,8 @@
           "host": "Host",
           "inn": "Request INN",
           "license": "License",
-          "actions": "Actions"
+          "actions": "Actions",
+          "lead": "Lead"
         },
         "licenseLine": "No. {{sequence}} · until {{validUntil}}",
         "phase": {
@@ -2059,11 +2062,23 @@
             "subscription_end": "subscription end",
             "entitlement_reduction": "next reduction of rights",
             "one_year_cap": "one-year cap",
-            "offline_term": "offline terms' term"
+            "offline_term": "offline terms' term",
+            "demo_term": "demo term"
           },
           "yearCapNote": "The file is valid for at most a year from issuance (a subscription or an assignment without an end date, or a longer one). When it lapses, the tenant requests a new file from us free of charge.",
           "issued": "File No. {{sequence}} issued and downloaded.",
-          "openLabel": "Issue offline license: {{name}}"
+          "openLabel": "Issue offline license: {{name}}",
+          "kind": {
+            "label": "File kind",
+            "subscription": "From the tenant's assignments",
+            "demo": "Demo — a trial extension or a bridge while an invoice is paid"
+          },
+          "demoTerm": "Demo term, days",
+          "demoTermHint": "1 to 45 days from issuance. A demo has no grace period.",
+          "demoTermInvalid": "A whole number from 1 to 45.",
+          "demoNoTariff": "No tariff assigned — the demo extends the trial: every feature, no quotas.",
+          "demoBridge": "Bridge while the invoice is paid: the assigned tariff's rights, no grace period.",
+          "demoExtension": "Trial extension: every feature without quotas, no grace period."
         },
         "warnings": {
           "request_inn_missing": "The request has no organization INN.",
@@ -2094,7 +2109,9 @@
           "generic": "The operation failed. Retry.",
           "standalone_assignment_limit_reached": "The tenant has more assignments than a license can name (65). Retire an add-on and preview again.",
           "standalone_license_assignments_required": "There is no current plan assignment. Change the tenant's rights.",
-          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page."
+          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page.",
+          "standalone_license_demo_term_invalid": "The demo term is a whole number of days from 1 to 45.",
+          "standalone_license_demo_offline_only": "A demo file is issued only to a tenant without a cabinet. Reload the page."
         },
         "assignmentsTenant": "A tenant without a cabinet: the license is issued from its assignments — the plan and add-ons on the tenant card. No cloud access is opened.",
         "assignments": {
@@ -2110,6 +2127,12 @@
           "change": "Change the tenant's rights",
           "empty": "The tenant has no current plan. Assign a plan flagged «Available to offline customers».",
           "loadError": "Could not load the tenant's assignments."
+        },
+        "lead": {
+          "linked": "Website lead",
+          "unresolved": "Leads with this INN: {{count}} — not linked, choose one manually",
+          "unresolvedLink": "Open the leads with INN {{inn}}",
+          "none": "No lead has this INN"
         }
       },
       "diagnostics": {
@@ -3240,7 +3263,10 @@
       "tenantLinked": "Linked to a tenant.",
       "openTenant": "Open tenant",
       "previousTenant": "Previous tenant: {{id}}",
-      "anonymizedReason": "Reason: {{reason}}"
+      "anonymizedReason": "Reason: {{reason}}",
+      "viaActivation": "Automatically, by a site activation request.",
+      "activationCreate": "A site was registered from an activation request.",
+      "activationRebind": "A new host was bound to the site from an activation request."
     },
     "anonymize": {
       "title": "Anonymization",
@@ -3269,6 +3295,129 @@
       "link_failed": "Could not link the lead to the tenant.",
       "create_tenant_failed": "Could not create the tenant. Check the name and slug.",
       "anonymize_failed": "Could not anonymize the lead."
+    }
+  },
+  "standaloneReleases": {
+    "title": "Standalone releases",
+    "description": "Signed «Markiro Standalone» packages in the public bucket and each channel's latest.json pointer. The panel signs nothing: a package is signed offline with the release key, and the API re-checks the signature, SHA-256 and size.",
+    "forbidden": "Only a platform administrator can open this section.",
+    "loading": "Loading releases",
+    "publicOrigin": "Files are served from {{origin}}.",
+    "unconfigured": {
+      "title": "Release storage is not configured",
+      "hint": "The owner sets the RELEASES_S3_* variables on the API server: the bucket, access keys and public address. Until then releases cannot be uploaded or published."
+    },
+    "channel": {
+      "stable": "Stable",
+      "beta": "Beta"
+    },
+    "channelTitle": {
+      "stable": "Stable channel",
+      "beta": "Beta channel"
+    },
+    "list": {
+      "latest": "Latest: {{version}}",
+      "noLatest": "No latest version published",
+      "latestUnreadable": "The channel's latest.json cannot be read: the site and standalone hosts may not find the latest version. Make the right version latest to rewrite the pointer.",
+      "latestBadge": "Latest",
+      "empty": "No versions yet",
+      "tableRegion": "Versions of the {{channel}} channel",
+      "version": "Version",
+      "releasedAt": "Released",
+      "registeredAt": "Registered",
+      "size": "Installer",
+      "megabytes": "{{value}} MB",
+      "sha256": "Installer SHA-256",
+      "copy": "Copy",
+      "copyShaFor": "Copy SHA-256 of version {{version}}",
+      "kid": "Key",
+      "notes": "What's new",
+      "files": "Files",
+      "installerLink": "Installer",
+      "manifestLink": "Manifest",
+      "action": "Pointer"
+    },
+    "pending": {
+      "title": "Unfinished uploads",
+      "hint": "These versions have files in the bucket but are not registered, for example because the tab was closed before verification. Verification checks the signature and the installer; on refusal the files are removed.",
+      "register": "Verify and register"
+    },
+    "pointer": {
+      "promote": "Make latest",
+      "rollback": "Roll back to this version",
+      "rollbackConfirm": "Roll back",
+      "cancel": "Cancel",
+      "promoteTitle": "Make {{version}} the latest?",
+      "rollbackTitle": "Roll the channel back to {{version}}?",
+      "promoteDescription": "The site will serve version {{version}} instead of {{previous}}, and standalone hosts on the {{channel}} channel will see it as an update. The version's files are re-checked before the pointer moves.",
+      "promoteDescriptionFirst": "The site will serve version {{version}}, and standalone hosts on the {{channel}} channel will see it as an update. The version's files are re-checked before the pointer moves.",
+      "rollbackDescription": "The site will serve version {{version}} instead of {{previous}} on the {{channel}} channel. Version files are never deleted, so the pointer can be moved back at any time.",
+      "done": "The latest version of the {{channel}} channel is {{version}}."
+    },
+    "upload": {
+      "title": "Upload a release",
+      "hint": "Choose the signed .update.jws manifest and the .exe installer of the same version. The channel and version come from the manifest. The installer goes straight to the bucket, not through the API; the API then checks the signature, SHA-256 and size and only then registers the version.",
+      "drop": "Drop the manifest and the installer, or click",
+      "dropHint": "markiro-standalone-<version>.update.jws and markiro-standalone-<version>-windows-x86_64-setup.exe",
+      "dropLabel": "Choose release files",
+      "wrongFile": "“{{name}}” does not fit: choose an .update.jws manifest or an .exe installer.",
+      "selection": "Selected release",
+      "channel": "Channel",
+      "version": "Version",
+      "manifest": "Manifest",
+      "installer": "Installer",
+      "expectedSha": "SHA-256 per manifest",
+      "notChosen": "not chosen",
+      "fileWithSize": "{{name}} · {{size}} MB",
+      "manifestProblems": {
+        "too_large": "The manifest file is too large to be an update manifest.",
+        "not_jws": "This is not an update manifest: a single-line JWS of three parts is expected.",
+        "unreadable": "The manifest cannot be read: it lacks a version, a channel or an installer description.",
+        "wrong_product": "The manifest is not for «Markiro Standalone»."
+      },
+      "issues": {
+        "installer_size": "The chosen installer's size ({{actual}} bytes) differs from the manifest ({{expected}} bytes). Choose this version's installer.",
+        "installer_name": "The installer name “{{actual}}” differs from the expected “{{expected}}”. Make sure it is the same version.",
+        "manifest_name": "The manifest name “{{actual}}” differs from the expected “{{expected}}”. Make sure it is the right version's manifest."
+      },
+      "steps": {
+        "preparing": "Preparing upload links…",
+        "manifest": "Uploading the manifest to the bucket…",
+        "installer": "Uploading the installer to the bucket…",
+        "registering": "The API is checking the signature and the installer…"
+      },
+      "result": {
+        "registered": "Version {{version}} is registered on the {{channel}} channel. To have the site serve it, press “Make latest”.",
+        "unchanged": "Version {{version}} is already registered with the same files."
+      },
+      "submit": "Upload and verify",
+      "cancel": "Cancel upload",
+      "reset": "Choose other files"
+    },
+    "errors": {
+      "standalone_releases_not_configured": "Release storage is not configured: the owner must set RELEASES_S3_* on the API server.",
+      "standalone_releases_storage_unavailable": "Release storage is unavailable right now. Try again later.",
+      "standalone_release_version_exists": "Version {{version}} is already uploaded to this channel. An unfinished upload can be verified and registered from the channel list.",
+      "standalone_release_version_not_newer": "The version must be higher than every version already published on the channel.",
+      "standalone_release_files_missing": "One of the version's files is missing from storage. Upload both files again.",
+      "standalone_release_installer_too_large": "The installer exceeds the allowed size.",
+      "standalone_release_manifest_malformed": "The manifest is damaged or is not a standalone update manifest.",
+      "standalone_release_manifest_unknown_key": "The manifest is signed with a key standalone hosts do not know. Sign the package with a current release key.",
+      "standalone_release_manifest_bad_signature": "The manifest signature does not verify: the file changed after signing or was signed with another key.",
+      "standalone_release_manifest_mismatch": "The manifest describes a different product, channel, version or installer than the uploaded files.",
+      "standalone_release_installer_size_mismatch": "The installer size does not match the manifest.",
+      "standalone_release_installer_hash_mismatch": "The installer SHA-256 does not match the manifest.",
+      "standalone_release_immutable": "This version is already published with different files: paths are immutable.",
+      "standalone_release_not_found": "The channel has no such version. Refresh the list.",
+      "standalone_release_integrity_failed": "The version's files changed after registration or its key was revoked; the pointer did not move.",
+      "filesRemoved": "This attempt's files were removed from storage; upload the corrected package again.",
+      "bucket_network": "Storage did not accept the file. Check the release bucket CORS (PUT with a Content-Type header from the admin origin) and the connection, then retry.",
+      "bucket_aborted": "Upload cancelled. If some files made it, the version appears among the channel's unfinished uploads.",
+      "bucketRejected": "Storage rejected the file (HTTP {{status}}). The upload link may have expired; start again.",
+      "network": "No connection to the platform server. Try again.",
+      "uploadFailed": "Could not prepare the upload.",
+      "registerFailed": "Could not verify and register the version.",
+      "setLatestFailed": "Could not move the pointer."
     }
   }
 }

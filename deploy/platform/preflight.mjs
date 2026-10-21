@@ -8,6 +8,15 @@ const fail = (key) => {
   throw new Error(`invalid platform configuration: ${key}`);
 };
 const domain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/;
+/** The release bucket's upload origin; `saas_admin_csp` in the Caddyfile allows exactly it. */
+export const RELEASES_UPLOAD_ORIGIN = "https://storage.yandexcloud.net";
+const RELEASES_STORAGE_KEYS = [
+  "RELEASES_S3_ENDPOINT",
+  "RELEASES_S3_REGION",
+  "RELEASES_S3_BUCKET",
+  "RELEASES_S3_ACCESS_KEY_ID",
+  "RELEASES_S3_SECRET_ACCESS_KEY",
+];
 const required = [
   "SERVER_PROFILE",
   "VITE_SERVER_PROFILE",
@@ -190,6 +199,19 @@ export function validateConfig(env, manifest) {
     )
   )
     fail("LEAD_RETENTION_MONTHS");
+  // «Выпуски автонома» are optional and never gate readiness. The bucket's keys
+  // come as a set; the endpoint must be the upload origin the admin CSP allows,
+  // since the browser PUTs path-style to it. Keys are never echoed.
+  const releaseStorage = RELEASES_STORAGE_KEYS.filter((key) => env[key]);
+  if (releaseStorage.length > 0) {
+    for (const key of RELEASES_STORAGE_KEYS) if (!env[key]) fail(key);
+    if (env.RELEASES_S3_ENDPOINT !== RELEASES_UPLOAD_ORIGIN) fail("RELEASES_S3_ENDPOINT");
+    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(env.RELEASES_S3_BUCKET))
+      fail("RELEASES_S3_BUCKET");
+    if (env.RELEASES_S3_BUCKET === env.S3_BUCKET) fail("RELEASES_S3_BUCKET");
+  }
+  if (env.RELEASES_PUBLIC_ORIGIN !== undefined)
+    exactHttpsOrigin(env.RELEASES_PUBLIC_ORIGIN, "RELEASES_PUBLIC_ORIGIN");
   // Disabled product surfaces must not accidentally inherit legacy credentials,
   // workers or deferred CRM configuration from a shared env file.
   for (const key of [
