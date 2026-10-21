@@ -3843,7 +3843,14 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   limit is above one and whose shift names participants (N the active ones); a
   participant of such a line silent for ten minutes is one attention row and
   takes the place of the plain silent-device row of the same device; a shift
-  closed without its reason is one row with the way to its card.
+  closed without its reason is one row with the way to its card; an active
+  shift whose every open part (`active` or `left`) belongs to a revoked device or
+  a paused one is one row («ждёт отозванное или приостановленное устройство»,
+  `waitingOnAbsentDevices`, with the way to the card's «Станции»): the host
+  counts those parts as open, so the shift never closes by itself. A lone
+  station that merely paused is not listed. The card's «Станции» tab marks
+  «Нет связи» by the host's clock (`useHostClock`, the overview's source) and
+  not at all while it is unknown; an active shift's card reads every 30 s.
 - The blank: `ShiftTaskFormData.closingRule` is `"each_part"` for the office
   («Каждая станция закрывает свою часть; смена закрывается, когда закрыли все,
   или из офиса.») and absent for the cloud, whose rule (the opener closes) is
