@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -191,17 +192,24 @@ fun ShiftCardView(card: ShiftCard, onClick: () -> Unit) {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
     ) {
-        Row(horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text(card.number, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
-            Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1)) {
-                MarkiroChip(stringResource(R.string.shifts_mode_validation), Tone.Neutral)
-                if (card.aggregation) MarkiroChip(stringResource(R.string.shifts_mode_aggregation), Tone.Info)
-                // Only alongside aggregation: pallets are built out of closed
-                // boxes, so the flag is meaningless on a validation shift and a
-                // chip there would promise work the shift cannot do.
-                if (card.aggregation && card.pallets) MarkiroChip(stringResource(R.string.shifts_mode_pallets), Tone.Info)
-                if (card.active) MarkiroChip(stringResource(R.string.shifts_status_active), Tone.Ok)
-            }
+        // The number and the status share the first line; the mode chips get a
+        // line of their own and wrap. All of them in one row overflowed a 411 dp
+        // phone: «+ паллеты» broke in two and the status chip of the running
+        // shift was pushed past the card's edge.
+        Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(card.number, style = t.code.copy(fontSize = 16.sp), color = c.fg1, modifier = Modifier.weight(1f))
+            if (card.active) MarkiroChip(stringResource(R.string.shifts_status_active), Tone.Ok)
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
+            verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
+        ) {
+            MarkiroChip(stringResource(R.string.shifts_mode_validation), Tone.Neutral)
+            if (card.aggregation) MarkiroChip(stringResource(R.string.shifts_mode_aggregation), Tone.Info)
+            // Only alongside aggregation: pallets are built out of closed
+            // boxes, so the flag is meaningless on a validation shift and a
+            // chip there would promise work the shift cannot do.
+            if (card.aggregation && card.pallets) MarkiroChip(stringResource(R.string.shifts_mode_pallets), Tone.Info)
         }
         Text(card.product, style = t.strong.copy(fontSize = 16.sp), color = c.fg1)
         Text(
