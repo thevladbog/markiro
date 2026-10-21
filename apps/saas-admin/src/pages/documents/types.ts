@@ -27,6 +27,11 @@ export interface DocumentLineDraft {
   vatRateBps: number | null;
   vatIncluded: boolean;
   activationPolicy: ActivationPolicy | null;
+  /** Explicit-term input as typed; present only on plan lines that were given dates. */
+  term?: { start: string; end: string };
+  /** Catalog terms and unit saved while explicit dates override them, to restore on clearing. */
+  baseTerms?: CommercialLineTerms | null;
+  baseUnit?: string;
 }
 
 export interface DocumentDraft {
@@ -51,6 +56,7 @@ export type DocumentDraftAction =
   | { type: "line.priceOverrideReasonChanged"; id: string; reason: string }
   | { type: "line.vatIncludedChanged"; id: string; included: boolean }
   | { type: "line.policyChanged"; id: string; policy: ActivationPolicy }
+  | { type: "line.termChanged"; id: string; termStart: string; termEnd: string }
   | { type: "line.moved"; id: string; direction: -1 | 1 }
   | { type: "line.removed"; id: string };
 
