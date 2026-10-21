@@ -4,6 +4,8 @@ import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/art
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import { articlesForLocale } from "../content/articles";
 import { FILM_SEARCH_PAGES, type FilmPageDefinition } from "../content/film";
+import { AUTONOM_SEARCH_PAGES, type AutonomPageDefinition } from "../content/autonom-pages";
+import { formatRoubles, TARIFFS } from "../content/pricing";
 import { mirrorPathFor } from "./mirror-path.ts";
 
 export { mirrorPathFor };
@@ -19,6 +21,7 @@ const ORGANIZATION_EMAIL = SITE_CONTACTS.email;
 const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
+  ...AUTONOM_SEARCH_PAGES,
   ...FILM_SEARCH_PAGES,
   ...HUB_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
@@ -317,6 +320,91 @@ export function buildFilmPageGraph(page: FilmPageDefinition): PageGraph {
   };
 }
 
+export interface AutonomGraphOptions {
+  readonly faq?: readonly { question: string; answer: string }[];
+  /** Adds the Product with one Offer per published yearly price (/stoimost/). */
+  readonly offers?: boolean;
+}
+
+function productNode(page: AutonomPageDefinition): JsonLdObject {
+  const pageUrl = absoluteUrl(page.path);
+  const offers = TARIFFS.flatMap((tariff) =>
+    tariff.pricePerYear === null
+      ? []
+      : [
+          {
+            "@type": "Offer",
+            name: `«${tariff.name}»`,
+            description: tariff.features.join(", "),
+            url: pageUrl,
+            price: tariff.pricePerYear,
+            priceCurrency: "RUB",
+            availability: "https://schema.org/InStock",
+            seller: { "@id": `${SITE_URL}/#organization` },
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price: tariff.pricePerYear,
+              priceCurrency: "RUB",
+              valueAddedTaxIncluded: false,
+              unitText: "год",
+              referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: "ANN" },
+            },
+          },
+        ],
+  );
+  const prices = offers.map((offer) => offer.price);
+  return {
+    "@type": "Product",
+    "@id": `${pageUrl}#product`,
+    name: "Маркиро Автоном",
+    description:
+      "Программа маркировки и агрегации для Windows: станция на линии, ТСД на складе и офис на ПК заказчика. Лицензия на площадку на год.",
+    brand: { "@type": "Brand", name: "Маркиро" },
+    category: "Программное обеспечение для маркировки и агрегации",
+    offers: {
+      "@type": "AggregateOffer",
+      priceCurrency: "RUB",
+      lowPrice: Math.min(...prices),
+      highPrice: Math.max(...prices),
+      offerCount: offers.length,
+      offers,
+    },
+  };
+}
+
+export function buildAutonomPageGraph(
+  page: AutonomPageDefinition,
+  options: AutonomGraphOptions = {},
+): PageGraph {
+  const pageUrl = absoluteUrl(page.path);
+  const graph: JsonLdObject[] = [
+    websiteNode(),
+    organizationNode(),
+    {
+      "@type": "WebPage",
+      "@id": `${pageUrl}#webpage`,
+      url: pageUrl,
+      name: page.title,
+      description: page.description,
+      inLanguage: page.locale,
+      dateModified: page.reviewedAt,
+      isPartOf: { "@id": `${SITE_URL}/#website` },
+    },
+  ];
+  if (options.offers === true) graph.push(productNode(page));
+  if (options.faq !== undefined) {
+    graph.push({
+      "@type": "FAQPage",
+      mainEntity: options.faq.map(({ question, answer }) => ({
+        "@type": "Question",
+        name: question,
+        acceptedAnswer: { "@type": "Answer", text: answer },
+      })),
+    });
+  }
+  return { "@context": "https://schema.org", "@graph": graph };
+}
+
 export function buildLegalPageGraph(
   page: PageMetadata,
   dates?: { readonly published: string; readonly modified: string; readonly basedOn?: string },
@@ -492,19 +580,20 @@ export function renderLlmsTxt(): string {
 
 ## Русский
 
-> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.
+> «Маркиро Автоном»: программа маркировки и агрегации для Windows. Программа, база и копии работают на ПК заказчика, интернет для смены не нужен.
 
 ## Коротко о продукте
 
-- Что это: производственная система маркировки «Честный знак». Коды Data Matrix проверяются на станции при сканировании, единицы собираются в короба и паллеты с SSCC, этикетки печатаются в ZPL или TSPL, каждое действие остаётся в журнале.
+- Что это: производственная программа маркировки «Честный знак». Главный ПК в офисе держит базу, станции на линиях и ТСД на складе подключаются к нему по локальной сети завода.
+- Станция: проверяет каждый код Data Matrix при сканировании (структура GS1, GTIN товара смены, дубли, неполное чтение), собирает короба и паллеты с SSCC, печатает этикетки ZPL или TSPL.
 - Товарные группы: любая маркируемая продукция, например соки и вода, молочная продукция, пиво, косметика. Правила конкретной товарной группы сверяются до запуска.
 - Уровни агрегации: единица → короб → паллета. Паллеты собирают на станции и на ТСД.
-- ТСД: терминал на Android собирает паллеты, снимает с них коробы и проводит инвентаризацию у стеллажа.
-- Рабочее место: станция для Windows x64, сканер как клавиатурный ввод или через COM-порт, принтер ZPL или TSPL по сети, через COM-порт или USB.
-- Офлайн: станция работает без сети с локальным журналом SQLite и отправляет очередь после восстановления связи с ключом идемпотентности.
-- Интеграции: обмен с 1С по CommerceML, публичный REST API с OpenAPI, выгрузки отчётов смены TXT, CSV и XML агрегации для ГИС МТ, чтение статусов кодов через True API «Честного знака».
-- Киоск выбытия: сотрудник сканирует бейдж и коды, заявка проводится в кабинете через кассу или списанием.
-- Контакт: ${ORGANIZATION_EMAIL}. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
+- ТСД: терминал на Android собирает и разбирает паллеты и проводит инвентаризацию в той же смене.
+- Офис: смены, товары, шаблоны этикеток, расхождения, резервные копии и выгрузки для ГИС МТ на том же ПК.
+- Без облака: во время смены программа не обращается к серверам Маркиро, обновления ставятся из файла, лицензия загружается файлом.
+- Пробный период: 14 дней со всеми функциями, без оплаты. Установщик для Windows 10 и 11: ${absoluteUrl("/skachat/")}
+- Цены за площадку в год, без НДС: ${TARIFFS.map((tariff) => `«${tariff.name}» ${tariff.pricePerYear === null ? "по запросу" : `${formatRoubles(tariff.pricePerYear)} ₽`}`).join(", ")}. Подробно: ${absoluteUrl("/stoimost/")}
+- Контакт: ${ORGANIZATION_EMAIL}, Telegram @${SITE_CONTACTS.telegram.handle}. Разбор линии по видеосвязи: ${absoluteUrl("/kak-rabotaet/#demo")}
 
 ${links("ru", "/")}
 

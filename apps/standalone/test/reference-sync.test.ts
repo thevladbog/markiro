@@ -2220,6 +2220,38 @@ describe("catalog copies", () => {
     ]);
   });
 
+  it("keeps the demo product's flag and drops the product by its tombstone (spec 2026-10-21)", async () => {
+    const { db, executor } = openLocalDb();
+    const DEMO = changesResponseSchema.parse(
+      JSON.parse(
+        readFileSync(new URL("../proto/fixtures/changes-demo.json", testModuleUrl), "utf8"),
+      ),
+    );
+    const [demo, removal] = DEMO.items;
+    if (demo === undefined || removal === undefined) throw new Error("the fixture has two items");
+    const flags = () =>
+      Array.from(db.prepare("SELECT id, demo FROM ref_products ORDER BY id").all(), (row) => ({
+        ...row,
+      }));
+    await syncReferences({
+      changes: feed({ 0: page(3, [demo, product(MILK, 2)]) }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    expect(flags()).toEqual([
+      { id: demo.id, demo: 1 },
+      { id: MILK, demo: 0 },
+    ]);
+    await syncReferences({
+      changes: feed({ 3: page(12, [removal]) }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    expect(flags()).toEqual([{ id: MILK, demo: 0 }]);
+  });
+
   it("drops a key a newer host adds to a catalog record and keeps the record: the catalog grants no access", async () => {
     const { db, executor } = openLocalDb();
     await expect(

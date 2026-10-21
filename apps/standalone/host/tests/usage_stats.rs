@@ -695,6 +695,10 @@ async fn no_query_scans_a_table_of_facts() {
     }
     assert!(!plans.is_empty());
     for (sql, detail) in &plans {
+        // The demo product's partial index (spec 2026-10-21) holds one row at most.
+        if detail == "SCAN products USING COVERING INDEX products_demo" {
+            continue;
+        }
         if let Some(table) = detail.strip_prefix("SCAN ") {
             let table = table.split_whitespace().next().unwrap_or_default();
             assert!(

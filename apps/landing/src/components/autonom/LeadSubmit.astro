@@ -1,0 +1,33 @@
+---
+import Icon, { type IconName } from "./Icon.astro";
+
+interface Props {
+  label: string;
+  /** The phone label; the installer goes to a computer, so phones ask for the link by mail. */
+  labelNarrow?: string;
+  icon?: IconName;
+  iconNarrow?: IconName;
+  tone?: "accent" | "dark";
+}
+
+const { label, labelNarrow, icon, iconNarrow, tone = "accent" } = Astro.props;
+---
+
+<button class:list={["ax-btn", "ax-btn--lg", "ax-form__submit", `ax-btn--${tone}`]} type="submit" data-lead-submit>
+  <span class="ax-form__submit-label" data-label="idle">
+    {labelNarrow === undefined ? label : (
+      <>
+        <span class="ax-only-wide">{label}</span>
+        <span class="ax-only-narrow">{labelNarrow}</span>
+      </>
+    )}
+  </span>
+  <span class="ax-form__submit-label" data-label="sending" hidden><span class="ax-spinner" aria-hidden="true"></span>Отправляем…</span>
+  <span class="ax-form__submit-label" data-label="retry" hidden>Отправить ещё раз</span>
+  {icon && (
+    <span class="ax-btn__icon" data-label="idle">
+      <Icon name={icon} size={18} class={iconNarrow === undefined ? undefined : "ax-only-wide"} />
+      {iconNarrow && <Icon name={iconNarrow} size={18} class="ax-only-narrow" />}
+    </span>
+  )}
+</button>

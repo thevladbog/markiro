@@ -20,6 +20,8 @@ const CAPABILITIES = {
   manageBackups: ["admin"],
   /** Loading a license file, the activation request and the emergency extension (plan ЛЦ-3); every role reads the license. */
   manageLicense: ["admin"],
+  /** «Удалить демо-данные» (spec 2026-10-21); every role sees that the demo data is there. */
+  manageDemoData: ["admin"],
 } as const satisfies Record<string, readonly OfficeRole[]>;
 
 export type OfficeCapability = keyof typeof CAPABILITIES;

@@ -1,10 +1,11 @@
-import { formatSsccHri } from "@markiro/domain";
+import { formatSsccHri, type LabelTemplateSpec } from "@markiro/domain";
 import type { TFunction } from "i18next";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, VisuallyHidden } from "@markiro/ui";
 
+import { DemoLabelPreview } from "../demo/DemoLabelPreview.js";
 import { REPRINT_REASONS } from "../exception-reasons.js";
 import {
   printerMode,
@@ -63,6 +64,12 @@ export interface LabelPanelProps {
    * ТОВ, `sheetWithoutEgais`): the panel says so in every view; it decides nothing.
    */
   egaisOffSheet?: boolean;
+  /**
+   * A demo shift's layout of the job's purpose (spec 2026-10-21, decision Д2): a label that
+   * failed for want of a printer is shown on the screen instead, and «Готово» goes on as
+   * «Продолжить без этикетки» does. Absent for a real shift, which needs its printer.
+   */
+  demoPreview?: LabelTemplateSpec;
 }
 
 /**
@@ -170,6 +177,7 @@ export function LabelPanel({
   checkQueue,
   clock = realClock,
   egaisOffSheet = false,
+  demoPreview,
 }: LabelPanelProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>({ kind: "main" });
@@ -447,6 +455,28 @@ export function LabelPanel({
         <Button size="floor" {...press(onRecover)}>
           {t("floor.print.stalled.action")}
         </Button>
+      ),
+    });
+  } else if (
+    demoPreview !== undefined &&
+    job.state === "failed" &&
+    job.errorCode === "printer_unconfigured"
+  ) {
+    // A demo shift without a printer: the label on the screen, and the work goes on.
+    body = dialog({
+      tone: "info",
+      title: t(pallet ? "floor.demo.preview.palletTitle" : "floor.demo.preview.title"),
+      headerAction: (
+        <Button size="floor" {...press(onSkip)}>
+          {t("floor.demo.preview.done")}
+        </Button>
+      ),
+      children: (
+        <>
+          <DemoLabelPreview spec={demoPreview} purpose={job.purpose} fields={job.fields} />
+          <p>{t("floor.demo.preview.body")}</p>
+          {ssccBlock}
+        </>
       ),
     });
   } else if (job.state === "prepared" || job.state === "sending") {

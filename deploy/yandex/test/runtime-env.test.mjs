@@ -19,6 +19,8 @@ const INVENTORY = `# runtime inventory\nDATABASE_URL=\nSMTP_PASSWORD=\nS3_ENDPOI
 const OPTIONAL_OFFLINE_GRANT_INVENTORY = `${INVENTORY}OFFLINE_GRANT_ORIGIN=\nOFFLINE_GRANT_KID=\nOFFLINE_GRANT_PRIVATE_KEY_PEM=\nOFFLINE_GRANT_KEYSET_JSON=\n`;
 const OPTIONAL_STANDALONE_LICENSE_INVENTORY = `${INVENTORY}STANDALONE_LICENSE_ISSUER=\nSTANDALONE_LICENSE_KID=\nSTANDALONE_LICENSE_PRIVATE_KEY_PEM=\nSTANDALONE_LICENSE_KEYSET_JSON=\n`;
 const OPTIONAL_STANDALONE_SUPPORT_INVENTORY = `${INVENTORY}STANDALONE_SUPPORT_KEYS_JSON=\n`;
+const OPTIONAL_LEAD_TELEGRAM_INVENTORY = `${INVENTORY}LEAD_TELEGRAM_ENABLED=\nLEAD_TELEGRAM_BOT_TOKEN=\nLEAD_TELEGRAM_CHAT_ID=\nLEAD_RETENTION_MONTHS=\n`;
+const OPTIONAL_RELEASES_INVENTORY = `${INVENTORY}RELEASES_S3_ENDPOINT=\nRELEASES_S3_REGION=\nRELEASES_S3_BUCKET=\nRELEASES_S3_ACCESS_KEY_ID=\nRELEASES_S3_SECRET_ACCESS_KEY=\nRELEASES_PUBLIC_ORIGIN=\n`;
 const VALUES = {
   DATABASE_URL: "postgres://markiro:password@db.example.test/markiro",
   SMTP_PASSWORD: "mail-password",
@@ -230,6 +232,81 @@ test("rejects a partially configured standalone license group (plan ЛЦ-0)", ()
     () => runtimeInventoryKeyNames(keys, entries),
     (error) => error.message === INVENTORY_FAILURE,
   );
+});
+
+test("allows lead Telegram alerts and retention to be entirely absent", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_LEAD_TELEGRAM_INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, entries), [
+    "DATABASE_URL",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.doesNotMatch(renderRuntimeEnvironment(keys, entries), /LEAD_/u);
+});
+
+test("lead Telegram keys are provisioned together, retention on its own", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_LEAD_TELEGRAM_INVENTORY);
+  const base = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+  const telegram = [
+    { key: "LEAD_TELEGRAM_ENABLED", textValue: "true" },
+    { key: "LEAD_TELEGRAM_BOT_TOKEN", textValue: "private-telegram-token" },
+    { key: "LEAD_TELEGRAM_CHAT_ID", textValue: "-100123" },
+  ];
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, [...base, ...telegram]), [
+    "DATABASE_URL",
+    "LEAD_TELEGRAM_BOT_TOKEN",
+    "LEAD_TELEGRAM_CHAT_ID",
+    "LEAD_TELEGRAM_ENABLED",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.deepEqual(
+    runtimeInventoryKeyNames(keys, [...base, { key: "LEAD_RETENTION_MONTHS", textValue: "6" }]),
+    ["DATABASE_URL", "LEAD_RETENTION_MONTHS", "S3_ENDPOINT", "SMTP_PASSWORD"],
+  );
+  for (const partial of [telegram.slice(0, 2), telegram.slice(1)])
+    assert.throws(
+      () => runtimeInventoryKeyNames(keys, [...base, ...partial]),
+      (error) => error.message === INVENTORY_FAILURE,
+    );
+});
+
+test("standalone release storage keys are provisioned together or not at all, the origin on its own", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_RELEASES_INVENTORY);
+  const base = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+  assert.doesNotMatch(renderRuntimeEnvironment(keys, base), /RELEASES_/u);
+  const storage = [
+    { key: "RELEASES_S3_ENDPOINT", textValue: "https://storage.yandexcloud.net" },
+    { key: "RELEASES_S3_REGION", textValue: "ru-central1" },
+    { key: "RELEASES_S3_BUCKET", textValue: "releases.markiro.app" },
+    { key: "RELEASES_S3_ACCESS_KEY_ID", textValue: "private-releases-access" },
+    { key: "RELEASES_S3_SECRET_ACCESS_KEY", textValue: "private-releases-secret" },
+  ];
+  assert.deepEqual(runtimeInventoryKeyNames(keys, [...base, ...storage]), [
+    "DATABASE_URL",
+    "RELEASES_S3_ACCESS_KEY_ID",
+    "RELEASES_S3_BUCKET",
+    "RELEASES_S3_ENDPOINT",
+    "RELEASES_S3_REGION",
+    "RELEASES_S3_SECRET_ACCESS_KEY",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.deepEqual(
+    runtimeInventoryKeyNames(keys, [
+      ...base,
+      { key: "RELEASES_PUBLIC_ORIGIN", textValue: "https://releases.markiro.app" },
+    ]),
+    ["DATABASE_URL", "RELEASES_PUBLIC_ORIGIN", "S3_ENDPOINT", "SMTP_PASSWORD"],
+  );
+  for (const partial of [storage.slice(0, 4), storage.slice(1)])
+    assert.throws(
+      () => runtimeInventoryKeyNames(keys, [...base, ...partial]),
+      (error) => error.message === INVENTORY_FAILURE,
+    );
 });
 
 test("allows the standalone support key to be entirely absent (plan ДИАГ)", () => {
@@ -494,6 +571,16 @@ test("uses every and only the production environment example keys", async () => 
     "LANDING_DEMO_RATE_WINDOW_SECONDS",
     "LANDING_DEMO_SOURCE_LIMIT",
     "LANDING_DEMO_GLOBAL_LIMIT",
+    "LEAD_TELEGRAM_ENABLED",
+    "LEAD_TELEGRAM_BOT_TOKEN",
+    "LEAD_TELEGRAM_CHAT_ID",
+    "LEAD_RETENTION_MONTHS",
+    "RELEASES_S3_ENDPOINT",
+    "RELEASES_S3_REGION",
+    "RELEASES_S3_BUCKET",
+    "RELEASES_S3_ACCESS_KEY_ID",
+    "RELEASES_S3_SECRET_ACCESS_KEY",
+    "RELEASES_PUBLIC_ORIGIN",
     "S3_ENDPOINT",
     "S3_REGION",
     "S3_BUCKET",
@@ -516,7 +603,7 @@ test("uses every and only the production environment example keys", async () => 
     "STANDALONE_LICENSE_KEYSET_JSON",
     "STANDALONE_SUPPORT_KEYS_JSON",
   ]);
-  assert.equal(inventory.length, 57);
+  assert.equal(inventory.length, 67);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

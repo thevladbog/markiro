@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import { rm, lstat } from "node:fs/promises";
-import { createPrivateDirectory, writePrivateFile, readPrivateFile } from "../host/files.mjs";
+import {
+  createPrivateDirectory,
+  writePrivateFile,
+  readPrivateFile,
+  inventoryDocumentOptions,
+} from "../host/files.mjs";
 import { openRuntime, readPrivateAbsolute, privateCopy } from "./local-runtime.mjs";
 import { publishArchive, hashArchive } from "./files.mjs";
 import {
@@ -22,6 +27,7 @@ export async function createDatabaseBackup({
   connectionFile,
   writerFence,
   run,
+  recoveryRuntime,
 }) {
   identity(operationId, target);
   target = plain(target);
@@ -50,7 +56,7 @@ export async function createDatabaseBackup({
       await privateCopy(root, config[field], join(input, name));
     await writePrivateFile(input, "request.json", Buffer.from(canonical({ operationId, target })));
     phase = "runtime";
-    runtime = await openRuntime({ root, operationId, purpose: "archive", run });
+    runtime = await openRuntime({ root, operationId, purpose: "archive", run, recoveryRuntime });
     before = fence(
       await writerFence.observe({ operationId, target, boundary: "before-snapshot" }),
       operationId,
@@ -66,8 +72,11 @@ export async function createDatabaseBackup({
     const metadata = await lstat(join(output, "inventory.json"));
     if (metadata.uid !== process.getuid()) throw fail("output-owner");
     if ((metadata.mode & 0o7777) !== 0o600) throw fail("output-mode");
-    if (metadata.size > 1048576) throw fail(`inventory-limit-${metadata.size}`);
-    const captured = JSON.parse(await readPrivateFile(output, "inventory.json"));
+    if (metadata.size > inventoryDocumentOptions.maxBytes)
+      throw fail(`inventory-limit-${metadata.size}`);
+    const captured = JSON.parse(
+      await readPrivateFile(output, "inventory.json", inventoryDocumentOptions),
+    );
     validateInventory(captured.inventory);
     ensure(
       typeof captured.snapshotId === "string" &&
@@ -131,7 +140,8 @@ export async function createDatabaseBackup({
         inventory: result.captured.inventory,
       };
       const inventoryBytes = Buffer.from(canonical(inventory) + "\n");
-      if (inventoryBytes.length > 1048576) throw fail(`inventory-limit-${inventoryBytes.length}`);
+      if (inventoryBytes.length > inventoryDocumentOptions.maxBytes)
+        throw fail(`inventory-limit-${inventoryBytes.length}`);
       result = { ...result, archive, inventoryBytes };
     } catch (error) {
       problem = error.stage ? error : fail(`${phase}-validation`);
@@ -162,7 +172,7 @@ export async function createDatabaseBackup({
   ensure(archive.sha256 === result.archive.sha256 && archive.bytes === result.archive.bytes);
   const { inventoryBytes } = result;
   await rm(output, { recursive: true, force: true });
-  await writePrivateFile(directory, "inventory.json", inventoryBytes);
+  await writePrivateFile(directory, "inventory.json", inventoryBytes, inventoryDocumentOptions);
   return {
     archivePath: archive.path,
     archiveSha256: archive.sha256,

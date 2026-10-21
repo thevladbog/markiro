@@ -1,146 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile, writeFile, lstat } from "node:fs/promises";
+import { readFile, writeFile, lstat, rename } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  commandIntegrationFixture,
-  integrationOptions,
-} from "./host-command-integration-fixture.mjs";
-import { fakeDocker } from "./backup-runtime-fixture.mjs";
-import { canonical, digest } from "../backup/schemas.mjs";
+import { digest } from "../backup/schemas.mjs";
 import { createTargetRecoveryBackup } from "../host/target-backup.mjs";
+import { randomUUID, createHash } from "node:crypto";
+import * as targetBackup from "../host/target-backup.mjs";
+import { withRecoveryState } from "../host/recovery-state.mjs";
+import { backupProof } from "./host-fixtures.mjs";
 import { withHostState } from "../host/state.mjs";
 
-async function fixture(t, mode) {
-  const f = await commandIntegrationFixture(t);
-  const host = await integrationOptions(f.root);
-  const operation = Object.fromEntries(
-    ["root", "identity", "configuration", "dockerConfig"].map((k) => [k, f.record.deployment[k]]),
-  );
-  const policy = f.record.observationPolicy;
-  const image = `sha256:${"e".repeat(64)}`;
-  const runtime = {
-    version: 1,
-    executorSha: f.identity.executorSha,
-    dockerExecutable: "/usr/bin/docker",
-    endpoint: "unix:///var/run/docker.sock",
-    image,
-    provenance: "live-source",
-  };
-  const save = (name, value) =>
-    writeFile(join(f.root, name), typeof value === "string" ? value : canonical(value), {
-      mode: 0o600,
-    });
-  await save("backup-runtime.json", runtime);
-  await save(
-    "backup-service.conf",
-    "[backup]\nhost=db.private\nport=5432\ndbname=markiro\nuser=backup_admin\nsslmode=verify-full\nsslrootcert=/input/ca.crt\n",
-  );
-  await save("backup-password", `db.private:5432:markiro:backup_admin:${"x".repeat(32)}\n`);
-  const connection = {
-    version: 1,
-    kind: "platform-backup-connection",
-    operationId: f.identity.operationId,
-    target: f.identity.target,
-    service: "backup",
-    serviceFile: join(f.root, "backup-service.conf"),
-    passFile: join(f.root, "backup-password"),
-    caFile: f.env.MARKIRO_POSTGRES_CA_FILE,
-    network: policy.networks.database.name,
-  };
-  await save("connection.json", connection);
-  const daemon = JSON.parse(await readFile(join(f.root, "daemon.json")));
-  daemon.images.push({
-    Id: image,
-    Os: "linux",
-    Architecture: "amd64",
-    Config: { Volumes: { "/var/lib/postgresql/data": {} } },
-  });
-  const publish = () => save("daemon.json", daemon);
-  await publish();
-  const captured = {
-    snapshotId: "00000001-00000002-1",
-    postgresVersion: "17.11",
-    inventory: f.document.inventory,
-  };
-  const docker = fakeDocker({
-    root: f.root,
-    operationId: f.identity.operationId,
-    image,
-    restored: { postgresVersion: "17.11", inventory: f.document.inventory },
-    failCleanup: mode === "cleanup",
-  });
-  let boundaries = 0,
-    workerCommands = 0;
-  const options = {
-    readMachineId: host.readMachineId,
-    runProcess: async (request) => {
-      const args = request.args.slice(2);
-      if (request.timeoutMs === 60000) {
-        // A host observation must never coexist with archive or restore workers.
-        assert.equal(docker.containers.size + docker.volumes.size, 0);
-        return host.runProcess(request);
-      }
-      if (["create", "start"].includes(args[0]) || (args[0] === "volume" && args[1] === "create"))
-        workerCommands++;
-      if (mode === "unreaped" && args[0] === "start" && args.includes("--attach"))
-        throw Object.assign(new Error("secret child output"), { terminationConfirmed: false });
-      if (mode === "durability" && args[0] === "start" && args.includes("--attach"))
-        throw Object.assign(new Error("secret uncertain process output"), {
-          durabilityUncertain: true,
-        });
-      if (
-        mode === "restore-cleanup" &&
-        args[0] === "container" &&
-        args[1] === "rm" &&
-        args.at(-1).endsWith("-restore-worker")
-      )
-        throw new Error("secret cleanup output");
-      const result = await docker.run(request);
-      if (args[0] === "image") {
-        const values = JSON.parse(result.stdout);
-        values[0].Architecture = "amd64";
-        result.stdout = Buffer.from(canonical(values));
-      }
-      if (args[0] === "cp" && args[1].includes("-archive-worker:/work/out/.")) {
-        await writeFile(join(args[2], "inventory.json"), canonical(captured), { mode: 0o600 });
-        await writeFile(join(args[2], "database.dump"), "PGDMP target fixture", { mode: 0o600 });
-      }
-      return result;
-    },
-  };
-  const input = {
-    operation,
-    observationPolicy: policy,
-    hbaPath: join(f.installed, "deploy/platform/postgres/pg_hba.conf"),
-    hbaSha256: f.receipt.files["deploy/platform/postgres/pg_hba.conf"],
-    connectionFile: join(f.root, "connection.json"),
-    roleMapping: f.expected.roleMapping,
-    verifySources: async () => {
-      boundaries++;
-      if (mode === "source-failure") throw new Error("secret source output");
-      if (mode === "final-observation" && boundaries === 4) {
-        daemon.adminResult.prepared = 1;
-        await publish();
-      }
-      if (mode === "altered-private" && boundaries === 2)
-        await save("backup-password", `db.private:5432:markiro:backup_admin:${"z".repeat(32)}\n`);
-    },
-  };
-  return {
-    f,
-    input,
-    options,
-    daemon,
-    publish,
-    save,
-    runtime,
-    connection,
-    docker,
-    boundaries: () => boundaries,
-    workerCommands: () => workerCommands,
-  };
-}
+import { targetBackupFixture as fixture } from "./target-backup-fixture.mjs";
 const invoke = (f) => createTargetRecoveryBackup(f.input, f.options);
 
 test("target backup returns fresh bound recovery descriptors only after concrete observations and isolated cleanup", async (t) => {
@@ -354,4 +224,160 @@ test("target backup never issues another process command after unconfirmed termi
   await assert.rejects(invoke(f), { terminationConfirmed: false, durabilityUncertain: true });
   assert.equal(unreaped, true);
   assert.equal(laterCommands, 0);
+});
+
+for (const mode of [
+  "valid",
+  "different-executor",
+  "wrong-runtime-executor",
+  "missing-recovery-runtime",
+  "wrong-runtime-operation",
+  "changed-source-runtime",
+  "changed-recovery-runtime",
+  "forged",
+  "wrong-phase",
+  "changed-sidecar",
+  "wrong-root",
+  "expired",
+  "cleanup",
+  "restore-cleanup",
+  "unreaped",
+]) {
+  test(`held target backup validates recovery boundary: ${mode}`, async (t) => {
+    const uncertain = ["cleanup", "restore-cleanup", "unreaped"].includes(mode);
+    const f = await fixture(t, uncertain ? mode : undefined);
+    const prior = structuredClone(f.input.operation.identity);
+    prior.operationId = randomUUID();
+    if (mode === "different-executor") {
+      prior.executorSha = "1".repeat(40);
+      await f.save("backup-runtime.json", {
+        ...f.runtime,
+        executorSha: prior.executorSha,
+        image: `sha256:${"9".repeat(64)}`,
+      });
+    }
+    if (mode !== "missing-recovery-runtime")
+      await f.save(
+        `recovery-backup-runtime-${f.input.operation.identity.operationId}.json`,
+        f.runtime,
+      );
+    if (mode === "wrong-runtime-executor")
+      await f.save(`recovery-backup-runtime-${f.input.operation.identity.operationId}.json`, {
+        ...f.runtime,
+        executorSha: "2".repeat(40),
+      });
+    if (mode === "wrong-runtime-operation")
+      await rename(
+        join(f.f.root, `recovery-backup-runtime-${f.input.operation.identity.operationId}.json`),
+        join(f.f.root, `recovery-backup-runtime-${randomUUID()}.json`),
+      );
+    const originalRuntime = await readFile(join(f.f.root, "backup-runtime.json"));
+    if (["changed-source-runtime", "changed-recovery-runtime"].includes(mode)) {
+      const verify = f.input.verifySources;
+      f.input.verifySources = async () => {
+        await verify();
+        const name =
+          mode === "changed-source-runtime"
+            ? "backup-runtime.json"
+            : `recovery-backup-runtime-${f.input.operation.identity.operationId}.json`;
+        await f.save(name, (await readFile(join(f.f.root, name))).toString() + " ");
+      };
+    }
+    const state = {
+      version: 1,
+      sequence: 14,
+      previousHealthy: null,
+      current: {
+        identity: prior,
+        phase: "api-started",
+        status: "recovery-required",
+        backup: backupProof(prior),
+      },
+    };
+    const bytes = Buffer.from(JSON.stringify(state));
+    await f.save("state.json", bytes.toString());
+    const admission = {
+      version: 1,
+      kind: "platform-failed-activation-recovery",
+      identity: f.input.operation.identity,
+      predecessor: {
+        identity: prior,
+        sequence: 14,
+        stateSha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+      executorCi: { runId: "123456789", runAttempt: "1" },
+      expiresAt: new Date(Date.now() + 1800000).toISOString(),
+    };
+    await assert.rejects(invoke(f));
+    assert.equal(f.workerCommands(), 0);
+    const execution = withRecoveryState(f.f.root, admission, async (store) => {
+      await store.complete("admitted");
+      await store.enter("target-stopped");
+      await store.complete("target-stopped");
+      await store.enter("backup-verified");
+      const call = () =>
+        store.produceBackup(async (capability) => {
+          if (mode === "changed-sidecar" || mode === "wrong-phase") {
+            const ledger = JSON.parse(await readFile(join(f.f.root, "recovery-state.json")));
+            if (mode === "wrong-phase") ledger.phase = "target-stopped";
+            else ledger.admission.identity.operationId = randomUUID();
+            await f.save("recovery-state.json", ledger);
+          }
+          const input =
+            mode === "wrong-root"
+              ? { ...f.input, operation: { ...f.input.operation, root: join(f.f.root, "other") } }
+              : f.input;
+          const admitted =
+            mode === "expired"
+              ? { ...admission, expiresAt: new Date(Date.now() - 1000).toISOString() }
+              : admission;
+          return targetBackup.createHeldTargetRecoveryBackup(
+            input,
+            mode === "forged" ? {} : capability,
+            admitted,
+            f.options,
+          );
+        });
+      if (!["valid", "different-executor"].includes(mode)) await assert.rejects(call());
+      else {
+        const result = await call();
+        const evidence = JSON.parse(await readFile(result.restoreEvidence.evidencePath));
+        const inventory = JSON.parse(await readFile(result.backup.inventoryPath));
+        assert.equal(evidence.status, "completed");
+        for (const document of [inventory, evidence]) {
+          assert.equal(document.executorSha, f.input.operation.identity.executorSha);
+          assert.equal(document.runtime.image, f.runtime.image);
+        }
+        assert.equal(f.boundaries(), 4);
+        assert.equal(f.docker.containers.size + f.docker.volumes.size, 0);
+      }
+    });
+    if (uncertain) {
+      await assert.rejects(execution, { durabilityUncertain: true });
+      await lstat(join(f.f.root, ".deploy.lock"));
+      assert.ok(f.workerCommands() > 0);
+    } else await execution;
+    assert.deepEqual(await readFile(join(f.f.root, "state.json")), bytes);
+    if (mode !== "changed-source-runtime")
+      assert.deepEqual(await readFile(join(f.f.root, "backup-runtime.json")), originalRuntime);
+    if (!["valid", "different-executor"].includes(mode) && !uncertain)
+      assert.equal(f.workerCommands(), 0);
+  });
+}
+
+test("target backup exposes only its trusted fixed boundary, not injected error metadata", async (t) => {
+  const f = await fixture(t);
+  f.options.runProcess = async () => {
+    throw Object.assign(new Error("secret command output and path"), {
+      targetBackupStage: "secret-stage",
+      stage: "secret-stage",
+    });
+  };
+  await assert.rejects(invoke(f), (error) => {
+    assert.equal(error.code, "ERR_TARGET_BACKUP");
+    assert.equal(error.message, "Target recovery backup failed.");
+    assert.equal(error.targetBackupStage, "entry-observation");
+    assert.ok(!JSON.stringify(error).includes("secret"));
+    return true;
+  });
 });

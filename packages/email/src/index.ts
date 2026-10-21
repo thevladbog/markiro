@@ -23,6 +23,26 @@ import {
   type LandingDemoConfirmationEmailProps,
 } from "./landing-demo-confirmation.js";
 import {
+  LandingDownloadLinkEmail,
+  landingDownloadLinkSubject,
+  type LandingDownloadLinkEmailProps,
+} from "./landing-download-link.js";
+import {
+  LandingInvoiceRequestConfirmationEmail,
+  landingInvoiceRequestConfirmationSubject,
+  type LandingInvoiceRequestConfirmationEmailProps,
+} from "./landing-invoice-request-confirmation.js";
+import {
+  LandingLeadNotificationEmail,
+  landingLeadNotificationSubject,
+  type LandingLeadNotificationEmailProps,
+} from "./landing-lead-notification.js";
+import {
+  LandingLeadDigestEmail,
+  landingLeadDigestSubject,
+  type LandingLeadDigestEmailProps,
+} from "./landing-lead-digest.js";
+import {
   boundedBillingSubjectName,
   TenantBillingNotificationEmail,
   tenantBillingNotificationSubject,
@@ -36,6 +56,10 @@ export type EmailTemplateInput =
   | ({ kind: "platform-user-activation" } & PlatformUserActivationEmailProps)
   | ({ kind: "landing-demo-notification" } & LandingDemoNotificationEmailProps)
   | ({ kind: "landing-demo-confirmation" } & LandingDemoConfirmationEmailProps)
+  | ({ kind: "landing-download-link" } & LandingDownloadLinkEmailProps)
+  | ({ kind: "landing-invoice-request-confirmation" } & LandingInvoiceRequestConfirmationEmailProps)
+  | ({ kind: "landing-lead-notification" } & LandingLeadNotificationEmailProps)
+  | ({ kind: "landing-lead-digest" } & LandingLeadDigestEmailProps)
   | ({ kind: "tenant-billing-notification" } & TenantBillingNotificationEmailProps)
   | ({ kind: "email-verification" } & EmailVerificationEmailProps);
 
@@ -151,6 +175,33 @@ function resolveTemplate(input: EmailTemplateInput): {
         }),
       };
     }
+    case "landing-download-link": {
+      return {
+        subject: landingDownloadLinkSubject(input.locale),
+        replyTo: input.contactEmail,
+        element: createElement(LandingDownloadLinkEmail, input),
+      };
+    }
+    case "landing-invoice-request-confirmation": {
+      return {
+        subject: landingInvoiceRequestConfirmationSubject(input.locale),
+        replyTo: input.contactEmail,
+        element: createElement(LandingInvoiceRequestConfirmationEmail, input),
+      };
+    }
+    case "landing-lead-notification": {
+      return {
+        subject: landingLeadNotificationSubject(input.intent, input.company, input.inn),
+        replyTo: input.email,
+        element: createElement(LandingLeadNotificationEmail, input),
+      };
+    }
+    case "landing-lead-digest": {
+      return {
+        subject: landingLeadDigestSubject(input.digestDate),
+        element: createElement(LandingLeadDigestEmail, input),
+      };
+    }
     case "tenant-billing-notification": {
       const subjectName = boundedBillingSubjectName(input.subjectName);
       return {
@@ -172,6 +223,10 @@ export type {
   EmailVerificationEmailProps,
   LandingDemoConfirmationEmailProps,
   LandingDemoNotificationEmailProps,
+  LandingDownloadLinkEmailProps,
+  LandingInvoiceRequestConfirmationEmailProps,
+  LandingLeadDigestEmailProps,
+  LandingLeadNotificationEmailProps,
   OrganizationInvitationEmailProps,
   PasswordResetEmailProps,
   PlatformUserActivationEmailProps,
@@ -181,3 +236,6 @@ export type {
 export type { LandingLocale } from "./landing-demo-notification.js";
 export type { TenantBillingEventKind } from "./tenant-billing-notification.js";
 export { TENANT_BILLING_EVENT_KINDS } from "./tenant-billing-notification.js";
+export type { LandingLeadIntent } from "./landing-lead-notification.js";
+export type { LandingLeadDigestSection } from "./landing-lead-digest.js";
+export { LANDING_LEAD_DIGEST_SECTIONS, LANDING_LEAD_DIGEST_TITLES } from "./landing-lead-digest.js";

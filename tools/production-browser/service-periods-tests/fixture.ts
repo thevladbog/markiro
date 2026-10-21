@@ -183,6 +183,9 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           capabilities: platformCapabilitiesForRole.platform_admin,
           twoFactorReady: true,
         };
+      } else if (url.pathname === "/api/platform/leads/summary" && method === "GET") {
+        // The rail's lead badge asks for it on every page.
+        json = { newCount: 0 };
       } else if (url.pathname === "/api/platform/catalog/items" && method === "GET") {
         json = { items: [monthlyService] };
       } else if (url.pathname === "/api/platform/settings/demo-plan" && method === "GET") {

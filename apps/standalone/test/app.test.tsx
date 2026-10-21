@@ -67,7 +67,7 @@ import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 import { DEVICE_INFO, deviceLicense } from "./support/license.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { chooseFromUserMenu, openUserMenu } from "./support/user-menu.js";
-import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
+import { completeWizard, expectedRequest } from "./support/wizard.js";
 
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
 const STATION_ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
@@ -378,7 +378,7 @@ describe("App", () => {
     await completeWizard();
     expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledWith("Рабочее место хоста");
-    expect(host.bootstrap).toHaveBeenCalledWith(EXPECTED_REQUEST);
+    expect(host.bootstrap).toHaveBeenCalledWith(expectedRequest());
     // The site must not be created on this computer before it is paired.
     expect(firstCallOrder(device.pairLocally)).toBeLessThan(firstCallOrder(host.bootstrap));
   });

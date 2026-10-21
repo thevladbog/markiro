@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "more devices work a shift of this line than the new limit",
+    "details": { "constraint": "line_stations_in_use", "active": 3 }
+  }
+}

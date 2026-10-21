@@ -808,3 +808,200 @@ describe("offline license from the assignments of a tenant without a cabinet (sp
     ).toBeDefined();
   });
 });
+
+describe("offline demo file of a tenant without a cabinet (spec 2026-10-20 §4.2–4.3)", () => {
+  const PREVIEW = `POST ${BASE}/${STANDALONE_SITE_ID}/issuances/preview`;
+  const CONFIRM = `POST ${BASE}/${STANDALONE_SITE_ID}/issuances`;
+  const TENANT = `GET /api/platform/tenants/${STANDALONE_TENANT_ID}`;
+  const BARE_TENANT = {
+    ...structuredClone(TENANT_DETAIL),
+    tenant: { ...structuredClone(TENANT_DETAIL.tenant), cabinetAccess: "none" },
+    subscriptionStatus: "unmanaged",
+    ownerActivation: null,
+    currentSubscription: null,
+    activeAddons: [],
+    scheduledAddons: [],
+  };
+  const TRIAL_RIGHTS = {
+    quotas: { lines: null, stations: null, kiosks: null, cabinetUsers: null },
+    features: {
+      labelEditor: true,
+      publicApi: true,
+      pallets: true,
+      chzIntegration: true,
+      inventory: true,
+      commerceMl: true,
+      handheld: true,
+      customLogo: true,
+    },
+  };
+  const demoPreview = {
+    ...STANDALONE_PREVIEW,
+    next: {
+      ...STANDALONE_PREVIEW.next,
+      source: "offline_demo",
+      plan: "demo",
+      planVersionId: "00000000-0000-8000-8000-000000000000",
+      validFrom: new Date().toISOString(),
+      validUntilReason: "demo_term",
+      graceDays: 0,
+      sourceAssignments: null,
+      rights: TRIAL_RIGHTS,
+    },
+    warnings: [],
+    expected: { ...STANDALONE_PREVIEW.expected, boundaryAt: null },
+  };
+  const OFFLINE_LIST = { ...STANDALONE_SITE_LIST, issuanceSource: "offline_assignments" };
+
+  async function openIssueDialog(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(
+      within(await siteRow()).getByRole("button", {
+        name: "Выпустить офлайн-лицензию: Цех розлива",
+      }),
+    );
+    return screen.findByRole("dialog", { name: "Выпуск офлайн-лицензии: Цех розлива" });
+  }
+
+  it("does not offer a demo to a tenant with a cabinet", async () => {
+    stubApi({ [`GET ${BASE}`]: [() => jsonResponse(200, STANDALONE_SITE_LIST)] });
+    renderPanel();
+    const dialog = await openIssueDialog(userEvent.setup());
+    expect(within(dialog).queryByRole("radio", { name: /Демо/u })).toBeNull();
+    expect(within(dialog).queryByLabelText("Срок демо, дней")).toBeNull();
+  });
+
+  it("issues a demo with the typed term and no grace; without a tariff it extends the trial", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(REQUEST_ID);
+    const calls = stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [() => jsonResponse(200, BARE_TENANT)],
+      [PREVIEW]: [() => jsonResponse(200, demoPreview)],
+      [CONFIRM]: [() => jsonResponse(200, STANDALONE_FILE)],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("radio", { name: /Демо/u }));
+    expect(within(dialog).queryByLabelText("Льготный срок, дней")).toBeNull();
+    const term = within(dialog).getByLabelText("Срок демо, дней");
+    expect((term as HTMLInputElement).value).toBe("14");
+    expect(
+      within(dialog).getByText(
+        "Без тарифа — продление пробного периода: все возможности, без квот.",
+      ),
+    ).toBeDefined();
+    await user.clear(term);
+    await user.type(term, "30");
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+    const table = await within(dialog).findByRole("table", { name: "Было → станет" });
+    expect(
+      within(within(table).getByRole("row", { name: /Основание/u })).getByText(
+        "демо для клиента без кабинета",
+      ),
+    ).toBeDefined();
+    expect(within(table).getByText(/срок демо/u)).toBeDefined();
+    expect(
+      within(dialog).getByText(
+        "Продление пробного периода: все возможности без квот, без льготного срока.",
+      ),
+    ).toBeDefined();
+    await user.click(within(dialog).getByRole("button", { name: "Подтвердить и скачать" }));
+    await vi.waitFor(() => expect(vi.mocked(saveLicenseFile)).toHaveBeenCalled());
+    expect(calls.filter((call) => call.key.startsWith("POST"))).toEqual([
+      { key: PREVIEW, body: { graceDays: null, offline: null, demo: { termDays: 30 } } },
+      {
+        key: CONFIRM,
+        body: {
+          requestId: REQUEST_ID,
+          graceDays: null,
+          offline: null,
+          demo: { termDays: 30 },
+          expected: demoPreview.expected,
+        },
+      },
+    ]);
+  });
+
+  it("names the bridge when the demo carries the assigned tariff", async () => {
+    const tenant = {
+      ...BARE_TENANT,
+      currentSubscription: {
+        ...structuredClone(TENANT_DETAIL.currentSubscription),
+        status: "active",
+        source: "manual",
+      },
+    };
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [() => jsonResponse(200, tenant)],
+      [PREVIEW]: [
+        () =>
+          jsonResponse(200, {
+            ...demoPreview,
+            next: {
+              ...demoPreview.next,
+              planVersionId: tenant.currentSubscription.planVersionId,
+              sourceAssignments: [
+                {
+                  kind: "plan",
+                  id: tenant.currentSubscription.id,
+                  catalogVersionId: tenant.currentSubscription.planVersionId,
+                },
+              ],
+              rights: STANDALONE_PREVIEW.next.rights,
+            },
+          }),
+      ],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("radio", { name: /Демо/u }));
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+    expect(
+      await within(dialog).findByText(
+        "Мост на время оплаты: права назначенного тарифа до оплаты счёта, без льготного срока.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("refuses a term outside 1 to 45 days before sending anything", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [() => jsonResponse(200, BARE_TENANT)],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("radio", { name: /Демо/u }));
+    const term = within(dialog).getByLabelText("Срок демо, дней");
+    for (const value of ["0", "46", "1.5", ""]) {
+      await user.clear(term);
+      if (value) await user.type(term, value);
+      expect(within(dialog).getByText("Целое число от 1 до 45.")).toBeDefined();
+      expect(within(dialog).getByRole("button", { name: "Предпросмотр" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+    }
+    expect(calls.filter((call) => call.key.startsWith("POST"))).toEqual([]);
+  });
+
+  it("explains the server's refusal of a demo for a tenant with a cabinet", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, OFFLINE_LIST)],
+      [TENANT]: [() => jsonResponse(200, BARE_TENANT)],
+      [PREVIEW]: [() => jsonResponse(409, { code: "standalone_license_demo_offline_only" })],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const dialog = await openIssueDialog(user);
+    await user.click(within(dialog).getByRole("radio", { name: /Демо/u }));
+    await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
+    expect(
+      await within(dialog).findByText(
+        "Демо-файл выпускается только клиенту без кабинета. Обновите страницу.",
+      ),
+    ).toBeDefined();
+  });
+});

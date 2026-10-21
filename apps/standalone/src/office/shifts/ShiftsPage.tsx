@@ -23,6 +23,8 @@ import { shiftProductTitle } from "../../lib/shift-product.js";
 import { useCan } from "../access.js";
 import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
+import { DemoBadge } from "../demo/DemoBadge.js";
+import { isDemoShift } from "../demo/demo.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { listViewState } from "../list/list-state.js";
@@ -277,12 +279,15 @@ export function ShiftsPage() {
       mono: true,
       // The number opens the shift's card (plan О-Ф).
       render: (shift) => (
-        <Link
-          to={shiftCardPath(shift.id)}
-          aria-label={t("office.shifts.cardNamed", { number: shift.number })}
-        >
-          {shift.number}
-        </Link>
+        <span className="shift-cell">
+          <Link
+            to={shiftCardPath(shift.id)}
+            aria-label={t("office.shifts.cardNamed", { number: shift.number })}
+          >
+            {shift.number}
+          </Link>
+          {isDemoShift(shift, products.data) && <DemoBadge />}
+        </span>
       ),
     },
     {
@@ -752,7 +757,11 @@ export function ShiftsPage() {
       )}
       {dialog?.kind === "export" && (
         <Suspense fallback={null}>
-          <ExportDialog shift={dialog.shift} onClose={() => setDialog(null)} />
+          <ExportDialog
+            shift={dialog.shift}
+            demo={isDemoShift(dialog.shift, products.data)}
+            onClose={() => setDialog(null)}
+          />
         </Suspense>
       )}
       {canPlan && dialog?.kind === "plan" && (

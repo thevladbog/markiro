@@ -156,6 +156,19 @@ describe("office products", () => {
     expect(within(rowOf("Айран")).getByText("В архиве")).toBeTruthy();
   });
 
+  it("marks the demo product «Демо» and offers no action on it (spec 2026-10-21)", async () => {
+    const fake = session();
+    fake.api.listProducts.mockResolvedValue([
+      MILK,
+      { ...MILK, id: "0d5e3c1a-7b2f-4c8d-9e0a-1b2c3d4e5f60", name: "Демо: вода", demo: true },
+    ]);
+    await openProducts(fake);
+    const demo = within(rowOf("Демо: вода"));
+    expect(demo.getByText("Демо")).toBeTruthy();
+    expect(hasRowAction(demo, /Изменить/)).toBe(false);
+    expect(hasRowAction(within(rowOf("Молоко 3,2% 0,9 л")), /Изменить/)).toBe(true);
+  });
+
   it("shows the print name as a second line only when it differs from the name", async () => {
     await openProducts(session());
     expect(within(rowOf("Молоко 3,2% 0,9 л")).getByText("Для печати: Молоко 3,2%")).toBeTruthy();

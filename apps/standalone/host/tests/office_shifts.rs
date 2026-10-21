@@ -1540,12 +1540,12 @@ async fn the_office_closes_an_active_shift_with_its_reason() {
     );
     assert_eq!(host_revision(&admin.app).await, 5);
     assert_eq!(
-        audit_trail(&admin.app, "shift.close").await,
+        audit_trail(&admin.app, "shift.force_closed").await,
         vec![admin.row(
-            "shift.close",
+            "shift.force_closed",
             "shift",
             &id,
-            json!({ "reason": "Станция линии 1 вышла из строя" })
+            json!({ "reason": "Станция линии 1 вышла из строя", "notClosed": [] })
         )]
     );
     let (by, kind): (String, String) =
@@ -1914,10 +1914,10 @@ async fn a_reason_is_trimmed_counted_in_characters_and_free_of_control_character
             .await;
         assert_eq!(status, StatusCode::OK, "{reason:?}: {closed}");
         assert_eq!(closed["closeReasonText"], json!(stored), "{reason:?}");
-        let audited = audit_trail(&admin.app, "shift.close").await;
+        let audited = audit_trail(&admin.app, "shift.force_closed").await;
         assert_eq!(
             audited.last().map(|row| row.6.clone()),
-            Some(json!({ "reason": stored })),
+            Some(json!({ "reason": stored, "notClosed": [] })),
             "{reason:?}"
         );
     }
@@ -2059,13 +2059,13 @@ async fn a_technologist_closes_in_their_name_and_a_user_turned_off_or_a_device_c
     let (status, closed) = admin.call_as(&token, "POST", &close, Some(body)).await;
     assert_eq!(status, StatusCode::OK, "{closed}");
     assert_eq!(
-        audit_trail(&admin.app, "shift.close").await,
+        audit_trail(&admin.app, "shift.force_closed").await,
         vec![support::app::audit_row(
             &other,
-            "shift.close",
+            "shift.force_closed",
             "shift",
             &id,
-            json!({ "reason": "Сбой" })
+            json!({ "reason": "Сбой", "notClosed": [] })
         )]
     );
     let (by, kind): (String, String) =

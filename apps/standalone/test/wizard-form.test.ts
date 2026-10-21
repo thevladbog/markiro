@@ -127,6 +127,7 @@ describe("the wizard request", () => {
   it("is trimmed and normalized", () => {
     const request = toBootstrapRequest(
       values({
+        installDemo: false,
         login: " admin ",
         orgName: " ООО «Атолл» ",
         inn: " ",
@@ -160,6 +161,22 @@ describe("the wizard request", () => {
     expect(stepOf("boxNextSerial")).toBe("sscc");
     expect(stepOf("lines.3.name")).toBe("lines");
     expect(stepOf("passwordConfirm")).toBe("admin");
+  });
+});
+
+describe("the wizard's demo data (spec 2026-10-21)", () => {
+  it("is ticked by default and sends the organization's today as the demo shift's date", () => {
+    expect(defaultWizardValues("Линия 1").installDemo).toBe(true);
+    // 21:30 UTC is already the next day in Moscow.
+    const now = new Date("2026-10-20T21:30:00.000Z");
+    expect(toBootstrapRequest(values(), now).demoData).toEqual({ productionDate: "2026-10-21" });
+    expect(bootstrapRequestSchema.parse(toBootstrapRequest(values(), now)).demoData).toEqual({
+      productionDate: "2026-10-21",
+    });
+  });
+
+  it("leaves the field out when unticked", () => {
+    expect("demoData" in toBootstrapRequest(values({ installDemo: false }))).toBe(false);
   });
 });
 

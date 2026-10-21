@@ -62,7 +62,7 @@ import { useHostUpdateCheck } from "../update/use-host-offer.js";
 import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
-import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
+import { purgeAcknowledged, purgeRemovedDemo, scheduleRetention } from "../local/retention.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
@@ -380,6 +380,12 @@ function AppScreens({
       }
       try {
         purged += await purgeWarehouseSessions(localDb, pairing, new Date());
+      } catch (error) {
+        failure ??= error;
+      }
+      // The demo shifts the office removed (spec 2026-10-21) go at once, not after 30 days.
+      try {
+        purged += await purgeRemovedDemo(localDb, pairing);
       } catch (error) {
         failure ??= error;
       }

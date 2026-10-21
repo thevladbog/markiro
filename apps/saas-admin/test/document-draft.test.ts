@@ -99,6 +99,97 @@ function draft(lines: DocumentDraft["lines"] = []): DocumentDraft {
 }
 
 describe("document draft reducer", () => {
+  describe("explicit plan term", () => {
+    const annual = {
+      ...plan,
+      documentNameRu: "Право использования",
+      documentNameEn: "License",
+      subject: "software_license" as const,
+      sellerPolicyRevision: 3,
+    };
+    const withLine = () =>
+      documentDraftReducer(draft(), { type: "catalog.added", version: annual, id: "term" });
+
+    it("turns explicit dates into a quantity-one term line and restores the catalog period", () => {
+      const dated = documentDraftReducer(withLine(), {
+        type: "line.termChanged",
+        id: "term",
+        termStart: "2026-11-01",
+        termEnd: "2027-05-27",
+      });
+      expect(dated.lines[0]).toMatchObject({ quantity: 1, unit: "period" });
+      expect(toInvoiceCreateInput(dated).lines[0]?.commercialTerms).toMatchObject({
+        version: 3,
+        billingPeriod: "custom",
+        termStart: "2026-11-01",
+        termEnd: "2027-05-27",
+        activationRule: "on_application",
+        sellerPolicyRevision: 3,
+      });
+      expect(validateDocumentDraft(dated)).toEqual({});
+      const cleared = documentDraftReducer(dated, {
+        type: "line.termChanged",
+        id: "term",
+        termStart: "",
+        termEnd: "",
+      });
+      expect(cleared.lines[0]?.unit).toBe("месяц");
+      expect(toInvoiceCreateInput(cleared).lines[0]?.commercialTerms).toMatchObject({
+        version: 1,
+        billingPeriod: "month",
+      });
+    });
+
+    it("keeps the term when the activation policy changes and rejects incomplete or reversed ranges", () => {
+      const dated = documentDraftReducer(withLine(), {
+        type: "line.termChanged",
+        id: "term",
+        termStart: "2026-11-01",
+        termEnd: "2027-05-27",
+      });
+      const renewed = documentDraftReducer(dated, {
+        type: "line.policyChanged",
+        id: "term",
+        policy: "after_current",
+      });
+      expect(toInvoiceCreateInput(renewed).lines[0]?.commercialTerms).toMatchObject({
+        version: 3,
+        activationRule: "after_current",
+        termEnd: "2027-05-27",
+      });
+      const partial = documentDraftReducer(withLine(), {
+        type: "line.termChanged",
+        id: "term",
+        termStart: "2026-11-01",
+        termEnd: "",
+      });
+      expect(validateDocumentDraft(partial)["lines.term.term"]).toBe("term_both_dates_required");
+      const reversed = documentDraftReducer(withLine(), {
+        type: "line.termChanged",
+        id: "term",
+        termStart: "2027-05-27",
+        termEnd: "2026-11-01",
+      });
+      expect(validateDocumentDraft(reversed)["lines.term.term"]).toBe("term_end_before_start");
+    });
+
+    it("applies only to plan lines", () => {
+      const withAddon = documentDraftReducer(draft(), {
+        type: "catalog.added",
+        version: addon,
+        id: "addon",
+      });
+      expect(
+        documentDraftReducer(withAddon, {
+          type: "line.termChanged",
+          id: "addon",
+          termStart: "2026-11-01",
+          termEnd: "2027-05-27",
+        }),
+      ).toEqual(withAddon);
+    });
+  });
+
   it("freezes structured annual terms and keeps plan quantity one", () => {
     const annual = {
       ...plan,

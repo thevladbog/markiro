@@ -1,0 +1,39 @@
+---
+import { Picture } from "astro:assets";
+
+import pereval from "../../assets/standalone/clients/mikhaylovsky-pereval-logo.png";
+import perevalWhite from "../../assets/standalone/clients/mikhaylovsky-pereval-logo-white.png";
+import rebelApple from "../../assets/standalone/clients/rebel-apple-logo.png";
+import rebelAppleWhite from "../../assets/standalone/clients/rebel-apple-logo-white.png";
+
+interface Props {
+  kicker: string;
+}
+
+const { kicker } = Astro.props;
+// Logos of customers who agreed to be shown (ООО «АТОЛЛ» for «Михайловский перевал», Rebel Apple).
+const clients = [
+  { name: "Rebel Apple", light: rebelApple, dark: rebelAppleWhite, width: 168, wordmark: false },
+  { name: "Михайловский перевал", light: pereval, dark: perevalWhite, width: 72, wordmark: true },
+] as const;
+const loops = [0, 1, 2] as const;
+---
+
+<section class="ax-clients" aria-labelledby="clients-title">
+  <p class="ax-kicker ax-kicker--muted ax-clients__kicker" id="clients-title">{kicker}</p>
+  <div class="ax-clients__viewport">
+    <div class="ax-clients__track">
+      {loops.map((loop) => (
+        <ul class="ax-clients__list" aria-hidden={loop === 0 ? undefined : "true"}>
+          {clients.map((client) => (
+            <li class="ax-clients__item">
+              <Picture class="ax-clients__logo ax-on-light" src={client.light} alt="" widths={[client.width, client.width * 2]} sizes={`${client.width}px`} formats={["avif", "webp"]} loading="lazy" />
+              <Picture class="ax-clients__logo ax-on-dark" src={client.dark} alt="" widths={[client.width, client.width * 2]} sizes={`${client.width}px`} formats={["avif", "webp"]} loading="lazy" />
+              <span class:list={[client.wordmark ? "ax-clients__name" : "ax-visually-hidden"]}>{client.name}</span>
+            </li>
+          ))}
+        </ul>
+      ))}
+    </div>
+  </div>
+</section>

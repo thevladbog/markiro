@@ -64,10 +64,12 @@ test("builds the production-like enabled landing for the gate unless the caller 
   assert.equal(overridden.PUBLIC_PHONE, "");
 });
 
-test("gates the home page, a commercial topic page, an article and the film", () => {
+test("gates the home, download and pricing pages, a commercial topic page, an article and the film", () => {
   assert.ok(Object.isFrozen(LIGHTHOUSE_ROUTES));
   assert.deepEqual(LIGHTHOUSE_ROUTES, [
     "/",
+    "/skachat/",
+    "/stoimost/",
     "/markirovka-chestny-znak/",
     "/stati/markirovka-piva-2026/",
     "/kak-rabotaet/",

@@ -249,9 +249,14 @@ corepack pnpm test:ci-policy
 corepack pnpm format:check
 ```
 
-The mandatory production-bundle CI job builds the platform edge separately and
-reuses its already-built API. After the legacy stack has been removed, it runs
+The mandatory production-bundle CI job builds the API image and the platform edge
+(with a GitHub Actions layer cache that only main writes; the release workflows
+still build from scratch) and, after the role, backup and recovery harnesses, runs
 `node deploy/platform/ci-stack.mjs --local-ci` with the local image source SHA.
+The landing browser and Lighthouse gates and the SaaS-admin browser suites run in
+their own required jobs (`landing-browser`, `landing-lighthouse`,
+`saas-admin-browser`); the cabinet and station galleries run in the optional
+`cabinet-galleries` and `station-galleries` jobs, outside `ci-required`.
 This harness verifies a local Unix Docker endpoint, uses a unique project,
 synthetic credentials in a protected temporary file and loopback-only edge ports.
 It starts its own Postgres, Mailpit and private SeaweedFS, migrates twice, verifies
@@ -333,7 +338,8 @@ Select a successful `CI` push run on main in this repository for exactly that SH
 PR CI and a successful run for an earlier main commit do not qualify. The resolver
 reads the exact successful run attempt and every jobs page, and requires both
 `production-bundle` and `ci-required` to have completed successfully. Skipped
-mandatory jobs fail the gate. No alternate source SHA input exists.
+mandatory jobs fail the gate; `ci-required` itself fails unless every selected
+required job, the landing and SaaS-admin browser jobs included, succeeded. No alternate source SHA input exists.
 
 For example, after independently selecting and checking the numeric run ID:
 

@@ -48,6 +48,9 @@ for (const width of [390, 1440]) {
               twoFactorReady: true,
             },
           });
+        } else if (url.pathname === "/api/platform/leads/summary") {
+          // The rail's lead badge asks for it on every page.
+          await route.fulfill({ json: { newCount: 0 } });
         } else if (url.pathname === "/api/platform/tenants") {
           await route.fulfill({ json: { items: [tenant], page: 1, limit: 50, total: 1 } });
         } else if (url.pathname === "/api/platform/reports") {

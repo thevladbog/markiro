@@ -18,6 +18,7 @@ import {
 } from "@markiro/domain";
 // setupWarehouseApi binds the server once through listenOnLoopback.
 import { setupWarehouseApi, WAREHOUSE_TEST_SSCC } from "./support/warehouse-reprint";
+import { dropFixtureDatabase } from "./support/fixture-pool";
 const databaseUrl = process.env.DATABASE_URL;
 describe.skipIf(!databaseUrl)("pallet reprint V2 admission", () => {
   const databaseName = `markiro_pallet_api_v2_${randomUUID().replaceAll("-", "_")}`;
@@ -42,7 +43,9 @@ describe.skipIf(!databaseUrl)("pallet reprint V2 admission", () => {
   }, 180000);
   afterAll(async () => {
     if (h) await h.app.close();
-    if (created) await maintenance.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    // The app's pool resolves end() before its sockets close; a bare FORCE drop
+    // then kills a closing client, which surfaces as an unhandled 57P01.
+    if (created) await dropFixtureDatabase(maintenance, databaseName);
     await maintenance.end();
   });
   it("keeps V1 and exposes V2, freezes a selected rendering and audits exact event provenance", async () => {

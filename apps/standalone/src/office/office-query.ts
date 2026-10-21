@@ -44,6 +44,8 @@ export const officeKeys = {
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
+  /** The wizard's demo data (`GET /v1/office/demo-data`, spec 2026-10-21). */
+  demoData: ["office", "demo-data"],
   /** A product's photo (plan ТОВ, `GET /v1/office/products/{id}/photo`); a write changes the list's `photoChecksum` too. */
   productPhoto: (id: string) => ["office", "product-photo", id],
   /** A list row's thumbnail: keyed by the photo's checksum, so a changed photo is read again. */

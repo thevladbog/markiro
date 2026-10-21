@@ -1,7 +1,9 @@
 {
   "variables": {
     "terraform_service_account_id": { "value": "terraform-sa-id" },
-    "app_service_account_id": { "value": "app-runtime-sa-id" }
+    "app_service_account_id": { "value": "app-runtime-sa-id" },
+    "saas_admin_domain": { "value": "saas-admin.markiro.app" },
+    "landing_domain": { "value": "markiro.app" }
   },
   "resource_changes": [
     {
@@ -53,7 +55,16 @@
           "grant": [],
           "force_destroy": false,
           "anonymous_access_flags": [{ "read": true, "list": false, "config_read": false }],
-          "versioning": [{ "enabled": true }]
+          "versioning": [{ "enabled": true }],
+          "cors_rule": [
+            {
+              "allowed_headers": ["content-type"],
+              "allowed_methods": ["PUT"],
+              "allowed_origins": ["https://saas-admin.markiro.app"],
+              "expose_headers": [],
+              "max_age_seconds": 3600
+            }
+          ]
         }
       }
     },
@@ -64,11 +75,11 @@
         "actions": ["update"],
         "before": {
           "bucket": "markiro-station-releases",
-          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowPublicReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\"]},{\"Sid\":\"AllowPublisherReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\"]},{\"Sid\":\"AllowPublisherReleaseBucketPreflight\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"station/*\",\"signer/*\"]}}},{\"Sid\":\"AllowTerraformReleaseManagement\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"terraform-sa-id\"},\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\",\"arn:aws:s3:::markiro-station-releases/*\"]}]}"
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowPublicReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\",\"arn:aws:s3:::markiro-station-releases/handheld/*\"]},{\"Sid\":\"AllowPublisherReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\",\"arn:aws:s3:::markiro-station-releases/handheld/*\"]},{\"Sid\":\"AllowPublisherReleaseBucketPreflight\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"station/*\",\"signer/*\",\"handheld/*\"]}}},{\"Sid\":\"AllowTerraformReleaseManagement\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"terraform-sa-id\"},\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\",\"arn:aws:s3:::markiro-station-releases/*\"]}]}"
         },
         "after": {
           "bucket": "markiro-station-releases",
-          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowPublicReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\",\"arn:aws:s3:::markiro-station-releases/handheld/*\"]},{\"Sid\":\"AllowPublisherReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\",\"arn:aws:s3:::markiro-station-releases/handheld/*\"]},{\"Sid\":\"AllowPublisherReleaseBucketPreflight\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"station/*\",\"signer/*\",\"handheld/*\"]}}},{\"Sid\":\"AllowTerraformReleaseManagement\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"terraform-sa-id\"},\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\",\"arn:aws:s3:::markiro-station-releases/*\"]}]}"
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowPublicReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\",\"arn:aws:s3:::markiro-station-releases/handheld/*\",\"arn:aws:s3:::markiro-station-releases/standalone/*\"]},{\"Sid\":\"AllowPublisherReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\",\"arn:aws:s3:::markiro-station-releases/signer/*\",\"arn:aws:s3:::markiro-station-releases/handheld/*\"]},{\"Sid\":\"AllowPublisherReleaseBucketPreflight\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"station/*\",\"signer/*\",\"handheld/*\"]}}},{\"Sid\":\"AllowStandaloneReleaseApiObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"standalone-api-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/standalone/*\"]},{\"Sid\":\"AllowStandaloneReleaseApiListing\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"standalone-api-sa-id\"},\"Action\":[\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"standalone/*\"]}}},{\"Sid\":\"AllowTerraformReleaseManagement\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"terraform-sa-id\"},\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\",\"arn:aws:s3:::markiro-station-releases/*\"]}]}"
         }
       }
     },
@@ -76,7 +87,7 @@
       "address": "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
       "type": "yandex_storage_bucket_iam_binding",
       "change": {
-        "actions": ["no-op"],
+        "actions": ["update"],
         "before": {
           "bucket": "markiro-station-releases",
           "role": "storage.uploader",
@@ -85,7 +96,7 @@
         "after": {
           "bucket": "markiro-station-releases",
           "role": "storage.uploader",
-          "members": ["serviceAccount:publisher-sa-id"]
+          "members": ["serviceAccount:publisher-sa-id", "serviceAccount:standalone-api-sa-id"]
         }
       }
     },
@@ -113,6 +124,34 @@
           "service_account_id": "publisher-sa-id",
           "access_key": "masked-access-key",
           "encrypted_secret_key": "encrypted-secret",
+          "pgp_key": "base64-pgp-public-key"
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_iam_service_account.standalone_release_api",
+      "type": "yandex_iam_service_account",
+      "change": {
+        "actions": ["no-op"],
+        "before": { "id": "standalone-api-sa-id", "name": "markiro-standalone-release-api" },
+        "after": { "id": "standalone-api-sa-id", "name": "markiro-standalone-release-api" }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api",
+      "type": "yandex_iam_service_account_static_access_key",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "service_account_id": "standalone-api-sa-id",
+          "access_key": "masked-standalone-access-key",
+          "encrypted_secret_key": "encrypted-standalone-secret",
+          "pgp_key": "base64-pgp-public-key"
+        },
+        "after": {
+          "service_account_id": "standalone-api-sa-id",
+          "access_key": "masked-standalone-access-key",
+          "encrypted_secret_key": "encrypted-standalone-secret",
           "pgp_key": "base64-pgp-public-key"
         }
       }
@@ -227,6 +266,7 @@
               "forward_host_header": false,
               "edge_cache_settings": 0,
               "browser_cache_settings": 0,
+              "cors": ["markiro.app"],
               "static_response_headers": {
                 "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
                 "x-content-type-options": "nosniff"

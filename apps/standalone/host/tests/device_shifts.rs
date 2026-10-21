@@ -626,6 +626,27 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
         ("ownerDeviceId", json!(station)),
         ("openedAt", json!(opened_at)),
         ("snapshot", snapshot.clone()),
+        // Plan 2b: the opening answer names the line's limit, the opener's part and the totals.
+        ("maxStations", json!(1)),
+        ("myState", json!("active")),
+        (
+            "totals",
+            json!({ "accepted": 0, "boxesClosed": 0, "pallets": 0, "asOf": opened_at }),
+        ),
+        (
+            "byDevice",
+            json!([{ "deviceId": station, "accepted": 0, "boxesClosed": 0, "pallets": 0 }]),
+        ),
+        (
+            "participants",
+            json!([{
+                "deviceId": station, "deviceKind": "station", "deviceName": "Тестовое устройство",
+                "state": "active", "firstEnteredAt": opened_at, "joinedAt": opened_at,
+                "leftAt": null, "closedAt": null, "closedBy": null, "closedActualQty": null,
+                "closedReasonCode": null, "lateDataAt": null, "lastSeenAt": opened_at,
+                "joinedRev": 6
+            }]),
+        ),
     ] {
         expected[key] = value;
     }

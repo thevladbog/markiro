@@ -258,13 +258,16 @@ try {
     .filter(Boolean);
   assert.deepEqual(queue, [
     "__pgboss__send-it",
+    "anonymize-landing-leads",
     "dispatch-email-outbox",
+    "dispatch-lead-notifications",
     "materialize-subscription-statuses",
     "platform-report-repair",
     "platform-report-run",
     "prune-email-deliveries",
     "reconcile-email-deliveries",
     "send-email-delivery",
+    "send-lead-digest",
   ]);
   evidence.queues = queue;
   await browserSmoke(httpsPort, evidenceDir);

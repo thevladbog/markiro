@@ -66,6 +66,16 @@ pub async fn put_org(
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
+    // The demo prefix's counters are the demo shifts' (spec 2026-10-21): no organization takes
+    // that prefix while the demo data is there.
+    if validate::issuer_prefix(&org.gln) == crate::demo::DEMO_PREFIX
+        && crate::demo::present(&mut tx).await?
+    {
+        return Err(ApiError::validation(
+            "gln",
+            "this GLN's prefix is the demo data's; remove the demo data first",
+        ));
+    }
     let Some(details) = audit::update_details(&[
         ("name", json!(current.name), json!(org.name)),
         ("inn", json!(current.inn), json!(org.inn)),

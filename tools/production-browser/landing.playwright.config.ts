@@ -22,7 +22,9 @@ export default defineConfig({
       ASTRO_TELEMETRY_DISABLED: "1",
       PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
       PUBLIC_PHONE: "+7 960 495-46-10",
-      PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_playwright-test-key",
+      // The same build environment as scripts/landing-build.mjs, so a local run
+      // builds what CI builds once for this suite and the Lighthouse gate.
+      PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_landing-gate-key",
     },
   },
   use: {
