@@ -359,6 +359,8 @@ jobs:
         id: buildx
         with:
           use: false
+          # Removed explicitly below, before the recovery harness.
+          cleanup: false
       - name: Build local SHA-tagged API image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -385,6 +387,10 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=platform-edge
           cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=platform-edge,mode=max,ignore-error=true' || '' }}
+      # The recovery harness accepts only an empty Docker host: no container,
+      # no volume. The cache builder runs as a container with a state volume.
+      - name: Remove the image cache builder
+        run: docker buildx rm "${{ steps.buildx.outputs.name }}"
       - name: Verify isolated PostgreSQL roles and TLS
         run: |
           pnpm --filter @markiro/db build

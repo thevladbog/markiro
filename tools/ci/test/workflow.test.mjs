@@ -638,6 +638,18 @@ test("the platform images reuse a layer cache that only main writes, and never p
   // The backup and recovery harnesses run plain `docker build` and need the
   // default builder, so the cache-capable one must not become the default.
   assert.equal(job.steps[buildx].with.use, false);
+  // recovery-ci.mjs refuses a Docker host with any container or volume, and the
+  // cache builder is a container with a state volume: it goes before the harnesses.
+  const remove = stepByName(job, "Remove the image cache builder");
+  assert.equal(remove.run, `docker buildx rm "\${{ steps.${job.steps[buildx].id}.outputs.name }}"`);
+  const firstHarness = job.steps.findIndex((step) =>
+    /deploy\/platform\/(?:postgres|backup)\/|recovery-ci\.mjs|ci-stack\.mjs/u.test(step.run ?? ""),
+  );
+  assert.ok(job.steps.indexOf(remove) < firstHarness);
+  assert.ok(
+    job.steps.indexOf(remove) >
+      job.steps.indexOf(stepByName(job, "Build local platform-only edge preparation image")),
+  );
   for (const [name, scope] of [
     ["Build local SHA-tagged API image", "platform-api"],
     ["Build local platform-only edge preparation image", "platform-edge"],
