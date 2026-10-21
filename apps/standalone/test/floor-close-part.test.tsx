@@ -314,6 +314,30 @@ describe("the work screen's close of a part (plan 2b)", () => {
     );
   });
 
+  it("a close just written here says it waits in the outbox from the start, not «уточняется» (final review m4)", async () => {
+    const { executor, shift } = await sharedStation("active");
+    // The stored receipt's read never answers: what the panel says is what the close itself knew.
+    const slow: typeof executor = {
+      ...executor,
+      query: (sql, values, schema) =>
+        sql === PART_STATE_SQL ? new Promise(() => undefined) : executor.query(sql, values, schema),
+    };
+    const work = renderWork({ local: slow, shift }, { overrides: { online: true } });
+    await work.settled();
+    await work.press("Закрыть мою часть");
+    await screen.findByRole("region", { name: "Закрытие моей части смены OCT26-004" });
+    await work.press("Подтвердить закрытие части");
+    expect(
+      await screen.findByRole("group", { name: "Ваша часть смены OCT26-004 закрыта" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Ваша часть закрыта на этой станции. Данные будут отправлены автоматически.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/уточняется/)).toBeNull();
+  });
+
   it("offline: the last closer is not asked, and the panel says the office will give the reason", async () => {
     const { executor, shift } = await sharedStation("closed");
     const work = renderWork({ local: executor, shift }, { overrides: { online: false } });
@@ -474,7 +498,7 @@ describe("the closed panel when the part's state is not known (plan 2b, Task 11 
     ).toBeTruthy();
   });
 
-  it("work screen: a failed read is neutral at first and keeps a state it knew before", async () => {
+  it("work screen: a failed read keeps what the close just written here knew (queued, final review m4) and a state it knew before", async () => {
     const { db, executor, shift } = await sharedStation("active");
     let failing = true;
     const flaky = {
@@ -490,8 +514,8 @@ describe("the closed panel when the part's state is not known (plan 2b, Task 11 
     await screen.findByRole("region", { name: "Закрытие моей части смены OCT26-004" });
     await work.press("Подтвердить закрытие части");
     await screen.findByRole("group", { name: "Ваша часть смены OCT26-004 закрыта" });
-    expect(screen.getByText(UNKNOWN)).toBeTruthy();
-    expect(screen.queryByText(QUEUED)).toBeNull();
+    expect(screen.getByText(QUEUED)).toBeTruthy();
+    expect(screen.queryByText(UNKNOWN)).toBeNull();
     failing = false;
     await answer(executor, db, "accepted", { partClosed: true });
     await act(async () => {

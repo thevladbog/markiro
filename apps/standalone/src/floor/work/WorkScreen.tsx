@@ -1489,6 +1489,9 @@ export function WorkScreen(props: WorkScreenProps) {
         const result = await closeShift(boxContextOf(live), reason, guards, live.current.online);
         if (result.kind === "closed") {
           live.current.onRecorded();
+          // The record was just written to the outbox: its part waits there (final review m4),
+          // until the stored receipt's read says more.
+          setPartState("queued");
           setStop({ kind: "closed", record: result.record });
           return;
         }

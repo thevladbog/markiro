@@ -1956,7 +1956,7 @@ shift only this station ever worked keeps stage 2a's rule, offline too; a shared
 online of the last closer, never offline (the host marks it missing). The closed panel says the
 part's state from the stored receipt (`readPartState`: `queued`, `waiting`, `shift_closed`,
 `reason_missing`, `refused`; `unknown` when the copy is gone or the read fails, said as nothing
-rather than as «queued»). The queue screen calls a `shift_closed` record «Закрытие смены станцией».
+rather than as «queued»; a close just written here starts from `queued`, final review m4). The queue screen calls a `shift_closed` record «Закрытие смены станцией».
 
 «Выйти из смены» and a move to another line pause the part (`markLeave`, `leave_requested_at`; a
 sign-out does not); the link sends pauses when online (`sendPendingLeaves`,
