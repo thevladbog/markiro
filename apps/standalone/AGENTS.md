@@ -352,7 +352,7 @@ wrote it; `Workstation` — the PC's own settings (plan 2a7), which outlive any
 pairing. Of the 29 tables 12 are `Disposable`, the 8 of migration `0006`,
 `floor_print_jobs` of `0007`, the two pallet tables of `0008`, the three warehouse tables of
 `0012`, `floor_block_drops` of `0013` and `floor_unit_labels` of `0015` are `DeviceData` (below), and
-`workstation_settings` of `0007` is the one `Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
+`workstation_settings` of `0007` is the one `Workstation` table. `floor_shift_participation` (plan 2b, `0022`: a shared shift's figures) is `Disposable`. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables
 (`no_table_has_a_foreign_key`): a plain key fails the forget at its `DELETE`,
@@ -1919,6 +1919,62 @@ while the answer of one shift (an entry, a leave, a closed shift read back) carr
 non-planned status; `OfficeShift` carries
 `participants`, `byDevice` and `closeReasonMissing`. The export's `stationClosedAt` is the latest accepted close
 instant of the shift's devices (`NULL` when the office closed it).
+
+### Several devices in one shift: the station (plan 2b)
+
+`docs/superpowers/plans/2026-10-20-multi-station-station.md`. Every entry names
+`multi-station-v1` (`STATION_SHIFT_ENTER`, `shift-enter-multi.json`). What the host's list and the
+answers of an entry and a leave say of a shared shift (`maxStations`, `participants`, `myState`,
+`totals`, `byDevice`, and this station's own `participants[].joinedRev` as `joined_rev`) is kept
+in `floor_shift_participation` (shell migration `0022`, `TableClass::Disposable`, and in
+`RETAINED_TABLES` of the retention pass with a pair in `local_db.rs`;
+`src/floor/shifts/shift-participation.ts`): one row per shift, written with the copy in the same
+transaction, never recalculated, a read older than the row's `as_of` ignored unless the station
+saw the row more than a minute before (a host clock set back); every list read drops the rows of
+shifts the pairing no longer keeps. The host's list carries `totals` and `byDevice` for active
+shifts only: a closed list item updates the participants and `myState` of a row already there and
+keeps its figures (`COALESCE` against the stored row), and makes no row where none is kept (never
+zeros). A shift is shared when `maxStations > 1` or more than one device ever entered
+(`sharedParticipation`); a solo station on a line of one sees stage 2a.
+
+The hub card joins («Присоединиться», online only) while the other devices hold fewer slots than
+the limit, says «Линия занята: N из M» with no action, names who works the shift when another
+device does, and says a part the host reports closed; a refusal `shift_line_full` is said with its
+numbers, an entry answered `myState: "closed"` is `part_closed`, enters no copy and caches the
+answer's figures; a shared shift's progress is the whole shift's. The work screen's band shows
+«Всего в смене» K (the others' part by the host plus this station's own codes, `sharedCount`)
+against the plan and «Моя станция» N, the group named «Моя станция: N · Всего в смене: K из M»,
+and «данные от ЧЧ:ММ» while the link is down; it asks the link for the list every 15 s while
+shared and online (`useShiftParticipation`, `HostLinkControls.requestShifts`: another device's
+scan takes no revision). The plan notice comes when K reaches the plan.
+
+«Закрыть мою часть» keeps stage 2a's blockers and transaction; the reason follows
+`stationReasonRequired` (the host's `reason_need`, fixture `shift-close-reason-shared.json`): a
+shift only this station ever worked keeps stage 2a's rule, offline too; a shared close asks it only
+online of the last closer, never offline (the host marks it missing). The closed panel says the
+part's state from the stored receipt (`readPartState`: `queued`, `waiting`, `shift_closed`,
+`reason_missing`, `refused`; `unknown` when the copy is gone or the read fails, said as nothing
+rather than as «queued»). The queue screen calls a `shift_closed` record «Закрытие смены станцией».
+
+«Выйти из смены» and a move to another line pause the part (`markLeave`, `leave_requested_at`; a
+sign-out does not); the link sends pauses when online (`sendPendingLeaves`,
+`HostLinkControls.requestLeaves`) with the body `{ joinedRev }` from `joined_rev` (no body when
+none is kept). The sender settles only a permanent refusal (`not_found`, `shift_not_entered`,
+`validation_failed`); every other failure keeps the pause queued and does not block the pauses
+behind it. An answer whose `myState` is still `active` settles it as already re-entered (the host
+saw a later stay and wrote nothing), and any entry, online or offline, drops a pending one. Known
+limit: a pause in flight while the operator re-enters an active part carries the still-current
+token and may reach the host after the entry. `SYNC_SCHEMA_VERSION` stays 5.
+
+Known limits and release order:
+
+- Participant names are cut at one line at 860 px and narrower (tap-to-expand later); the 1280x720
+  second card of an unshared pair clips 3 px, outside the guard matrix.
+- The shell CSS of the band and cards uses `:has()` (Chromium 105+, WebView2 is newer).
+- `test/station-fit.browser.test.ts` takes about 13–23 minutes (`PLAYWRIGHT_CORE`); run it with
+  `work-screen-fit.browser.test.ts` when the hub or the band changes.
+- Release the host (protocol 7) first; a 1.1.0 station must land before it joins a multi-device
+  line, and a station older than that is `shift_busy` on a shared shift.
 
 ## Signed documents and trust keys
 
