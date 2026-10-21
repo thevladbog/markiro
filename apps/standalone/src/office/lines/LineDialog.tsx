@@ -59,7 +59,12 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
   const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token), {
     enabled: editsLimit,
   });
-  const inUse = mode.kind === "rename" ? activeStationsOnLine(shifts.data, mode.line.id) : null;
+  // The host's count leaves revoked devices out, so the devices are read too; unread, the host decides.
+  const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
+    enabled: editsLimit,
+  });
+  const inUse =
+    mode.kind === "rename" ? activeStationsOnLine(shifts.data, mode.line.id, devices.data) : null;
   const schema = useMemo(() => lineFieldsSchema(inUse), [inUse]);
   const save = useOfficeMutation((api, token, values: LineFields) => {
     switch (mode.kind) {

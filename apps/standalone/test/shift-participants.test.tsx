@@ -97,6 +97,12 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
     ]);
   });
 
+  it("names a device by its id when the host sent no name", async () => {
+    const nameless = { ...SHARED, participants: [participant({ deviceName: "" })] };
+    await openCard(shiftsSession([nameless]), "OCT26-004", "Станции");
+    expect(stationsRows()[0]?.[0]).toMatch(/^Устройство 7c9e6679….*Станция/);
+  });
+
   it("says a paused device is paused, and shows no silence for it", async () => {
     vi.setSystemTime(new Date("2026-10-08T10:00:00Z"));
     const paused = {

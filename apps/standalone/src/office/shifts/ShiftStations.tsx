@@ -47,7 +47,11 @@ export function ShiftStations({ shift, at }: ShiftStationsProps) {
       minWidth: 150,
       render: (each) => (
         <span className="shift-cell">
-          <span className="shift-cell__name">{each.deviceName}</span>
+          <span className="shift-cell__name">
+            {each.deviceName === ""
+              ? t("office.shifts.totals.unknownDevice", { id: each.deviceId.slice(0, 8) })
+              : each.deviceName}
+          </span>
           <span className="shift-cell__quiet">{t(`office.devices.kinds.${each.deviceKind}`)}</span>
         </span>
       ),

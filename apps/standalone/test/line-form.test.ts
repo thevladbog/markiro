@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
 import { HostError } from "../src/host/client.js";
+import type { DeviceRecord } from "../src/host/protocol.js";
 import { MAX_STATIONS } from "../src/host/protocol.js";
 import { maxStationsRule } from "../src/lib/rules.js";
 import {
@@ -15,9 +16,24 @@ import {
   SHARED,
   ACTIVE,
   CLOSED,
+  HANDHELD_ID,
+  STATION_ID,
   LINE_2,
   LINE_10,
 } from "./support/shifts.js";
+
+const device = (id: string, revokedAt: string | null): DeviceRecord => ({
+  id,
+  kind: "station",
+  name: "Станция",
+  lineId: LINE_2.id,
+  appVersion: "0.1.0",
+  pairedAt: "2026-09-26T09:15:00Z",
+  lastSeenAt: null,
+  revokedAt,
+});
+/** Both devices of SHARED, neither revoked. */
+const LIVE = [device(STATION_ID, null), device(HANDHELD_ID, null)];
 
 const message = (rule: z.ZodType, text: string) => rule.safeParse(text).error?.issues[0]?.message;
 
@@ -39,16 +55,26 @@ describe("the busiest active shift of a line", () => {
       id: "a1",
       participants: [participant({ state: "left" }), PARTICIPANT_B],
     };
-    expect(activeStationsOnLine([SHARED], LINE_2.id)).toBe(2);
-    expect(activeStationsOnLine([quiet, SHARED], LINE_2.id)).toBe(2);
-    expect(activeStationsOnLine([quiet], LINE_2.id)).toBe(1);
+    expect(activeStationsOnLine([SHARED], LINE_2.id, LIVE)).toBe(2);
+    expect(activeStationsOnLine([quiet, SHARED], LINE_2.id, LIVE)).toBe(2);
+    expect(activeStationsOnLine([quiet], LINE_2.id, LIVE)).toBe(1);
   });
 
   it("is zero for a line with no active shift or with one of an older host, null while unread", () => {
-    expect(activeStationsOnLine([SHARED], LINE_10.id)).toBe(0);
-    expect(activeStationsOnLine([ACTIVE, CLOSED], LINE_2.id)).toBe(0);
-    expect(activeStationsOnLine([{ ...SHARED, status: "closed" }], LINE_2.id)).toBe(0);
-    expect(activeStationsOnLine(undefined, LINE_2.id)).toBeNull();
+    expect(activeStationsOnLine([SHARED], LINE_10.id, LIVE)).toBe(0);
+    expect(activeStationsOnLine([ACTIVE, CLOSED], LINE_2.id, LIVE)).toBe(0);
+    expect(activeStationsOnLine([{ ...SHARED, status: "closed" }], LINE_2.id, LIVE)).toBe(0);
+    expect(activeStationsOnLine(undefined, LINE_2.id, LIVE)).toBeNull();
+  });
+
+  it("does not count a revoked device: the host's slots are the live devices'", () => {
+    const revoked = [device(STATION_ID, null), device(HANDHELD_ID, "2026-10-08T12:00:00Z")];
+    expect(activeStationsOnLine([SHARED], LINE_2.id, revoked)).toBe(1);
+  });
+
+  it("counts a device the list lacks, and claims nothing while the devices are unread", () => {
+    expect(activeStationsOnLine([SHARED], LINE_2.id, [])).toBe(2);
+    expect(activeStationsOnLine([SHARED], LINE_2.id, undefined)).toBeNull();
   });
 });
 

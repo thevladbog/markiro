@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { HostError } from "../../host/client.js";
-import type { OfficeShift } from "../../host/protocol.js";
+import type { DeviceRecord, OfficeShift } from "../../host/protocol.js";
 import { lineNameRule, maxStationsRule } from "../../lib/rules.js";
 import { activeParticipants } from "../shifts/participation.js";
 
@@ -27,18 +27,24 @@ export type LineFields = z.input<ReturnType<typeof lineFieldsSchema>>;
 
 /**
  * The most active participants of any active shift of the line (the host counts the same: «the
- * busiest active shift's live slots»); `0` for a line nobody works, `null` while the shifts are not
- * read, so the form claims nothing.
+ * busiest active shift's live slots», and a revoked device holds no slot there, so it is left out
+ * here by the devices list); `0` for a line nobody works, `null` while the shifts or the devices
+ * are not read, so the form claims nothing and the host decides.
  */
 export function activeStationsOnLine(
   shifts: readonly OfficeShift[] | undefined,
   lineId: string,
+  devices: readonly DeviceRecord[] | undefined,
 ): number | null {
-  if (shifts === undefined) return null;
+  if (shifts === undefined || devices === undefined) return null;
+  const revoked = new Set(devices.filter((each) => each.revokedAt !== null).map((each) => each.id));
   let busiest = 0;
   for (const shift of shifts) {
     if (shift.lineId !== lineId || shift.status !== "active") continue;
-    busiest = Math.max(busiest, activeParticipants(shift).length);
+    busiest = Math.max(
+      busiest,
+      activeParticipants(shift).filter((each) => !revoked.has(each.deviceId)).length,
+    );
   }
   return busiest;
 }

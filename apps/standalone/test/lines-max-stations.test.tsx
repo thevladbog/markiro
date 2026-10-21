@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import type { OfficeLine } from "../src/host/protocol.js";
+import type { DeviceRecord, OfficeLine } from "../src/host/protocol.js";
 import {
   fakeOfficeSession,
   renderOffice,
@@ -10,7 +10,7 @@ import {
   type FakeOfficeSession,
 } from "./support/office.js";
 import { pressRowAction } from "./support/row-menu.js";
-import { LINE_10, LINE_2, SHARED } from "./support/shifts.js";
+import { HANDHELD_ID, LINE_10, LINE_2, SHARED, STATION_ID } from "./support/shifts.js";
 
 const TOKEN = "office-session-token";
 const THREE: OfficeLine = { ...LINE_2, maxStations: 3 };
@@ -18,11 +18,23 @@ const LABEL = "Максимум станций в смене";
 const IN_USE = "Сейчас в смене работают 2 устройства: меньше поставить нельзя.";
 const BELOW = "В смене этой линии работают 2 устройства: максимум не может быть меньше.";
 
+const device = (id: string, revokedAt: string | null): DeviceRecord => ({
+  id,
+  kind: "station",
+  name: "Станция",
+  lineId: LINE_2.id,
+  appVersion: "0.1.0",
+  pairedAt: "2026-09-26T09:15:00Z",
+  lastSeenAt: null,
+  revokedAt,
+});
+
 function session(): FakeOfficeSession {
   const fake = fakeOfficeSession();
   // Line 2 allows three devices and two work its shift; line 10 is a line of an older host.
   fake.api.listLines.mockResolvedValue([LINE_10, THREE]);
   fake.api.listShifts.mockResolvedValue([SHARED]);
+  fake.api.listDevices.mockResolvedValue([device(STATION_ID, null), device(HANDHELD_ID, null)]);
   return fake;
 }
 
@@ -98,6 +110,48 @@ describe("the line's limit in the office (plan 2b)", () => {
         expectedRev: 40,
       }),
     );
+  });
+
+  it("does not count a revoked device that is still active in the shift: the host does not", async () => {
+    const fake = session();
+    fake.api.listDevices.mockResolvedValue([
+      device(STATION_ID, null),
+      device(HANDHELD_ID, "2026-10-08T12:00:00Z"),
+    ]);
+    fake.api.updateLine.mockResolvedValue({ ...THREE, maxStations: 1, rev: 41 });
+    const dialog = await openRename(fake);
+    expect(
+      await within(dialog).findByText(
+        "Сейчас в смене работает 1 устройство: меньше поставить нельзя.",
+      ),
+    ).toBeTruthy();
+    typeLimit("1");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fake.api.updateLine).toHaveBeenCalledWith(TOKEN, THREE.id, {
+        maxStations: 1,
+        expectedRev: 40,
+      }),
+    );
+  });
+
+  it("leaves the verdict to the host while the devices are unread, and shows its refusal", async () => {
+    const fake = session();
+    fake.api.listDevices.mockRejectedValue(new Error("down"));
+    fake.api.updateLine.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "more devices work a shift of this line than the new limit",
+        details: { constraint: "line_stations_in_use", active: 2 },
+      }),
+    );
+    const dialog = await openRename(fake);
+    typeLimit("1");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сохранить" }));
+    expect(await within(dialog).findByText(BELOW)).toBeTruthy();
+    expect(fake.api.updateLine).toHaveBeenCalledTimes(1);
   });
 
   it("puts the host's refusal under the field with the host's count", async () => {
