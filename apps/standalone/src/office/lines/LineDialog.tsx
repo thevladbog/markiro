@@ -46,7 +46,7 @@ export interface LineDialogProps {
  * active line already has (without case) comes back as `conflict` on `line_name` on every path
  * here — adding, changing and bringing a line back — and goes under the name, so bringing a line
  * back can give it a new name in the same dialog. The limit is not offered when a line is added
- * (it starts at one), or brought back; changing it below the devices at work is refused here as
+ * (it starts at one), brought back, or comes from a host before protocol 7 (it has no limit to change); changing it below the devices at work is refused here as
  * soon as the shifts are read, and by the host (`line_stations_in_use`) whatever the page knew.
  */
 export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps) {
@@ -55,7 +55,9 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   // How many devices work the line, as the host last said when it refused a lower limit.
   const [hostInUse, setHostInUse] = useState<number | null>(null);
-  const editsLimit = mode.kind === "rename";
+  // A host before protocol 7 sends no limit for a line, and its `LineUpdate` refuses the field
+  // (deny_unknown_fields): the limit is offered only for a line the host gave one.
+  const editsLimit = mode.kind === "rename" && mode.line.maxStations !== undefined;
   const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token), {
     enabled: editsLimit,
   });

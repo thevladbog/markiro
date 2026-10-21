@@ -204,6 +204,25 @@ describe("the line's limit in the office (plan 2b)", () => {
     expect(within(dialog).queryByText(BELOW)).toBeNull();
   });
 
+  it("offers no limit for a line of a host before protocol 7: its update refuses the field", async () => {
+    const fake = session();
+    fake.api.updateLine.mockResolvedValue({ ...LINE_10, name: "Линия Десять", rev: 42 });
+    await openLines(fake);
+    pressRowAction(screen, "Переименовать линию «Линия 10»");
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText(LABEL)).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText("Название линии"), {
+      target: { value: "Линия Десять" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fake.api.updateLine).toHaveBeenCalledWith(TOKEN, LINE_10.id, {
+        name: "Линия Десять",
+        expectedRev: 41,
+      }),
+    );
+  });
+
   it("refuses a limit that is not a whole number from 1 to 16", async () => {
     const fake = session();
     const dialog = await openRename(fake);
