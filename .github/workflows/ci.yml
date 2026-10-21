@@ -307,7 +307,10 @@ jobs:
   production-bundle:
     needs: classify-changes
     if: needs.classify-changes.outputs.production_bundle == 'true'
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 (ubuntu-latest since October 2026) the backup
+    # harness's recovery-image export fails with ERR_RECOVERY_IMAGE (runs
+    # 39549522646, 39544537071; 24.04 passes). Move together with a harness fix.
+    runs-on: ubuntu-24.04
     # Galleries, image builds and landing checks take ~20 minutes on slow runners.
     # Leave time for migrations and the production/API-docs smoke checks as well.
     # The shift and National Catalog import instruction frames added ~4 minutes
