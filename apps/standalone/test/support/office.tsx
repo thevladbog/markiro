@@ -162,6 +162,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateShift: vi.fn<HostApi["updateShift"]>(() => unexpected("updateShift")),
     deleteShift: vi.fn<HostApi["deleteShift"]>(() => unexpected("deleteShift")),
     closeShift: vi.fn<HostApi["closeShift"]>(() => unexpected("closeShift")),
+    setShiftCloseReason: vi.fn<HostApi["setShiftCloseReason"]>(() =>
+      unexpected("setShiftCloseReason"),
+    ),
     getShiftExportSource: vi.fn<HostApi["getShiftExportSource"]>(() =>
       unexpected("getShiftExportSource"),
     ),

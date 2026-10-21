@@ -217,6 +217,7 @@ import {
   type ProductGroup,
   type ProductUpdate,
   type ShiftClose,
+  type ShiftCloseReasonSet,
   type ShiftCreate,
   type ShiftEnter,
   type ShiftLeave,
@@ -457,6 +458,15 @@ export interface HostApi {
   /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
   deleteShift: (token: string, id: string) => Promise<void>;
   closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
+  /**
+   * `PUT …/close-reason` (plan 2b): the reason of a shared shift its devices closed without one;
+   * `conflict` on `close_reason_not_missing` once it is set. Administrators and technologists.
+   */
+  setShiftCloseReason: (
+    token: string,
+    id: string,
+    set: ShiftCloseReasonSet,
+  ) => Promise<OfficeShift>;
   /**
    * What the shift's exports are built from, in one snapshot of the host
    * (plan ЧЗ); every office role. A planned shift answers with empty lists.
@@ -1263,6 +1273,12 @@ export function createHostApi(client: HostClient): HostApi {
     closeShift: (token, id, close) =>
       client.request("POST", `/v1/office/shifts/${id}/close`, {
         body: close,
+        officeToken: token,
+        schema: officeShiftSchema,
+      }),
+    setShiftCloseReason: (token, id, set) =>
+      client.request("PUT", `/v1/office/shifts/${id}/close-reason`, {
+        body: set,
         officeToken: token,
         schema: officeShiftSchema,
       }),

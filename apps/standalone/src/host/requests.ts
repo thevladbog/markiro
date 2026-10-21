@@ -23,6 +23,7 @@ import type {
   ProductCreate,
   ProductUpdate,
   ShiftClose,
+  ShiftCloseReasonSet,
   ShiftCreate,
   ShiftEnter,
   ShiftExportRecord,
@@ -123,24 +124,35 @@ export function lineCreate(name: string): LineCreate {
 
 /**
  * What a line is to become; `lineUpdate` sends what differs from the loaded
- * line. `name` is the trimmed value `lineNameRule` accepted.
+ * line. `name` is the trimmed value `lineNameRule` accepted. `maxStations` is
+ * the line's limit of devices in one shift (plan 2b), the number
+ * `maxStationsRule` accepted; left out, the limit is not touched.
  */
 export interface LineChange {
   name: string;
   archived: boolean;
+  maxStations?: number;
+}
+
+/** A line's limit of devices in one shift; a host before protocol 7 sends none, which is one. */
+export function lineMaxStations(line: Pick<OfficeLine, "name" | "maxStations">): number {
+  return line.maxStations ?? 1;
 }
 
 /**
- * `PUT /v1/office/lines/{id}` (`line-update.json`): only the fields that
- * change, with the loaded revision.
+ * `PUT /v1/office/lines/{id}` (`line-update.json`, `line-update-max-stations.json`):
+ * only the fields that change, with the loaded revision.
  */
 export function lineUpdate(
-  line: Pick<OfficeLine, "name" | "archived" | "rev">,
+  line: Pick<OfficeLine, "name" | "archived" | "rev" | "maxStations">,
   next: LineChange,
 ): LineUpdate {
   const update: LineUpdate = { expectedRev: line.rev };
   if (next.name !== line.name) update.name = next.name;
   if (next.archived !== line.archived) update.archived = next.archived;
+  if (next.maxStations !== undefined && next.maxStations !== lineMaxStations(line)) {
+    update.maxStations = next.maxStations;
+  }
   return update;
 }
 
@@ -593,6 +605,14 @@ export function shiftUpdate(
  */
 export function shiftClose(reason: string, expectedRev: number): ShiftClose {
   return { reason, expectedRev };
+}
+
+/**
+ * `PUT /v1/office/shifts/{id}/close-reason` (`shift-close-reason-set.json`, plan 2b): one of the
+ * six reason codes for a shared shift its devices closed without one, over the loaded revision.
+ */
+export function shiftCloseReasonSet(reasonCode: string, expectedRev: number): ShiftCloseReasonSet {
+  return { reasonCode, expectedRev };
 }
 
 /**
