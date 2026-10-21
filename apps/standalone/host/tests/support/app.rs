@@ -235,6 +235,40 @@ pub fn bootstrap_body() -> Value {
     })
 }
 
+/// [`bootstrap_body`] with stock box and pallet templates (the organization's defaults) and the
+/// demo data (spec 2026-10-21), its shift produced on 2026-10-21.
+pub fn demo_bootstrap_body() -> Value {
+    let spec = |width: u32| serde_json::json!({ "widthMm": width, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] });
+    let mut body = bootstrap_body();
+    body["templates"] = serde_json::json!([
+        { "name": "Коробка 58×40", "purpose": "box", "spec": spec(58), "orgDefault": true },
+        { "name": "Паллета 100×150", "purpose": "pallet", "spec": spec(100), "orgDefault": true }
+    ]);
+    body["demoData"] = serde_json::json!({ "productionDate": "2026-10-21" });
+    body
+}
+
+/// [`admin_of`] a new host whose wizard installed the demo data ([`demo_bootstrap_body`]).
+pub async fn demo_admin() -> Admin {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let (status, body) = app
+        .send(json(
+            with_device(request("POST", "/v1/bootstrap"), &key),
+            demo_bootstrap_body(),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let token = body["session"]["token"].as_str().unwrap().to_owned();
+    let id = body["session"]["user"]["id"].as_str().unwrap().to_owned();
+    Admin {
+        app,
+        key,
+        token,
+        id,
+    }
+}
+
 /// Run the wizard from loopback with `device_key`; returns the admin's token.
 pub async fn bootstrap(app: &TestApp, device_key: &str) -> String {
     let (status, body) = app

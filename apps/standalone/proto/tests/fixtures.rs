@@ -23,9 +23,9 @@ use markiro_proto::{
     ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use markiro_proto::{
-    receipt_codes, shift_supports, BoxRegistryItem, BoxRegistryKind, BoxRegistryPage, DemoDataSummary,
-    OfficeWarehousePallets, OrgPrint, PalletBoxAddedData, PalletBoxRemovedData, PalletEventBatch,
-    PalletEventKind, UserAvatarPut, UserAvatarState, WarehousePalletClosedData,
+    receipt_codes, shift_supports, BoxRegistryItem, BoxRegistryKind, BoxRegistryPage,
+    DemoDataSummary, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData, PalletBoxRemovedData,
+    PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState, WarehousePalletClosedData,
     WarehousePalletLabelData, WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -2245,7 +2245,10 @@ fn demo_data_fixtures_round_trip_and_an_older_record_is_no_demo() {
     assert!(!real.demo);
 
     let summary: DemoDataSummary = round_trip("demo-data-summary.json");
-    assert_eq!((summary.present, summary.boxes, summary.pallets), (true, 4, 2));
+    assert_eq!(
+        (summary.present, summary.boxes, summary.pallets),
+        (true, 4, 2)
+    );
     assert_eq!(summary.active_shifts, vec!["DEMO-001".to_owned()]);
 }
 
