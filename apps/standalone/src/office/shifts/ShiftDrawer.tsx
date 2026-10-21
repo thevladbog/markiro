@@ -41,6 +41,7 @@ import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
+import { CloseReasonDialog } from "./CloseReasonDialog.js";
 import {
   endsWithTail,
   isLateBox,
@@ -88,7 +89,7 @@ const PACK_PHASE = {
 /** Counts with the thousands apart by a no-break space: «1 200». */
 const UNITS = new Intl.NumberFormat("ru");
 
-type CardDialog = "export" | "close";
+type CardDialog = "export" | "close" | "reason";
 
 /** The sections of the drawer, in the order of its tabs. */
 export const DRAWER_TABS = [
@@ -376,6 +377,11 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
             {t(isSharedShift(current) ? "office.shifts.closeAll" : "office.shifts.close")}
           </Button>
         )}
+        {canPlan && current.status === "closed" && current.closeReasonMissing === true && (
+          <Button variant="secondary" onClick={() => setDialog("reason")}>
+            {t("office.shifts.supplyReason")}
+          </Button>
+        )}
         {current.status !== "closed" && (
           <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
             {t("office.shiftCard.taskForm")}
@@ -474,6 +480,22 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
           onClosed={(closed) => {
             setDialog(null);
             setNotice(t("office.shifts.closed", { number: closed.number }));
+            readAgain();
+          }}
+          onReload={() => {
+            setDialog(null);
+            readAgain();
+          }}
+          onOutdated={readAgain}
+        />
+      )}
+      {canPlan && dialog === "reason" && (
+        <CloseReasonDialog
+          shift={current}
+          onClose={() => setDialog(null)}
+          onSaved={(saved) => {
+            setDialog(null);
+            setNotice(t("office.shifts.reasonSaved", { number: saved.number }));
             readAgain();
           }}
           onReload={() => {
