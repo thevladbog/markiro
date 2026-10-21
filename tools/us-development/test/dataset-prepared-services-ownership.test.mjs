@@ -5,6 +5,10 @@ import test from "node:test";
 import { load } from "js-yaml";
 import { checkWorkflows } from "../check-isolation.mjs";
 import {
+  withoutCompleteSeedOwner,
+  withoutCompleteSeedOwnerBytes,
+} from "./support/complete-seed-owner.mjs";
+import {
   assertSupplementalOwnership,
   withoutCasesRegressionWorkflow,
 } from "./support/cases-regression-owner.mjs";
@@ -199,7 +203,9 @@ for (const [id, name] of [
   expectedJobs[id] = job;
 }
 
-const source = readFileSync(".github/workflows/us-development.yml", "utf8");
+const source = withoutCompleteSeedOwnerBytes(
+  readFileSync(".github/workflows/us-development.yml", "utf8"),
+);
 const workflow = load(source);
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const hash = (value) => digest(JSON.stringify(value));
@@ -209,7 +215,10 @@ const readWorkflows = () =>
   Object.fromEntries(
     readdirSync(".github/workflows")
       .filter((name) => /\.ya?ml$/.test(name))
-      .map((name) => [name, load(readFileSync(`.github/workflows/${name}`, "utf8"))]),
+      .map((name) => [
+        name,
+        withoutCompleteSeedOwner(load(readFileSync(`.github/workflows/${name}`, "utf8"))),
+      ]),
   );
 
 // Preserve the original complete predecessor pins, including its 30-minute Trace

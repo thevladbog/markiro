@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import { withoutCompleteSeedOwner, withoutCompleteSeedOwnerBytes } from "./complete-seed-owner.mjs";
 
 const previousCommand =
   "corepack pnpm --filter @markiro/api exec vitest run test/us-six-month-references.test.ts test/us-six-month-chains.test.ts test/us-six-month-definition.test.ts --maxWorkers=1";
@@ -51,12 +52,14 @@ function hasExactCanonicalTestsOwner(workflow) {
 // Restore only the exact reviewed addition. Any altered selection, owner, guard
 // or failure handling remains visible to the unchanged historical workflow pins.
 export function withoutCanonicalTestsOwner(workflow) {
+  workflow = withoutCompleteSeedOwner(workflow);
   const result = structuredClone(workflow);
   if (hasExactCanonicalTestsOwner(workflow)) result.jobs.isolation.steps[22].run = previousCommand;
   return result;
 }
 
 export function withoutCanonicalTestsOwnerBytes(source) {
+  source = withoutCompleteSeedOwnerBytes(source);
   if (!hasExactCanonicalTestsOwner(load(source)) || source.split(block).length !== 2) return source;
   return source.replace(block, block.replace(command, previousCommand));
 }

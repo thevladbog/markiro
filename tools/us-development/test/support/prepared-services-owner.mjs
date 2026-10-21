@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import { withoutCompleteSeedOwner, withoutCompleteSeedOwnerBytes } from "./complete-seed-owner.mjs";
 import {
   withoutCanonicalTestsOwner,
   withoutCanonicalTestsOwnerBytes,
@@ -197,6 +198,7 @@ export function hasExactPreparedServicesOwner(workflow) {
 }
 
 export function withoutPreparedServicesOwner(workflow) {
+  workflow = withoutCompleteSeedOwner(workflow);
   if (!hasExactPreparedServicesOwner(workflow)) return structuredClone(workflow);
   const result = withoutCanonicalTestsOwner(workflow);
   for (const id of preparedServicesJobIds) delete result.jobs[id];
@@ -204,6 +206,7 @@ export function withoutPreparedServicesOwner(workflow) {
 }
 
 export function withoutPreparedServicesOwnerBytes(source) {
+  source = withoutCompleteSeedOwnerBytes(source);
   if (
     !hasExactPreparedServicesOwner(load(source)) ||
     source.split(preparedServicesPartitionBlock).length !== 2 ||

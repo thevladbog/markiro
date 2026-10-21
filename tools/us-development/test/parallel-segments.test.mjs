@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { load } from "js-yaml";
+import { withoutCompleteSeedOwnerBytes } from "./support/complete-seed-owner.mjs";
 import {
   hasExactParallelSegments,
   segmentForStep,
@@ -11,7 +12,9 @@ import {
   withoutParallelSegmentsBytes,
 } from "./support/parallel-segments.mjs";
 
-const source = readFileSync(".github/workflows/us-development.yml", "utf8");
+const source = withoutCompleteSeedOwnerBytes(
+  readFileSync(".github/workflows/us-development.yml", "utf8"),
+);
 const workflow = load(source);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 

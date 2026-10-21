@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import { withoutCompleteSeedOwner, withoutCompleteSeedOwnerBytes } from "./complete-seed-owner.mjs";
 import {
   withoutCanonicalTestsOwner,
   withoutCanonicalTestsOwnerBytes,
@@ -64,6 +65,7 @@ export function hasExactParallelSegments(workflow) {
 // Historical command/byte pins remain authoritative. Remove only the exact
 // complete partition; missing segments, misplaced guards or extra steps stay visible.
 export function withoutParallelSegments(workflow) {
+  workflow = withoutCompleteSeedOwner(workflow);
   if (!hasExactParallelSegments(workflow)) return structuredClone(workflow);
   const result = withoutTraceReadinessOwner(
     withoutPreparedServicesOwner(withoutCanonicalTestsOwner(workflow)),
@@ -74,6 +76,7 @@ export function withoutParallelSegments(workflow) {
 }
 
 export function withoutParallelSegmentsBytes(source) {
+  source = withoutCompleteSeedOwnerBytes(source);
   if (!hasExactParallelSegments(load(source))) return source;
   source = withoutTraceReadinessOwnerBytes(
     withoutPreparedServicesOwnerBytes(withoutCanonicalTestsOwnerBytes(source)),

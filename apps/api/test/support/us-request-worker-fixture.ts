@@ -90,6 +90,7 @@ export async function prepareUsWorkerSource(
  * Statements are bounded in memory and never include parameter values. */
 export function createUsWorkerDatabaseTransport(db: Db): {
   db: Db;
+  mutationStatements: string[];
   statements: {
     raw: string;
     projected: string;
@@ -107,6 +108,9 @@ export function createUsWorkerDatabaseTransport(db: Db): {
     projected: string;
     outcome: "forwarded" | "committed_reply_lost" | "rolled_back_reply_lost";
   }[] = [];
+  // Separate from the bounded diagnostic ring: full dataset replay must retain
+  // every mutation even when its read-only traversal exceeds 3000 statements.
+  const mutationStatements: string[] = [];
   const query =
     (target: { query: unknown }, receiver: object) =>
     async (...args: unknown[]) => {
@@ -117,6 +121,8 @@ export function createUsWorkerDatabaseTransport(db: Db): {
           : input && typeof input === "object" && "text" in input && typeof input.text === "string"
             ? input.text
             : "";
+      if (/\b(?:insert\s+into\b|update\s+["a-z_]|delete\s+from\b)/i.test(raw))
+        mutationStatements.push(raw);
       if (/^begin\b/i.test(raw)) transactionMatched.set(receiver, false);
       if (match?.(raw)) transactionMatched.set(receiver, true);
       const workerClockQuery =
@@ -182,6 +188,7 @@ export function createUsWorkerDatabaseTransport(db: Db): {
   });
   return {
     db: drizzle(wrapped),
+    mutationStatements,
     statements,
     faultCommit(fault: "commit" | "rollback", predicate: (text: string) => boolean) {
       commitFault = fault;

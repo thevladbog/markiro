@@ -1,0 +1,258 @@
+# US-11 Guarded Dataset Command Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Provide an explicit local initialize/verify command composing all six-month native/Trace stages and the owned Plan/three Request packages.
+
+**Architecture:** A pure fail-closed command policy precedes all I/O. A complete owner constructs the existing actual Trace and artifact owners; a separate executable supplies checked resources and prints only a bounded private-safe summary. Existing journals and native worker remain authoritative.
+
+**Tech Stack:** Node 24+, repository Corepack/pnpm, strict TypeScript, existing Zod/Drizzle/Nest services, Vitest and Node tooling checks; no dependencies added.
+
+**Spec:** `docs/superpowers/specs/2026-10-20-us-11-dataset-command-design.md`
+
+## Global Constraints
+
+- Work only in `/Users/thevladbog/PRSOME/q/.worktrees/us-docs-audit`, branch `codex/us-mvp`; preserve unrelated `docs/us/demo-hosting-options.md`.
+- Keep recipe `us-processor-six-month-v1` and its current compiled digest.
+- Preserve all 260+2 units, 964 roots, 963 current finalized events, 785 lots and 15,700 boxes; no recipe/version rewrite, source exclusion or reduced sampling.
+- Request selection remains bounded by 500 revisions and 16 MiB per snapshot. Per-stage JSON remains bounded at 256 KiB. No timer or phase-budget increase.
+- Runtime code must not import test fixtures, accept success/proof callbacks, start HTTP/Auth/general workers, migrate, provision users, reset or repair records.
+- Return state `six_month_seed_stages_verified`, `datasetComplete: false`; sequential proof is not globally atomic current state or viewer/browser acceptance.
+- Preserve ignored evidence/ledger. Root owns explicit-path staging and commits; every author AND committer is Vlad Bogatyrev <47273232+thevladbog@users.noreply.github.com> via per-commit environment and readback. No primary/main/PR/release/deploy or unknown DB/process cleanup.
+- Preceding gate reconciled on 2026-10-21: successor `d712098f247cdde5a91b5dbcbe3915ed67e18847` preserves the prior implementation and completes exact-source US/Cases CI after isolated prepared-services partition. Task 1's reviewed pure policy remains accepted; resume Task 2 from this source, without repeating unchanged broad baseline runs or status-only CI restarts.
+- Iterate focused checks. One ordinary API suite at final integration, not per task; retain earlier evidence and exact-SHA full Trace/Cases gates separately.
+
+## Review Focus
+
+- A duplicate flag following an otherwise valid confirmation must be refused, not interpreted as last-value-wins (Task 1).
+- A valid recipe digest combined with a remote or differently owned DB URL must fail before connection/business work (Tasks 1/3).
+- Missing or invalid Plan/Request storage must not allow the native half of initialize to populate data first (Tasks 1/3).
+- Completed verification with a missing/corrupt private artifact must fail without repair, success output or provider/DB writes (Tasks 2/3).
+- Runtime failure after one real Request package must preserve exact pending identity/clocks and drain resources without a false complete result (Tasks 2/3).
+
+## File map
+
+| File                                                                 | Responsibility                                                                                       |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `apps/api/src/deployment/us-dataset-command.ts`                      | Pure strict argv/environment/storage policy                                                          |
+| `apps/api/test/us-dataset-command.test.ts`                           | Literal behavioral policy/refusal/private-safe regressions                                           |
+| `apps/api/src/modules/traceability/demo/us-dataset-complete-seed.ts` | Real full Trace + artifact composition, exact identity/order, bounded immutable output               |
+| `apps/api/test/us-dataset-complete-seed.e2e.test.ts`                 | Actual full-volume integration and linked no-write/recovery assertions                               |
+| `apps/api/src/deployment/us-dataset-command-runtime.ts`              | Trusted descriptor/resources/actual target preflight, one awaited command, disposal and safe summary |
+| `apps/api/src/main.us-dataset.ts`                                    | Separate executable argv/exit/output only                                                            |
+| `apps/api/test/us-dataset-command-runtime.test.ts`                   | Boundary/lifecycle failure tests, not substituted native acceptance                                  |
+| `tools/us-development/test/dataset-command-entry.smoke.mjs`          | Compiled refusal/secret/listener checks                                                              |
+| Existing prepared-services ownership/workflow files                  | Additive new native-suite ownership only after finite budget preflight                               |
+| `docs/us/dataset-command.md`, current roadmap                        | Operator instructions and exact evidence/remaining gates                                             |
+
+### Task 1: Strict pre-I/O command policy
+
+Local source checkpoint: independently reviewed and accepted on 2026-10-20;
+82 new pure tests pass, focused regressions126pass/4explicit native skips.
+Source remains uncommitted from that reviewed checkpoint. The preceding CI gate
+is now reconciled; resume at Task2. This is not executable/native/full-command acceptance.
+
+**Files:** Create `apps/api/src/deployment/us-dataset-command.ts` and `apps/api/test/us-dataset-command.test.ts`.
+
+**Interfaces:**
+
+```ts
+export type UsDatasetCommand = Readonly<{
+  mode: "initialize" | "verify";
+  context: UsDatasetContext;
+  version: "us-processor-six-month-v1";
+  definitionDigest: string;
+  env: UsDevelopmentEnv;
+  planStorage: UsPlanArtifactStorageConfig;
+  packageStorage: UsRequestPackageArtifactStorageConfig;
+}>;
+export function datasetCommandEnvironment(
+  args: readonly string[],
+  raw: NodeJS.ProcessEnv,
+): UsDatasetCommand;
+```
+
+Consumes existing `loadUsDevelopmentEnv`, both private storage config loaders,
+`UsDatasetContext` and `usSixMonthDefinition`. No filesystem/build loader,
+connection, transport, dispatch, logging, CLI entry or consumer integration in
+this task. Configuration values remain internal, never an output DTO.
+
+- [ ] Write a real failing behavioral test before implementation. A minimal refusal-only module may make imports collect, but a missing-module/collection error is not behavioral RED. Expected valid input must initially throw/refuse rather than return a valid command; save actual RED output before implementing successful behavior.
+- [ ] Pin a literal full valid argv with real isolated example environment plus explicit synthetic separate private storage configs. Assert literal mode/context, fixed recipe/version/digest, unchanged raw input and both real validated storage configs. Test reordered pairs and verify without confirmation; initialize without confirmation and verify with confirmation refuse.
+- [ ] Add table-driven literal negatives: each missing required pair/value, duplicates including confirmation, unknown/reset/range/URL options, extra positional tokens, unsupported modes, malformed/uppercase/whitespace UUIDs, wrong DB name/user/version/digest, empty values and trailing tokens. The valid digest fixture is an independently pinned literal of the current recipe, not the parser's output.
+- [ ] Add unsafe environment cases: both edition fields, production mode, remote or unexpected DB/username, incompatible isolated endpoints; missing/partial/invalid Plan storage and missing/partial/invalid package storage, including equality with general S3 credentials/bucket. Use actual existing validators, no mocked allow decision. Errors contain only one of `us_dataset_command_arguments_invalid`, `us_dataset_command_environment_invalid`, `us_dataset_command_storage_unavailable`; never attach raw config or the original exception as a public error cause.
+- [ ] Implement exact parsing and pure preflight. No implicit defaults or normalization. Copy owned parsed context/config structures rather than mutating caller arrays/environment; freeze owned outward policy/context. Do not freeze or otherwise mutate caller-owned inputs.
+- [ ] Run focused new test plus existing `test/us-owner-command.test.ts` and `test/deployment-entry.test.ts`. Use Node 24 and existing compiled dependency outputs. Run API typecheck, focused ESLint/Prettier and `git diff --check`. Report exact warnings/exit counts and scope, leave code unstaged for root independent review. No broad SQL/API rerun for this leaf task.
+
+### Task 2: Actual complete seed owner
+
+**Files:** Create `apps/api/src/modules/traceability/demo/us-dataset-complete-seed.ts`, `apps/api/test/us-dataset-complete-seed.e2e.test.ts`; modify only necessary test support and additive exact CI ownership files.
+
+**Interfaces:**
+
+```ts
+export type UsDatasetCompleteSeedResult = Readonly<{
+  datasetId: string;
+  version: "us-processor-six-month-v1";
+  definitionDigest: string;
+  state: "six_month_seed_stages_verified";
+  datasetComplete: false;
+  trace: UsDatasetTraceReadinessSeedResult;
+  artifacts: UsDatasetArtifactResult;
+}>;
+export class UsDatasetCompleteSeedStore {
+  constructor(db: Db, services: UsDatasetRequestServices);
+  initialize(context: UsDatasetContext): Promise<UsDatasetCompleteSeedResult>;
+  verify(context: UsDatasetContext): Promise<UsDatasetCompleteSeedResult>;
+}
+```
+
+Consumes unchanged actual `UsDatasetTraceReadinessSeedStore` and
+`UsDatasetArtifactSeedStore`. No caller results, selectors, flags, alternative
+recipes or injected owners. Output is bounded/deeply frozen and stable on replay;
+timings are diagnostics, not digest-bearing state.
+
+- [ ] Before starting this task reconcile preceding exact-SHA CI. Read the existing complete Trace native workload/phase helper and actual artifact fixture. Write down a finite test/CI ownership matrix with unchanged original timers/budgets and expected new whole-file counts before running anything. Keep old full-volume tests unchanged. If the new full composition cannot fit existing independent phase envelopes, subdivide new correctness setup using the already approved separation rule; do not enlarge any accepted timer/cap or invent a new SLA.
+- [ ] Establish actual behavioral RED, then implement minimal direct composition in the same mode, exact shared identities, all 262 Trace units and three prescribed ordered Request keys. Validate relationships without presenting a caller-usable synthetic proof as authority.
+- [ ] Exercise all native 260+2 chains and actual Plan/three packages in one owned installation; no fake Trace success or reduced loop accepted. Link exact before/after full DB snapshots, provider PUT/DELETE calls, IDs, clocks, byte hashes and result equality across completed initialize and verify. Record per-phase elapsed time, process peak RSS, actual DB bytes and private bytes separately. A shorter fixture may test refusal but is not full completion evidence.
+- [ ] Prove verify on fresh/middle-pending installation makes no writes; actual interrupted package resume preserves saved Request/run/operation identity and receivedAt/dueAt. Prove wrong tenant/current owner/profile refusal, native drift, missing/corrupt final private byte refusal and an unrelated queued run unchanged. Preserve original failure cause/unit/stage. Finish normal exact owned DB disposal and named catalog absence; never delete unknown prior fixtures.
+- [ ] Add new native suite to actual check-only CI ownership with independent literal selector/mutant tests, retaining every existing suite and release lock. Run only focused iteration, then fresh API static/build, tooling/isolation/format/diff; report original failed invocations distinctly. Root independent review before task commit.
+
+### Task 3: Executable, checked resources and operator acceptance
+
+**Files:** Create runtime, executable, runtime test, compiled smoke and operator documentation from file map; update current roadmap and additive check-only compiled-smoke ownership as necessary. No package dependency changes.
+
+**Interfaces:**
+
+```ts
+export async function runUsDatasetCommand(
+  args: readonly string[],
+  raw: NodeJS.ProcessEnv,
+): Promise<UsDatasetCompleteSeedResult>;
+```
+
+The executable has no injected dependencies; trusted runtime tests may replace
+connection/transport and the existing checked-loader filesystem I/O boundary only.
+The loader seam must invoke the actual checked loader over an owned fixture and
+the actual runtime identity constructor, never fabricate successful authority.
+It consumes Task 1
+policy, existing checked build loader/runtime execution identity and Task 2 owner.
+No injected successful seed/proof/Ready callback is permitted.
+
+Execution refinement (2026-10-21): split this task into separately reviewed 3A
+(runtime, resources, refusal tests, compiled refusal smoke, operator docs and an
+additive exact no-service check owner) and 3B (actual compiled-positive acceptance
+on an independently owned exact-named PostgreSQL/private-provider CI service).
+The positive gate is not removed or waived. CLI acceptance and subsequent viewer
+implementation require current native and compiled-positive CI success. A detailed
+finite provider/ownership/disposal matrix precedes 3B implementation; no shared
+local base is populated to substitute for that gate.
+
+- [ ] Write behavioral RED for preflight failure before connection/seed work and safe failure output. Test malformed args/config/build, wrong actual DB/user/current schema, missing owner/profile, partial runtime acquisition and pool/provider failure; resources acquired before refusal are disposed exactly once after awaited work.
+- [ ] Build runtime with real loader/config/stores, bounded pool settings from existing worker conventions and actual read-only target/schema/provenance/profile preflight. Dispatch exactly one complete owner operation; never general worker loop/startup seed. Preserve internal original error but redact executable diagnostics to fixed categories plus validated finite recipe unit/stage only. Emit no success on any refusal or incomplete run.
+- [ ] Add compiled smoke for unsafe arguments/targets/missing/dirty descriptor, no HTTP listener and no raw secret/SQL/URL/stack output. Preserve/restore only the smoke's owned descriptor fixture; no personal env writes or skip-based green. Build affected dependencies before the executable smoke.
+- [ ] Keep standalone executable restricted to actual `markiro_us_dev`/`markiro_us`; do not map a child DB identity to that name in a mock or relax the check. Compiled positive acceptance requires an independently owned disposable PostgreSQL service whose database really has that exact name, not the shared local base or an ordinary child fixture. Before adding that separate check-only service job, record its finite resource/ownership/phase matrix and preserve existing jobs/budgets. Exercise real initialize/verify against the same owned installation/private transport and normal exact disposal. If that environment is not available, keep compiled positive acceptance explicitly pending; native Task 2 and compiled refusal evidence cannot be called a successful CLI run.
+- [ ] Document clean explicit environment/build prerequisites, exact initialize/verify arguments, finite errors, interrupted resume and false completion flag semantics. Record measured resources without cost/hosting/US-11 completion claims.
+- [ ] Root final integration: one ordinary API invocation, full format/tooling/isolation/static/build, actual new native/compiled evidence, most-capable whole-increment review, explicit-path user-identity commit/push only when prior exact-SHA evidence is reconciled. New exact-source CI remains a separate gate. Preserve ignored ledger; no release/PR/deploy.
+
+### Task 4: Real compiled positive acceptance (Task 3B)
+
+**Files:** Create `tools/us-development/test/dataset-command-positive.smoke.mjs`,
+`tools/us-development/test/support/dataset-command-provider.mjs`,
+`tools/us-development/test/support/dataset-command-positive-fixture.mjs`,
+`tools/us-development/test/dataset-command-provider.test.mjs`,
+`tools/us-development/test/dataset-command-positive-ownership.test.mjs` and
+`tools/us-development/test/support/dataset-command-positive-owner.mjs`.
+Modify only additive check ownership in `.github/workflows/us-development.yml`
+and the exact normalizer chain; update operator evidence/status documentation.
+Runtime, recipe, native suites, existing jobs/limits and operational locks stand.
+
+**Interfaces:** Consume the actual compiled `apps/api/dist/main.us-dataset.js`
+and its existing clean checked descriptor, Task1 argv contract and Task2/3A
+canonical summary. No runtime dependency overrides/preloads that supply success.
+The fixture may call actual migration, `UsDevelopmentOwnerStore.provision` and
+`UsProfileStore.provision` services solely in its initially empty CI installation.
+It never calls a dataset owner to populate data before invoking the executable.
+
+Provider helper interface:
+
+```js
+startDatasetProviderObservation({ port, upstreamPort });
+// Promise<{ counts(): { reads, mutations, failures, active }, close(): Promise<void> }>
+```
+
+This is a streaming loopback HTTP observer, not an S3 response fake: forward
+unchanged method/path/query/headers/body and real upstream status/headers/bytes.
+Preserve Host for signature validation, backpressure and error/close semantics.
+Count every non-GET/HEAD method conservatively as a mutation. Retain no body,
+Authorization header, secret or private key in logs/counter DTOs. Ports are
+trusted fixture arguments; the positive harness pins19000→19002 and runtime
+environment policy remains unchanged. Small helper tests use owned random ports.
+
+- [ ] Establish genuine behavioral RED for forwarding/counter/lifecycle rules,
+      then implement the helper and focused tests: exact signed-Host/path/query/body
+      and response fidelity; GET/HEAD vs PUT/POST/DELETE counts; upstream refusal,
+      aborted request and awaited normal socket cleanup. No fabricated provider
+      response is allowed in positive acceptance; an echo server is unit evidence only.
+- [ ] Before adding/running services, write the finite matrix to the existing
+      ignored ledger: new exact `dataset_command_positive` check-only job,
+      `needs:isolation`,45minutes, original pinned action/build sequence. Use its own
+      existing `postgres:17-alpine` service at loopback55432 with actual
+      `markiro_us_dev`/`markiro_us`. The positive harness refuses before I/O outside
+      the exact CI job, and attests initial empty database/actual identity before
+      acquiring ownership. Never substitute a child DB or touch the local base.
+- [ ] On that runner ONLY, start one precisely owned MinIO container using
+      existing `minio/minio:RELEASE.2025-09-07T16-13-09Z`, loopback19002, ephemeral
+      container-owned data and no external/named production volume. Record exact
+      returned container ID and verified image/ownership before use/cleanup. GitHub
+      service syntax does not offer a command field, so the fixture owns this
+      explicit `server /data` process; do not silently introduce an invalid service.
+      Use existing `minio/mc:RELEASE.2025-08-13T08-35-41Z` only as finite owned clients.
+      No local Docker invocation, image substitution or dependency-policy change.
+- [ ] Create two fresh unique private buckets and distinct restricted service
+      credentials. Use generated service-account output captured in memory, never
+      secrets in arguments/logs/artifacts. Store any required MC configuration only
+      in an owned0600 temporary fixture, never a personal env/config. Restrict each
+      account to its own bucket/object operations, no admin or other-bucket access;
+      assert actual cross-bucket and anonymous access denial. Setup clients use the
+      upstream provider; both actual CLI SDK clients use observed endpoint19000.
+      The pinned MC service-account command/policy support was checked against its
+      [release source](https://github.com/minio/mc/blob/RELEASE.2025-08-13T08-35-41Z/cmd/admin-user-svcacct-add.go).
+- [ ] Apply existing migrations and provision the reserved owner/processor
+      profile through actual services on this installation only. Generate password
+      in memory; never log it or create sessions/MFA/browser data. Build descriptor
+      must come from the clean actual checkout and include dataset entry. No forged
+      `dirty:false`, alternate descriptor roots, seed fixtures or shortened dataset.
+- [ ] Execute exactly ONE compiled initialize, then exactly ONE compiled verify
+      against that same installation, each awaited within900000ms; no retries,
+      per-case reset allowances, third full traversal or new cold-command SLA.
+      Assertion cases retain5000ms; setup/disposal retain60000ms where applicable.
+      Existing pool, provider and native phase limits remain unchanged. Record
+      actual elapsed/peak child RSS, DB bytes and separate private-byte totals.
+- [ ] Require both child exits0, no signal, one strict bounded canonical JSON
+      summary each and no success on refusal. Independently assert shared IDs/hashes
+      and equal stable summaries, all260+2 units/964roots/963currentfinalized/785lots/
+      15700boxes, actual Plan PDF and three1/12/12 Request selections, complete
+      manifest/hash/size/PDF/ZIP bytes and unchanged native bounds. Read persisted
+      publication through actual compiled readers and actual SDK, not a success mock.
+- [ ] Reuse the existing full-public-table MVCC snapshot helper via fixture-only
+      compilation if needed; do not duplicate or narrow its hashing algorithm.
+      Compare every table before/after compiled verify; no exclusions. Provider
+      observer must show actual reads, zero mutations/failures/active requests over
+      verify. Report this compiled persistence/network evidence separately from
+      Task2's required literal SQL mutation observation on current15 native cases;
+      table hashes alone are not a claim that no SQL statement was issued.
+- [ ] Always await owned children/pools/provider requests before disposal. Drop
+      ONLY the attested initially empty runner-owned exact database, without FORCE,
+      and verify named catalog absence. Normally stop/remove ONLY the recorded
+      fixture MinIO ID and confirm absence; await observer/client/temporary-file
+      closure. Never clean unknown resources. Failure/cancellation is nonacceptance;
+      failed disposal fails the job, not a hidden successful result.
+- [ ] Establish real ownership RED then independent literal/mutant tests for
+      this additive job/whole smoke selector/resources/build order/caps. Preserve
+      every predecessor job, timer, guard, pin and release lock through exact
+      normalization only. Full positive smoke refuses locally; do not run services
+      here. Focused helper/tooling/static/format/isolation checks, independent review,
+      root final ordinary API/whole-increment review and authorized exact-source CI
+      follow. Current15 native and compiled positive must actually pass before CLI
+      acceptance or viewer implementation. Keep all failed/partial evidence distinct.

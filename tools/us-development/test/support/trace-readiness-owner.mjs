@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import { withoutCompleteSeedOwner, withoutCompleteSeedOwnerBytes } from "./complete-seed-owner.mjs";
 
 export const traceReadinessJobId = "dataset_trace_readiness";
 export const traceReadinessFiles = [
@@ -107,12 +108,14 @@ export function hasExactTraceReadinessOwner(workflow) {
 }
 
 export function withoutTraceReadinessOwner(workflow) {
+  workflow = withoutCompleteSeedOwner(workflow);
   const result = structuredClone(workflow);
   if (hasExactTraceReadinessOwner(result)) delete result.jobs[traceReadinessJobId];
   return result;
 }
 
 export function withoutTraceReadinessOwnerBytes(source) {
+  source = withoutCompleteSeedOwnerBytes(source);
   if (
     !hasExactTraceReadinessOwner(load(source)) ||
     source.split(traceReadinessJobBlock).length !== 2 ||

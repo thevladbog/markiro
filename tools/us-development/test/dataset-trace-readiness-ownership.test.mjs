@@ -5,6 +5,10 @@ import test from "node:test";
 import { load } from "js-yaml";
 import { checkWorkflows } from "../check-isolation.mjs";
 import {
+  withoutCompleteSeedOwner,
+  withoutCompleteSeedOwnerBytes,
+} from "./support/complete-seed-owner.mjs";
+import {
   hasExactTraceReadinessOwner,
   traceReadinessCommand,
   traceReadinessFiles,
@@ -26,7 +30,9 @@ import {
 } from "./support/prepared-services-owner.mjs";
 import { assertNativeFixtureGate } from "./support/native-fixture-gate.mjs";
 
-const fullSource = readFileSync(".github/workflows/us-development.yml", "utf8");
+const fullSource = withoutCompleteSeedOwnerBytes(
+  readFileSync(".github/workflows/us-development.yml", "utf8"),
+);
 const source = withoutPreparedServicesOwnerBytes(fullSource);
 const workflow = load(source);
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -37,7 +43,10 @@ const readWorkflows = () =>
   Object.fromEntries(
     readdirSync(".github/workflows")
       .filter((name) => /\.ya?ml$/.test(name))
-      .map((name) => [name, load(readFileSync(`.github/workflows/${name}`, "utf8"))]),
+      .map((name) => [
+        name,
+        withoutCompleteSeedOwner(load(readFileSync(`.github/workflows/${name}`, "utf8"))),
+      ]),
   );
 
 function assertOwnership(all) {

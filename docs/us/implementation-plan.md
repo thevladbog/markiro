@@ -6,27 +6,36 @@
 - Status: partial implementation; current checkpoint below supersedes historical next-step notes
 - Owner: Vladislav Bogatyrev
 
-## Current checkpoint — 2026-10-20
+## Current checkpoint — 2026-10-21
 
 The MVP target is US-11 inclusive, with US-10 Station/physical integration deferred
 to P1 and US-12 landing/supplementary assets optional in P1. Slice numbers are not
 an instruction to implement either deferred surface before completing the demo.
 
-At source `1e18e108b8a4874d811c7ea5733d839839b98c37`,
+Historical source `1e18e108b8a4874d811c7ea5733d839839b98c37`:
 [US development isolation](https://github.com/thevladbog/markiro/actions/runs/38845586944)
 passed all eight jobs, including prepared services and full Trace;
 [Cases native regression](https://github.com/thevladbog/markiro/actions/runs/38845586971)
 also passed. Full Trace acceptance covers all 260 regular chains plus the
 correction and orphan examples, complete verification and read-only replay. This
-is isolated test evidence, not an installed demo or release.
+is isolated test evidence, not an installed demo or release. The preceding
+Request-package source gate was subsequently reconciled by accepted successor
+`d712098f247cdde5a91b5dbcbe3915ed67e18847`: all ten US jobs and Cases passed.
+This accepted predecessor does not verify the current uncommitted CLI increment.
 
 US-11 remains **In progress**. The separate artifact-only adapter composes the
 owned synthetic Plan and the three actual Request packages in recipe order,
 using native `export_ready` preparation, the reviewed exact-run worker and
 verified private PDF/ZIP bytes. Its explicit result is
 `plan_request_artifacts_verified`, with `datasetComplete: false`; the existing
-Trace/Readiness coordinator retains its own acceptance boundary. The adapter
-requires existing owned chains and does not seed the full dataset or create a CLI.
+Trace/Readiness coordinator retains its own acceptance boundary. The later
+complete owner directly composes the actual full Trace/Readiness and artifact
+owners in the same mode, returning `six_month_seed_stages_verified` and
+`datasetComplete: false`. Source review approved that composition; its amended
+15-case exact-source native CI remains pending. The original full invocation
+passed12, failed1 and skipped1 because a drift-restoration test exceeded its
+five-second assertion window; focused harness corrections do not replace the
+required whole-file run. Existing assertion/phase/volume limits remain intact.
 
 The [Request packages plan](../superpowers/plans/2026-10-20-us-11-dataset-request-packages.md)
 records the independently approved transaction, Transformation V2 and per-unit
@@ -36,12 +45,27 @@ Ready `export_ready` runs over the literal 1/12/12-chain selections, every priva
 artifact/ZIP member/Plan PDF, pending-middle resume and completed DB/provider
 no-write replay. All frozen selections remain below 500 revisions and 16 MiB.
 The existing 60-second setup and five-second assertion limits are unchanged.
-API typecheck/lint/build and 193 tooling checks pass without skips. The root's
-one final ordinary API invocation and exact new-source full Trace/Cases CI remain
-separate gates; older full-CI evidence above does not verify these new sources.
+API typecheck/lint/build and193 tooling checks passed without skips at that
+artifact-only checkpoint. The root's one final ordinary API invocation and exact
+new-source full Trace/Cases CI remain separate gates.
 
-Remaining demo acceptance includes a guarded complete initializer/CLI, complete
-dataset resource measurements, viewer/browser journeys and screenshots/video.
+The [guarded dataset command](dataset-command.md) now has separate runtime and
+executable source, strict policy, checked build/runtime identity, actual
+database/schema/original-owner/profile preflight, concrete owner dispatch and
+awaited resource disposal. Focused boundary tests use real checked-build
+fixtures and pg transport doubles; compiled refusal smoke opens no connection
+or listener. One additive no-service `dataset_command_refusals` job owns those
+explicit checks, retaining existing jobs and budgets. This independently
+reviewed Task3A source/refusal evidence is not successful CLI acceptance.
+
+Task3B now adds the separate `dataset_command_positive` CI harness for actual
+compiled initialize and verify against the same independently owned
+`markiro_us_dev`/`markiro_us` installation and real private provider. Its source
+records resources, full persisted-state equality, real provider read-only replay
+and normal exact disposal; actual positive execution remains pending CI together
+with the current15 native cases. The shared local base remains unpopulated by
+this work. Remaining demo acceptance includes those CLI gates and measurements,
+viewer/browser journeys and screenshots/video.
 Hosting outside Russia, live viewer access and release enablement remain
 external gates. Private provider transport in native tests is fixture-owned;
 it does not prove hosted storage. Operational workflow locks stay in place;
@@ -2770,3 +2794,25 @@ passed. Final most-capable source review approved without actionable findings.
 Runtime integration is blocked on
 the red full Trace gate; Requests/packages, visitor/CLI/full browser and hosted
 acceptance remain pending. This checkpoint is not complete-demo or release proof.
+
+### US-11 dataset command compiled-positive source checkpoint (2026-10-21)
+
+Added one check-only `dataset_command_positive` job with its own initially empty
+exact-named PG17 database and pinned, explicitly owned ephemeral MinIO provider.
+The CI-only fixture provisions actual owner/profile prerequisites, then invokes
+the actual checked compiled dataset executable exactly once to initialize and
+once to verify the same installation. A streaming loopback observer counts real
+private SDK methods without replacing upstream responses. Independent persisted
+readers check the full262 units, exact census, prescribed1/12/12 Request closure
+and all Plan/package hashes, sizes and PDF/ZIP/manifest bytes. Full-table snapshot
+equality and zero provider mutations are compiled evidence; current15 native
+literal SQL observation remains a separate gate.
+
+Each compiled command retains900000ms, assertions5000ms, setup/disposal60000ms
+and the new job45 minutes. No prior job/pin/selector/limit or runtime behavior
+changes. Normal exact resource disposal and catalog/container absence are
+required on owned failures as well as success. GNU time observes actual child
+peak RSS without a preload or substituted execution identity. Source-level
+helper/ownership/refusal checks are not actual provider/CLI acceptance:
+current15 native, compiled-positive exact-source CI and final integration/review
+remain pending. No viewer, hosting, release or deployment has been accepted.
