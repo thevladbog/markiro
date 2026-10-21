@@ -13,6 +13,7 @@ import { BootstrapWizard } from "../src/wizard/BootstrapWizard.js";
 import {
   completeWizard,
   EXPECTED_REQUEST,
+  expectedRequest,
   next,
   reachAddress,
   reachReview,
@@ -27,6 +28,24 @@ describe("BootstrapWizard", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<BootstrapWizard onSubmit={onSubmit} />);
     await completeWizard();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expectedRequest()));
+  });
+
+  it("offers the demo data on the review step, ticked, and sends none once it is unticked", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await reachReview();
+    const box = screen.getByRole("checkbox", { name: "Установить демо-данные" });
+    expect(box.getAttribute("aria-checked") ?? String((box as HTMLInputElement).checked)).toBe(
+      "true",
+    );
+    expect(
+      screen.getByText(
+        "Демо-товар, коды маркировки и смена, чтобы попробовать без сканера и принтера. Удаляются одной кнопкой в офисе.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(EXPECTED_REQUEST));
   });
 

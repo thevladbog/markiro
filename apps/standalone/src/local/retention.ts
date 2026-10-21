@@ -156,13 +156,13 @@ export const DEMO_SSCC_PREFIX = "290000000";
  * of a removed demo shift, so the queue drains first. Parameters: host id, device id.
  */
 const REMOVED_DEMO =
-  "s.host_id = ? AND s.device_id = ? AND s.entered_at IS NOT NULL " +
-  `AND s.snapshot ->> 'issuerPrefix' = '${DEMO_SSCC_PREFIX}' ` +
-  "AND NOT EXISTS (SELECT 1 FROM ref_products p WHERE p.id = s.product_id) " +
-  "AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id " +
-  "AND o.device_id = s.device_id AND o.shift_id = s.id AND o.acked_at IS NULL)";
+  "d.host_id = ? AND d.device_id = ? AND d.entered_at IS NOT NULL " +
+  `AND d.snapshot ->> 'issuerPrefix' = '${DEMO_SSCC_PREFIX}' ` +
+  "AND NOT EXISTS (SELECT 1 FROM ref_products p WHERE p.id = d.product_id) " +
+  "AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = d.host_id " +
+  "AND o.device_id = d.device_id AND o.shift_id = d.id AND o.acked_at IS NULL)";
 
-export const REMOVED_DEMO_SQL = `SELECT s.id FROM floor_shifts s WHERE ${REMOVED_DEMO}`;
+export const REMOVED_DEMO_SQL = `SELECT d.id FROM floor_shifts AS d WHERE ${REMOVED_DEMO}`;
 
 /**
  * Deletes this pairing's copies of removed demo shifts at once, with every record of them
@@ -177,7 +177,7 @@ export async function purgeRemovedDemo(local: LocalExecutor, pairing: Pairing): 
     try {
       await local.transaction([
         {
-          sql: `DELETE FROM floor_shifts AS s WHERE s.id = ? AND ${REMOVED_DEMO}`,
+          sql: `DELETE FROM floor_shifts AS d WHERE d.id = ? AND ${REMOVED_DEMO}`,
           values: [id, hostId, deviceId],
           expectedChanges: 1,
         },
