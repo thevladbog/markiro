@@ -425,11 +425,20 @@ class EnglishRenderTest {
         // One setContent per test: the dialog is swapped through state.
         val shown = androidx.compose.runtime.mutableStateOf<ShiftDialog>(ShiftDialog.LineFull(active = 2, maxStations = 2))
         compose.setContent { MarkiroTheme { ShiftDialogScreen(shown.value, "Line 2", onDismiss = {}, onRetry = {}) } }
-        for (dialog in listOf(ShiftDialog.LineFull(active = 2, maxStations = 2), ShiftDialog.Busy, ShiftDialog.PartClosed)) {
+        // Each dialog's own English title and text (final review M6: the old check was true of any screen).
+        val expected = listOf(
+            ShiftDialog.LineFull(active = 2, maxStations = 2) to listOf(
+                "The line is full",
+                "2 of 2 devices are already working on this line. You can join when one of them leaves the shift.",
+            ),
+            ShiftDialog.Busy to listOf("The shift is taken", "Another device works this shift", "Update the server on the site"),
+            ShiftDialog.PartClosed to listOf("Your part is closed", "This device has already closed its part of the shift"),
+        )
+        for ((dialog, texts) in expected) {
             shown.value = dialog
             compose.waitForIdle()
             assertNoCyrillic()
-            assertEquals(true, compose.onAllNodes(androidx.compose.ui.test.hasText("", substring = true).not()).fetchSemanticsNodes().isNotEmpty())
+            for (text in texts) compose.onNodeWithText(text, substring = true).assertIsDisplayed()
         }
     }
 
