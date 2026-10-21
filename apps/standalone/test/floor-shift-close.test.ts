@@ -188,7 +188,7 @@ describe("the summary of a shift's close", () => {
     await closedBoxWithLabel(at);
     const context = scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() });
     await fill(context, ["B1", "B2"]);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toEqual({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toEqual({
       plannedQty: 6,
       actualQty: 5,
       closedBoxes: 1,
@@ -196,7 +196,7 @@ describe("the summary of a shift's close", () => {
       blocker: { kind: "open_box", items: 2 },
     });
     await clearOpenBox(context);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
       actualQty: 3,
       blocker: null,
     });
@@ -209,18 +209,18 @@ describe("the summary of a shift's close", () => {
       manualRuntime(fakeHardware(async () => ({ sent: false, code: "not_sent" })).hardware).runtime,
     );
     const failed = await sendLabelJob(context, await closeBoxWithLabel(at));
-    const summary = await readCloseSummary(at.local, PAIRING, SHIFT_ID);
+    const summary = await readCloseSummary(at.local, PAIRING, SHIFT_ID, false);
     expect(summary).toMatchObject({
       actualQty: 3,
       reasonRequired: false,
       blocker: { kind: "label" },
     });
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "label" },
     });
     await skipLabel(context, failed);
-    expect(await closeShift(closer(at), null)).toMatchObject({
+    expect(await closeShift(closer(at), null, [], false)).toMatchObject({
       kind: "closed",
     });
   });
@@ -239,6 +239,8 @@ describe("the close of a shift on the station", () => {
     const result = await closeShift(
       scanContext(at.local, at.shift, { newId: () => "00000000-0000-4000-8000-0000000000aa" }),
       null,
+      [],
+      false,
     );
     const record = {
       plannedQtySnapshot: 3,
@@ -267,26 +269,26 @@ describe("the close of a shift on the station", () => {
   it("needs one of the six reasons when the plan is not met, and keeps one given without need", async () => {
     const at = await station(4);
     await closedBoxWithLabel(at);
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "reason_required",
     });
     expect(outboxKinds(at)).not.toContain("shift_closed");
     expect(localState(at)).toBeNull();
-    expect(await closeShift(closer(at), "material_shortage")).toMatchObject({
+    expect(await closeShift(closer(at), "material_shortage", [], false)).toMatchObject({
       kind: "closed",
       record: { plannedQtySnapshot: 4, actualQty: 3, reasonCode: "material_shortage" },
     });
 
     const met = await station(3);
     await closedBoxWithLabel(met);
-    expect(await closeShift(closer(met), "equipment_stop")).toMatchObject({
+    expect(await closeShift(closer(met), "equipment_stop", [], false)).toMatchObject({
       kind: "closed",
       record: { reasonCode: "equipment_stop" },
     });
 
     const unplanned = await station(null);
     await closedBoxWithLabel(unplanned);
-    expect(await closeShift(closer(unplanned), null)).toMatchObject({
+    expect(await closeShift(closer(unplanned), null, [], false)).toMatchObject({
       kind: "closed",
       record: { plannedQtySnapshot: null, actualQty: 3, reasonCode: null },
     });
@@ -295,7 +297,7 @@ describe("the close of a shift on the station", () => {
   it("is kept open by an open box with codes, writing nothing", async () => {
     const at = await station(null);
     await fill(scanContext(at.local, at.shift), ["A1"]);
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "open_box", items: 1 },
     });
@@ -306,8 +308,8 @@ describe("the close of a shift on the station", () => {
   it("closes once: a second close finds the shift closed", async () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
-    await closeShift(closer(at), null);
-    expect(await closeShift(closer(at), null)).toEqual({
+    await closeShift(closer(at), null, [], false);
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "closed" },
     });
@@ -320,7 +322,7 @@ describe("the close of a shift on the station", () => {
     const print = resolveContext(at.local, manualRuntime(shell.hardware).runtime);
     const job = await sendLabelJob(print, await closeBoxWithLabel(at));
     const context = scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() });
-    expect(await closeShift(context, null)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(context, null, [], false)).toMatchObject({ kind: "closed" });
     const closedSeq = rows(at.db, "SELECT seq FROM outbox WHERE kind = 'shift_closed'")[0]?.["seq"];
     await expect(processScan(context, km("Z1"))).rejects.toMatchObject({
       code: "changes_mismatch",
@@ -355,7 +357,7 @@ describe("the close of a shift on the station", () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
     const context = closer(at);
-    expect(await closeShift(context, null)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(context, null, [], false)).toMatchObject({ kind: "closed" });
     at.db.exec("UPDATE floor_shifts SET local_state = 'closed'");
     expect(localState(at)).toBe("closed");
     const kinds = outboxKinds(at);
@@ -393,7 +395,7 @@ describe("the close of a shift on the station", () => {
     await closedBoxWithLabel(at);
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     await fill(scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() }), ["C1"]);
     held.release();
@@ -412,13 +414,13 @@ describe("the close of a shift on the station", () => {
     const job = await sendLabelJob(print, await closeBoxWithLabel(at));
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     await disassembleBox(closer(at), job.subjectId, { code: "quality_rejected", text: null });
     held.release();
     // The summary said 3 codes in 1 box; the station holds none now.
     expect(await closing).toEqual({ kind: "stale" });
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
       actualQty: 0,
       closedBoxes: 0,
       blocker: null,
@@ -433,7 +435,7 @@ describe("the close of a shift on the station", () => {
     const job = await sendLabelJob(print, await closeBoxWithLabel(at));
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     shell.holdSends();
     const reprint = reprintBox(
@@ -462,7 +464,7 @@ describe("the close of a shift on the station", () => {
       values: ["no such shift"],
       expectedChanges: 1,
     };
-    expect(await closeShift(closer(at), null, [failing])).toEqual({
+    expect(await closeShift(closer(at), null, [failing], false)).toEqual({
       kind: "stale",
     });
     expect(outboxKinds(at)).not.toContain("shift_closed");
@@ -475,7 +477,7 @@ describe("the summary reads this station's own records only", () => {
     const at = await station(6);
     await closedBoxWithLabel(at);
     seedForeignShift(at.db);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toEqual({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toEqual({
       plannedQty: 6,
       actualQty: 3,
       closedBoxes: 1,
@@ -495,10 +497,10 @@ describe("the summary reads this station's own records only", () => {
       blocker: { kind: "closed" },
     };
     expect(
-      await readCloseSummary(at.local, PAIRING, "11111111-2222-4333-8444-555555555555"),
+      await readCloseSummary(at.local, PAIRING, "11111111-2222-4333-8444-555555555555", false),
     ).toEqual(nothing);
-    expect(await readCloseSummary(at.local, FOREIGN[0], SHIFT_ID)).toEqual(nothing);
-    expect(await readCloseSummary(at.local, FOREIGN[1], SHIFT_ID)).toEqual(nothing);
+    expect(await readCloseSummary(at.local, FOREIGN[0], SHIFT_ID, false)).toEqual(nothing);
+    expect(await readCloseSummary(at.local, FOREIGN[1], SHIFT_ID, false)).toEqual(nothing);
   });
 
   it("names the blocker in order: closed, then an open box with codes, then a label", async () => {
@@ -506,17 +508,17 @@ describe("the summary reads this station's own records only", () => {
     await closeBoxWithLabel(at); // its label waits: the job is prepared, nothing sent
     const context = scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() });
     await fill(context, ["B1"]);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
       blocker: { kind: "open_box", items: 1 },
     });
     await undoLastCode(context);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
       blocker: { kind: "label" },
     });
     await fill(context, ["B2"]);
     for (const state of ["closing", "closed"]) {
       at.db.prepare("UPDATE floor_shifts SET local_state = ?").run(state);
-      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
         blocker: { kind: "closed" },
       });
     }
@@ -527,14 +529,14 @@ describe("the summary reads this station's own records only", () => {
     const context = resolveContext(at.local, manualRuntime(fakeHardware().hardware).runtime);
     const sent = await sendLabelJob(context, await closeBoxWithLabel(at));
     expect(sent).toMatchObject({ state: "sent", verify: true });
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "label" },
     });
     expect(await checkLabel(context, sent, `]C100${FIRST_SSCC}`)).toMatchObject({
       kind: "verified",
     });
-    expect(await closeShift(closer(at), null)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(closer(at), null, [], false)).toMatchObject({ kind: "closed" });
   });
 });
 
@@ -582,10 +584,10 @@ describe("what a label keeps the shift open for", () => {
   it.each(WAITING)("keeps it open while a job is %s (check asked: %i)", async (state, verify) => {
     const at = await station(null);
     seedJob(at.db, state, verify);
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
       blocker: { kind: "label" },
     });
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "label" },
     });
@@ -596,8 +598,10 @@ describe("what a label keeps the shift open for", () => {
     async (state, verify) => {
       const at = await station(null);
       seedJob(at.db, state, verify);
-      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({ blocker: null });
-      expect(await closeShift(closer(at), null)).toMatchObject({ kind: "closed" });
+      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
+        blocker: null,
+      });
+      expect(await closeShift(closer(at), null, [], false)).toMatchObject({ kind: "closed" });
     },
   );
 
@@ -608,7 +612,7 @@ describe("what a label keeps the shift open for", () => {
       await closedBoxWithLabel(at);
       const held = holdingWrites(at.local);
       held.holdNext();
-      const closing = closeShift(closer(at, { local: held.executor }), null);
+      const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
       await held.reached();
       seedJob(at.db, state, verify);
       held.release();
@@ -625,7 +629,7 @@ describe("the close of a shift, in more detail", () => {
     const same = { ...ENTERED, plannedQty: null };
     await keepEnteredShift(at.local, FOREIGN[0], same, "2026-10-08T06:02:00.000Z", 1);
     await keepEnteredShift(at.local, FOREIGN[1], same, "2026-10-08T06:02:00.000Z", 1);
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "closed",
       record: {
         plannedQtySnapshot: null,
@@ -661,19 +665,21 @@ describe("the close of a shift, in more detail", () => {
       );
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     at.db.prepare("UPDATE floor_boxes SET disassembled_at = '2026-10-08T06:20:00.000Z'").run();
     held.release();
     expect(await closing).toEqual({ kind: "stale" });
-    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({ closedBoxes: 0 });
+    expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
+      closedBoxes: 0,
+    });
   });
 
   it("is not held up by the records of the shift that are not sent yet, and follows them", async () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
     const before = outboxKinds(at);
-    expect(await closeShift(closer(at), null)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(closer(at), null, [], false)).toMatchObject({ kind: "closed" });
     expect(outboxKinds(at)).toEqual([...before, "shift_closed"]);
     expect(rows(at.db, "SELECT count(*) AS n FROM outbox WHERE acked_at IS NOT NULL")).toEqual([
       { n: 0 },
@@ -690,8 +696,8 @@ describe("the close of a shift, in more detail", () => {
   it("asks for a reason when the shift made more than its plan, too", async () => {
     const at = await station(2);
     await closedBoxWithLabel(at);
-    expect(await closeShift(closer(at), null)).toEqual({ kind: "reason_required" });
-    expect(await closeShift(closer(at), "planned_quantity_error")).toMatchObject({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({ kind: "reason_required" });
+    expect(await closeShift(closer(at), "planned_quantity_error", [], false)).toMatchObject({
       kind: "closed",
       record: { plannedQtySnapshot: 2, actualQty: 3, reasonCode: "planned_quantity_error" },
     });
@@ -710,14 +716,14 @@ describe("the close of a shift, in more detail", () => {
     for (const planned of [4, null]) {
       const at = await station(planned);
       await closedBoxWithLabel(at);
-      expect(await closeShift(closer(at), stray)).toEqual({ kind: "reason_required" });
+      expect(await closeShift(closer(at), stray, [], false)).toEqual({ kind: "reason_required" });
       expect(outboxKinds(at)).not.toContain("shift_closed");
       expect(localState(at)).toBeNull();
     }
     for (const reason of reasons) {
       const at = await station(4);
       await closedBoxWithLabel(at);
-      expect(await closeShift(closer(at), reason)).toMatchObject({
+      expect(await closeShift(closer(at), reason, [], false)).toMatchObject({
         kind: "closed",
         record: { reasonCode: reason },
       });
@@ -728,8 +734,8 @@ describe("the close of a shift, in more detail", () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
     const fixed = { newId: () => "00000000-0000-4000-8000-0000000000bb" };
-    expect(await closeShift(closer(at, fixed), null)).toMatchObject({ kind: "closed" });
-    expect(await closeShift(closer(at, fixed), null)).toEqual({
+    expect(await closeShift(closer(at, fixed), null, [], false)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(closer(at, fixed), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "closed" },
     });
@@ -739,12 +745,12 @@ describe("the close of a shift, in more detail", () => {
   it("finds a shift closing after a restart closed, and writes no second record", async () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
-    await closeShift(closer(at), null);
+    await closeShift(closer(at), null, [], false);
     const kept = rows(at.db, "SELECT seq, id, acked_at FROM outbox ORDER BY seq");
     // A new work screen over the same database: the copy says `closing`.
-    const restarted = await readCloseSummary(at.local, PAIRING, SHIFT_ID);
+    const restarted = await readCloseSummary(at.local, PAIRING, SHIFT_ID, false);
     expect(restarted.blocker).toEqual({ kind: "closed" });
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "closed" },
     });
@@ -759,7 +765,7 @@ describe("the close of a shift, in more detail", () => {
     await keepEnteredShift(at.local, FOREIGN[1], ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedForeignShift(at.db, 0);
     const foreign = foreignRecords(at.db);
-    expect(await closeShift(closer(at), null)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(closer(at), null, [], false)).toMatchObject({ kind: "closed" });
     expect(foreignRecords(at.db)).toEqual(foreign);
     expect(
       rows(
@@ -808,7 +814,7 @@ describe("the close of a shift, in more detail", () => {
         OPERATOR_ID,
         "2026-10-08T05:30:00.000Z",
       );
-    expect(await closeShift(closer(at), null)).toMatchObject({ kind: "closed" });
+    expect(await closeShift(closer(at), null, [], false)).toMatchObject({ kind: "closed" });
     expect(rows(at.db, "SELECT id FROM floor_boxes WHERE item_count = 0 ORDER BY id")).toEqual([
       { id: "eeeeeeee-0000-4000-8000-000000000001" },
       { id: "eeeeeeee-0000-4000-8000-000000000002" },
@@ -820,7 +826,7 @@ describe("the close of a shift, in more detail", () => {
     await closedBoxWithLabel(at);
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     seedForeignShift(at.db);
     held.release();
@@ -835,7 +841,7 @@ describe("the close of a shift, in more detail", () => {
     await undoLastCode(context);
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     // The host's list moved the plan of the active shift under the close.
     at.db.prepare("UPDATE floor_shifts SET planned_qty = 4 WHERE id = ?").run(SHIFT_ID);
@@ -847,8 +853,8 @@ describe("the close of a shift, in more detail", () => {
       { item_count: 0 },
     ]);
     // Read again, the plan is not met and a reason is needed: never closed on the old plan.
-    expect(await closeShift(closer(at), null)).toEqual({ kind: "reason_required" });
-    expect(await closeShift(closer(at), "material_shortage")).toMatchObject({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({ kind: "reason_required" });
+    expect(await closeShift(closer(at), "material_shortage", [], false)).toMatchObject({
       kind: "closed",
       record: { plannedQtySnapshot: 4, actualQty: 3, reasonCode: "material_shortage" },
     });
@@ -859,12 +865,12 @@ describe("the close of a shift, in more detail", () => {
     await closedBoxWithLabel(at);
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     at.db.prepare("UPDATE floor_shifts SET planned_qty = 9 WHERE id = ?").run(SHIFT_ID);
     held.release();
     expect(await closing).toEqual({ kind: "stale" });
-    expect(await closeShift(closer(at), null)).toEqual({ kind: "reason_required" });
+    expect(await closeShift(closer(at), null, [], false)).toEqual({ kind: "reason_required" });
   });
 
   it("closes on the same counts when a scan and its undo land between the summary and the write", async () => {
@@ -873,7 +879,7 @@ describe("the close of a shift, in more detail", () => {
     await closedBoxWithLabel(at);
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     const meanwhile = scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() });
     await fill(meanwhile, ["C1"]);
@@ -893,7 +899,7 @@ describe("the close of a shift, in more detail", () => {
     await undoLastCode(context);
     const held = holdingWrites(at.local);
     held.holdNext();
-    const closing = closeShift(closer(at, { local: held.executor }), null);
+    const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
     await held.reached();
     // A writer outside the queue: the box's counter moves, the shift's counts do not.
     at.db.prepare("UPDATE floor_boxes SET item_count = 1 WHERE closed_at IS NULL").run();
@@ -913,7 +919,7 @@ describe("the close of a shift, in more detail", () => {
       await closedBoxWithLabel(at);
       const held = holdingWrites(at.local);
       held.holdNext();
-      const closing = closeShift(closer(at, { local: held.executor }), null);
+      const closing = closeShift(closer(at, { local: held.executor }), null, [], false);
       await held.reached();
       // A writer outside the queue changes the shift's codes only: its closed boxes
       // stay the same, no box is open and no label waits, so the count of codes is
@@ -935,13 +941,13 @@ describe("the close of a shift, in more detail", () => {
       expect(await closing).toEqual({ kind: "stale" });
       expect(localState(at)).toBeNull();
       expect(outboxKinds(at)).not.toContain("shift_closed");
-      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID, false)).toMatchObject({
         actualQty: 3 + delta,
         closedBoxes: 1,
         blocker: null,
       });
       // Read again, it closes on the codes the station holds now.
-      expect(await closeShift(closer(at), null)).toMatchObject({
+      expect(await closeShift(closer(at), null, [], false)).toMatchObject({
         kind: "closed",
         record: { actualQty: 3 + delta, closedBoxCount: 1 },
       });
@@ -957,7 +963,9 @@ describe("the close of a shift, in more detail", () => {
       values: [SHIFT_ID],
       expectedChanges: 1,
     };
-    expect(await closeShift(closer(at), null, [whileOpen])).toMatchObject({ kind: "closed" });
+    expect(await closeShift(closer(at), null, [whileOpen], false)).toMatchObject({
+      kind: "closed",
+    });
     expect(localState(at)).toBe("closing");
   });
 
@@ -965,7 +973,7 @@ describe("the close of a shift, in more detail", () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
     at.db.prepare("DELETE FROM floor_shifts WHERE id = ?").run(SHIFT_ID);
-    expect(await closeShift(closer(at), null)).toEqual({
+    expect(await closeShift(closer(at), null, [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "closed" },
     });
@@ -976,7 +984,7 @@ describe("the close of a shift, in more detail", () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
     await expect(
-      closeShift(closer(at, { local: failingWrites(at.local) }), null),
+      closeShift(closer(at, { local: failingWrites(at.local) }), null, [], false),
     ).rejects.toMatchObject({ code: "statement_failed" });
     expect(localState(at)).toBeNull();
     expect(outboxKinds(at)).not.toContain("shift_closed");

@@ -156,7 +156,7 @@ export async function readCloseSummary(
   local: LocalExecutor,
   pairing: Pairing,
   shiftId: string,
-  online = false,
+  online: boolean,
 ): Promise<CloseSummary> {
   const copy = await readShiftCopy(local, pairing, shiftId);
   const [row] = await local.query(
@@ -268,8 +268,8 @@ export type CloseResult =
 export async function closeShift(
   context: BoxContext,
   reasonCode: ShiftCloseReasonCode | null,
-  guards: readonly LocalStatement[] = [],
-  online = false,
+  guards: readonly LocalStatement[],
+  online: boolean,
 ): Promise<CloseResult> {
   const { local, pairing, shift } = context;
   const summary = await readCloseSummary(local, pairing, shift.copy.id, online);
@@ -345,4 +345,52 @@ export async function readRefusedCloses(
     refusalRow,
   );
   return new Map(rows.map((row) => [row.shift_id, row.code]));
+}
+
+/**
+ * What became of this station's close of its part of a shared shift (plan 2b, host D8): the record
+ * waits for the host (`queued`); the host closed the part and the shift waits for the others
+ * (`waiting`); the shift is closed — by this record, by an earlier close, or later by the others
+ * or the office (`shift_closed`); the shift closed without the reason it needed, which the office
+ * gives (`reason_missing`); or the host refused the record (`refused`, the queue screen's to
+ * resolve).
+ */
+export type PartState = "queued" | "waiting" | "shift_closed" | "reason_missing" | "refused";
+
+/**
+ * The shift's last `shift_closed` record of this pairing with its stored outcome and details
+ * (`sendFactBatch` keeps both) and the copy's status by the last list. Parameters: shift id, host
+ * id, device id. Searches `outbox_shift`.
+ */
+export const PART_STATE_SQL =
+  "SELECT o.outcome AS outcome, o.outcome_details ->> 'partClosed' AS part_closed, " +
+  "o.outcome_details ->> 'reasonMissing' AS reason_missing, s.status AS status FROM outbox o " +
+  "JOIN floor_shifts s ON s.host_id = o.host_id AND s.device_id = o.device_id " +
+  "AND s.id = o.shift_id WHERE o.shift_id = ? AND o.host_id = ? AND o.device_id = ? " +
+  "AND o.kind = 'shift_closed' ORDER BY o.seq DESC LIMIT 1";
+
+const partRow = z.object({
+  outcome: z.string().nullable(),
+  part_closed: z.number().nullable(),
+  reason_missing: z.number().nullable(),
+  status: z.string(),
+});
+
+/** The part's state; `null` when this station wrote no close of the shift. */
+export async function readPartState(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+): Promise<PartState | null> {
+  const [row] = await local.query(
+    PART_STATE_SQL,
+    [shiftId, pairing.hostId, pairing.deviceId],
+    partRow,
+  );
+  if (row === undefined) return null;
+  if (row.outcome === null) return "queued";
+  if (row.outcome !== "accepted") return "refused";
+  if (row.reason_missing === 1) return "reason_missing";
+  if (row.part_closed === 1) return row.status === "closed" ? "shift_closed" : "waiting";
+  return "shift_closed";
 }

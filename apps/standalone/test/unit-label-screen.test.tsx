@@ -1138,7 +1138,7 @@ describe("the close of a shift with an unresolved label", () => {
       now: () => new Date("2026-10-08T09:00:00.000Z"),
       newId: () => crypto.randomUUID(),
     });
-    const result = await closeShift(context(local), "material_shortage");
+    const result = await closeShift(context(local), "material_shortage", [], false);
     expect(injected).toBe(true);
     expect(result).toEqual({ kind: "stale" });
     expect(rows(at.db, "SELECT local_state FROM floor_shifts")).toEqual([{ local_state: null }]);
@@ -1146,7 +1146,7 @@ describe("the close of a shift with an unresolved label", () => {
       { n: 0 },
     ]);
     // Read again, the summary names the label.
-    expect(await closeShift(context(at.local), "material_shortage")).toEqual({
+    expect(await closeShift(context(at.local), "material_shortage", [], false)).toEqual({
       kind: "blocked",
       blocker: { kind: "label_unresolved" },
     });

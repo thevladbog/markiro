@@ -7,7 +7,7 @@ import { Alert, Button } from "@markiro/ui";
 
 import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { formatQuantity } from "../shifts/shift-text.js";
-import type { CloseBlocker, CloseSummary } from "./shift-close.js";
+import type { CloseBlocker, CloseSummary, PartState } from "./shift-close.js";
 import "./shift-close.css";
 
 /**
@@ -167,7 +167,11 @@ export interface ShiftClosePanelProps {
   clock?: () => number;
   /** A validation shift (plan РЕЖ): its codes have no box, and the summary names none. */
   boxless?: boolean;
-  /** A shift several devices may work (plan 2b): this station closes only its part, said so from the first view. */
+  /**
+   * A shift several devices may work (plan 2b): this station closes only its part, said so from
+   * the first view, before the summary is read. Once it is, the summary's `part` is the one source
+   * of every word of the part.
+   */
   ownPart?: boolean;
 }
 
@@ -316,7 +320,9 @@ export function ShiftClosePanel({
             <p className="shift-close__part">
               {t(
                 !part.online
-                  ? "floor.close.part.offline"
+                  ? summary.reasonRequired
+                    ? "floor.close.part.offlineReason"
+                    : "floor.close.part.offline"
                   : part.closesShift
                     ? "floor.close.part.last"
                     : "floor.close.part.othersOpen",
@@ -395,7 +401,8 @@ export function ShiftClosePanel({
       </>
     );
   };
-  const title = t(ownPart ? "floor.close.part.title" : "floor.close.title", { number });
+  const own = summary === null ? ownPart : (summary.part ?? null) !== null;
+  const title = t(own ? "floor.close.part.title" : "floor.close.title", { number });
   return (
     <section className="shift-close" aria-label={title} tabIndex={-1} ref={viewRef}>
       <h3>{title}</h3>
@@ -411,7 +418,7 @@ export function ShiftClosePanel({
           {t(
             summary?.blocker?.kind === "open_pallet"
               ? "floor.close.closingPallet"
-              : ownPart
+              : own
                 ? "floor.close.part.closing"
                 : "floor.close.closing",
           )}
@@ -434,6 +441,12 @@ export interface ShiftClosedPanelProps {
   clock?: () => number;
   /** A validation shift (plan РЕЖ): the numbers name its codes and no box. */
   boxless?: boolean;
+  /**
+   * What became of the close of this station's part of a shared shift (plan 2b): waiting in the
+   * outbox, waiting for the others, the shift closed (with or without the reason it needed), or
+   * refused. `null` or absent: a solo shift's close, said as before.
+   */
+  part?: PartState | null;
 }
 
 /**
@@ -450,14 +463,18 @@ export function ShiftClosedPanel({
   onDone,
   clock = realClock,
   boxless = false,
+  part = null,
 }: ShiftClosedPanelProps) {
   const { t } = useTranslation();
   const { viewRef, settled } = useViewGuard<HTMLDivElement>("closed", clock);
-  const title = t("floor.close.done.title", { number });
+  const title =
+    part === null
+      ? t("floor.close.done.title", { number })
+      : t("floor.close.part.done.title", { number });
   return (
     <div role="group" aria-label={title} tabIndex={-1} ref={viewRef} className="shift-close">
       <Alert tone="ok" role="presentation" className="shift-close__done" title={title}>
-        <p>{t("floor.close.done.body")}</p>
+        <p>{part === null ? t("floor.close.done.body") : t(`floor.close.part.done.${part}`)}</p>
         <p>
           {boxless
             ? t("floor.validation.closedNumbers", { quantity: formatQuantity(record.actualQty) })

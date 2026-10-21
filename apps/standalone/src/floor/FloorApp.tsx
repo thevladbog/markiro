@@ -509,6 +509,7 @@ export function FloorApp({
         leaving={view.leaving}
         officeClosed={view.officeClosed}
         shiftReads={shiftReads.done}
+        outboxVersion={outboxVersion}
         {...(requestShifts === undefined ? {} : { onRefreshShifts: requestShifts })}
         isLeaving={isLeaving}
         linkHeld={rejectionPending}

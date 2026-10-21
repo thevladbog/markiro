@@ -86,7 +86,7 @@ async function finished(
   const job = await readPrintJob(at.local, PAIRING, `job-${serial}`);
   if (job === null) throw new Error("no job");
   await sendLabelJob(resolveContext(at.local, manualRuntime(fakeHardware().hardware).runtime), job);
-  const result = await closeShift(context, "production_defect");
+  const result = await closeShift(context, "production_defect", [], false);
   if (result.kind !== "closed") throw new Error(result.kind);
   at.db
     .prepare("UPDATE outbox SET outcome = ?, acked_at = ? WHERE shift_id = ?")
@@ -668,9 +668,12 @@ describe("the retention of a shift's records on the station", () => {
     const [pallet] = rows(at.db, "SELECT id FROM floor_pallets");
     const context = palletContext(at);
     await disassemblePallet(context, String(pallet?.["id"]), { code: "wrong_product", text: null });
-    const result = await closeShift(context, "production_defect", [
-      openPalletGuard(PAIRING, at.shift.copy.id),
-    ]);
+    const result = await closeShift(
+      context,
+      "production_defect",
+      [openPalletGuard(PAIRING, at.shift.copy.id)],
+      false,
+    );
     if (result.kind !== "closed") throw new Error(result.kind);
     at.db.prepare("UPDATE outbox SET outcome = 'accepted', acked_at = ?").run(CUTOFF);
     at.db.prepare("UPDATE floor_shifts SET local_state = 'closed'").run();

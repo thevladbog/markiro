@@ -27,7 +27,13 @@ import {
   type CloseNote,
   type ClosedNumbers,
 } from "../close/ShiftClosePanel.js";
-import { closeShift, readCloseSummary, type CloseSummary } from "../close/shift-close.js";
+import {
+  closeShift,
+  readCloseSummary,
+  readPartState,
+  type CloseSummary,
+  type PartState,
+} from "../close/shift-close.js";
 import {
   BoxUnavailableError,
   clearOpenBox,
@@ -284,6 +290,11 @@ export interface WorkScreenProps {
    * shared shift's totals are asked every `SHIFT_TOTALS_POLL_MS` while the link is up.
    */
   onRefreshShifts?: () => void;
+  /**
+   * `ShellState.outboxVersion` (plan 2b): the closed part's state is read again after every batch
+   * of receipts.
+   */
+  outboxVersion?: number;
 }
 
 /** What stops the scanning until the operator acts (stage 2a spec §5.7.3). */
@@ -873,6 +884,34 @@ export function WorkScreen(props: WorkScreenProps) {
     ...(props.onRefreshShifts === undefined ? {} : { onRefresh: props.onRefreshShifts }),
   });
   const sharedPart = sharedParticipation(participation);
+  // What became of the close of this station's part of a shared shift (plan 2b).
+  const [partState, setPartState] = useState<PartState | null>(null);
+  // Read when the part is closed here, and again after every batch of receipts and every list.
+  const closedHere = stop?.kind === "closed";
+  const sharedHere = sharedPart !== null;
+  const { hostId: partHost, deviceId: partDevice } = props.pairing;
+  useEffect(() => {
+    if (!closedHere || !sharedHere) return undefined;
+    let cancelled = false;
+    readPartState(props.local, { hostId: partHost, deviceId: partDevice }, shift.copy.id).then(
+      (state) => {
+        if (!cancelled) setPartState(state);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    closedHere,
+    sharedHere,
+    props.local,
+    partHost,
+    partDevice,
+    shift.copy.id,
+    props.outboxVersion,
+    props.shiftReads,
+  ]);
 
   // How the shift's labels are rendered: a test's own, else from the shift's snapshot, with
   // the organization logo it froze or the Markiro one (plan А4, #703).
@@ -2915,6 +2954,7 @@ export function WorkScreen(props: WorkScreenProps) {
               leaving={leaving}
               onDone={onLeave}
               boxless={validation}
+              part={sharedPart === null ? null : (partState ?? "queued")}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
