@@ -13,6 +13,7 @@ import {
 
 import type { OfficeProduct } from "../../host/protocol.js";
 import { useCan } from "../access.js";
+import { DemoBadge } from "../demo/DemoBadge.js";
 import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficeIcon } from "../OfficeIcon.js";
@@ -84,6 +85,7 @@ export function ProductsPage() {
           <ProductThumb product={product} />
           <span className="product-name">
             <span className="product-name__full">{product.name}</span>
+            {product.demo === true && <DemoBadge />}
             {product.printName !== null && product.printName !== product.name && (
               <span className="product-name__print">
                 {t("office.products.printNameShort", { name: product.printName })}
@@ -129,46 +131,48 @@ export function ProductsPage() {
       key: "actions",
       stickyEnd: true,
       title: t("office.products.table.actions"),
-      render: (product) => (
-        <RowActionBar
-          actions={[
-            {
-              key: "edit",
-              label: t("office.products.editNamed", { name: product.name }),
-              icon: "pencil",
-              onSelect: () => open({ kind: "edit", product }),
-            },
-          ]}
-          menu={{
-            label: t("office.common.rowActions", { name: product.name }),
-            items: [
+      render: (product) =>
+        // The demo product is read-only (spec 2026-10-21): «Удалить демо-данные» on «Обзор» removes it.
+        product.demo === true ? null : (
+          <RowActionBar
+            actions={[
               {
                 key: "edit",
-                label: t("office.products.edit"),
-                ariaLabel: t("office.products.editNamed", { name: product.name }),
+                label: t("office.products.editNamed", { name: product.name }),
                 icon: "pencil",
                 onSelect: () => open({ kind: "edit", product }),
               },
-              product.archived
-                ? {
-                    key: "restore",
-                    label: t("office.products.restore"),
-                    ariaLabel: t("office.products.restoreNamed", { name: product.name }),
-                    icon: "reset",
-                    onSelect: () => open({ kind: "restore", product }),
-                  }
-                : {
-                    key: "archive",
-                    label: t("office.products.archive"),
-                    ariaLabel: t("office.products.archiveNamed", { name: product.name }),
-                    icon: "archive",
-                    destructive: true,
-                    onSelect: () => open({ kind: "archive", product }),
-                  },
-            ],
-          }}
-        />
-      ),
+            ]}
+            menu={{
+              label: t("office.common.rowActions", { name: product.name }),
+              items: [
+                {
+                  key: "edit",
+                  label: t("office.products.edit"),
+                  ariaLabel: t("office.products.editNamed", { name: product.name }),
+                  icon: "pencil",
+                  onSelect: () => open({ kind: "edit", product }),
+                },
+                product.archived
+                  ? {
+                      key: "restore",
+                      label: t("office.products.restore"),
+                      ariaLabel: t("office.products.restoreNamed", { name: product.name }),
+                      icon: "reset",
+                      onSelect: () => open({ kind: "restore", product }),
+                    }
+                  : {
+                      key: "archive",
+                      label: t("office.products.archive"),
+                      ariaLabel: t("office.products.archiveNamed", { name: product.name }),
+                      icon: "archive",
+                      destructive: true,
+                      onSelect: () => open({ kind: "archive", product }),
+                    },
+              ],
+            }}
+          />
+        ),
     });
   }
 
