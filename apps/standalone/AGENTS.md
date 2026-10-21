@@ -3224,8 +3224,9 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   current line stays on the list even when archived. A station that works on
   an active shift may be moved all the same (owner question В9, option А;
   nothing refuses it): the dialog reads `GET /v1/office/shifts` when it opens,
-  for a station only, finds the active shift the station opened
-  (`stationShift`: `ownerDeviceId`), and once another line is chosen, an
+  for a station only, finds the active shift the station works
+  (`stationShift`: an active participant, since plan 2b; `ownerDeviceId` only
+  for a host before protocol 7), and once another line is chosen, an
   empty one included, says in a live region that the station finishes its
   work, signs the operator out and shows the new line's shifts, or, when
   «Не выбрана» is chosen, asks for a line (two texts, chosen by
@@ -3773,6 +3774,78 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   plan); a change or a close of a shift opened meanwhile says the generic
   «Данные изменились…» rather than that the shift is now active, since the
   host answers `stale_revision`.
+
+### Several devices in one shift (office, plan 2b)
+
+- The office reads participation from `OfficeShift.participants`, `byDevice`
+  and `closeReasonMissing` and from `OfficeLine.maxStations` (protocol 7). All
+  are optional, so a host before it shows the office as it was: a shift with no
+  participants has no «Станции» tab, no marks, no «целиком», and a line with no
+  limit is a line of one. Every rule about participants lives in
+  `src/office/shifts/participation.ts` (`isSharedShift`, `participantLook`,
+  `isSilent`, `deviceWorksShift`, `presenceOf`); `ownerDeviceId` is only «who
+  opened it» and is never used to find the shift a device works
+  (`stationShift`, `installWarnings` use `deviceWorksShift`).
+- «Линии»: an active line's «Переименовать» dialog also edits «Максимум станций
+  в смене» (`maxStationsRule`, 1–16, `lineUpdate` sends it only when it
+  differs from `lineMaxStations(line)`); adding and bringing a line back do not
+  carry it. The form refuses a value below the busiest active shift's active
+  participants as soon as the shifts are read (`activeStationsOnLine`), and
+  maps the host's `conflict` `line_stations_in_use` `{ active }` to the same
+  field. When the shifts are not read the client check is skipped and the
+  host's refusal is the only guard. The list has a column «Макс. станций».
+- «Смены»: the list gains no column. A shared shift's status cell adds one quiet
+  line («Устройств: N, закрыли часть: K») and a shift closed without its reason
+  the tag «Причина не указана» (`ShiftMarks`). The card gains the tab
+  «Станции» (`ShiftStations`) when the shift names participants: device and
+  kind, entry, state (a phase tag: working, silent, paused, part closed, closed
+  from the office), the units, boxes and pallets of each device from `byDevice`.
+  A participant is silent when it is `active` and the host last heard it more
+  than ten minutes before this PC's «now». «Итоги» adds «По устройствам»
+  (names from `participants`, so a technologist sees them) only when `byDevice`
+  has more than one entry; a participant missing from `byDevice` shows a dash.
+- Silence is an office-only rule: ten minutes, applied only on lines with
+  `maxStations > 1` (the overview card and attention row). The spec §7 states
+  it without that limit; the owner is to confirm. The silent mark of «Обзор»
+  moves only with its 30-second poll, and `ShiftStations` takes `nowMs` once
+  per render (not live). Revoked devices are excluded from «N из M», presence
+  and silence, but stay in the «Станции» tab and in the forced-close «Не
+  закрыли» list: the host gives a revoked device no slot, yet its open part
+  still blocks auto-close.
+- «Закрыть смену целиком» (row action, card button, dialog title and submit)
+  replaces «Закрыть» for a shift with more than one participant; the dialog
+  names `participants.filter(state != "closed")` («Не закрыли: …») from the
+  loaded shift and sends the unchanged `{ reason, expectedRev }`: the host
+  closes every open part as the office's and audits `shift.force_closed`; a
+  preview older than the host's state ends as `stale_revision`.
+- «Указать причину» (`planShifts`; row action and card button) is for a closed
+  shift with `closeReasonMissing`: a select of the six
+  `SHIFT_CLOSE_REASON_CODES` and `PUT …/close-reason`; a reason set meanwhile
+  (`close_reason_not_missing`) is an alert in words of its own and a re-read of
+  the list. «Обзор» lists such a shift under «Требует внимания»; it reads the
+  `listShifts` window (planned and active plus 31 days of closed ones), so an
+  older shift closed without its reason is marked in «Смены» only.
+- «Устройства»: the «Линия» cell carries a participation tag under the line's
+  name (working, paused, part closed; `presenceOf`); the page reads the shifts
+  for it and claims nothing when they do not load. No column was added.
+- «Обзор»: a line's card says «станций в смене: N из M» only for a line whose
+  limit is above one and whose shift names participants (N the active ones); a
+  participant of such a line silent for ten minutes is one attention row and
+  takes the place of the plain silent-device row of the same device; a shift
+  closed without its reason is one row with the way to its card.
+- The blank: `ShiftTaskFormData.closingRule` is `"each_part"` for the office
+  («Каждая станция закрывает свою часть; смена закрывается, когда закрыли все,
+  или из офиса.») and absent for the cloud, whose rule (the opener closes) is
+  true there. `closingRule` is optional in `packages/domain`, so the cloud's
+  bytes and golden parity are unchanged; two each-part snapshot fixtures pin the
+  office's sentence, and the office's parity test declares it.
+- Exports are keyed by `shift_id` and carry no device: nothing changed, pinned
+  by `export-multi-station.test.ts` (codes of both devices in scan order, boxes
+  by SSCC, the operation time is the latest device close the host reports).
+- Layout: the office rows are pinned by a CSS-text contract test only. No
+  office browser harness exists, so 1280×690 has not been measured (see the
+  release checklist: «Смены» status cell, «Станции» tab, totals dialog,
+  «Устройства» chip, «Обзор» overflow, focus ring; dark and light).
 
 ## License in the office and on the floor
 
