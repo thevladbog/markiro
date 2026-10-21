@@ -225,6 +225,45 @@ test(
   () => {
     const target = { ...input, id: "a".repeat(64) };
     assert.doesNotThrow(() => assertDatasetObjectStoreContainer(inspected(), target));
+    const diagnosticFailures = [];
+    const refusesWithFields = (candidate, fields) => {
+      try {
+        assert.throws(
+          () => assertDatasetObjectStoreContainer(candidate, target),
+          (error) => {
+            assert.equal(error.message, "us_dataset_object_store_attestation_failed");
+            assert.deepEqual(error.fields, fields);
+            assert.deepEqual(Object.keys(error), ["fields"]);
+            assert.doesNotMatch(
+              JSON.stringify(error) + error.stack,
+              /hostile-secret-value|private-config-path|AWS_SECRET_ACCESS_KEY/,
+            );
+            return true;
+          },
+        );
+      } catch (error) {
+        diagnosticFailures.push(error);
+      }
+    };
+    const wrongImage = inspected();
+    wrongImage.Image = `sha256:${"b".repeat(64)}`;
+    refusesWithFields(wrongImage, ["image_id"]);
+    const multiple = inspected();
+    multiple.Id = "c".repeat(64);
+    multiple.Config.User = "0:0";
+    multiple.Config.WorkingDir = "/";
+    refusesWithFields(multiple, ["container_id", "user", "working_directory"]);
+    const hostile = inspected();
+    hostile.Config.Env = ["AWS_SECRET_ACCESS_KEY=hostile-secret-value"];
+    hostile.HostConfig.Mounts[0].Source = "/private-config-path/hostile-secret-value";
+    hostile.Mounts[0].Source = "/private-config-path/hostile-secret-value";
+    refusesWithFields(hostile, [
+      "secret_environment",
+      "configured_mount_source",
+      "observed_mounts",
+    ]);
+    if (diagnosticFailures.length)
+      throw new AggregateError(diagnosticFailures, "attestation field diagnostics incomplete");
     for (const mutate of [
       (c) => {
         c.Id = "c".repeat(64);

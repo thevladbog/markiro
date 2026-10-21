@@ -157,7 +157,74 @@ export function assertDatasetObjectStoreContainer(item, input) {
           m.RW === false) ||
         (m.Type === "tmpfs" && m.Destination === "/data" && m.RW === true),
     );
-  check(valid, "attestation_failed");
+  try {
+    check(valid, "attestation_failed");
+  } catch (error) {
+    // Diagnostic replay only: the acceptance expression and all-must-pass
+    // decision above stay unchanged. Never attach actual/expected values.
+    const fields = [
+      ["container_id_format", () => /^[a-f0-9]{64}$/.test(input.id)],
+      ["container_id", () => item?.Id === input.id],
+      ["configured_image", () => item.Config?.Image === IMAGE],
+      ["image_id", () => IMAGE_IDS.includes(item.Image)],
+      ["owner_label", () => item.Config.Labels?.["markiro.us-dataset-positive"] === expected.owner],
+      ["entrypoint", () => same(item.Config.Entrypoint, ["/usr/bin/weed"])],
+      ["command", () => same(item.Config.Cmd, COMMAND)],
+      ["user", () => item.Config.User === expected.user],
+      ["working_directory", () => item.Config.WorkingDir === "/data"],
+      [
+        "secret_environment",
+        () => !(item.Config.Env ?? []).some((e) => /^(?:MINIO_|AWS_|S3_)/.test(e)),
+      ],
+      [
+        "declared_volumes",
+        () => Object.keys(item.Config.Volumes ?? {}).every((path) => path === "/data"),
+      ],
+      ["log_driver", () => item.HostConfig?.LogConfig?.Type === "none"],
+      ["privileged", () => item.HostConfig.Privileged === false],
+      ["publish_all_ports", () => item.HostConfig.PublishAllPorts === false],
+      ["network", () => ["default", "bridge"].includes(item.HostConfig.NetworkMode)],
+      ["capabilities", () => (item.HostConfig.CapAdd ?? []).length === 0],
+      ["devices", () => (item.HostConfig.Devices ?? []).length === 0],
+      ["binds", () => same(item.HostConfig.Binds ?? [], [])],
+      ["tmpfs", () => same(item.HostConfig.Tmpfs, { "/data": expected.tmpfs })],
+      [
+        "port_bindings",
+        () =>
+          same(item.HostConfig.PortBindings, {
+            "8333/tcp": [{ HostIp: "127.0.0.1", HostPort: "19002" }],
+          }),
+      ],
+      ["configured_mount_count", () => item.HostConfig.Mounts?.length === 1],
+      ["configured_mount_type", () => item.HostConfig.Mounts[0].Type === "bind"],
+      ["configured_mount_source", () => item.HostConfig.Mounts[0].Source === expected.configPath],
+      ["configured_mount_target", () => item.HostConfig.Mounts[0].Target === "/run/us-s3.json"],
+      ["configured_mount_read_only", () => item.HostConfig.Mounts[0].ReadOnly === true],
+      ["observed_mounts_array", () => Array.isArray(item.Mounts)],
+      ["observed_bind_count", () => item.Mounts.filter((m) => m.Type === "bind").length === 1],
+      [
+        "observed_mounts",
+        () =>
+          item.Mounts.every(
+            (m) =>
+              (m.Type === "bind" &&
+                m.Source === expected.configPath &&
+                m.Destination === "/run/us-s3.json" &&
+                m.RW === false) ||
+              (m.Type === "tmpfs" && m.Destination === "/data" && m.RW === true),
+          ),
+      ],
+    ];
+    error.fields = fields.flatMap(([field, matches]) => {
+      try {
+        return matches() ? [] : [field];
+      } catch {
+        // A missing/malformed inspect member is a failed field, not raw output.
+        return [field];
+      }
+    });
+    throw error;
+  }
 }
 
 export function datasetObjectStoreFailureCategory(error) {
