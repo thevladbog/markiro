@@ -558,3 +558,21 @@ test("production-bundle exports ICU worker separately with exact pinned two-file
   assert.equal(upload.with["retention-days"], 7);
   assert.equal(upload.with.overwrite, undefined);
 });
+
+test("production-bundle runs held recovery integration after ICU export before next stack", () => {
+  const job = workflow.jobs["production-bundle"];
+  const recovery = stepByName(job, "Verify isolated failed-activation recovery integration");
+  assert.equal(
+    recovery.run,
+    'sudo --preserve-env=RUNNER_TEMP,GITHUB_SHA "$(command -v node)" deploy/platform/recovery-ci.mjs --local-ci',
+  );
+  assert.ok(
+    job.steps.indexOf(recovery) >
+      job.steps.indexOf(stepByName(job, "Preserve verified ICU recovery worker image")),
+  );
+  assert.ok(
+    job.steps.indexOf(recovery) <
+      job.steps.indexOf(stepByName(job, "Verify isolated platform-only preparation stack")),
+  );
+  assert.equal(recovery.if, undefined);
+});

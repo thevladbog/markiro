@@ -42,7 +42,7 @@ const SELECT: &str = "SELECT p.id, p.gtin14, p.name, p.print_name, p.chz_group_c
      p.default_pallet_template_id, p.default_pallet_sheet_id, p.egais_code, \
      p.default_counterparty_id, \
      (SELECT ph.checksum FROM product_photos ph WHERE ph.product_id = p.id) AS photo_checksum, \
-     p.archived, p.status, p.rev FROM products p";
+     p.demo, p.archived, p.status, p.rev FROM products p";
 
 #[derive(sqlx::FromRow)]
 struct ProductRow {
@@ -60,6 +60,7 @@ struct ProductRow {
     egais_code: Option<String>,
     default_counterparty_id: Option<String>,
     photo_checksum: Option<String>,
+    demo: bool,
     archived: bool,
     status: String,
     rev: i64,
@@ -81,6 +82,7 @@ fn record(row: ProductRow) -> Result<OfficeProduct, ApiError> {
         egais_code: row.egais_code,
         default_counterparty_id: row.default_counterparty_id,
         photo_checksum: row.photo_checksum,
+        demo: row.demo,
         archived: row.archived,
         status: row.status.parse().map_err(ApiError::internal)?,
         rev: row.rev,
@@ -441,6 +443,11 @@ pub async fn update_product(
     let current = read(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("no such product"))?;
+    // The demo product is read-only (spec 2026-10-21): a real GTIN on it would hide real
+    // production from the exports.
+    if current.demo {
+        return Err(crate::demo::demo_product());
+    }
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }

@@ -395,14 +395,20 @@ pub struct NewShift<'a> {
 }
 
 /// Insert a planned shift at `rev` and return its id. The number is the
-/// next of its month's counter, drawn in the same transaction.
+/// next of its month's counter, drawn in the same transaction; a demo
+/// shift's (its product is the demo product) is the next of the `DEMO`
+/// counter, so it spends no number of the organization's months.
 pub async fn insert(
     conn: &mut SqliteConnection,
     shift: &NewShift<'_>,
     at: &str,
     rev: i64,
 ) -> Result<String, ApiError> {
-    let key = month_key(shift.production_date);
+    let key = if crate::demo::is_demo_product(&mut *conn, shift.product_id).await? {
+        crate::demo::DEMO_NUMBER_KEY.to_owned()
+    } else {
+        month_key(shift.production_date)
+    };
     let seq: i64 = sqlx::query_scalar(
         "INSERT INTO shift_number_counters (month_key, last_seq) VALUES (?, 1) \
          ON CONFLICT (month_key) DO UPDATE SET last_seq = last_seq + 1 RETURNING last_seq",
@@ -645,16 +651,17 @@ pub async fn snapshot(
         String,
         bool,
         Option<String>,
+        bool,
     );
     let product: Option<ProductRow> = sqlx::query_as(
         "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived, \
-         egais_code FROM products WHERE id = ?",
+         egais_code, demo FROM products WHERE id = ?",
     )
     .bind(product_id)
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let (gtin14, name, print_name, group, shelf_life_days, status, archived, egais_code) =
+    let (gtin14, name, print_name, group, shelf_life_days, status, archived, egais_code, demo) =
         product.ok_or_else(|| ApiError::internal("the shift's product vanished"))?;
     let group = match (status.parse::<ProductStatus>(), archived, group) {
         (Ok(ProductStatus::Active), false, Some(group)) => group,
@@ -750,7 +757,12 @@ pub async fn snapshot(
             egais_code,
         },
         box_template,
-        issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),
+        // A demo shift's SSCCs are of the demo prefix (decision О4, option В).
+        issuer_prefix: if demo {
+            crate::demo::DEMO_PREFIX.to_owned()
+        } else {
+            crate::validate::issuer_prefix(&gln).to_owned()
+        },
         counterparty_name,
         pallet_template,
         pallet_sheet,

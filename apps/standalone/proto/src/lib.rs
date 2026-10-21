@@ -843,7 +843,8 @@ impl std::str::FromStr for ProductStatus {
 
 /// `data` of a `products` item. An archived product stays in the feed with
 /// `archived: true`: stations keep it for history and leave it out of their
-/// pickers. A product is never deleted, so it never leaves as a tombstone.
+/// pickers. Only the demo product is ever deleted (the office's «Удалить
+/// демо-данные»), and it leaves as a tombstone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductRecord {
@@ -867,6 +868,10 @@ pub struct ProductRecord {
     /// from an older host has none.
     #[serde(default)]
     pub photo_checksum: Option<String>,
+    /// The wizard's demo product (spec 2026-10-21): its shifts are demo shifts. Sent only when
+    /// true; a record from an older host has none.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub demo: bool,
 }
 
 /// `data` of a `label_templates` item. A disabled template stays in the feed
@@ -1004,6 +1009,18 @@ pub struct BootstrapRequest {
     /// was confirmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address_confirmed: Option<bool>,
+    /// «Установить демо-данные» (spec 2026-10-21): the host adds the demo product, its SSCC
+    /// counters and a planned demo shift on the first line. Left out, nothing of the kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demo_data: Option<DemoDataRequest>,
+}
+
+/// The wizard's demo data: the demo shift's production date is the wizard's today, as every
+/// production date comes from the client (the host keeps no time-zone database).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DemoDataRequest {
+    pub production_date: String,
 }
 
 /// A stock label template of the wizard: enabled, for every category, and
@@ -1609,9 +1626,27 @@ pub struct OfficeProduct {
     /// (the bytes come from `GET /v1/office/products/{id}/photo`).
     #[serde(default)]
     pub photo_checksum: Option<String>,
+    /// The wizard's demo product (spec 2026-10-21): read-only, deleted with the demo data.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub demo: bool,
     pub archived: bool,
     pub status: ProductStatus,
     pub rev: i64,
+}
+
+/// `GET /v1/office/demo-data`, and the answer of `DELETE` with what it removed: the demo
+/// product and what its shifts made. `activeShifts` names the demo shifts still open (a
+/// delete refuses while there is one).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DemoDataSummary {
+    pub present: bool,
+    pub product_id: Option<String>,
+    pub shifts: u32,
+    pub boxes: u32,
+    pub pallets: u32,
+    pub codes: u32,
+    pub active_shifts: Vec<String>,
 }
 
 /// `POST /v1/office/products`: a product in use. The office normalized the

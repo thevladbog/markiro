@@ -282,7 +282,23 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
           </>
         )}
 
-        {step === "review" && <WizardReview values={getValues()} />}
+        {step === "review" && (
+          <>
+            <WizardReview values={getValues()} />
+            <Controller
+              control={control}
+              name="installDemo"
+              render={({ field }) => (
+                <Checkbox
+                  label={t("wizard.demo.label")}
+                  checked={field.value}
+                  onCheckedChange={field.onChange}
+                />
+              )}
+            />
+            <p className="standalone-wizard__note">{t("wizard.demo.hint")}</p>
+          </>
+        )}
 
         <div className="standalone-form__actions">
           {position > 0 && (

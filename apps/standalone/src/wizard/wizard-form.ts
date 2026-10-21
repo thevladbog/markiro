@@ -22,6 +22,7 @@ import {
   THIRTEEN_DIGITS,
   toOrgInput,
 } from "../lib/rules.js";
+import { civilToday } from "../lib/civil-date.js";
 import { DEFAULT_TIME_ZONE } from "../lib/time-zones.js";
 
 /**
@@ -50,6 +51,11 @@ export interface WizardValues {
   lines: { name: string }[];
   /** «Я зарезервировал адрес»: only a mark, the setup is never blocked by it. */
   addressConfirmed: boolean;
+  /**
+   * «Установить демо-данные» (spec 2026-10-21): the demo product, codes and a demo shift on the
+   * first line; ticked by default.
+   */
+  installDemo: boolean;
 }
 
 const PLAIN_FIELDS = [
@@ -90,6 +96,7 @@ export function defaultWizardValues(firstLineName: string): WizardValues {
     palletNextSerial: 0,
     lines: [{ name: firstLineName }],
     addressConfirmed: false,
+    installDemo: true,
   };
 }
 
@@ -241,7 +248,11 @@ export function stockTemplateCounts(
   return { box: count("box"), pallet: count("pallet"), duplicate: count("product_duplicate") };
 }
 
-export function toBootstrapRequest(values: WizardValues): BootstrapRequest {
+/**
+ * The host's request. With the demo data ticked, the demo shift is produced on the organization's
+ * today (`civilToday` of its zone at `now`): every production date comes from the client.
+ */
+export function toBootstrapRequest(values: WizardValues, now: Date = new Date()): BootstrapRequest {
   return {
     admin: {
       login: values.login.trim(),
@@ -254,6 +265,9 @@ export function toBootstrapRequest(values: WizardValues): BootstrapRequest {
     templates: stockTemplates(),
     // With `exactOptionalPropertyTypes` the field is left out while the box is not ticked.
     ...(values.addressConfirmed ? { addressConfirmed: true } : {}),
+    ...(values.installDemo
+      ? { demoData: { productionDate: civilToday(values.timeZone, now) } }
+      : {}),
   };
 }
 

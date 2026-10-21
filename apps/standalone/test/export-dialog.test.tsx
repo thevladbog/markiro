@@ -25,7 +25,7 @@ import {
   type FakeOfficeSession,
 } from "./support/office.js";
 import { warnedExportRows } from "./support/export-rows.js";
-import { ACTIVE, freezeToday, PALLET, shiftsSession } from "./support/shifts.js";
+import { ACTIVE, freezeToday, MILK, PALLET, shiftsSession } from "./support/shifts.js";
 import { pressRowAction } from "./support/row-menu.js";
 
 const testModuleUrl = import.meta.url;
@@ -332,6 +332,39 @@ describe("office shifts: an export (plan ЧЗ)", () => {
         palletId: null,
       }),
     );
+    expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a demo shift no format for ГИС МТ and names its files DEMO_ (spec 2026-10-21)", async () => {
+    const files = fakeFiles();
+    const session = await openExport(CLOSED_PALLETS, rows(), files, undefined, [], (fake) => {
+      fake.api.listProducts.mockResolvedValue([{ ...MILK, demo: true }]);
+    });
+    const labels = within(dialog())
+      .getAllByRole("radio")
+      .map(
+        (radio) =>
+          document.getElementById(radio.getAttribute("aria-labelledby") ?? "")?.textContent ?? "",
+      );
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels.filter((label) => label.includes("ГИСМТ"))).toEqual([]);
+    expect(
+      within(dialog()).getByText(
+        "Демо-смену нельзя выгрузить для ГИС МТ: доступны только TXT и CSV, их имена начинаются с DEMO_.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(dialog()).getByRole("radio", { name: "[CSV][Без коробов] Отчет смены" }),
+    );
+    form();
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    const expected = expectedParts(rows(), {
+      formatId: "shift_csv_flat",
+      formatVersion: 1,
+      maxLines: null,
+      palletId: null,
+    }).map((part) => ({ ...part, name: `DEMO_${part.name}` }));
+    expect(files.save.mock.calls[0]?.[1]).toEqual(expected);
     expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
   });
 

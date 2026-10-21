@@ -25,9 +25,10 @@ use markiro_proto::{
 };
 use markiro_proto::{
     receipt_codes, shift_close_reasons, shift_supports, BoxRegistryItem, BoxRegistryKind,
-    BoxRegistryPage, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData, PalletBoxRemovedData,
-    PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState, WarehousePalletClosedData,
-    WarehousePalletLabelData, WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
+    BoxRegistryPage, DemoDataSummary, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData,
+    PalletBoxRemovedData, PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState,
+    WarehousePalletClosedData, WarehousePalletLabelData, WarehousePalletOpenedData,
+    MIN_PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -2213,6 +2214,45 @@ fn the_host_network_lists_each_address_with_how_it_was_got() {
     let mut value = fixture("host-network-confirm.json");
     value["extra"] = Value::Bool(true);
     assert!(serde_json::from_value::<markiro_proto::HostNetworkConfirm>(value).is_err());
+}
+
+/// Demo data (spec 2026-10-21): the wizard's flag, the demo product in the feed and in the
+/// office, the office's summary; a record without the flag reads as no demo.
+#[test]
+fn demo_data_fixtures_round_trip_and_an_older_record_is_no_demo() {
+    let sent: BootstrapRequest = round_trip("bootstrap-request-demo.json");
+    assert_eq!(
+        sent.demo_data.map(|demo| demo.production_date).as_deref(),
+        Some("2026-10-21")
+    );
+    let mut value = fixture("bootstrap-request-demo.json");
+    value["demoData"] = Value::Bool(true);
+    assert!(serde_json::from_value::<BootstrapRequest>(value).is_err());
+    let plain: BootstrapRequest = round_trip("bootstrap-request.json");
+    assert_eq!(plain.demo_data, None);
+
+    let changes: ChangesResponse = round_trip("changes-demo.json");
+    let demo: ProductRecord = typed(&changes.items[0].data.clone().expect("a live record"));
+    assert!(demo.demo);
+    assert_eq!(demo.gtin14, "02900000000018");
+    assert!(changes.items[1].deleted && changes.items[1].data.is_none());
+    assert_eq!(changes.items[1].id, changes.items[0].id);
+
+    let catalog: ChangesResponse = round_trip("changes-catalog.json");
+    let milk: ProductRecord = typed(&catalog.items[4].data.clone().expect("a live record"));
+    assert!(!milk.demo);
+
+    let office: OfficeProduct = round_trip("office-product-demo.json");
+    assert!(office.demo);
+    let real: OfficeProduct = round_trip("office-product.json");
+    assert!(!real.demo);
+
+    let summary: DemoDataSummary = round_trip("demo-data-summary.json");
+    assert_eq!(
+        (summary.present, summary.boxes, summary.pallets),
+        (true, 4, 2)
+    );
+    assert_eq!(summary.active_shifts, vec!["DEMO-001".to_owned()]);
 }
 
 #[test]

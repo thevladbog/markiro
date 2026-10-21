@@ -2816,6 +2816,10 @@ body,
   -webkit-line-clamp: 2;
 }
 
+.setup-choice-group--printer-language .setup-touch-choice span {
+  flex: 1;
+}
+
 .setup-touch-choice--checkbox {
   justify-content: flex-start;
   text-align: left;

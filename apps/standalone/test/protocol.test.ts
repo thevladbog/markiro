@@ -16,6 +16,7 @@ import {
   badgeSaltSchema,
   blockSizesUpdateSchema,
   bootstrapRequestSchema,
+  demoDataSummarySchema,
   bootstrapResponseSchema,
   boxReportRowsSchema,
   canonicalSaltSchema,
@@ -274,6 +275,30 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
   });
 });
 
+describe("demo data (spec 2026-10-21)", () => {
+  it("the demo product rides the feed with its flag and leaves as a tombstone", () => {
+    const raw = fixture("changes-demo.json") as { items: Array<{ data?: unknown }> };
+    const changes = changesResponseSchema.parse(raw);
+    expect(productRecordSchema.parse(changes.items[0]?.data)).toEqual(raw.items[0]?.data);
+    expect(productRecordSchema.parse(changes.items[0]?.data).demo).toBe(true);
+    expect([changes.items[1]?.entity, changes.items[1]?.deleted]).toEqual(["products", true]);
+    const milk = changesResponseSchema.parse(fixture("changes-catalog.json")).items[4]?.data;
+    expect(productRecordSchema.parse(milk).demo).toBeUndefined();
+  });
+
+  it("the wizard sends demoData with the demo shift's production date", () => {
+    const request = fixture("bootstrap-request-demo.json") as Record<string, unknown>;
+    expect(bootstrapRequestSchema.parse(request).demoData).toEqual({
+      productionDate: "2026-10-21",
+    });
+    expect(bootstrapRequestSchema.safeParse({ ...request, demoData: true }).success).toBe(false);
+    expect(
+      bootstrapRequestSchema.safeParse({ ...request, demoData: { productionDate: "21.10.2026" } })
+        .success,
+    ).toBe(false);
+  });
+});
+
 /** `data` of item `index` of a feed fixture, as an object. */
 function feedRecord(name: string, index: number): Record<string, unknown> {
   const changes = changesResponseSchema.parse(fixture(name));
@@ -347,6 +372,8 @@ const RESPONSES = [
   ["product-group.json", productGroupSchema],
   ["office-product.json", officeProductSchema],
   ["office-product-egais.json", officeProductSchema],
+  ["office-product-demo.json", officeProductSchema],
+  ["demo-data-summary.json", demoDataSummarySchema],
   ["product-photo-state.json", productPhotoStateSchema],
   ["template-summary.json", labelTemplateSummarySchema],
   ["label-template.json", labelTemplateSchema],
@@ -382,6 +409,7 @@ const REQUESTS = [
   ["bootstrap-request-address.json", bootstrapRequestSchema],
   ["office-login-request.json", officeLoginRequestSchema],
   ["bootstrap-request.json", bootstrapRequestSchema],
+  ["bootstrap-request-demo.json", bootstrapRequestSchema],
   ["org-profile-update.json", orgProfileUpdateSchema],
   ["org-logo-put.json", orgLogoPutSchema],
   ["product-photo-put.json", productPhotoPutSchema],

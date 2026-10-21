@@ -16,6 +16,7 @@ import type { OfficeShift, ShiftExportRecord } from "../../host/protocol.js";
 import type { ConflictQuery } from "../../host/review.js";
 import { shiftExportRecord } from "../../host/requests.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
+import { DEMO_FILE_PREFIX, isGismtFormat } from "../demo/demo.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -76,6 +77,11 @@ export interface ExportDialogProps {
    * shows its row and its «XML паллеты», not the shift's formats.
    */
   palletId?: string;
+  /**
+   * A demo shift (spec 2026-10-21, decision Д1): no format for ГИС МТ and no pallet's document;
+   * its TXT and CSV files are named `DEMO_…`.
+   */
+  demo?: boolean;
   onClose: () => void;
 }
 
@@ -100,6 +106,7 @@ export interface ExportDialogProps {
 export function ExportDialog({
   shift,
   palletId,
+  demo = false,
   onClose,
   sourceKind = "native",
 }: ExportDialogProps) {
@@ -170,10 +177,13 @@ export function ExportDialog({
   const reportTimeZone = () =>
     sourceKind === "cloud" ? requireHistoryTimeZone(rows?.organization.timeZone) : nativeTimeZone;
 
-  const checks = plan.status === "ready" ? plan.plan.checks : [];
-  // A pallet's own dialog (plan КРТ) lists that pallet only.
+  const checks = (plan.status === "ready" ? plan.plan.checks : []).filter(
+    (check) => !demo || !isGismtFormat(check.format.id),
+  );
+  // A pallet's own dialog (plan КРТ) lists that pallet only; a demo shift's pallets get no ЧЗ
+  // document.
   const pallets =
-    plan.status === "ready"
+    plan.status === "ready" && !demo
       ? plan.plan.pallets.filter((pallet) => palletId === undefined || pallet.palletId === palletId)
       : [];
   const firstAllowed = checks.find((check) => check.refusal === null);
@@ -284,6 +294,10 @@ export function ExportDialog({
         return;
       }
       setPhase("saving");
+      // A demo shift's files say so in their names (decision Д1).
+      const parts = demo
+        ? result.parts.map((part) => ({ ...part, filename: `${DEMO_FILE_PREFIX}${part.filename}` }))
+        : result.parts;
       // The host keeps the exact bytes first: whatever happens to the folder on this PC, the
       // file stays downloadable from the shift's drawer. A host that cannot keep them (its store
       // is full, it does not answer) never stops the export: the folder copy is made all the same.
@@ -294,7 +308,7 @@ export function ExportDialog({
         batchId: documentId,
         formatId: format.id,
         formatVersion: format.version,
-        parts: result.parts.map((part, index) => ({
+        parts: parts.map((part, index) => ({
           partNo: index + 1,
           name: part.filename,
           bytes: part.bytes,
@@ -309,7 +323,7 @@ export function ExportDialog({
       try {
         saved = await files.save(
           exportFolder(fresh.shift.number, format.id, formedAt, originalZone),
-          result.parts.map((part) => ({ name: part.filename, bytes: part.bytes })),
+          parts.map((part) => ({ name: part.filename, bytes: part.bytes })),
         );
       } catch (error) {
         const code = error instanceof OfficeFilesError ? error.code : "storage";
@@ -326,7 +340,7 @@ export function ExportDialog({
         maxLines: lines,
         palletId,
         documentId,
-        parts: result.parts,
+        parts,
         openPalletSuppressedBoxCount: result.openPalletSuppressedBoxCount,
       });
       await writeRecord(saved, folderFailure, hostCopy, body);
@@ -576,6 +590,7 @@ export function ExportDialog({
         )}
         {outcomeAlerts()}
         {openFailure !== null && <Alert tone="error">{openFailure}</Alert>}
+        {demo && <Alert tone="info">{t("office.demo.exportsNote")}</Alert>}
         {/* Heard once, by this region: its messages are not alerts of their own (`role="presentation"`). */}
         <div aria-live="polite">
           {warnings.map((warning) => (

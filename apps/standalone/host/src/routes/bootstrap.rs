@@ -100,6 +100,33 @@ pub async fn bootstrap(
         templates.push((name, template.purpose, spec));
     }
 
+    // The demo set (spec 2026-10-21) needs the stock box and pallet defaults for its shift, a
+    // civil date to produce it on, and an organization whose prefix is not the demo one.
+    let demo_date = match &request.demo_data {
+        Some(demo) => {
+            if !defaults.contains_key(&TemplatePurpose::Box)
+                || !defaults.contains_key(&TemplatePurpose::Pallet)
+            {
+                return Err(ApiError::validation(
+                    "demoData",
+                    "the demo shift needs the stock box and pallet defaults",
+                ));
+            }
+            if prefix == crate::demo::DEMO_PREFIX {
+                return Err(ApiError::validation(
+                    "demoData",
+                    "the organization's SSCC prefix is the demo prefix",
+                ));
+            }
+            Some(
+                crate::shifts::civil_date(&demo.production_date).ok_or_else(|| {
+                    ApiError::validation("demoData.productionDate", "a civil date YYYY-MM-DD")
+                })?,
+            )
+        }
+        None => None,
+    };
+
     // Hash before taking the write lock: PBKDF2 takes a noticeable fraction
     // of a second.
     let password_phc = hash_password_blocking(request.admin.password.clone())
@@ -229,15 +256,40 @@ pub async fn bootstrap(
         .map_err(ApiError::internal)?;
     }
 
+    let mut line_ids: Vec<String> = Vec::with_capacity(lines.len());
     for (line_name, name_key) in &lines {
+        let line_id = uuid::Uuid::new_v4().to_string();
         sqlx::query("INSERT INTO lines (id, name, name_key, archived, rev) VALUES (?, ?, ?, 0, ?)")
-            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&line_id)
             .bind(line_name)
             .bind(name_key)
             .bind(rev)
             .execute(&mut *tx)
             .await
             .map_err(ApiError::internal)?;
+        line_ids.push(line_id);
+    }
+
+    if let Some(production_date) = demo_date {
+        let first_line_id = line_ids
+            .first()
+            .ok_or_else(|| ApiError::internal("no line"))?;
+        let template = |purpose| {
+            default_of(purpose).ok_or_else(|| ApiError::internal("a checked default vanished"))
+        };
+        crate::demo::create(
+            &mut tx,
+            &crate::demo::Wizard {
+                admin_id: &admin_id,
+                first_line_id,
+                box_template_id: &template(TemplatePurpose::Box)?,
+                pallet_template_id: &template(TemplatePurpose::Pallet)?,
+                production_date,
+                at: &at,
+                rev,
+            },
+        )
+        .await?;
     }
 
     let (token, expires) = open_session(&mut tx, &admin_id, &device.id, now)
@@ -254,6 +306,9 @@ pub async fn bootstrap(
     });
     if request.address_confirmed == Some(true) {
         details["addressConfirmed"] = json!(true);
+    }
+    if let Some(demo) = &request.demo_data {
+        details["demoData"] = json!({ "productionDate": demo.production_date });
     }
     audit::record(
         &mut tx,

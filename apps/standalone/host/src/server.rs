@@ -405,6 +405,11 @@ fn protected_routes() -> Router<AppState> {
             "/v1/office/warehouse-pallets",
             get(crate::routes::office_warehouse_pallets::list),
         )
+        .route(
+            "/v1/office/demo-data",
+            get(crate::routes::demo_data::get_demo_data)
+                .delete(crate::routes::demo_data::delete_demo_data),
+        )
         .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
         .route(
             "/v1/office/sscc/counters/{prefix}/{extension}",
