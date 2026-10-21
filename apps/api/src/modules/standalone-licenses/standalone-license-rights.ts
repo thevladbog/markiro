@@ -7,7 +7,8 @@ export const MAX_VALIDITY_STEPS = 64;
 
 export interface LicenseValidity {
   validUntil: Date;
-  reason: "subscription_end" | "entitlement_reduction" | "one_year_cap" | "offline_term";
+  reason:
+    "subscription_end" | "entitlement_reduction" | "one_year_cap" | "offline_term" | "demo_term";
   /** The time-bound instant the preview promised; `null` for the one-year cap. */
   boundaryAt: Date | null;
 }

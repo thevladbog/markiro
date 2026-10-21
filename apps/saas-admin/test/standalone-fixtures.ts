@@ -72,6 +72,7 @@ export const STANDALONE_SITE = standaloneSiteSchema.parse({
   lastIssuedSequence: 1,
   latestIssuance: STANDALONE_ISSUANCE,
   renewalDue: true,
+  leadLink: null,
   createdAt: "2099-09-30T10:00:00.000Z",
 });
 

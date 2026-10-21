@@ -16,10 +16,14 @@ import {
 } from "@markiro/domain";
 import {
   STANDALONE_ASSIGNMENT_REFS_MAX,
+  STANDALONE_DEMO_PLAN_VERSION_ID,
+  standaloneDemoTermsSchema,
   standaloneIssuanceListSchema,
   standaloneIssuancePreviewSchema,
+  type EntitlementSnapshotV1,
   type PlatformPrincipal,
   type StandaloneAssignmentRef,
+  type StandaloneDemoTerms,
   type StandaloneIssuanceConfirm,
   type StandaloneIssuanceList,
   type StandaloneIssuanceSource,
@@ -123,6 +127,8 @@ function termsDigest(draft: IssuanceDraft, hostId: string): string {
     STANDALONE_FEATURE_KEYS.map((key) => draft.rights.features[key]),
     draft.sourceAssignments?.map((ref) => [ref.kind, ref.id, ref.catalogVersionId]) ?? null,
     draft.validity.reason,
+    // A demo's term moves its end; appended only for a demo, so other digests stay as they were.
+    ...(draft.demoTerm === null ? [] : [draft.demoTerm.termDays]),
   ]);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -130,9 +136,20 @@ function termsDigest(draft: IssuanceDraft, hostId: string): string {
 /**
  * The same request id must carry the same terms to replay its file. The removed
  * manual offline terms still replay a row issued from them (owner decision
- * 2026-10-16: the journal is history), but are refused for a new issuance.
+ * 2026-10-16: the journal is history), but are refused for a new issuance. A
+ * demo replays only a demo row of the same term.
  */
-function sameTerms(row: StandaloneIssuanceRow, offline: StandaloneOfflineTerms | null): boolean {
+function sameTerms(
+  row: StandaloneIssuanceRow,
+  offline: StandaloneOfflineTerms | null,
+  demo: StandaloneDemoTerms | null,
+): boolean {
+  if (demo !== null)
+    return (
+      offline === null &&
+      row.source === "offline_demo" &&
+      row.validUntil.getTime() - row.validFrom.getTime() === demo.termDays * DAY_MS
+    );
   if (offline === null)
     return row.source === "subscription" || row.source === "offline_assignments";
   return (
@@ -152,9 +169,41 @@ interface IssuanceDraft {
   graceDays: number;
   customer: { name: string; inn: string };
   rights: StandaloneLicenseRights;
-  /** The plan and add-on rows the rights were read from; set only for `offline_assignments`. */
+  /**
+   * The plan and add-on rows the rights were read from: set for `offline_assignments`,
+   * and for an `offline_demo` that bridges an assigned tariff.
+   */
   sourceAssignments: StandaloneAssignmentRef[] | null;
+  /** The operator's term of an `offline_demo` file; `null` for every other source. */
+  demoTerm: StandaloneDemoTerms | null;
   warnings: StandaloneIssuanceWarning[];
+}
+
+/**
+ * Spec 2026-10-20 §4.2: a demo file without an assigned tariff carries the built-in
+ * trial's rights — no quota and every feature (the host's `Features::ALL`).
+ */
+const TRIAL_RIGHTS: StandaloneLicenseRights = {
+  quotas: { lines: null, stations: null, kiosks: null, cabinetUsers: null },
+  features: {
+    labelEditor: true,
+    publicApi: true,
+    pallets: true,
+    chzIntegration: true,
+    inventory: true,
+    commerceMl: true,
+    handheld: true,
+    customLogo: true,
+  },
+};
+
+/** A term of whole days within the contract's bound, or a precise refusal. */
+function demoTermOf(demo: StandaloneDemoTerms | null | undefined): StandaloneDemoTerms | null {
+  if (demo === undefined || demo === null) return null;
+  const parsed = standaloneDemoTermsSchema.safeParse(demo);
+  if (!parsed.success)
+    throw new BadRequestException({ code: "standalone_license_demo_term_invalid" });
+  return parsed.data;
 }
 
 @Injectable()
@@ -238,7 +287,7 @@ export class StandaloneLicenseIssuanceService {
           if (
             replay.issuedByPlatformUserId !== user.id ||
             (body.graceDays !== null && body.graceDays !== replay.graceDays) ||
-            !sameTerms(replay, body.offline)
+            !sameTerms(replay, body.offline, demoTermOf(body.demo))
           )
             throw new ConflictException({ code: "standalone_license_request_conflict" });
           return licenseFile(replay);
@@ -348,6 +397,7 @@ export class StandaloneLicenseIssuanceService {
             replaces: draft.previous?.id ?? null,
             source: draft.source,
             offlineTerms: null,
+            demoTerm: draft.demoTerm,
             sourceAssignments: draft.sourceAssignments,
             plan: draft.plan,
             planVersionId: draft.planVersionId,
@@ -442,13 +492,19 @@ export class StandaloneLicenseIssuanceService {
     tx: SubscriptionTransaction,
     site: StandaloneSiteRow,
     tenant: { name: string; cabinetAccess: "enabled" | "none" },
-    body: { graceDays: number | null; offline: StandaloneOfflineTerms | null },
+    body: {
+      graceDays: number | null;
+      offline: StandaloneOfflineTerms | null;
+      demo?: StandaloneDemoTerms | null | undefined;
+    },
     now: Date,
   ): Promise<IssuanceDraft> {
-    const source = issuanceSourceFor(tenant.cabinetAccess);
     // The manual offline terms are removed: an old client's request is refused, not guessed at.
     if (body.offline !== null)
       throw new ConflictException({ code: "standalone_license_offline_terms_removed" });
+    const demoTerm = demoTermOf(body.demo);
+    if (demoTerm !== null) return this.demoDraft(tx, site, tenant, body.graceDays, demoTerm, now);
+    const source = issuanceSourceFor(tenant.cabinetAccess);
     const terms = await this.assignmentTerms(
       tx,
       site.tenantId,
@@ -460,6 +516,93 @@ export class StandaloneLicenseIssuanceService {
     const grace = body.graceDays ?? (terms.plan === "demo" ? 0 : DEFAULT_SUBSCRIPTION_GRACE_DAYS);
     if (terms.plan === "demo" && grace !== 0)
       throw new BadRequestException({ code: "standalone_license_grace_invalid" });
+    const facts = await this.customerFacts(tx, site, tenant);
+    return {
+      previous: facts.previous,
+      source,
+      plan: terms.plan,
+      planVersionId: terms.planVersionId,
+      entitlementRevision: terms.entitlementRevision,
+      validity: terms.validity,
+      graceDays: grace,
+      customer: facts.customer,
+      rights: terms.rights,
+      sourceAssignments: source === "offline_assignments" ? terms.sourceAssignments : null,
+      demoTerm: null,
+      warnings: [
+        ...facts.warnings,
+        ...usageWarnings(terms.rights, siteUsage(site)),
+        ...terms.unmapped.map((feature): StandaloneIssuanceWarning => ({
+          code: "feature_unmapped",
+          feature,
+        })),
+      ],
+    };
+  }
+
+  /**
+   * Spec 2026-10-20 §4.2–4.3: a demo file for a tenant without a cabinet only,
+   * `plan: "demo"`, no grace, valid for the operator's term from issuance. With a
+   * tariff assigned it carries that tariff's rights (the bridge while an invoice is
+   * paid); without one, the built-in trial's (the trial extension).
+   */
+  private async demoDraft(
+    tx: SubscriptionTransaction,
+    site: StandaloneSiteRow,
+    tenant: { name: string; cabinetAccess: "enabled" | "none" },
+    graceDays: number | null,
+    demoTerm: StandaloneDemoTerms,
+    now: Date,
+  ): Promise<IssuanceDraft> {
+    if (tenant.cabinetAccess !== "none")
+      throw new ConflictException({ code: "standalone_license_demo_offline_only" });
+    if (graceDays !== null && graceDays !== 0)
+      throw new BadRequestException({ code: "standalone_license_grace_invalid" });
+    const snapshotAt = await this.entitlements.loadSnapshotTimeline(site.tenantId, tx);
+    const first = (await snapshotAt(now)).snapshot;
+    const subscription = first.current.subscription;
+    const assigned =
+      first.current.access === "managed" && subscription !== null && subscription.status !== "trial"
+        ? { planVersionId: subscription.planVersionId, ...exportStandaloneRights(first) }
+        : null;
+    const sourceAssignments = assigned ? activeAssignments(first) : null;
+    if (sourceAssignments !== null && sourceAssignments.length > STANDALONE_ASSIGNMENT_REFS_MAX)
+      throw new ConflictException({ code: "standalone_assignment_limit_reached" });
+    const rights = assigned?.rights ?? TRIAL_RIGHTS;
+    const facts = await this.customerFacts(tx, site, tenant);
+    return {
+      previous: facts.previous,
+      source: "offline_demo",
+      plan: "demo",
+      planVersionId: assigned?.planVersionId ?? STANDALONE_DEMO_PLAN_VERSION_ID,
+      entitlementRevision: first.revision,
+      validity: {
+        validUntil: new Date(now.getTime() + demoTerm.termDays * DAY_MS),
+        reason: "demo_term",
+        boundaryAt: null,
+      },
+      graceDays: 0,
+      customer: facts.customer,
+      rights,
+      sourceAssignments,
+      demoTerm,
+      warnings: [
+        ...facts.warnings,
+        ...usageWarnings(rights, siteUsage(site)),
+        ...(assigned?.unmapped ?? []).map((feature): StandaloneIssuanceWarning => ({
+          code: "feature_unmapped",
+          feature,
+        })),
+      ],
+    };
+  }
+
+  /** The signed customer, its INN warnings and the site's latest file. */
+  private async customerFacts(
+    tx: SubscriptionTransaction,
+    site: StandaloneSiteRow,
+    tenant: { name: string },
+  ) {
     const inns = await readTenantInns(tx, site.tenantId);
     const customerInn = resolveCustomerInn({
       orgInn: inns.orgInn,
@@ -481,23 +624,8 @@ export class StandaloneLicenseIssuanceService {
       .limit(1);
     return {
       previous: previous ?? null,
-      source,
-      plan: terms.plan,
-      planVersionId: terms.planVersionId,
-      entitlementRevision: terms.entitlementRevision,
-      validity: terms.validity,
-      graceDays: grace,
       customer: { name: plainName(inns.billingName ?? tenant.name), inn: customerInn.inn },
-      rights: terms.rights,
-      sourceAssignments: source === "offline_assignments" ? terms.sourceAssignments : null,
-      warnings: [
-        ...customerInn.warnings,
-        ...usageWarnings(terms.rights, siteUsage(site)),
-        ...terms.unmapped.map((feature): StandaloneIssuanceWarning => ({
-          code: "feature_unmapped",
-          feature,
-        })),
-      ],
+      warnings: customerInn.warnings,
     };
   }
 
@@ -525,14 +653,7 @@ export class StandaloneLicenseIssuanceService {
     )
       throw new ConflictException({ code: missingCode });
     const exported = exportStandaloneRights(first);
-    // Only what the entitlement projection counts at this instant: the same predicate
-    // as the rights, so an add-on that has not started or has ended is not named.
-    const asOf = new Date(first.asOf);
-    const sourceAssignments = first.sources.flatMap((source): StandaloneAssignmentRef[] =>
-      (source.kind === "plan" || source.kind === "addon") && sourceActiveAt(source, asOf)
-        ? [{ kind: source.kind, id: source.id, catalogVersionId: source.versionId }]
-        : [],
-    );
+    const sourceAssignments = activeAssignments(first);
     // The journal holds a bounded list (only for the assignments path; a cloud file names none); assignment creation enforces the same bound, so this
     // is a defence for rows that predate it, and answers with a code rather than a 500.
     if (
@@ -554,4 +675,17 @@ export class StandaloneLicenseIssuanceService {
       sourceAssignments,
     };
   }
+}
+
+/**
+ * Only what the entitlement projection counts at this instant: the same predicate
+ * as the rights, so an add-on that has not started or has ended is not named.
+ */
+function activeAssignments(snapshot: EntitlementSnapshotV1): StandaloneAssignmentRef[] {
+  const asOf = new Date(snapshot.asOf);
+  return snapshot.sources.flatMap((source): StandaloneAssignmentRef[] =>
+    (source.kind === "plan" || source.kind === "addon") && sourceActiveAt(source, asOf)
+      ? [{ kind: source.kind, id: source.id, catalogVersionId: source.versionId }]
+      : [],
+  );
 }
