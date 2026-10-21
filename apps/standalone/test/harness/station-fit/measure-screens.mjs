@@ -103,6 +103,17 @@ const CASES = [
   { name: "close-note", query: "view=close&variant=note" },
   { name: "closed", query: "view=closed" },
   { name: "closed-held", query: "view=closed&variant=held" },
+  // Plan 2b: the close of a part of a shared shift, and what became of it.
+  { name: "close-part", query: "view=close&variant=part" },
+  { name: "close-part-last", query: "view=close&variant=part-last" },
+  { name: "close-part-offline", query: "view=close&variant=part-offline" },
+  { name: "close-part-pallet", query: "view=close&variant=part-pallet" },
+  { name: "closed-part-queued", query: "view=closed&variant=queued" },
+  { name: "closed-part-waiting", query: "view=closed&variant=waiting" },
+  { name: "closed-part-shift", query: "view=closed&variant=shift_closed" },
+  { name: "closed-part-reason", query: "view=closed&variant=reason_missing" },
+  { name: "closed-part-refused", query: "view=closed&variant=refused" },
+  { name: "closed-part-unknown", query: "view=closed&variant=unknown" },
   { name: "history-full", query: "view=history" },
   {
     name: "history-full-page2",

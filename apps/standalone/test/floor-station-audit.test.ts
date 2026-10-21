@@ -553,3 +553,44 @@ describe("the shared shift's strip (plan 2b)", () => {
     expect(cases).toContain("shared=1&stale=1");
   });
 });
+
+describe("the close of a part (plan 2b)", () => {
+  const close = rulesOf("src/floor/close/shift-close.css");
+
+  it("sets the part's line in the floor's body face, smaller on a short window", () => {
+    expect(rule(close, ".shift-close__part")["font"]).toBe("var(--floor-body)");
+    expect(rule(close, ".shift-close__part", "@media (max-height: 860px)")["font"]).toBe(
+      "400 15px/20px var(--font-ui)",
+    );
+  });
+
+  it("gives the last closer's line up to the reasons, and keeps a part's six tiles in one row", () => {
+    const short = "@media (max-height: 860px)";
+    expect(
+      rule(close, ".shift-close__body:has(> .shift-close__reasons) > .shift-close__part", short)[
+        "display"
+      ],
+    ).toBe("none");
+    expect(rule(close, ".shift-close__facts:has(> :nth-child(7))")["grid-template-columns"]).toBe(
+      "repeat(auto-fit, minmax(112px, 1fr))",
+    );
+  });
+
+  it("measures every part panel on the whole matrix", () => {
+    const cases = textOf("test/harness/station-fit/measure-screens.mjs");
+    for (const variant of [
+      "part",
+      "part-last",
+      "part-offline",
+      "part-pallet",
+      "queued",
+      "waiting",
+      "shift_closed",
+      "reason_missing",
+      "refused",
+      "unknown",
+    ]) {
+      expect(cases).toContain(`variant=${variant}"`);
+    }
+  });
+});
