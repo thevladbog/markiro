@@ -391,6 +391,14 @@ impl Engine {
         self.queue.iter().take(max).cloned().collect()
     }
 
+    /// Test aid: make the first queued record unreadable to the host.
+    #[cfg(test)]
+    pub fn corrupt_front_for_test(&mut self) {
+        if let Some(front) = self.queue.front_mut() {
+            front.record = serde_json::json!({ "id": front.id, "kind": 7 });
+        }
+    }
+
     /// The first `n` records of the outbox, their receipts kept.
     pub fn ack(&mut self, n: usize) -> Vec<Queued> {
         self.queue.drain(..n.min(self.queue.len())).collect()
