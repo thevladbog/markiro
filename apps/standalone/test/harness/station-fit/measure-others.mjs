@@ -61,6 +61,12 @@ const WORK_CASES = [
   "mode=pallets&capacity=6&items=4&big=1&long=1&photo=jpeg",
   "mode=check&rows=3&big=1",
   "mode=check&rows=0",
+  // Plan 2b: the strip of a shared shift — plain, with pallets big and stale with long names,
+  // a validation band with its three small counters, stale.
+  "mode=plain&capacity=12&items=5&shared=1",
+  "mode=pallets&capacity=6&items=4&big=1&long=1&photo=jpeg&shared=1&stale=1",
+  "mode=check&rows=3&big=1&shared=1&stale=1",
+  "mode=check&rows=0&shared=1",
 ];
 const HUB_CASES = [
   "view=hub&shifts=1&queue=2&photo=jpeg",

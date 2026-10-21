@@ -923,8 +923,33 @@
     padding-block: var(--sp-2);
   }
 
+  /* Plan 2b: the age of a shared shift's figures takes the line the plan's bar and percent had. */
+  .work-shift-band__total:has(.work-shift-band__stale) .work-shift-band__bar,
+  .work-shift-band__total:has(.work-shift-band__stale) .work-shift-band__meta {
+    display: none;
+  }
+
   .work-shift-band__count {
     font-size: 48px;
+  }
+
+  /* Plan 2b: a validation band of a shared shift holds four counters and big figures; they narrow
+     so the title and the chips keep two rows beside them. */
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__total {
+    padding-inline: var(--sp-2);
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__count {
+    font-size: 44px;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__small {
+    min-width: 64px;
+    padding-inline: var(--sp-1);
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__small-count {
+    font-size: 28px;
   }
 
   .work-shift-band__small-count {
@@ -1060,6 +1085,36 @@
 
   .work-shift-band__small-count {
     font-size: 28px;
+  }
+
+  /* Plan 2b: «Моя станция» beside the two refusal counters of a validation band: tighter labels, so the
+     chips keep their three words. */
+  .work-shift-band__counters:has(.work-shift-band__small--mine)
+    .work-shift-band__small
+    .work-shift-band__label {
+    letter-spacing: 0.02em;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__count {
+    font-size: 40px;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine)
+    .work-shift-band__small--mine
+    .work-shift-band__small-count {
+    font-size: 24px;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__small {
+    min-width: 64px;
+  }
+
+  .work-shift-band__counters {
+    gap: var(--sp-1);
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__total {
+    padding-inline: var(--sp-1);
   }
 
   /* The open box: title and count on a slim row, the cells share the rest, the buttons keep 64 px. */

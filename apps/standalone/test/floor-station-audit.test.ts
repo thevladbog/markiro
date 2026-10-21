@@ -533,3 +533,23 @@ describe("the shared shift's card (plan 2b)", () => {
     }
   });
 });
+
+describe("the shared shift's strip (plan 2b)", () => {
+  const work = rulesOf("src/floor/work/work-screen.css");
+
+  it("keeps the age of the host's figures on a short window, where the plan's bar and percent go", () => {
+    expect(rule(work, ".work-shift-band__stale")["white-space"]).toBe("nowrap");
+    expect(
+      rule(work, ".work-shift-band__stale", "@media (max-height: 780px)")["display"],
+    ).toBeUndefined();
+    expect(rule(work, ".work-shift-band__meta", "@media (max-height: 780px)")["display"]).toBe(
+      "none",
+    );
+  });
+
+  it("measures the shared strip on the whole matrix, stale and big", () => {
+    const cases = textOf("test/harness/station-fit/measure-others.mjs");
+    expect(cases).toContain("shared=1");
+    expect(cases).toContain("shared=1&stale=1");
+  });
+});
