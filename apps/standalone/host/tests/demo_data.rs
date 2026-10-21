@@ -198,3 +198,240 @@ async fn the_demo_set_needs_its_templates_a_date_and_another_prefix_and_a_refusa
         assert_eq!(count(&app, "SELECT COUNT(*) FROM office_users").await, 0);
     }
 }
+
+/// The demo product, the demo shift and the wizard's first line and stock templates.
+struct DemoSet {
+    product: String,
+    shift: Value,
+    line: String,
+    box_template: String,
+    pallet_template: String,
+}
+
+async fn demo_set(admin: &support::app::Admin) -> DemoSet {
+    let pool = &admin.app.state.pool;
+    let product: String = sqlx::query_scalar("SELECT id FROM products WHERE demo = 1")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let line: String = sqlx::query_scalar("SELECT id FROM lines WHERE name = 'Линия 1'")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let template = |purpose: &'static str| async move {
+        sqlx::query_scalar::<_, String>("SELECT id FROM label_templates WHERE purpose = ?")
+            .bind(purpose)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+    let (status, shifts) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{shifts}");
+    DemoSet {
+        product,
+        shift: shifts[0].clone(),
+        line,
+        box_template: template("box").await,
+        pallet_template: template("pallet").await,
+    }
+}
+
+/// A device request with `key`.
+async fn device_call(
+    admin: &support::app::Admin,
+    key: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let builder = with_device(request(method, path), key);
+    match body {
+        Some(body) => admin.app.send(json_request(builder, body)).await,
+        None => admin.app.send(support::app::empty(builder)).await,
+    }
+}
+
+fn demo_photo_base64() -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(include_bytes!("../assets/demo-product.png"))
+}
+
+fn constraint(body: &Value) -> &Value {
+    &body["error"]["details"]["constraint"]
+}
+
+#[tokio::test]
+async fn the_demo_product_is_read_only() {
+    let admin = demo_admin().await;
+    let set = demo_set(&admin).await;
+    let path = format!("/v1/office/products/{}", set.product);
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({
+                "gtin14": "04600682000013", "name": "Молоко", "printName": null,
+                "chzProductGroupCode": 13, "boxCapacity": 5, "palletBoxCapacity": 2,
+                "shelfLifeDays": 365, "defaultBoxTemplateId": null,
+                "defaultPalletTemplateId": null, "archived": false, "expectedRev": 1
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(constraint(&body), "demo_product");
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("{path}/photo"),
+            Some(json!({ "width": 480, "height": 480, "dataBase64": demo_photo_base64() })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(constraint(&body), "demo_product");
+    let (status, body) = admin.call("DELETE", &format!("{path}/photo"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(constraint(&body), "demo_product");
+    assert_eq!(
+        count(&admin.app, "SELECT COUNT(*) FROM product_photos").await,
+        1
+    );
+    assert_eq!(audit_trail(&admin.app, "product.update").await.len(), 0);
+
+    // The office and the feed see the flag.
+    let (status, products) = admin.call("GET", "/v1/office/products", None).await;
+    assert_eq!(status, StatusCode::OK, "{products}");
+    assert_eq!(products[0]["demo"], true);
+    let feed = admin.feed(0).await;
+    let record = feed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["entity"] == "products")
+        .expect("the demo product rides the feed");
+    assert_eq!(record["data"]["demo"], true);
+    assert_eq!(record["data"]["gtin14"], DEMO_GTIN);
+}
+
+#[tokio::test]
+async fn a_new_shift_of_the_demo_product_is_a_demo_shift_with_a_demo_number() {
+    let admin = demo_admin().await;
+    let set = demo_set(&admin).await;
+    let (status, planned) = admin
+        .call(
+            "POST",
+            "/v1/office/shifts",
+            Some(json!({
+                "productId": set.product, "lineId": set.line, "productionDate": "2026-11-02",
+                "boxTemplateId": set.box_template, "mode": "aggregation",
+                "palletsEnabled": true, "palletTemplateId": set.pallet_template
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{planned}");
+    assert_eq!(planned["number"], "DEMO-002");
+
+    let (status, line) = device_call(
+        &admin,
+        &admin.key,
+        "PUT",
+        "/v1/device/line",
+        Some(json!({ "lineId": set.line })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{line}");
+    let (status, created) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(json!({
+            "requestId": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+            "productId": set.product,
+            "boxTemplateId": set.box_template,
+            "productionDate": "2026-11-03"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["number"], "DEMO-003/S");
+    assert_eq!(
+        count(
+            &admin.app,
+            "SELECT COUNT(*) FROM shift_number_counters WHERE month_key <> 'DEMO'"
+        )
+        .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_demo_shift_takes_its_ssccs_from_the_demo_prefix_which_the_office_does_not_list() {
+    let admin = demo_admin().await;
+    let set = demo_set(&admin).await;
+    let (status, line) = device_call(
+        &admin,
+        &admin.key,
+        "PUT",
+        "/v1/device/line",
+        Some(json!({ "lineId": set.line })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{line}");
+    let path = format!(
+        "/v1/device/shifts/{}/enter",
+        set.shift["id"].as_str().unwrap()
+    );
+    let (status, entered) = device_call(&admin, &admin.key, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["snapshot"]["issuerPrefix"], DEMO_PREFIX);
+    let (status, block) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/sscc/blocks",
+        Some(json!({
+            "requestId": "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a",
+            "issuerPrefix": DEMO_PREFIX,
+            "extension": 0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    assert_eq!(block["fromSerial"], 1);
+
+    let (status, sscc) = admin.call("GET", "/v1/office/sscc", None).await;
+    assert_eq!(status, StatusCode::OK, "{sscc}");
+    assert!(
+        sscc["counters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|counter| counter["issuerPrefix"] != DEMO_PREFIX),
+        "{sscc}"
+    );
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/sscc/counters/{DEMO_PREFIX}/0"),
+            Some(json!({ "nextSerial": 5000, "expectedRev": 2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+#[tokio::test]
+async fn the_organization_takes_no_gln_of_the_demo_prefix_while_the_demo_data_is_there() {
+    let admin = demo_admin().await;
+    let (status, body) = admin
+        .call(
+            "PUT",
+            "/v1/office/org",
+            Some(json!({
+                "name": "ООО «Атолл»", "inn": "7707083893", "gln": "2900000000018",
+                "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow", "expectedRev": 1
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"]["field"], "gln");
+}

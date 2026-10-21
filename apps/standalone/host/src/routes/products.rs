@@ -443,6 +443,11 @@ pub async fn update_product(
     let current = read(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("no such product"))?;
+    // The demo product is read-only (spec 2026-10-21): a real GTIN on it would hide real
+    // production from the exports.
+    if current.demo {
+        return Err(crate::demo::demo_product());
+    }
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }

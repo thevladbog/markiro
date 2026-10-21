@@ -50,6 +50,14 @@ pub async fn is_demo_product(conn: &mut SqliteConnection, id: &str) -> Result<bo
     Ok(demo.unwrap_or(false))
 }
 
+/// Whether the demo data is there: the demo product exists.
+pub async fn present(conn: &mut SqliteConnection) -> Result<bool, ApiError> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM products WHERE demo = 1)")
+        .fetch_one(conn)
+        .await
+        .map_err(ApiError::internal)
+}
+
 /// Whether the shift's product is the demo product; an unknown shift is no demo.
 pub async fn is_demo_shift(conn: &mut SqliteConnection, id: &str) -> Result<bool, ApiError> {
     let demo: Option<bool> = sqlx::query_scalar(
