@@ -53,10 +53,20 @@ interface CodeDao {
     suspend fun countForShift(shiftId: String): Int
 
     /**
-     * The shift's effective codes the host gave to another terminal (their hash is in `conflicts_mirror`, the code stays in `codes_mirror`):
-     * they are inside the others' part of a shared shift's total, so `SharedShiftRules` takes them off this device's own count (its `lost`).
+     * The codes THIS shift's own scans hold that the host does not count for this device (the station's `SHIFT_LOST_CODES_SQL`): the host gave the
+     * code to another terminal (`conflict`: the hash is in `conflicts_mirror`, the code stays in `codes_mirror`) or refused the record (`rejected`:
+     * its `host_outbox` record is quarantined and the scan stays in `outbox`). They are inside the others' part of a shared shift's total or in
+     * nobody's, so `SharedShiftRules` takes them off this device's own count (its `lost`). A code is the shift's own when `codes_mirror` holds it
+     * for this shift: the same hash accepted in another shift, or only reprocessed here, never counts. A code in both kinds counts once.
+     * The station's third kind, a code the host displaced since, has no counterpart: the handheld reads no displacement notices.
      */
-    @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") e WHERE e.shiftId = :shiftId AND e.codeHash IN (SELECT codeHash FROM conflicts_mirror)")
+    @Query(
+        "SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") e WHERE e.shiftId = :shiftId " +
+            "AND EXISTS (SELECT 1 FROM codes_mirror c WHERE c.codeHash = e.codeHash AND c.shiftId = e.shiftId) " +
+            "AND (e.codeHash IN (SELECT codeHash FROM conflicts_mirror) " +
+            "OR e.codeHash IN (SELECT o.codeHash FROM outbox o JOIN host_outbox h ON h.sourceKind = 'scan' AND h.sourceKey = CAST(o.id AS TEXT) " +
+            "WHERE h.state = 'quarantined' AND o.shiftId = :shiftId AND o.codeHash IS NOT NULL))",
+    )
     suspend fun lostForShift(shiftId: String): Int
 
     @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
