@@ -377,6 +377,7 @@ test("runtime probe emits only the closed version 3 diagnostic schema and safe c
     "LEAD_TELEGRAM_BOT_TOKEN",
     "LEAD_TELEGRAM_CHAT_ID",
     "LEAD_RETENTION_MONTHS",
+    "RELEASES_S3_ENDPOINT",
     "SMTP_USER",
     "SMTP_PASSWORD",
   ]);

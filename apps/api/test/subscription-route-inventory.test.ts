@@ -876,6 +876,15 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformLeadsController.anonymize": platform(
     "erasing a lead's personal data is guarded by leads.write",
   ),
+  "PlatformStandaloneReleasesController.upload": platform(
+    "presigned uploads into the public release bucket are guarded by standaloneReleases.manage",
+  ),
+  "PlatformStandaloneReleasesController.register": platform(
+    "verifying and registering a signed standalone release is guarded by standaloneReleases.manage",
+  ),
+  "PlatformStandaloneReleasesController.setLatest": platform(
+    "moving a standalone channel's latest.json is guarded by standaloneReleases.manage",
+  ),
   "ProfileController.deleteAvatar": profile,
   "ProfileController.updateProfile": profile,
   "ProfileController.uploadAvatar": profile,
