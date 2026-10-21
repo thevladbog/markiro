@@ -236,7 +236,7 @@ pub fn bootstrap_body() -> Value {
 }
 
 /// [`bootstrap_body`] with stock box and pallet templates (the organization's defaults) and the
-/// demo data (spec 2026-10-21), its shift produced on 2026-10-21.
+/// demo data (spec 2026-10-21), its shift produced on 2026-09-21, the test clock's day.
 pub fn demo_bootstrap_body() -> Value {
     let spec = |width: u32| serde_json::json!({ "widthMm": width, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] });
     let mut body = bootstrap_body();
@@ -244,7 +244,7 @@ pub fn demo_bootstrap_body() -> Value {
         { "name": "Коробка 58×40", "purpose": "box", "spec": spec(58), "orgDefault": true },
         { "name": "Паллета 100×150", "purpose": "pallet", "spec": spec(100), "orgDefault": true }
     ]);
-    body["demoData"] = serde_json::json!({ "productionDate": "2026-10-21" });
+    body["demoData"] = serde_json::json!({ "productionDate": "2026-09-21" });
     body
 }
 

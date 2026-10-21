@@ -440,6 +440,7 @@ async fn record_export_in(
     if !of_pallet && status != ShiftStatus::Closed {
         return Err(shifts::status_conflict(status));
     }
+    crate::demo::refuse_gismt(&mut tx, &id, &record.format_id).await?;
     if let Some(pallet) = &record.pallet_id {
         let found: Option<i64> =
             sqlx::query_scalar("SELECT 1 FROM pallets WHERE id = ?1 AND shift_id = ?2 UNION ALL SELECT 1 FROM cloud_history_pallets p JOIN cloud_history_batches b ON b.id=p.batch_id AND b.status='complete' WHERE p.id=?1 AND p.shift_id=?2")

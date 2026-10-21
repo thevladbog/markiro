@@ -98,7 +98,7 @@ async fn the_wizard_installs_the_demo_set_in_its_own_revision() {
     assert_eq!(shift["mode"], "aggregation");
     assert_eq!(shift["productId"], json!(product.0));
     assert_eq!(shift["lineId"], json!(first_line));
-    assert_eq!(shift["productionDate"], "2026-10-21");
+    assert_eq!(shift["productionDate"], "2026-09-21");
     assert_eq!(shift["plannedQty"], 20);
     assert_eq!(shift["boxCapacity"], 5);
     assert_eq!(shift["palletsEnabled"], true);
@@ -118,7 +118,7 @@ async fn the_wizard_installs_the_demo_set_in_its_own_revision() {
     assert_eq!(trail.len(), 1);
     assert_eq!(
         trail[0].6["demoData"],
-        json!({ "productionDate": "2026-10-21" })
+        json!({ "productionDate": "2026-09-21" })
     );
 }
 
@@ -434,4 +434,225 @@ async fn the_organization_takes_no_gln_of_the_demo_prefix_while_the_demo_data_is
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"]["details"]["field"], "gln");
+}
+
+/// A demo shift worked on its station: 10 demo codes in two boxes of 5 on one pallet; `close`
+/// closes the shift from the station.
+struct DemoRun {
+    shift: String,
+    boxes: Vec<String>,
+    pallet: String,
+}
+
+fn demo_code(n: u32) -> Value {
+    json!({
+        "codeHash": format!("{:064x}", 0xd0000 + n),
+        "gtin14": DEMO_GTIN,
+        "serial": format!("DEMO{n:09}"),
+        "canonical": format!("01{DEMO_GTIN}21DEMO{n:09}\u{1d}91DEMO\u{1d}92Tail{n}")
+    })
+}
+
+fn demo_digest(members: std::ops::RangeInclusive<u32>) -> String {
+    let hashes: Vec<String> = members.map(|n| format!("{:064x}", 0xd0000 + n)).collect();
+    markiro_host::facts::rules::box_membership_digest(&hashes)
+}
+
+async fn run_demo_shift(admin: &support::app::Admin, close: bool) -> DemoRun {
+    use support::app::{box_id, fact, instant, pallet_id, receipts, record_id, sscc_of};
+    let set = demo_set(admin).await;
+    let shift = set.shift["id"].as_str().unwrap().to_owned();
+    let (status, line) = device_call(
+        admin,
+        &admin.key,
+        "PUT",
+        "/v1/device/line",
+        Some(json!({ "lineId": set.line })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{line}");
+    let (status, entered) = device_call(
+        admin,
+        &admin.key,
+        "POST",
+        &format!("/v1/device/shifts/{shift}/enter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let block = |extension: u8, request: &'static str| {
+        let body =
+            json!({ "requestId": request, "issuerPrefix": DEMO_PREFIX, "extension": extension });
+        async move {
+            let (status, block) = device_call(
+                admin,
+                &admin.key,
+                "POST",
+                "/v1/device/sscc/blocks",
+                Some(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{block}");
+            block
+        }
+    };
+    let boxes_block = block(0, "7e6d5c4b-3a2f-4e1d-9c8b-7a6f5e4d3c2b").await;
+    let pallets_block = block(1, "8f7e6d5c-4b3a-4f2e-8d1c-9b8a7f6e5d4c").await;
+    let pallet = pallet_id(1);
+    let mut records = Vec::new();
+    let mut n = 0;
+    for b in 1..=2_u32 {
+        for code in (b - 1) * 5 + 1..=b * 5 {
+            n += 1;
+            records.push(fact(
+                &record_id(n),
+                "scan",
+                &shift,
+                json!({
+                    "scannedAt": instant(code, 0), "verdict": "ok", "duplicateSource": null,
+                    "rawKind": "km", "rawLength": 40, "code": demo_code(code), "boxId": box_id(b)
+                }),
+            ));
+        }
+        n += 1;
+        records.push(fact(
+            &record_id(n),
+            "box_closed",
+            &shift,
+            json!({
+                "boxId": box_id(b), "sscc": sscc_of(0, DEMO_PREFIX, u64::from(b)),
+                "blockId": boxes_block["id"], "serial": b,
+                "openedAt": instant((b - 1) * 5 + 1, 0), "closedAt": instant(b * 5, 500),
+                "itemCount": 5, "membershipDigest": demo_digest((b - 1) * 5 + 1..=b * 5),
+                "palletId": pallet
+            }),
+        ));
+    }
+    n += 1;
+    records.push(fact(
+        &record_id(n),
+        "pallet_closed",
+        &shift,
+        json!({
+            "palletId": pallet, "sscc": sscc_of(1, DEMO_PREFIX, 0), "blockId": pallets_block["id"],
+            "serial": 0, "openedAt": instant(1, 0), "closedAt": instant(10, 600), "boxCount": 2
+        }),
+    ));
+    if close {
+        n += 1;
+        records.push(fact(
+            &record_id(n),
+            "shift_closed",
+            &shift,
+            json!({
+                "plannedQtySnapshot": 20, "actualQty": 10, "closedBoxCount": 2,
+                "reasonCode": "other_production_deviation", "closedAt": instant(20, 0)
+            }),
+        ));
+    }
+    let answers = receipts(&admin.app, &admin.key, &records).await;
+    assert!(
+        answers
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answers:?}"
+    );
+    DemoRun {
+        shift,
+        boxes: vec![sscc_of(0, DEMO_PREFIX, 1), sscc_of(0, DEMO_PREFIX, 2)],
+        pallet: sscc_of(1, DEMO_PREFIX, 0),
+    }
+}
+
+#[tokio::test]
+async fn a_demo_shift_goes_into_no_document_for_gismt_but_its_csv_may_be_saved() {
+    let admin = demo_admin().await;
+    let run = run_demo_shift(&admin, true).await;
+    let record = |format: &str, version: u32| {
+        json!({
+            "formatId": format, "formatVersion": version, "maxLines": null, "palletId": null,
+            "documentId": "4f3e2d1c-0b9a-4876-9543-210fedcba987", "partCount": 1,
+            "codeCount": 10, "boxCount": 2, "palletCount": 1, "openPalletSuppressedBoxCount": 0
+        })
+    };
+    let path = format!("/v1/office/shifts/{}/exports", run.shift);
+    let (status, body) = admin
+        .call(
+            "POST",
+            &path,
+            Some(record("shift_xml_gismt_aggregation", 1)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(constraint(&body), "demo_shift");
+    assert_eq!(audit_trail(&admin.app, "shift.export").await.len(), 0);
+    let (status, body) = admin
+        .call("POST", &path, Some(record("shift_csv_flat", 1)))
+        .await;
+    assert!(status.is_success(), "{status} {body}");
+}
+
+#[tokio::test]
+async fn a_demo_box_goes_into_no_disaggregation_document() {
+    let admin = demo_admin().await;
+    let run = run_demo_shift(&admin, true).await;
+    let (status, document) = admin
+        .call(
+            "POST",
+            "/v1/office/disaggregation",
+            Some(json!({ "reasonId": null, "comment": null })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{document}");
+    let id = document["document"]["id"].as_str().unwrap();
+    let (status, body) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/disaggregation/{id}/lines"),
+            Some(json!({
+                "lines": [
+                    { "input": run.boxes[0], "sscc": run.boxes[0] },
+                    { "input": run.pallet, "sscc": run.pallet }
+                ],
+                "import": false
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(constraint(&body), "demo_box");
+    assert_eq!(
+        body["error"]["details"]["ssccs"],
+        json!([run.boxes[0], run.pallet])
+    );
+    assert_eq!(
+        count(
+            &admin.app,
+            "SELECT COUNT(*) FROM disaggregation_document_lines"
+        )
+        .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn the_usage_statistics_count_no_demo_shift() {
+    let admin = demo_admin().await;
+    let (status, before) = admin.call("GET", "/v1/office/usage-stats", None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    run_demo_shift(&admin, true).await;
+    let (status, after) = admin.call("GET", "/v1/office/usage-stats", None).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    assert_eq!(before["months"], after["months"]);
+    // The demo shift's month is in the window, and counts nothing.
+    let september = after["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|month| month["month"] == "2026-09")
+        .expect("the demo shift's month is in the window")
+        .clone();
+    assert_eq!(september["shifts"]["aggregation"], 0);
+    assert_eq!(september["scans"]["accepted"], 0);
+    assert_eq!(september["boxes"]["closed"], 0);
+    assert_eq!(september["pallets"]["closed"], 0);
 }

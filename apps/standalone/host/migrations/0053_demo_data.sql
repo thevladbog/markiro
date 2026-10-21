@@ -22,3 +22,7 @@ INSERT INTO shift_number_counters_rebuilt (rowid, month_key, last_seq)
   SELECT rowid, month_key, last_seq FROM shift_number_counters;
 DROP TABLE shift_number_counters;
 ALTER TABLE shift_number_counters_rebuilt RENAME TO shift_number_counters;
+
+-- The statistics leave the demo product's shifts out (`product_id NOT IN (… demo = 1)`): this
+-- index holds that one row, so no query reads the catalog for it.
+CREATE INDEX products_demo ON products (id) WHERE demo = 1;

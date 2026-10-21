@@ -87,6 +87,24 @@ pub fn demo_shift() -> ApiError {
     )
 }
 
+/// Whether an export format is a document for ГИС МТ (decision Д1: a demo shift goes into
+/// none; its TXT and CSV files may be saved).
+pub fn is_gismt_format(format_id: &str) -> bool {
+    format_id.contains("_xml_gismt_")
+}
+
+/// `demo_shift` when `shift_id` is a demo shift and the format is a document for ГИС МТ.
+pub async fn refuse_gismt(
+    conn: &mut SqliteConnection,
+    shift_id: &str,
+    format_id: &str,
+) -> Result<(), ApiError> {
+    if is_gismt_format(format_id) && is_demo_shift(conn, shift_id).await? {
+        return Err(demo_shift());
+    }
+    Ok(())
+}
+
 /// The demo set: the product with its photo, the demo prefix's counters and the planned shift;
 /// returns the product's id.
 pub async fn create(conn: &mut SqliteConnection, wizard: &Wizard<'_>) -> Result<String, ApiError> {
@@ -178,6 +196,27 @@ mod tests {
         assert_eq!((bytes.len(), media_type), (DEMO_PHOTO.len(), "image/png"));
         // The PNG's own header says 480 × 480.
         assert_eq!(&DEMO_PHOTO[16..24], &[0, 0, 1, 224, 0, 0, 1, 224]);
+    }
+
+    #[test]
+    fn every_gismt_format_and_only_those_is_refused_for_a_demo_shift() {
+        use crate::routes::office_exports::{PALLET_FORMATS, SHIFT_FORMATS};
+        let gismt: Vec<&str> = SHIFT_FORMATS
+            .iter()
+            .chain(PALLET_FORMATS.iter())
+            .map(|(id, _)| *id)
+            .filter(|id| is_gismt_format(id))
+            .collect();
+        assert_eq!(
+            gismt,
+            vec![
+                "shift_xml_gismt_aggregation",
+                "shift_xml_gismt_aggregation_pallets",
+                "shift_xml_gismt_pallet_boxes",
+                "pallet_xml_gismt_aggregation"
+            ]
+        );
+        assert!(!is_gismt_format("shift_csv_boxes") && !is_gismt_format("shift_txt_flat"));
     }
 
     #[test]
