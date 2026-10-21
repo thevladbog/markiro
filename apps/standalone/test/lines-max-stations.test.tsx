@@ -178,6 +178,32 @@ describe("the line's limit in the office (plan 2b)", () => {
     expect(within(dialog).getByLabelText(LABEL).getAttribute("aria-invalid")).toBe("true");
   });
 
+  it("does not refuse a limit by shifts it could not read again: with the last read failed it asks the host", async () => {
+    const fake = session();
+    fake.api.updateLine.mockResolvedValue({ ...THREE, maxStations: 1, rev: 41 });
+    // «Смены» reads the list first and leaves it cached; the dialog's own read of it then fails.
+    renderOffice(fake, { initialPath: "/shifts" });
+    await screen.findByRole("heading", { name: "Смены" });
+    await waitFor(() => expect(fake.api.listShifts).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("link", { name: "Линии" }));
+    await screen.findByText("Линия 10");
+    fake.api.listShifts.mockRejectedValue(new Error("down"));
+    const reads = fake.api.listShifts.mock.calls.length;
+    pressRowAction(screen, "Переименовать линию «Линия 2»");
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(fake.api.listShifts.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(fake.api.listDevices).toHaveBeenCalled());
+    typeLimit("1");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fake.api.updateLine).toHaveBeenCalledWith(TOKEN, THREE.id, {
+        maxStations: 1,
+        expectedRev: 40,
+      }),
+    );
+    expect(within(dialog).queryByText(BELOW)).toBeNull();
+  });
+
   it("refuses a limit that is not a whole number from 1 to 16", async () => {
     const fake = session();
     const dialog = await openRename(fake);

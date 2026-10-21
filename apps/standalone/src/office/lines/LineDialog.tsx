@@ -46,7 +46,7 @@ export interface LineDialogProps {
  * active line already has (without case) comes back as `conflict` on `line_name` on every path
  * here — adding, changing and bringing a line back — and goes under the name, so bringing a line
  * back can give it a new name in the same dialog. The limit is not offered when a line is added
- * (it starts at one) or brought back; changing it below the devices at work is refused here as
+ * (it starts at one), or brought back; changing it below the devices at work is refused here as
  * soon as the shifts are read, and by the host (`line_stations_in_use`) whatever the page knew.
  */
 export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps) {
@@ -63,8 +63,12 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
   const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
     enabled: editsLimit,
   });
+  // Shifts whose last read failed may be older than the host's state (data stays cached through a
+  // failed read): the form then claims nothing and the host decides.
   const inUse =
-    mode.kind === "rename" ? activeStationsOnLine(shifts.data, mode.line.id, devices.data) : null;
+    mode.kind === "rename" && !shifts.isError
+      ? activeStationsOnLine(shifts.data, mode.line.id, devices.data)
+      : null;
   const schema = useMemo(() => lineFieldsSchema(inUse), [inUse]);
   const save = useOfficeMutation((api, token, values: LineFields) => {
     switch (mode.kind) {
