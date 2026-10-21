@@ -13,6 +13,11 @@ import {
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import {
+  clearLeaveStatement,
+  dropOrphanParticipationStatement,
+  participationStatement,
+} from "./shift-participation.js";
+import {
   checkShiftSnapshot,
   type CheckedSnapshot,
   type SnapshotRefusal,
@@ -183,7 +188,12 @@ const KEEP_ENTERED =
  * in one transaction (stage 2a spec §5.4). `shifts` must be the host's whole
  * parsed answer, never a fallback or a partial list: an empty array drops every
  * copy this station has not entered. Another pairing's rows, kept by a forget
- * with records not yet sent, are never touched.
+ * with records not yet sent, are never touched. The host's figures of a shift
+ * several devices work (plan 2b) go into `floor_shift_participation` in the
+ * same transaction (`participationStatement`), an older read never over a newer
+ * one, a closed shift's participants and state over the figures it had (the list
+ * names a closed shift without figures), and the figures of a shift no longer
+ * kept go.
  */
 export async function replaceShiftCopies(
   local: LocalExecutor,
@@ -195,6 +205,10 @@ export async function replaceShiftCopies(
   await local.transaction([
     { sql: DROP_UNLISTED, values: [pairing.hostId, pairing.deviceId, listed] },
     { sql: UPSERT, values: [pairing.hostId, pairing.deviceId, seenAt, listed] },
+    // Plan 2b: the host's figures of a shared shift with the copy, in the same transaction, and
+    // none of a shift this pairing no longer keeps.
+    participationStatement(pairing, shifts, seenAt),
+    dropOrphanParticipationStatement(pairing),
   ]);
 }
 
@@ -244,7 +258,13 @@ export async function keepEnteredShift(
     ],
     expectedChanges: 1,
   };
-  await local.transaction([statement]);
+  // Plan 2b: the answer's figures, and no pause left that a late send could turn against this
+  // entry (host D5).
+  await local.transaction([
+    statement,
+    participationStatement(pairing, [fields], seenAt),
+    clearLeaveStatement(pairing, shift.id),
+  ]);
 }
 
 const copyRow = z.object({
