@@ -12,8 +12,8 @@ import { useLabelRendering } from "../../office/templates/label-rendering.js";
 import { labelRenderOptions } from "../../office/templates/label-samples.js";
 import type { LabelFields } from "../print/label-render.js";
 
-/** Pixels per millimetre: a 58×40 label is 232×160 px, a 100×150 one 400×600 (CSS fits it). */
-const SCALE = 4;
+/** Pixels per millimetre: a 58×40 label is 464×320 px, a 100×150 one 800×1200 (CSS fits it). */
+const SCALE = 8;
 
 export interface DemoLabelPreviewProps {
   spec: LabelTemplateSpec;
