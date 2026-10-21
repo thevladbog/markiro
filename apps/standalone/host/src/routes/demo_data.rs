@@ -1,15 +1,13 @@
 //! Demo data in the office (spec `2026-10-21-standalone-wizard-demo-data-design`):
 //! `GET /v1/office/demo-data` (every office role) says whether the wizard's demo set is there
 //! and what its shifts made; `DELETE` (administrators) removes all of it in one transaction and
-//! one revision. A demo shift still open refuses the delete (`conflict` on `demo_shift_active`
+//! one revision (with nothing there, the summary of nothing). A demo shift still open refuses the delete (`conflict` on `demo_shift_active`
 //! with the shifts' numbers). The demo product leaves the station feed as a tombstone, and a
 //! station's late fact of a removed shift is acknowledged and dropped (`demo_removed_shifts`).
 //! The audit log keeps its rows: «без следа» is about the work data, the numbering and the
 //! reports, never the journal.
 
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::Json;
 use markiro_proto::{entities, DemoDataSummary, ShiftOrigin};
 use serde_json::json;
@@ -144,11 +142,12 @@ const REMOVE: &[(&str, Arg)] = &[
     ("DROP TABLE temp.demo_ssccs", Arg::None),
 ];
 
-/// `DELETE /v1/office/demo-data`: `200` with what was removed, `204` when there is nothing.
+/// `DELETE /v1/office/demo-data`: what was removed; with nothing there, the summary of nothing
+/// (`present: false`), and no revision or row.
 pub async fn delete_demo_data(
     State(state): State<AppState>,
     context: OfficeContext,
-) -> Result<Response, ApiError> {
+) -> Result<Json<DemoDataSummary>, ApiError> {
     context.require_admin()?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
@@ -156,7 +155,7 @@ pub async fn delete_demo_data(
     let removed = summary(&mut tx).await?;
     let Some(product_id) = removed.product_id.clone() else {
         // Nothing to remove: no revision, no row.
-        return Ok(StatusCode::NO_CONTENT.into_response());
+        return Ok(Json(removed));
     };
     if !removed.active_shifts.is_empty() {
         return Err(ApiError::conflict(
@@ -203,5 +202,5 @@ pub async fn delete_demo_data(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
-    Ok(Json(removed).into_response())
+    Ok(Json(removed))
 }

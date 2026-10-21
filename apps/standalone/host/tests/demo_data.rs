@@ -742,7 +742,8 @@ async fn a_host_without_demo_data_deletes_nothing() {
     assert_eq!(status, StatusCode::OK, "{summary}");
     assert_eq!(summary["present"], false);
     let (status, body) = admin.call("DELETE", "/v1/office/demo-data", None).await;
-    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["present"], false);
     assert_eq!(host_revision(&admin.app).await, rev);
     assert_eq!(support::app::audit_rows(&admin.app).await, rows);
 }
@@ -826,8 +827,9 @@ async fn the_delete_removes_every_trace_of_the_demo_data_in_one_revision() {
     assert_eq!(status, StatusCode::OK, "{summary}");
     assert_eq!(summary["present"], false);
     // A second press changes nothing.
-    let (status, _) = admin.call("DELETE", "/v1/office/demo-data", None).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, again) = admin.call("DELETE", "/v1/office/demo-data", None).await;
+    assert_eq!((status, &again["present"]), (StatusCode::OK, &json!(false)));
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
 
     // A station's late fact of the removed shift is acknowledged and dropped.
     let late = support::app::fact(
