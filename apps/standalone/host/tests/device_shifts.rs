@@ -643,7 +643,8 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
                 "deviceId": station, "deviceKind": "station", "deviceName": "Тестовое устройство",
                 "state": "active", "firstEnteredAt": opened_at, "joinedAt": opened_at,
                 "leftAt": null, "closedAt": null, "closedBy": null, "closedActualQty": null,
-                "closedReasonCode": null, "lateDataAt": null, "lastSeenAt": opened_at
+                "closedReasonCode": null, "lateDataAt": null, "lastSeenAt": opened_at,
+                "joinedRev": 6
             }]),
         ),
     ] {
