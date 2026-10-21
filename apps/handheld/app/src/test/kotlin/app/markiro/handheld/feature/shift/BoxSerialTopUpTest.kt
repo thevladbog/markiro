@@ -73,10 +73,17 @@ class BoxSerialTopUpTest {
     @Test fun onlyChecksAtLowWaterAndKeepsOldRangeFirst() = runTest {
         pool.addRange(ServerRange(prefix, 0, 1, 2000, null))
         var calls = 0
-        val topUp = coordinator(backgroundScope) { calls++; BoxSsccTopUpDto(listOf(block(2001, 4000)), emptyList(), null) }
-        topUp.nudge()?.join()
+        val request: suspend (String) -> BoxSsccTopUpDto = { calls++; BoxSsccTopUpDto(listOf(block(2001, 4000)), emptyList(), null) }
+        val aboveLowWater = coordinator(backgroundScope, request)
+        aboveLowWater.nudge()?.join()
         assertEquals(0, calls)
+        // Stopped before burning: its 60 s re-check is otherwise left pending, and runTest
+        // skips virtual time while the body waits on Room's threads, so that check fired about
+        // 480 times during the burns below. One that had read the pool before the last burn
+        // was still in flight at the nudge, which joined it and made no call.
+        aboveLowWater.stop()
         repeat(1600) { pool.burn(prefix, 0) }
+        val topUp = coordinator(backgroundScope, request)
         topUp.nudge()?.join()
         assertEquals(1, calls)
         assertEquals(1601L, pool.burn(prefix, 0))
