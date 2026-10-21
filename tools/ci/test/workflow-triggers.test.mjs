@@ -12,14 +12,12 @@ test("every repository workflow has an explicit reviewed event scope", () => {
   const expectedEvents = {
     "ci.yml": ["pull_request", "push", "workflow_dispatch"],
     "dependency-review.yml": ["pull_request"],
-    "deploy-production.yml": ["workflow_dispatch"],
     "deploy-platform.yml": ["workflow_dispatch"],
     "deploy-vbtech-production.yml": ["workflow_dispatch"],
     "diagnose-production.yml": ["workflow_dispatch"],
     "handheld-release.yml": ["workflow_dispatch"],
     "provision-platform-admin.yml": ["workflow_dispatch"],
     "recover-platform.yml": ["workflow_dispatch"],
-    "release-images.yml": ["push"],
     "release-platform-images.yml": ["workflow_dispatch"],
     "signer-download-repair.yml": ["workflow_dispatch"],
     "signer-stable-release.yml": ["workflow_dispatch"],
@@ -61,41 +59,6 @@ test("dependency review runs only for supported dependency surface changes", () 
   assert.deepEqual(value.concurrency, {
     group: "dependency-review-${{ github.event.pull_request.number }}",
     "cancel-in-progress": true,
-  });
-});
-
-test("production image publication runs only for deployable image and release inputs", () => {
-  const value = workflow("release-images.yml");
-
-  assert.deepEqual(value.on.push, {
-    branches: ["main"],
-    paths: [
-      ".github/workflows/release-images.yml",
-      ".dockerignore",
-      ".npmrc",
-      "package.json",
-      "pnpm-lock.yaml",
-      "pnpm-workspace.yaml",
-      "turbo.json",
-      "tsconfig.base.json",
-      "patches/**",
-      "apps/api/**",
-      "apps/admin/**",
-      "apps/kiosk/**",
-      "apps/landing/**",
-      "apps/saas-admin/**",
-      "packages/db/**",
-      "packages/domain/**",
-      "packages/email/**",
-      "packages/legal-documents/**",
-      "packages/platform-contracts/**",
-      "packages/ui/**",
-      "compose.production.yml",
-      "deploy/production/**",
-      "deploy/platform/**",
-      "deploy/yandex/**",
-      "tools/production-browser/**",
-    ],
   });
 });
 

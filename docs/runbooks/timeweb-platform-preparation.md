@@ -31,12 +31,11 @@ cannot be fed into the existing production deployment path. Synthetic CI uses
 placeholder runtime digests and local SHA tags. Only the protected publisher
 below creates release evidence and real registry digest references.
 
-The `release-images.yml` trigger and Node validation now include this package;
-its exact legacy manifest, published outputs and `deploy-production.yml` remain
-unchanged. The platform edge is built and exercised by the mandatory PR/main CI
-bundle job; that legacy publisher exports only the verified legacy images. The
-separate `release-platform-images.yml` publishes the platform images after
-approval, and does not deploy them. Do not invoke
+The legacy Yandex publisher (`release-images.yml`) and deploy workflow
+(`deploy-production.yml`) were removed on 2026-10-21. The platform edge is built
+and exercised by the mandatory PR/main CI bundle job, and
+`release-platform-images.yml` publishes the platform images after approval; it
+does not deploy them. Do not invoke
 `deploy/yandex/remote-deploy.mjs` as a shortcut; it has unrelated host and
 secret-management responsibilities.
 

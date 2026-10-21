@@ -160,9 +160,6 @@ function isRootToolchainPath(path) {
 function jobsForPath(path) {
   if (path.startsWith("tools/station-printer-tests/")) return stationJobs;
   if (isDocumentation(path)) return [];
-  // This protected deployment workflow is covered by the bundle's production
-  // contract suite. CI policy and other workflows still fail closed.
-  if (path === ".github/workflows/deploy-production.yml") return ["production_bundle"];
   if (isRootToolchainPath(path)) return ALL_JOBS;
 
   if (

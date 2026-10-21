@@ -351,7 +351,7 @@ jobs:
         run: env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs
       # Layer cache only: pull requests read what main wrote, and only main
       # writes, so pull requests cannot evict each other from the 10 GB Actions
-      # cache. The release workflows still build both images from scratch.
+      # cache. The platform release still builds both images from scratch.
       # `use: false`: the backup and recovery harnesses below run plain
       # `docker build` and need the default builder, whose results land in the
       # local image store. Only the two cached builds name this one.

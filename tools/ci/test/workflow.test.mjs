@@ -205,7 +205,7 @@ test("production bundle keeps the contract suite the platform release re-runs", 
 
 test("CI no longer builds or smokes the retired Yandex production contour", () => {
   // Owner decision 2026-10-21: production runs on Timeweb (SERVER_PROFILE=platform-only).
-  // deploy-production.yml and release-images.yml keep their own checks.
+  // The Yandex release and deploy workflows were removed on 2026-10-21 as well.
   const source = readFileSync(".github/workflows/ci.yml", "utf8");
   for (const retired of [
     "test:yandex-runtime",
@@ -670,9 +670,11 @@ test("the platform images reuse a layer cache that only main writes, and never p
     );
     assert.equal(step["continue-on-error"], undefined, name);
   }
-  // The release workflows still build both images from scratch.
-  for (const file of ["release-images.yml", "release-platform-images.yml"])
-    assert.doesNotMatch(readFileSync(`.github/workflows/${file}`, "utf8"), /type=gha|cache-from/u);
+  // The platform release still builds both images from scratch.
+  assert.doesNotMatch(
+    readFileSync(".github/workflows/release-platform-images.yml", "utf8"),
+    /type=gha|cache-from/u,
+  );
 });
 
 test("the landing is built once and both landing gates judge that build", () => {
