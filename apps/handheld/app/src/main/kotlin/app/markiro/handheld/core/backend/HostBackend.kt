@@ -89,8 +89,8 @@ class HostBackend(
     override suspend fun enter(shiftId: String, body: ShiftEntryRequest): ShiftDto {
         val entered = calls.run { api().enter(shiftId) }
         keep { save(entered) }
-        // A closed part is read back without a bundle to work: nothing to keep for `bundle`.
-        if (entered.myState != "closed") entries[shiftId] = entered
+        // A closed part is read back without a bundle to work: nothing to keep for `bundle`, and an earlier entry must not feed it.
+        if (entered.myState == "closed") entries.remove(shiftId) else entries[shiftId] = entered
         return entered.toShiftDto(config.get()?.lineName)
     }
 

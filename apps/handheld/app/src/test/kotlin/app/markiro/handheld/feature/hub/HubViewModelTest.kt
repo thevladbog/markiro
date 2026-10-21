@@ -257,6 +257,27 @@ class HubViewModelTest {
         assertNull(model.state.first { it.dialog == null }.dialog)
     }
 
+    @Test
+    fun aFullLineOnContinueShowsTheLineFullDialogAndKeepsTheRunningShift() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val api = api(enter = {
+            throw retrofit2.HttpException(
+                retrofit2.Response.error<ShiftDto>(
+                    409, okhttp3.ResponseBody.create(null, """{"code":"shift_line_full","maxStations":2,"active":2}"""),
+                ),
+            )
+        })
+        val model = vm(api, repository = repository(api))
+        model.state.first { it.activeShiftId == "s1" }
+        model.continueShift()
+        assertEquals(
+            app.markiro.handheld.feature.shift.ShiftDialog.LineFull(active = 2, maxStations = 2),
+            model.state.first { it.dialog != null && it.dialog != app.markiro.handheld.feature.shift.ShiftDialog.Entering }.dialog,
+        )
+        assertEquals("s1", db.deviceConfigDao().get()!!.activeShiftId)
+    }
+
     private fun pendingWriteoff(id: String, seq: Long) = app.markiro.handheld.core.storage.WriteoffOutboxEntity(
         documentId = id, deviceSeq = seq, operatorId = "op-1", reasonId = "r-1", reasonName = "Бой", unitCount = 1,
         boxCount = 0, requestJson = "{}", createdAt = "2026-09-14T10:00:00.000Z", state = "pending", orderNo = null,

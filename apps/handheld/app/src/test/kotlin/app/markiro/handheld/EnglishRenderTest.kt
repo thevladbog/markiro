@@ -28,6 +28,8 @@ import app.markiro.handheld.feature.inventory.InventoryListUi
 import app.markiro.handheld.feature.inventory.InventoryProgress
 import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
 import app.markiro.handheld.feature.inventory.InventoryWorkScreen
+import app.markiro.handheld.feature.shift.ShiftDialog
+import app.markiro.handheld.feature.shift.ShiftDialogScreen
 import app.markiro.handheld.feature.inventory.InventoryWorkUi
 import app.markiro.handheld.feature.inventory.LeaveStep
 import app.markiro.handheld.core.label.PrinterLanguage
@@ -414,5 +416,18 @@ class EnglishRenderTest {
             }
         }
         assertNoCyrillic()
+    }
+
+    @Test
+    fun theSharedShiftEntryDialogsRenderInEnglish() {
+        // One setContent per test: the dialog is swapped through state.
+        val shown = androidx.compose.runtime.mutableStateOf<ShiftDialog>(ShiftDialog.LineFull(active = 2, maxStations = 2))
+        compose.setContent { MarkiroTheme { ShiftDialogScreen(shown.value, "Line 2", onDismiss = {}, onRetry = {}) } }
+        for (dialog in listOf(ShiftDialog.LineFull(active = 2, maxStations = 2), ShiftDialog.Busy, ShiftDialog.PartClosed)) {
+            shown.value = dialog
+            compose.waitForIdle()
+            assertNoCyrillic()
+            assertEquals(true, compose.onAllNodes(androidx.compose.ui.test.hasText("", substring = true).not()).fetchSemanticsNodes().isNotEmpty())
+        }
     }
 }

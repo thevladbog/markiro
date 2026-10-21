@@ -21,6 +21,9 @@ import app.markiro.handheld.core.storage.InMemoryCredentialStore
 import app.markiro.handheld.core.storage.MetaStore
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -105,5 +108,59 @@ class ShiftRepositoryHostTest {
         val update = HostResult.Ok(409, """{"error":{"code":"conflict","message":"m","details":{"constraint":"station_update"}}}""", null)
         assertEquals(EnterResult.Closed, repository(Script(emptyMap(), mutableMapOf("/v1/device/shifts/$id/enter" to ArrayDeque(listOf(closed))))).enter(id))
         assertEquals(EnterResult.UpdateRequired, repository(Script(emptyMap(), mutableMapOf("/v1/device/shifts/$id/enter" to ArrayDeque(listOf(update))))).enter(id))
+    }
+
+    private fun refusal(body: String) = HostResult.Ok(409, body, null)
+    private fun enterPath() = "/v1/device/shifts/$id/enter"
+
+    @Test
+    fun aFullLineIsReportedWithItsNumbersAndNothingIsEntered() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled(id))
+        db.deviceConfigDao().get()!!.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = id)) }
+        val script = Script(emptyMap(), mutableMapOf(enterPath() to ArrayDeque(listOf(refusal(fixture("error-shift-line-full.json"))))))
+        assertEquals(EnterResult.LineFull(active = 2, maxStations = 2), repository(script).enter(id))
+        // Work already running on this device is not stopped by a refusal of a new entry.
+        assertEquals(id, db.deviceConfigDao().get()!!.activeShiftId)
+        assertEquals("active", db.shiftDao().get(id)!!.status)
+    }
+
+    @Test
+    fun anOldHostsBusyIsSaidInWordsAndIsNotAGenericRefusal() = runTest {
+        val script = Script(emptyMap(), mutableMapOf(enterPath() to ArrayDeque(listOf(refusal(fixture("error-shift-busy.json"))))))
+        assertEquals(EnterResult.Busy, repository(script).enter(id))
+    }
+
+    @Test
+    fun aFullLineWhoseNumbersAreMissingFallsBackToBusy() = runTest {
+        val body = """{"error":{"code":"conflict","message":"m","details":{"constraint":"shift_line_full"}}}"""
+        assertEquals(EnterResult.Busy, repository(Script(emptyMap(), mutableMapOf(enterPath() to ArrayDeque(listOf(refusal(body)))))).enter(id))
+    }
+
+    @Test
+    fun aClosedPartIsNeverEnteredAndItsShiftIsClosedOnThisDevice() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled(id))
+        db.deviceConfigDao().get()!!.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = id)) }
+        val entered = Json.parseToJsonElement(fixture("device-shift-entered.json")).jsonObject
+        val closedPart = JsonObject(entered + ("myState" to JsonPrimitive("closed")) + ("maxStations" to JsonPrimitive(2)))
+        // Only the entry is scripted: a second request (the bundle re-entering) would fail the test.
+        val script = Script(emptyMap(), mutableMapOf(enterPath() to ArrayDeque(listOf(ok(closedPart.toString())))))
+        val before = db.shiftDao().get(id)!!
+        assertEquals(EnterResult.PartClosed, repository(script).enter(id))
+        val after = db.shiftDao().get(id)!!
+        assertEquals("closed", after.status)
+        // Nothing that starts work is written: the entry time and the bundle stay as they were.
+        assertEquals(before.enteredAt, after.enteredAt)
+        assertEquals(before.bundleFetchedAt, after.bundleFetchedAt)
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+    }
+
+    @Test
+    fun aClosedPartWithNoLocalRowWritesNoWorkableRow() = runTest {
+        val entered = Json.parseToJsonElement(fixture("device-shift-entered.json")).jsonObject
+        val closedPart = JsonObject(entered + ("myState" to JsonPrimitive("closed")))
+        val script = Script(emptyMap(), mutableMapOf(enterPath() to ArrayDeque(listOf(ok(closedPart.toString())))))
+        assertEquals(EnterResult.PartClosed, repository(script).enter(id))
+        assertEquals(null, db.shiftDao().get(id)?.enteredAt)
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
     }
 }

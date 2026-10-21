@@ -151,6 +151,24 @@ class HostBackendShiftsTest {
     }
 
     @Test
+    fun anEarlierEntryIsNotKeptForTheBundleOnceALaterOneComesBackClosed() = runTest {
+        val entered = Json.parseToJsonElement(fixture("device-shift-entered.json")).jsonObject
+        val closedPart = JsonObject(entered + ("myState" to JsonPrimitive("closed")))
+        val routes = Routes(
+            mutableMapOf(
+                shiftPath to ArrayDeque(listOf(ok(fixture("device-shift-entered.json")), ok(closedPart.toString()), ok(fixture("device-shift-entered.json")))),
+                "/v1/device/sscc/blocks" to ArrayDeque(listOf(ok(block0), ok(block1))),
+            ),
+        )
+        val backend = backend(routes)
+        backend.enter(id, ShiftEntryRequest("list"))
+        assertEquals("closed", backend.enter(id, ShiftEntryRequest("list")).status)
+        backend.bundle(id)
+        // The bundle asked again at the host (the answer of the first entry is not reused for a part that has since closed).
+        assertEquals(3, routes.posts.count { it.first == shiftPath })
+    }
+
+    @Test
     fun theHostsRefusalsReachTheLoadersAsTheCodesTheyAlreadyRead() = runTest {
         fun entering(answer: HostResult) = backend(Routes(mutableMapOf(shiftPath to ArrayDeque(listOf(answer)))))
         suspend fun refused(answer: HostResult): Pair<Int, String> {

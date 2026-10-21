@@ -20,6 +20,9 @@ import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import java.io.IOException
 
+private const val LINE_FULL_CODE = "shift_line_full"
+private const val BUSY_CODE = "shift_busy"
+
 /** Which call the server refused: entering the shift, or downloading its bundle. */
 enum class EnterStep { ENTER, BUNDLE }
 
@@ -28,6 +31,15 @@ sealed interface EnterResult {
     data object UpdateRequired : EnterResult
     data object Closed : EnterResult
     data object Unavailable : EnterResult
+
+    /** Every slot of the line is held by another device (`409 shift_line_full`): the two numbers are the host's. */
+    data class LineFull(val active: Int, val maxStations: Int) : EnterResult
+
+    /** An older host (before several devices in one shift) says another device works this shift (`409 shift_busy`). */
+    data object Busy : EnterResult
+
+    /** This device closed its part of the shift: the host reads it back, nothing is entered and no bundle is fetched. */
+    data object PartClosed : EnterResult
 
     /**
      * The server refused for a reason this build cannot name. It carries the
@@ -214,6 +226,15 @@ class ShiftRepository(
         } catch (_: IOException) {
             return offline(cached)
         }
+        // A host that read a closed part back answers the shift as closed for this device: working it again would only make late facts,
+        // and asking for the bundle would enter it a second time. Nothing that starts work is written.
+        if (entered.status == "closed") {
+            db.recovery.commit {
+                db.shiftDao().setStatus(shiftId, "closed")
+                db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
+            }
+            return EnterResult.PartClosed
+        }
         val bundle = try {
             backend.bundle(shiftId)
         } catch (e: HttpException) {
@@ -266,9 +287,17 @@ class ShiftRepository(
      * stands in front of a shift the screen insists is closed.
      */
     private fun refusal(step: EnterStep, e: HttpException): EnterResult {
-        val code = errorCode(e)
+        val body = errorBody(e)
+        val code = body?.code
         return when {
             e.code() == 409 && code == UPDATE_REQUIRED_CODE -> EnterResult.UpdateRequired
+            e.code() == 409 && code == LINE_FULL_CODE -> {
+                val active = body?.active
+                val max = body?.maxStations
+                // A host that names the refusal but not its numbers still says the shift cannot be joined now.
+                if (active != null && max != null) EnterResult.LineFull(active, max) else EnterResult.Busy
+            }
+            e.code() == 409 && code == BUSY_CODE -> EnterResult.Busy
             e.code() == 409 && code == null -> EnterResult.Closed
             e.code() in 400..499 -> EnterResult.Refused(step, e.code(), code)
             else -> EnterResult.Unavailable
@@ -327,6 +356,7 @@ class ShiftRepository(
         db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
     }
 
-    private fun errorCode(e: HttpException): String? =
-        runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code }.getOrNull()
+    /** The body is read once (a response body can be consumed only once): the code and, for a full line, its two numbers. */
+    private fun errorBody(e: HttpException): ErrorBody? =
+        runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()) }.getOrNull()
 }

@@ -355,6 +355,18 @@ class HubViewModel(
                     }
                     app.markiro.handheld.feature.shift.EnterResult.Unavailable ->
                         dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Unavailable
+                    is app.markiro.handheld.feature.shift.EnterResult.LineFull -> {
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.LineFull(result.active, result.maxStations)
+                        recovery.work { repository.refreshList() }
+                    }
+                    app.markiro.handheld.feature.shift.EnterResult.Busy -> {
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Busy
+                        recovery.work { repository.refreshList() }
+                    }
+                    app.markiro.handheld.feature.shift.EnterResult.PartClosed -> {
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.PartClosed
+                        recovery.work { repository.refreshList() }
+                    }
                     is app.markiro.handheld.feature.shift.EnterResult.Refused -> {
                         dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Refused(result.step, result.status, result.code)
                         recovery.work { repository.refreshList() }
