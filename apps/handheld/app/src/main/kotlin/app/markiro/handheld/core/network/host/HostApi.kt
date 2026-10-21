@@ -45,6 +45,9 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
         }
     }
 
+    private fun errorCodeOf(result: HostResult.Ok): String? =
+        runCatching { json.decodeFromString(ErrorEnvelopeDto.serializer(), result.body).error.code }.getOrNull()
+
     private fun <T> parse(result: HostResult, serializer: KSerializer<T>): Result<T> = when (result) {
         is HostResult.Failed -> Result.failure(
             HostApiError(
@@ -60,7 +63,7 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
                 runCatching { json.decodeFromString(serializer, result.body) }
                     .fold({ Result.success(it) }, { Result.failure(HostApiError(HostFailure.BadResponse, result.code)) })
             } else {
-                Result.failure(HostApiError(failureOf(result), result.code))
+                Result.failure(HostApiError(failureOf(result), result.code, errorCodeOf(result)))
             }
     }
 

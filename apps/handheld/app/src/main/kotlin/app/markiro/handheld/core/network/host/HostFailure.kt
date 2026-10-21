@@ -27,6 +27,7 @@ sealed interface HostFailure {
     data object BadResponse : HostFailure
 }
 
-class HostApiError(val failure: HostFailure, val status: Int? = null) : Exception("host call failed: $failure")
+/** [code] is the `error.code` of the host's envelope when the refusal carried a readable one (`not_found`, `validation_failed`, ...), whatever [failure] it was reduced to. */
+class HostApiError(val failure: HostFailure, val status: Int? = null, val code: String? = null) : Exception("host call failed: $failure")
 
 enum class TransportFailure { UNREACHABLE, TIMEOUT, CERT_MISMATCH }
