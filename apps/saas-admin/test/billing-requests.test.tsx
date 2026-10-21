@@ -62,7 +62,12 @@ describe("platform billing request operations", () => {
       await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
     ).toBeDefined();
     expect(within(screen.getByRole("main")).queryByRole("button")).toBeNull();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // The rail's lead badge asks for its own summary; no billing request is made.
+    expect(
+      fetch.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => url !== "/api/platform/leads/summary"),
+    ).toEqual(["/api/platform/me"]);
   });
 
   it("serializes exact filters and renders only server-allowed transitions", async () => {

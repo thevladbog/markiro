@@ -52,6 +52,10 @@ describe.skipIf(!ready)("landing demo request mail pipeline", () => {
     await db
       .delete(schema.emailDeliveries)
       .where(inArray(schema.emailDeliveries.publicRequestId, [...requestIds]));
+    // The demo form also writes a lead (spec 2026-10-20 §15.3); its events keep the ids.
+    await db
+      .delete(schema.landingLeads)
+      .where(inArray(schema.landingLeads.email, ["ada@example.test"]));
     requestIds.clear();
   });
 

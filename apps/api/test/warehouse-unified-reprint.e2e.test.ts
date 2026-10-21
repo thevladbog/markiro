@@ -20,6 +20,7 @@ import {
   productLabelValueDigest,
 } from "@markiro/domain";
 import { setupWarehouseApi, WAREHOUSE_TEST_SSCC } from "./support/warehouse-reprint";
+import { dropFixtureDatabase } from "./support/fixture-pool";
 const databaseUrl = process.env.DATABASE_URL;
 describe.skipIf(!databaseUrl)("unified pallet data admission", () => {
   const databaseName = `markiro_unified_${randomUUID().replaceAll("-", "_")}`;
@@ -45,7 +46,9 @@ describe.skipIf(!databaseUrl)("unified pallet data admission", () => {
   }, 180000);
   afterAll(async () => {
     if (h) await h.close();
-    if (created) await maintenance.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    // The app's pool resolves end() before its sockets close; a bare FORCE drop
+    // then kills a closing client, which surfaces as an unhandled 57P01.
+    if (created) await dropFixtureDatabase(maintenance, databaseName);
     await maintenance.end();
   });
   it("looks up closed pallet data, accepts a new rendering and audits exact provenance without an original template", async () => {

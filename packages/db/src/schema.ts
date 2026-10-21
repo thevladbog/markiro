@@ -43,3 +43,4 @@ export * from "./schema/pallet-reprint-renderings.js";
 export * from "./schema/pallet-production-resolutions.js";
 export * from "./schema/standalone-licenses.js";
 export * from "./schema/standalone-support-diagnostics.js";
+export * from "./schema/landing-leads.js";

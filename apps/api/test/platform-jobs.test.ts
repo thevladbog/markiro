@@ -74,13 +74,16 @@ describe.skipIf(!process.env.PLATFORM_PROFILE_TEST_DATABASE_URL)(
         );
         expect(queues.rows.map((row: { name: string }) => row.name)).toEqual([
           "__pgboss__send-it",
+          "anonymize-landing-leads",
           "dispatch-email-outbox",
+          "dispatch-lead-notifications",
           "materialize-subscription-statuses",
           "platform-report-repair",
           "platform-report-run",
           "prune-email-deliveries",
           "reconcile-email-deliveries",
           "send-email-delivery",
+          "send-lead-digest",
         ]);
       } finally {
         await app.close();
@@ -119,6 +122,10 @@ it.skipIf(!process.env.PLATFORM_PROFILE_TEST_DATABASE_URL)(
       ])
         await http.get(path).expect(404);
       await http.post("/station/pair").send({}).expect(404);
+      // The landing lead form is mounted in this profile; disabled submission answers 404.
+      const lead = await http.post("/landing-leads").send({}).expect(404);
+      expect(lead.body).toEqual({ code: "submission_disabled" });
+      await http.get("/platform/leads/summary").expect(401);
       await http.post("/1c_exchange").send({}).expect(404);
       await http.get("/platform/tenants").expect(401);
       await http.get("/api/platform-auth/get-session").expect(200);

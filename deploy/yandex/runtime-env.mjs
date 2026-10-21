@@ -24,6 +24,11 @@ const OPTIONAL_ENVIRONMENT_KEY_GROUPS = [
     "STANDALONE_LICENSE_KEYSET_JSON",
   ],
   ["STANDALONE_SUPPORT_KEYS_JSON"],
+  // Landing lead alerts in Telegram are optional; the three are provisioned
+  // together. The bot token is a secret and is only ever handled as a value.
+  ["LEAD_TELEGRAM_ENABLED", "LEAD_TELEGRAM_BOT_TOKEN", "LEAD_TELEGRAM_CHAT_ID"],
+  // Absent means the API default (12 months).
+  ["LEAD_RETENTION_MONTHS"],
 ];
 
 const defaultFilesystem = {

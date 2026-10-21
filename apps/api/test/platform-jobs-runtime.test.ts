@@ -6,6 +6,7 @@ import { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import { PlatformReportRunnerService } from "../src/platform-reports/platform-report-runner.service";
+import { LandingLeadJobsService } from "../src/modules/landing-leads/landing-lead-jobs.service";
 
 const calls = vi.hoisted(() => ({ work: vi.fn(), start: vi.fn(), stop: vi.fn() }));
 vi.mock("pg-boss", () => ({
@@ -27,6 +28,11 @@ it.each([undefined, false, true])(
   async (preprovisioned) => {
     vi.mocked(PgBoss).mockClear();
     calls.work.mockImplementation(async (name: string) => name);
+    const leads = {
+      dispatchNotifications: vi.fn(),
+      sendDailyDigest: vi.fn(),
+      anonymizeStale: vi.fn(),
+    };
     const module = await Test.createTestingModule({
       providers: [
         PlatformJobsService,
@@ -38,6 +44,7 @@ it.each([undefined, false, true])(
         { provide: MailRetentionService, useValue: { prune: vi.fn() } },
         { provide: SubscriptionStatusJob, useValue: { run: vi.fn() } },
         { provide: PlatformReportRunnerService, useValue: { reconcile: vi.fn() } },
+        { provide: LandingLeadJobsService, useValue: leads },
       ],
     }).compile();
     try {
@@ -52,6 +59,18 @@ it.each([undefined, false, true])(
         { batchSize: 1, localConcurrency: 1 },
         expect.any(Function),
       );
+      // Lead jobs are scheduled but never run by a (re)start: no unscheduled digest,
+      // no early retention and no Telegram calls holding up readiness.
+      for (const queue of [
+        "dispatch-lead-notifications",
+        "send-lead-digest",
+        "anonymize-landing-leads",
+      ]) {
+        expect(calls.work).toHaveBeenCalledWith(queue, expect.any(Function));
+      }
+      expect(leads.dispatchNotifications).not.toHaveBeenCalled();
+      expect(leads.sendDailyDigest).not.toHaveBeenCalled();
+      expect(leads.anonymizeStale).not.toHaveBeenCalled();
     } finally {
       await module.close();
     }

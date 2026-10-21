@@ -358,6 +358,13 @@ test("product-labels browser contract runs in the Chromium job after both app bu
   assert.equal(config.match(/--strictPort/g)?.length, 2);
 });
 
+test("production-bundle stays on the runner image its recovery-image export is proven on", () => {
+  // ubuntu-latest became 26.04 in October 2026 and the backup harness's recovery
+  // image export fails there (runs 39549522646, 39544537071). Move it only together
+  // with a harness that passes on the new image.
+  assert.equal(workflow.jobs["production-bundle"]["runs-on"], "ubuntu-24.04");
+});
+
 test("production-bundle reserves every browser harness port Linux could hand out as a source port", () => {
   const job = workflow.jobs["production-bundle"];
   const reserve = stepByName(job, "Reserve browser harness ports");
