@@ -1,5 +1,12 @@
 import { PlatformJobsService } from "./platform-jobs.service";
-import { LandingLeadJobsService } from "../modules/landing-leads/landing-lead-jobs.service";
+import {
+  ANONYMIZE_LANDING_LEADS_CRON,
+  ANONYMIZE_LANDING_LEADS_QUEUE,
+  DISPATCH_LEAD_NOTIFICATIONS_QUEUE,
+  LandingLeadJobsService,
+  SEND_LEAD_DIGEST_CRON,
+  SEND_LEAD_DIGEST_QUEUE,
+} from "../modules/landing-leads/landing-lead-jobs.service";
 import { TelegramClient, telegramConfigFromEnv } from "../modules/landing-leads/telegram.client";
 import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
 import { PlatformAuditService } from "../platform-auth/platform-audit.service";
@@ -11,6 +18,7 @@ import {
   Module,
   Optional,
   type DynamicModule,
+  type Provider,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
@@ -426,6 +434,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly platformReports?: PlatformReportRunnerService,
     @Optional() private readonly supportChatJobs?: SupportChatJobsService,
     @Optional() private readonly supportChatSync?: SupportChatSyncService,
+    @Optional() private readonly landingLeads?: LandingLeadJobsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -524,6 +533,34 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
           await this.mailJobs.reconcile(this.mailQueue(boss));
         }),
       );
+
+      // Landing leads (spec 2026-10-20 §15): the demo form writes leads in this
+      // profile too, so their outbox, digest and retention run here as well.
+      // Schedules only: a restart neither sends a digest nor calls Telegram.
+      const landingLeads = this.landingLeads;
+      if (landingLeads) {
+        for (const [queue, cron, run] of [
+          [
+            DISPATCH_LEAD_NOTIFICATIONS_QUEUE,
+            "* * * * *",
+            () => landingLeads.dispatchNotifications(),
+          ],
+          [SEND_LEAD_DIGEST_QUEUE, SEND_LEAD_DIGEST_CRON, () => landingLeads.sendDailyDigest()],
+          [
+            ANONYMIZE_LANDING_LEADS_QUEUE,
+            ANONYMIZE_LANDING_LEADS_CRON,
+            () => landingLeads.anonymizeStale(),
+          ],
+        ] as const) {
+          await boss.createQueue(queue);
+          await boss.schedule(queue, cron);
+          this.workerIds.push(
+            await boss.work(queue, async () => {
+              await run();
+            }),
+          );
+        }
+      }
 
       await boss.createQueue(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME);
       await boss.schedule(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME, PRUNE_EMAIL_DELIVERIES_QUEUE_CRON);
@@ -1071,7 +1108,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       this.workerIds.length !==
         23 +
           (this.platformReports ? 2 : 0) +
-          (this.supportChatJobs && this.supportChatSync ? 1 : 0) ||
+          (this.supportChatJobs && this.supportChatSync ? 1 : 0) +
+          (this.landingLeads ? 3 : 0) ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -1221,6 +1259,28 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
+/** Landing lead jobs for either profile; Telegram stays silent without its env. */
+function landingLeadJobsProvider(env: Env): Provider {
+  return {
+    provide: LandingLeadJobsService,
+    inject: [DB, MailDeliveryService, PlatformAuditService],
+    useFactory: (db: Db, mail: MailDeliveryService, audit: PlatformAuditService) => {
+      const telegram = telegramConfigFromEnv(env);
+      return new LandingLeadJobsService(
+        db,
+        mail,
+        audit,
+        telegram === null ? null : new TelegramClient(telegram),
+        {
+          recipient: env.LANDING_DEMO_RECIPIENT ?? "",
+          adminOrigin: env.SAAS_ADMIN_ORIGIN,
+          retentionMonths: env.LEAD_RETENTION_MONTHS,
+        },
+      );
+    },
+  };
+}
+
 @Global()
 @Module({})
 export class JobsModule {
@@ -1245,24 +1305,7 @@ export class JobsModule {
             useValue: env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA,
           },
           { provide: PgBossService, useClass: PlatformJobsService },
-          {
-            provide: LandingLeadJobsService,
-            inject: [DB, MailDeliveryService, PlatformAuditService],
-            useFactory: (db: Db, mail: MailDeliveryService, audit: PlatformAuditService) => {
-              const telegram = telegramConfigFromEnv(env);
-              return new LandingLeadJobsService(
-                db,
-                mail,
-                audit,
-                telegram === null ? null : new TelegramClient(telegram),
-                {
-                  recipient: env.LANDING_DEMO_RECIPIENT ?? "",
-                  adminOrigin: env.SAAS_ADMIN_ORIGIN,
-                  retentionMonths: env.LEAD_RETENTION_MONTHS,
-                },
-              );
-            },
-          },
+          landingLeadJobsProvider(env),
           PlatformReportRunnerService,
           PlatformReportSourceService,
         ],
@@ -1278,6 +1321,7 @@ export class JobsModule {
       providers: [
         { provide: PG_CONNECTION_STRING, useValue: connectionString },
         PgBossService,
+        landingLeadJobsProvider(env),
         PlatformReportRunnerService,
         PlatformReportSourceService,
         JournalService,

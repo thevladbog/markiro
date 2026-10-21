@@ -30,6 +30,20 @@ describe("landing lead environment (spec 2026-10-20 §15.4)", () => {
     expect(env.LEAD_RETENTION_MONTHS).toBe(12);
   });
 
+  it("treats blank placeholders, as .env.production.example ships them, as unset", () => {
+    const env = loadEnv({
+      ...base,
+      LEAD_TELEGRAM_ENABLED: "",
+      LEAD_TELEGRAM_BOT_TOKEN: "",
+      LEAD_TELEGRAM_CHAT_ID: "",
+      LEAD_RETENTION_MONTHS: "",
+    });
+    expect(env.LEAD_TELEGRAM_ENABLED).toBe(false);
+    expect(env.LEAD_TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(env.LEAD_TELEGRAM_CHAT_ID).toBeUndefined();
+    expect(env.LEAD_RETENTION_MONTHS).toBe(12);
+  });
+
   it("requires the token and the chat once alerts are switched on", () => {
     expect(() => loadEnv({ ...base, LEAD_TELEGRAM_ENABLED: "true" })).toThrow(
       /LEAD_TELEGRAM_BOT_TOKEN[\s\S]*LEAD_TELEGRAM_CHAT_ID/,

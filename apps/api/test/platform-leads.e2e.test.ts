@@ -386,6 +386,10 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
       anonymizedAt: new Date(now.getTime() + 60_000).toISOString(),
     });
     expect(detail.events[0]).toMatchObject({ kind: "anonymized", payload: { reason: "manual" } });
+    // The sole trader's INN also leaves the journal; the tariff stays for statistics.
+    const invoice = detail.events.find((event) => event.kind === "invoice_request");
+    expect(invoice?.payload).toMatchObject({ tariffCode: "line", sourcePath: "/stoimost/" });
+    expect(invoice?.payload).not.toHaveProperty("inn");
     await service.anonymize(admin, row.id);
     const [entry, ...rest] = await auditFor(row.id, "landing_lead.anonymized");
     expect(rest).toHaveLength(0);

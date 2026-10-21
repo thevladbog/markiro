@@ -11,8 +11,8 @@ type AnonymizeTransaction = Pick<Db, "insert" | "execute">;
 
 /**
  * Clears the personal data of one lead (spec §15.2): e-mail, name and phone, plus the
- * free-text owner note and a 12-digit (individual entrepreneur's) INN, which identify a
- * person too. The row stays for statistics. Returns `false` when it was already done.
+ * free-text owner note and a 12-digit (individual entrepreneur's) INN — on the lead and
+ * in its invoice events — which identify a person too. The row stays for statistics. Returns `false` when it was already done.
  * The audit row records which fields were present, never their values.
  */
 export async function anonymizeLead(
@@ -49,6 +49,12 @@ export async function anonymizeLead(
       inn = CASE WHEN char_length(inn) = 12 THEN NULL ELSE inn END,
       anonymized_at = ${input.now}, updated_at = ${input.now}
     WHERE id = ${input.leadId}::uuid
+  `);
+  // Invoice events carry the INN too; a 12-digit one names a person, so it leaves
+  // the journal with the lead's own copy. A company's 10-digit INN stays.
+  await tx.execute(sql`
+    UPDATE landing_lead_events SET payload = payload - 'inn'
+    WHERE lead_id = ${input.leadId}::uuid AND char_length(payload ->> 'inn') = 12
   `);
   await insertLeadEvent(
     tx,
