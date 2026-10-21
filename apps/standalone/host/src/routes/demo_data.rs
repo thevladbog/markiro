@@ -1,8 +1,9 @@
 //! Demo data in the office (spec `2026-10-21-standalone-wizard-demo-data-design`):
 //! `GET /v1/office/demo-data` (every office role) says whether the wizard's demo set is there
 //! and what its shifts made; `DELETE` (administrators) removes all of it in one transaction and
-//! one revision (with nothing there, the summary of nothing). A demo shift still open refuses the delete (`conflict` on `demo_shift_active`
-//! with the shifts' numbers). The demo product leaves the station feed as a tombstone, and a
+//! one revision (with nothing there, the summary of nothing). A demo shift still open refuses
+//! the delete (`conflict` on `demo_shift_active` with the shifts' numbers). The demo product
+//! leaves the station feed as a tombstone, and a
 //! station's late fact of a removed shift is acknowledged and dropped (`demo_removed_shifts`).
 //! The audit log keeps its rows: «без следа» is about the work data, the numbering and the
 //! reports, never the journal.
