@@ -465,8 +465,8 @@ const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  * `data` of a `products` item. The catalog grants no access, so its records
  * are read with `z.object`, as `org_profile` and `lines` are: a key a newer
  * host adds is dropped, and a value this build cannot read quarantines the
- * record. An archived product stays with `archived: true`; a product is never
- * deleted.
+ * record. An archived product stays with `archived: true`; only the demo product
+ * is ever deleted, and it leaves as a tombstone.
  */
 export const productRecordSchema = z.object({
   gtin14: z.string().regex(/^[0-9]{14}$/),
@@ -486,6 +486,8 @@ export const productRecordSchema = z.object({
    * differs. Read as none from an older host.
    */
   photoChecksum: sha256HexSchema.nullable().default(null),
+  /** The wizard's demo product (spec 2026-10-21); sent only when true. */
+  demo: z.boolean().optional(),
 });
 export type ProductRecord = z.infer<typeof productRecordSchema>;
 
@@ -782,11 +784,28 @@ export const officeProductSchema = z.object({
   egaisCode: z.string().nullable().default(null),
   defaultCounterpartyId: z.uuid().nullable().default(null),
   photoChecksum: sha256HexSchema.nullable().default(null),
+  /** The wizard's demo product (spec 2026-10-21): read-only, sent only when true. */
+  demo: z.boolean().optional(),
   archived: z.boolean(),
   status: productStatusSchema,
   rev: z.number().int(),
 });
 export type OfficeProduct = z.infer<typeof officeProductSchema>;
+
+/**
+ * `GET /v1/office/demo-data`, and the answer of `DELETE` with what it removed. `activeShifts`
+ * names the demo shifts still open: a delete refuses while there is one.
+ */
+export const demoDataSummarySchema = z.object({
+  present: z.boolean(),
+  productId: z.uuid().nullable(),
+  shifts: z.number().int().nonnegative(),
+  boxes: z.number().int().nonnegative(),
+  pallets: z.number().int().nonnegative(),
+  codes: z.number().int().nonnegative(),
+  activeShifts: z.array(z.string()),
+});
+export type DemoDataSummary = z.infer<typeof demoDataSummarySchema>;
 
 /** The picture types a photo is kept as (beta 3.2: PNG and WebP keep transparency). */
 export const photoMediaTypeSchema = z.enum(["image/jpeg", "image/png", "image/webp"]);
@@ -1756,6 +1775,11 @@ export const bootstrapRequestSchema = z
     templates: z.array(stockTemplateSchema).optional(),
     /** Left out when the box «I reserved the address» was not ticked. */
     addressConfirmed: z.boolean().optional(),
+    /**
+     * «Установить демо-данные» (spec 2026-10-21): sent only when ticked, with the wizard's today
+     * as the demo shift's production date.
+     */
+    demoData: z.strictObject({ productionDate: civilDateTextSchema }).optional(),
   })
   .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;

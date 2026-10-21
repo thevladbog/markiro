@@ -238,3 +238,12 @@
   letter-spacing: 0.025em;
   text-overflow: ellipsis;
 }
+
+/* A demo shift's label on the screen (spec 2026-10-21): the label's own proportions, fitted. */
+.demo-label-preview {
+  max-width: min(100%, 520px);
+  max-height: 48vh;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--floor-paper);
+}

@@ -35,6 +35,8 @@ import { BoxLink, PalletLink, PalletLinkOrOpen } from "../codes/PackLinks.js";
 import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { taskFormInputs } from "../forms/task-inputs.js";
+import { DemoBadge } from "../demo/DemoBadge.js";
+import { isDemoShift } from "../demo/demo.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -300,11 +302,12 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     );
 
   const editable = canPlan && current.status === "planned";
+  const demo = isDemoShift(current, products.data);
   if (editing && editable) {
     return panel(
       t("office.shiftCard.title", { number: current.number }),
       <div className="office-stack">
-        <ShiftStatusLine shift={current} />
+        <ShiftStatusLine shift={current} demo={demo} />
         <ShiftEditBody
           key={current.id}
           shift={current}
@@ -342,7 +345,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
   return panel(
     t("office.shiftCard.title", { number: current.number }),
     <div className="office-stack">
-      <ShiftStatusLine shift={current} />
+      <ShiftStatusLine shift={current} demo={demo} />
       <RowActions>
         {editable && (
           <Button
@@ -446,6 +449,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         <Suspense fallback={null}>
           <ExportDialog
             shift={current}
+            demo={demo}
             onClose={() => {
               setDialog(null);
               // A finished export wrote a row of the history.
@@ -671,7 +675,7 @@ function templateName(
 }
 
 /** The shift's status and its marks, as the list's status cell shows them. */
-function ShiftStatusLine({ shift }: { shift: OfficeShift }) {
+function ShiftStatusLine({ shift, demo }: { shift: OfficeShift; demo: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="shift-cell">
@@ -679,6 +683,7 @@ function ShiftStatusLine({ shift }: { shift: OfficeShift }) {
         phase={STATUS_PHASE[shift.status]}
         label={t(`office.shifts.statuses.${shift.status}`)}
       />
+      {demo && <DemoBadge />}
       {/* The working day, in the header of every tab (beta 3); the production date is in the summary. */}
       <span className="shift-cell__quiet">
         {t("office.shiftCard.headerDate", { date: civilDateLabel(shift.plannedDate) })}

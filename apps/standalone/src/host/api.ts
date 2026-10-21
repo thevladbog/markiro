@@ -128,6 +128,8 @@ import {
   officeOperatorSchema,
   officePalletSchema,
   officeProductSchema,
+  demoDataSummarySchema,
+  type DemoDataSummary,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
@@ -397,6 +399,13 @@ export interface HostApi {
   listProductGroups: (token: string) => Promise<ProductGroup[]>;
   /** Every product, archived ones included. */
   listProducts: (token: string) => Promise<OfficeProduct[]>;
+  /** Whether the wizard's demo data is there and what its shifts made (spec 2026-10-21). */
+  getDemoData: (token: string) => Promise<DemoDataSummary>;
+  /**
+   * «Удалить демо-данные» (administrators): what was removed, `present: false` when nothing was
+   * there; `conflict` on `demo_shift_active` while a demo shift is open.
+   */
+  deleteDemoData: (token: string) => Promise<DemoDataSummary>;
   createProduct: (token: string, create: ProductCreate) => Promise<OfficeProduct>;
   updateProduct: (token: string, id: string, update: ProductUpdate) => Promise<OfficeProduct>;
   /** Every template, without its layout. */
@@ -1010,6 +1019,16 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", "/v1/office/products", {
         officeToken: token,
         schema: z.array(officeProductSchema),
+      }),
+    getDemoData: (token) =>
+      client.request("GET", "/v1/office/demo-data", {
+        officeToken: token,
+        schema: demoDataSummarySchema,
+      }),
+    deleteDemoData: (token) =>
+      client.request("DELETE", "/v1/office/demo-data", {
+        officeToken: token,
+        schema: demoDataSummarySchema,
       }),
     createProduct: (token, create) =>
       client.request("POST", "/v1/office/products", {

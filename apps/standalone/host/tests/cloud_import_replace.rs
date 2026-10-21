@@ -5,7 +5,7 @@ mod support;
 use axum::http::StatusCode;
 use markiro_host::backup::{copy, Backups};
 use serde_json::{json, Value};
-use support::app::{admin, cloud_import_request, host_revision, Admin, IMPORT_ID};
+use support::app::{admin, cloud_import_request, demo_admin, host_revision, Admin, IMPORT_ID};
 
 fn backups(a: &mut Admin) {
     let local = a.app.dir().join("backups");
@@ -501,4 +501,30 @@ async fn replacement_supersedes_the_test_datasets_old_restore_hold() {
         (None, None, 1),
         "only the new history hold should remain"
     );
+}
+
+/// A replacement over the wizard's demo data (spec 2026-10-21) takes the demo prefix's counters
+/// and the `DEMO` shift counter with the demo product: nothing of it is left orphaned.
+#[tokio::test]
+async fn replacement_over_demo_data_leaves_none_of_its_counters() {
+    let mut a = demo_admin().await;
+    backups(&mut a);
+    let before = host_revision(&a.app).await;
+    let (code, done) = a
+        .call(
+            "POST",
+            "/v1/office/import",
+            Some(replacement(false, before)),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{done}");
+    let left: (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM sscc_counters WHERE issuer_prefix = '290000000'), \
+         (SELECT COUNT(*) FROM shift_number_counters WHERE month_key = 'DEMO'), \
+         (SELECT COUNT(*) FROM products WHERE demo = 1)",
+    )
+    .fetch_one(&a.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(left, (0, 0, 0));
 }

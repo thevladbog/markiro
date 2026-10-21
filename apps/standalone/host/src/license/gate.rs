@@ -154,6 +154,8 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/office/operators/{id}/badges"),
     ("DELETE", "/v1/office/operators/{id}/badges/{badge_id}"),
     ("GET", "/v1/office/badge-salt"),
+    ("GET", "/v1/office/demo-data"),
+    ("DELETE", "/v1/office/demo-data"),
     ("GET", "/v1/office/product-groups"),
     ("GET", "/v1/office/products"),
     ("POST", "/v1/office/products"),

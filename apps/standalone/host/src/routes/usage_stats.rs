@@ -33,57 +33,63 @@ use crate::auth::OfficeContext;
 use crate::error::ApiError;
 use crate::server::AppState;
 
+// None of these counts a demo shift's work (spec 2026-10-21): the statistics go into the
+// support text and the license request, and a demo shift is no production.
+
 /// Shifts of the window by month, mode, origin, print policy and pallets.
 /// Parameters: the first and the last day of the window.
 pub const SHIFTS: &str = "SELECT substr(planned_date, 1, 7), mode, created_from, \
      validation_print_mode, pallets_enabled, COUNT(*) FROM shifts \
-     WHERE planned_date >= ?1 AND planned_date <= ?2 GROUP BY 1, 2, 3, 4, 5";
+     WHERE planned_date >= ?1 AND planned_date <= ?2 \
+     AND product_id NOT IN (SELECT id FROM products WHERE demo = 1) GROUP BY 1, 2, 3, 4, 5";
 
 /// Scans of those shifts by verdict.
 pub const SCANS: &str = "SELECT substr(s.planned_date, 1, 7), sc.verdict, COUNT(*) \
-     FROM shifts s JOIN scans sc ON sc.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN scans sc ON sc.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 GROUP BY 1, 2";
 
 /// Boxes closed in those shifts, those taken apart since, the codes reported.
 pub const BOXES: &str = "SELECT substr(s.planned_date, 1, 7), COUNT(*), \
      COUNT(b.disassembled_at), COALESCE(SUM(b.item_count_reported), 0) \
-     FROM shifts s JOIN boxes b ON b.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN boxes b ON b.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 AND b.closed_at IS NOT NULL \
      GROUP BY 1";
 
 /// Pallets closed in those shifts and those taken apart since.
 pub const PALLETS: &str = "SELECT substr(s.planned_date, 1, 7), COUNT(*), \
      COUNT(p.disassembled_at) \
-     FROM shifts s JOIN pallets p ON p.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN pallets p ON p.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 AND p.closed_at IS NOT NULL \
      GROUP BY 1";
 
 /// Box exceptions of those shifts by kind.
 pub const BOX_EXCEPTIONS: &str = "SELECT substr(s.planned_date, 1, 7), e.kind, COUNT(*) \
-     FROM shifts s JOIN box_exceptions e ON e.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN box_exceptions e ON e.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 GROUP BY 1, 2";
 
 /// Pallet exceptions of those shifts by kind.
 pub const PALLET_EXCEPTIONS: &str = "SELECT substr(s.planned_date, 1, 7), e.kind, COUNT(*) \
-     FROM shifts s JOIN pallet_exceptions e ON e.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN pallet_exceptions e ON e.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 GROUP BY 1, 2";
 
 /// Reprints of a validation shift's duplicate labels in those shifts.
 pub const UNIT_LABEL_REPRINTS: &str = "SELECT substr(s.planned_date, 1, 7), COUNT(*) \
-     FROM shifts s JOIN unit_label_events u ON u.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN unit_label_events u ON u.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 \
      AND u.event = 'prepared' AND u.attempt_no > 1 GROUP BY 1";
 
 /// Records of those shifts the host refused.
 pub const REFUSED_RECORDS: &str = "SELECT substr(s.planned_date, 1, 7), COUNT(*) \
-     FROM shifts s JOIN fact_receipts r ON r.shift_id = s.id \
+     FROM shifts s JOIN products sp ON sp.id = s.product_id AND sp.demo = 0 JOIN fact_receipts r ON r.shift_id = s.id \
      WHERE s.planned_date >= ?1 AND s.planned_date <= ?2 AND r.outcome = 'rejected' GROUP BY 1";
 
 /// Conflicts detected since the window opened, by kind and review. Parameter:
 /// the first instant of the window.
 pub const CONFLICTS: &str = "SELECT substr(detected_at, 1, 7), kind, \
      reviewed_at IS NOT NULL, COUNT(*) FROM code_conflicts \
-     WHERE detected_at >= ?1 GROUP BY 1, 2, 3";
+     WHERE detected_at >= ?1 AND NOT EXISTS (SELECT 1 FROM scans sc \
+     JOIN shifts s ON s.id = sc.shift_id JOIN products p ON p.id = s.product_id \
+     WHERE sc.id = code_conflicts.loser_scan_id AND p.demo = 1) GROUP BY 1, 2, 3";
 
 /// Disaggregation documents applied since the window opened. Parameter: the
 /// first instant of the window.

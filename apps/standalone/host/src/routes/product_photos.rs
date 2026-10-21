@@ -45,6 +45,15 @@ async fn check_product(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiE
         .ok_or_else(|| ApiError::not_found("no such product"))
 }
 
+/// [`check_product`], and not the demo product, whose photo is read-only (spec 2026-10-21).
+async fn check_writable_product(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
+    check_product(&mut *conn, id).await?;
+    if crate::demo::is_demo_product(conn, id).await? {
+        return Err(crate::demo::demo_product());
+    }
+    Ok(())
+}
+
 /// The product's photo, or `None`.
 pub async fn read_photo(
     conn: &mut SqliteConnection,
@@ -95,7 +104,7 @@ pub async fn put_photo(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
-    check_product(&mut tx, &id).await?;
+    check_writable_product(&mut tx, &id).await?;
     // The same photo again changes nothing: no write, no audit row; the
     // answer is the stored photo, its time included.
     if let Some(stored) = read_photo(&mut tx, &id).await? {
@@ -165,7 +174,7 @@ pub async fn delete_photo(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
-    check_product(&mut tx, &id).await?;
+    check_writable_product(&mut tx, &id).await?;
     let removed = sqlx::query("DELETE FROM product_photos WHERE product_id = ?")
         .bind(&id)
         .execute(&mut *tx)

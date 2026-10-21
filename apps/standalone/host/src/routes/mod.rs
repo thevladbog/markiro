@@ -10,6 +10,7 @@ pub mod cloud_import;
 pub mod cloud_shifts;
 pub mod codes;
 pub mod counterparties;
+pub mod demo_data;
 pub mod device_conflicts;
 pub mod device_shifts;
 pub mod device_update;

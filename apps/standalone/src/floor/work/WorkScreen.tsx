@@ -1,4 +1,4 @@
-import { formatSsccHri, type ShiftCloseReasonCode } from "@markiro/domain";
+import { formatSsccHri, type LabelTemplateSpec, type ShiftCloseReasonCode } from "@markiro/domain";
 import type { TFunction } from "i18next";
 import {
   useCallback,
@@ -67,6 +67,7 @@ import {
   type PalletContext,
   type ShiftPallets,
 } from "../pallets/pallets.js";
+import { isDemoShiftNumber, nextDemoCode } from "../demo/demo-codes.js";
 import { LabelPanel, type LabelNote } from "../print/LabelPanel.js";
 import {
   boxLabelStep,
@@ -533,6 +534,11 @@ interface Live {
 
 type LiveRef = MutableRefObject<Live>;
 
+/** The panel's `demoPreview`, left out for a real shift (`exactOptionalPropertyTypes`). */
+function demoPreviewProp(spec: LabelTemplateSpec | undefined): { demoPreview?: LabelTemplateSpec } {
+  return spec === undefined ? {} : { demoPreview: spec };
+}
+
 function pairingOf(now: Live): Pairing {
   return { hostId: now.hostId, deviceId: now.deviceId };
 }
@@ -781,6 +787,15 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
  */
 export function WorkScreen(props: WorkScreenProps) {
   const { shift, leaving, onLeave, source, linkHeld = false, officeClosed = false } = props;
+  // A demo shift (spec 2026-10-21): «Демо-код» instead of a scanner, the label on the screen
+  // instead of a printer.
+  const demo = isDemoShiftNumber(shift.copy.number);
+  const demoPreviewOf = (job: { purpose: "box" | "pallet" }): LabelTemplateSpec | undefined =>
+    !demo
+      ? undefined
+      : job.purpose === "pallet"
+        ? shift.snapshot.palletTemplate?.spec
+        : shift.snapshot.boxTemplate.spec;
   const { t } = useTranslation();
   const [totals, setTotals] = useState<WorkTotals | null>(null);
   const [last, setLast] = useState<Last | null>(null);
@@ -2144,6 +2159,31 @@ export function WorkScreen(props: WorkScreenProps) {
     resumeWork();
   };
 
+  /**
+   * «Демо-код» (spec 2026-10-21): the next demo code this station holds no scan of, handed to
+   * the gate as a scan of the scanner is — the one way into the pipeline.
+   */
+  const demoScan = () => {
+    const now = live.current;
+    now.touch();
+    if (leavingNow()) {
+      refuse(true);
+      return;
+    }
+    void now
+      .track(
+        queue.run(async () => {
+          const raw = await nextDemoCode(
+            now.local,
+            pairingOf(now),
+            now.shift.snapshot.product.gtin14,
+          );
+          if (raw !== null) await scan(raw);
+        }),
+      )
+      .catch(() => undefined);
+  };
+
   useEffect(
     () =>
       source.start((raw) => {
@@ -2420,6 +2460,14 @@ export function WorkScreen(props: WorkScreenProps) {
             {...(totals === null ? {} : { local: props.local })}
             productId={shift.copy.productId}
           />
+          {demo && (
+            <div className="work-screen__demo" role="note">
+              <p>{t("floor.demo.work.body")}</p>
+              <Button size="floor" variant="secondary" onClick={demoScan}>
+                {t("floor.demo.work.code")}
+              </Button>
+            </div>
+          )}
           {officeClosed && stop?.kind !== "closed" && (
             <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
               {t("floor.work.officeClosed.body")}
@@ -2833,6 +2881,7 @@ export function WorkScreen(props: WorkScreenProps) {
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
               egaisOffSheet={sheetWithoutEgais(stop.job, shift)}
+              {...demoPreviewProp(demoPreviewOf(stop.job))}
             />
           </div>
         )}

@@ -19,8 +19,10 @@ import {
   RESEND_WINDOW_MS,
 } from "../src/local/restore-reconcile.js";
 import {
+  DEMO_SSCC_PREFIX,
   DUE_SHIFTS_SQL,
   purgeAcknowledged,
+  purgeRemovedDemo,
   RETAINED_TABLES,
   RETENTION_INTERVAL_MS,
   RETENTION_MS,
@@ -732,6 +734,52 @@ describe("the retention of a shift's records on the station", () => {
       floor_pallets: 1,
       floor_pallet_exceptions: 1,
     });
+  });
+});
+
+describe("the removal of demo shifts (spec 2026-10-21)", () => {
+  /** The shift's copy made a demo shift's: its snapshot names the demo prefix. */
+  function demo(at: Pick<Station, "db">, shiftId: string): void {
+    at.db
+      .prepare(
+        "UPDATE floor_shifts SET snapshot = json_set(snapshot, '$.issuerPrefix', ?) WHERE id = ?",
+      )
+      .run(DEMO_SSCC_PREFIX, shiftId);
+  }
+
+  it("deletes a demo shift at once when its product left the copies and the host answered every record", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-11-08T11:59:00.000Z");
+    await finished(at, SECOND, "B", "2026-11-08T11:59:00.000Z");
+    demo(at, ENTERED.id);
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    // A real shift, done with only an hour ago, stays.
+    expect(kept(at, SECOND.id)).toEqual(WHOLE);
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(0);
+  });
+
+  it("keeps a demo shift while its product is in the copies or a record of it waits", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-11-08T11:59:00.000Z");
+    demo(at, ENTERED.id);
+    at.db
+      .prepare(
+        "INSERT INTO ref_products (id, gtin14, name, archived, status, demo, rev) " +
+          "VALUES (?, '02900000000018', 'Демо', 0, 'active', 1, 1)",
+      )
+      .run(ENTERED.productId);
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(0);
+    at.db.prepare("DELETE FROM ref_products").run();
+    at.db
+      .prepare(
+        "UPDATE outbox SET acked_at = NULL, outcome = NULL WHERE rowid = (SELECT max(rowid) FROM outbox)",
+      )
+      .run();
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual(WHOLE);
+    // Another pairing's demo copy is never touched.
+    expect(await purgeRemovedDemo(at.local, OTHER_PAIRING)).toBe(0);
   });
 });
 
