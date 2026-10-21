@@ -1,5 +1,5 @@
 {
-  "id": "8ba417f1-6e27-472b-b283-c3413c70c443",
+  "id": "29563524-adfb-4043-aef5-af09ecd3ae29",
   "prevId": "e5ad84d4-c785-4aaa-8585-b7e63ceb3f93",
   "version": "7",
   "dialect": "postgresql",
@@ -40081,7 +40081,7 @@
           "name": "company",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "name": {
           "name": "name",
@@ -40313,7 +40313,7 @@
       "checkConstraints": {
         "landing_leads_shape_check": {
           "name": "landing_leads_shape_check",
-          "value": "\"landing_leads\".\"status\" in ('new','contacted','trial','invoice_sent','won','lost') and \"landing_leads\".\"locale\" in ('ru','en') and (\"landing_leads\".\"lines_bucket\" is null or \"landing_leads\".\"lines_bucket\" in ('1','2-3','4+')) and (\"landing_leads\".\"owner_note\" is null or char_length(\"landing_leads\".\"owner_note\") <= 2000) and char_length(\"landing_leads\".\"company\") between 1 and 300"
+          "value": "\"landing_leads\".\"status\" in ('new','contacted','trial','invoice_sent','won','lost') and \"landing_leads\".\"locale\" in ('ru','en') and (\"landing_leads\".\"lines_bucket\" is null or \"landing_leads\".\"lines_bucket\" in ('1','2-3','4+')) and (\"landing_leads\".\"owner_note\" is null or char_length(\"landing_leads\".\"owner_note\") <= 2000) and (\"landing_leads\".\"company\" is null or char_length(\"landing_leads\".\"company\") between 1 and 300)"
         },
         "landing_leads_anonymized_check": {
           "name": "landing_leads_anonymized_check",

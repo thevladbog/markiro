@@ -68,7 +68,7 @@ export const landingLeads = pgTable(
   {
     id: uuid("id").primaryKey(),
     email: text("email"),
-    company: text("company").notNull(),
+    company: text("company"),
     name: text("name"),
     phone: text("phone"),
     inn: text("inn"),
@@ -104,7 +104,7 @@ export const landingLeads = pgTable(
     index("landing_leads_updated_idx").on(t.updatedAt),
     check(
       "landing_leads_shape_check",
-      sql`${t.status} in (${list(LANDING_LEAD_STATUSES)}) and ${t.locale} in ('ru','en') and (${t.linesBucket} is null or ${t.linesBucket} in ('1','2-3','4+')) and (${t.ownerNote} is null or char_length(${t.ownerNote}) <= 2000) and char_length(${t.company}) between 1 and 300`,
+      sql`${t.status} in (${list(LANDING_LEAD_STATUSES)}) and ${t.locale} in ('ru','en') and (${t.linesBucket} is null or ${t.linesBucket} in ('1','2-3','4+')) and (${t.ownerNote} is null or char_length(${t.ownerNote}) <= 2000) and (${t.company} is null or char_length(${t.company}) between 1 and 300)`,
     ),
     // A lead either still carries its e-mail or has been anonymized, never both.
     check(

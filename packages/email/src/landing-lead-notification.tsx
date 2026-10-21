@@ -19,7 +19,8 @@ export interface LandingLeadNotificationEmailProps {
   receivedAt: Date;
   sourcePath: string;
   consentVersion: string;
-  company: string;
+  /** Absent when the price-page form asked for the INN only. */
+  company?: string;
   email: string;
   name?: string;
   phone?: string;
@@ -36,8 +37,13 @@ export interface LandingLeadNotificationEmailProps {
 
 const INTENT = { download: "скачивание", invoice: "запрос счёта" } as const;
 
-export function landingLeadNotificationSubject(intent: LandingLeadIntent, company: string): string {
-  return `${intent === "invoice" ? "Запрос счёта" : "Скачивание"} · ${company} — Маркиро`;
+export function landingLeadNotificationSubject(
+  intent: LandingLeadIntent,
+  company: string | undefined,
+  inn: string | undefined,
+): string {
+  const who = company ?? (inn === undefined ? "компания не указана" : `ИНН ${inn}`);
+  return `${intent === "invoice" ? "Запрос счёта" : "Скачивание"} · ${who} — Маркиро`;
 }
 
 export function LandingLeadNotificationEmail(props: LandingLeadNotificationEmailProps) {
@@ -58,7 +64,7 @@ export function LandingLeadNotificationEmail(props: LandingLeadNotificationEmail
       </Text>
       <SummaryTable label="Данные заявки">
         <SummaryRow label="Вид">{INTENT[props.intent]}</SummaryRow>
-        <SummaryRow label="Компания">{props.company}</SummaryRow>
+        <SummaryRow label="Компания">{props.company ?? "не указана"}</SummaryRow>
         {props.inn !== undefined ? <SummaryRow label="ИНН">{props.inn}</SummaryRow> : null}
         {props.tariffCode !== undefined ? (
           <SummaryRow label="Тариф">{props.tariffCode}</SummaryRow>

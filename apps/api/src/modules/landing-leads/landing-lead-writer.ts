@@ -9,7 +9,8 @@ export type LeadWriteTransaction = Pick<Db, "insert" | "execute">;
 export interface LeadContactFields {
   /** Already normalized: trimmed and lower-cased. */
   email: string;
-  company: string;
+  /** Absent on the invoice form, which asks for the INN only. */
+  company?: string;
   locale: "ru" | "en";
   sourcePath: string;
   name?: string;
@@ -39,12 +40,13 @@ export async function upsertLead(
       id, email, company, name, phone, inn, product_group, lines_bucket, locale,
       first_source_path, first_utm, first_referrer, status_changed_at, created_at, updated_at
     ) VALUES (
-      ${createId()}::uuid, ${fields.email}, ${fields.company}, ${fields.name ?? null},
+      ${createId()}::uuid, ${fields.email}, ${fields.company ?? null}, ${fields.name ?? null},
       ${fields.phone ?? null}, ${fields.inn ?? null}, ${fields.productGroup ?? null},
       ${fields.linesBucket ?? null}, ${fields.locale}, ${fields.sourcePath}, ${utm}::jsonb,
       ${fields.referrer ?? null}, ${now}, ${now}, ${now}
     )
     ON CONFLICT (lower(btrim(email))) WHERE email IS NOT NULL DO UPDATE SET
+      company = coalesce(landing_leads.company, excluded.company),
       name = coalesce(landing_leads.name, excluded.name),
       phone = coalesce(landing_leads.phone, excluded.phone),
       inn = coalesce(landing_leads.inn, excluded.inn),

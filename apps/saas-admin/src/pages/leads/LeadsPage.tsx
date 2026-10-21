@@ -102,7 +102,7 @@ export function LeadsPage() {
       minWidth: 220,
       render: (lead) => (
         <Link className="table-link" to={`/leads/${lead.id}`}>
-          <span>{lead.company}</span>
+          <span>{lead.company ?? t("leads.noCompany")}</span>
           <small>
             {lead.anonymized ? t("leads.anonymizedShort") : (lead.email ?? "—")}
             {lead.inn ? ` · ${t("leads.innShort", { inn: lead.inn })}` : ""}

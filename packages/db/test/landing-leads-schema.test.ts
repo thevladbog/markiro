@@ -9,7 +9,8 @@ describe("landing leads schema (spec 2026-10-20 §15.2)", () => {
     expect(column("email")?.notNull).toBe(false);
     expect(column("name")?.notNull).toBe(false);
     expect(column("phone")?.notNull).toBe(false);
-    expect(column("company")?.notNull).toBe(true);
+    // The invoice form asks for the INN, not the company (П3 layout).
+    expect(column("company")?.notNull).toBe(false);
     expect(column("status")?.default).toBe("new");
     expect(column("tenant_id")?.notNull).toBe(false);
     expect(column("anonymized_at")?.notNull).toBe(false);

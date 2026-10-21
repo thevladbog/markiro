@@ -15,12 +15,16 @@ export function scrubContacts(value: string): string {
   return value.replace(EMAIL_LIKE, "…").replace(PHONE_LIKE, "…").slice(0, 200);
 }
 
+/** Shown instead of a missing company; an INN (a person's, for a sole trader) never goes out. */
+export const NO_COMPANY = "компания не указана";
+
 const LINES: Record<string, string> = { "1": "1 линия", "2-3": "2–3 линии", "4+": "4+ линий" };
 
 export interface LeadAlertFacts {
   kind: "download" | "invoice_request" | "demo_request";
   firstContact: boolean;
-  company: string;
+  /** `null` for an invoice request that gave the INN only; the INN is never sent. */
+  company: string | null;
   productGroup: string | null;
   linesBucket: string | null;
   tariffCode: string | null;
@@ -38,7 +42,7 @@ const KIND_TITLE = {
 export function leadAlertText(facts: LeadAlertFacts): string {
   const title = `${facts.firstContact ? "Новый лид" : "Повторное обращение"} · ${KIND_TITLE[facts.kind]}`;
   const about = [
-    scrubContacts(facts.company),
+    facts.company === null ? NO_COMPANY : scrubContacts(facts.company),
     facts.productGroup === null ? null : scrubContacts(facts.productGroup),
     facts.linesBucket === null ? null : (LINES[facts.linesBucket] ?? null),
   ].filter((part): part is string => part !== null && part !== "");

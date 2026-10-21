@@ -14,7 +14,12 @@ import {
   type LeadDigestCandidate,
   type LeadDigestSections,
 } from "./lead-digest-sections";
-import { leadAlertText, leadDigestText, type LeadAlertFacts } from "./lead-telegram-message";
+import {
+  leadAlertText,
+  leadDigestText,
+  NO_COMPANY,
+  type LeadAlertFacts,
+} from "./lead-telegram-message";
 import { leadUrl } from "./landing-lead-writer";
 import { TelegramSendError, type TelegramSender } from "./telegram.client";
 
@@ -158,27 +163,26 @@ export class LandingLeadJobsService {
         all.length === 0
           ? []
           : (
-              await tx.execute<{ id: string; company: string }>(sql`
+              await tx.execute<{ id: string; company: string | null }>(sql`
                 SELECT id::text AS id, company FROM landing_leads
                 WHERE id = ANY(${`{${all.join(",")}}`}::uuid[])
               `)
             ).rows;
-      const companies = new Map(leads.map((lead) => [lead.id, lead.company]));
+      const companies = new Map(leads.map((lead) => [lead.id, lead.company ?? NO_COMPANY]));
       const sections = Object.fromEntries(
         LANDING_LEAD_DIGEST_SECTIONS.map((section) => [
           section,
           ids[section]
             .filter((id) => companies.has(id))
             .map((id) => ({
-              company: companies.get(id) ?? "",
+              company: companies.get(id) ?? NO_COMPANY,
               leadUrl: leadUrl(this.options.adminOrigin, id),
             })),
         ]),
       ) as LeadDigestSections<{ company: string; leadUrl: string }>;
       return leadDigestText(row.digestDate ?? "", sections, `${this.options.adminOrigin}/leads`);
     }
-    if (row.leadId === null || row.company === null)
-      throw new Error("Lead notification lost its lead");
+    if (row.leadId === null) throw new Error("Lead notification lost its lead");
     const payload = row.eventPayload ?? {};
     const facts: LeadAlertFacts = {
       kind:
@@ -265,7 +269,7 @@ export class LandingLeadJobsService {
   ): Promise<LeadDigestCandidate[]> {
     const rows = await tx.execute<{
       id: string;
-      company: string;
+      company: string | null;
       status: LandingLeadStatus;
       createdAt: Date | string;
       statusChangedAt: Date | string;
@@ -287,7 +291,7 @@ export class LandingLeadJobsService {
     `);
     return rows.rows.map((row) => ({
       id: row.id,
-      company: row.company,
+      company: row.company ?? NO_COMPANY,
       status: row.status,
       createdAt: new Date(row.createdAt),
       statusChangedAt: new Date(row.statusChangedAt),

@@ -329,7 +329,7 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     service.now = () => new Date(Date.now());
     const slug = `inn-7707083893-${run}-${randomUUID().slice(0, 6)}`;
     const detail = await service.createTenant(admin, row.id, {
-      tenantName: row.company,
+      tenantName: String(row.company),
       tenantSlug: slug,
     });
     expect(detail.tenant).toMatchObject({ name: row.company, cabinetAccess: "none" });
@@ -349,7 +349,7 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
       tenantId,
     });
     const retried = await service.createTenant(admin, row.id, {
-      tenantName: row.company,
+      tenantName: String(row.company),
       tenantSlug: slug,
     });
     expect(retried.tenant?.id).toBe(tenantId);
@@ -366,7 +366,7 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     );
     tenantIds.push(other.tenantId);
     await expect(
-      service.createTenant(admin, row.id, { tenantName: row.company, tenantSlug: slug }),
+      service.createTenant(admin, row.id, { tenantName: String(row.company), tenantSlug: slug }),
     ).rejects.toMatchObject({ status: 409, response: { code: "lead_tenant_slug_taken" } });
     expect((await service.detail(row.id)).tenant).toBeNull();
     expect(await auditFor(row.id, "landing_lead.tenant_linked")).toHaveLength(0);
@@ -407,7 +407,7 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
       status: 409,
       response: { code: "lead_anonymized" },
     });
-    const listed = await service.list({ page: 1, limit: 50, search: row.company });
+    const listed = await service.list({ page: 1, limit: 50, search: String(row.company) });
     expect(listed.items.find((item) => item.id === row.id)).toMatchObject({
       email: null,
       anonymized: true,

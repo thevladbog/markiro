@@ -40,8 +40,9 @@ function CreateTenantForm({
   const form = useForm<PlatformLeadCreateTenant>({
     resolver: zodResolver(platformLeadCreateTenantSchema),
     defaultValues: {
-      tenantName: lead.company.slice(0, 300),
-      tenantSlug: suggestLeadTenantSlug(lead.company, lead.inn),
+      // The invoice form gives no company; the operator types the name then.
+      tenantName: (lead.company ?? "").slice(0, 300),
+      tenantSlug: suggestLeadTenantSlug(lead.company ?? "", lead.inn),
     },
   });
   const submit = form.handleSubmit(async (values) => {

@@ -4,7 +4,8 @@ import { SummaryRow, SummaryTable } from "./landing-lead-parts.js";
 
 export interface LandingInvoiceRequestConfirmationEmailProps {
   locale: EmailLocale;
-  company: string;
+  /** Absent when the price-page form asked for the INN only. */
+  company?: string;
   inn: string;
   tariffCode: string;
   email: string;
@@ -75,7 +76,7 @@ export function LandingInvoiceRequestConfirmationEmail({
       <Text style={emailStyles.paragraph}>{text.next}</Text>
       <Text style={emailStyles.paragraph}>{text.bridge}</Text>
       <SummaryTable label={text.summary}>
-        <SummaryRow label={text.company}>{company}</SummaryRow>
+        {company !== undefined ? <SummaryRow label={text.company}>{company}</SummaryRow> : null}
         <SummaryRow label={text.inn}>{inn}</SummaryRow>
         <SummaryRow label={text.tariff}>{tariffCode}</SummaryRow>
         <SummaryRow label={text.email}>{email}</SummaryRow>

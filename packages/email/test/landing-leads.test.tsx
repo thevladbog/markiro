@@ -62,6 +62,36 @@ describe("landing lead e-mails (spec 2026-10-20 §15)", () => {
     expectNoTracking(output);
   });
 
+  it("handles an invoice request without a company (the form asks for the INN only)", async () => {
+    const confirmation = await renderEmail({
+      kind: "landing-invoice-request-confirmation",
+      locale: "ru",
+      inn: "7707083893",
+      tariffCode: "workshop",
+      email: "buyer@example.test",
+      contactEmail: "hello@v-b.tech",
+    });
+    expect(confirmation.text).toContain("ИНН: 7707083893\nТариф: workshop");
+    expect(confirmation.text).not.toContain("Компания:");
+    const owner = await renderEmail({
+      kind: "landing-lead-notification",
+      intent: "invoice",
+      locale: "ru",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      receivedAt: new Date("2026-10-21T09:05:00Z"),
+      sourcePath: "/stoimost/",
+      consentVersion: "consent-v1",
+      email: "buyer@example.test",
+      inn: "7707083893",
+      tariffCode: "workshop",
+      firstContact: true,
+      leadUrl: "https://admin.markiro.app/leads/22222222-2222-4222-8222-222222222222",
+    });
+    expect(owner.subject).toBe("Запрос счёта · ИНН 7707083893 — Маркиро");
+    expect(owner.text).toContain("Компания: не указана");
+    expectNoTracking(owner);
+  });
+
   it("gives the owner the contacts, the attribution and the card link", async () => {
     const output = await renderEmail({
       kind: "landing-lead-notification",

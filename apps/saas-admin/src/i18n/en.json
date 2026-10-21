@@ -3047,6 +3047,7 @@
     "createNotice": "Tenant without a cabinet: no owner, activation email or demo is created. Standalone sites and offline licenses are available. You send invoices and acts yourself."
   },
   "leads": {
+    "noCompany": "Company not given",
     "title": "Leads",
     "description": "Downloads, invoice requests and demo requests from the website. Times are Moscow time.",
     "forbidden": "You have no access to website leads.",

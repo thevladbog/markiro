@@ -122,7 +122,11 @@ function LeadContacts({ lead, language }: { lead: LeadDetail; language: string }
 function LeadFacts({ lead, language }: { lead: LeadDetail; language: string }) {
   const { t } = useTranslation();
   const items: DefinitionGridItem[] = [
-    { id: "company", term: t("leads.facts.company"), description: lead.company },
+    {
+      id: "company",
+      term: t("leads.facts.company"),
+      description: lead.company ?? t("leads.noCompany"),
+    },
     { id: "inn", term: t("leads.facts.inn"), description: lead.inn ?? "—", mono: true },
     {
       id: "productGroup",
@@ -385,7 +389,7 @@ export function LeadPage() {
     <section className="leads-page lead-detail-page">
       <SectionHeader
         eyebrow="OPERATIONS / LEADS"
-        title={detail.company}
+        title={detail.company ?? t("leads.noCompany")}
         description={t("leads.detail.description", {
           date: formatLeadDateTime(detail.createdAt, language),
         })}
@@ -438,7 +442,7 @@ export function LeadPage() {
         tone="destructive"
         title={t("leads.anonymize.confirmTitle")}
         description={t("leads.anonymize.confirmDescription")}
-        entity={detail.company}
+        entity={detail.company ?? t("leads.noCompany")}
         confirmLabel={t("leads.anonymize.action")}
         cancelLabel={t("leads.cancel")}
         busy={busy}

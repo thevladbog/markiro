@@ -61,6 +61,13 @@ describe.skipIf(!databaseUrl)("landing leads migration", () => {
     await expect(lead(null)).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("accepts a lead without a company (invoice form) but not an empty company", async () => {
+    await lead(`${randomUUID()}@example.invalid`, { company: null, inn: "7707083893" });
+    await expect(lead(`${randomUUID()}@example.invalid`, { company: "" })).rejects.toMatchObject({
+      code: "23514",
+    });
+  });
+
   it("checks status, lines bucket, locale and note length", async () => {
     for (const overrides of [
       { status: "paid" },

@@ -178,7 +178,7 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("landing-invoice-request-confirmation"),
       locale: z.enum(["ru", "en"]),
-      company: z.string().min(1),
+      company: z.string().min(1).optional(),
       inn: z.string().regex(/^(?:\d{10}|\d{12})$/),
       tariffCode: z.string().min(1).max(64),
       email: z.email(),
@@ -194,7 +194,7 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
       receivedAt: z.coerce.date(),
       sourcePath: z.string().min(1),
       consentVersion: z.string().trim().min(1).max(64),
-      company: z.string().min(1),
+      company: z.string().min(1).optional(),
       email: z.email(),
       name: z.string().min(1).optional(),
       phone: z.string().min(1).optional(),
@@ -267,6 +267,7 @@ function withoutUndefined<T extends object>(
 }
 
 function toEmailTemplateInput(input: z.output<typeof emailTemplateSchema>): EmailTemplateInput {
+  if (input.kind === "landing-invoice-request-confirmation") return withoutUndefined(input);
   if (input.kind === "landing-lead-notification") {
     const { utm, ...rest } = input;
     return {

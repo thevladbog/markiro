@@ -51,7 +51,7 @@ export class LandingLeadRepository {
         tx,
         {
           email: input.email,
-          company: input.company,
+          ...optional("company", input.company),
           locale: input.locale,
           sourcePath: input.sourcePath,
           ...optional("name", input.name),
@@ -99,7 +99,7 @@ export class LandingLeadRepository {
           template: {
             kind: "landing-invoice-request-confirmation",
             locale: input.locale,
-            company: input.company,
+            ...optional("company", input.company),
             inn: input.inn,
             tariffCode: input.tariffCode,
             email: input.email,
@@ -107,6 +107,9 @@ export class LandingLeadRepository {
           },
         });
       } else {
+        if (input.company === undefined) {
+          throw new Error("Download lead without a company passed validation");
+        }
         await this.mail.enqueue(tx, {
           scope,
           recipient: input.email,
@@ -132,7 +135,7 @@ export class LandingLeadRepository {
           receivedAt,
           sourcePath: input.sourcePath,
           consentVersion: input.consentVersion,
-          company: input.company,
+          ...optional("company", input.company),
           email: input.email,
           ...optional("name", input.name),
           ...optional("phone", input.phone),

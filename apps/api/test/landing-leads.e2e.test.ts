@@ -284,6 +284,38 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
     ).toMatchObject({ intent: "invoice", firstContact: false, inn: "7707083893" });
   });
 
+  it("stores an invoice request without a company and fills it from a later download", async () => {
+    const address = email();
+    const invoice = body({
+      email: address,
+      intent: "invoice",
+      sourcePath: "/stoimost/",
+      inn: "7707083893",
+      tariffCode: "workshop",
+    });
+    delete invoice.company;
+    await request(app.getHttpServer()).post("/landing-leads").send(invoice).expect(202);
+    expect((await state(address)).lead).toMatchObject({ company: null, inn: "7707083893" });
+    const mails = await deliveries(String(invoice.requestId));
+    for (const { template } of mails) expect(template).not.toHaveProperty("company");
+
+    await request(app.getHttpServer())
+      .post("/landing-leads")
+      .send(body({ email: address, company: "ООО «Квас»" }))
+      .expect(202);
+    expect((await state(address)).lead).toMatchObject({ company: "ООО «Квас»" });
+  });
+
+  it("requires the company on the download form", async () => {
+    const form = body();
+    delete form.company;
+    const response = await request(app.getHttpServer())
+      .post("/landing-leads")
+      .send(form)
+      .expect(400);
+    expect(response.body).toEqual({ code: "invalid_request" });
+  });
+
   it.each([
     ["a stale consent", { consentVersion: "MKR-PD-02/2025.01/01" }, 400, "invalid_request"],
     ["a filled honeypot", { website: "https://spam.example" }, 400, "invalid_request"],

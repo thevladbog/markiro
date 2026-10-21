@@ -13,7 +13,7 @@ CREATE TABLE "landing_lead_events" (
 CREATE TABLE "landing_leads" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"email" text,
-	"company" text NOT NULL,
+	"company" text,
 	"name" text,
 	"phone" text,
 	"inn" text,
@@ -31,7 +31,7 @@ CREATE TABLE "landing_leads" (
 	"anonymized_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "landing_leads_shape_check" CHECK ("landing_leads"."status" in ('new','contacted','trial','invoice_sent','won','lost') and "landing_leads"."locale" in ('ru','en') and ("landing_leads"."lines_bucket" is null or "landing_leads"."lines_bucket" in ('1','2-3','4+')) and ("landing_leads"."owner_note" is null or char_length("landing_leads"."owner_note") <= 2000) and char_length("landing_leads"."company") between 1 and 300),
+	CONSTRAINT "landing_leads_shape_check" CHECK ("landing_leads"."status" in ('new','contacted','trial','invoice_sent','won','lost') and "landing_leads"."locale" in ('ru','en') and ("landing_leads"."lines_bucket" is null or "landing_leads"."lines_bucket" in ('1','2-3','4+')) and ("landing_leads"."owner_note" is null or char_length("landing_leads"."owner_note") <= 2000) and ("landing_leads"."company" is null or char_length("landing_leads"."company") between 1 and 300)),
 	CONSTRAINT "landing_leads_anonymized_check" CHECK (("landing_leads"."anonymized_at" is null and "landing_leads"."email" is not null) or ("landing_leads"."anonymized_at" is not null and "landing_leads"."email" is null and "landing_leads"."name" is null and "landing_leads"."phone" is null))
 );
 --> statement-breakpoint

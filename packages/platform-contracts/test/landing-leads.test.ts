@@ -68,6 +68,23 @@ describe("landing lead public contract (spec §15.3)", () => {
     ).toBe(false);
   });
 
+  it("asks the company only on the download form (the invoice form has none)", () => {
+    const withoutCompany: Record<string, unknown> = { ...download };
+    delete withoutCompany.company;
+    expect(landingLeadRequestSchema.safeParse(withoutCompany).success).toBe(false);
+    expect(landingLeadRequestSchema.safeParse({ ...withoutCompany, company: "" }).success).toBe(
+      false,
+    );
+    const invoice = landingLeadRequestSchema.parse({
+      ...withoutCompany,
+      intent: "invoice",
+      sourcePath: "/stoimost/",
+      inn: "7707083893",
+      tariffCode: "workshop",
+    });
+    expect(invoice.company).toBeUndefined();
+  });
+
   it("rejects unknown fields, paths and buckets", () => {
     for (const body of [
       { ...download, extra: true },

@@ -54,6 +54,14 @@ const TEMPLATES = {
       },
     ],
   },
+  "landing-invoice-request-confirmation-without-company": {
+    kind: "landing-invoice-request-confirmation",
+    locale: "ru",
+    inn: "7707083893",
+    tariffCode: "workshop",
+    email: "buyer@example.test",
+    contactEmail: "hello@v-b.tech",
+  },
 } as const;
 
 function harness(
@@ -77,7 +85,7 @@ function harness(
             publicRequestId:
               owner.publicRequestId === undefined ? REQUEST_ID : owner.publicRequestId,
             recipient: "owner@example.test",
-            kind,
+            kind: TEMPLATES[kind].kind,
             sourceId: REQUEST_ID,
             attemptCount: 1,
             ...encrypted,

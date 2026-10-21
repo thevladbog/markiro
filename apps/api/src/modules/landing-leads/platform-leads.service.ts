@@ -29,7 +29,7 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type LeadRow = {
   id: string;
   email: string | null;
-  company: string;
+  company: string | null;
   name: string | null;
   phone: string | null;
   inn: string | null;
@@ -74,7 +74,7 @@ export class PlatformLeadsService {
     if (query.search !== undefined && query.search !== "") {
       const pattern = `%${escapeLike(query.search.toLowerCase())}%`;
       filters.push(
-        sql`(lower(l.company) LIKE ${pattern} OR lower(coalesce(l.email, '')) LIKE ${pattern} OR coalesce(l.inn, '') LIKE ${pattern})`,
+        sql`(lower(coalesce(l.company, '')) LIKE ${pattern} OR lower(coalesce(l.email, '')) LIKE ${pattern} OR coalesce(l.inn, '') LIKE ${pattern})`,
       );
     }
     if (query.status !== undefined) filters.push(sql`l.status = ${query.status}`);
@@ -98,7 +98,7 @@ export class PlatformLeadsService {
     const [rows, count] = await Promise.all([
       this.db.execute<{
         id: string;
-        company: string;
+        company: string | null;
         email: string | null;
         inn: string | null;
         status: LandingLeadStatus;

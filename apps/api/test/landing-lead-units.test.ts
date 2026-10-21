@@ -256,6 +256,22 @@ describe("Telegram texts carry no personal data (spec §15.4)", () => {
     expect(scrubContacts("7707083893")).toBe("…");
   });
 
+  it("never falls back to the INN when the invoice form gave no company", () => {
+    const text = leadAlertText({
+      kind: "invoice_request",
+      firstContact: true,
+      company: null,
+      productGroup: null,
+      linesBucket: null,
+      tariffCode: "workshop",
+      sourcePath: "/stoimost/",
+      utm: null,
+      leadUrl: "https://admin.markiro.app/leads/x",
+    });
+    expect(text.split("\n")[1]).toBe("компания не указана");
+    expect(text).toContain("Тариф: workshop");
+  });
+
   it("lists digest sections with companies and links only, within Telegram's limit", () => {
     const many = Array.from({ length: 40 }, (_, index) => ({
       company: `Компания ${index}`,

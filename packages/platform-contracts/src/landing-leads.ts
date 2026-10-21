@@ -94,7 +94,8 @@ export const landingLeadRequestSchema = z
     sourcePath: z.enum(LANDING_LEAD_SOURCE_PATHS),
     intent: z.enum(LANDING_LEAD_INTENTS),
     email: z.string().trim().max(254).toLowerCase().pipe(z.email()),
-    company: z.string().trim().min(1).max(120),
+    /** Required on the download form; the invoice form asks for the INN instead. */
+    company: optionalText(120),
     consentVersion: z.string().trim().min(1).max(64),
     /** Honeypot: must stay empty. */
     website: z.string().max(200),
@@ -117,7 +118,11 @@ export const landingLeadRequestSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.intent !== "invoice") return;
+    if (value.intent === "download") {
+      if (value.company === undefined)
+        context.addIssue({ code: "custom", path: ["company"], message: "company" });
+      return;
+    }
     if (value.inn === undefined)
       context.addIssue({ code: "custom", path: ["inn"], message: "inn" });
     if (value.tariffCode === undefined)
@@ -175,7 +180,7 @@ const lastEventSchema = z
 export const platformLeadListItemSchema = z
   .object({
     id: platformUuidSchema,
-    company: z.string().min(1).max(300),
+    company: z.string().min(1).max(300).nullable(),
     email: z.string().nullable(),
     inn: z.string().nullable(),
     status: landingLeadStatusSchema,
@@ -223,7 +228,7 @@ export const platformLeadDetailSchema = z
   .object({
     id: platformUuidSchema,
     email: z.string().nullable(),
-    company: z.string().min(1).max(300),
+    company: z.string().min(1).max(300).nullable(),
     name: z.string().nullable(),
     phone: z.string().nullable(),
     inn: z.string().nullable(),

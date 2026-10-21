@@ -191,7 +191,7 @@ function resolveTemplate(input: EmailTemplateInput): {
     }
     case "landing-lead-notification": {
       return {
-        subject: landingLeadNotificationSubject(input.intent, input.company),
+        subject: landingLeadNotificationSubject(input.intent, input.company, input.inn),
         replyTo: input.email,
         element: createElement(LandingLeadNotificationEmail, input),
       };

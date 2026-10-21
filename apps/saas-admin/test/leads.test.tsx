@@ -9,6 +9,7 @@ import {
   LEAD_DETAIL,
   LEAD_ID,
   LEAD_INN,
+  LEAD_LIST_ITEM,
 } from "./leads-fixtures.js";
 import {
   ACCOUNTANT_ME,
@@ -214,6 +215,23 @@ describe("lead card", () => {
     expect(entries[1]?.textContent).toContain("unexpectedKey");
     expect(entries[2]?.textContent).toContain("Скачивание");
     expect(entries[2]?.textContent).toContain("Форма на сайте");
+  });
+
+  it("names a lead from the invoice form, which gives no company", async () => {
+    installLeadsApi({
+      list: { items: [{ ...LEAD_LIST_ITEM, company: null }], total: 1, page: 1, limit: 50 },
+      detail: { ...LEAD_DETAIL, company: null },
+    });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: "/leads" });
+
+    await user.click(await screen.findByRole("link", { name: /Компания не указана/ }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Компания не указана" }),
+    ).toBeDefined();
+    await user.click(await screen.findByRole("button", { name: "Создать клиента без кабинета" }));
+    expect((screen.getByLabelText(/^Название/) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(/^Slug/) as HTMLInputElement).value).toBe(`inn-${LEAD_INN}`);
   });
 
   it("creates a tenant without a cabinet prefilled from the lead", async () => {
