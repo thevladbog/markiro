@@ -1387,6 +1387,13 @@
       "when": 1792551833896,
       "tag": "0197_landing_leads",
       "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1792579595127,
+      "tag": "0198_standalone_offline_demo",
+      "breakpoints": true
     }
   ]
 }

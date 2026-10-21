@@ -109,8 +109,14 @@ export async function setTenantInns(
     });
 }
 
-export async function auditRows(db: Db, tenantId: string) {
-  return db
+/**
+ * The tenant's platform audit rows. Landing leads are platform-wide: a lead another
+ * test file left with the fixture INN may be linked by a site registration (spec
+ * 2026-10-20 §15.6), so its rows are left out unless asked for — the lead link
+ * tests use INNs of their own and read them with `{ leads: true }`.
+ */
+export async function auditRows(db: Db, tenantId: string, options: { leads?: boolean } = {}) {
+  const rows = await db
     .select({
       actorPlatformUserId: schema.platformAuditEvents.actorPlatformUserId,
       actorRole: schema.platformAuditEvents.actorRole,
@@ -127,6 +133,7 @@ export async function auditRows(db: Db, tenantId: string) {
     .from(schema.platformAuditEvents)
     .where(eq(schema.platformAuditEvents.tenantId, tenantId))
     .orderBy(asc(schema.platformAuditEvents.createdAt), asc(schema.platformAuditEvents.id));
+  return options.leads ? rows : rows.filter((row) => !row.action.startsWith("landing_lead."));
 }
 
 /** A tenant the platform created without a cabinet (owner decision 2026-10-13: offline licenses only). */

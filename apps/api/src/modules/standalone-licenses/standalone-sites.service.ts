@@ -13,6 +13,7 @@ import {
   type StandaloneSiteList,
   type StandaloneSiteRegister,
 } from "@markiro/platform-contracts";
+import { linkLeadOnActivation, readSiteLeadLinks } from "../landing-leads/lead-activation-link";
 import { StandaloneDiagnosticsService } from "../standalone-diagnostics/standalone-diagnostics.service";
 import { DB } from "../../auth/auth.module";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -83,12 +84,22 @@ export class StandaloneSitesService {
               )
           : [];
         const now = this.now();
+        const leads = await readSiteLeadLinks(
+          tx,
+          tenantId,
+          sites.flatMap((site) => (site.requestInn === null ? [] : [site.requestInn])),
+        );
         return standaloneSiteListSchema.parse({
           tenantId,
           signingConfigured: this.signing !== null,
           issuanceSource: issuanceSourceFor(tenant.cabinetAccess),
           sites: sites.map((site) =>
-            siteView(site, issuances.find((row) => row.siteId === site.id) ?? null, now),
+            siteView(
+              site,
+              issuances.find((row) => row.siteId === site.id) ?? null,
+              now,
+              site.requestInn === null ? null : (leads.get(site.requestInn) ?? null),
+            ),
           ),
         });
       },
@@ -252,6 +263,16 @@ export class StandaloneSitesService {
           })
           .returning();
         if (!row) throw new Error("standalone site insert returned no row");
+        const lead = await linkLeadOnActivation(tx, this.audit, {
+          inn: requestInn,
+          tenantId,
+          siteId: id,
+          hostId: request.hostId,
+          intent: "create",
+          requestId: body.requestId,
+          actor: { id: user.id, role: user.role },
+          now,
+        });
         await this.audit.record(tx, {
           actorPlatformUserId: user.id,
           actorRole: user.role,
@@ -263,7 +284,14 @@ export class StandaloneSitesService {
           reason: null,
           requestId: body.requestId,
           before: null,
-          after: { siteId: id, hostId: request.hostId, name: body.name, requestInn, warnings },
+          after: {
+            siteId: id,
+            hostId: request.hostId,
+            name: body.name,
+            requestInn,
+            warnings,
+            lead,
+          },
         });
         return this.view(tx, row, now);
       }
@@ -286,6 +314,16 @@ export class StandaloneSitesService {
         )
         .returning();
       if (!row) throw new Error("standalone site update returned no row");
+      const lead = await linkLeadOnActivation(tx, this.audit, {
+        inn: requestInn,
+        tenantId,
+        siteId: site.id,
+        hostId: request.hostId,
+        intent: "rebind",
+        requestId: body.requestId,
+        actor: { id: user.id, role: user.role },
+        now,
+      });
       await this.audit.record(tx, {
         actorPlatformUserId: user.id,
         actorRole: user.role,
@@ -297,7 +335,7 @@ export class StandaloneSitesService {
         reason: null,
         requestId: body.requestId,
         before: { hostId: site.hostId, requestInn: site.requestInn },
-        after: { siteId: site.id, hostId: request.hostId, requestInn, warnings },
+        after: { siteId: site.id, hostId: request.hostId, requestInn, warnings, lead },
       });
       return this.view(tx, row, now);
     });
@@ -315,6 +353,15 @@ export class StandaloneSitesService {
       )
       .orderBy(desc(schema.standaloneLicenseIssuances.sequence))
       .limit(1);
-    return siteView(site, latest ?? null, now);
+    const leads =
+      site.requestInn === null
+        ? null
+        : await readSiteLeadLinks(tx, site.tenantId, [site.requestInn]);
+    return siteView(
+      site,
+      latest ?? null,
+      now,
+      site.requestInn === null ? null : (leads?.get(site.requestInn) ?? null),
+    );
   }
 }

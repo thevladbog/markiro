@@ -265,6 +265,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
         replaces: null,
         source: "subscription",
         offlineTerms: null,
+        demoTerm: null,
         sourceAssignments: null,
         plan: "subscription",
         planVersionId: f.planVersionId,

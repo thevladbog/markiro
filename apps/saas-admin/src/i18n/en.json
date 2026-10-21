@@ -1942,7 +1942,8 @@
         "source": {
           "subscription": "subscription",
           "offline": "offline terms",
-          "offline_assignments": "tenant assignments"
+          "offline_assignments": "tenant assignments",
+          "offline_demo": "demo for a tenant without a cabinet"
         },
         "scrollLabel": "Standalone sites",
         "noValue": "—",
@@ -1951,7 +1952,8 @@
           "host": "Host",
           "inn": "Request INN",
           "license": "License",
-          "actions": "Actions"
+          "actions": "Actions",
+          "lead": "Lead"
         },
         "licenseLine": "No. {{sequence}} · until {{validUntil}}",
         "phase": {
@@ -2049,11 +2051,23 @@
             "subscription_end": "subscription end",
             "entitlement_reduction": "next reduction of rights",
             "one_year_cap": "one-year cap",
-            "offline_term": "offline terms' term"
+            "offline_term": "offline terms' term",
+            "demo_term": "demo term"
           },
           "yearCapNote": "The file is valid for at most a year from issuance (a subscription or an assignment without an end date, or a longer one). When it lapses, the tenant requests a new file from us free of charge.",
           "issued": "File No. {{sequence}} issued and downloaded.",
-          "openLabel": "Issue offline license: {{name}}"
+          "openLabel": "Issue offline license: {{name}}",
+          "kind": {
+            "label": "File kind",
+            "subscription": "From the tenant's assignments",
+            "demo": "Demo — a trial extension or a bridge while an invoice is paid"
+          },
+          "demoTerm": "Demo term, days",
+          "demoTermHint": "1 to 45 days from issuance. A demo has no grace period.",
+          "demoTermInvalid": "A whole number from 1 to 45.",
+          "demoNoTariff": "No tariff assigned — the demo extends the trial: every feature, no quotas.",
+          "demoBridge": "Bridge while the invoice is paid: the assigned tariff's rights, no grace period.",
+          "demoExtension": "Trial extension: every feature without quotas, no grace period."
         },
         "warnings": {
           "request_inn_missing": "The request has no organization INN.",
@@ -2084,7 +2098,9 @@
           "generic": "The operation failed. Retry.",
           "standalone_assignment_limit_reached": "The tenant has more assignments than a license can name (65). Retire an add-on and preview again.",
           "standalone_license_assignments_required": "There is no current plan assignment. Change the tenant's rights.",
-          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page."
+          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page.",
+          "standalone_license_demo_term_invalid": "The demo term is a whole number of days from 1 to 45.",
+          "standalone_license_demo_offline_only": "A demo file is issued only to a tenant without a cabinet. Reload the page."
         },
         "assignmentsTenant": "A tenant without a cabinet: the license is issued from its assignments — the plan and add-ons on the tenant card. No cloud access is opened.",
         "assignments": {
@@ -2100,6 +2116,12 @@
           "change": "Change the tenant's rights",
           "empty": "The tenant has no current plan. Assign a plan flagged «Available to offline customers».",
           "loadError": "Could not load the tenant's assignments."
+        },
+        "lead": {
+          "linked": "Website lead",
+          "unresolved": "Leads with this INN: {{count}} — not linked, choose one manually",
+          "unresolvedLink": "Open the leads with INN {{inn}}",
+          "none": "No lead has this INN"
         }
       },
       "diagnostics": {
@@ -3230,7 +3252,10 @@
       "tenantLinked": "Linked to a tenant.",
       "openTenant": "Open tenant",
       "previousTenant": "Previous tenant: {{id}}",
-      "anonymizedReason": "Reason: {{reason}}"
+      "anonymizedReason": "Reason: {{reason}}",
+      "viaActivation": "Automatically, by a site activation request.",
+      "activationCreate": "A site was registered from an activation request.",
+      "activationRebind": "A new host was bound to the site from an activation request."
     },
     "anonymize": {
       "title": "Anonymization",
