@@ -1114,7 +1114,9 @@ trial starts with the wizard either way.
   `demo_shift_active`, `details.shifts`). Nothing there answers `present: false` with no
   revision or row. The audit keeps its rows; the delete writes `demo_data.delete`.
 - The removed shifts' ids stay in `demo_removed_shifts`: a station's late fact of one is
-  acknowledged `accepted` and dropped (`facts::apply`), so its queue drains.
+  acknowledged `accepted` and dropped (`facts::apply`), so its queue drains. The table is business
+  data of the cloud import's replacement (`BUSINESS_TABLES`), and a replacement over demo data
+  also drops the demo prefix's counters and the `DEMO` counter rather than keep them as floors.
 - The station knows a demo shift by its number (`isDemoShiftNumber`): «Демо-код» on the work
   screen feeds the next demo code it holds no scan of (`nextDemoCode`) through the scan gate; a
   label of a demo shift without a printer shows as a preview in the label panel, and «Готово» is
