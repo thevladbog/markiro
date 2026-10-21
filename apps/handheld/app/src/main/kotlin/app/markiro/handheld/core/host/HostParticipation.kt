@@ -61,21 +61,21 @@ class HostParticipation(
      * key) ends the pass: the rest would fail the same way and each would cost a timeout; the next beat starts over.
      */
     private suspend fun flushLeaves() {
-        for (shiftId in store.pendingLeaves()) {
-            val row = db.shiftDao().get(shiftId)
-            if (row == null || row.leftAt == null) {
-                store.clearLeavePending(shiftId)
+        for (owed in store.owedLeaves()) {
+            val shiftId = owed.shiftId
+            if (!owed.stillOut) {
+                store.clearLeavePending(shiftId, owed.marker)
                 continue
             }
             try {
-                // With this device's token: a leave of an earlier stay changes nothing on the host, which answers the part still `active`
-                // ("already re-entered"); the answer is kept and nothing more is owed either way.
-                store.save(calls.run { api().leave(shiftId, store.get(shiftId)?.joinedRev) })
-                store.clearLeavePending(shiftId)
+                // With this device's token as read together with the marker: a leave of an earlier stay changes nothing on the host, which
+                // answers the part still `active` ("already re-entered"); the answer is kept and nothing more is owed either way.
+                store.save(calls.run { api().leave(shiftId, owed.joinedRev) })
+                store.clearLeavePending(shiftId, owed.marker)
             } catch (e: HttpException) {
-                if (settles(e)) store.clearLeavePending(shiftId)
+                if (settles(e)) store.clearLeavePending(shiftId, owed.marker)
             } catch (e: IOException) {
-                if (settles(e)) store.clearLeavePending(shiftId) else if (hostNotReached(e)) return
+                if (settles(e)) store.clearLeavePending(shiftId, owed.marker) else if (hostNotReached(e)) return
             }
         }
     }

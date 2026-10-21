@@ -35,9 +35,12 @@ class HostParticipationTest {
     private class Exact(val answers: MutableMap<String, ArrayDeque<HostResult>>) : HostTransport {
         val requests = mutableListOf<String>()
         val bodies = mutableListOf<String>()
+        /** Runs while a POST is in flight, before the host answers: what the operator does on the device meanwhile. */
+        var during: (suspend () -> Unit)? = null
         override suspend fun get(path: String): HostResult = next("GET", path)
         override suspend fun post(path: String, body: String): HostResult {
             bodies += body
+            during?.invoke()
             return next("POST", path)
         }
         private fun next(method: String, path: String): HostResult {
@@ -60,7 +63,8 @@ class HostParticipationTest {
     private fun ok(body: String) = HostResult.Ok(200, body, null)
     private fun listBody() = fixture("device-shifts-participants.json")
     private fun oneShift() = Json.parseToJsonElement(listBody()).jsonObject.getValue("shifts").jsonArray[0].toString()
-    private fun store() = ShiftParticipationStore(db, myDeviceId = { me })
+    private var clock = 1_000L
+    private fun store() = ShiftParticipationStore(db, myDeviceId = { me }, clock = { clock })
 
     private fun participation(transport: Exact) =
         HostParticipation(db, { HostApi(transport) }, HostCalls { }, store(), db.deviceConfigDao())
@@ -245,7 +249,7 @@ class HostParticipationTest {
             owe(shift)
             participation(Exact(mutableMapOf(leavePath to ArrayDeque(listOf(answer)), listPath to ArrayDeque(listOf(ok(listBody())))))).beat()
             assertEquals(answer.toString(), listOf(shift), store().pendingLeaves())
-            store().clearLeavePending(shift)
+            db.recovery.commit { db.metaDao().remove(ShiftParticipationStore.leaveKey(shift)) }
         }
     }
 
@@ -279,5 +283,65 @@ class HostParticipationTest {
         participation(t).beat()
         assertEquals(listOf("GET $listPath", "POST $enterPath"), t.requests)
         assertEquals("left", store().get(shift)!!.myState)
+    }
+
+    @Test
+    fun anAnswerToAnEarlierPauseDoesNotSettleThePauseAskedAgainWhileItWasInFlight() = runTest {
+        owe(shift)
+        val transport = Exact(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShift()))), listPath to ArrayDeque(listOf(ok(listBody())))))
+        // The leave is on its way; the operator enters again and pauses again (the marker is written anew).
+        transport.during = {
+            clock = 2_000L
+            store().markLeavePending(shift)
+        }
+        participation(transport).beat()
+        // The answer was to the first pause: the second is still owed, with its own marker.
+        assertEquals(listOf(shift), store().pendingLeaves())
+        assertEquals("2000", db.metaDao().get(ShiftParticipationStore.leaveKey(shift)))
+    }
+
+    @Test
+    fun aSettlingRefusalToAnEarlierPauseDoesNotSettleThePauseAskedAgainEither() = runTest {
+        owe(shift)
+        val refused = refusal(409, envelope("conflict", "shift_not_entered"))
+        val transport = Exact(mutableMapOf(leavePath to ArrayDeque(listOf(refused)), listPath to ArrayDeque(listOf(ok(listBody())))))
+        transport.during = {
+            clock = 2_000L
+            store().markLeavePending(shift)
+        }
+        participation(transport).beat()
+        assertEquals(listOf(shift), store().pendingLeaves())
+    }
+
+    @Test
+    fun anOwedLeaveDroppedBecauseTheDeviceIsInDoesNotDropAPauseMarkedMeanwhile() = runTest {
+        // Read as «in the shift again»: the drop is of that marker only. The store is asked once; a marker rewritten after the read stays.
+        db.shiftDao().upsert(HostFactsFixtures.shift().copy(leftAt = null))
+        store().markLeavePending(shift)
+        val owed = store().owedLeaves().single()
+        assertFalse(owed.stillOut)
+        clock = 3_000L
+        store().markLeavePending(shift)
+        store().clearLeavePending(shift, owed.marker)
+        assertEquals(listOf(shift), store().pendingLeaves())
+    }
+
+    @Test
+    fun theTokenOfAnOwedLeaveIsTheOneReadWithItsMarkerNotOneThatAnEntryWroteDuringTheSend() = runTest {
+        db.shiftDao().upsert(HostFactsFixtures.shift().copy(leftAt = 5L))
+        store().markLeavePending(shift)
+        db.recovery.commit {
+            db.metaDao().put(app.markiro.handheld.core.storage.MetaEntity(ShiftParticipationStore.key(shift), """{"shiftId":"$shift","myState":"left","fetchedAt":1,"joinedRev":7}"""))
+        }
+        val owed = store().owedLeaves().single()
+        assertEquals(7L, owed.joinedRev)
+        assertTrue(owed.stillOut)
+        assertEquals("1000", owed.marker)
+        // An entry since moves the token on; the read already made stays what it was (the host ignores a leave of the earlier stay).
+        db.recovery.commit {
+            db.metaDao().put(app.markiro.handheld.core.storage.MetaEntity(ShiftParticipationStore.key(shift), """{"shiftId":"$shift","myState":"active","fetchedAt":2,"joinedRev":99}"""))
+        }
+        assertEquals(7L, owed.joinedRev)
+        assertEquals(99L, store().owedLeaves().single().joinedRev)
     }
 }

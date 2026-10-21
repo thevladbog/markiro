@@ -147,8 +147,24 @@ class ShiftParticipationStoreTest {
         store().markLeavePending(shiftId)
         store().markLeavePending("other")
         assertEquals(setOf(shiftId, "other"), store().pendingLeaves().toSet())
-        store().clearLeavePending(shiftId)
+        // Only the pause that was sent is settled: another marker (a pause asked again meanwhile) leaves it owed.
+        store().clearLeavePending(shiftId, "not-the-marker")
+        assertEquals(setOf(shiftId, "other"), store().pendingLeaves().toSet())
+        store().clearLeavePending(shiftId, now.toString())
         assertEquals(listOf("other"), store().pendingLeaves())
+    }
+
+    @Test
+    fun aPauseAskedAgainWritesALaterMarkerEvenWithinOneTick() = runTest {
+        store().markLeavePending(shiftId)
+        val first = db.metaDao().get(ShiftParticipationStore.leaveKey(shiftId))!!.toLong()
+        store().markLeavePending(shiftId)
+        val second = db.metaDao().get(ShiftParticipationStore.leaveKey(shiftId))!!.toLong()
+        assertTrue("$second must be after $first", second > first)
+        // A clock set back never writes an earlier marker either.
+        now -= 10_000
+        store().markLeavePending(shiftId)
+        assertTrue(db.metaDao().get(ShiftParticipationStore.leaveKey(shiftId))!!.toLong() > second)
     }
 
     @Test
@@ -177,8 +193,6 @@ class ShiftParticipationStoreTest {
         val p = store().get(shiftId)!!
         assertEquals(547L, p.accepted)
         assertEquals("2026-10-08T09:41:07Z", p.asOf)
-        // The shift is not forgotten because its stale read was skipped.
-        assertNotNull(p)
         now += 5_000
         store().save(withAsOf(base, "2026-10-08T09:42:00Z", 560))
         assertEquals(560L, store().get(shiftId)!!.accepted)
@@ -222,8 +236,22 @@ class ShiftParticipationStoreTest {
     }
 
     @Test
-    fun aRestartedStoreStillOwesTheLeave() = runTest {
-        store().markLeavePending(shiftId)
-        assertEquals(listOf(shiftId), ShiftParticipationStore(db, myDeviceId = { me }, clock = { now }).pendingLeaves())
+    fun aDatabaseReopenedFromItsFileStillOwesTheLeave() = runTest {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "owed-leave-reopen.db"
+        context.deleteDatabase(name)
+        var file = Room.databaseBuilder(context, HandheldDatabase::class.java, name).allowMainThreadQueries().build()
+        try {
+            file.initializeRecoveryForTest()
+            ShiftParticipationStore(file, myDeviceId = { me }, clock = { now }).markLeavePending(shiftId)
+            file.close()
+            // The process died: nothing but the file is left.
+            file = Room.databaseBuilder(context, HandheldDatabase::class.java, name).allowMainThreadQueries().build()
+            file.initializeRecoveryForTest()
+            assertEquals(listOf(shiftId), ShiftParticipationStore(file, myDeviceId = { me }, clock = { now }).pendingLeaves())
+        } finally {
+            file.close()
+            context.deleteDatabase(name)
+        }
     }
 }

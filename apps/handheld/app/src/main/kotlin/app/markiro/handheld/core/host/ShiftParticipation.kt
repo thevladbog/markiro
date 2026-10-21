@@ -2,6 +2,7 @@ package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.network.host.DeviceShiftDto
 import app.markiro.handheld.core.storage.HandheldDatabase
+import androidx.room.withTransaction
 import app.markiro.handheld.core.storage.MetaEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -40,6 +41,9 @@ data class ShiftParticipation(
     /** This device's own leave token (`participants[me].joinedRev`), echoed by the leave; `null` while no answer named one (an older host). */
     val joinedRev: Long? = null,
 )
+
+/** One leave still owed to the host: [marker] is what the pause wrote, [joinedRev] this device's token at the same read, [stillOut] whether the row says it is out. */
+data class OwedLeave(val shiftId: String, val marker: String, val stillOut: Boolean, val joinedRev: Long?)
 
 /** `null` for a shift that carries none of the protocol-7 fields (a planned shift, or an older host): there is nothing to remember. */
 fun DeviceShiftDto.toParticipation(myDeviceId: String?, now: Long): ShiftParticipation? {
@@ -161,12 +165,39 @@ class ShiftParticipationStore(
         }
     }
 
-    suspend fun markLeavePending(shiftId: String) =
-        db.recovery.commit { db.metaDao().put(MetaEntity(leaveKey(shiftId), clock().toString())) }
+    /**
+     * The marker is the time of the pause, and strictly later than the one it replaces: a leave in flight settles only the marker it was sent for
+     * ([clearLeavePending]), so a pause asked again must never be mistaken for the one already answered, whatever the clock says.
+     */
+    suspend fun markLeavePending(shiftId: String) = db.recovery.commit {
+        val previous = db.metaDao().get(leaveKey(shiftId))?.toLongOrNull()
+        val marker = clock().let { if (previous != null && previous >= it) previous + 1 else it }
+        db.metaDao().put(MetaEntity(leaveKey(shiftId), marker.toString()))
+    }
 
     suspend fun pendingLeaves(): List<String> = db.metaDao().withPrefix(LEAVE_PREFIX).map { it.key.removePrefix(LEAVE_PREFIX) }
 
-    suspend fun clearLeavePending(shiftId: String) = db.recovery.commit { db.metaDao().remove(leaveKey(shiftId)) }
+    /**
+     * Every owed leave with what the send needs, read in one transaction so the marker, the leave token and the device's own state in the shift
+     * belong together: an entry cannot slip between the question «is it still out?» and the token the leave carries (a late leave of the
+     * earlier stay would end the new one; with the token read here the host ignores it).
+     */
+    suspend fun owedLeaves(): List<OwedLeave> = db.withTransaction {
+        db.metaDao().withPrefix(LEAVE_PREFIX).map { row ->
+            val shiftId = row.key.removePrefix(LEAVE_PREFIX)
+            OwedLeave(
+                shiftId = shiftId,
+                marker = row.value,
+                stillOut = db.shiftDao().get(shiftId)?.leftAt != null,
+                joinedRev = get(shiftId)?.joinedRev,
+            )
+        }
+    }
+
+    /** The station's `AND leave_requested_at = ?`: settles the pause that was sent, and leaves one asked again meanwhile (another marker) owed. */
+    suspend fun clearLeavePending(shiftId: String, marker: String) = db.recovery.commit {
+        if (db.metaDao().get(leaveKey(shiftId)) == marker) db.metaDao().remove(leaveKey(shiftId))
+    }
 
     /** What the host answered to this device's close beyond «accepted» (`NOTE_*`); read by the close summary. */
     suspend fun noteClose(shiftId: String, note: String) = db.recovery.commit { db.metaDao().put(MetaEntity(closeNoteKey(shiftId), note)) }
