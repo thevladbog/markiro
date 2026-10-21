@@ -8,4 +8,5 @@ pub mod procstat;
 pub mod profile;
 pub mod rng;
 pub mod sampler;
+pub mod site;
 pub mod wal;
