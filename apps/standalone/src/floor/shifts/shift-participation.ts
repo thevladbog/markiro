@@ -17,7 +17,7 @@ import type { Pairing } from "../../local/reference-sync.js";
 
 /**
  * A shift several devices may work, as the host's last read of it said (plan 2b, migration
- * `0021`): the line's limit, every device that entered it (first entry first), this station's own
+ * `0022`): the line's limit, every device that entered it (first entry first), this station's own
  * state (`null`: it never entered), the whole shift's totals and each device's part at `asOf`, the
  * host's time (for a closed shift: the last answer that had them, host D14 as amended); the pause
  * this station asked for and the host has not answered yet; and this station's leave token
