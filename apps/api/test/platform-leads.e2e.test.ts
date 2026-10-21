@@ -309,7 +309,6 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     await db
       .insert(schema.organization)
       .values({ id: tenantId, name: "Существующий", slug: tenantId, createdAt: now });
-    service.now = () => new Date(Date.now());
     const detail = await service.linkTenant(admin, row.id, tenantId);
     expect(detail.tenant).toEqual({ id: tenantId, name: "Существующий", cabinetAccess: "enabled" });
     expect(detail.events[0]).toMatchObject({
@@ -333,7 +332,6 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
 
   it("creates a tenant without cabinet from the lead, idempotently by slug", async () => {
     const row = await lead();
-    service.now = () => new Date(Date.now());
     const slug = `inn-7707083893-${run}-${randomUUID().slice(0, 6)}`;
     const detail = await service.createTenant(admin, row.id, {
       tenantName: String(row.company),
@@ -365,7 +363,6 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
 
   it("refuses to «create» a tenant whose slug already belongs to another tenant", async () => {
     const row = await lead();
-    service.now = () => new Date(Date.now());
     const slug = `taken-${run}-${randomUUID().slice(0, 6)}`;
     const other = await provisioning.provision(
       { tenantName: "Чужой клиент", tenantSlug: slug, cabinetAccess: "none" },
