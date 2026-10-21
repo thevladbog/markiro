@@ -276,3 +276,29 @@ export function sharedCount(
     asOf: participation.asOf,
   };
 }
+
+/**
+ * The pause this station asks for on «Выйти из смены» (plan 2b, spec §5 «Выход из смены»): marked
+ * only while the cache says its part is active, the shift is active and this station is not
+ * closing it; the link sends it (`sendPendingLeaves`). Parameters: the instant, host id, device
+ * id, shift id.
+ */
+export const MARK_LEAVE_SQL =
+  "UPDATE floor_shift_participation SET leave_requested_at = ? WHERE host_id = ? AND device_id = ? " +
+  "AND shift_id = ? AND my_state = 'active' AND EXISTS (SELECT 1 FROM floor_shifts s " +
+  "WHERE s.host_id = floor_shift_participation.host_id " +
+  "AND s.device_id = floor_shift_participation.device_id " +
+  "AND s.id = floor_shift_participation.shift_id AND s.status = 'active' AND s.local_state IS NULL)";
+
+/** Marks the pause; `true` when there was a part to pause. */
+export async function markLeave(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+  at: string,
+): Promise<boolean> {
+  const [changed] = await local.transaction([
+    { sql: MARK_LEAVE_SQL, values: [at, pairing.hostId, pairing.deviceId, shiftId] },
+  ]);
+  return changed === 1;
+}

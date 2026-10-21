@@ -51,6 +51,7 @@ import { NewShift } from "./shifts/NewShift.js";
 import { readShiftCopy, readStoredWork, type WorkShift } from "./shifts/shift-copies.js";
 import { QueueScreen } from "./queue/QueueScreen.js";
 import { ShiftList } from "./shifts/ShiftList.js";
+import { markLeave } from "./shifts/shift-participation.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
 import { playSignalTone } from "./work/signal-sound.js";
@@ -121,6 +122,10 @@ export interface FloorAppProps {
   palletSheets?: (productId?: string) => Promise<PalletSheets>;
   /** The link's delivery of the outbox, asked after every local write (`useHostLink`). */
   requestFacts: () => void;
+  /** The link's read of the shifts, asked by the work screen of a shared shift (plan 2b); none — not asked. */
+  requestShifts?: () => void;
+  /** The link's sending of the pauses (plan 2b), asked after «Выйти из смены»; none — they wait. */
+  requestLeaves?: () => void;
   /** The floor's scanner: a new shift's product is chosen by a scan. */
   source: ScanSource;
   /** The app's printers (plan 2a7). */
@@ -179,6 +184,7 @@ export function FloorApp({
   warehouseLookup,
   palletSheets,
   requestFacts,
+  requestLeaves,
   source,
   printing,
   hardware,
@@ -211,9 +217,9 @@ export function FloorApp({
   }, []);
   // The view and the callbacks as the last commit has them, for timers and
   // answers that land later.
-  const current = useRef({ view, onSignOut, dispatch });
+  const current = useRef({ view, onSignOut, dispatch, requestLeaves });
   useLayoutEffect(() => {
-    current.current = { view, onSignOut, dispatch };
+    current.current = { view, onSignOut, dispatch, requestLeaves };
   });
   // What the leave that waits for the work ends in; `null` when none waits.
   const standing = useRef<Leave | null>(null);
@@ -248,6 +254,9 @@ export function FloorApp({
   const leave = useCallback(
     (reason: Leave) => {
       const from = current.current.view.kind;
+      // The shift whose part «Выйти из смены» or a move to another line pauses (plan 2b).
+      const leaving = current.current.view;
+      const pausedShift = leaving.kind === "work" ? leaving.shift.copy.id : null;
       // The warehouse reprint's work is tracked by the same gate as a shift's (N9),
       // but it is no shift: the shell is told of no work entered or left.
       if (from !== "work" && from !== "warehouse") {
@@ -271,12 +280,24 @@ export function FloorApp({
       void gate.drain().then(() => {
         const ending = standing.current ?? reason;
         standing.current = null;
+        // Plan 2b (spec §5 «Выход из смены»): the operator's own exit and a move to another line
+        // free this station's slot; a sign-out does not — the next operator goes on here. The
+        // pause is written after the work drained and goes when the link can.
+        if (pausedShift !== null && (ending.kind === "list" || ending.kind === "line_changed")) {
+          void markLeave(local, { hostId, deviceId }, pausedShift, new Date().toISOString()).then(
+            (marked) => {
+              if (marked) current.current.requestLeaves?.();
+            },
+            // The slot stays held until the next exit or the office's close; nothing else waits on it.
+            () => undefined,
+          );
+        }
         if (!alive.current) return;
         if (from === "work") current.current.dispatch({ type: "work_left", sessionId });
         finish(ending);
       });
     },
-    [finish, gate, sessionId],
+    [finish, gate, sessionId, local, hostId, deviceId],
   );
 
   useLayoutEffect(() => {

@@ -396,7 +396,7 @@ function AppScreens({
     });
   }, [localDb, keptHostId, keptDeviceId]);
 
-  const { requestSync, requestFacts } = useHostLink({
+  const { requestSync, requestFacts, requestShifts, requestLeaves } = useHostLink({
     hostId: linked?.hostId ?? null,
     deviceId: linked?.deviceId ?? null,
     connection: connectionApi,
@@ -410,6 +410,7 @@ function AppScreens({
     conflictStatus: hostApi.conflictStatus,
     listDisplacements: hostApi.listDisplacements,
     deviceProductPhoto: hostApi.getDeviceProductPhoto,
+    leaveShift: hostApi.leaveShift,
     dispatch,
   });
   // The site's license as this station last heard it (plan ЛЦ-3): the floor's
@@ -1114,6 +1115,8 @@ function AppScreens({
                 warehouseLookup={hostApi.warehouseLookup}
                 palletSheets={hostApi.getDevicePalletSheets}
                 requestFacts={requestFacts}
+                requestShifts={requestShifts}
+                requestLeaves={requestLeaves}
                 source={floorGate.source}
                 printing={printing}
                 hardware={hardwareApi}
