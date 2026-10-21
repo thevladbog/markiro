@@ -30,6 +30,18 @@ Gradle runs as `"$WT/apps/handheld/gradlew" -p "$WT/apps/handheld" --no-daemon �
 `GRADLE …`). A focused run is `GRADLE :app:testDebugUnitTest --tests "<fully.qualified.Class>"`. The Android
 SDK path lives in the ignored `local.properties`; never commit it. Robolectric tests run under `ru-RU`.
 
+**Amended to the host contract as implemented** (`claude/ms-host`, host plan «Implementation
+status»): (1) `GET /v1/device/shifts` carries `totals`/`byDevice` for `active` shifts only; the
+fixture `device-shifts-participants.json` now holds TWO shifts (an active one with figures, a closed
+one without them whose participant row has no `joinedRev`), so no test reads it with `.single()`; a
+closed list item updates `maxStations`/`myState`/participants of the stored snapshot and keeps its
+figures, and makes none when nothing is stored. The answer of one shift (entry, leave) keeps the
+figures for any non-planned status. (2) The leave takes the optional strict body `{ "joinedRev": n }`
+(`shift-leave.json`): the handheld keeps its own `participants[].joinedRev` in the
+`shift_participation:<id>` meta JSON and echoes it; a 200 whose `myState` is still `active` means
+"already re-entered". (3) A build without `multi-station-v1` whose own part is closed gets
+`409 shift_status`; this plan always names the capability, so it reads the closed part back.
+
 ## Global Constraints
 
 From the spec (owner decisions of 2026-10-20, §1, §4, §6, §12.7):
@@ -76,7 +88,11 @@ From `apps/handheld/AGENTS.md` and the root `AGENTS.md`:
   `withPrefix`, and needs no migration, so Room stays at version 22 and none of the ten migration test lists
   changes. The value is derived from the host's last answer and never a source of truth: losing it only
   costs a refresh. Keys: `shift_participation:<shiftId>`, `shift_leave_pending:<shiftId>`,
-  `shift_close_note:<shiftId>`.
+  `shift_close_note:<shiftId>`. The participation JSON also holds `joinedRev`, this device's own leave
+  token (`participants[me].joinedRev`), kept when an answer does not name it. A closed shift in the
+  list comes without `totals`/`byDevice` (host D14 as amended): its participants and `myState`
+  replace the stored ones while the stored figures (and `fetchedAt`, `stale`) stay; with nothing
+  stored no value is written (no figures to show, never zeros).
 - **D3. The strip appears only when the line allows more than one device** (`maxStations >= 2`) or the host
   already lists two participants. With `maxStations = 1` the work screen is byte-for-byte the screen of today
   (spec: «при max_stations = 1 клиенты не видят изменений»).
@@ -107,8 +123,11 @@ From `apps/handheld/AGENTS.md` and the root `AGENTS.md`:
   once (as today). The host call (`POST /v1/device/shifts/{id}/leave`, host D5, online-only) frees the slot; when
   it cannot be made, `shift_leave_pending:<id>` is written in the same commit as the local mark, and the
   heartbeat sends it later only while the local row is still `leftAt != null`: a re-entry (online or offline)
-  cancels it, so a late leave never undoes a re-entry (host D5 asks the same of the station). A residual
-  race of one in-flight request is listed in the report.
+  cancels it, so a late leave never undoes a re-entry (host D5 asks the same of the station). Every leave
+  sends `{ "joinedRev": n }` from the stored participation (no body when none is stored: an older host);
+  the host ignores a token of an earlier stay (no write, `myState` unchanged), and an answer still
+  `active` is kept as "already re-entered". The residual race (a leave in flight while the device
+  re-enters an ACTIVE part, which stamps no new token) is listed in the report.
 - **D9. «Занято» in words for the old host (spec §12.7).** Today a `shift_busy` conflict travels
   `HostApi → HostFailure.Constraint → HostCalls (HttpException 409 {"code":"shift_busy"}) → ShiftRepository.refusal`
   and ends as `EnterResult.Refused(ENTER, 409, "shift_busy")`, which `ShiftDialogScreen` renders as the generic
@@ -169,12 +188,13 @@ This task writes no code and makes no commit.
 
 ```bash
 for f in device-shifts-participants error-shift-line-full error-shift-busy shift-enter-handheld-multi \
-         facts-response-part-close shift-close-reason-shared compatibility device-shifts device-shift-entered; do
+         facts-response-part-close shift-close-reason-shared compatibility device-shifts device-shift-entered \
+         shift-leave; do
   test -f "$WT/apps/standalone/proto/fixtures/$f.json" && echo "ok  $f" || echo "MISSING $f"
 done
 ```
 
-Expected: ten `ok` lines, no `MISSING`. If any is missing the host plan has not landed: stop and report; do not create the fixture here (the host owns it, and a handheld-local copy would hide a parity failure).
+Expected: eleven `ok` lines, no `MISSING` (`shift-leave.json` comes with the host's post-review commit `651eb1c06`). If any is missing the host plan has not landed: stop and report; do not create the fixture here (the host owns it, and a handheld-local copy would hide a parity failure).
 
 - [ ] **Step 2: Room is at 22 and this plan needs no migration.** Run `grep -n "HANDHELD_DATABASE_VERSION = " "$WT/apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/storage/HandheldDatabase.kt"`. Expected: `const val HANDHELD_DATABASE_VERSION = 22`. If it is higher, another migration landed; this plan is unaffected (it adds none) but record the number in the report.
 
@@ -204,7 +224,7 @@ Expected: PASS. If the baseline is red, stop and report which test; do not start
 **Interfaces:**
 
 - Consumes: host fixtures `device-shifts-participants.json`, `device-shifts.json`, `facts-response-part-close.json`.
-- Produces: `ShiftParticipantDto`, `DeviceTotalsDto`, `DeviceShiftTotalsDto`; `DeviceShiftDto.{maxStations, participants, myState, totals, byDevice}` (all nullable, default `null`: an older host sends none); `fun JsonObject?.int(key: String): Int?`, `fun JsonObject?.flag(key: String): Boolean`.
+- Produces: `ShiftParticipantDto` (with `joinedRev: Long? = null`), `DeviceTotalsDto`, `DeviceShiftTotalsDto`; `DeviceShiftDto.{maxStations, participants, myState, totals, byDevice}` (all nullable, default `null`: an older host sends none; a closed shift in the list has no `totals`/`byDevice`); `fun JsonObject?.int(key: String): Int?`, `fun JsonObject?.flag(key: String): Boolean`.
 
 - [ ] **Step 1: Write the failing tests.** In `HostFixturesTest.kt` add `import org.junit.Assert.assertNotNull` if absent, then append inside the class:
 
@@ -212,7 +232,10 @@ Expected: PASS. If the baseline is red, stop and report which test; do not start
     @Test
     fun aSharedShiftsParticipantsTotalsAndEachDevicesPartAreReadAndAddUp() {
         val json = Json { ignoreUnknownKeys = true }
-        val shift = json.decodeFromJsonElement(DeviceShiftsDto.serializer(), fixture("device-shifts-participants.json")).shifts.single()
+        val shifts = json.decodeFromJsonElement(DeviceShiftsDto.serializer(), fixture("device-shifts-participants.json")).shifts
+        // An active shift with its figures and a closed one without them (the list carries totals for active shifts only).
+        assertEquals(listOf("active", "closed"), shifts.map { it.status })
+        val shift = shifts.first { it.status == "active" }
         assertEquals(2, shift.maxStations)
         assertEquals("active", shift.myState)
         val participants = checkNotNull(shift.participants)
@@ -228,6 +251,22 @@ Expected: PASS. If the baseline is red, stop and report which test; do not start
         assertEquals(totals.accepted, byDevice.sumOf { it.accepted })
         assertEquals(45, totals.boxesClosed)
         assertEquals("2026-10-08T09:41:07Z", totals.asOf)
+        // Each participant's leave token (`joinedRev`), the revision of the write that took its slot.
+        assertEquals(listOf(12L, 15L), participants.map { it.joinedRev })
+    }
+
+    @Test
+    fun aClosedShiftInTheListKeepsItsParticipantsAndStateButCarriesNoFigures() {
+        val json = Json { ignoreUnknownKeys = true }
+        val closed = json.decodeFromJsonElement(DeviceShiftsDto.serializer(), fixture("device-shifts-participants.json"))
+            .shifts.first { it.status == "closed" }
+        assertEquals(2, closed.maxStations)
+        assertEquals("closed", closed.myState)
+        assertEquals(listOf("closed"), checkNotNull(closed.participants).map { it.state })
+        assertNull(closed.totals)
+        assertNull(closed.byDevice)
+        // A host row without the token (an older host) reads as `null`, never as 0.
+        assertNull(closed.participants!!.single().joinedRev)
     }
 
     @Test
@@ -272,6 +311,8 @@ data class ShiftParticipantDto(
     val state: String,
     val firstEnteredAt: String? = null,
     val joinedAt: String? = null,
+    /** The host revision of the write that took this slot: the token the leave echoes (`ShiftLeave`); absent from an older host. */
+    val joinedRev: Long? = null,
     val leftAt: String? = null,
     val closedAt: String? = null,
     val closedBy: String? = null,
@@ -310,7 +351,10 @@ data class DeviceShiftDto(
     val openedAt: String? = null,
     val closedAt: String? = null,
     val snapshot: ShiftSnapshotDto? = null,
-    /** Protocol 7, open or closed shifts only; every one is absent from an older host and from a planned shift. */
+    /**
+     * Protocol 7, open or closed shifts only; every one is absent from an older host and from a planned shift. In the list `totals` and `byDevice`
+     * come for an active shift only; the answer of an entry or a leave carries them for a closed shift too.
+     */
     val maxStations: Int? = null,
     val participants: List<ShiftParticipantDto>? = null,
     /** This device's own state; absent when it never entered. */
@@ -359,8 +403,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 
-- Consumes: Task 2 (`int`, `DeviceShiftDto`); host fixtures `error-shift-line-full.json`, `error-shift-busy.json`, `shift-enter-handheld-multi.json`.
-- Produces: `HostApi.CAPABILITY_MULTI_STATION = "multi-station-v1"`; `internal val HostApi.ENTER_SUPPORTS`; `suspend fun HostApi.leave(shiftId): Result<DeviceShiftDto>`; `HostFailure.Constraint(name, maxStations: Int? = null, active: Int? = null)`; a `409` of a full line reaches the loaders as `HttpException` with body `{"code":"shift_line_full","maxStations":N,"active":M}`; `ErrorBody(code, maxStations, active)`.
+- Consumes: Task 2 (`int`, `DeviceShiftDto`); host fixtures `error-shift-line-full.json`, `error-shift-busy.json`, `shift-enter-handheld-multi.json`, `shift-leave.json`.
+- Produces: `HostApi.CAPABILITY_MULTI_STATION = "multi-station-v1"`; `internal val HostApi.ENTER_SUPPORTS`; `suspend fun HostApi.leave(shiftId, joinedRev: Long?): Result<DeviceShiftDto>` (body `{"joinedRev":N}`, or none when `null`); `HostFailure.Constraint(name, maxStations: Int? = null, active: Int? = null)`; a `409` of a full line reaches the loaders as `HttpException` with body `{"code":"shift_line_full","maxStations":N,"active":M}`; `ErrorBody(code, maxStations, active)`.
 
 - [ ] **Step 1: Write the failing tests.** In `HostApiTest.kt` add imports `kotlinx.serialization.json.Json`, `kotlinx.serialization.json.jsonArray`, `kotlinx.serialization.json.jsonObject`, a private helper inside the class, and the tests; **change** the existing `anEntryNamesTheValidationCapabilityButNotTheDuplicate` expectation (a product decision changed: the entry names a third capability) and rename it:
 
@@ -392,15 +436,22 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
     }
 
     @Test
-    fun aLeavePostsNothingButItsPathAndReadsTheShiftBack() = runTest {
+    fun aLeavePostsItsTokenOrNothingAndReadsTheShiftBack() = runTest {
         val shift = Json.parseToJsonElement(fixture("device-shifts-participants.json")).jsonObject.getValue("shifts").jsonArray[0].toString()
         val (transport, host) = api(ok(shift))
-        val left = host.leave(shiftId).getOrThrow()
-        assertEquals(Triple("POST", "/v1/device/shifts/$shiftId/leave", ""), transport.sent.single())
+        val left = host.leave(shiftId, 12L).getOrThrow()
+        // The body is the host's `ShiftLeave` exactly (`shift-leave.json`, compared as JSON).
+        val sent = transport.sent.single()
+        assertEquals("POST" to "/v1/device/shifts/$shiftId/leave", sent.first to sent.second)
+        assertEquals(Json.parseToJsonElement(fixture("shift-leave.json")), Json.parseToJsonElement(sent.third.orEmpty()))
         assertEquals(2, left.maxStations)
         assertEquals("active", left.myState)
+        // No token known (an older host named none): no body, as before.
+        val (bare, old) = api(ok(shift))
+        old.leave(shiftId, null).getOrThrow()
+        assertEquals(Triple("POST", "/v1/device/shifts/$shiftId/leave", ""), bare.sent.single())
         val (_, refused) = api(error(409, "conflict", """{"constraint":"shift_not_entered"}"""))
-        assertEquals(HostFailure.Constraint("shift_not_entered"), (refused.leave(shiftId).exceptionOrNull() as HostApiError).failure)
+        assertEquals(HostFailure.Constraint("shift_not_entered"), (refused.leave(shiftId, 12L).exceptionOrNull() as HostApiError).failure)
     }
 ```
 
@@ -453,11 +504,16 @@ After `enter` (`:83`) add:
 
 ```kotlin
     /**
-     * Frees this device's slot of a shared shift (`POST /v1/device/shifts/{id}/leave`, protocol 7): no body, answered with the shift as the device
-     * sees it. State-idempotent on the host, so a retry after a lost answer is harmless; `shift_not_entered` means the host holds no slot of this device.
+     * Frees this device's slot of a shared shift (`POST /v1/device/shifts/{id}/leave`, protocol 7), answered with the shift as the device sees it.
+     * [joinedRev] is this device's own `participants[].joinedRev` from its last entry answer, sent as `{"joinedRev":N}` (`ShiftLeave`); the host
+     * ignores a token of an earlier stay (no write, `myState` stays `active`). `null` sends no body (no token known: an older host). State-idempotent
+     * on the host, so a retry after a lost answer is harmless; `shift_not_entered` means the host holds no slot of this device.
      */
-    suspend fun leave(shiftId: String): Result<DeviceShiftDto> =
-        parse(transport.post("/v1/device/shifts/$shiftId/leave", ""), DeviceShiftDto.serializer())
+    suspend fun leave(shiftId: String, joinedRev: Long?): Result<DeviceShiftDto> =
+        parse(
+            transport.post("/v1/device/shifts/$shiftId/leave", joinedRev?.let { """{"joinedRev":$it}""" } ?: ""),
+            DeviceShiftDto.serializer(),
+        )
 ```
 
 and replace the companion's `ENTER_SUPPORTS` line and add the constant:
@@ -538,8 +594,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 - Consumes: Task 2 (`DeviceShiftDto`, `ShiftParticipantDto`); `MetaDao.{get,put,remove,withPrefix,observe}` (`core/storage/ShiftDaos.kt:173-193`); `db.recovery.commit`.
 - Produces:
-  - `@Serializable data class ShiftParticipation(shiftId, maxStations: Int?, myState: String?, participantsEver: Int, active: Int, othersOpen: Int, accepted: Long?, boxesClosed: Int?, pallets: Int?, myAccepted: Long?, asOf: String?, fetchedAt: Long, stale: Boolean)`
-  - `fun DeviceShiftDto.toParticipation(myDeviceId: String?, now: Long): ShiftParticipation?` (`null` for a shift that carries none of the protocol-7 fields)
+  - `@Serializable data class ShiftParticipation(shiftId, maxStations: Int?, myState: String?, participantsEver: Int, active: Int, othersOpen: Int, accepted: Long?, boxesClosed: Int?, pallets: Int?, myAccepted: Long?, asOf: String?, fetchedAt: Long, stale: Boolean, joinedRev: Long?)`
+  - `fun DeviceShiftDto.toParticipation(myDeviceId: String?, now: Long): ShiftParticipation?` (`null` for a shift that carries none of the protocol-7 fields; a closed list item maps with null figures, which the store merges with the stored ones)
   - `class ShiftParticipationStore(db, myDeviceId: suspend () -> String?, clock)` with `get`, `observe`, `save(List)`, `save(one)`, `markStale`, `markLeavePending`, `pendingLeaves`, `clearLeavePending`, `noteClose`, `closeNote`, and companion `PREFIX`, `LEAVE_PREFIX`, `key`, `leaveKey`, `closeNoteKey`, `NOTE_PART_CLOSED`, `NOTE_REASON_MISSING`.
 
 - [ ] **Step 1: Write the failing test** `ShiftParticipationStoreTest.kt`:
@@ -574,6 +630,8 @@ class ShiftParticipationStoreTest {
     /** The first participant of the host's fixture: the device that reads the fixture as its own (`myState` is `active`). */
     private val me = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
     private val shiftId = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b"
+    /** The fixture's second shift: closed, listed without totals or byDevice. */
+    private val closedShiftId = "6d2c9b1e-3a4f-4e5d-8b7a-9c0d1e2f3a4b"
     private var now = 1_760_000_000_000L
 
     @Before
@@ -611,11 +669,45 @@ class ShiftParticipationStoreTest {
         assertEquals("2026-10-08T09:41:07Z", p.asOf)
         assertEquals(now, p.fetchedAt)
         assertFalse(p.stale)
+        // This device's own leave token, from its participant row.
+        assertEquals(12L, p.joinedRev)
+        // The fixture's closed shift comes without figures and nothing was stored for it: nothing is made.
+        assertNull(store().get(closedShiftId))
+    }
+
+    @Test
+    fun aClosedShiftListedWithoutFiguresKeepsTheStoredOnesAndTakesItsParticipantsAndState() = runTest {
+        store().save(shifts())
+        val fetched = now
+        now += 60_000
+        val active = shifts().first { it.status == "active" }
+        // The host's list now names the same shift closed, without totals, byDevice or this device's token.
+        store().save(
+            listOf(
+                active.copy(
+                    status = "closed",
+                    myState = "closed",
+                    participants = listOf(part(me, "closed"), part("9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d", "closed")),
+                    totals = null,
+                    byDevice = null,
+                ),
+            ),
+        )
+        val p = checkNotNull(store().get(shiftId))
+        assertEquals("closed", p.myState)
+        assertEquals(0, p.othersOpen)
+        assertEquals(547L, p.accepted)
+        assertEquals(427L, p.myAccepted)
+        assertEquals(45, p.boxesClosed)
+        assertEquals("2026-10-08T09:41:07Z", p.asOf)
+        // The figures are as old as the answer that had them.
+        assertEquals(fetched, p.fetchedAt)
+        assertEquals(12L, p.joinedRev)
     }
 
     @Test
     fun othersOpenCountsTheActiveAndLeftParticipantsOtherThanThisDevice() = runTest {
-        val base = shifts().single()
+        val base = shifts().first { it.status == "active" }
         store().save(base.copy(participants = listOf(part(me, "active"), part("x", "left"), part("y", "closed"))))
         assertEquals(1, store().get(shiftId)!!.othersOpen)
         store().save(base.copy(participants = listOf(part(me, "active"), part("x", "left"), part("z", "active"))))
@@ -724,6 +816,8 @@ data class ShiftParticipation(
     val fetchedAt: Long,
     /** The host did not answer the last beat: the figures are the last known ones. */
     val stale: Boolean = false,
+    /** This device's own leave token (`participants[me].joinedRev`), echoed by the leave; `null` while no answer named one (an older host). */
+    val joinedRev: Long? = null,
 )
 
 /** `null` for a shift that carries none of the protocol-7 fields (a planned shift, or an older host): there is nothing to remember. */
@@ -743,6 +837,7 @@ fun DeviceShiftDto.toParticipation(myDeviceId: String?, now: Long): ShiftPartici
         myAccepted = byDevice?.firstOrNull { it.deviceId == myDeviceId }?.accepted,
         asOf = totals?.asOf,
         fetchedAt = now,
+        joinedRev = all.firstOrNull { it.deviceId == myDeviceId }?.joinedRev,
     )
 }
 
@@ -766,14 +861,38 @@ class ShiftParticipationStore(
 
     fun observe(shiftId: String): Flow<ShiftParticipation?> = db.metaDao().observe(key(shiftId)).map { decode(it) }.distinctUntilChanged()
 
-    /** One answer of the list: every shift that carries figures is rewritten, every stored shift the host no longer lists is forgotten. */
+    /**
+     * What to store for [shift] read as [row], over [stored]: the token stays when the answer does not name it; a closed shift without
+     * `totals` (the list carries them for active shifts only, host D14 as amended) takes its participants and state over the stored
+     * figures, which stay with their `fetchedAt` and `stale`; with nothing stored it gives nothing (no figures to show, never zeros).
+     */
+    private fun merged(shift: DeviceShiftDto, row: ShiftParticipation, stored: ShiftParticipation?): ShiftParticipation? {
+        val kept = row.copy(joinedRev = row.joinedRev ?: stored?.joinedRev)
+        if (shift.totals != null || shift.status != "closed") return kept
+        if (stored == null) return null
+        return kept.copy(
+            accepted = stored.accepted,
+            boxesClosed = stored.boxesClosed,
+            pallets = stored.pallets,
+            myAccepted = stored.myAccepted,
+            asOf = stored.asOf,
+            fetchedAt = stored.fetchedAt,
+            stale = stored.stale,
+        )
+    }
+
+    /**
+     * One answer of the list: every shift that carries figures is rewritten (a closed one keeps the stored figures, see [merged]), every stored
+     * shift the host no longer lists is forgotten.
+     */
     suspend fun save(shifts: List<DeviceShiftDto>) {
         val me = myDeviceId()
         val now = clock()
         db.recovery.commit {
             val keep = mutableSetOf<String>()
             for (shift in shifts) {
-                val row = shift.toParticipation(me, now) ?: continue
+                val read = shift.toParticipation(me, now) ?: continue
+                val row = merged(shift, read, decode(db.metaDao().get(key(shift.id)))) ?: continue
                 db.metaDao().put(MetaEntity(key(shift.id), encode(row)))
                 keep += shift.id
             }
@@ -783,10 +902,13 @@ class ShiftParticipationStore(
         }
     }
 
-    /** The answer of one call (an entry or a leave). */
+    /** The answer of one call (an entry or a leave; it carries the figures for any non-planned status). */
     suspend fun save(shift: DeviceShiftDto) {
-        val row = shift.toParticipation(myDeviceId(), clock()) ?: return
-        db.recovery.commit { db.metaDao().put(MetaEntity(key(shift.id), encode(row))) }
+        val read = shift.toParticipation(myDeviceId(), clock()) ?: return
+        db.recovery.commit {
+            val row = merged(shift, read, decode(db.metaDao().get(key(shift.id)))) ?: return@commit
+            db.metaDao().put(MetaEntity(key(shift.id), encode(row)))
+        }
     }
 
     /** The host did not answer: the stored figures stay, marked as the last known ones. A shift with no figures stays without. */
@@ -829,7 +951,7 @@ class ShiftParticipationStore(
 
 - [ ] **Step 4: Run the test to verify it passes.**
       Run: `GRADLE :app:testDebugUnitTest --tests "app.markiro.handheld.core.host.ShiftParticipationStoreTest"`
-      Expected: PASS (8 tests). Also run `--tests "app.markiro.handheld.core.storage.HostDatasetResetTest"` — it asserts every table is classified; `meta` already is, nothing changes. Expected: PASS.
+      Expected: PASS (9 tests). Also run `--tests "app.markiro.handheld.core.storage.HostDatasetResetTest"` — it asserts every table is classified; `meta` already is, nothing changes. Expected: PASS.
 
 - [ ] **Step 5: Commit.**
 
@@ -1079,7 +1201,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 
 - Consumes: Tasks 2, 3, 4.
-- Produces: `StationBackend.leave(shiftId)` (default no-op; the cloud has no slots); `HostBackend(… registry, participation: ShiftParticipationStore? = null, clock)`; after `shifts()`/`enter()`/`leave()` the store holds the host's figures; `DeviceShiftDto.toShiftDto` gives `status = "closed"` when `myState == "closed"`; `HostBackend.enter` does not cache the entry of a closed part for the bundle.
+- Produces: `StationBackend.leave(shiftId)` (default no-op; the cloud has no slots; the host backend sends the stored `joinedRev`); `HostBackend(… registry, participation: ShiftParticipationStore? = null, clock)`; after `shifts()`/`enter()`/`leave()` the store holds the host's figures; `DeviceShiftDto.toShiftDto` gives `status = "closed"` when `myState == "closed"`; `HostBackend.enter` does not cache the entry of a closed part for the bundle.
 
 - [ ] **Step 1: Write the failing tests.** In `HostBackendShiftsTest.kt` add imports `app.markiro.handheld.core.host.ShiftParticipationStore`, `kotlinx.serialization.json.JsonArray`, `kotlinx.serialization.json.JsonObject`, `kotlinx.serialization.json.JsonPrimitive`, `kotlinx.serialization.json.Json`, `kotlinx.serialization.json.jsonArray`; **replace** the helper `backend` (`:85-93`) with
 
@@ -1113,7 +1235,8 @@ and append the tests:
         val store = ShiftParticipationStore(db)
         val routes = Routes(mutableMapOf("/v1/device/shifts" to ArrayDeque(listOf(ok(fixture(participants))))))
         val items = backend(routes, participation = store).shifts().items
-        assertEquals("active", items.single().status)
+        // The fixture lists the shared shift active and an older one closed (without figures, so nothing is kept of it).
+        assertEquals(listOf("active", "closed"), items.map { it.status })
         val p = checkNotNull(store.get(id))
         assertEquals(2, p.maxStations)
         assertEquals(547L, p.accepted)
@@ -1152,13 +1275,19 @@ and append the tests:
     }
 
     @Test
-    fun aLeaveAsksTheHostAndKeepsWhatItAnswered() = runTest {
-        val store = ShiftParticipationStore(db)
+    fun aLeaveAsksTheHostWithThisDevicesTokenAndKeepsWhatItAnswered() = runTest {
+        val store = ShiftParticipationStore(db, myDeviceId = { "7c9e6679-7425-40de-944b-e07fc1f90ae7" })
         val leavePath = "/v1/device/shifts/$id/leave"
+        // No answer kept yet: no token, so no body (as to an older host).
         val routes = Routes(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShift())))))
         backend(routes, participation = store).leave(id)
         assertEquals(listOf(leavePath to ""), routes.posts)
         assertEquals(2, store.get(id)!!.maxStations)
+        // The answer named this device's `joinedRev` (12): the next leave echoes it (`shift-leave.json`).
+        assertEquals(12L, store.get(id)!!.joinedRev)
+        val again = Routes(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShift())))))
+        backend(again, participation = store).leave(id)
+        assertEquals(listOf(leavePath to """{"joinedRev":12}"""), again.posts)
         // A host that holds no slot of this device is a refusal the caller reads; nothing is kept.
         val refused = Routes(mutableMapOf(leavePath to ArrayDeque(listOf(refusal(409, "conflict", """{"constraint":"shift_not_entered"}""")))))
         val error = runCatching { backend(refused).leave(id) }.exceptionOrNull() as HttpException
@@ -1218,7 +1347,9 @@ and replace `shifts()` and `enter()` (`:61-72`) with
     }
 
     override suspend fun leave(shiftId: String) {
-        participation?.save(calls.run { api().leave(shiftId) })
+        // This device's own token from the last answer that named it; a stale one is ignored by the host (the answer stays `active`).
+        val token = participation?.get(shiftId)?.joinedRev
+        participation?.save(calls.run { api().leave(shiftId, token) })
     }
 ```
 
@@ -1293,8 +1424,12 @@ class HostParticipationTest {
     /** Exact paths, answers in order; a path with nothing scripted fails the test. */
     private class Exact(val answers: MutableMap<String, ArrayDeque<HostResult>>) : HostTransport {
         val requests = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
         override suspend fun get(path: String): HostResult = next("GET", path)
-        override suspend fun post(path: String, body: String): HostResult = next("POST", path)
+        override suspend fun post(path: String, body: String): HostResult {
+            bodies += body
+            return next("POST", path)
+        }
         private fun next(method: String, path: String): HostResult {
             requests += "$method $path"
             return (answers[path] ?: error("nothing scripted for $method $path")).removeFirst()
@@ -1375,6 +1510,26 @@ class HostParticipationTest {
         assertEquals(listOf("POST $leavePath", "GET $listPath"), transport.requests)
         assertEquals(emptyList<String>(), store().pendingLeaves())
         assertNotNull(store().get(shift))
+    }
+
+    @Test
+    fun anOwedLeaveCarriesTheStoredTokenAndAnAnswerStillActiveSettlesItAsAlreadyReEntered() = runTest {
+        db.shiftDao().upsert(HostFactsFixtures.shift().copy(leftAt = 5L))
+        store().markLeavePending(shift)
+        // The participation of this shift as an earlier answer left it: this device's token 7.
+        db.recovery.commit {
+            db.metaDao().put(
+                app.markiro.handheld.core.storage.MetaEntity(
+                    ShiftParticipationStore.key(shift),
+                    """{"shiftId":"$shift","myState":"left","fetchedAt":1,"joinedRev":7}""",
+                ),
+            )
+        }
+        val transport = Exact(mutableMapOf(leavePath to ArrayDeque(listOf(ok(oneShift()))), listPath to ArrayDeque(listOf(ok(listBody())))))
+        participation(transport).beat()
+        assertEquals(listOf("""{"joinedRev":7}"""), transport.bodies)
+        // The host answered the part still active (its token moved on): nothing is owed any more.
+        assertEquals(emptyList<String>(), store().pendingLeaves())
     }
 
     @Test
@@ -1497,7 +1652,9 @@ class HostParticipation(
                 continue
             }
             try {
-                store.save(calls.run { api().leave(shiftId) })
+                // With this device's token: a leave of an earlier stay changes nothing on the host, which answers the part still `active`
+                // ("already re-entered"); the answer is kept and nothing more is owed either way.
+                store.save(calls.run { api().leave(shiftId, store.get(shiftId)?.joinedRev) })
                 store.clearLeavePending(shiftId)
             } catch (_: HttpException) {
                 store.clearLeavePending(shiftId)
@@ -2103,7 +2260,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
         val shift = Json { ignoreUnknownKeys = true }.decodeFromString(
             DeviceShiftsDto.serializer(),
             checkNotNull(javaClass.classLoader?.getResource("device-shifts-participants.json")).readText(),
-        ).shifts.single().copy(id = "s1", plannedQty = plan)
+        ).shifts.first { it.status == "active" }.copy(id = "s1", plannedQty = plan)
         ShiftParticipationStore(db, myDeviceId = { "7c9e6679-7425-40de-944b-e07fc1f90ae7" }).save(shift)
     }
 

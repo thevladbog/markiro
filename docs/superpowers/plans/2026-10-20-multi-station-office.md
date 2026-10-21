@@ -56,9 +56,9 @@ From the spec (owner decisions of 2026-10-20, §1, §7, §12):
 
 From the host contract (exact names, protocol 7, build 1.1.0):
 
-- `OfficeShift` gains `participants?: ShiftParticipant[]`, `byDevice?: DeviceTotals[]` (same order as `participants`; the sum of `accepted` equals `totals.acceptedUnits`), `closeReasonMissing?: true` (absent when false). `ShiftParticipant`: `deviceId, deviceKind ("station"|"handheld"), deviceName, state ("active"|"left"|"closed"), firstEnteredAt, joinedAt, leftAt, closedAt, closedBy ("device"|"office_user"|null), closedActualQty, closedReasonCode, lateDataAt, lastSeenAt` (nullable ones are `null`, not absent).
+- `OfficeShift` gains `participants?: ShiftParticipant[]`, `byDevice?: DeviceTotals[]` (same order as `participants`; the sum of `accepted` equals `totals.acceptedUnits`), `closeReasonMissing?: true` (absent when false). `ShiftParticipant`: `deviceId, deviceKind ("station"|"handheld"), deviceName, state ("active"|"left"|"closed"), firstEnteredAt, joinedAt, leftAt, closedAt, closedBy ("device"|"office_user"|null), closedActualQty, closedReasonCode, lateDataAt, lastSeenAt` (nullable ones are `null`, not absent), plus the optional `joinedRev` (a device's leave token, host post-review `651eb1c06`; absent from an older host; the office neither shows nor sends it). A shared shift's `closedAt` is the LATEST device close instant among its parts (host D6 as amended, `9a9d5b578`), whatever order the closes arrived in; `closedBy` is the last closer.
 - `OfficeLine.maxStations?: 1..16` (absent from an older host = 1); `LineUpdate.maxStations?`; refusals `400 validation_failed` on `maxStations`, `409 conflict` `line_stations_in_use` `{ active }`, `409 conflict` `line_name`, `409 stale_revision`.
-- `POST /v1/office/shifts/{id}/close` `{ reason (3–500 chars), expectedRev }` is unchanged in body; for a shift with participants it closes every `active`/`left` participant as the office's and audits `shift.force_closed` `{ reason, notClosed }`. The «Не закрыли: …» preview is `participants.filter(state != "closed")` of the loaded shift; the loaded `rev` makes it exact (every participant change stamps the shift's `rev`).
+- `POST /v1/office/shifts/{id}/close` `{ reason (3–500 chars), expectedRev }` is unchanged in body; it closes every `active`/`left` participant as the office's and audits `shift.force_closed` `{ reason, notClosed }`, which replaces `shift.close` for EVERY office close, a single-device shift included (old rows keep `shift.close`). The «Не закрыли: …» preview is `participants.filter(state != "closed")` of the loaded shift; the loaded `rev` makes it exact (every participant change stamps the shift's `rev`).
 - `PUT /v1/office/shifts/{id}/close-reason` `{ reasonCode, expectedRev }` → `OfficeShift`; errors `400 reasonCode`, `404`, `409 stale_revision`, `409 conflict` `close_reason_not_missing`.
 - Fixtures the plan reads (all in `apps/standalone/proto/fixtures/`): `office-shift-participants.json`, `device-shifts-participants.json`, `office-line.json` (with `maxStations`), `line-update-max-stations.json`, `shift-close-reason-set.json`, `error-line-stations-in-use.json`.
 
@@ -4047,7 +4047,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ### Task 11: Exports with several devices — verification test
 
-The export source is keyed by `shift_id` and holds no device column (`ShiftExportRows` boxes, items, pallets, codes), so a shared shift needs no change in the office. The host plan fixes the operation date (D16: `stationClosedAt` is the close of the device that closed the shift). This task pins what the office does with such rows, so a later change cannot break it unseen. No source file changes.
+The export source is keyed by `shift_id` and holds no device column (`ShiftExportRows` boxes, items, pallets, codes), so a shared shift needs no change in the office. The host plan fixes the operation date (D16 as implemented, `9a9d5b578`: `stationClosedAt` is the LATEST of the shift's accepted device close instants, whatever order they arrived in; `null` for an office-closed shift). This task pins what the office does with such rows, so a later change cannot break it unseen. No source file changes.
 
 **Files:**
 
@@ -4072,8 +4072,8 @@ import {
 /**
  * A shift two stations worked (plan 2b, spec §7 «Экспорты … проверить формат при нескольких
  * устройствах»): the rows carry no device, codes of both stations interleave by their scan instants, each
- * station's boxes are its own, and the document's operation time is the close of the device that closed
- * the shift (host D16), never an early part's.
+ * station's boxes are its own, and the document's operation time is the latest device close the host
+ * reports (host D16 as implemented: the MAX of the accepted close instants), never an early part's.
  */
 
 const FORMED_AT = "2026-10-08T15:30:00.123Z";
@@ -4087,7 +4087,8 @@ const boxId = (n: number): string => `b0000000-0000-4000-8000-${String(n).padSta
 
 /**
  * Station A scanned KM-1 and KM-3 into box 1, station B KM-2 and KM-4 into box 2, one second apart in turn;
- * station B closed the shift last, at 14:10:00.250 by its own clock (the host's whole second is 14:10:07).
+ * the latest device close is station B's, at 14:10:00.250 by its own clock (the host's whole second is
+ * 14:10:07), which the host reports whichever close reached it last.
  */
 function sharedRows(shift: Partial<ShiftExportRows["shift"]> = {}): ShiftExportRows {
   const scanned = ["06:00:00.000", "06:00:01.000", "06:00:02.000", "06:00:03.000"];
@@ -4152,7 +4153,7 @@ describe("the export of a shift two devices worked (plan 2b)", () => {
     });
   });
 
-  it("takes the operation time from the close of the device that closed the shift", () => {
+  it("takes the operation time from the latest device close the host reports", () => {
     expect(snapshotOf(sharedRows(), FLAT_TXT).operationDateTime).toBe("2026-10-08T14:10:00.250Z");
   });
 
@@ -4175,7 +4176,7 @@ describe("the export of a shift two devices worked (plan 2b)", () => {
 
 - [ ] **Step 2: Run it.**
       Run: `pnpm --dir "$WT" --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/export-multi-station.test.ts test/export-source-rules.test.ts test/export-source.test.ts test/export-parity.test.ts`
-      Expected: PASS at once: this is a characterization of existing behaviour, not new behaviour, so there is no failing step. If it fails, the failure is a finding: stop and report which assumption (scan-order, box order, operation instant) differs from the host plan's D16 before changing any source.
+      Expected: PASS at once: this is a characterization of existing behaviour, not new behaviour, so there is no failing step. If it fails, the failure is a finding: stop and report which assumption (scan-order, box order, operation instant) differs from the host plan's D16 (as amended) before changing any source.
 
 - [ ] **Step 3: Check the formats against several devices in the ЧЗ dialog.** Run `pnpm --dir "$WT" --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/export-dialog.test.tsx test/export-checks.test.ts test/export-plan.test.ts`. Expected: PASS (they do not read `participants`). This is the whole of the verification the spec asks for in the office; a real export of a shared shift is a Windows/host check listed in Task 14.
 
@@ -4597,7 +4598,7 @@ new:
   declares that one sentence.
 - Exports are keyed by `shift_id` and carry no device: nothing changed, pinned
   by `export-multi-station.test.ts` (codes of both devices in scan order, boxes
-  by SSCC, the operation time is the closing device's).
+  by SSCC, the operation time is the latest device close the host reports).
 ```
 
 - [ ] **Step 3: Format.**

@@ -21,6 +21,15 @@ cache; the link (`useHostLink`) sends pending pauses and refreshes the list on r
 station's own records (`floor_shifts`, `floor_codes`, `floor_boxes`, the outbox) keep their
 meaning; the close's part state is read from the receipt the outbox already stores.
 
+**Amended to the host contract as implemented** (`claude/ms-host`, see the host plan's
+«Implementation status»): the list `GET /v1/device/shifts` carries `totals`/`byDevice` for `active`
+shifts only, so the cache takes a closed list item's `maxStations`, `participants` and `myState`
+and keeps the figures it already had (it never inserts a closed shift first seen without them);
+the answer of one shift (entry, leave, a closed part read back) still carries them. The leave
+sends the optional strict body `{ joinedRev }` — this station's own `participants[].joinedRev`,
+cached in the new column `joined_rev` — and reads a 200 whose `myState` is still `active` as
+"already re-entered".
+
 **Tech Stack:** React 19 + TypeScript (strict, `exactOptionalPropertyTypes`,
 `noUncheckedIndexedAccess`), Zod 4, react-i18next (RU), Vitest + Testing Library + jsdom,
 `node:sqlite` test executor (`test/support/local-db.ts`), Tauri 2 shell (Rust, sqlx SQLite
@@ -82,7 +91,13 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
   The figures are the host's, not this device's records: a forget may empty them and the next read
   brings them back. Columns added to `floor_shifts` would also break the pinned schema snapshots
   of `src-tauri/tests/local_db.rs` (`without_0016`) for no gain. One row per (pairing, shift); every
-  list read deletes rows of shifts the pairing no longer keeps.
+  list read deletes rows of shifts the pairing no longer keeps. A closed shift in the host's list
+  comes without `totals`/`byDevice` (host D14 as amended): its `maxStations`, `participants` and
+  `myState` update a row already there while `totals`, `by_device` and `as_of` keep their stored
+  values (`COALESCE` against the stored row in one upsert); a closed shift with no row yet is not
+  inserted (no figures to show, never zeros). The row also keeps `joined_rev`, this station's own
+  participant token (`participants[me].joinedRev`, host D5 as amended), from every answer that names
+  it; an answer without it (an older host, a list where the row lacks it) keeps the stored one.
 - **S2. The capability is always sent.** `STATION_SHIFT_ENTER` becomes `shift-enter-multi.json`
   (`validation-v1`, `validation-dm-duplicate-v1`, `multi-station-v1`). A protocol-7 station never
   talks to a protocol-6 host (`host_too_old`, host D12), so `shift_busy` is kept only as a
@@ -123,12 +138,17 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
   continues at the same station. The pause is written locally (`leave_requested_at`) after the work
   drained, sent by the link when online (`sendPendingLeaves`, retried like the other reads), and
   dropped by any entry, online or offline, so a late pause never undoes a re-entry (host D5). A
-  `shift_not_entered` or `not_found` answer clears it. Known limit: a pause already in flight when
-  the operator re-enters may land after the entry; the host then lists the station `left` while it
-  works (its facts are still accepted; gap G4).
+  `shift_not_entered` or `not_found` answer clears it. The pause sends `{ joinedRev }` from the
+  cached `joined_rev` (no body when none is cached: an older host); a 200 whose `myState` is still
+  `active` means the host already saw a later entry (a return from `left` stamps a new token), so the
+  pause is settled as "already re-entered" and the answer's figures are kept. Residual limit (gap G4,
+  narrowed): a pause in flight while the operator re-enters an ACTIVE part carries the still-current
+  token (re-entering an active part stamps none), so if it lands after that entry the host lists the
+  station `left` while it works (its facts are still accepted).
 - **S11. Refusals.** `shift_line_full` → `line_full` with the refusal's `{ active, maxStations }`;
   an entry answered with `myState: "closed"` (host D2, a station that lost its database) →
-  `part_closed`, nothing kept.
+  `part_closed`, no copy entered; the answer's participation (a one-shift answer, so with `totals`)
+  goes into the cache so the card says the closed part at once.
 - **S12. Untouched:** the shell's IPC and `host_client.rs` (the leave goes through the generic
   `host_request`), the feed and `SYNC_SCHEMA_VERSION`, retention, SSCC blocks, conflict notices, the
   protocol constant and the build version (host plan Task 14).
@@ -176,10 +196,10 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
 
 **Interfaces:**
 
-- Consumes (host plan Tasks 2, 3, 14): `SHIFT_SUPPORTS.multiStation`, `PROTOCOL_VERSION === 7`, `deviceShiftSchema`, fixtures `shift-enter-multi.json`, `device-shifts-participants.json`, `shift-close-reason-shared.json`.
+- Consumes (host plan Tasks 2, 3, 14 and `651eb1c06`): `SHIFT_SUPPORTS.multiStation`, `PROTOCOL_VERSION === 7`, `deviceShiftSchema`, `ShiftLeave`, fixtures `shift-enter-multi.json`, `device-shifts-participants.json`, `shift-close-reason-shared.json`, `shift-leave.json`.
 - Produces:
   - `STATION_SHIFT_ENTER: ShiftEnter` = `{ supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"] }`
-  - `HostApi.leaveShift(id: string): Promise<DeviceShift>` (`POST /v1/device/shifts/{id}/leave`, no body)
+  - `HostApi.leaveShift(id: string, leave: ShiftLeave | null): Promise<DeviceShift>` (`POST /v1/device/shifts/{id}/leave`; body `{ joinedRev }` when the station holds its token, no body when it does not)
   - `type ReasonNeed = "none" | "required" | "shared"`; `interface ReasonCase { closesShift: boolean; participantsEver: number; factPlanned: number | null; actualQty: number; hostPlanned: number | null; shiftAccepted: number }`; `reasonNeed(rule: ReasonCase): ReasonNeed`
   - `interface StationReasonInput { plannedQty: number | null; actualQty: number; participantsEver: number; closesShift: boolean; online: boolean; total: number }`; `stationReasonRequired(input: StationReasonInput): boolean`
 
@@ -190,13 +210,14 @@ Run:
 ```bash
 grep -n 'export const PROTOCOL_VERSION = 7' "$WT/apps/standalone/src/host/protocol.ts"
 grep -n 'multiStation: "multi-station-v1"' "$WT/apps/standalone/src/host/protocol.ts"
-grep -n -E 'export const (shiftParticipantSchema|deviceShiftTotalsSchema|deviceTotalsSchema|maxStationsSchema|participantStateSchema)' "$WT/apps/standalone/src/host/protocol.ts"
-ls "$WT/apps/standalone/proto/fixtures" | grep -E 'device-shifts-participants|shift-enter-multi|error-shift-line-full|facts-response-part-close|shift-close-reason-shared'
+grep -n -E 'export const (shiftParticipantSchema|deviceShiftTotalsSchema|deviceTotalsSchema|maxStationsSchema|participantStateSchema|shiftLeaveSchema)' "$WT/apps/standalone/src/host/protocol.ts"
+ls "$WT/apps/standalone/proto/fixtures" | grep -E 'device-shifts-participants|shift-enter-multi|error-shift-line-full|facts-response-part-close|shift-close-reason-shared|shift-leave'
 ```
 
-Expected: every line found (5 schemas, 5 fixtures). If any is missing, STOP: the host plan
-(`docs/superpowers/plans/2026-10-20-multi-station-host.md`, Tasks 2, 3 and 14) must be merged into
-the base first; record it in the report.
+Expected: every line found (6 schemas, 6 fixtures). If any is missing, STOP: the host plan
+(`docs/superpowers/plans/2026-10-20-multi-station-host.md`, Tasks 2, 3 and 14 and the post-review
+commit `651eb1c06` for `shiftLeaveSchema` and `shift-leave.json`) must be merged into the base
+first; record it in the report.
 
 - [ ] **Step 2: Write the failing tests.**
 
@@ -219,17 +240,25 @@ In `apps/standalone/test/api.test.ts`, inside `describe("HostApi device shifts",
 last test (after the test that uses `overShell`, so the helper is in scope):
 
 ```ts
-it("pauses this station's part with the device key only and no body, and reads the shift back (plan 2b)", async () => {
+it("pauses this station's part with its leave token, or no body without one, and reads the shift back (plan 2b)", async () => {
   const shared = (
     fixture("device-shifts-participants.json") as { shifts: Record<string, unknown>[] }
   ).shifts[0];
   const left = { ...shared, myState: "left" };
   const leaving = recording(left);
-  await expect(leaving.api.leaveShift(SHIFT_ID)).resolves.toMatchObject({
-    myState: "left",
-    maxStations: 2,
-  });
+  // The token is this station's own `participants[].joinedRev` (`shift-leave.json`).
+  await expect(
+    leaving.api.leaveShift(SHIFT_ID, fixture("shift-leave.json") as { joinedRev: number }),
+  ).resolves.toMatchObject({ myState: "left", maxStations: 2 });
+  // Without a token (an older host named none) the leave goes with no body, as before.
+  await leaving.api.leaveShift(SHIFT_ID, null);
   expect(leaving.sent).toEqual([
+    {
+      method: "POST",
+      path: `/v1/device/shifts/${SHIFT_ID}/leave`,
+      body: { joinedRev: 12 },
+      officeToken: undefined,
+    },
     {
       method: "POST",
       path: `/v1/device/shifts/${SHIFT_ID}/leave`,
@@ -238,15 +267,15 @@ it("pauses this station's part with the device key only and no body, and reads t
     },
   ]);
   const shell = overShell(200, left);
-  await shell.api.leaveShift(SHIFT_ID);
+  await shell.api.leaveShift(SHIFT_ID, { joinedRev: 12 });
   expect(shell.call).toHaveBeenCalledWith("host_request", {
     method: "POST",
     path: `/v1/device/shifts/${SHIFT_ID}/leave`,
-    body: null,
+    body: { joinedRev: 12 },
     officeToken: null,
   });
   // An answer that is no shift is refused, as every device answer.
-  await expect(recording({ shifts: [] }).api.leaveShift(SHIFT_ID)).rejects.toThrow();
+  await expect(recording({ shifts: [] }).api.leaveShift(SHIFT_ID, null)).rejects.toThrow();
 });
 ```
 
@@ -355,16 +384,25 @@ export const STATION_SHIFT_ENTER: ShiftEnter = {
 /**
  * Pauses this station's part of a shift it works (plan 2b, protocol 7): the host frees its slot
  * of the line (`left`) and answers the shift as this station sees it, without the snapshot.
+ * `leave` is this station's own `joinedRev` (`ShiftLeave`, `shift-leave.json`) from its last
+ * entry answer; a token that is no longer the host's (a later entry stamped a new one) changes
+ * nothing and the answer's `myState` stays `active`. `null` sends no body (no token known).
  * Repeating it changes nothing; `conflict` `shift_not_entered` for a shift it never entered.
  */
-leaveShift: (id: string) => Promise<DeviceShift>;
+leaveShift: (id: string, leave: ShiftLeave | null) => Promise<DeviceShift>;
 ```
 
-and in the implementation object, right after the `enterShift` entry (`:1179-1183`):
+(add `type ShiftLeave` to the file's import from `./protocol.js`) and in the implementation object,
+right after the `enterShift` entry (`:1179-1183`):
 
 ```ts
-    leaveShift: (id) =>
-      client.request("POST", `/v1/device/shifts/${id}/leave`, { schema: deviceShiftSchema }),
+    leaveShift: (id, leave) =>
+      leave === null
+        ? client.request("POST", `/v1/device/shifts/${id}/leave`, { schema: deviceShiftSchema })
+        : client.request("POST", `/v1/device/shifts/${id}/leave`, {
+            body: leave,
+            schema: deviceShiftSchema,
+          }),
 ```
 
 Create `apps/standalone/src/floor/close/shared-reason.ts`:
@@ -486,7 +524,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 
 - Consumes: nothing.
-- Produces: table `floor_shift_participation (host_id, device_id, shift_id, max_stations, my_state, participants, totals, by_device, as_of, seen_at, leave_requested_at)`, PK `(host_id, device_id, shift_id)`, `TableClass::Disposable`; the Rust constant text of the upsert that Task 3's `UPSERT_PARTICIPATION_SQL` must equal byte for byte.
+- Produces: table `floor_shift_participation (host_id, device_id, shift_id, max_stations, my_state, participants, totals, by_device, as_of, seen_at, leave_requested_at, joined_rev)`, PK `(host_id, device_id, shift_id)`, `TableClass::Disposable`; the Rust constant text of the upsert that Task 3's `UPSERT_PARTICIPATION_SQL` must equal byte for byte (a closed list item without figures updates a row already there and keeps its figures; `joined_rev` is this station's own leave token).
 
 - [ ] **Step 1: Re-check the number.** Run `ls "$WT/apps/standalone/src-tauri/migrations" | tail -3`. Expected: the last is `0020_dataset_epochs.sql`. If a later file exists, use the next free number everywhere below and record it.
 
@@ -544,6 +582,7 @@ describe("migration 0021 over a database of 0020 (plan 2b, the station's partici
       { name: "as_of", required: 1, pk: 0 },
       { name: "seen_at", required: 1, pk: 0 },
       { name: "leave_requested_at", required: 0, pk: 0 },
+      { name: "joined_rev", required: 0, pk: 0 },
     ]);
     const insert = db.prepare(INSERT);
     insert.run(HOST_ID, DEVICE_ID, "s1", 2, "active", "[]", TOTALS, "[]", "2026-10-08T09:41:07Z");
@@ -563,6 +602,12 @@ describe("migration 0021 over a database of 0020 (plan 2b, the station's partici
     expect(() =>
       insert.run(HOST_ID, DEVICE_ID, "s1", 2, null, "[]", TOTALS, "[]", "2026-10-08T09:41:07Z"),
     ).toThrow(/UNIQUE|PRIMARY/);
+    // The leave token is the host's revision: never negative (host `shift_participants.joined_rev`).
+    const token = db.prepare(
+      "UPDATE floor_shift_participation SET joined_rev = ? WHERE shift_id = ?",
+    );
+    token.run(12, "s1");
+    expect(() => token.run(-1, "s1")).toThrow(/CHECK/);
     // No foreign key, as every table of the station (`0006`).
     expect(
       db
@@ -656,18 +701,29 @@ and replace its doc's last line (the sentence on the native generation table of 
 /// The webview's upsert of a shared shift's participation (plan 2b, migration `0021`,
 /// `UPSERT_PARTICIPATION_SQL` in `src/floor/shifts/shift-participation.ts`, which
 /// `test/floor-shift-participation.test.ts` finds in this file): `->` and `->>` chained on the
-/// shell's bundled SQLite, a shift without the fields kept out, and an older read never over a
-/// newer one.
+/// shell's bundled SQLite, a shift without the fields kept out, a closed list item without
+/// figures (host `35020185a`) taking its participants and state over a row already there while
+/// the stored figures stay, this station's own leave token (`joined_rev`, host `651eb1c06`) kept
+/// when an answer does not name it, and an older read never over a newer one. Parameters: host
+/// id, device id, seen at, device id, the list.
 const UPSERT_PARTICIPATION: &str = "INSERT INTO floor_shift_participation (host_id, device_id, \
-    shift_id, max_stations, my_state, participants, totals, by_device, as_of, seen_at) SELECT ?, ?, \
-    value ->> 'id', value ->> 'maxStations', value ->> 'myState', value -> 'participants', \
-    value -> 'totals', value -> 'byDevice', value -> 'totals' ->> 'asOf', ? FROM json_each(?) \
-    WHERE value ->> 'maxStations' IS NOT NULL AND value -> 'participants' IS NOT NULL \
-    AND value -> 'totals' IS NOT NULL AND value -> 'byDevice' IS NOT NULL \
+    shift_id, max_stations, my_state, participants, totals, by_device, as_of, seen_at, joined_rev) \
+    SELECT p.host_id, p.device_id, p.shift_id, p.max_stations, p.my_state, p.participants, \
+    COALESCE(p.totals, f.totals), COALESCE(p.by_device, f.by_device), COALESCE(p.as_of, f.as_of), \
+    p.seen_at, COALESCE(p.joined_rev, f.joined_rev) FROM (SELECT ? AS host_id, ? AS device_id, \
+    s.value ->> 'id' AS shift_id, s.value ->> 'maxStations' AS max_stations, \
+    s.value ->> 'myState' AS my_state, s.value -> 'participants' AS participants, \
+    s.value -> 'totals' AS totals, s.value -> 'byDevice' AS by_device, \
+    s.value -> 'totals' ->> 'asOf' AS as_of, ? AS seen_at, (SELECT me.value ->> 'joinedRev' \
+    FROM json_each(s.value -> 'participants') AS me WHERE me.value ->> 'deviceId' = ?) AS joined_rev \
+    FROM json_each(?) AS s WHERE s.value ->> 'maxStations' IS NOT NULL \
+    AND s.value -> 'participants' IS NOT NULL) AS p LEFT JOIN floor_shift_participation AS f \
+    ON f.host_id = p.host_id AND f.device_id = p.device_id AND f.shift_id = p.shift_id \
+    WHERE (p.totals IS NOT NULL AND p.by_device IS NOT NULL) OR f.shift_id IS NOT NULL \
     ON CONFLICT (host_id, device_id, shift_id) DO UPDATE SET max_stations = excluded.max_stations, \
     my_state = excluded.my_state, participants = excluded.participants, totals = excluded.totals, \
-    by_device = excluded.by_device, as_of = excluded.as_of, seen_at = excluded.seen_at \
-    WHERE excluded.as_of >= floor_shift_participation.as_of \
+    by_device = excluded.by_device, as_of = excluded.as_of, seen_at = excluded.seen_at, \
+    joined_rev = excluded.joined_rev WHERE excluded.as_of >= floor_shift_participation.as_of \
     OR excluded.seen_at >= floor_shift_participation.seen_at + 60000";
 
 #[tokio::test]
@@ -677,13 +733,22 @@ async fn the_participation_cache_takes_a_newer_read_only() {
         json!([
             {
                 "id": "shift-1",
+                "status": "active",
                 "maxStations": 2,
                 "myState": "active",
-                "participants": [],
+                "participants": [{ "deviceId": "device", "state": "active", "joinedRev": 12 }],
                 "totals": { "accepted": accepted, "boxesClosed": 0, "pallets": 0, "asOf": as_of },
                 "byDevice": []
             },
-            { "id": "planned-1" }
+            { "id": "planned-1" },
+            // A closed shift the list names without figures and no row holds: none is made.
+            {
+                "id": "closed-1",
+                "status": "closed",
+                "maxStations": 2,
+                "myState": "closed",
+                "participants": [{ "deviceId": "device", "state": "closed" }]
+            }
         ])
         .to_string()
     };
@@ -693,15 +758,32 @@ async fn the_participation_cache_takes_a_newer_read_only() {
     ] {
         db.transaction(vec![statement(
             UPSERT_PARTICIPATION,
-            json!(["host", "device", seen, list(as_of, accepted)]),
+            json!(["host", "device", seen, "device", list(as_of, accepted)]),
         )])
         .await
         .unwrap();
     }
+    // The same shift closed, as the list names it now (no totals, no byDevice, no joinedRev):
+    // its participants and this station's state are taken, the figures and the token stay.
+    let closed = json!([{
+        "id": "shift-1",
+        "status": "closed",
+        "maxStations": 2,
+        "myState": "closed",
+        "participants": [{ "deviceId": "device", "state": "closed" }]
+    }])
+    .to_string();
+    db.transaction(vec![statement(
+        UPSERT_PARTICIPATION,
+        json!(["host", "device", 3, "device", closed]),
+    )])
+    .await
+    .unwrap();
     let rows = db
         .query(
-            "SELECT shift_id, max_stations, my_state, totals ->> 'accepted' AS accepted, as_of, \
-             seen_at FROM floor_shift_participation",
+            "SELECT shift_id, max_stations, my_state, participants ->> '$[0].state' AS my_row, \
+             totals ->> 'accepted' AS accepted, json_array_length(by_device) AS by_device, as_of, \
+             seen_at, joined_rev FROM floor_shift_participation",
             vec![],
         )
         .await
@@ -711,10 +793,13 @@ async fn the_participation_cache_takes_a_newer_read_only() {
         json!([{
             "shift_id": "shift-1",
             "max_stations": 2,
-            "my_state": "active",
+            "my_state": "closed",
+            "my_row": "closed",
             "accepted": 5,
+            "by_device": 0,
             "as_of": "2026-10-08T09:41:07Z",
-            "seen_at": 1
+            "seen_at": 3,
+            "joined_rev": 12
         }])
     );
     assert_eq!(
@@ -758,6 +843,15 @@ Create `apps/standalone/src-tauri/migrations/0021_floor_shift_participation.sql`
 -- `as_of` is the host's instant, `leave_requested_at` this computer's
 -- (`Date.toISOString`), `seen_at` Unix milliseconds of this computer, as
 -- `floor_shifts.seen_at`. No foreign key (see `0006`).
+--
+-- The host's list carries `totals` and `byDevice` for an active shift only; a
+-- closed shift in the list updates `max_stations`, `my_state` and
+-- `participants` of a row already there and keeps its figures (the last the
+-- station saw; never zeros); a closed shift with no row is not inserted, so
+-- `totals`, `by_device` and `as_of` stay NOT NULL. `joined_rev` is this
+-- station's own leave token (`participants[me].joinedRev`, the host revision of
+-- the write that took its slot), sent back as `{ "joinedRev": n }` with a
+-- pause; NULL while no answer named one (an older host).
 CREATE TABLE floor_shift_participation (
   host_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
@@ -771,6 +865,7 @@ CREATE TABLE floor_shift_participation (
   as_of TEXT NOT NULL,
   seen_at INTEGER NOT NULL,
   leave_requested_at TEXT,
+  joined_rev INTEGER CHECK (joined_rev IS NULL OR joined_rev >= 0),
   PRIMARY KEY (host_id, device_id, shift_id)
 );
 ```
@@ -816,14 +911,14 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 - Consumes: Task 2's table; host plan's `deviceShiftSchema`, `enteredShiftSchema`, `shiftParticipantSchema`, `deviceShiftTotalsSchema`, `deviceTotalsSchema`, `maxStationsSchema`, `participantStateSchema` and their types.
 - Produces (`src/floor/shifts/shift-participation.ts`):
-  - `interface Participation { shiftId: string; maxStations: number; myState: ParticipantState | null; participants: ShiftParticipant[]; totals: DeviceShiftTotals; byDevice: DeviceTotals[]; asOf: string; leaveRequestedAt: string | null }`
+  - `interface Participation { shiftId: string; maxStations: number; myState: ParticipantState | null; participants: ShiftParticipant[]; totals: DeviceShiftTotals; byDevice: DeviceTotals[]; asOf: string; leaveRequestedAt: string | null; joinedRev: number | null }`
   - `UPSERT_PARTICIPATION_SQL`, `DROP_ORPHAN_PARTICIPATION_SQL`, `CLEAR_LEAVE_SQL` (string constants)
   - `participationStatement(pairing: Pairing, shifts: readonly DeviceShift[], seenAt: number): LocalStatement`
   - `dropOrphanParticipationStatement(pairing: Pairing): LocalStatement`
   - `clearLeaveStatement(pairing: Pairing, shiftId: string): LocalStatement`
   - `readParticipations(local: LocalExecutor, pairing: Pairing): Promise<Map<string, Participation>>`
   - `readParticipation(local: LocalExecutor, pairing: Pairing, shiftId: string): Promise<Participation | null>`
-  - `participationFromShift(shift: DeviceShift): Participation | null`
+  - `participationFromShift(shift: DeviceShift, deviceId: string): Participation | null` (`null` for a shift without the figures: planned, an older host, or a closed list item)
   - `sharedParticipation(participation: Participation | null): Participation | null`
   - `activeOthers(participation: Participation, deviceId: string): ShiftParticipant[]`
   - `closesShift(participation: Participation, deviceId: string): boolean`
@@ -976,12 +1071,14 @@ describe("the participation cache (plan 2b, migration 0021)", () => {
     const { executor } = openLocalDb();
     await replaceShiftCopies(executor, PAIRING, [SHARED], SEEN);
     const read = await readParticipation(executor, PAIRING, SHARED.id);
-    expect(read).toEqual(participationFromShift(SHARED));
+    expect(read).toEqual(participationFromShift(SHARED, DEVICE_ID));
     expect(read).toMatchObject({
       maxStations: 2,
       myState: "active",
       asOf: "2026-10-08T09:41:07Z",
       leaveRequestedAt: null,
+      // This station's own leave token, from its participant row (`device-shifts-participants.json`).
+      joinedRev: 12,
     });
     expect(read?.participants.map((row) => row.deviceId)).toEqual([DEVICE_ID, HANDHELD]);
   });
@@ -991,7 +1088,48 @@ describe("the participation cache (plan 2b, migration 0021)", () => {
     const old = deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts;
     await replaceShiftCopies(executor, PAIRING, old, SEEN);
     expect((await readParticipations(executor, PAIRING)).size).toBe(0);
-    expect(participationFromShift(old[0] ?? SHARED)).toBeNull();
+    expect(participationFromShift(old[0] ?? SHARED, DEVICE_ID)).toBeNull();
+  });
+
+  it("takes a closed shift's participants and state from the list and keeps the figures it had (host 35020185a)", async () => {
+    const { executor } = openLocalDb();
+    // The host's list names a closed shift without `totals`/`byDevice` (its second item): with no
+    // row kept for it, none is made — there are no figures to show, and never zeros.
+    const listed = deviceShiftsSchema.parse(fixture("device-shifts-participants.json")).shifts;
+    const closedFirstSeen = listed[1];
+    if (closedFirstSeen === undefined) throw new Error("the fixture has no closed shift");
+    expect(closedFirstSeen.totals).toBeUndefined();
+    await replaceShiftCopies(executor, PAIRING, [closedFirstSeen], SEEN);
+    expect(await readParticipation(executor, PAIRING, closedFirstSeen.id)).toBeNull();
+    expect(participationFromShift(closedFirstSeen, DEVICE_ID)).toBeNull();
+
+    // A shift the station saw active is listed closed later: participants and state are taken,
+    // the figures of the last answer that had them stay, and so does the leave token.
+    await replaceShiftCopies(executor, PAIRING, [SHARED], SEEN);
+    const closed = sharedShift({
+      participants: [
+        { row: participant(DEVICE_ID, "Станция линии 1", "closed"), accepted: 0 },
+        { row: participant(HANDHELD, "ТСД 1", "closed", "handheld"), accepted: 0 },
+      ],
+      myState: "closed",
+    });
+    delete closed.totals;
+    delete closed.byDevice;
+    await replaceShiftCopies(
+      executor,
+      PAIRING,
+      [{ ...closed, status: "closed", closedAt: "2026-10-08T15:00:00Z" }],
+      SEEN + 1,
+    );
+    const read = await readParticipation(executor, PAIRING, SHARED.id);
+    expect(read).toMatchObject({
+      myState: "closed",
+      totals: { accepted: 547, asOf: "2026-10-08T09:41:07Z" },
+      asOf: "2026-10-08T09:41:07Z",
+      joinedRev: 12,
+    });
+    expect(read?.byDevice.map((part) => part.accepted)).toEqual([427, 120]);
+    expect(read?.participants.map((row) => row.state)).toEqual(["closed", "closed"]);
   });
 
   it("never takes an older read over a newer one, and takes a newer one", async () => {
@@ -1065,7 +1203,7 @@ describe("the participation cache (plan 2b, migration 0021)", () => {
   });
 
   it("derives who works the shift, whether this close is the last, and the whole shift's count", () => {
-    const shared = participationFromShift(SHARED);
+    const shared = participationFromShift(SHARED, DEVICE_ID);
     expect(shared).not.toBeNull();
     if (shared === null) return;
     expect(sharedParticipation(shared)).toBe(shared);
@@ -1086,6 +1224,7 @@ describe("the participation cache (plan 2b, migration 0021)", () => {
         ],
         myState: "active",
       }),
+      DEVICE_ID,
     );
     expect(busy === null ? null : closesShift(busy, DEVICE_ID)).toBe(false);
     expect(busy === null ? [] : activeOthers(busy, DEVICE_ID).map((row) => row.deviceId)).toEqual([
@@ -1098,6 +1237,7 @@ describe("the participation cache (plan 2b, migration 0021)", () => {
         maxStations: 1,
         myState: "active",
       }),
+      DEVICE_ID,
     );
     expect(sharedParticipation(solo)).toBeNull();
     expect(participantsEver(null)).toBe(1);
@@ -1141,7 +1281,9 @@ import type { Pairing } from "../../local/reference-sync.js";
  * A shift several devices may work, as the host's last read of it said (plan 2b, migration
  * `0021`): the line's limit, every device that entered it (first entry first), this station's own
  * state (`null`: it never entered), the whole shift's totals and each device's part at `asOf`, the
- * host's time; and the pause this station asked for and the host has not answered yet.
+ * host's time (for a closed shift: the last answer that had them, host D14 as amended); the pause
+ * this station asked for and the host has not answered yet; and this station's leave token
+ * (`joinedRev` of its own participant row, `null` while no answer named one).
  */
 export interface Participation {
   shiftId: string;
@@ -1152,30 +1294,43 @@ export interface Participation {
   byDevice: DeviceTotals[];
   asOf: string;
   leaveRequestedAt: string | null;
+  joinedRev: number | null;
 }
 
 /**
- * The host's figures of every shift in the JSON array parameter that carries them (an open or
- * closed shift of a host of protocol 7), as this pairing's: a read older than the stored one
- * (`as_of`) changes nothing, so two overlapping refreshes never take the figures back, unless this
- * computer saw the stored one more than a minute before (`seen_at`: a host clock set back must
- * not freeze the figures); the
- * station's own pause (`leave_requested_at`) is never touched. Parameters: host id, device id,
- * seen at, the array. Pinned with this exact text on the shell's SQLite in
- * `src-tauri/tests/local_db.rs`.
+ * The host's figures of every shift in the JSON array parameter that carries them, as this
+ * pairing's. An active shift in the list, and any shift in a one-shift answer (entry, leave),
+ * carries `totals`/`byDevice`; a closed shift in the list does not (host D14 as amended): it
+ * updates `max_stations`, `my_state` and `participants` of a row already there while `totals`,
+ * `by_device` and `as_of` keep the stored values (`COALESCE` against the stored row `f`), and it
+ * makes no row where none is kept. `joined_rev` is this station's own `joinedRev` (the device id
+ * parameter picks its participant row); an answer that does not name it keeps the stored one. A
+ * read older than the stored one (`as_of`) changes nothing, so two overlapping refreshes never take
+ * the figures back, unless this computer saw the stored one more than a minute before (`seen_at`:
+ * a host clock set back must not freeze the figures); the station's own pause
+ * (`leave_requested_at`) is never touched. Parameters: host id, device id, seen at, device id,
+ * the array. Pinned with this exact text on the shell's SQLite in `src-tauri/tests/local_db.rs`.
  */
 export const UPSERT_PARTICIPATION_SQL =
-  "INSERT INTO floor_shift_participation (host_id, device_id, shift_id, max_stations, my_state, " +
-  "participants, totals, by_device, as_of, seen_at) SELECT ?, ?, value ->> 'id', " +
-  "value ->> 'maxStations', value ->> 'myState', value -> 'participants', value -> 'totals', " +
-  "value -> 'byDevice', value -> 'totals' ->> 'asOf', ? FROM json_each(?) " +
-  "WHERE value ->> 'maxStations' IS NOT NULL AND value -> 'participants' IS NOT NULL " +
-  "AND value -> 'totals' IS NOT NULL AND value -> 'byDevice' IS NOT NULL " +
-  "ON CONFLICT (host_id, device_id, shift_id) DO UPDATE SET max_stations = excluded.max_stations, " +
-  "my_state = excluded.my_state, participants = excluded.participants, totals = excluded.totals, " +
-  "by_device = excluded.by_device, as_of = excluded.as_of, seen_at = excluded.seen_at " +
-  "WHERE excluded.as_of >= floor_shift_participation.as_of " +
-  "OR excluded.seen_at >= floor_shift_participation.seen_at + 60000";
+  "INSERT INTO floor_shift_participation (host_id, device_id, shift_id, max_stations, " +
+  "my_state, participants, totals, by_device, as_of, seen_at, joined_rev) SELECT p.host_id, " +
+  "p.device_id, p.shift_id, p.max_stations, p.my_state, p.participants, COALESCE(p.totals, " +
+  "f.totals), COALESCE(p.by_device, f.by_device), COALESCE(p.as_of, f.as_of), p.seen_at, " +
+  "COALESCE(p.joined_rev, f.joined_rev) FROM (SELECT ? AS host_id, ? AS device_id, s.value " +
+  "->> 'id' AS shift_id, s.value ->> 'maxStations' AS max_stations, s.value ->> 'myState' " +
+  "AS my_state, s.value -> 'participants' AS participants, s.value -> 'totals' AS totals, " +
+  "s.value -> 'byDevice' AS by_device, s.value -> 'totals' ->> 'asOf' AS as_of, ? AS " +
+  "seen_at, (SELECT me.value ->> 'joinedRev' FROM json_each(s.value -> 'participants') AS " +
+  "me WHERE me.value ->> 'deviceId' = ?) AS joined_rev FROM json_each(?) AS s WHERE s.value " +
+  "->> 'maxStations' IS NOT NULL AND s.value -> 'participants' IS NOT NULL) AS p LEFT JOIN " +
+  "floor_shift_participation AS f ON f.host_id = p.host_id AND f.device_id = p.device_id " +
+  "AND f.shift_id = p.shift_id WHERE (p.totals IS NOT NULL AND p.by_device IS NOT NULL) OR " +
+  "f.shift_id IS NOT NULL ON CONFLICT (host_id, device_id, shift_id) DO UPDATE SET " +
+  "max_stations = excluded.max_stations, my_state = excluded.my_state, participants = " +
+  "excluded.participants, totals = excluded.totals, by_device = excluded.by_device, as_of = " +
+  "excluded.as_of, seen_at = excluded.seen_at, joined_rev = excluded.joined_rev WHERE " +
+  "excluded.as_of >= floor_shift_participation.as_of OR excluded.seen_at >= " +
+  "floor_shift_participation.seen_at + 60000";
 
 /**
  * The figures of shifts this pairing no longer keeps a copy of (a list dropped them, the
@@ -1200,7 +1355,7 @@ export function participationStatement(
 ): LocalStatement {
   return {
     sql: UPSERT_PARTICIPATION_SQL,
-    values: [pairing.hostId, pairing.deviceId, seenAt, JSON.stringify(shifts)],
+    values: [pairing.hostId, pairing.deviceId, seenAt, pairing.deviceId, JSON.stringify(shifts)],
   };
 }
 
@@ -1216,7 +1371,8 @@ export function clearLeaveStatement(pairing: Pairing, shiftId: string): LocalSta
 }
 
 const COLUMNS =
-  "shift_id, max_stations, my_state, participants, totals, by_device, as_of, leave_requested_at";
+  "shift_id, max_stations, my_state, participants, totals, by_device, as_of, leave_requested_at, " +
+  "joined_rev";
 
 const rowSchema = z.object({
   shift_id: z.string(),
@@ -1227,6 +1383,7 @@ const rowSchema = z.object({
   by_device: z.string(),
   as_of: z.string(),
   leave_requested_at: z.string().nullable(),
+  joined_rev: z.number().int().nonnegative().nullable(),
 });
 
 const storedSchema = z.object({
@@ -1262,6 +1419,7 @@ function toParticipation(row: z.infer<typeof rowSchema>): Participation | null {
     ...parsed.data,
     asOf: row.as_of,
     leaveRequestedAt: row.leave_requested_at,
+    joinedRev: row.joined_rev,
   };
 }
 
@@ -1298,8 +1456,11 @@ export async function readParticipation(
   return row === undefined ? null : toParticipation(row);
 }
 
-/** A host answer's figures as the cache would read them; `null` for a shift that carries none. */
-export function participationFromShift(shift: DeviceShift): Participation | null {
+/**
+ * A host answer's figures as the cache would read them, with `deviceId`'s own leave token; `null`
+ * for a shift that carries none (planned, an older host, a closed shift in the list).
+ */
+export function participationFromShift(shift: DeviceShift, deviceId: string): Participation | null {
   const { maxStations, participants, totals, byDevice } = shift;
   if (
     maxStations === undefined ||
@@ -1318,6 +1479,7 @@ export function participationFromShift(shift: DeviceShift): Participation | null
     byDevice,
     asOf: totals.asOf,
     leaveRequestedAt: null,
+    joinedRev: participants.find((row) => row.deviceId === deviceId)?.joinedRev ?? null,
   };
 }
 
@@ -1402,7 +1564,7 @@ await local.transaction([
 ]);
 ```
 
-and extend its doc comment (`:181-187`) with the sentence: «The host's figures of a shift several devices work (plan 2b) go into `floor_shift_participation` in the same transaction (`participationStatement`), an older read never over a newer one, and the figures of a shift no longer kept go.»
+and extend its doc comment (`:181-187`) with the sentence: «The host's figures of a shift several devices work (plan 2b) go into `floor_shift_participation` in the same transaction (`participationStatement`), an older read never over a newer one, a closed shift's participants and state over the figures it had (the list names a closed shift without figures), and the figures of a shift no longer kept go.»
 
 Replace the last line of `keepEnteredShift` (`:247`, `await local.transaction([statement]);`) with:
 
@@ -1477,7 +1639,7 @@ describe("a shift card's action on a shift several devices work (plan 2b)", () =
     maxStations = 2,
     myState: ShiftParticipant["state"] | null = null,
   ): Participation | null =>
-    participationFromShift(sharedShift({ participants: rows, maxStations, myState }));
+    participationFromShift(sharedShift({ participants: rows, maxStations, myState }), DEVICE);
   const active = (patch: Partial<ShiftCopy> = {}) =>
     copy({ status: "active", ownerDeviceId: OTHER, ...patch });
 
@@ -2239,7 +2401,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 
-- Consumes: Task 3 `clearLeaveStatement`, `readParticipation`; Task 4 the join card.
+- Consumes: Task 3 `clearLeaveStatement`, `participationStatement`, `readParticipation`; Task 4 the join card.
 - Produces:
   - `EntryRefusal` gains `"line_full"` and `"part_closed"`
   - `interface LineSlots { active: number; maxStations: number }`
@@ -2296,7 +2458,7 @@ describe("what an entry into a shared shift comes to (plan 2b)", () => {
     ).toBeTruthy();
   });
 
-  it("works nothing of a part the host says is closed, and keeps nothing of the answer", async () => {
+  it("works nothing of a part the host says is closed, enters no copy, and keeps the answer's figures for the card", async () => {
     const shift = sharedShift({
       participants: [
         { row: participant(DEVICE_ID, "Станция линии 1", "active"), accepted: 40 },
@@ -2321,6 +2483,12 @@ describe("what an entry into a shared shift comes to (plan 2b)", () => {
     ).toBeTruthy();
     expect(handlers.onEntered).not.toHaveBeenCalled();
     expect((await readShiftCopy(executor, PAIRING, shift.id))?.entered).toBe(false);
+    // The read-back is a one-shift answer, so it carries the totals even for a closed part (host
+    // `35020185a`): the cache takes it, and the card says the closed part without a new list.
+    expect(await readParticipation(executor, PAIRING, shift.id)).toMatchObject({
+      myState: "closed",
+      totals: { accepted: 340 },
+    });
   });
 
   it("enters a known shift without the link and drops the pause the host has not heard", async () => {
@@ -2362,7 +2530,7 @@ describe("what an entry into a shared shift comes to (plan 2b)", () => {
 - [ ] **Step 2: Run them to verify they fail.**
 
 Run: `pnpm --dir "$WT" --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/floor-shift-list.test.tsx -t "what an entry into a shared shift"`
-Expected: FAIL — «Не удалось открыть смену» instead of the full line; the closed part is entered; the pause stays.
+Expected: FAIL — «Не удалось открыть смену» instead of the full line; the closed part is entered and its figures are not cached; the pause stays.
 
 - [ ] **Step 3: Add the strings.** In `apps/standalone/src/i18n/ru.json`, in `floor.shifts.refused`, replace
 
@@ -2386,7 +2554,7 @@ and in `floor.shifts`, after the `"partClosed"` line added by Task 4:
 
 - [ ] **Step 4: Implement the entry.** In `apps/standalone/src/floor/shifts/shift-entry.ts`:
 
-Add the import `import { clearLeaveStatement } from "./shift-participation.js";` after the `./shift-snapshot.js` import.
+Add the import `import { clearLeaveStatement, participationStatement } from "./shift-participation.js";` after the `./shift-snapshot.js` import.
 
 In the doc of `EntryRefusal` (`:16-26`) add after «`station_update`: …, plan РЕЖ);» the words «`line_full`: every slot of the line is held, plan 2b; `part_closed`: this station's part of the shift is closed on the host, plan 2b;», and add to the union after `| "station_update"`:
 
@@ -2458,8 +2626,15 @@ and after the snapshot check (`:134-136`) insert:
 
 ```ts
 // A device whose part is closed reads the shift back (plan 2b, host D2: a station that lost
-// its database): there is nothing to work, and nothing of the answer is kept.
-if (answer.myState === "closed") return { kind: "refused", reason: "part_closed" };
+// its database): there is nothing to work and no copy is entered. The answer of one shift
+// carries the totals for a closed part too (host D14 as amended), so its figures go into the
+// cache for the card; a failed write changes nothing of the refusal.
+if (answer.myState === "closed") {
+  await context.local
+    .transaction([participationStatement(context.pairing, [answer], context.now().getTime())])
+    .catch(() => undefined);
+  return { kind: "refused", reason: "part_closed" };
+}
 ```
 
 Extend the doc of `enterShift` with: «Since plan 2b the host gives a slot of the line (`shift_line_full` when every slot is held, with its numbers), and an entry — online or not — drops a pause this station asked for.»
@@ -2630,6 +2805,7 @@ function sharedFirst(kind: string): Participation | null {
     })),
     asOf: "2026-10-08T09:41:07Z",
     leaveRequestedAt: null,
+    joinedRev: kind === "mine" || kind === "closed" ? 12 : null,
   };
 }
 const first = sharedFirst(multi);
@@ -2713,8 +2889,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Consumes: Task 1 `HostApi.leaveShift`; Task 3 `participationStatement`, `readParticipation`, the table's `leave_requested_at`.
 - Produces:
   - `MARK_LEAVE_SQL`; `markLeave(local: LocalExecutor, pairing: Pairing, shiftId: string, at: string): Promise<boolean>`
-  - `PENDING_LEAVES_SQL`, `SETTLE_LEAVE_SQL`; `sendPendingLeaves(local: LocalExecutor, pairing: Pairing, leave: (shiftId: string) => Promise<DeviceShift>, now: () => Date): Promise<{ sent: number }>`
-  - `HostLinkOptions.leaveShift?: (shiftId: string) => Promise<DeviceShift>`; `HostLinkControls.requestShifts: () => void`, `HostLinkControls.requestLeaves: () => void`
+  - `PENDING_LEAVES_SQL`, `SETTLE_LEAVE_SQL`; `type LeaveShift = (shiftId: string, leave: ShiftLeave | null) => Promise<DeviceShift>`; `sendPendingLeaves(local: LocalExecutor, pairing: Pairing, leave: LeaveShift, now: () => Date): Promise<{ sent: number; stale: number }>` (`stale`: pauses the host answered with `myState` still `active` — already re-entered)
+  - `HostLinkOptions.leaveShift?: LeaveShift`; `HostLinkControls.requestShifts: () => void`, `HostLinkControls.requestLeaves: () => void`
   - `FloorAppProps.requestShifts?: () => void`, `FloorAppProps.requestLeaves?: () => void`
 
 - [ ] **Step 1: Write the failing tests.**
@@ -2776,15 +2952,38 @@ describe("this station's pause of a shared shift (plan 2b, host D5)", () => {
     );
   });
 
-  it("is sent, the host's answer kept, and settled", async () => {
+  it("is sent with this station's leave token, the host's answer kept, and settled", async () => {
     const { executor, row } = await paused();
     const leave = vi.fn(async () => LEFT);
-    expect(await sendPendingLeaves(executor, PAIRING, leave, NOW)).toEqual({ sent: 1 });
-    expect(leave).toHaveBeenCalledWith(SHARED.id);
+    expect(await sendPendingLeaves(executor, PAIRING, leave, NOW)).toEqual({ sent: 1, stale: 0 });
+    // The token is this station's own `joinedRev` from its entry answer (host `651eb1c06`).
+    expect(leave).toHaveBeenCalledWith(SHARED.id, { joinedRev: 12 });
     expect(await row()).toEqual([{ leave_requested_at: null, my_state: "left" }]);
     // Nothing is owed any more: nothing goes again.
-    expect(await sendPendingLeaves(executor, PAIRING, leave, NOW)).toEqual({ sent: 0 });
+    expect(await sendPendingLeaves(executor, PAIRING, leave, NOW)).toEqual({ sent: 0, stale: 0 });
     expect(leave).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes with no body when no answer named the token (an older host)", async () => {
+    const { db, executor } = await paused();
+    db.prepare("UPDATE floor_shift_participation SET joined_rev = NULL").run();
+    const leave = vi.fn(async () => LEFT);
+    await sendPendingLeaves(executor, PAIRING, leave, NOW);
+    expect(leave).toHaveBeenCalledWith(SHARED.id, null);
+  });
+
+  it("is settled as already re-entered when the host answers the part still active (a stale token)", async () => {
+    const { executor, row } = await paused();
+    // The host saw a later entry (a return from `left` stamps a new token): it wrote nothing and
+    // answers the shift as it is, this station active, read at 10:00:06.
+    const stillIn = deviceShiftSchema.parse({
+      ...SHARED,
+      myState: "active",
+      totals: { accepted: 560, boxesClosed: 46, pallets: 0, asOf: "2026-10-08T10:00:06Z" },
+    });
+    const leave = vi.fn(async () => stillIn);
+    expect(await sendPendingLeaves(executor, PAIRING, leave, NOW)).toEqual({ sent: 0, stale: 1 });
+    expect(await row()).toEqual([{ leave_requested_at: null, my_state: "active" }]);
   });
 
   it("is settled without an answer when the host owes nothing: never entered, or no such shift", async () => {
@@ -2806,7 +3005,7 @@ describe("this station's pause of a shared shift (plan 2b, host D5)", () => {
           vi.fn(async () => Promise.reject(refusal)),
           NOW,
         ),
-      ).toEqual({ sent: 0 });
+      ).toEqual({ sent: 0, stale: 0 });
       expect(await row()).toEqual([{ leave_requested_at: null, my_state: "active" }]);
     }
   });
@@ -2861,6 +3060,7 @@ import {
   type HostStatus,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
+import type { LeaveShift } from "../src/local/leave-sender.js";
 import { DEVICE_ID, DEVICE_STATUS, HOST_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
 import { SHARED, SHARED_ENTERED } from "./support/multi-station.js";
@@ -2881,7 +3081,7 @@ async function pausedStation(): Promise<LocalExecutor> {
   return executor;
 }
 
-function link(local: LocalExecutor, leaveShift: (shiftId: string) => Promise<DeviceShift>) {
+function link(local: LocalExecutor, leaveShift: LeaveShift) {
   const connection: ConnectionApi = {
     watch: vi.fn(async (next: ConnectionHandlers) => {
       next.onStatus(ONLINE);
@@ -2923,7 +3123,7 @@ describe("the pauses and the list on the link (plan 2b)", () => {
     const local = await pausedStation();
     const leaveShift = vi.fn(async () => LEFT);
     const { hook, deviceShifts } = link(local, leaveShift);
-    await waitFor(() => expect(leaveShift).toHaveBeenCalledWith(SHARED.id));
+    await waitFor(() => expect(leaveShift).toHaveBeenCalledWith(SHARED.id, { joinedRev: 12 }));
     await waitFor(async () => expect(await pauses(local)).toEqual([{ leave_requested_at: null }]));
     // The everything() read, then the one the settled pause asked for.
     await waitFor(() => expect(deviceShifts.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -3062,13 +3262,19 @@ import { z } from "zod";
 
 import { participationStatement } from "../floor/shifts/shift-participation.js";
 import { HostError } from "../host/client.js";
-import type { DeviceShift } from "../host/protocol.js";
+import type { DeviceShift, ShiftLeave } from "../host/protocol.js";
 import type { LocalExecutor, LocalStatement } from "./executor.js";
 import type { Pairing } from "./reference-sync.js";
 
-/** This pairing's pauses the host has not answered; parameters: host id, device id. */
+/** `HostApi.leaveShift`: the pause of one shift, with this station's leave token or no body. */
+export type LeaveShift = (shiftId: string, leave: ShiftLeave | null) => Promise<DeviceShift>;
+
+/**
+ * This pairing's pauses the host has not answered, with this station's leave token of each
+ * (`joined_rev`, host D5 as amended); parameters: host id, device id.
+ */
 export const PENDING_LEAVES_SQL =
-  "SELECT shift_id, leave_requested_at FROM floor_shift_participation " +
+  "SELECT shift_id, leave_requested_at, joined_rev FROM floor_shift_participation " +
   "WHERE host_id = ? AND device_id = ? AND leave_requested_at IS NOT NULL " +
   "ORDER BY leave_requested_at, shift_id";
 
@@ -3080,7 +3286,11 @@ export const SETTLE_LEAVE_SQL =
   "UPDATE floor_shift_participation SET leave_requested_at = NULL " +
   "WHERE host_id = ? AND device_id = ? AND shift_id = ? AND leave_requested_at = ?";
 
-const pendingRow = z.object({ shift_id: z.string(), leave_requested_at: z.string() });
+const pendingRow = z.object({
+  shift_id: z.string(),
+  leave_requested_at: z.string(),
+  joined_rev: z.number().int().nonnegative().nullable(),
+});
 
 /** The host owes nothing for this pause: the device never entered, or the shift is gone. */
 function moot(error: unknown): boolean {
@@ -3094,47 +3304,53 @@ function moot(error: unknown): boolean {
 
 /**
  * Sends this pairing's pauses (plan 2b, `POST /v1/device/shifts/{id}/leave`, host D5), oldest
- * first: each answer's figures go into the cache with the pause settled in one transaction; a
- * pause the host owes nothing for is settled without figures; any other failure — the host away,
- * a refused key — goes back to the link, which retries it and keeps the rest for then. A pause
- * an entry dropped meanwhile is not sent (the read is fresh), and one asked again after the send
- * is not settled by the older answer. Answers how many the host took.
+ * first, each with this station's leave token (`{ joinedRev }`; no body when none is kept): each
+ * answer's figures go into the cache with the pause settled in one transaction; a pause the host
+ * owes nothing for is settled without figures; any other failure — the host away, a refused key —
+ * goes back to the link, which retries it and keeps the rest for then. A pause an entry dropped
+ * meanwhile is not sent (the read is fresh), and one asked again after the send is not settled by
+ * the older answer. An answer whose `myState` is still `active` to a sent token means the host saw
+ * a later entry and wrote nothing (a stale pause): it is settled as "already re-entered" and counted
+ * as `stale`, not as `sent`. Answers how many the host took and how many were stale.
  */
 export async function sendPendingLeaves(
   local: LocalExecutor,
   pairing: Pairing,
-  leave: (shiftId: string) => Promise<DeviceShift>,
+  leave: LeaveShift,
   now: () => Date,
-): Promise<{ sent: number }> {
+): Promise<{ sent: number; stale: number }> {
   const pending = await local.query(
     PENDING_LEAVES_SQL,
     [pairing.hostId, pairing.deviceId],
     pendingRow,
   );
   let sent = 0;
+  let stale = 0;
   for (const row of pending) {
     const settle: LocalStatement = {
       sql: SETTLE_LEAVE_SQL,
       values: [pairing.hostId, pairing.deviceId, row.shift_id, row.leave_requested_at],
     };
+    const token: ShiftLeave | null = row.joined_rev === null ? null : { joinedRev: row.joined_rev };
     let answer: DeviceShift;
     try {
-      answer = await leave(row.shift_id);
+      answer = await leave(row.shift_id, token);
     } catch (error) {
       if (!moot(error)) throw error;
       await local.transaction([settle]);
       continue;
     }
     await local.transaction([participationStatement(pairing, [answer], now().getTime()), settle]);
-    sent += 1;
+    if (token !== null && answer.myState === "active") stale += 1;
+    else sent += 1;
   }
-  return { sent };
+  return { sent, stale };
 }
 ```
 
 - [ ] **Step 5: Give the link the pauses and the two requests.** In `apps/standalone/src/app/host-link.ts`:
 
-Add the import `import { sendPendingLeaves } from "../local/leave-sender.js";` after the
+Add the import `import { sendPendingLeaves, type LeaveShift } from "../local/leave-sender.js";` after the
 `sendWarehouseBatch` import.
 
 In `HostLinkOptions`, after `deviceProductPhoto?: …;`:
@@ -3142,9 +3358,9 @@ In `HostLinkOptions`, after `deviceProductPhoto?: …;`:
 ```ts
   /**
    * `HostApi.leaveShift` (plan 2b): the pauses this station owes the host go when the link is
-   * online, retried like the reads; none — they wait.
+   * online, each with this station's leave token, retried like the reads; none — they wait.
    */
-  leaveShift?: (shiftId: string) => Promise<DeviceShift>;
+  leaveShift?: LeaveShift;
 ```
 
 Replace `HostLinkControls` (`:122-127`) with:
@@ -3197,10 +3413,10 @@ const leaveSender = createSyncScheduler(async () => {
   if (!online && !watchFailed) return;
   cancelLeaveRetry();
   try {
-    const { sent } = await sendPendingLeaves(local, pairing, leaveShift, () => new Date());
+    const { sent, stale } = await sendPendingLeaves(local, pairing, leaveShift, () => new Date());
     if (!active) return;
     leaveFailures = 0;
-    if (sent > 0) shiftReader.trigger();
+    if (sent + stale > 0) shiftReader.trigger();
   } catch (error) {
     if (!active) return;
     const action = shellActionFor(error, null);
@@ -5281,6 +5497,7 @@ import {
   type EnteredShift,
   type FactReceipt,
   type ShiftEnter,
+  type ShiftLeave,
   type ShiftParticipant,
 } from "../../src/host/protocol.js";
 
@@ -5300,8 +5517,11 @@ export type MultiHost = ReturnType<typeof multiHost>;
 /**
  * A host of one shared shift for the webview tests of plan 2b, in memory: the host contract's
  * entry (a slot by `maxStations`, `shift_line_full` with its numbers, `shift_busy` without the
- * capability, a closed part read back), leave (`left`, `shift_not_entered`), list (participants,
- * `myState`, totals by device at an `asOf` that moves on with every answer) and facts (an accepted
+ * capability, a closed part read back; a first entry or a return from `left` stamps a new
+ * `joinedRev`), leave (`left`, `shift_not_entered`; a `joinedRev` that is not the row's current
+ * one changes nothing), list (participants, `myState`; totals by device at an `asOf` that moves on
+ * with every answer, for an active shift only — a closed shift in the list carries none, while the
+ * answer of an entry or a leave always does) and facts (an accepted
  * scan counts; a `shift_closed` closes the sender's part and the shift with the last one, the
  * reason by `reasonNeed`, the receipts `partClosed`, `reasonMissing`, `alreadyClosed`). Not the
  * host: what the stations must see of it.
@@ -5316,6 +5536,12 @@ export function multiHost(
   let status: "active" | "closed" = "active";
   let closedAt: string | null = null;
   let reasonMissing = false;
+  let rev = 0;
+  /** The host revision a slot-taking write stamps on its participant row (`joinedRev`). */
+  const nextRev = () => {
+    rev += 1;
+    return rev;
+  };
   let seconds = 0;
   const instant = () => {
     seconds += 1;
@@ -5342,6 +5568,7 @@ export function multiHost(
     state: "active",
     firstEnteredAt: at,
     joinedAt: at,
+    joinedRev: nextRev(),
     leftAt: null,
     closedAt: null,
     closedBy: null,
@@ -5351,7 +5578,8 @@ export function multiHost(
     lastSeenAt: at,
   });
   const accepted = () => [...parts.values()].reduce((sum, part) => sum + part.accepted, 0);
-  const shiftFor = (deviceId: string): DeviceShift => {
+  /** The shift as `deviceId` reads it; the list leaves a closed shift's figures out (host D14). */
+  const shiftFor = (deviceId: string, withTotals = true): DeviceShift => {
     const list = [...parts.values()];
     const mine = parts.get(deviceId);
     return deviceShiftSchema.parse({
@@ -5361,13 +5589,17 @@ export function multiHost(
       maxStations,
       participants: list.map((part) => part.row),
       ...(mine === undefined ? {} : { myState: mine.row.state }),
-      totals: { accepted: accepted(), boxesClosed: 0, pallets: 0, asOf: instant() },
-      byDevice: list.map((part) => ({
-        deviceId: part.row.deviceId,
-        accepted: part.accepted,
-        boxesClosed: 0,
-        pallets: 0,
-      })),
+      ...(withTotals
+        ? {
+            totals: { accepted: accepted(), boxesClosed: 0, pallets: 0, asOf: instant() },
+            byDevice: list.map((part) => ({
+              deviceId: part.row.deviceId,
+              accepted: part.accepted,
+              boxesClosed: 0,
+              pallets: 0,
+            })),
+          }
+        : {}),
     });
   };
   const closePart = (deviceId: string, id: string, data: Record<string, unknown>): FactReceipt => {
@@ -5416,7 +5648,9 @@ export function multiHost(
     open(deviceId: string): void {
       parts.set(deviceId, { row: row(deviceId, instant()), accepted: 0 });
     },
-    list: async (deviceId: string): Promise<DeviceShift[]> => [shiftFor(deviceId)],
+    list: async (deviceId: string): Promise<DeviceShift[]> => [
+      shiftFor(deviceId, status === "active"),
+    ],
     enter:
       (deviceId: string) =>
       async (shiftId: string, enter: ShiftEnter): Promise<EnteredShift> => {
@@ -5435,16 +5669,26 @@ export function multiHost(
           }
           const at = instant();
           if (mine === undefined) parts.set(deviceId, { row: row(deviceId, at), accepted: 0 });
-          else mine.row = { ...mine.row, state: "active", joinedAt: at, leftAt: null };
+          else {
+            mine.row = {
+              ...mine.row,
+              state: "active",
+              joinedAt: at,
+              joinedRev: nextRev(),
+              leftAt: null,
+            };
+          }
         }
         return enteredShiftSchema.parse({ ...shiftFor(deviceId), snapshot });
       },
     leave:
       (deviceId: string) =>
-      async (shiftId: string): Promise<DeviceShift> => {
+      async (shiftId: string, leave: ShiftLeave | null): Promise<DeviceShift> => {
         if (shiftId !== base.id) throw refused("not_found", null);
         const mine = parts.get(deviceId);
         if (mine === undefined) throw refused("conflict", "shift_not_entered");
+        // A token of an earlier stay: the shift as it is, nothing written (host D5 as amended).
+        if (leave !== null && leave.joinedRev !== mine.row.joinedRev) return shiftFor(deviceId);
         if (mine.row.state === "active") {
           mine.row = { ...mine.row, state: "left", leftAt: instant() };
         }
@@ -5739,7 +5983,7 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     expect(host.state()).toMatchObject({ status: "closed", reasonMissing: true });
   });
 
-  it("«Выйти из смены» frees the slot; an entry before the pause reaches the host drops it", async () => {
+  it("«Выйти из смены» frees the slot; an entry before the pause reaches the host drops it; a stale pause undoes nothing", async () => {
     const host = multiHost(VALIDATION_ENTERED, 2, NAMES);
     host.open(DEVICE_ID);
     const a = station(host, DEVICE_ID);
@@ -5764,6 +6008,19 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     await a.goOnline();
     await a.sendLeaves();
     expect(host.state().parts.get(DEVICE_ID)?.row.state).toBe("active");
+
+    // B comes back (a new stay, a new token); a pause of its first stay reaching the host now
+    // carries the old token and undoes nothing (host `651eb1c06`).
+    const firstStay = host.state().parts.get(OTHER_STATION)?.row.joinedRev;
+    await b.readShifts();
+    await b.press("Продолжить");
+    expect(host.state().parts.get(OTHER_STATION)?.row.joinedRev).not.toBe(firstStay);
+    const stale = await host.leave(OTHER_STATION)(
+      VALIDATION_ENTERED.id,
+      firstStay === undefined ? null : { joinedRev: firstStay },
+    );
+    expect(stale.myState).toBe("active");
+    expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("active");
   });
 });
 ```
@@ -5805,17 +6062,21 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 `docs/superpowers/plans/2026-10-20-multi-station-station.md`. Every entry names
 `multi-station-v1` (`STATION_SHIFT_ENTER`, `shift-enter-multi.json`). What the host's list and the
 answers of an entry and a leave say of a shared shift — `maxStations`, `participants`, `myState`,
-`totals`, `byDevice` — is kept in `floor_shift_participation` (shell migration `0021`,
+`totals`, `byDevice`, and this station's own `participants[].joinedRev` as `joined_rev` — is kept
+in `floor_shift_participation` (shell migration `0021`,
 `TableClass::Disposable`; `src/floor/shifts/shift-participation.ts`): one row per shift, written
 with the copy in the same transaction, never recalculated, a read older than the row's `as_of`
 ignored unless the station saw the row more than a minute before (a host clock set back); every
-list read drops the rows of shifts the pairing no longer keeps. A shift is shared when
+list read drops the rows of shifts the pairing no longer keeps. The host's list carries `totals`
+and `byDevice` for active shifts only: a closed list item updates the participants and `myState` of
+a row already there and keeps its figures (`COALESCE` against the stored row), and makes no row
+where none is kept (never zeros). A shift is shared when
 `maxStations > 1` or more than one device ever entered (`sharedParticipation`); a solo station on a
 line of one sees stage 2a. The hub card joins («Присоединиться», online only) while the other
 devices hold fewer slots than the limit, says «Линия занята: N из M» with no action, names who
 works the shift when another device does, and says a part the host reports closed; a refusal
-`shift_line_full` is said with its numbers, an entry answered `myState: "closed"` is `part_closed`
-and keeps nothing; a shared shift's progress is the whole shift's. The work screen's band shows
+`shift_line_full` is said with its numbers, an entry answered `myState: "closed"` is `part_closed`,
+enters no copy and caches the answer's figures; a shared shift's progress is the whole shift's. The work screen's band shows
 «Всего в смене» K — the others' part by the host plus this station's own codes (`sharedCount`) —
 against the plan and «Моя станция» N, the group named «Моя станция: N · Всего в смене: K из M»,
 and «данные от ЧЧ:ММ» while the link is down; it asks the link for the list every 15 s while
@@ -5828,9 +6089,12 @@ offline (the host marks it missing). The closed panel says the part's state from
 receipt (`readPartState`: `queued`, `waiting`, `shift_closed`, `reason_missing`, `refused`).
 «Выйти из смены» and a move to another line pause the part (`markLeave`, `leave_requested_at`; a
 sign-out does not); the link sends pauses when online (`sendPendingLeaves`,
-`HostLinkControls.requestLeaves`), a `shift_not_entered` or `not_found` answer settles one, and any
-entry, online or offline, drops a pending one. Known limit: a pause in flight when the operator
-enters again may reach the host after the entry. The queue screen calls a `shift_closed` record
+`HostLinkControls.requestLeaves`) with the body `{ joinedRev }` from `joined_rev` (no body when
+none is kept), a `shift_not_entered` or `not_found` answer settles one, an answer whose `myState`
+is still `active` settles it as already re-entered (the host saw a later stay and wrote nothing),
+and any entry, online or offline, drops a pending one. Known limit: a pause in flight while the
+operator re-enters an active part carries the still-current token and may reach the host after
+the entry. The queue screen calls a `shift_closed` record
 «Закрытие смены станцией». `SYNC_SCHEMA_VERSION` stays 5.
 ```
 
@@ -5909,11 +6173,12 @@ set to 2 in the office.
 
 **2. Placeholder scan.** Searched the plan for «TBD», «TODO», «implement later», «fill in», «similar to Task», «add appropriate», «handle edge cases»: none. The conditional CSS steps (Tasks 6 and 9 Step 4, Task 12 Step 5) carry the exact rule to add and the exact guard report that triggers it. Line numbers are of `main` 3dc8df952 before the host plan; files the host plan moves are anchored by quoted text.
 
-**3. Type consistency.** `Participation` (Task 3) is used with the same fields in Tasks 4, 7, 8, 10 and the harnesses (Tasks 6); `participationStatement`, `dropOrphanParticipationStatement`, `clearLeaveStatement` (Task 3) are called with `(pairing, …)` in Tasks 3, 5, 7; `sharedParticipation`, `activeOthers`, `closesShift`, `participantsEver`, `sharedCount(participation, deviceId, mine)` match their callers in Tasks 4, 8, 10; `markLeave(local, pairing, shiftId, at)` (Task 7) matches FloorApp and the tests; `sendPendingLeaves(local, pairing, leave, now)` matches host-link and Task 13; `stationReasonRequired({ plannedQty, actualQty, participantsEver, closesShift, online, total })` (Task 1) matches Task 10; `reasonNeed(ReasonCase)` matches Task 13's fake host; `CardAction` kinds `join`, `line_full { active, maxStations }`, `part_closed` (Task 4) match the card and tests; `EntryResult.refused.line?: LineSlots` (Task 5) matches `ShiftList`; `CloseSummary.part?: PartClose { closesShift, total, online }` (Task 10) matches the panel, `sameSummary` and the harness (Task 12); `PartState` (Task 11) matches `ShiftClosedPanel.part`, the work screen and the harness; `WorkScreenProps.shiftReads`, `onRefreshShifts` (Task 8) and `outboxVersion` (Task 11) match FloorApp; `HostLinkControls.requestShifts`/`requestLeaves` and `HostLinkOptions.leaveShift` (Task 7) match App and FloorApp; i18n keys `floor.shifts.{participants,participant,thisStation,deviceKind.*,lineFull,partClosed,lineFullRefused,action.join,refused.line_full,refused.part_closed}`, `floor.work.shared.*`, `floor.close.openPart`, `floor.close.part.*` are added before first use. The DOM classes `.work-shift-band__small--mine`, `.work-shift-band__stale`, `.shift-card__participants`, `.shift-close__part` are the same in code, CSS, audit pins and Task 13's helpers.
+**3. Type consistency.** `Participation` (Task 3) is used with the same fields in Tasks 4, 7, 8, 10 and the harnesses (Tasks 6); `participationStatement`, `dropOrphanParticipationStatement`, `clearLeaveStatement` (Task 3) are called with `(pairing, …)` in Tasks 3, 5, 7; `sharedParticipation`, `activeOthers`, `closesShift`, `participantsEver`, `sharedCount(participation, deviceId, mine)` match their callers in Tasks 4, 8, 10; `markLeave(local, pairing, shiftId, at)` (Task 7) matches FloorApp and the tests; `sendPendingLeaves(local, pairing, leave: LeaveShift, now)` → `{ sent, stale }` matches host-link and Task 13 (`MultiHost.leave(deviceId)` is a `LeaveShift`); `HostApi.leaveShift(id, ShiftLeave | null)` (Task 1) is a `LeaveShift`; `participationFromShift(shift, deviceId)` matches Tasks 3 and 4; `Participation.joinedRev` is set in the store, the harness (Task 6) and `participationFromShift`; `stationReasonRequired({ plannedQty, actualQty, participantsEver, closesShift, online, total })` (Task 1) matches Task 10; `reasonNeed(ReasonCase)` matches Task 13's fake host; `CardAction` kinds `join`, `line_full { active, maxStations }`, `part_closed` (Task 4) match the card and tests; `EntryResult.refused.line?: LineSlots` (Task 5) matches `ShiftList`; `CloseSummary.part?: PartClose { closesShift, total, online }` (Task 10) matches the panel, `sameSummary` and the harness (Task 12); `PartState` (Task 11) matches `ShiftClosedPanel.part`, the work screen and the harness; `WorkScreenProps.shiftReads`, `onRefreshShifts` (Task 8) and `outboxVersion` (Task 11) match FloorApp; `HostLinkControls.requestShifts`/`requestLeaves` and `HostLinkOptions.leaveShift` (Task 7) match App and FloorApp; i18n keys `floor.shifts.{participants,participant,thisStation,deviceKind.*,lineFull,partClosed,lineFullRefused,action.join,refused.line_full,refused.part_closed}`, `floor.work.shared.*`, `floor.close.openPart`, `floor.close.part.*` are added before first use. The DOM classes `.work-shift-band__small--mine`, `.work-shift-band__stale`, `.shift-card__participants`, `.shift-close__part` are the same in code, CSS, audit pins and Task 13's helpers.
 
 **Contract assumptions made by this plan:**
 
-- A1. The leave answer is a `DeviceShift` with `myState`, `participants`, `totals` and `byDevice` (host Task 7 `read_for`); the station stores it like a list item.
+- A1. The leave answer is a `DeviceShift` with `myState`, `participants`, `totals` and `byDevice` (host Task 7 `read_for`; a one-shift answer keeps the totals for any non-planned status, host `35020185a`); the station stores it like a list item. The list carries the totals for active shifts only (a closed list item keeps the stored figures, S1).
+- A7. The leave token is the station's own `participants[].joinedRev` (optional, absent from an older host); a stale token is answered 200 with `myState` unchanged and nothing written (host `651eb1c06`).
 - A2. `shift_line_full` details carry numeric `maxStations` and `active` (fixture `error-shift-line-full.json`); without them the station says the full line in words.
 - A3. Receipt details are JSON `true` (`partClosed`, `reasonMissing`, `alreadyClosed`), read with `->>` as 1.
 - A4. `totals.asOf` is the host's clock and moves forward; a clock set back is tolerated after a minute (S1).
@@ -5925,7 +6190,7 @@ set to 2 in the office.
 - G1. `participants[]` does not say a device is revoked, but the host frees a revoked device's slot (host D3): the card may say «Линия занята» where the host would let the station in. Suggest a `revoked` flag on `ShiftParticipant`, or that the host lists a revoked active participant with a distinct state.
 - G2. Totals have no push (host D11): the station polls `GET /v1/device/shifts` every 15 s while a shared shift is open; the load/soak plan should include N stations × one list read per 15 s with the totals queries.
 - G3. The spec does not say whether a sign-out (operator change, idle lock) pauses the part; this plan pauses only on «Выйти из смены» and a line change (S10). Owner to confirm.
-- G4. A pause in flight can reach the host after a re-entry (no ordering between leave and entry on the host): the host then shows the station `left` while it works. Suggest the host ignore a leave older than the participant's last `joinedAt` if the station sends its request instant.
+- G4. Narrowed by the host's leave token (`joinedRev`, host `651eb1c06`): a pause of an earlier stay (before a return from `left`) can no longer undo a re-entry. Remaining: a pause in flight while the operator re-enters an ACTIVE part carries the still-current token (such a re-entry stamps none), so if it lands after the entry the host lists the station `left` while it works; its facts are still accepted and the next «Продолжить» takes the slot back while one is free.
 - G5. The spec's offline rule (§12.9) does not apply to a shift that only ever had one participant: the host refuses such a close without a reason (host D7), so the station keeps stage 2a's rule there, offline too.
 - G6. After a station closed its part and left the closed panel, the hub hides the shift (stage 2a's `local_state = 'closed'`), so «waiting for the others» is seen only on the closed panel and in the office. The spec is silent; a hub card for a closed part is a possible follow-up.
 - G7. Spec «K из totals хоста»: the station adds its own codes not yet sent to the others' part by the host (S5), so K never trails «Моя станция»; the host's count wins at the next read.

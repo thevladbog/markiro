@@ -2,6 +2,49 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Implementation status
+
+**IMPLEMENTED** on branch `claude/ms-host` (base `9d3800245`). The task bodies below are kept as
+written; where the final review changed the contract, the decisions (D4, D5, D6, D14, D16) and the
+«Host contract for the other plans» section below are amended and say so. The sibling plans read
+the amended contract.
+
+| Task                                       | Commits                                                 |
+| ------------------------------------------ | ------------------------------------------------------- |
+| 1. Migration `0052` and its schema test    | `8f2408ca9`                                             |
+| 2. Wire types of shared shifts             | `9f248c8b9`                                             |
+| 3. Participant rules and the reason table  | `1271ac753`, `754b483f8`                                |
+| 4. Participant store and shift totals      | `a9c065170`, `5eb721d23`, `7fe514b15`                   |
+| 5. Device shift answers                    | `bc58ba60f`                                             |
+| 6. Entry by the line's capacity            | `87563444f`                                             |
+| 7. Leave route                             | `c99cd2de9`                                             |
+| 8. Part close, automatic close, late parts | `44821e482`                                             |
+| 9. Office shift shape                      | `d4304d765`                                             |
+| 10. Forced close and the missing reason    | `2e2c6dd35`, `9e566cd00`                                |
+| 11. Line limit `maxStations`               | `77e92687f`                                             |
+| 12. Export instant                         | `0fa56e5f3`                                             |
+| 13. Integration scenario and edge cases    | `64184e10b`, `56d812319`, `d5a0090c4`                   |
+| 14. Protocol 7 and build 1.1.0             | `7c00da749`                                             |
+| 15. `AGENTS.md`                            | `76f416de6`, `a1f0fe776` (the guard accepts protocol 7) |
+
+Post-review fixes (whole-branch final review):
+
+- `35020185a` — `GET /v1/device/shifts` carries `totals`/`byDevice` for `active` shifts only (D14
+  amended); a closed list item keeps `participants`, `myState`, `maxStations`. The answer of one
+  shift (enter, leave, a closed shift read back) keeps them for any non-planned status.
+- `fbc5a87d9` — a build without `multi-station-v1` whose own part is `closed` gets
+  `409 shift_status { status: "closed" }` on entry instead of the read-back (D4 amended); the entry
+  match names every variant.
+- `9a9d5b578` — a shared shift's `closed_at` and the export's `stationClosedAt` are the LATEST
+  device close instant, parsed, not the last-received one (D6, D16 amended).
+- `651eb1c06`, `843ef80f8` — optional strict leave body `ShiftLeave { joinedRev }`, column
+  `shift_participants.joined_rev` (migration 0052 edited before release), `joinedRev` in the
+  participant shape; a stale leave is a no-op (D5 amended).
+
+Owner step outside the branch: append `{ "version": "1.1.0", "protocol": 7, "minProtocol": 1 }`
+after the 1.0.0 entry of `tools/standalone-release/releases.json` when releasing (the release tooling
+does not enforce it).
+
 **Goal:** Let several stations and handhelds work one shift of one line at the same time on the
 host of «Markiro Автоном»: entry by the line's capacity, each participant closing its own part,
 the shift closing itself when every participant closed, a forced close from the office, the plan
@@ -95,10 +138,25 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
   `409 conflict` `shift_busy`, which every older station and handheld already shows as «занято». With it,
   a full line is `409 conflict` `shift_line_full` with `details { constraint, maxStations, active }`.
   `shift_busy` is therefore kept (not retired) for clients that do not name the capability.
+  _Amended at implementation (`fbc5a87d9`):_ D4 checks only the joiner's capability, so a shift opened by an
+  old build can be joined by a capable device; when that old opener then sends its `shift_closed`, only ITS
+  part closes and the shift stays active for the others. A device that does not name `multi-station-v1`,
+  whose own part is `closed`, entering an active shift again gets `409 conflict` `shift_status`
+  `{ constraint: "shift_status", status: "closed" }` (every old build shows «закрыта»), not D2's read-back,
+  whose `active` status would send it on producing into a closed part. A capable device keeps the read-back.
 - **D5. Leave is a route, not a fact.** `POST /v1/device/shifts/{id}/leave` (stations and handhelds),
   state-idempotent: `active → left` once; `left`, `closed` or a closed shift answer the shift as it is with no
   write. It is online-only: an offline station keeps its slot until it reaches the host (the station plan drops
   a pending leave when it enters again, so a late leave can never undo a re-entry).
+  _Amended at implementation (`651eb1c06`):_ the leave takes an optional strict body `ShiftLeave { joinedRev }`
+  (fixture `shift-leave.json`; unknown field, wrong type or `{}` → `400 validation_failed`). `joinedRev` is a new
+  participant column (`shift_participants.joined_rev INTEGER CHECK (joined_rev IS NULL OR joined_rev >= 0)`,
+  migration 0052 edited before release, existing rows backfilled with their shift's `rev`) and a new optional
+  field of the participant shape: the revision of the write that took the slot (a first entry or a return from
+  `left` stamps a new one). A token that is not the row's current one (a stale or in-flight leave of an earlier
+  stay) is answered with the shift as it is: `myState` unchanged, no write, no audit row, no revision. A
+  matching token leaves as before; no body keeps the state-based idempotence. Clients echo `joinedRev` of their
+  own row from their last enter answer and read a 200 whose `myState` is still `active` as "already re-entered".
 - **D6. Part close and automatic close.** The existing `shift_closed` fact closes the sender's part. When no
   other participant is `active` or `left`, the same record closes the shift: `closed_by_kind = 'device'`,
   `closed_by` = the last closer, `closed_at` = its instant. The spec's `closed_by_kind = 'devices'` cannot be
@@ -106,6 +164,11 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
   last closer is what the table can hold. A part that leaves the shift open writes `shift.part_closed`; the
   close that closes the shift writes `shift.close` as in stage 2a (one row per event; the participant's own
   close of the shift is visible in `participants[].closedAt`).
+  _Amended at implementation (`9a9d5b578`):_ `closed_at` of the shift is the LATEST close instant among its
+  device-closed parts (this one included), not the closing record's own instant: an offline station's earlier
+  close may arrive last. The instants are parsed (`parse_timestamp`) and the maximum is written with
+  `format_timestamp`, because the device form (`…:05.000Z`) and the host form (`…:05Z`) do not compare as text.
+  `closed_by` stays the last closer. A single-device shift is byte-identical to stage 2a.
 - **D7. Reason rule** (`shift_participants::reason_need`, pinned by `proto/fixtures/shift-close-reason-shared.json`):
   a part that leaves the shift open never needs a reason; the close of a shift that only ever had one
   participant keeps stage 2a's rule exactly (`plannedQtySnapshot` vs `actualQty` of the fact; a missing reason is
@@ -149,11 +212,21 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
 - **D14. Device shift item.** For an open or closed shift: `maxStations`, `participants[]`, `myState` (absent when
   the caller never entered), `totals`, `byDevice[]`. A planned shift carries none of them, and an older host none
   at all (all optional), so existing fixtures stay valid as "a host before protocol 7".
+  _Amended at implementation (`35020185a`):_ in the LIST (`GET /v1/device/shifts`) `totals` and `byDevice` come
+  for an `active` shift only; a closed list item keeps `maxStations`, `participants` and `myState` (a closed
+  shift of the last 30 days would cost a query over its units on every poll of every device). The answer of
+  ONE shift (enter, leave, a closed shift read back) carries them for any non-planned status. Clients treat a
+  closed shift without `totals` as "no live figures" and keep the figures of their last answer that had them;
+  they never show zeros. Participants also carry the optional `joinedRev` (D5 amended).
 - **D15. Office shift.** `participants[]`, `byDevice[]` (left out when empty: planned shifts) and
   `closeReasonMissing` (left out when false) in every answer of a shift, list included.
 - **D16. Export instant.** `stationClosedAt` of the export source (ЧЗ `operation_date_time`) becomes the close
   of the device that closed the shift (`closed_by`), not the first accepted close: in a shared shift the first
   accepted close is an early part. An office-closed shift has none, as before.
+  _Amended at implementation (`9a9d5b578`):_ the instant is the MAX of the shift's accepted close events'
+  instants (`shift_close_events.closed_at`, all in the device's millisecond form, so the text `MAX` is exact)
+  when `closed_by_kind = 'device'`, not the instant of the last-received close; `NULL` for an office-closed
+  shift; single-device shifts are byte-identical.
 - **D17. Joining is not opening.** Joining an open shift passes no license gate (`require_new_shifts` guards the
   opening only, spec «ЛЦ-2 §3.3»); license seats are unchanged.
 - **D18. Out of scope here:** a timeout for `left` participants (§12.6, left open: the office closes), the cloud
@@ -5557,12 +5630,13 @@ facts, all delivered by this plan:
 
 - Routes and bodies: `POST /v1/device/shifts/{id}/enter` with `{ "supports": ["multi-station-v1"] }`
   (handhelds add `handheld-host-v1`), `POST /v1/device/facts` (1–100 records, idempotent by
-  `(device_id, record_id)` and digest), `POST /v1/device/shifts/{id}/leave`, `GET /v1/device/shifts`
-  (the totals poll), `POST /v1/office/shifts/{id}/close`, `GET /v1/office/shifts/{id}`.
+  `(device_id, record_id)` and digest), `POST /v1/device/shifts/{id}/leave` (optional `{ "joinedRev": n }`,
+  the device's own `participants[].joinedRev` from its last enter answer), `GET /v1/device/shifts`
+  (the totals poll; `totals`/`byDevice` for `active` shifts only), `POST /v1/office/shifts/{id}/close`, `GET /v1/office/shifts/{id}`.
 - Write paths to measure (p99): the facts batch (`BEGIN IMMEDIATE`, one revision per batch only when a
   part/shift closes or a late mark is set), the entry/leave (one revision each when they change
   state). Read paths: `GET /v1/device/shifts` runs `shift_totals::SHIFT_TOTALS` and `BY_DEVICE` per open
-  shift (pinned to indexes by `the_totals_search_the_shifts_indexes_and_scan_nothing`).
+  shift (pinned to indexes by `the_totals_search_the_shifts_indexes_and_scan_nothing`). A closed shift in the list costs no totals query.
 - In-process harness: `markiro_host` exposes `shift_participants`, `shift_totals` and the test
   `TestApp` (`host/tests/support/app.rs`, manual clock) plus `tests/support/multi.rs` helpers
   (`station_on`, `handheld_on`, `allow`, `shared`, `enter`, `leave`); a real-socket harness starts
@@ -5614,31 +5688,34 @@ facts, all delivered by this plan:
 
 **3. Type consistency.** `ParticipantState`/`ParticipantClosedBy` (Task 2) are used with the same names in Tasks 3, 4, 8, 10; `EntryDecision::{Reenter, ReadClosed, Rejoin, Join, Busy, LineFull { max_stations, active }}` (Task 3) matches Task 6; `CloseDecision::{ClosePart { closes_shift }, AlreadyClosed}` and `ReasonNeed::{None, Required, Shared}` (Task 3) match Task 8; store functions (Task 4) `state_of`, `active_others`, `open_others`, `count_all`, `join`, `rejoin`, `touch`, `leave`, `close_by_device`, `close_open_by_office`, `mark_late`, `line_slots_in_use`, `list` match their callers in Tasks 6, 7, 8, 9, 10, 11; `shift_totals::{totals, shift_accepted, by_device}` match Tasks 5, 8, 9; `shifts::{line_full, stamp_revision}` (Task 6) match Tasks 7, 8; `read_for`/`with_participation` (Task 5) match Tasks 6, 7; `CloseShift` fields (Task 8) are built in `shift_closed.rs` and read in `close_part`; audit constants `SHIFT_JOIN`, `SHIFT_LEAVE`, `SHIFT_PART_CLOSED`, `SHIFT_FORCE_CLOSED`, `SHIFT_CLOSE_REASON`, `LINE_MAX_STATIONS_CHANGED` match their writers; JSON names (`maxStations`, `myState`, `byDevice`, `boxesClosed`, `asOf`, `closeReasonMissing`, `partClosed`, `reasonMissing`, `notClosed`) are identical in Rust serde, Zod, fixtures, tests and the contract below.
 
-**Spec gaps found (for the owner):** (1) `closed_by_kind = 'devices'` cannot be stored without rebuilding `shifts` — the plan uses `device` + the last closer (D6). (2) Re-entry of a `closed` participant was undefined — read-only (D2). (3) No leave mechanism was specified — an online, state-idempotent route (D5). (4) Old-client compatibility needs a capability, otherwise an old station could join and close "the shift" — `multi-station-v1` (D4). (5) Raising the protocol forces build 1.1.0 because 1.0.0 is recorded with protocol 6 (D12) — owner confirms the number. (6) The office close's audit action changes to `shift.force_closed` (D10) — the audit screen translates both. (7) The office needs a write to supply a missing reason — `PUT …/close-reason`, action `shift.close_reason` not in the spec's list (D7). (8) The export's operation instant took the first accepted close (D16). (9) Totals have no push: devices poll (D11). (10) A shared plan is judged by the host's current plan, not the station's snapshot (D7).
+**Spec gaps found (for the owner):** (1) `closed_by_kind = 'devices'` cannot be stored without rebuilding `shifts` — the plan uses `device` + the last closer (D6). (2) Re-entry of a `closed` participant was undefined — read-only (D2). (3) No leave mechanism was specified — an online, state-idempotent route (D5). (4) Old-client compatibility needs a capability, otherwise an old station could join and close "the shift" — `multi-station-v1` (D4). (5) Raising the protocol forces build 1.1.0 because 1.0.0 is recorded with protocol 6 (D12) — owner confirms the number. (6) The office close's audit action changes to `shift.force_closed` (D10) — the audit screen translates both. (7) The office needs a write to supply a missing reason — `PUT …/close-reason`, action `shift.close_reason` not in the spec's list (D7). (8) The export's operation instant took the first accepted close (D16; settled at implementation: the MAX of the accepted close instants). (9) Totals have no push: devices poll (D11). (10) A shared plan is judged by the host's current plan, not the station's snapshot (D7).
 
 ---
 
 ## Host contract for the other plans
 
-Protocol **7** (`MIN_PROTOCOL_VERSION` 1); build **1.1.0**. Host is released first.
+Protocol **7** (`MIN_PROTOCOL_VERSION` 1, `hello-future.json` at 8); build **1.1.0** (the owner adds
+`{ "version": "1.1.0", "protocol": 7, "minProtocol": 1 }` to `tools/standalone-release/releases.json` when
+releasing). Host is released first. A protocol-5 or protocol-6 device is accepted by a protocol-7 host. This
+section is the contract as finally implemented on `claude/ms-host` (post-review amendments included).
 
 **Capability.** `ShiftEnter.supports` names `"multi-station-v1"` (`markiro_proto::shift_supports::MULTI_STATION`, TS `SHIFT_SUPPORTS.multiStation`). Stations send `["validation-v1","validation-dm-duplicate-v1","multi-station-v1"]` (fixture `shift-enter-multi.json`); handhelds `["handheld-host-v1","multi-station-v1"]` (`shift-enter-handheld-multi.json`).
 
 **Routes.**
 
-| Method and path                           | Kinds                     | Body                                                                                | Answer                      | Errors                                                                                                                                           |
-| ----------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /v1/device/shifts/{id}/enter`       | station, handheld         | `ShiftEnter`                                                                        | `DeviceShift` + `snapshot`  | `409 shift_busy` (no capability), `409 shift_line_full {maxStations, active}`, `409 shift_status`, `409 shift_line`, `409 station_update`, `404` |
-| `POST /v1/device/shifts/{id}/leave`       | station, handheld         | none                                                                                | `DeviceShift` (no snapshot) | `409 shift_not_entered`, `404`                                                                                                                   |
-| `GET /v1/device/shifts`                   | station, handheld         | —                                                                                   | `{ shifts: DeviceShift[] }` | —                                                                                                                                                |
-| `POST /v1/device/facts` (`shift_closed`)  | station, handheld         | unchanged `ShiftClosedFact`                                                         | receipts below              | unchanged codes                                                                                                                                  |
-| `POST /v1/office/shifts/{id}/close`       | office rule               | `{ reason, expectedRev }` (reason 3–500 chars)                                      | `OfficeShift`               | `400 reason`, `404`, `409 stale_revision`, `409 shift_status`                                                                                    |
-| `PUT /v1/office/shifts/{id}/close-reason` | office rule, `planShifts` | `{ reasonCode, expectedRev }` (`shift-close-reason-set.json`)                       | `OfficeShift`               | `400 reasonCode`, `404`, `409 stale_revision`, `409 close_reason_not_missing`                                                                    |
-| `PUT /v1/office/lines/{id}`               | office rule, admin        | `{ name?, archived?, maxStations?, expectedRev }` (`line-update-max-stations.json`) | `OfficeLine`                | `400 maxStations`, `409 line_stations_in_use {active}`, `409 stale_revision`, `409 line_name`                                                    |
+| Method and path                           | Kinds                     | Body                                                                                | Answer                      | Errors                                                                                                                                                                                                                                   |
+| ----------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/device/shifts/{id}/enter`       | station, handheld         | `ShiftEnter`                                                                        | `DeviceShift` + `snapshot`  | `409 shift_busy` (no capability), `409 shift_line_full {maxStations, active}`, `409 shift_status` (also `{status: "closed"}` for a build without the capability whose own part is closed), `409 shift_line`, `409 station_update`, `404` |
+| `POST /v1/device/shifts/{id}/leave`       | station, handheld         | optional strict `ShiftLeave { joinedRev }` (`shift-leave.json`); no body allowed    | `DeviceShift` (no snapshot) | `400 validation_failed` (unknown field, wrong type, `{}`), `409 shift_not_entered`, `404`                                                                                                                                                |
+| `GET /v1/device/shifts`                   | station, handheld         | —                                                                                   | `{ shifts: DeviceShift[] }` | —                                                                                                                                                                                                                                        |
+| `POST /v1/device/facts` (`shift_closed`)  | station, handheld         | unchanged `ShiftClosedFact`                                                         | receipts below              | unchanged codes                                                                                                                                                                                                                          |
+| `POST /v1/office/shifts/{id}/close`       | office rule               | `{ reason, expectedRev }` (reason 3–500 chars)                                      | `OfficeShift`               | `400 reason`, `404`, `409 stale_revision`, `409 shift_status`                                                                                                                                                                            |
+| `PUT /v1/office/shifts/{id}/close-reason` | office rule, `planShifts` | `{ reasonCode, expectedRev }` (`shift-close-reason-set.json`)                       | `OfficeShift`               | `400 reasonCode`, `404`, `409 stale_revision`, `409 close_reason_not_missing`                                                                                                                                                            |
+| `PUT /v1/office/lines/{id}`               | office rule, admin        | `{ name?, archived?, maxStations?, expectedRev }` (`line-update-max-stations.json`) | `OfficeLine`                | `400 maxStations`, `409 line_stations_in_use {active}`, `409 stale_revision`, `409 line_name`                                                                                                                                            |
 
-All refusals are `{ "error": { "code": "conflict", "message", "details": { "constraint", … } } }` (fixtures `error-shift-line-full.json`, `error-line-stations-in-use.json`, `error-shift-busy.json`).
+The leave route is in the license gate's NEVER table (leaving never needs a licence). All refusals are `{ "error": { "code": "conflict", "message", "details": { "constraint", … } } }` (fixtures `error-shift-line-full.json`, `error-line-stations-in-use.json`, `error-shift-busy.json`).
 
-**`DeviceShift` additions** (open or closed shift only; all absent for planned shifts and older hosts; fixture `device-shifts-participants.json`):
+**`DeviceShift` additions** (open or closed shift only; all absent for planned shifts and older hosts; fixture `device-shifts-participants.json`, which holds TWO shifts: an active one with `totals`/`byDevice` and a closed one without them, whose participant row has no `joinedRev` as from an older host). In the LIST `totals` and `byDevice` come for `active` shifts only; the answer of one shift (enter, leave, a closed shift read back) carries them for any non-planned status:
 
 ```json
 {
@@ -5651,6 +5728,7 @@ All refusals are `{ "error": { "code": "conflict", "message", "details": { "cons
       "state": "active|left|closed",
       "firstEnteredAt": "host instant",
       "joinedAt": "host instant",
+      "joinedRev": 12,
       "leftAt": null,
       "closedAt": null,
       "closedBy": "device|office_user|null",
@@ -5666,6 +5744,23 @@ All refusals are `{ "error": { "code": "conflict", "message", "details": { "cons
 }
 ```
 
+`totals`/`byDevice` above: an `active` shift in the list, or any non-planned shift in a one-shift answer. A
+closed list item without them means "no live figures": keep the figures of the last answer that had them and
+never show zeros. `joinedRev` (optional, absent from an older host) is the revision of the write that took
+the slot; a client stores its OWN row's value from every enter answer (and later answers) and echoes it in
+`POST …/leave` as `{ "joinedRev": n }`. A leave whose token is not current answers 200 with the shift as it is
+(`myState` still `active`), writes nothing, takes no revision and no audit row: the client reads that as "my
+leave was stale, I am already back in". Without a token the leave acts on the current state.
+
+**Entry by an old build.** A device that does not name `multi-station-v1`: a new device in an open shift gets
+`shift_busy`; its own part `closed` in an active shift gets `409 shift_status { status: "closed" }`. A shift opened
+by an old build can be joined by a capable device; the old opener's `shift_closed` then closes only its part.
+
+**Close instant.** A shared shift's `closedAt` (office detail and list, the closed shift on devices) is the
+LATEST device close instant among its parts, whatever the arrival order; `closedBy` is the last closer. The
+export source's `stationClosedAt` (ЧЗ `operation_date_time`) is the MAX of the shift's accepted close instants
+(device millisecond form), `null` for an office-closed shift.
+
 `ownerDeviceId` means "opened by" only. `byDevice` lists every participant in `participants` order; the sum of `accepted` equals `totals.accepted`. Totals are not pushed per scan: re-read `GET /v1/device/shifts` (streams wake only on participant or shift changes); show `asOf` when offline.
 
 **`OfficeShift` additions** (fixture `office-shift-participants.json`): `participants` (same shape), `byDevice` (same shape), `closeReasonMissing: true` (absent when false). The force-close warning «Не закрыли: …» = `participants.filter(state != "closed")`; send the loaded `rev`.
@@ -5674,6 +5769,6 @@ All refusals are `{ "error": { "code": "conflict", "message", "details": { "cons
 
 **`shift_closed` receipts** (fixture `facts-response-part-close.json`): `accepted {partClosed: true}` (part closed, shift still open — also for a repeated close of a closed part); `accepted` with no details (shift closed by this record); `accepted {reasonMissing: true}` (shared shift closed without its needed reason); `accepted {alreadyClosed: true}` (shift closed before). A missing reason is refused (`invalid_record`, `data.reasonCode`) only in a shift that ever had one participant, by stage 2a's rule. Clients ask for a reason only when, online, they are the last non-closed participant and `plannedQty` differs from `totals.accepted` (rule fixture `shift-close-reason-shared.json`, cases `{ closesShift, participantsEver, factPlanned, actualQty, hostPlanned, shiftAccepted, need }`); offline they close without one.
 
-**Audit actions** (office audit screen translates): `shift.join {number, rejoined}`, `shift.leave {number}`, `shift.part_closed {number, actualQty, closedBoxCount, reasonCode}`, `shift.close` (device; shared adds `participants, acceptedTotal, reasonMissing`), `shift.force_closed {reason, notClosed: [{deviceId, state}]}` (replaces the office's `shift.close`), `shift.close_reason {reasonCode}`, `line.max_stations_changed {from, to}`.
+**Audit actions** (office audit screen translates): `shift.join {number, rejoined}`, `shift.leave {number}`, `shift.part_closed {number, actualQty, closedBoxCount, reasonCode}`, `shift.close` (device; shared adds `participants, acceptedTotal, reasonMissing`), `shift.force_closed {reason, notClosed: [{deviceId, state}]}` (replaces `shift.close` for EVERY office close, single-device shifts included; old rows keep `shift.close`), `shift.close_reason {reasonCode}`, `line.max_stations_changed {from, to}`.
 
-**Fixture names** (all in `apps/standalone/proto/fixtures/`): `device-shifts-participants.json`, `office-shift-participants.json`, `error-shift-line-full.json`, `error-line-stations-in-use.json`, `shift-enter-multi.json`, `shift-enter-handheld-multi.json`, `shift-close-reason-set.json`, `facts-response-part-close.json`, `shift-close-reason-shared.json`, `line-update-max-stations.json`, `office-line.json` (now with `maxStations`), `hello*.json` (protocol 7), `hello-future.json` (8), `compatibility.json` (client-7 cases).
+**Fixture names** (all in `apps/standalone/proto/fixtures/`, checked against `claude/ms-host`): `device-shifts-participants.json` (two shifts, see above), `shift-leave.json`, `error-shift-busy.json`, `office-shift-participants.json`, `error-shift-line-full.json`, `error-line-stations-in-use.json`, `shift-enter-multi.json`, `shift-enter-handheld-multi.json`, `shift-close-reason-set.json`, `facts-response-part-close.json`, `shift-close-reason-shared.json`, `line-update-max-stations.json`, `office-line.json` (now with `maxStations`), `hello.json`, `hello-replaced.json`, `hello-restored.json` (protocol 7), `hello-future.json` (8), `compatibility.json` (client-7 cases).
