@@ -58,6 +58,8 @@ import { ShiftEditBody, type ShiftEditStatus } from "./ShiftEditor.js";
 import { ShiftExports } from "./ShiftExports.js";
 import { ShiftScans } from "./ShiftScans.js";
 import { PalletCountTag } from "./PalletCountTag.js";
+import { ShiftMarks } from "./ShiftMarks.js";
+import { ShiftStations } from "./ShiftStations.js";
 
 /**
  * The export dialog comes with the domain's renderers and the check of every
@@ -90,6 +92,7 @@ type CardDialog = "export" | "close";
 /** The sections of the drawer, in the order of its tabs. */
 export const DRAWER_TABS = [
   "summary",
+  "stations",
   "boxes",
   "pallets",
   "scans",
@@ -109,6 +112,8 @@ export function drawerTabs(shift: OfficeShift): DrawerTab[] {
   if (shift.status === "planned") return ["summary"];
   const validation = shift.mode === "validation";
   return DRAWER_TABS.filter((tab) => {
+    // The devices of a shared shift (plan 2b); a host before protocol 7 names none.
+    if (tab === "stations") return (shift.participants?.length ?? 0) > 0;
     if (tab === "boxes") return !validation;
     if (tab === "pallets") return shift.palletsEnabled;
     // Box and pallet exceptions only: a validation shift can have none.
@@ -412,6 +417,9 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
             sheets={palletSheets.data}
           />
         )}
+        {active === "stations" && (
+          <ShiftStations key={`stations-${current.id}`} shift={current} at={at} />
+        )}
         {active === "boxes" && (
           <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
         )}
@@ -705,6 +713,7 @@ function ShiftStatusLine({ shift, demo }: { shift: OfficeShift; demo: boolean })
           })}
         </span>
       )}
+      <ShiftMarks shift={shift} />
     </div>
   );
 }

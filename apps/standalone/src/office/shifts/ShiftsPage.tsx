@@ -56,6 +56,7 @@ import { ShiftCreateDrawer } from "./ShiftEditor.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { ShiftSourceLinks } from "./CloudShifts.js";
+import { ShiftMarks } from "./ShiftMarks.js";
 import { shiftOutput } from "./shift-text.js";
 
 /**
@@ -395,6 +396,7 @@ export function ShiftsPage() {
             {shift.lateDataAt !== null && (
               <StatusChip phase="attention" label={t("office.shifts.lateData")} />
             )}
+            <ShiftMarks shift={shift} />
             {shift.closeReasonText !== null && (
               <span className="shift-cell__quiet">
                 {t("office.shifts.closedByOffice", { reason: shift.closeReasonText })}
