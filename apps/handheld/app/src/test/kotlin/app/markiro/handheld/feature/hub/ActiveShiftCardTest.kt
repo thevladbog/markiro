@@ -139,4 +139,10 @@ class ActiveShiftCardTest {
         compose.onNodeWithText("Всего в смене").assertIsDisplayed()
         compose.onNodeWithText("данные на", substring = true).assertDoesNotExist()
     }
+
+    @Test
+    fun aFullLineIsSaidOnTheHubCard() {
+        show(HubActiveShift(shift, 547, shared = true, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2)))
+        compose.onNodeWithText("Линия занята: 2 из 2 — продолжите работу, место вернётся, когда освободится").assertIsDisplayed()
+    }
 }

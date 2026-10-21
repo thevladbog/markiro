@@ -114,6 +114,19 @@ class WorkScreenTest {
     }
 
     @Test
+    fun aFullLineIsSaidOnTheWorkScreenAndWorkGoesOn() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(strip = SharedStrip(mine = 4, total = 50, plan = null, active = 2, maxStations = 2, staleAtMillis = null, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2))),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Линия занята: 2 из 2 — продолжите работу, место вернётся, когда освободится").assertIsDisplayed()
+    }
+
+    @Test
     fun aSharedShiftsMenuClosesOnlyThePart() {
         compose.setContent {
             MarkiroTheme {

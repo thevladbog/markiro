@@ -258,8 +258,9 @@ class HubViewModelTest {
         assertNull(model.state.first { it.dialog == null }.dialog)
     }
 
+    /** Final review I4: a full line never stops local production; the card and the strip say why the device has no slot. */
     @Test
-    fun aFullLineOnContinueShowsTheLineFullDialogAndKeepsTheRunningShift() = runTest {
+    fun aFullLineOnContinueOfTheRunningShiftOpensTheWorkAndSaysTheLineIsFull() = runTest {
         db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
         db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
         val api = api(enter = {
@@ -269,14 +270,19 @@ class HubViewModelTest {
                 ),
             )
         })
-        val model = vm(api, repository = repository(api))
+        val figures = app.markiro.handheld.core.host.ShiftParticipation(
+            shiftId = "s1", maxStations = 2, myState = "left", participantsEver = 3, active = 2, othersOpen = 2, fetchedAt = clock,
+        )
+        val model = vm(api, repository = repository(api), participation = { flowOf(figures) })
         model.state.first { it.activeShiftId == "s1" }
         model.continueShift()
-        assertEquals(
-            app.markiro.handheld.feature.shift.ShiftDialog.LineFull(active = 2, maxStations = 2),
-            model.state.first { it.dialog != null && it.dialog != app.markiro.handheld.feature.shift.ShiftDialog.Entering }.dialog,
-        )
+        assertEquals(HubEvent.Entered("s1"), model.events.first())
+        assertNull(model.state.first { it.dialog == null }.dialog)
         assertEquals("s1", db.deviceConfigDao().get()!!.activeShiftId)
+        assertEquals(
+            app.markiro.handheld.feature.shift.LineFullNotice(active = 2, maxStations = 2),
+            model.state.first { it.activeShift?.lineFull != null }.activeShift!!.lineFull,
+        )
     }
 
     private fun pendingWriteoff(id: String, seq: Long) = app.markiro.handheld.core.storage.WriteoffOutboxEntity(

@@ -224,7 +224,9 @@ class ShiftRepository(
         val entered = try {
             backend.enter(shiftId, ShiftEntryRequest(entryMethod))
         } catch (e: HttpException) {
-            return refusal(EnterStep.ENTER, e)
+            val refused = refusal(EnterStep.ENTER, e)
+            if (refused is EnterResult.LineFull && cached != null && continuesOwnWork(cached)) return continueOnFullLine(cached)
+            return refused
         } catch (_: IOException) {
             return offline(cached)
         }
@@ -304,6 +306,25 @@ class ShiftRepository(
             e.code() in 400..499 -> EnterResult.Refused(step, e.code(), code)
             else -> EnterResult.Unavailable
         }
+    }
+
+    /**
+     * A full line never stops local production (final review I4, as on the station): the shift this device is already working, with its bundle
+     * here, goes on as offline work does. That happens when the device re-entered offline while its host part was left and another device took
+     * the slot. A fresh entry still gets the refusal.
+     */
+    private suspend fun continuesOwnWork(cached: ShiftEntity): Boolean =
+        cached.bundleFetchedAt != null && db.deviceConfigDao().get()?.activeShiftId == cached.id
+
+    /**
+     * Enters offline, then reads the list once (the host just answered, so it is there) so the host's own numbers are kept for the notice
+     * «Линия занята: N из M» (`SharedShiftRules.lineFull`) when the work screen opens; the heartbeat retries the rejoin on every beat and the
+     * notice goes when it gets the slot back. A failed read changes nothing: the next beat brings the numbers.
+     */
+    private suspend fun continueOnFullLine(cached: ShiftEntity): EnterResult {
+        enterOffline(cached)
+        refreshListOwned()
+        return EnterResult.Ok
     }
 
     /** No route to the server: a shift whose bundle is already on the device can still be worked. */

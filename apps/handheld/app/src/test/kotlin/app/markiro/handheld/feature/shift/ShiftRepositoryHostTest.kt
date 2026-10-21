@@ -120,13 +120,43 @@ class ShiftRepositoryHostTest {
 
     @Test
     fun aFullLineIsReportedWithItsNumbersAndNothingIsEntered() = runTest {
-        db.shiftDao().upsert(ShiftEntityFixtures.bundled(id))
-        db.deviceConfigDao().get()!!.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = id)) }
+        // A fresh entry: the shift is not the one this device works.
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled(id).copy(enteredAt = null))
         val script = Script(emptyMap(), mutableMapOf(enterPath() to ArrayDeque(listOf(refusal(fixture("error-shift-line-full.json"))))))
         assertEquals(EnterResult.LineFull(active = 2, maxStations = 2), repository(script).enter(id))
-        // Work already running on this device is not stopped by a refusal of a new entry.
+        assertEquals(null, db.deviceConfigDao().get()!!.activeShiftId)
+        assertEquals(null, db.shiftDao().get(id)!!.enteredAt)
+    }
+
+    /** The host's list with this device's part left and both slots taken by the others. */
+    private fun fullLineList(): String {
+        val root = Json.parseToJsonElement(fixture("device-shifts-participants.json")).jsonObject
+        val first = root.getValue("shifts").jsonArray[0].jsonObject
+        val others = first.getValue("participants").jsonArray.map { JsonObject(it.jsonObject + ("state" to JsonPrimitive("active"))) }
+        val shift = JsonObject(first + ("myState" to JsonPrimitive("left")) + ("participants" to kotlinx.serialization.json.JsonArray(others)))
+        return JsonObject(root + ("shifts" to kotlinx.serialization.json.JsonArray(listOf(shift)))).toString()
+    }
+
+    @Test
+    fun aFullLineOnTheShiftThisDeviceWorksNeverStopsItsWork() = runTest {
+        workingIn()
+        val before = db.shiftDao().get(id)!!
+        val script = Script(
+            mapOf(listPath() to fullLineList()),
+            mutableMapOf(enterPath() to ArrayDeque(listOf(refusal(fixture("error-shift-line-full.json"))))),
+        )
+        // Final review I4: the device re-entered offline while its host part was left and another device took the slot. «Продолжить» works on.
+        assertEquals(EnterResult.Ok, storeRepository(script).enter(id))
         assertEquals(id, db.deviceConfigDao().get()!!.activeShiftId)
-        assertEquals("active", db.shiftDao().get(id)!!.status)
+        val after = db.shiftDao().get(id)!!
+        assertEquals("active", after.status)
+        assertEquals(null, after.leftAt)
+        assertEquals(before.bundleFetchedAt, after.bundleFetchedAt)
+        // The host's numbers are read at once, so the notice is there when the work screen opens.
+        val figures = ShiftParticipationStore(db).get(id)!!
+        assertEquals("left", figures.myState)
+        assertEquals(2, figures.active)
+        assertEquals(2, figures.maxStations)
     }
 
     @Test

@@ -11,7 +11,12 @@ data class SharedStrip(
     val active: Int,
     val maxStations: Int,
     val staleAtMillis: Long?,
+    /** The host has this device's part as `left` and every slot of the line taken: work goes on, the slot comes back when one frees up. */
+    val lineFull: LineFullNotice? = null,
 )
+
+/** «Линия занята: N из M» while this device works a shift whose host part is left (final review I4); the numbers are the host's. */
+data class LineFullNotice(val active: Int, val maxStations: Int)
 
 /**
  * The rules of a shift several devices work, as a handheld can apply them from the host's last answer. Pure and deterministic: the clock is an
@@ -60,6 +65,13 @@ object SharedShiftRules {
             active = p.active,
             maxStations = p.maxStations ?: p.participantsEver.coerceAtLeast(1),
             staleAtMillis = if (p.stale) p.asOf?.let(Iso::parse) ?: p.fetchedAt else null,
+            lineFull = lineFull(p),
         )
+    }
+
+    /** The part is `left` at the host and every slot is taken: the rejoin of each beat is refused until one frees up. Only with the host's own limit. */
+    fun lineFull(p: ShiftParticipation): LineFullNotice? {
+        val max = p.maxStations ?: return null
+        return if (p.myState == "left" && p.active >= max) LineFullNotice(p.active, max) else null
     }
 }

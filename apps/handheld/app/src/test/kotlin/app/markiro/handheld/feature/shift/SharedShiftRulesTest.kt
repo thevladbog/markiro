@@ -131,4 +131,17 @@ class SharedShiftRulesTest {
         assertFalse(SharedShiftRules.reasonRequired(572, 457, shared(), now, lost = 5))
         assertTrue(SharedShiftRules.reasonRequired(572, 457, shared(), now, lost = 0))
     }
+
+    /** Final review I4: a full line never stops local production, and the strip says why this device has no slot. */
+    @Test
+    fun theStripNamesAFullLineOnlyWhileThisDevicesPartIsLeftAndEverySlotIsTaken() {
+        val left = shared().copy(myState = "left", active = 2, maxStations = 2)
+        assertEquals(LineFullNotice(active = 2, maxStations = 2), SharedShiftRules.strip(left, 10, null, 0)!!.lineFull)
+        // A free slot: the next beat enters again, nothing to say.
+        assertNull(SharedShiftRules.strip(left.copy(active = 1), 10, null, 0)!!.lineFull)
+        // The part holds its slot.
+        assertNull(SharedShiftRules.strip(left.copy(myState = "active"), 10, null, 0)!!.lineFull)
+        // A host that does not say its limit: nothing is claimed.
+        assertNull(SharedShiftRules.strip(left.copy(maxStations = null, participantsEver = 3), 10, null, 0)!!.lineFull)
+    }
 }

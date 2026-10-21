@@ -845,6 +845,7 @@
     <string name="work_shift_total_of">%1$s of %2$s</string>
     <string name="work_my_part">My shift</string>
     <string name="work_shared_devices">Working: %1$d of %2$d</string>
+    <string name="work_shared_line_full">The line is full: %1$d of %2$d — keep working, your place comes back when one frees up</string>
     <string name="work_close_part">Close my part</string>
     <string name="close_part_confirm_title">Close your part?</string>
     <string name="close_part_confirm_text_others">Accepted %1$d, errors %2$d, duplicates %3$d. The shift closes when the others close theirs: %4$d.</string>

@@ -99,6 +99,8 @@ data class HubActiveShift(
     val summaryAt: Long? = null,
     val shared: Boolean = false,
     val staleAtMillis: Long? = null,
+    /** The strip's notice of a full line while this device works on without a slot (final review I4). */
+    val lineFull: app.markiro.handheld.feature.shift.LineFullNotice? = null,
 )
 
 enum class HubTile { SHIFT, INVENTORY, WRITEOFF, PALLETS, SETTINGS }
@@ -233,6 +235,7 @@ class HubViewModel(
                         summaryAt = shared?.takeIf { it.acceptedUnits != null }?.at,
                         shared = strip != null,
                         staleAtMillis = strip?.staleAtMillis,
+                        lineFull = strip?.lineFull,
                     )
                 }
             }

@@ -875,6 +875,7 @@
     <string name="work_shift_total_of">%1$s из %2$s</string>
     <string name="work_my_part">Моя смена</string>
     <string name="work_shared_devices">Работают: %1$d из %2$d</string>
+    <string name="work_shared_line_full">Линия занята: %1$d из %2$d — продолжите работу, место вернётся, когда освободится</string>
     <string name="work_close_part">Закрыть свою часть</string>
     <string name="close_part_confirm_title">Закрыть свою часть?</string>
     <string name="close_part_confirm_text_others">Принято %1$d, ошибок %2$d, дублей %3$d. Смена закроется, когда закроют остальные: %4$d.</string>

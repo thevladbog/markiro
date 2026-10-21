@@ -115,7 +115,10 @@ Android tests must also verify its interpretation.
   the row in the commit that keeps the answer), so the slot the rejoin took is freed on the next beat with the new
   token. `StationBackend.leave` has no default: every backend, the production `BackendSelector` included, answers it.
 - A closed part reads back as `myState: closed` and `toShiftDto` maps it to `status = "closed"`; it never opens
-  work again. A full line never stops local production. Receipts `partClosed`/`reasonMissing` are noted by
+  work again. A full line never stops local production: a fresh entry gets `EnterResult.LineFull`, but «Продолжить»
+  of the shift this device already works (its bundle here) enters offline and reads the list once
+  (`ShiftRepository.continueOnFullLine`); the strip and the hub card say «Линия занята: N из M — …»
+  (`SharedShiftRules.lineFull`: part `left` and `active >= maxStations`) until a beat's rejoin gets the slot back. Receipts `partClosed`/`reasonMissing` are noted by
   `HostAckMapper`. Closing a shared part offline sends no reason (the host marks `close_reason_missing`, the
   office supplies it); a single-device shift keeps the hard refusal and the reason.
 - Known gaps: no layout/short-screen tests for the strip (only Robolectric at `w360dp`); nothing was run on a device

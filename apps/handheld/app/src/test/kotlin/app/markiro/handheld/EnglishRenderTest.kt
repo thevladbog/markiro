@@ -440,13 +440,17 @@ class EnglishRenderTest {
         compose.setContent {
             MarkiroTheme {
                 app.markiro.handheld.feature.hub.ActiveShiftCard(
-                    app.markiro.handheld.feature.hub.HubActiveShift(shift, 547, shared = true, staleAtMillis = at), onContinue = {},
+                    app.markiro.handheld.feature.hub.HubActiveShift(
+                        shift, 547, shared = true, staleAtMillis = at, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2),
+                    ),
+                    onContinue = {},
                 )
             }
         }
         compose.onNodeWithText("In the shift total").assertIsDisplayed()
         compose.onNodeWithText("data as of ${app.markiro.handheld.core.util.TimeText.hhmm(at)}").assertIsDisplayed()
         compose.onNodeWithText("On this handheld").assertDoesNotExist()
+        compose.onNodeWithText("The line is full: 2 of 2 — keep working, your place comes back when one frees up").assertIsDisplayed()
         assertNoCyrillic()
     }
 
@@ -459,12 +463,13 @@ class EnglishRenderTest {
                         shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1").copy(productName = "Water 0.5 l", lineName = "Line 2"),
                         last = null, total = 547, plan = 1200, thisTerminal = 427,
                         errors = 0, duplicates = 0, feed = emptyList(), sync = app.markiro.handheld.core.sync.SyncState(), reachable = false, team = null,
-                        strip = app.markiro.handheld.feature.shift.SharedStrip(427, 547, 1200, 2, 3, staleAtMillis = 1_760_000_000_000L),
+                        strip = app.markiro.handheld.feature.shift.SharedStrip(427, 547, 1200, 2, 3, staleAtMillis = 1_760_000_000_000L, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(3, 3)),
                     ),
                     app.markiro.handheld.feature.work.WorkCallbacks(),
                 )
             }
         }
+        compose.onNodeWithText("The line is full: 3 of 3 — keep working, your place comes back when one frees up").assertIsDisplayed()
         assertNoCyrillic()
     }
 
