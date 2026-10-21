@@ -25,7 +25,11 @@ import {
 import { FirstSteps } from "./overview/FirstSteps.js";
 import { KpiStrip } from "./overview/KpiStrip.js";
 import { LineCards } from "./overview/LineCards.js";
-import { deviceSummary } from "./overview/overview-model.js";
+import {
+  deviceSummary,
+  reasonMissingShifts,
+  silentParticipants,
+} from "./overview/overview-model.js";
 import { OutputChart } from "./overview/OutputChart.js";
 import { OfficeIcon } from "./OfficeIcon.js";
 import { civilHeading, zoneClock } from "./overview/overview-time.js";
@@ -107,6 +111,8 @@ export function OfficeOverview() {
         shiftId: card.shift?.id ?? "",
         minutes: card.idleMinutes ?? 0,
       })),
+    silentParticipants: silentParticipants(shifts, data.lines.data ?? [], nowMs),
+    reasonMissing: reasonMissingShifts(shifts),
     nowMs,
     pcNowMs: Date.now(),
     format: (instant) => zoneClock(new Date(instant), zone).hm,

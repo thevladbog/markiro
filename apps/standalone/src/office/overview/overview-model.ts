@@ -1,5 +1,7 @@
 import type { ExportSettings } from "../../host/export-files.js";
-import type { DeviceKind, DeviceRecord, OfficeShift } from "../../host/protocol.js";
+import type { DeviceKind, DeviceRecord, OfficeLine, OfficeShift } from "../../host/protocol.js";
+import { lineMaxStations } from "../../host/requests.js";
+import { isSilent, lastSign, participantsOf } from "../shifts/participation.js";
 import { shiftUnits } from "../shifts/shift-list.js";
 
 /** A device that reported within this long, by the host's clock, counts as on line. */
@@ -88,6 +90,62 @@ export function deviceSummary(devices: readonly DeviceRecord[], nowMs: number): 
       (b.lastSeenAt === null ? -Infinity : Date.parse(b.lastSeenAt)),
   );
   return { byKind, silent };
+}
+
+/** An active participant of a shift of a line of several devices that the host has not heard for too long. */
+export interface SilentParticipant {
+  deviceId: string;
+  name: string;
+  shiftId: string;
+  shiftNumber: string;
+  lineName: string;
+  /** The host's last sign of it (its last hearing, else its entry), an instant. */
+  since: string;
+}
+
+/**
+ * The silent participants of the active shifts, the longest silent first (plan 2b, spec §7: an active
+ * participant silent for more than ten minutes, `PARTICIPANT_SILENT_MS`). Only a line whose limit is above
+ * one counts: on a line of one the silent station is the plain device row's, as before, so a site that
+ * did not turn several devices on sees no new row. `nowMs` is the Overview's clock (the host's time of its
+ * latest read), so the mark moves with the 30-second poll, not by itself.
+ */
+export function silentParticipants(
+  shifts: readonly OfficeShift[],
+  lines: readonly OfficeLine[],
+  nowMs: number,
+): SilentParticipant[] {
+  const found: SilentParticipant[] = [];
+  for (const shift of shifts) {
+    if (shift.status !== "active") continue;
+    const line = lines.find((each) => each.id === shift.lineId);
+    if (line === undefined || lineMaxStations(line) <= 1) continue;
+    for (const each of participantsOf(shift)) {
+      if (!isSilent(each, nowMs)) continue;
+      found.push({
+        deviceId: each.deviceId,
+        name: each.deviceName,
+        shiftId: shift.id,
+        shiftNumber: shift.number,
+        lineName: line.name,
+        since: lastSign(each),
+      });
+    }
+  }
+  return found.sort((a, b) => Date.parse(a.since) - Date.parse(b.since));
+}
+
+/** A closed shift its devices closed without the reason the plan's gap needed. */
+export interface ReasonMissingShift {
+  shiftId: string;
+  number: string;
+}
+
+/** The shifts of the list the host marked `closeReasonMissing`, in the list's order. */
+export function reasonMissingShifts(shifts: readonly OfficeShift[]): ReasonMissingShift[] {
+  return shifts
+    .filter((shift) => shift.status === "closed" && shift.closeReasonMissing === true)
+    .map((shift) => ({ shiftId: shift.id, number: shift.number }));
 }
 
 /** How far this PC's clock is from the host's `hostNow`, in milliseconds (positive: this PC is ahead). */

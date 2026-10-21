@@ -11,13 +11,17 @@ import type {
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import { backupWarnings, warningTone } from "../backups/backup-warnings.js";
 import { stateText, stateTone } from "../info/license/license-view.js";
+import { lineMaxStations } from "../../host/requests.js";
+import { activeParticipants } from "../shifts/participation.js";
 import { shiftUnits } from "../shifts/shift-list.js";
 import { formatWhen } from "../backups/backup-format.js";
 import {
   CLOCK_SKEW_MS,
   clockSkewMs,
   isOnline,
+  type ReasonMissingShift,
   shiftProgress,
+  type SilentParticipant,
   storeNearlyFull,
 } from "./overview-model.js";
 import { recentCivilDays } from "./overview-time.js";
@@ -132,6 +136,11 @@ export interface LineCard {
   etaAt: number | null;
   /** Whole minutes without a fact, for an idle line. */
   idleMinutes: number | null;
+  /**
+   * The devices at work in the shift against the line's limit (plan 2b); `null` for a line of one, a
+   * line with no shift and a host before protocol 7, which name no participants.
+   */
+  stations: { active: number; max: number } | null;
   /** For a line without a shift: the last shift of it closed, and the next one planned. */
   lastClosed: OfficeShift | null;
   nextPlanned: OfficeShift | null;
@@ -177,6 +186,7 @@ function cardFor(
       paceHourly: null,
       etaAt: null,
       idleMinutes: null,
+      stations: null,
       lastClosed,
       nextPlanned,
     };
@@ -195,6 +205,11 @@ function cardFor(
       ? nowMs + Math.round(((progress.planned - progress.done) / paceHourly) * HOUR_MS)
       : null;
   const product = products.find((each) => each.id === shift.productId);
+  const limit = lineMaxStations(line);
+  const stations =
+    shift.participants === undefined || limit <= 1
+      ? null
+      : { active: activeParticipants(shift).length, max: limit };
   return {
     line,
     status: idle ? "idle" : "running",
@@ -206,6 +221,7 @@ function cardFor(
     paceHourly,
     etaAt,
     idleMinutes: idle ? Math.floor(silent / 60_000) : null,
+    stations,
     lastClosed,
     nextPlanned,
   };
@@ -271,7 +287,15 @@ export function shiftDayRow(
 }
 
 export type AttentionKind =
-  "conflicts" | "device_silent" | "backup" | "license" | "clock_skew" | "store_full" | "line_idle";
+  | "conflicts"
+  | "device_silent"
+  | "backup"
+  | "license"
+  | "clock_skew"
+  | "store_full"
+  | "line_idle"
+  | "participant_silent"
+  | "close_reason_missing";
 
 export type AttentionSeverity = "err" | "warn" | "info";
 
@@ -298,6 +322,13 @@ export interface AttentionInput {
   license: OfficeLicense | null;
   settings: ExportSettings | null;
   idleLines: readonly { lineName: string; shiftId: string; minutes: number }[];
+  /**
+   * Active participants of a line of several devices not heard for ten minutes (plan 2b): each is one
+   * row, and takes the place of the plain silent-device row of the same device.
+   */
+  silentParticipants?: readonly SilentParticipant[];
+  /** Closed shifts the host marked as closed without the reason (plan 2b). */
+  reasonMissing?: readonly ReasonMissingShift[];
   /** The host's clock (a device's age is measured by it), and this PC's. */
   nowMs: number;
   pcNowMs: number;
@@ -310,7 +341,7 @@ const SEVERITY_ORDER: Record<AttentionSeverity, number> = { err: 0, warn: 1, inf
 /**
  * What needs a person, most serious first: conflicts waiting, devices not heard for more than
  * ten minutes, the copies, the license, the clocks, the store of files, an
- * idle line (app versions are never compared: the office, stations and handhelds have their own). Built here from what the office reads; a host endpoint may take the rules over.
+ * idle line, a participant of a shared shift silent for ten minutes, a shift closed without its reason (app versions are never compared: the office, stations and handhelds have their own). Built here from what the office reads; a host endpoint may take the rules over.
  */
 export function attentionItems(input: AttentionInput): AttentionItem[] {
   const format = input.format ?? ((instant: string) => formatWhen(instant, null));
@@ -333,9 +364,13 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
       actionKey: "office.overview.attention.conflicts.action",
     });
   }
+  const covered = new Set((input.silentParticipants ?? []).map((each) => each.deviceId));
   if (input.devices !== null) {
     const silent = input.devices
-      .filter((device) => device.revokedAt === null && !isOnline(device, input.nowMs))
+      .filter(
+        (device) =>
+          device.revokedAt === null && !isOnline(device, input.nowMs) && !covered.has(device.id),
+      )
       .sort(
         (a, b) =>
           (a.lastSeenAt === null ? -Infinity : Date.parse(a.lastSeenAt)) -
@@ -369,6 +404,33 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
         actionKey: "office.overview.attention.device.action",
       });
     }
+  }
+  for (const each of input.silentParticipants ?? []) {
+    const span = formatDuration(input.nowMs - Date.parse(each.since));
+    items.push({
+      id: `participant-${each.shiftId}-${each.deviceId}`,
+      kind: "participant_silent",
+      severity: "warn",
+      titleKey: "office.overview.attention.participant.title",
+      titleValues: { name: each.name, unit: span.unit, count: span.count },
+      detailKey: "office.overview.attention.participant.detail",
+      detailValues: { shift: each.shiftNumber, line: each.lineName },
+      to: `/shifts?shift=${encodeURIComponent(each.shiftId)}&tab=stations`,
+      actionKey: "office.overview.attention.participant.action",
+    });
+  }
+  for (const each of input.reasonMissing ?? []) {
+    items.push({
+      id: `close-reason-${each.shiftId}`,
+      kind: "close_reason_missing",
+      severity: "warn",
+      titleKey: "office.overview.attention.closeReason.title",
+      titleValues: { number: each.number },
+      detailKey: "office.overview.attention.closeReason.detail",
+      detailValues: {},
+      to: `/shifts?shift=${encodeURIComponent(each.shiftId)}`,
+      actionKey: "office.overview.attention.closeReason.action",
+    });
   }
   if (input.backups !== null) {
     const warning = backupWarnings(input.backups)[0];
