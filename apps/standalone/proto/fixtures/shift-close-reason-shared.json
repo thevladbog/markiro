@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "closesShift": false,
+      "participantsEver": 2,
+      "factPlanned": 100,
+      "actualQty": 40,
+      "hostPlanned": 100,
+      "shiftAccepted": 40,
+      "need": "none"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 1,
+      "factPlanned": 100,
+      "actualQty": 99,
+      "hostPlanned": 100,
+      "shiftAccepted": 99,
+      "need": "required"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 1,
+      "factPlanned": 100,
+      "actualQty": 100,
+      "hostPlanned": 120,
+      "shiftAccepted": 100,
+      "need": "none"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 1,
+      "factPlanned": null,
+      "actualQty": 5,
+      "hostPlanned": null,
+      "shiftAccepted": 5,
+      "need": "none"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 2,
+      "factPlanned": 100,
+      "actualQty": 40,
+      "hostPlanned": 100,
+      "shiftAccepted": 100,
+      "need": "none"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 2,
+      "factPlanned": 100,
+      "actualQty": 40,
+      "hostPlanned": 100,
+      "shiftAccepted": 99,
+      "need": "shared"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 3,
+      "factPlanned": 100,
+      "actualQty": 0,
+      "hostPlanned": 120,
+      "shiftAccepted": 100,
+      "need": "shared"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 2,
+      "factPlanned": null,
+      "actualQty": 40,
+      "hostPlanned": null,
+      "shiftAccepted": 77,
+      "need": "none"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 2,
+      "factPlanned": 100,
+      "actualQty": 40,
+      "hostPlanned": 100,
+      "shiftAccepted": 101,
+      "need": "shared"
+    },
+    {
+      "closesShift": true,
+      "participantsEver": 1,
+      "factPlanned": 100,
+      "actualQty": 101,
+      "hostPlanned": 100,
+      "shiftAccepted": 101,
+      "need": "required"
+    },
+    {
+      "closesShift": false,
+      "participantsEver": 3,
+      "factPlanned": 100,
+      "actualQty": 0,
+      "hostPlanned": 120,
+      "shiftAccepted": 99,
+      "need": "none"
+    },
+    {
+      "closesShift": false,
+      "participantsEver": 1,
+      "factPlanned": 100,
+      "actualQty": 99,
+      "hostPlanned": 100,
+      "shiftAccepted": 99,
+      "need": "none"
+    }
+  ]
+}

@@ -4,29 +4,31 @@ use markiro_proto::{
     BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, BoxReportRows,
     CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility,
     CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
-    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
-    EmployeeCreate, EmployeeRecord, EmployeeUpdate, ErrorBody, ExceptionKind, FactBatch, FactKind,
-    FactOutcome, FactReceipts, Hello, HelloEnvelope, LabelOutcome, LabelTemplate,
-    LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary, LabelTemplateUpdate,
-    LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox, OfficeLine,
-    OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole, OfficeSession,
-    OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShiftTotals,
+    DeviceShifts, DeviceTotals, DeviceUpdate, EmployeeCreate, EmployeeRecord, EmployeeUpdate,
+    ErrorBody, ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
+    LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
+    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
+    OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
+    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgLogoPut, OrgLogoState,
     OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest,
     PalletClosedFact, PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows,
     PalletSheet, PalletSheetCreate, PalletSheetDefaultUpdate, PalletSheetUpdate, PalletSheets,
-    PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductPhotoPut, ProductPhotoState,
-    ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
-    ShiftClosedFact, ShiftCreate, ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin,
-    ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
-    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, UnitLabelFact,
-    ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
+    ParticipantClosedBy, ParticipantState, PasswordChange, PasswordSet, ProductCreate,
+    ProductGroup, ProductPhotoPut, ProductPhotoState, ProductRecord, ProductStatus, ProductUpdate,
+    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftCloseReasonSet, ShiftClosedFact,
+    ShiftCreate, ShiftEnter, ShiftExportRecord, ShiftExportRows, ShiftLeave, ShiftMode,
+    ShiftOrigin, ShiftParticipant, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock,
+    SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate,
+    TemplatePurpose, UnitLabelFact, ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use markiro_proto::{
-    receipt_codes, shift_supports, BoxRegistryItem, BoxRegistryKind, BoxRegistryPage,
-    DemoDataSummary, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData, PalletBoxRemovedData,
-    PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState, WarehousePalletClosedData,
-    WarehousePalletLabelData, WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
+    receipt_codes, shift_close_reasons, shift_supports, BoxRegistryItem, BoxRegistryKind,
+    BoxRegistryPage, DemoDataSummary, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData,
+    PalletBoxRemovedData, PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState,
+    WarehousePalletClosedData, WarehousePalletLabelData, WarehousePalletOpenedData,
+    MIN_PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -87,7 +89,7 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 7);
+    assert_eq!(hello.protocol, 8);
     assert!(hello.initialized);
 }
 
@@ -105,7 +107,8 @@ fn envelope_decides_compatibility_before_the_rest() {
     assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(6, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(7, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(8, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(8, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(9, &future), Compatibility::HostTooOld);
     // A host of a later protocol that still takes this build's.
     assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
@@ -1967,8 +1970,8 @@ fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
 }
 
 #[test]
-fn this_build_speaks_protocol_six_and_the_current_hello_fixtures_say_so() {
-    assert_eq!(PROTOCOL_VERSION, 6);
+fn this_build_speaks_protocol_seven_and_the_current_hello_fixtures_say_so() {
+    assert_eq!(PROTOCOL_VERSION, 7);
     assert_eq!(MIN_PROTOCOL_VERSION, 1);
     for name in ["hello.json", "hello-restored.json", "hello-replaced.json"] {
         let hello: Hello = serde_json::from_value(fixture(name)).unwrap();
@@ -2258,4 +2261,159 @@ fn a_wizard_may_say_the_address_is_reserved_and_an_older_one_says_nothing() {
     assert_eq!(sent.address_confirmed, Some(true));
     let plain: BootstrapRequest = round_trip("bootstrap-request.json");
     assert_eq!(plain.address_confirmed, None);
+}
+
+#[test]
+fn a_shared_shifts_participants_and_totals_round_trip_and_add_up() {
+    let list: DeviceShifts = round_trip("device-shifts-participants.json");
+    let shift = &list.shifts[0];
+    let participants: &Vec<ShiftParticipant> = shift
+        .participants
+        .as_ref()
+        .expect("an open shift names its participants");
+    let by_device: &Vec<DeviceTotals> = shift.by_device.as_ref().expect("and each device's part");
+    let totals: &DeviceShiftTotals = shift.totals.as_ref().expect("and its totals");
+    assert_eq!(
+        by_device.iter().map(|part| part.accepted).sum::<u64>(),
+        totals.accepted
+    );
+    assert_eq!(
+        participants
+            .iter()
+            .map(|p| &p.device_id)
+            .collect::<Vec<_>>(),
+        by_device
+            .iter()
+            .map(|part| &part.device_id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        (shift.max_stations, shift.my_state),
+        (Some(2), Some(ParticipantState::Active))
+    );
+    assert_eq!(
+        (
+            participants[1].device_kind,
+            participants[1].state,
+            participants[1].closed_by
+        ),
+        (
+            DeviceKind::Handheld,
+            ParticipantState::Closed,
+            Some(ParticipantClosedBy::Device)
+        )
+    );
+    // A closed shift of the list keeps its participation but carries no totals: the host reads
+    // them for an active shift only.
+    let closed = &list.shifts[1];
+    assert_eq!(closed.status, ShiftStatus::Closed);
+    assert_eq!(
+        (closed.max_stations, closed.my_state),
+        (Some(2), Some(ParticipantState::Closed))
+    );
+    assert_eq!(closed.participants.as_ref().map(Vec::len), Some(1));
+    assert!(closed.totals.is_none() && closed.by_device.is_none());
+    // A host before protocol 7 names none of them.
+    let old: DeviceShifts = serde_json::from_value(fixture("device-shifts.json")).unwrap();
+    assert!(old.shifts.iter().all(|shift| shift.participants.is_none()
+        && shift.totals.is_none()
+        && shift.by_device.is_none()
+        && shift.my_state.is_none()
+        && shift.max_stations.is_none()));
+    let office: OfficeShift = round_trip("office-shift-participants.json");
+    // The token a client echoes in its leave; the closed shift's participant of an older host
+    // carries none.
+    assert_eq!(
+        office
+            .participants
+            .iter()
+            .map(|part| part.joined_rev)
+            .collect::<Vec<_>>(),
+        [Some(12), Some(15)]
+    );
+    assert_eq!(participants[0].joined_rev, Some(12));
+    assert!(closed.participants.as_ref().unwrap()[0]
+        .joined_rev
+        .is_none());
+    assert!(office.close_reason_missing);
+    assert_eq!(office.participants.len(), 2);
+    assert_eq!(
+        office
+            .by_device
+            .iter()
+            .map(|part| part.accepted)
+            .sum::<u64>(),
+        office.totals.accepted_units
+    );
+    let legacy: OfficeShift = serde_json::from_value(fixture("office-shift.json")).unwrap();
+    assert!(legacy.participants.is_empty() && legacy.by_device.is_empty());
+    assert!(!legacy.close_reason_missing);
+}
+
+#[test]
+fn the_multi_station_requests_refusals_and_receipts_round_trip() {
+    let enter: ShiftEnter = round_trip("shift-enter-multi.json");
+    assert!(enter
+        .supports
+        .iter()
+        .any(|name| name == shift_supports::MULTI_STATION));
+    let handheld: ShiftEnter = round_trip("shift-enter-handheld-multi.json");
+    assert_eq!(
+        handheld.supports,
+        [shift_supports::HANDHELD_HOST, shift_supports::MULTI_STATION]
+    );
+    let leave: ShiftLeave = round_trip("shift-leave.json");
+    assert_eq!(leave.joined_rev, 12);
+    let mut extra = fixture("shift-leave.json");
+    extra["enteredAt"] = serde_json::json!("2026-10-08T06:00:00Z");
+    assert!(serde_json::from_value::<ShiftLeave>(extra).is_err());
+    assert!(serde_json::from_value::<ShiftLeave>(serde_json::json!({})).is_err());
+    let set: ShiftCloseReasonSet = round_trip("shift-close-reason-set.json");
+    assert!(shift_close_reasons::ALL.contains(&set.reason_code.as_str()));
+    let mut extra = fixture("shift-close-reason-set.json");
+    extra["reason"] = serde_json::json!("words");
+    assert!(serde_json::from_value::<ShiftCloseReasonSet>(extra).is_err());
+    let full: ErrorBody = round_trip("error-shift-line-full.json");
+    let details = full.error.details.clone().expect("details");
+    assert_eq!(
+        (
+            full.error.code.as_str(),
+            details["constraint"].as_str(),
+            details["maxStations"].as_u64(),
+            details["active"].as_u64()
+        ),
+        (codes::CONFLICT, Some("shift_line_full"), Some(2), Some(2))
+    );
+    let receipts: FactReceipts = round_trip("facts-response-part-close.json");
+    assert_eq!(receipts.receipts.len(), 2);
+    for (name, state) in [
+        ("active", ParticipantState::Active),
+        ("left", ParticipantState::Left),
+        ("closed", ParticipantState::Closed),
+    ] {
+        assert_eq!(name.parse::<ParticipantState>().unwrap(), state);
+        assert_eq!(state.as_str(), name);
+    }
+    assert!("paused".parse::<ParticipantState>().is_err());
+    assert_eq!(ParticipantClosedBy::OfficeUser.as_str(), "office_user");
+}
+
+#[test]
+fn a_lines_limit_round_trips_and_an_older_host_means_one() {
+    let line: OfficeLine = round_trip("office-line.json");
+    assert_eq!(line.max_stations, 2);
+    let mut older = fixture("office-line.json");
+    older.as_object_mut().unwrap().remove("maxStations");
+    let older: OfficeLine = serde_json::from_value(older).unwrap();
+    assert_eq!(older.max_stations, 1);
+    let update: LineUpdate = round_trip("line-update-max-stations.json");
+    assert_eq!(update.max_stations, Some(3));
+    let plain: LineUpdate = round_trip("line-update.json");
+    assert_eq!(plain.max_stations, None);
+    let in_use: ErrorBody = round_trip("error-line-stations-in-use.json");
+    let details = in_use.error.details.expect("details");
+    assert_eq!(
+        (details["constraint"].as_str(), details["active"].as_u64()),
+        (Some("line_stations_in_use"), Some(3))
+    );
 }

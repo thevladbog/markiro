@@ -53,13 +53,15 @@ pub const PALLET_FORMATS: [(&str, u32); 1] = [("pallet_xml_gismt_aggregation", 1
 const MIN_LINES: u32 = 2;
 const MAX_LINES: u32 = 1_000_000;
 
-/// The shift, its product's name now and the instant of the station's
-/// close the host accepted (one at most: the first close of an active
-/// shift is the one accepted, any later one `already_closed`).
+/// The shift, its product's name now and the device instant of its close: the LATEST `closedAt`
+/// among the accepted closes of its devices (plan 2b: every part's close is accepted, and an
+/// offline station's earlier close may arrive last) when a device closed the shift; an
+/// office-closed shift has none. Device instants all keep one 24-character form
+/// (`rules::device_instant` validates it), so `MAX` over the text orders them.
 pub const SHIFT_SQL: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_from, \
      s.status, s.production_date, p.name AS product_name, s.pallets_enabled, s.closed_at, \
-     (SELECT e.closed_at FROM shift_close_events e WHERE e.shift_id = s.id \
-      AND e.outcome = 'accepted' ORDER BY e.received_at, e.id LIMIT 1) AS station_closed_at, \
+     (SELECT MAX(e.closed_at) FROM shift_close_events e WHERE e.shift_id = s.id \
+      AND e.outcome = 'accepted' AND s.closed_by_kind = 'device') AS station_closed_at, \
      s.late_data_at \
      FROM shifts s JOIN products p ON p.id = s.product_id WHERE s.id = ?";
 
