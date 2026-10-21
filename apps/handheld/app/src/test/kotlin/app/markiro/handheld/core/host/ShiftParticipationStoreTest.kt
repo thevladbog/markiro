@@ -236,6 +236,70 @@ class ShiftParticipationStoreTest {
     }
 
     @Test
+    fun anOlderReadIsRefusedUpToAMinuteAndTakenFromThere() = runTest {
+        val base = shifts().first { it.status == "active" }
+        val seen = now
+        store().save(withAsOf(base, "2026-10-08T09:41:07Z", 547))
+        // 59.999 s after the stored read was seen: still refused (a 30 s window would take it).
+        now = seen + 59_999
+        store().save(listOf(withAsOf(base, "2026-10-08T09:00:00Z", 100)))
+        assertEquals(547L, store().get(shiftId)!!.accepted)
+        assertEquals(seen, store().get(shiftId)!!.fetchedAt)
+        // 60 s: taken.
+        now = seen + 60_000
+        store().save(listOf(withAsOf(base, "2026-10-08T09:00:00Z", 100)))
+        assertEquals(100L, store().get(shiftId)!!.accepted)
+        assertEquals(seen + 60_000, store().get(shiftId)!!.fetchedAt)
+        // And 60.001 s after that read: taken as well.
+        now += 60_001
+        store().save(listOf(withAsOf(base, "2026-10-08T08:00:00Z", 50)))
+        assertEquals(50L, store().get(shiftId)!!.accepted)
+    }
+
+    @Test
+    fun aReadWithoutAnAsOfChangesNothingWithinTheMinuteAsTheStationsNullCompareDoes() = runTest {
+        val base = shifts().first { it.status == "active" }.copy(totals = null, byDevice = null)
+        val seen = now
+        store().save(listOf(base.copy(participants = listOf(part(me, "active")))))
+        assertNull(store().get(shiftId)!!.asOf)
+        assertEquals(1, store().get(shiftId)!!.participantsEver)
+        now = seen + 59_999
+        store().save(listOf(base.copy(participants = listOf(part(me, "active"), part("x", "active")))))
+        assertEquals(1, store().get(shiftId)!!.participantsEver)
+        now = seen + 60_000
+        store().save(listOf(base.copy(participants = listOf(part(me, "active"), part("x", "active")))))
+        assertEquals(2, store().get(shiftId)!!.participantsEver)
+    }
+
+    @Test
+    fun anActiveShiftListedWithoutFiguresKeepsTheStoredOnesLikeAnyRowThatLacksThem() = runTest {
+        store().save(shifts())
+        val fetched = now
+        now += 20_000
+        val active = shifts().first { it.status == "active" }
+        // Not closed, no totals and no byDevice (the station's COALESCE keeps them for any row that lacks them): the participants are new.
+        store().save(listOf(active.copy(totals = null, byDevice = null, participants = listOf(part(me, "active"), part("x", "active"), part("y", "active")))))
+        val p = checkNotNull(store().get(shiftId))
+        assertEquals(3, p.participantsEver)
+        assertEquals(547L, p.accepted)
+        assertEquals(427L, p.myAccepted)
+        assertEquals(45, p.boxesClosed)
+        assertEquals("2026-10-08T09:41:07Z", p.asOf)
+        assertEquals(fetched, p.fetchedAt)
+    }
+
+    @Test
+    fun aReadWithTotalsButNoPerDeviceRowsKeepsTheStoredShareOfThisDevice() = runTest {
+        store().save(shifts())
+        now += 20_000
+        val active = shifts().first { it.status == "active" }
+        store().save(listOf(active.copy(byDevice = null, totals = active.totals!!.copy(accepted = 560, asOf = "2026-10-08T09:42:00Z"))))
+        val p = checkNotNull(store().get(shiftId))
+        assertEquals(560L, p.accepted)
+        assertEquals(427L, p.myAccepted)
+    }
+
+    @Test
     fun aDatabaseReopenedFromItsFileStillOwesTheLeave() = runTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val name = "owed-leave-reopen.db"

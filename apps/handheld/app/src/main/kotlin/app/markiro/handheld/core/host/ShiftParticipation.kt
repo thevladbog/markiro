@@ -87,19 +87,21 @@ class ShiftParticipationStore(
     fun observe(shiftId: String): Flow<ShiftParticipation?> = db.metaDao().observe(key(shiftId)).map { decode(it) }.distinctUntilChanged()
 
     /**
-     * What to store for [shift] read as [row], over [stored]: the token stays when the answer does not name it; a closed shift without
-     * `totals` (the list carries them for active shifts only, host D14 as amended) takes its participants and state over the stored
-     * figures, which stay with their `fetchedAt` and `stale`; with nothing stored it gives nothing (no figures to show, never zeros).
+     * What to store for [shift] read as [row], over [stored]: the station's `COALESCE` against the stored row, for any status. The token stays when
+     * the answer does not name it; an answer without `totals` (the list carries them for active shifts only, host D14 as amended, and a closed one
+     * never) takes its participants and state over the stored figures, which stay with their `fetchedAt` and `stale`; an answer with `totals` but
+     * without `byDevice` keeps the stored share of this device. A closed shift with nothing stored gives nothing (no figures to show, never zeros).
      */
     private fun merged(shift: DeviceShiftDto, row: ShiftParticipation, stored: ShiftParticipation?): ShiftParticipation? {
         val kept = row.copy(joinedRev = row.joinedRev ?: stored?.joinedRev)
-        if (shift.totals != null || shift.status != "closed") return kept
-        if (stored == null) return null
+        if (stored == null) return if (shift.totals == null && shift.status == "closed") null else kept
+        val share = if (shift.byDevice == null) stored.myAccepted else kept.myAccepted
+        if (shift.totals != null) return kept.copy(myAccepted = share)
         return kept.copy(
             accepted = stored.accepted,
             boxesClosed = stored.boxesClosed,
             pallets = stored.pallets,
-            myAccepted = stored.myAccepted,
+            myAccepted = share,
             asOf = stored.asOf,
             fetchedAt = stored.fetchedAt,
             stale = stored.stale,
