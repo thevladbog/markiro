@@ -10,6 +10,7 @@ pub mod ledger;
 pub mod metrics;
 pub mod procstat;
 pub mod profile;
+pub mod report;
 pub mod rng;
 pub mod sampler;
 pub mod site;
