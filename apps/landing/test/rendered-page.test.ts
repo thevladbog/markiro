@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,9 +10,11 @@ import { DEMO_SOURCE_PATHS } from "../../api/src/modules/demo-requests/demo-requ
 import { findFilmPage } from "../src/content/film";
 import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
+import { testBuildDirectory } from "./build-output";
+
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
-const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
-const enabledOutputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-enabled-render-"));
+const outputDirectory = testBuildDirectory("markiro-landing-render-");
+const enabledOutputDirectory = testBuildDirectory("markiro-landing-enabled-render-");
 let document: Document;
 const documents = new Map<string, Document>();
 const enabledDocuments = new Map<string, Document>();

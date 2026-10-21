@@ -8,12 +8,13 @@ import { auditBuiltSite } from "../src/lib/audit";
 const execFileAsync = promisify(execFile);
 const appRoot = new URL("../", import.meta.url);
 
+// A full build with image processing; the rendered-page suites give theirs the same budget.
 beforeAll(async () => {
   await execFileAsync("node_modules/.bin/astro", ["build"], {
     cwd: appRoot,
     env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" },
   });
-});
+}, 180_000);
 
 it("passes the deterministic audit against the real Astro output", async () => {
   const findings = await auditBuiltSite(new URL("dist/", appRoot).pathname);
