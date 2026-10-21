@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { compileFunction } from "node:vm";
 import test from "node:test";
 import { load } from "js-yaml";
 import {
@@ -13,6 +18,7 @@ import {
   assertDatasetPositiveDatabase,
   assertDatasetPositiveContainer,
 } from "./support/dataset-command-positive-fixture.mjs";
+import * as fixtureSupport from "./support/dataset-command-positive-fixture.mjs";
 
 const id = "dataset_command_positive";
 const text = () => readFileSync(".github/workflows/us-development.yml", "utf8");
@@ -89,7 +95,7 @@ function owner(workflow, others = []) {
 test(
   "positive command has exact additive check-only owner and frozen predecessor bytes",
   { timeout: 5000 },
-  () => {
+  async () => {
     const source = text(),
       workflow = load(source),
       original = structuredClone(workflow);
@@ -122,6 +128,303 @@ test(
     assert.ok(fixture.includes('readFile("apps/api/test/support/us-dataset-snapshot.ts"'));
     assert.equal(fixture.split('docker(["image", "inspect", storeContract.image])').length - 1, 1);
     assert.ok(fixture.includes("{ ...storeContract, id, uid, gid, imageInspection }"));
+    // Exercise the actual sanitizer implementation, with independent recipe
+    // locations, without booting its DB/runtime imports or requiring API dist.
+    const ts = createRequire(resolve("apps/api/package.json"))("typescript");
+    const diagnosticSource = readFileSync(
+      "apps/api/src/deployment/us-dataset-command-runtime.ts",
+      "utf8",
+    );
+    const diagnosticAst = ts.createSourceFile(
+      "diagnostic.ts",
+      diagnosticSource,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const selected = diagnosticAst.statements.filter(
+      (node) =>
+        (ts.isVariableStatement(node) &&
+          node.declarationList.declarations.some((decl) => decl.name.getText() === "categories")) ||
+        (ts.isFunctionDeclaration(node) &&
+          ["ownValue", "usDatasetCommandDiagnostic"].includes(node.name?.text)),
+    );
+    assert.equal(selected.length, 3);
+    const js = ts.transpileModule(selected.map((node) => node.getText()).join("\n"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const diagnose = compileFunction(`${js}; return exports.usDatasetCommandDiagnostic`, [
+      "exports",
+      "usSixMonthDefinition",
+    ])(
+      {},
+      {
+        units: [
+          { key: "chain_0259", stages: ["shipping"] },
+          { key: "request_september", stages: ["request", "package"] },
+        ],
+      },
+    );
+    const unavailable = { status: "unavailable" };
+    const diagnosticCases = [
+      [
+        '{"code":"us_dataset_command_connection_failed","unitKey":"chain_0259","stage":"shipping"}\n',
+        {
+          status: "available",
+          code: "us_dataset_command_connection_failed",
+          unitKey: "chain_0259",
+          stage: "shipping",
+        },
+      ],
+      [
+        '{"code":"us_dataset_command_failed"}\n',
+        { status: "available", code: "us_dataset_command_failed" },
+      ],
+      [
+        '{"code":"postgres://hostile-secret","unitKey":"chain_0260","stage":"shipping"}\n',
+        { status: "available", code: "us_dataset_command_failed" },
+      ],
+      [
+        '{"code":"us_dataset_command_failed","unitKey":"chain_0259","stage":"package"}\n',
+        { status: "available", code: "us_dataset_command_failed" },
+      ],
+      ['{"code":"us_dataset_command_failed","extra":"hostile-secret"}\n', unavailable],
+      ['{"code":42}\n', unavailable],
+      ['{"code":"us_dataset_command_failed","unitKey":"chain_0259"}\n', unavailable],
+      [
+        '{"code":"us_dataset_command_failed","__proto__":{"secret":"hostile-secret"}}\n',
+        unavailable,
+      ],
+      ['{"code":"us_dataset_command_failed"}\n{"code":"hostile-secret"}\n', unavailable],
+      ["hostile-secret SQL error", unavailable],
+      ['{"code":"us_dataset_command_failed"', unavailable],
+      ["x".repeat(4097), unavailable],
+    ];
+    const failures = [];
+    const check = async (action) => {
+      try {
+        await action();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    for (const [stderr, wanted] of diagnosticCases)
+      await check(async () => {
+        const diagnostic = fixtureSupport.datasetPositiveCommandDiagnostic(stderr, diagnose);
+        assert.deepEqual(diagnostic, wanted);
+        assert.doesNotMatch(JSON.stringify(diagnostic), /hostile-secret|SQL error/);
+      });
+    await check(async () => {
+      const [stderr, wanted] = diagnosticCases[0];
+      await assert.rejects(
+        fixtureSupport.runDatasetPositiveChild(
+          process.execPath,
+          [
+            "-e",
+            `process.stdout.write('stdout-hostile-secret');process.stderr.write(${JSON.stringify(stderr)});process.exitCode=1`,
+          ],
+          { diagnose },
+        ),
+        (error) => {
+          assert.equal(error.message, "us_dataset_positive_child_failed");
+          assert.equal(error.evidence.code, 1);
+          assert.equal(error.evidence.timedOut, false);
+          assert.equal(error.evidence.overflow, false);
+          assert.equal(error.evidence.signal, null);
+          assert.ok(error.evidence.elapsedMs >= 0 && error.evidence.elapsedMs < 5000);
+          assert.deepEqual(error.evidence.diagnostic, wanted);
+          assert.doesNotMatch(JSON.stringify(error) + error.stack, /hostile-secret|SQL error/);
+          return true;
+        },
+      );
+    });
+    await check(async () => {
+      await assert.rejects(
+        fixtureSupport.runDatasetPositiveChild(
+          process.execPath,
+          [
+            "-e",
+            'process.stderr.write(\'{"code":"us_dataset_command_failed"}\\n\');process.exitCode=1',
+          ],
+          {
+            diagnose: () => {
+              throw new Error("hostile-secret");
+            },
+          },
+        ),
+        (error) => {
+          assert.equal(error.message, "us_dataset_positive_child_failed");
+          assert.deepEqual(error.evidence.diagnostic, unavailable);
+          assert.doesNotMatch(JSON.stringify(error) + error.stack, /hostile-secret/);
+          return true;
+        },
+      );
+    });
+    await check(async () => {
+      let parsed = 0;
+      await assert.rejects(
+        fixtureSupport.runDatasetPositiveChild(
+          process.execPath,
+          [
+            "-e",
+            'process.stderr.write(\'{"code":"us_dataset_command_failed"}\\n\');setTimeout(()=>process.stderr.write("x".repeat(8192)),100)',
+          ],
+          {
+            limit: 4096,
+            cap: 1000,
+            diagnose: (error) => {
+              parsed++;
+              return diagnose(error);
+            },
+          },
+        ),
+        (error) => {
+          assert.equal(error.message, "us_dataset_positive_child_failed");
+          assert.equal(error.evidence.overflow, true);
+          assert.equal(error.evidence.timedOut, false);
+          assert.deepEqual(error.evidence.diagnostic, unavailable);
+          assert.equal(parsed, 0, "incomplete retained stderr must not be parsed");
+          return true;
+        },
+      );
+    });
+    await check(async () => {
+      for (const [script, options, field] of [
+        ["setTimeout(()=>{},2000)", { cap: 80 }, "timedOut"],
+        [
+          "process.stderr.write('x'.repeat(4097));setTimeout(()=>{},2000)",
+          { limit: 4096 },
+          "overflow",
+        ],
+      ])
+        await assert.rejects(
+          fixtureSupport.runDatasetPositiveChild(process.execPath, ["-e", script], {
+            diagnose,
+            ...options,
+          }),
+          (error) => {
+            assert.equal(error.message, "us_dataset_positive_child_failed");
+            assert.equal(error.evidence[field], true);
+            assert.deepEqual(error.evidence.diagnostic, unavailable);
+            return true;
+          },
+        );
+      await assert.rejects(
+        fixtureSupport.runDatasetPositiveChild(process.execPath, [
+          "-e",
+          "process.stderr.write('hostile-secret');process.exitCode=1",
+        ]),
+        (error) => {
+          assert.equal(error.message, "us_dataset_positive_child_failed");
+          assert.equal(Object.hasOwn(error.evidence, "diagnostic"), false);
+          assert.doesNotMatch(JSON.stringify(error) + error.stack, /hostile-secret/);
+          return true;
+        },
+      );
+      const success = await fixtureSupport.runDatasetPositiveChild(
+        process.execPath,
+        ["-e", "process.stdout.write('original-success')"],
+        { diagnose },
+      );
+      assert.equal(success.stdout, "original-success");
+      assert.equal(success.stderr, "");
+    });
+    await check(async () => {
+      assert.equal(
+        typeof fixtureSupport.retainDatasetPositiveCommandFailure,
+        "function",
+        "nonzero command must retain actual measurements without replacing failure",
+      );
+      const directory = await mkdtemp(join(tmpdir(), "dataset-command-diagnostic-"));
+      const timeFile = join(directory, "time.txt");
+      const time = "\tMaximum resident set size (kbytes): 123456\n\tExit status: 1\n";
+      const counts = { reads: 12, mutations: 3, failures: 1, active: 0, raw: "hostile-secret" };
+      const observer = { counts: () => counts };
+      try {
+        await writeFile(timeFile, time, { mode: 0o600 });
+        const original = Object.assign(new Error("us_dataset_positive_child_failed"), {
+          evidence: { code: 1, elapsedMs: 42 },
+        });
+        assert.equal(
+          await fixtureSupport.retainDatasetPositiveCommandFailure(
+            original,
+            "initialize",
+            timeFile,
+            observer,
+          ),
+          original,
+        );
+        assert.deepEqual(original.command, {
+          mode: "initialize",
+          measurement: { status: "available", maximumRssKiB: 123456, exitStatus: 1 },
+          provider: { status: "available", reads: 12, mutations: 3, failures: 1, active: 0 },
+        });
+        for (const invalid of [
+          "",
+          time.replace("123456", "0"),
+          time.replace("123456", "-1"),
+          time.replace("123456", "Infinity"),
+          time.replace("123456", "9007199254740992"),
+          time.replace("Exit status: 1", "Exit status: 256"),
+          time + time,
+          time + "\tMaximum resident set size (kbytes): hostile-secret\n",
+          time + "\tExit status: -1\n",
+          "hostile-secret".repeat(2000),
+        ]) {
+          await writeFile(timeFile, invalid);
+          const failure = new Error("original");
+          assert.equal(
+            await fixtureSupport.retainDatasetPositiveCommandFailure(
+              failure,
+              "verify",
+              timeFile,
+              observer,
+            ),
+            failure,
+          );
+          assert.deepEqual(failure.command.measurement, unavailable);
+          assert.doesNotMatch(JSON.stringify(failure), /hostile-secret/);
+        }
+        await rm(timeFile);
+        const missing = new Error("original");
+        assert.equal(
+          await fixtureSupport.retainDatasetPositiveCommandFailure(
+            missing,
+            "initialize",
+            timeFile,
+            {
+              counts: () => {
+                throw new Error("hostile-secret");
+              },
+            },
+          ),
+          missing,
+        );
+        assert.deepEqual(missing.command.measurement, unavailable);
+        assert.deepEqual(missing.command.provider, unavailable);
+        const invalidCounts = new Error("original");
+        await fixtureSupport.retainDatasetPositiveCommandFailure(
+          invalidCounts,
+          "initialize",
+          timeFile,
+          { counts: () => ({ ...counts, reads: -1 }) },
+        );
+        assert.deepEqual(invalidCounts.command.provider, unavailable);
+        const frozen = Object.freeze(new Error("original"));
+        assert.equal(
+          await fixtureSupport.retainDatasetPositiveCommandFailure(
+            frozen,
+            "initialize",
+            timeFile,
+            observer,
+          ),
+          frozen,
+        );
+      } finally {
+        await rm(directory, { recursive: true });
+      }
+    });
+    if (failures.length)
+      throw new AggregateError(failures, "nonzero command diagnostic evidence lost");
   },
 );
 test(

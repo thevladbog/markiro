@@ -44,8 +44,88 @@ export function assertDatasetPositiveContainer(item, target) {
   assertDatasetObjectStoreContainer(item, target);
 }
 
+// Test-only access to the real bounded child runner; not a fixture/proof override.
+export { child as runDatasetPositiveChild, commandDiagnostic as datasetPositiveCommandDiagnostic };
+
+function commandDiagnostic(text, diagnose) {
+  try {
+    if (typeof text !== "string" || text.length > 4096 || !/^\{[^\r\n]*\}\n?$/.test(text))
+      return { status: "unavailable" };
+    const parsed = JSON.parse(text);
+    const keys = Object.keys(parsed);
+    if (
+      !keys.includes("code") ||
+      keys.some((key) => !["code", "unitKey", "stage"].includes(key)) ||
+      keys.some((key) => typeof parsed[key] !== "string") ||
+      keys.includes("unitKey") !== keys.includes("stage") ||
+      ![JSON.stringify(parsed), `${JSON.stringify(parsed)}\n`].includes(text)
+    )
+      return { status: "unavailable" };
+    // This is the concrete compiled runtime sanitizer at the actual CLI call site.
+    // Never forward the parsed object, raw text, cause, message or extra fields.
+    const safe = diagnose({ message: parsed.code, unitKey: parsed.unitKey, stage: parsed.stage });
+    return {
+      status: "available",
+      code: safe.code,
+      ...(safe.unitKey && safe.stage ? { unitKey: safe.unitKey, stage: safe.stage } : {}),
+    };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+export async function retainDatasetPositiveCommandFailure(error, mode, timeFile, observer) {
+  try {
+    let measurement = { status: "unavailable" };
+    try {
+      const time = await readFile(timeFile, "utf8");
+      if (time.length <= 16 * 1024) {
+        const rss = [...time.matchAll(/^\tMaximum resident set size \(kbytes\): ([^\r\n]*)$/gm)];
+        const exit = [...time.matchAll(/^\tExit status: ([^\r\n]*)$/gm)];
+        const maximumRssKiB = Number(rss[0]?.[1]),
+          exitStatus = Number(exit[0]?.[1]);
+        if (
+          rss.length === 1 &&
+          exit.length === 1 &&
+          /^\d+$/.test(rss[0][1]) &&
+          /^\d+$/.test(exit[0][1]) &&
+          Number.isSafeInteger(maximumRssKiB) &&
+          maximumRssKiB > 0 &&
+          Number.isSafeInteger(exitStatus) &&
+          exitStatus >= 0 &&
+          exitStatus <= 255
+        )
+          measurement = { status: "available", maximumRssKiB, exitStatus };
+      }
+    } catch {
+      /* Missing/unreadable timing evidence cannot replace the CLI failure. */
+    }
+    let provider = { status: "unavailable" };
+    try {
+      const counts = observer.counts();
+      const keys = ["reads", "mutations", "failures", "active"];
+      const values = keys.map((key) => Object.getOwnPropertyDescriptor(counts, key)?.value);
+      if (values.every((value) => Number.isSafeInteger(value) && value >= 0))
+        provider = {
+          status: "available",
+          ...Object.fromEntries(keys.map((key, index) => [key, values[index]])),
+        };
+    } catch {
+      /* Diagnostic counter failures cannot mask the original error. */
+    }
+    if (["initialize", "verify"].includes(mode)) error.command = { mode, measurement, provider };
+  } catch {
+    /* Even a frozen/hostile error must escape unchanged. */
+  }
+  return error;
+}
+
 // Output is held in memory. Never echo raw Docker/provider errors/output.
-async function child(file, args, { env = process.env, cap = 60_000, limit = 256 * 1024 } = {}) {
+async function child(
+  file,
+  args,
+  { env = process.env, cap = 60_000, limit = 256 * 1024, diagnose } = {},
+) {
   const started = performance.now();
   const process_ = spawn(file, args, { env, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = Buffer.alloc(0),
@@ -120,6 +200,13 @@ async function child(file, args, { env = process.env, cap = 60_000, limit = 256 
         timedOut,
         overflow,
         ...measurement,
+        ...(diagnose
+          ? {
+              diagnostic: overflow
+                ? { status: "unavailable" }
+                : commandDiagnostic(stderr.toString("utf8"), diagnose),
+            }
+          : {}),
       },
     });
   return { stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), ...measurement };
@@ -469,6 +556,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
         [`${prefix}_FORCE_PATH_STYLE`]: "true",
       });
     const { usSixMonthDefinition } = compiled("modules/traceability/demo/us-six-month-definition");
+    const { usDatasetCommandDiagnostic } = compiled("deployment/us-dataset-command-runtime");
     const pairs = [
       "--database-name",
       "markiro_us_dev",
@@ -502,20 +590,25 @@ export async function createDatasetPositiveFixture(env = process.env) {
         invoked.add(mode);
         const timeFile = join(directory, `time-${mode}.txt`);
         await writeFile(timeFile, "", { mode: 0o600, flag: "wx" });
-        const result = await child(
-          "/usr/bin/time",
-          [
-            "-v",
-            "-o",
-            timeFile,
-            process.execPath,
-            resolve(root, "apps/api/dist/main.us-dataset.js"),
-            mode,
-            ...(mode === "initialize" ? ["--confirm-local-synthetic-dataset"] : []),
-            ...pairs,
-          ],
-          { env: environment, cap: 900_000 },
-        );
+        let result;
+        try {
+          result = await child(
+            "/usr/bin/time",
+            [
+              "-v",
+              "-o",
+              timeFile,
+              process.execPath,
+              resolve(root, "apps/api/dist/main.us-dataset.js"),
+              mode,
+              ...(mode === "initialize" ? ["--confirm-local-synthetic-dataset"] : []),
+              ...pairs,
+            ],
+            { env: environment, cap: 900_000, diagnose: usDatasetCommandDiagnostic },
+          );
+        } catch (error) {
+          throw await retainDatasetPositiveCommandFailure(error, mode, timeFile, observer);
+        }
         const time = await readFile(timeFile, "utf8");
         const maximumRssKiB = Number(
           time.match(/Maximum resident set size \(kbytes\): (\d+)/)?.[1],
