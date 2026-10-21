@@ -196,6 +196,8 @@ export interface TaskFormInputs {
  * duplicate print is its own policy (plan РЕЖ part B: none when the host
  * sends none); the standalone neither reprocesses earlier codes nor issues
  * SSCCs under a counterparty's prefix yet.
+ * The blank's closing rule is the autonomous product's own (`closingRule: "each_part"`):
+ * the cloud's renderer is shared, and says the opener closes.
  */
 export function taskFormData(
   inputs: TaskFormInputs,
@@ -230,6 +232,7 @@ export function taskFormData(
     validationPrintMode: duplicate === null ? "none" : "duplicate_dm",
     validationPrintVerification: duplicate?.verification ?? "none",
     allowPreviouslyAcceptedCodes: false,
+    closingRule: "each_part",
     generatedAt,
   };
 }

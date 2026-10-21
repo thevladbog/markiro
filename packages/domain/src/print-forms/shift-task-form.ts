@@ -49,6 +49,14 @@ export interface ShiftTaskFormData {
   validationPrintMode: "none" | "duplicate_dm";
   validationPrintVerification: "none" | "required";
   allowPreviouslyAcceptedCodes: boolean;
+  /**
+   * Who closes the shift, for the rule printed on the blank. `"opener"` (left out): the station that
+   * opened it, a second one only through the admin — the cloud's rule (`stationClosePolicy`).
+   * `"each_part"`: «Markiro Автоном» with several devices in one shift — each closes its own part and
+   * the shift closes with the last, or from the office. The renderer is shared with the cloud, so the
+   * default keeps every byte of the cloud's blank.
+   */
+  closingRule?: "opener" | "each_part";
   generatedAt: Date;
 }
 
@@ -201,7 +209,9 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
         ]
       : []),
     "<li>Дата производства держится до следующего изменения; в одном коробе одна дата.</li>",
-    "<li>Смену закрывает станция, которая её открыла. Вторая станция — только через админку.</li>",
+    data.closingRule === "each_part"
+      ? "<li>Каждая станция закрывает свою часть; смена закрывается, когда закрыли все, или из офиса.</li>"
+      : "<li>Смену закрывает станция, которая её открыла. Вторая станция — только через админку.</li>",
     "<li>Чтобы поставить работу на паузу, выйдите из смены: она останется активной.</li>",
   ].join("");
 
