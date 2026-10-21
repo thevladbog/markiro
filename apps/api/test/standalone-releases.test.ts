@@ -36,13 +36,23 @@ describe("standalone releases (spec 2026-10-20 §5)", () => {
   let service: StandaloneReleasesService;
 
   function build(runtime: StandaloneReleasesRuntime | null, keyset = KEYSET) {
+    // Rows recorded inside a transaction land only if it commits, as in Postgres.
+    let pending: PlatformAuditEvent[] | null = null;
     const db = {
-      transaction: async <T>(work: (tx: unknown) => Promise<T>) =>
-        work({ execute: () => Promise.resolve((locks += 1)) }),
+      transaction: async <T>(work: (tx: unknown) => Promise<T>) => {
+        pending = [];
+        try {
+          const result = await work({ execute: () => Promise.resolve((locks += 1)) });
+          events.push(...pending);
+          return result;
+        } finally {
+          pending = null;
+        }
+      },
     };
     const audit = {
       record: (_tx: unknown, event: PlatformAuditEvent) => {
-        events.push(event);
+        (pending ?? events).push(event);
         return Promise.resolve();
       },
     };
@@ -108,7 +118,6 @@ describe("standalone releases (spec 2026-10-20 §5)", () => {
       status: 503,
       code: "standalone_releases_not_configured",
     });
-    expect(await bare.latestVersion("stable")).toBeNull();
   });
 
   it("hands out presigned PUTs into the version's own folder and audits who asked", async () => {
@@ -445,7 +454,7 @@ describe("standalone releases (spec 2026-10-20 §5)", () => {
         requestId: null,
       },
     ]);
-    expect(await service.latestVersion("stable")).toBe("0.4.0");
+    expect(await standaloneLatestBuildSource(store).latestPublishedVersion()).toBe("0.4.0");
   });
 
   it("rolls the pointer back to an earlier version and leaves every version's files", async () => {
@@ -542,6 +551,30 @@ describe("standalone releases (spec 2026-10-20 §5)", () => {
     const list = await service.list();
     if (!list.configured) throw new Error("configured");
     expect(list.channels[0]).toMatchObject({ latest: null, latestReadable: false });
+  });
+
+  it("leaves no registration or pointer move without its audit row, nor a row without it", async () => {
+    const installer = Buffer.from("MZ installer bytes");
+    upload("0.4.0", installer, manifest("0.4.0", installer));
+    const put = store.put.bind(store);
+    store.put = () => Promise.reject(new Error("socket hang up"));
+    expect(await refusal(service.register(admin, { channel: "stable", version: "0.4.0" }))).toEqual(
+      { status: 503, code: "standalone_releases_storage_unavailable" },
+    );
+    expect(events).toEqual([]);
+    expect(store.objects.has("standalone/stable/0.4.0/release.json")).toBe(false);
+    // The uploaded files stay for a retry: the refusal was the storage's, not the release's.
+    expect(store.removed).toEqual([]);
+
+    store.put = put;
+    await service.register(admin, { channel: "stable", version: "0.4.0" });
+    events.length = 0;
+    store.put = () => Promise.reject(new Error("socket hang up"));
+    expect(await refusal(service.setLatest(admin, "stable", "0.4.0"))).toEqual({
+      status: 503,
+      code: "standalone_releases_storage_unavailable",
+    });
+    expect(events).toEqual([]);
   });
 
   it("turns a storage failure into one retryable answer", async () => {

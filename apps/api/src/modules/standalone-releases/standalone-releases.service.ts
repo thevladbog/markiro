@@ -189,17 +189,16 @@ export class StandaloneReleasesService {
       throw standaloneReleaseError("standalone_release_version_not_newer");
     const installer = standaloneInstallerFileName(version);
     const manifest = standaloneManifestFileName(version);
-    const [installerUrl, manifestUrl] = await this.#storage(() =>
-      Promise.all(
-        [installer, manifest].map((name) =>
-          store.presignPut(
-            standaloneReleaseObjectKey(channel, version, name),
-            UPLOAD_CONTENT_TYPE,
-            UPLOAD_EXPIRES_SECONDS,
-          ),
+    const presign = (name: string) =>
+      this.#storage(() =>
+        store.presignPut(
+          standaloneReleaseObjectKey(channel, version, name),
+          UPLOAD_CONTENT_TYPE,
+          UPLOAD_EXPIRES_SECONDS,
         ),
-      ),
-    );
+      );
+    const installerUrl = await presign(installer);
+    const manifestUrl = await presign(manifest);
     const expiresAt = new Date(this.now().getTime() + UPLOAD_EXPIRES_SECONDS * 1000);
     await this.db.transaction((tx) =>
       this.audit.record(tx, {
@@ -215,8 +214,8 @@ export class StandaloneReleasesService {
       channel,
       version,
       expiresAt: expiresAt.toISOString(),
-      installer: { name: installer, uploadUrl: installerUrl!, contentType: UPLOAD_CONTENT_TYPE },
-      manifest: { name: manifest, uploadUrl: manifestUrl!, contentType: UPLOAD_CONTENT_TYPE },
+      installer: { name: installer, uploadUrl: installerUrl, contentType: UPLOAD_CONTENT_TYPE },
+      manifest: { name: manifest, uploadUrl: manifestUrl, contentType: UPLOAD_CONTENT_TYPE },
     };
   }
 
@@ -237,12 +236,8 @@ export class StandaloneReleasesService {
         await this.#lock(tx, channel);
         const result = await this.#verify(channel, version);
         if (result.ok && result.outcome === "registered") {
-          await runtime.store.put(
-            standaloneReleaseObjectKey(channel, version, RECORD_NAME),
-            Buffer.from(`${JSON.stringify(result.record)}\n`),
-            "application/json",
-            "public, max-age=31536000, immutable",
-          );
+          // The audit row first: if the record cannot be written, the throw rolls
+          // it back, and a registration is never left without its trace.
           await this.audit.record(tx, {
             ...this.#auditBase(principal, channel, version),
             action: "standalone.release.register",
@@ -259,6 +254,12 @@ export class StandaloneReleasesService {
               sourceSha: result.record.sourceSha,
             },
           });
+          await runtime.store.put(
+            standaloneReleaseObjectKey(channel, version, RECORD_NAME),
+            Buffer.from(`${JSON.stringify(result.record)}\n`),
+            "application/json",
+            "public, max-age=31536000, immutable",
+          );
         }
         if (!result.ok) {
           await this.audit.record(tx, {
@@ -316,12 +317,6 @@ export class StandaloneReleasesService {
         }
         if (previous === version) return { ok: true as const };
         const pointer = this.#pointer(record);
-        await runtime.store.put(
-          standaloneLatestObjectKey(channel),
-          Buffer.from(`${JSON.stringify(pointer, null, 2)}\n`),
-          "application/json",
-          "no-cache",
-        );
         await this.audit.record(tx, {
           ...this.#auditBase(principal, channel, version),
           action: "standalone.release.latest.set",
@@ -338,17 +333,18 @@ export class StandaloneReleasesService {
             installerSha256: record.installer.sha256,
           },
         });
+        // After the audit row, as in `register`: a failed write rolls the row back.
+        await runtime.store.put(
+          standaloneLatestObjectKey(channel),
+          Buffer.from(`${JSON.stringify(pointer, null, 2)}\n`),
+          "application/json",
+          "no-cache",
+        );
         return { ok: true as const };
       }),
     );
     if (!outcome.ok) throw standaloneReleaseError(outcome.code);
     return this.#storage(() => this.#channelView(channel));
-  }
-
-  /** The version `standalone/<channel>/latest.json` points at, for the diagnostics overview. */
-  async latestVersion(channel: StandaloneReleaseChannel): Promise<string | null> {
-    if (!this.runtime) return null;
-    return (await this.#readLatest(channel)).pointer?.version ?? null;
   }
 
   async #verify(channel: StandaloneReleaseChannel, version: string): Promise<Verified> {
