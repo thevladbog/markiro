@@ -57,6 +57,7 @@ import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { ShiftSourceLinks } from "./CloudShifts.js";
 import { ShiftMarks } from "./ShiftMarks.js";
+import { isSharedShift } from "./participation.js";
 import { shiftOutput } from "./shift-text.js";
 
 /**
@@ -476,10 +477,12 @@ export function ShiftsPage() {
           });
         }
         if (canPlan && shift.status === "active") {
+          // A shift several devices entered is closed whole: the office says so.
+          const whole = isSharedShift(shift);
           items.push({
             key: "close",
-            label: t("office.shifts.close"),
-            ariaLabel: t("office.shifts.closeNamed", named),
+            label: t(whole ? "office.shifts.closeAll" : "office.shifts.close"),
+            ariaLabel: t(whole ? "office.shifts.closeAllNamed" : "office.shifts.closeNamed", named),
             icon: "stop",
             destructive: true,
             onSelect: () => open({ kind: "close", shift }),

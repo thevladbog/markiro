@@ -59,6 +59,7 @@ import { ShiftExports } from "./ShiftExports.js";
 import { ShiftScans } from "./ShiftScans.js";
 import { PalletCountTag } from "./PalletCountTag.js";
 import { ShiftMarks } from "./ShiftMarks.js";
+import { isSharedShift } from "./participation.js";
 import { ShiftStations } from "./ShiftStations.js";
 
 /**
@@ -372,7 +373,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         )}
         {canPlan && current.status === "active" && (
           <Button variant="secondary" onClick={() => setDialog("close")}>
-            {t("office.shifts.close")}
+            {t(isSharedShift(current) ? "office.shifts.closeAll" : "office.shifts.close")}
           </Button>
         )}
         {current.status !== "closed" && (

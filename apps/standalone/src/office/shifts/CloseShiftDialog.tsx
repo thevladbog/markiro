@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Textarea } from "@markiro/ui";
+import { Alert, Textarea } from "@markiro/ui";
 
 import type { OfficeShift } from "../../host/protocol.js";
 import { shiftClose } from "../../host/requests.js";
@@ -13,6 +13,7 @@ import type { AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { StaleAlert, WriteFailureAlert } from "../page-state.js";
+import { isSharedShift, notClosedParticipants } from "./participation.js";
 import { shiftWriteFailure } from "./shift-form.js";
 import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
 
@@ -43,6 +44,11 @@ export interface CloseShiftDialogProps {
  * characters, counted as the host counts them, with no line break or other
  * control character: the rule says so under the field), over the revision the
  * dialog was opened on: for a station that died or a shift nobody will finish.
+ * A shift several devices entered is closed «целиком» (plan 2b): every device that
+ * has not closed its part is closed with it. The dialog says so and, whenever a
+ * participant is still open, names them («Не закрыли: …») from the shift it holds;
+ * the loaded revision makes that list exact, since every participant change moves
+ * the shift's revision and a close over an old one is refused as stale.
  */
 export function CloseShiftDialog({
   shift,
@@ -58,6 +64,8 @@ export function CloseShiftDialog({
   // be refused the same way, so «Закрыть смену» stays off and the alert offers to load the list.
   const [outdatedMessage, setOutdatedMessage] = useState<string | null>(null);
   const rereadIfLost = useRereadShiftsOnLostAnswer();
+  const shared = isSharedShift(shift);
+  const open = notClosedParticipants(shift);
   const close = useOfficeMutation((api, token, reason: string) =>
     api.closeShift(token, shift.id, shiftClose(reason, shift.rev)),
   );
@@ -102,8 +110,10 @@ export function CloseShiftDialog({
   const message = errors.reason?.message;
   return (
     <FormDialog
-      title={t("office.shifts.closeTitle", { number: shift.number })}
-      submitLabel={t("office.shifts.closeSubmit")}
+      title={t(shared ? "office.shifts.closeAllTitle" : "office.shifts.closeTitle", {
+        number: shift.number,
+      })}
+      submitLabel={t(shared ? "office.shifts.closeAllSubmit" : "office.shifts.closeSubmit")}
       submitVariant="destructive"
       submitDisabled={outdatedMessage !== null}
       onSubmit={submit}
@@ -116,7 +126,21 @@ export function CloseShiftDialog({
         )
       }
     >
-      <p>{t("office.shifts.closeIntro")}</p>
+      <p>{t(shared ? "office.shifts.closeAllIntro" : "office.shifts.closeIntro")}</p>
+      {open.length > 0 && (
+        <Alert tone="warn">
+          {t("office.shifts.notClosed", {
+            devices: open
+              .map((each) =>
+                t("office.shifts.notClosedItem", {
+                  name: each.deviceName,
+                  state: t(`office.shifts.notClosedState.${each.state}`),
+                }),
+              )
+              .join(", "),
+          })}
+        </Alert>
+      )}
       <Textarea
         label={t("office.shifts.fields.reason")}
         rows={4}

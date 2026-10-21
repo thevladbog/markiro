@@ -2,7 +2,15 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { TECHNOLOGIST } from "./support/office.js";
-import { ACTIVE, openShifts, shiftsSession, SHARED, STATION_ID } from "./support/shifts.js";
+import {
+  ACTIVE,
+  openShifts,
+  PARTICIPANT_A,
+  PARTICIPANT_B,
+  shiftsSession,
+  SHARED,
+  STATION_ID,
+} from "./support/shifts.js";
 
 async function openTotals(session: ReturnType<typeof shiftsSession>): Promise<HTMLElement> {
   await openShifts(session);
@@ -37,6 +45,18 @@ describe("a shift's totals with each device's part (plan 2b)", () => {
   it("names the devices from the participants, so a technologist sees names too", async () => {
     const dialog = await openTotals(shiftsSession([SHARED], TECHNOLOGIST));
     expect(Object.keys(breakdown(dialog))).toEqual(["Станция линии 1", "ТСД 1"]);
+  });
+
+  it("falls back to the device list's name when a participant's own name is empty", async () => {
+    const unnamed = {
+      ...SHARED,
+      participants: [PARTICIPANT_A, { ...PARTICIPANT_B, deviceName: "" }],
+    };
+    const dialog = await openTotals(shiftsSession([unnamed]));
+    const terms = Object.keys(breakdown(dialog));
+    expect(terms[0]).toBe("Станция линии 1");
+    expect(terms[1]).not.toBe("");
+    expect(terms).toHaveLength(2);
   });
 
   it("gives a validation shift only the codes", async () => {

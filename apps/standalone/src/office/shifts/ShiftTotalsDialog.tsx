@@ -116,7 +116,7 @@ function DeviceBreakdown({
   const { t } = useTranslation();
   const titleId = useId();
   const named = (id: string) =>
-    shift.participants?.find((each) => each.deviceId === id)?.deviceName ??
+    shift.participants?.find((each) => each.deviceId === id)?.deviceName ||
     deviceLabel(id, devices, t);
   const value = (part: DeviceTotals) =>
     shift.mode === "validation"
