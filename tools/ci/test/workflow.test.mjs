@@ -31,7 +31,23 @@ const heavyJobs = [
   ["standalone-rust", "standalone_rust"],
   ["standalone-windows-build", "standalone_windows_build"],
   ["standalone-app-tests", "standalone_app_tests"],
+  ["landing-browser", "landing_browser"],
+  ["landing-lighthouse", "landing_lighthouse"],
+  ["saas-admin-browser", "saas_admin_browser"],
 ];
+// Classified, but outside ci-required (owner decision 2026-10-21).
+const optionalJobs = [
+  ["cabinet-galleries", "cabinet_station_galleries"],
+  ["station-galleries", "cabinet_station_galleries"],
+];
+const classifierOutputs = [...heavyJobs.map(([, name]) => name), "cabinet_station_galleries"];
+// Jobs that consume another job's artifact besides the classifier's outputs.
+const extraNeeds = {
+  "landing-browser": ["landing-build"],
+  "landing-lighthouse": ["landing-build"],
+};
+// A step that starts a tools/production-browser harness (not just installs it).
+const harnessStep = /exec playwright test|--ignore-workspace test:|pnpm test:[\w:-]+:browser/;
 
 function stepByName(job, name) {
   return job.steps.find((step) => step.name === name);
@@ -65,7 +81,7 @@ test("classifier uses exact pull-request and main-push diffs and exposes every p
   assert.match(classifyStep.run, /affected\.mjs --stdin-zero/);
   assert.match(classifyStep.run, /affected\.mjs --full/);
 
-  for (const output of ["full", ...heavyJobs.map(([, name]) => name)]) {
+  for (const output of ["full", ...classifierOutputs]) {
     assert.equal(classifier.outputs[output], `\${{ steps.affected.outputs.${output} }}`, output);
   }
 });
@@ -101,7 +117,7 @@ test("classifier falls back to a full run when pull-request diff generation fail
   assert.equal(child.status, 0, child.stderr);
   assert.equal(
     readFileSync(outputPath, "utf8"),
-    ["full=true", ...heavyJobs.map(([, name]) => `${name}=true`), ""].join("\n"),
+    ["full=true", ...classifierOutputs.map((name) => `${name}=true`), ""].join("\n"),
   );
 });
 
@@ -138,7 +154,7 @@ test("classifier applies the changed-file policy to an existing main push", (t) 
   assert.equal(child.status, 0, child.stderr);
   assert.equal(
     readFileSync(outputPath, "utf8"),
-    ["full=false", ...heavyJobs.map(([, name]) => `${name}=false`), ""].join("\n"),
+    ["full=false", ...classifierOutputs.map((name) => `${name}=false`), ""].join("\n"),
   );
 });
 
@@ -166,26 +182,41 @@ test("classifier fails closed for a push without a usable previous commit", (t) 
   assert.equal(child.status, 0, child.stderr);
   assert.equal(
     readFileSync(outputPath, "utf8"),
-    ["full=true", ...heavyJobs.map(([, name]) => `${name}=true`), ""].join("\n"),
+    ["full=true", ...classifierOutputs.map((name) => `${name}=true`), ""].join("\n"),
   );
 });
 
-test("every heavy job keeps its id and is gated by its classifier output", () => {
-  for (const [jobId, outputName] of heavyJobs) {
+test("every heavy and optional job keeps its id and is gated by its classifier output", () => {
+  for (const [jobId, outputName] of [...heavyJobs, ...optionalJobs]) {
     const job = workflow.jobs[jobId];
     assert.ok(job, `workflow must retain ${jobId}`);
-    assert.equal(job.needs, "classify-changes", jobId);
+    const extra = extraNeeds[jobId];
+    assert.deepEqual(job.needs, extra ? ["classify-changes", ...extra] : "classify-changes", jobId);
     assert.equal(job.if, `needs.classify-changes.outputs.${outputName} == 'true'`, jobId);
   }
 });
 
-test("production bundle retains both contract suites owning the deployment workflow", () => {
+test("production bundle keeps the contract suite the platform release re-runs", () => {
   const job = workflow.jobs["production-bundle"];
-  for (const command of ["pnpm test:production-bundle:contract", "pnpm test:yandex-runtime"])
-    assert.ok(
-      job.steps.some((step) => step.run === command),
-      `missing deployment gate: ${command}`,
-    );
+  assert.ok(job.steps.some((step) => step.run === "pnpm test:production-bundle:contract"));
+  const release = readFileSync(".github/workflows/release-platform-images.yml", "utf8");
+  assert.match(release, /pnpm test:production-bundle:contract/);
+});
+
+test("CI no longer builds or smokes the retired Yandex production contour", () => {
+  // Owner decision 2026-10-21: production runs on Timeweb (SERVER_PROFILE=platform-only).
+  // deploy-production.yml and release-images.yml keep their own checks.
+  const source = readFileSync(".github/workflows/ci.yml", "utf8");
+  for (const retired of [
+    "test:yandex-runtime",
+    "test:production-docs:browser",
+    "deploy/production/edge.Dockerfile",
+    "deploy/production/smoke.mjs",
+    "deploy/production/preflight.mjs",
+    "compose.production.yml",
+    "markiro-production",
+  ])
+    assert.ok(!source.includes(retired), retired);
 });
 
 test("inventory database suites receive the migrated CI database through Turbo", () => {
@@ -286,11 +317,12 @@ test("National Catalog storage checks run after private SeaweedFS is healthy", (
   );
 });
 
-test("ci-required always evaluates the classifier and every heavy job", () => {
+test("ci-required always evaluates the classifier and every heavy job, never an optional one", () => {
   const gate = workflow.jobs["ci-required"];
   assert.ok(gate, "workflow must define ci-required");
   assert.equal(gate.if, "always()");
   assert.deepEqual(gate.needs, ["classify-changes", ...heavyJobs.map(([jobId]) => jobId)]);
+  for (const [jobId] of optionalJobs) assert.ok(!gate.needs.includes(jobId), jobId);
   assert.equal(gate.outputs.result, "${{ steps.result.outputs.result }}");
 
   const resultStep = stepByName(gate, "Verify required CI results");
@@ -300,8 +332,8 @@ test("ci-required always evaluates the classifier and every heavy job", () => {
   assert.equal(resultStep.run, "node tools/ci/required-results.mjs --needs-env CI_NEEDS_JSON");
 });
 
-test("National Catalog fixtures use existing Chromium job and preserve portable failure evidence", () => {
-  const job = workflow.jobs["production-bundle"];
+test("National Catalog fixtures run in the cabinet galleries and preserve portable failure evidence", () => {
+  const job = workflow.jobs["cabinet-galleries"];
   const browser = stepByName(job, "Verify National Catalog cabinet fixtures");
   assert.equal(
     browser.run,
@@ -326,20 +358,17 @@ test("National Catalog fixtures use existing Chromium job and preserve portable 
   assert.match(config, /43183 --strictPort/);
 });
 
-test("product-labels browser contract runs in the Chromium job after both app builds and keeps failure evidence", () => {
-  const job = workflow.jobs["production-bundle"];
+test("product-labels browser contract runs in the station galleries after both app builds and keeps failure evidence", () => {
+  const job = workflow.jobs["station-galleries"];
   const browser = stepByName(job, "Verify the product-labels browser contract");
-  assert.equal(
-    browser.run,
-    "pnpm --dir tools/production-browser --ignore-workspace test:product-labels",
-  );
   // It serves both the admin and the Station harness, so both dependency builds come first.
-  for (const build of [
-    "Verify the station inventory gallery contract",
-    "Verify the inventory admin gallery contract",
-  ]) {
-    assert.ok(job.steps.indexOf(browser) > job.steps.indexOf(stepByName(job, build)));
-  }
+  assert.deepEqual(browser.run.trim().split("\n"), [
+    "pnpm turbo run build --filter='@markiro/admin^...'",
+    "pnpm --dir tools/production-browser --ignore-workspace test:product-labels",
+  ]);
+  const station = stepByName(job, "Verify the station inventory gallery contract");
+  assert.match(station.run, /pnpm turbo run build --filter='@markiro\/station\^\.\.\.'/);
+  assert.ok(job.steps.indexOf(browser) > job.steps.indexOf(station));
   const artifact = stepByName(job, "Preserve product-labels browser failure evidence");
   assert.equal(artifact.if, "failure()");
   assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
@@ -352,7 +381,7 @@ test("product-labels browser contract runs in the Chromium job after both app bu
   assert.match(config, /trace: "retain-on-failure"/);
   assert.match(config, /screenshot: "only-on-failure"/);
   assert.match(config, /retries: 0/);
-  // Distinct from the National Catalog harness (43183) that runs in the same job.
+  // Distinct from the National Catalog harness (43183) in the cabinet galleries.
   assert.match(config, /"PRODUCT_LABELS_ADMIN_PORT", 43181/);
   assert.match(config, /"PRODUCT_LABELS_STATION_PORT", 43182/);
   assert.equal(config.match(/--strictPort/g)?.length, 2);
@@ -365,20 +394,32 @@ test("production-bundle stays on the runner image its recovery-image export is p
   assert.equal(workflow.jobs["production-bundle"]["runs-on"], "ubuntu-24.04");
 });
 
-test("production-bundle reserves every browser harness port Linux could hand out as a source port", () => {
-  const job = workflow.jobs["production-bundle"];
-  const reserve = stepByName(job, "Reserve browser harness ports");
-  assert.ok(reserve, "production-bundle must reserve its browser harness ports");
+test("every browser job reserves every harness port Linux could hand out as a source port", () => {
+  const browserJobs = Object.entries(workflow.jobs).filter(([, job]) =>
+    job.steps?.some((step) => harnessStep.test(step.run ?? "")),
+  );
+  assert.deepEqual(browserJobs.map(([id]) => id).sort(), [
+    "cabinet-galleries",
+    "landing-browser",
+    "landing-lighthouse",
+    "saas-admin-browser",
+    "station-galleries",
+  ]);
+  const ranges = new Set();
+  for (const [id, job] of browserJobs) {
+    const reserve = stepByName(job, "Reserve browser harness ports");
+    assert.ok(reserve, `${id} must reserve its browser harness ports`);
+    ranges.add(reserve.run.trim());
+    // Before the first suite opens a loopback connection that could take one of them.
+    const firstBrowser = job.steps.findIndex((step) => harnessStep.test(step.run ?? ""));
+    assert.ok(job.steps.indexOf(reserve) < firstBrowser, id);
+  }
+  assert.equal(ranges.size, 1, "one range for every harness job");
   const range = /^sudo sysctl -w net\.ipv4\.ip_local_reserved_ports=(\d+)-(\d+)$/.exec(
-    reserve.run.trim(),
+    [...ranges][0],
   );
   assert.ok(range, "the reservation must be one sysctl range");
   const [low, high] = [Number(range[1]), Number(range[2])];
-  // Before the first suite opens a loopback connection that could take one of them.
-  const firstBrowser = job.steps.findIndex((step) =>
-    /tools\/production-browser|:browser\b/.test(step.run ?? ""),
-  );
-  assert.ok(firstBrowser >= 0 && job.steps.indexOf(reserve) < firstBrowser);
 
   const ports = new Set();
   for (const name of readdirSync("tools/production-browser")) {
@@ -411,12 +452,12 @@ test("Android gate verifies original signed and budget fixture byte parity befor
   );
 });
 
-test("platform preparation builds its own edge and runs only after legacy cleanup", () => {
+test("platform preparation builds its own edge and runs the stack after both images", () => {
   const job = workflow.jobs["production-bundle"];
   const contracts = stepByName(job, "Verify portable platform preparation contracts");
   const build = stepByName(job, "Build local platform-only edge preparation image");
+  const api = stepByName(job, "Build local SHA-tagged API image");
   const stack = stepByName(job, "Verify isolated platform-only preparation stack");
-  const cleanup = stepByName(job, "Remove production-bundle containers and volumes");
   const roles = stepByName(job, "Verify isolated PostgreSQL roles and TLS");
   assert.match(roles.run, /pnpm --filter @markiro\/db build/);
   assert.match(roles.run, /node deploy\/platform\/postgres\/roles-ci\.mjs --local-ci/);
@@ -425,13 +466,16 @@ test("platform preparation builds its own edge and runs only after legacy cleanu
     contracts.run,
     "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
   );
-  assert.match(build.run, /deploy\/platform\/edge\.Dockerfile/u);
-  assert.match(build.run, /markiro-platform-edge/u);
-  assert.doesNotMatch(build.run, /--push|docker push/u);
+  assert.equal(build.with.file, "deploy/platform/edge.Dockerfile");
+  assert.equal(build.with.tags, "ghcr.io/thevladbog/markiro-platform-edge:${{ github.sha }}");
+  assert.equal(api.with.file, "deploy/production/api.Dockerfile");
+  assert.equal(api.with.tags, "ghcr.io/thevladbog/markiro-api:${{ github.sha }}");
   assert.equal(stack.run, "node deploy/platform/ci-stack.mjs --local-ci");
   assert.equal(stack.env.MARKIRO_SOURCE_SHA, "${{ github.sha }}");
-  assert.ok(job.steps.indexOf(stack) > job.steps.indexOf(cleanup));
-  assert.ok(job.steps.indexOf(build) > job.steps.indexOf(contracts));
+  for (const image of [api, build]) {
+    assert.ok(job.steps.indexOf(stack) > job.steps.indexOf(image));
+    assert.ok(job.steps.indexOf(image) > job.steps.indexOf(contracts));
+  }
   assert.equal(stepByName(job, "Preserve platform preparation evidence").if, "always()");
 });
 
@@ -582,4 +626,146 @@ test("production-bundle runs held recovery integration after ICU export before n
       job.steps.indexOf(stepByName(job, "Verify isolated platform-only preparation stack")),
   );
   assert.equal(recovery.if, undefined);
+});
+
+test("the platform images reuse a layer cache that only main writes, and never push", () => {
+  const job = workflow.jobs["production-bundle"];
+  const buildx = job.steps.findIndex((step) =>
+    step.uses?.startsWith("docker/setup-buildx-action@"),
+  );
+  assert.ok(buildx >= 0);
+  assert.match(job.steps[buildx].uses, /@[a-f0-9]{40}$/u);
+  // The backup and recovery harnesses run plain `docker build` and need the
+  // default builder, so the cache-capable one must not become the default.
+  assert.equal(job.steps[buildx].with.use, false);
+  // recovery-ci.mjs refuses a Docker host with any container or volume, and the
+  // cache builder is a container with a state volume: it goes before the harnesses.
+  const remove = stepByName(job, "Remove the image cache builder");
+  assert.equal(remove.run, `docker buildx rm "\${{ steps.${job.steps[buildx].id}.outputs.name }}"`);
+  const firstHarness = job.steps.findIndex((step) =>
+    /deploy\/platform\/(?:postgres|backup)\/|recovery-ci\.mjs|ci-stack\.mjs/u.test(step.run ?? ""),
+  );
+  assert.ok(job.steps.indexOf(remove) < firstHarness);
+  assert.ok(
+    job.steps.indexOf(remove) >
+      job.steps.indexOf(stepByName(job, "Build local platform-only edge preparation image")),
+  );
+  for (const [name, scope] of [
+    ["Build local SHA-tagged API image", "platform-api"],
+    ["Build local platform-only edge preparation image", "platform-edge"],
+  ]) {
+    const step = stepByName(job, name);
+    assert.ok(job.steps.indexOf(step) > buildx, name);
+    assert.match(step.uses, /^docker\/build-push-action@[a-f0-9]{40}$/u, name);
+    assert.equal(step.with.builder, `\${{ steps.${job.steps[buildx].id}.outputs.name }}`, name);
+    assert.equal(step.with.context, ".", name);
+    // The stack runs these local tags; nothing leaves the runner.
+    assert.equal(step.with.load, true, name);
+    assert.equal(step.with.push, false, name);
+    assert.equal(step.with["cache-from"], `type=gha,scope=${scope}`, name);
+    assert.equal(
+      step.with["cache-to"],
+      `\${{ github.event_name == 'push' && 'type=gha,scope=${scope},mode=max,ignore-error=true' || '' }}`,
+      name,
+    );
+    assert.equal(step["continue-on-error"], undefined, name);
+  }
+  // The release workflows still build both images from scratch.
+  for (const file of ["release-images.yml", "release-platform-images.yml"])
+    assert.doesNotMatch(readFileSync(`.github/workflows/${file}`, "utf8"), /type=gha|cache-from/u);
+});
+
+test("the landing is built once and both landing gates judge that build", () => {
+  const build = workflow.jobs["landing-build"];
+  assert.equal(build.needs, "classify-changes");
+  assert.equal(
+    build.if,
+    "needs.classify-changes.outputs.landing_browser == 'true' || needs.classify-changes.outputs.landing_lighthouse == 'true'",
+  );
+  const runs = build.steps.map((step) => step.run).filter(Boolean);
+  assert.ok(runs.includes("node tools/production-browser/scripts/landing-build.mjs"));
+  const upload = build.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
+  assert.equal(upload.with.path, "apps/landing/dist");
+  assert.equal(upload.with["if-no-files-found"], "error");
+
+  for (const [jobId, command] of [
+    ["landing-browser", "pnpm test:landing:browser"],
+    ["landing-lighthouse", "pnpm test:landing:lighthouse"],
+  ]) {
+    const job = workflow.jobs[jobId];
+    assert.equal(job["runs-on"], build["runs-on"], jobId);
+    const download = job.steps.find((step) => step.uses?.startsWith("actions/download-artifact@"));
+    assert.equal(download.with.name, upload.with.name, jobId);
+    assert.equal(download.with.path, "apps/landing/dist", jobId);
+    const gate = job.steps.find((step) => step.run === command);
+    assert.ok(gate, `${jobId} runs ${command}`);
+    assert.equal(gate.env.MARKIRO_LANDING_PREBUILT, "1", jobId);
+    assert.ok(job.steps.indexOf(gate) > job.steps.indexOf(download), jobId);
+  }
+  // Both scripts go through the one build helper instead of running astro build.
+  for (const script of ["serve-landing.mjs", "lighthouse-landing.mjs"]) {
+    const source = readFileSync(`tools/production-browser/scripts/${script}`, "utf8");
+    assert.match(source, /prepareLandingDist\(/u, script);
+    assert.doesNotMatch(source, /\["build"\]/u, script);
+  }
+  // No other job builds or audits the landing.
+  for (const [jobId, job] of Object.entries(workflow.jobs)) {
+    if (["landing-build", "landing-browser", "landing-lighthouse"].includes(jobId)) continue;
+    for (const step of job.steps ?? [])
+      assert.doesNotMatch(step.run ?? "", /test:landing|landing-build\.mjs/u, jobId);
+  }
+});
+
+test("the SaaS-admin suites stay required and the cabinet and station galleries are optional", () => {
+  const suites = (jobId) =>
+    workflow.jobs[jobId].steps
+      .flatMap((step) => (step.run ?? "").split("\n"))
+      .map((line) => /(test:[\w:-]+|--config [\w.-]+)$/u.exec(line.trim())?.[1])
+      .filter(Boolean);
+  assert.deepEqual(suites("saas-admin-browser"), [
+    "test:reports",
+    "test:offers",
+    "test:tenant-equipment",
+    "test:service-periods",
+  ]);
+  assert.ok(
+    workflow.jobs["saas-admin-browser"].steps.some((step) =>
+      step.run?.includes("--ignore-workspace typecheck"),
+    ),
+  );
+  assert.deepEqual(suites("cabinet-galleries"), [
+    "test:inventory:browser",
+    "test:catalog-regulatory",
+    "test:national-catalog",
+    "test:production",
+    "test:catalog-import",
+    "test:catalog",
+    "test:tenant-billing",
+    "--config device-replacement.playwright.config.ts",
+  ]);
+  assert.deepEqual(suites("station-galleries"), [
+    "test:station-inventory:browser",
+    "test:station-startup:browser",
+    "test:product-labels",
+  ]);
+  assert.deepEqual(suites("production-bundle"), ["test:production-bundle:contract"]);
+});
+
+test("the platform release evidence covers the split gates through ci-required", async () => {
+  // release-evidence.mjs accepts a main CI run only with a successful
+  // production-bundle and ci-required; ci-required in turn fails unless every
+  // selected required job succeeded, the landing and SaaS-admin browser jobs included.
+  const source = readFileSync("deploy/platform/release-evidence.mjs", "utf8");
+  assert.match(source, /new Set\(\["production-bundle", "ci-required"\]\)/u);
+  const gate = workflow.jobs["ci-required"];
+  const { HEAVY_JOBS } = await import("../affected.mjs");
+  for (const jobId of [
+    "production-bundle",
+    "landing-browser",
+    "landing-lighthouse",
+    "saas-admin-browser",
+  ]) {
+    assert.ok(gate.needs.includes(jobId), jobId);
+    assert.ok(HEAVY_JOBS.includes(jobId.replaceAll("-", "_")), jobId);
+  }
 });
