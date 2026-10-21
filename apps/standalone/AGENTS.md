@@ -1942,8 +1942,10 @@ the limit, says «Линия занята: N из M» with no action, names who 
 device does, and says a part the host reports closed; a refusal `shift_line_full` is said with its
 numbers, an entry answered `myState: "closed"` is `part_closed`, enters no copy and caches the
 answer's figures; a shared shift's progress is the whole shift's. The work screen's band shows
-«Всего в смене» K (the others' part by the host plus this station's own codes, `sharedCount`)
-against the plan and «Моя станция» N, the group named «Моя станция: N · Всего в смене: K из M»,
+«Всего в смене» K (the others' part by the host plus this station's own codes, less those the
+host counts for no one here — answered `conflict` or `rejected`, or displaced, `readLostCodes`, so a
+code two devices took counts once, the earliest scan's; final review I2; `sharedCount`) against the
+plan and «Моя станция» N, the group named «Моя станция: N · Всего в смене: K из M»,
 and «данные от ЧЧ:ММ» while the link is down; it asks the link for the list every 15 s while
 shared and online (`useShiftParticipation`, `HostLinkControls.requestShifts`: another device's
 scan takes no revision). The plan notice comes when K reaches the plan.

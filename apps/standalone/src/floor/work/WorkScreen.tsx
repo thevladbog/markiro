@@ -134,6 +134,7 @@ import { processScan, type ScanContext, type ScanOutcome } from "./scan-pipeline
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
 import {
+  readLostCodes,
   readOpenBox,
   readOpenBoxSerials,
   readValidationCounts,
@@ -905,6 +906,32 @@ export function WorkScreen(props: WorkScreenProps) {
     };
   }, [
     closedHere,
+    sharedHere,
+    props.local,
+    partHost,
+    partDevice,
+    shift.copy.id,
+    props.outboxVersion,
+    props.shiftReads,
+  ]);
+
+  // This station's codes the host counts for no one here (final review I2): read while the shift
+  // is shared, again after every batch of receipts (a `conflict`), every notice read that brought a
+  // displacement (both change the outbox's version) and every list. A failed read keeps the last.
+  const [lost, setLost] = useState(0);
+  useEffect(() => {
+    if (!sharedHere) return undefined;
+    let cancelled = false;
+    readLostCodes(props.local, { hostId: partHost, deviceId: partDevice }, shift.copy.id).then(
+      (count) => {
+        if (!cancelled) setLost(count);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [
     sharedHere,
     props.local,
     partHost,
@@ -2434,7 +2461,7 @@ export function WorkScreen(props: WorkScreenProps) {
   const shared =
     sharedPart === null
       ? null
-      : sharedCount(sharedPart, props.pairing.deviceId, totals?.accepted ?? 0);
+      : sharedCount(sharedPart, props.pairing.deviceId, totals?.accepted ?? 0, lost);
   const sharedReached =
     shared !== null &&
     plannedQty !== null &&

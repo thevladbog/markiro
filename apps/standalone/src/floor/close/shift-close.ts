@@ -17,6 +17,7 @@ import {
 } from "../shifts/shift-participation.js";
 import { UNRESOLVED_UNIT_LABEL_SQL } from "../unit-labels/unit-label-store.js";
 import type { BoxContext } from "../work/box-close.js";
+import { readLostCodes } from "../work/work-reads.js";
 import { stationReasonRequired } from "./shared-reason.js";
 
 /**
@@ -193,12 +194,14 @@ export async function readCloseSummary(
   // Plan 2b: what the host's last read said of the shift; unreadable, the shift is a solo one.
   const participation = await readParticipation(local, pairing, shiftId).catch(() => null);
   const shared = sharedParticipation(participation);
+  // The codes of this station the host counts for no one here (final review I2).
+  const lost = shared === null ? 0 : await readLostCodes(local, pairing, shiftId).catch(() => 0);
   const part: PartClose | null =
     shared === null
       ? null
       : {
           closesShift: closesShift(shared, pairing.deviceId),
-          total: sharedCount(shared, pairing.deviceId, row.actual).total,
+          total: sharedCount(shared, pairing.deviceId, row.actual, lost).total,
           online,
         };
   return {

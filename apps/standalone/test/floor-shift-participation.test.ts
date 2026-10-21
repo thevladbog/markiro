@@ -200,6 +200,13 @@ describe("the participation cache (plan 2b, migration 0022)", () => {
       total: 550,
       asOf: "2026-10-08T09:41:07Z",
     });
+    // Two of the 430 the host answered conflict or displaced: the host counts them for nobody
+    // here, so the whole shift does not count them twice (final review I2).
+    expect(sharedCount(shared, DEVICE_ID, 430, 2)).toEqual({
+      mine: 430,
+      total: 548,
+      asOf: "2026-10-08T09:41:07Z",
+    });
     const busy = participationFromShift(
       sharedShift({
         participants: [

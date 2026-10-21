@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { FloorSession, SyncState } from "../src/app/shell.js";
+import { readCloseSummary } from "../src/floor/close/shift-close.js";
 import { FloorApp } from "../src/floor/FloorApp.js";
 import { createPrintRuntime } from "../src/floor/print/print-runtime.js";
 import { replaceShiftCopies } from "../src/floor/shifts/shift-copies.js";
@@ -311,6 +312,43 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     );
     expect(stale.myState).toBe("active");
     expect(host.state().parts.get(OTHER_STATION)?.row.state).toBe("active");
+  });
+
+  it("a code scanned at both stations counts once in the whole shift: the host's conflict wins (final review I2)", async () => {
+    const host = multiHost(VALIDATION_ENTERED, 2, NAMES);
+    host.open(DEVICE_ID);
+    const a = station(host, DEVICE_ID);
+    const b = station(host, OTHER_STATION);
+    for (const one of [a, b]) await one.readShifts();
+    await a.press("Продолжить");
+    await b.press("Присоединиться");
+    await a.scanner.listening();
+    await b.scanner.listening();
+
+    // A takes the code first, with the link; B, offline, takes the same code later and another.
+    await a.scan(km("D1"));
+    await waitFor(() => expect(a.mine()).toBe("1"));
+    await a.scan(km("A1"));
+    await waitFor(() => expect(a.mine()).toBe("2"));
+    await a.deliver();
+    await b.goOffline();
+    await b.scan(km("D1"));
+    await waitFor(() => expect(b.mine()).toBe("1"));
+    await b.scan(km("B1"));
+    await waitFor(() => expect(b.mine()).toBe("2"));
+
+    // B's records reach the host: the registry keeps A's scan and answers B's `conflict`.
+    await b.goOnline();
+    await b.deliver();
+    expect(host.state().accepted).toBe(3);
+    await a.readShifts();
+    await b.readShifts();
+    await waitFor(() => expect(a.total()).toBe("3"));
+    // B keeps its own two codes on its band, and the whole shift counts the code once.
+    await waitFor(() => expect(b.total()).toBe("3"));
+    expect(b.mine()).toBe("2");
+    const summary = await readCloseSummary(b.local, b.pairing, VALIDATION_ENTERED.id, true);
+    expect(summary.part?.total).toBe(3);
   });
 
   it("a part left on the host and continued offline takes its slot again when the link is back (final review I1)", async () => {

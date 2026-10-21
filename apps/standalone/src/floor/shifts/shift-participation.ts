@@ -261,18 +261,23 @@ export interface SharedCount {
 /**
  * The whole shift's count as this station knows it: the others' part by the host
  * (`totals.accepted` less this station's own part on the host) and this station's own `mine`
- * codes, which are never behind its own scans (spec §11 «Расхождение числа»: the host's count wins
- * at the next read).
+ * codes, which are never behind its own scans or its exceptions, less the `lost` ones of them the
+ * host counts for no one here (`readLostCodes`: answered `conflict` or `rejected`, or displaced;
+ * final review I2). So a code taken by two devices counts once, the earliest scan's (spec §11
+ * «Расхождение числа»: the host's verdict on a code wins once the station has heard it). Until a
+ * receipt or a displacement is heard the code counts here too; the others' part is the host's
+ * last read.
  */
 export function sharedCount(
   participation: Participation,
   deviceId: string,
   mine: number,
+  lost = 0,
 ): SharedCount {
   const hostMine = participation.byDevice.find((part) => part.deviceId === deviceId)?.accepted ?? 0;
   return {
     mine,
-    total: Math.max(0, participation.totals.accepted - hostMine) + mine,
+    total: Math.max(0, participation.totals.accepted - hostMine) + Math.max(0, mine - lost),
     asOf: participation.asOf,
   };
 }

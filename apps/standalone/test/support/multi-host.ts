@@ -91,6 +91,28 @@ export function multiHost(
     lastSeenAt: at,
   });
   const accepted = () => [...parts.values()].reduce((sum, part) => sum + part.accepted, 0);
+  /** The registry (`code_owners`): each code's owning part and its scan's device instant. */
+  const owners = new Map<string, { part: Part; scannedAt: string }>();
+  /**
+   * An accepted scan claims its code: the earliest device instant owns it whatever the order of
+   * arrival; an earlier scan displaces the owner (its part counts one less; the fake serves no
+   * `/displacements`), a later one or one at the same instant is `conflict` (host
+   * `facts/registry.rs`).
+   */
+  const claim = (part: Part, id: string, data: Record<string, unknown>): FactReceipt => {
+    const code = data["code"];
+    const hash =
+      typeof code === "object" && code !== null && "codeHash" in code ? String(code.codeHash) : id;
+    const scannedAt = String(data["scannedAt"]);
+    const owner = owners.get(hash);
+    if (owner !== undefined && owner.scannedAt <= scannedAt) {
+      return { id, outcome: "conflict", details: { winner: { scannedAt: owner.scannedAt } } };
+    }
+    if (owner !== undefined) owner.part.accepted -= 1;
+    owners.set(hash, { part, scannedAt });
+    part.accepted += 1;
+    return { id, outcome: "accepted" };
+  };
   /** The shift as `deviceId` reads it; the list leaves a closed shift's figures out (host D14). */
   const shiftFor = (deviceId: string, withTotals = true): DeviceShift => {
     const list = [...parts.values()];
@@ -216,10 +238,10 @@ export function multiHost(
           if (record.kind === "shift_closed") return closePart(deviceId, record.id, record.data);
           const mine = parts.get(deviceId);
           if (record.kind === "scan" && mine !== undefined && record.data["verdict"] === "ok") {
-            mine.accepted += 1;
+            return claim(mine, record.id, record.data);
           }
           return { id: record.id, outcome: "accepted" };
         }),
-    state: () => ({ status, reasonMissing, parts: new Map(parts) }),
+    state: () => ({ status, reasonMissing, accepted: accepted(), parts: new Map(parts) }),
   };
 }

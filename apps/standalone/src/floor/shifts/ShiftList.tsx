@@ -19,6 +19,7 @@ import {
 import { opensBlocked } from "../license.js";
 import { queueBadge } from "./hub-layout.js";
 import { readAcceptedCounts } from "./shift-accepted.js";
+import { readLostCodes } from "../work/work-reads.js";
 import { ShiftHubView, type HubCopies } from "./ShiftHub.js";
 
 export interface ShiftListProps {
@@ -133,10 +134,13 @@ export function ShiftList({
           counted.map((copy) => copy.id),
         );
         // A shared shift's progress is the whole shift's: the others' part by the host and this
-        // station's own codes (plan 2b, the plan is reached by the shift-wide total).
+        // station's own codes, less those the host counts for no one here (plan 2b, the plan is
+        // reached by the shift-wide total; final review I2). An unreadable loss counts none.
         for (const [id, own] of accepted) {
           const shared = sharedParticipation(participation.get(id) ?? null);
-          if (shared !== null) accepted.set(id, sharedCount(shared, deviceId, own).total);
+          if (shared === null) continue;
+          const lost = await readLostCodes(local, pairing, id).catch(() => 0);
+          accepted.set(id, sharedCount(shared, deviceId, own, lost).total);
         }
         return { read, refused, accepted, participation };
       })
