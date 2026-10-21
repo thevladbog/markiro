@@ -367,7 +367,8 @@ export function LeadPage() {
       <Alert tone="error">{t("leads.detail.invalidId")}</Alert>,
     );
   }
-  if (lead.isPending || lead.error) {
+  // A failed background refetch keeps the loaded card; only a first load shows the error.
+  if (lead.isPending || (lead.error && lead.data === undefined)) {
     return shell(
       t(lead.isPending ? "leads.detail.loadingTitle" : "leads.detail.loadErrorTitle"),
       <PanelState
@@ -430,7 +431,15 @@ export function LeadPage() {
           {canWrite && !detail.anonymizedAt ? (
             <Card title={t("leads.anonymize.title")} titleAs="h2" className="leads-card">
               <p className="leads-muted">{t("leads.anonymize.hint")}</p>
-              <Button variant="destructive" disabled={busy} onClick={() => setAnonymizeOpen(true)}>
+              <Button
+                variant="destructive"
+                disabled={busy}
+                onClick={() => {
+                  // The dialog shows only its own error, not an earlier action's.
+                  setNotice(null);
+                  setAnonymizeOpen(true);
+                }}
+              >
                 {t("leads.anonymize.action")}
               </Button>
             </Card>

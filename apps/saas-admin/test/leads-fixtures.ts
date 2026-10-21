@@ -112,6 +112,7 @@ export function installLeadsApi({
   detail = LEAD_DETAIL,
   mutationStatus = 200,
   mutationError = "lead_anonymized",
+  detailFailsAfterWrite = false,
 }: {
   me?: PlatformPrincipal;
   summary?: unknown;
@@ -120,6 +121,8 @@ export function installLeadsApi({
   detail?: PlatformLeadDetail;
   mutationStatus?: number;
   mutationError?: string;
+  /** Every card read after the first write fails, like a background refetch error. */
+  detailFailsAfterWrite?: boolean;
 } = {}) {
   const calls: LeadApiCall[] = [];
   let current: PlatformLeadDetail = detail;
@@ -144,6 +147,9 @@ export function installLeadsApi({
       return jsonResponse(200, { items: [TENANT_LIST_ITEM], page: 1, limit: 100, total: 1 });
     }
     if (path === `/api/platform/leads/${LEAD_ID}` && method === "GET") {
+      if (detailFailsAfterWrite && calls.some((call) => call.method !== "GET")) {
+        return jsonResponse(503, { code: "platform_unavailable" });
+      }
       return jsonResponse(200, current);
     }
     if (path.startsWith(`/api/platform/leads/${LEAD_ID}`) && method !== "GET") {

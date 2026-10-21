@@ -126,6 +126,26 @@ describe("leads list", () => {
     );
   });
 
+  it("keeps typed search text when another filter changes before the debounce", async () => {
+    const api = installLeadsApi();
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: "/leads" });
+    await screen.findByText("ООО «Пивоварня»");
+
+    const search = screen.getByLabelText("Компания, почта или ИНН") as HTMLInputElement;
+    await user.type(search, "pivo");
+    await user.click(screen.getByLabelText("Статус", { selector: 'button[role="combobox"]' }));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByRole("option", { name: "Счёт выставлен" }),
+    );
+    expect(search.value).toBe("pivo");
+    await waitFor(() =>
+      expect(api.calls.map((call) => call.url)).toContain(
+        "/api/platform/leads?page=1&limit=50&search=pivo&status=invoice_sent",
+      ),
+    );
+  });
+
   it("shows an empty state when nothing matches", async () => {
     installLeadsApi({ list: { items: [], total: 0, page: 1, limit: 50 } });
     renderSaasApp({ initialEntry: "/leads" });
@@ -310,6 +330,35 @@ describe("lead card", () => {
     );
     expect(await screen.findByText(/Контакты обезличены/)).toBeDefined();
     expect(screen.queryByRole("link", { name: "buyer@pivovarnya.example" })).toBeNull();
+  });
+
+  it("keeps the loaded card when the refetch after a write fails", async () => {
+    const api = installLeadsApi({ detailFailsAfterWrite: true });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/leads/${LEAD_ID}` });
+
+    await user.click(await screen.findByRole("button", { name: "Написал" }));
+    await waitFor(() =>
+      expect(
+        api.calls.filter(
+          (call) => call.method === "GET" && call.url === `/api/platform/leads/${LEAD_ID}`,
+        ).length,
+      ).toBeGreaterThan(1),
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: "ООО «Пивоварня»" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Написал" })).toBeDefined();
+  });
+
+  it("opens the anonymize dialog without an earlier action's error", async () => {
+    installLeadsApi({ mutationStatus: 409, mutationError: "lead_anonymized" });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/leads/${LEAD_ID}` });
+
+    await user.click(await screen.findByRole("button", { name: "Написал" }));
+    expect(await screen.findByText("Контакты этой заявки обезличены.")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Обезличить" }));
+    const dialog = within(await screen.findByRole("alertdialog"));
+    expect(dialog.queryByText("Контакты этой заявки обезличены.")).toBeNull();
   });
 
   it("shows the server reason when an action is refused", async () => {

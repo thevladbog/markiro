@@ -144,7 +144,15 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
           `${ADMIN}/leads/${lead.id}`,
         ].join("\n"),
       ]);
-      for (const secret of [lead.email ?? "", "Анна", "Петрова", "999", "123-45-67", "@"]) {
+      // Whole values only: a short digit run like "999" also occurs in random lead UUIDs.
+      for (const secret of [
+        lead.email ?? "",
+        "Анна",
+        "Петрова",
+        "+79991234567",
+        "123-45-67",
+        "@",
+      ]) {
         expect(sent[0]).not.toContain(secret);
       }
       expect(await notifications()).toEqual([
@@ -298,7 +306,7 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
         payloadNonce: delivery!.payloadNonce!,
         payloadTag: delivery!.payloadTag!,
       });
-      expect(JSON.stringify(template)).not.toMatch(/example\.test|Анна|999/);
+      expect(JSON.stringify(template)).not.toMatch(/example\.test|Анна|\+79991234567/);
       expect(template).toMatchObject({
         kind: "landing-lead-digest",
         digestDate: "2026-10-21",

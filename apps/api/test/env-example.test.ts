@@ -83,6 +83,18 @@ describe(".env.example", () => {
     ]) {
       expect(production[key], key).toBe("");
     }
+    // Those blanks reach loadEnv when the secret store leaves them unset; they
+    // must mean "Telegram off, default retention", not a boot failure.
+    const blankLeads = loadEnv({
+      ...EXAMPLE_ENV,
+      LEAD_TELEGRAM_ENABLED: production.LEAD_TELEGRAM_ENABLED,
+      LEAD_TELEGRAM_BOT_TOKEN: production.LEAD_TELEGRAM_BOT_TOKEN,
+      LEAD_TELEGRAM_CHAT_ID: production.LEAD_TELEGRAM_CHAT_ID,
+      LEAD_RETENTION_MONTHS: production.LEAD_RETENTION_MONTHS,
+    });
+    expect(blankLeads.LEAD_TELEGRAM_ENABLED).toBe(false);
+    expect(blankLeads.LEAD_TELEGRAM_CHAT_ID).toBeUndefined();
+    expect(blankLeads.LEAD_RETENTION_MONTHS).toBe(12);
   });
 
   it("boots the API exactly as `cp .env.example .env` leaves it", () => {

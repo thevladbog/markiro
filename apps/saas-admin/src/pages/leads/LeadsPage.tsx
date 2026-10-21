@@ -51,9 +51,12 @@ export function LeadsPage() {
     enabled: canRead && parsed.success,
   });
 
+  // Only the search parameter resets the box: another filter changing inside
+  // the debounce must not overwrite what is being typed.
+  const searchParam = params.get("search") ?? "";
   useEffect(() => {
-    setText(params.get("search") ?? "");
-  }, [params]);
+    setText(searchParam);
+  }, [searchParam]);
   useEffect(() => {
     if (text.trim() === (params.get("search") ?? "")) return;
     const timer = window.setTimeout(
