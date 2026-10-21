@@ -88,3 +88,31 @@ Android tests must also verify its interpretation.
 - Off in host mode: grants, replacement, inventory, write-offs, update checks, duplicate
   DataMatrix print (`STATION_UPDATE_REQUIRED`). Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
+- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6 and Room stays at 22):
+  every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
+  `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
+  (`EnterResult.LineFull`); `HostCalls` carries the two numbers to the loaders. The host's `maxStations`,
+  `participants`, `myState`, `totals` and `byDevice` are reduced to one JSON value per shift in `meta`
+  (`shift_participation:<id>`, `ShiftParticipationStore`; also `shift_close_note:` for the receipts and
+  `shift_leave_pending:` for owed leaves) and refreshed by the host heartbeat (`HostParticipation`, 15 s) while a
+  shift is active. An answer older than the stored one (`as_of` guard) is refused unless the stored value is more
+  than 60 s old; a beat that does not reach the host marks the value stale and the strip says «данные на ЧЧ:ММ».
+- `SharedShiftRules` is the only place of the shift-wide total and of the reason rule, pinned by
+  `proto/fixtures/shift-close-reason-shared.json`; never re-derive it. The handheld has no displaced kind, so
+  `lost` is the shift's own conflicted/rejected codes (`CodeDao.lostForShift`); it is required in
+  `SharedShiftRules` and wired in the strip, the hub card and `ShiftCloser`. The 90 s freshness applies only to
+  the close reason, not to the strip.
+- Leaving writes the local mark and an owed-leave marker in one commit, then asks the host. An owed leave is
+  compare-and-cleared and settles only when the answer's `myState` is not `active` or on a definite refusal
+  (`not_found`, `shift_not_entered`, `validation_failed`); each owed leave is sent independently, so one stuck
+  leave never blocks the rest; `rejoinLeftPart` cancels it when the device re-enters before it was sent.
+- A closed part reads back as `myState: closed` and `toShiftDto` maps it to `status = "closed"`; it never opens
+  work again. A full line never stops local production. Receipts `partClosed`/`reasonMissing` are noted by
+  `HostAckMapper`. Closing a shared part offline sends no reason (the host marks `close_reason_missing`, the
+  office supplies it); a single-device shift keeps the hard refusal and the reason.
+- Known gaps: no layout/short-screen tests for the strip (only Robolectric at `w360dp`); nothing was run on a device
+  or emulator; the vendor scanner path is untouched; the token race of the owed-leave sender is untested;
+  `HostParticipation.flushLeaves` clears after any successful answer (an optional `myState` guard is open); a null
+  `asOf` is taken from the incoming answer where the station refuses it within 60 s; a non-closed answer without
+  totals and nothing stored creates a row with null figures; the hub card shows the corrected total only for shared
+  shifts.
