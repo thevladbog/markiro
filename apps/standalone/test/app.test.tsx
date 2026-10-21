@@ -70,7 +70,9 @@ import { chooseFromUserMenu, openUserMenu } from "./support/user-menu.js";
 import { completeWizard, expectedRequest } from "./support/wizard.js";
 
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
-const STATION_ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"] };
+const STATION_ENTRY = {
+  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
+};
 
 /**
  * What `onSignOut` each mount of the signed-in floor was given, in order, so
