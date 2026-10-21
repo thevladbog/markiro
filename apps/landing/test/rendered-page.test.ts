@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { DEMO_SOURCE_PATHS } from "../../api/src/modules/demo-requests/demo-request-routes";
+import { LANDING_LEAD_SOURCE_PATHS } from "../../../packages/platform-contracts/src/landing-leads";
 import { findFilmPage } from "../src/content/film";
 import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
@@ -43,9 +44,6 @@ const SAMPLE_CLUSTER_ROUTES = [
 ] as const;
 const FILM_ROUTES = ["/kak-rabotaet/", "/en/how-it-works/"] as const;
 const AUTONOM_ROUTES = ["/skachat/", "/stoimost/"] as const;
-// Paths whose pages carry `form[data-lead-form]`. Local until `LANDING_LEAD_SOURCE_PATHS`
-// of @markiro/platform-contracts (package П2) is in main; then compare with it instead.
-const LEAD_SOURCE_PATHS = ["/", "/skachat/", "/stoimost/"] as const;
 
 /** The English home keeps the cloud-era layout; its section tests live on there. */
 function legacyHome(): Document {
@@ -2394,7 +2392,9 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
       });
     expect(formRoutes.sort()).toEqual(["/skachat/", "/stoimost/"]);
     expect(
-      formRoutes.filter((route) => !(LEAD_SOURCE_PATHS as readonly string[]).includes(route)),
+      formRoutes.filter(
+        (route) => !(LANDING_LEAD_SOURCE_PATHS as readonly string[]).includes(route),
+      ),
     ).toEqual([]);
   });
 

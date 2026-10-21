@@ -1,3 +1,5 @@
+import { isValidInn } from "@markiro/domain";
+
 import { TARIFF_CODES, type TariffCode } from "../content/pricing";
 
 /** What the visitor asks for: the installer link on /skachat/ or an invoice on /stoimost/. */
@@ -59,26 +61,6 @@ function validateEmail(source: string, errors: LeadErrors): string {
     errors.email = domain.includes(".") ? LEAD_COPY.emailInvalid : LEAD_COPY.emailDomain;
   }
   return email;
-}
-
-const INN_10_WEIGHTS = [2, 4, 10, 3, 5, 9, 4, 6, 8] as const;
-const INN_12_FIRST_WEIGHTS = [7, 2, 4, 10, 3, 5, 9, 4, 6, 8] as const;
-const INN_12_SECOND_WEIGHTS = [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8] as const;
-
-function innControlDigit(digits: readonly number[], weights: readonly number[]): number {
-  const sum = weights.reduce((total, weight, index) => total + weight * (digits[index] ?? 0), 0);
-  return (sum % 11) % 10;
-}
-
-/** The control digits of a Russian taxpayer number: 10 digits for a company, 12 for a sole trader. */
-export function isValidInn(inn: string): boolean {
-  if (!/^(?:\d{10}|\d{12})$/.test(inn)) return false;
-  const digits = [...inn].map(Number);
-  if (digits.length === 10) return innControlDigit(digits, INN_10_WEIGHTS) === digits[9];
-  return (
-    innControlDigit(digits, INN_12_FIRST_WEIGHTS) === digits[10] &&
-    innControlDigit(digits, INN_12_SECOND_WEIGHTS) === digits[11]
-  );
 }
 
 export function validateDownloadLead(input: DownloadLeadInput): LeadValidation<DownloadLead> {

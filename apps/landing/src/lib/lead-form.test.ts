@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { TARIFF_CODES } from "../content/pricing";
-import { isValidInn, LEAD_COPY, validateDownloadLead, validateInvoiceLead } from "./lead-form";
+import { LEAD_COPY, validateDownloadLead, validateInvoiceLead } from "./lead-form";
 
 describe("download lead validation", () => {
   it("normalizes the address and keeps the company as typed", () => {
@@ -44,8 +44,9 @@ describe("invoice lead validation", () => {
   });
 
   it("accepts a sole trader INN of twelve digits", () => {
-    expect(isValidInn("500100732259")).toBe(true);
-    expect(isValidInn("234106228141")).toBe(true);
+    expect(
+      validateInvoiceLead({ email: "a@b.ru", inn: "234106228141", tariffCode: "start" }),
+    ).toEqual({ ok: true, value: { email: "a@b.ru", inn: "234106228141", tariffCode: "start" } });
   });
 
   it("explains the INN length before the control digit", () => {
