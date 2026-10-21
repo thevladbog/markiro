@@ -215,7 +215,15 @@ test(
       ["hostile-secret SQL error", unavailable],
       ['{"code":"us_dataset_command_failed"', unavailable],
       ["x".repeat(4097), unavailable],
-      [JSON.stringify(extension) + "\n", { status: "available", ...extension }],
+      [
+        JSON.stringify(extension) + "\n",
+        {
+          status: "available",
+          ...extension,
+          verificationOperation: "read_private_object",
+          verificationArtifact: "records.xlsx",
+        },
+      ],
       ...[
         { ...extension, code: "private-secret" },
         { ...extension, code: "us_dataset_request_conflict" },
@@ -236,6 +244,13 @@ test(
           verificationFailure: { operation: "read_private_object", artifact: "private/key" },
         },
         { ...extension, extra: "private-secret" },
+        { ...extension, verificationOperation: "private-secret" },
+        { ...extension, verificationArtifact: "private-secret" },
+        { code: "us_dataset_command_failed", verificationOperation: "read_plan" },
+        {
+          ...extension,
+          verificationFailure: { operation: "read_plan", verificationOperation: "private-secret" },
+        },
       ].map((value) => [JSON.stringify(value) + "\n", unavailable]),
       ['{"code":"us_dataset_command_failed","code":"us_dataset_command_failed"}\n', unavailable],
       ['{ "code":"us_dataset_command_failed"}\n', unavailable],
@@ -258,6 +273,132 @@ test(
         assert.deepEqual(diagnostic, wanted);
         assert.doesNotMatch(JSON.stringify(diagnostic), /hostile-secret|SQL error/);
       });
+    await check(async () => {
+      // Independent closed fixtures, never derived from the implementation lists.
+      const tuples = [
+        ...[
+          "package_stage",
+          "validate_request",
+          "prepare_package",
+          "probe_before_worker",
+          "run_worker",
+          "probe_after_worker",
+          "render_payloads",
+          "read_plan",
+          "bind_inputs",
+          "check_checkpoint",
+          "assemble_package",
+          "compare_manifest",
+          "compare_entries",
+          "compare_archive",
+          "final_publication_probe",
+          "commit_package_receipt",
+        ].map((operation) => ({ operation })),
+        ...["read_private_object", "compare_private_object"].flatMap((operation) =>
+          [
+            "manifest.json",
+            "package.zip",
+            "plan.pdf",
+            "records.xlsx",
+            "request-report.pdf",
+            "validation.json",
+          ].map((artifact) => ({ operation, artifact })),
+        ),
+        { operation: "verify_private_archive", artifact: "package.zip" },
+      ];
+      assert.equal(tuples.length, 29);
+      for (const tuple of tuples) {
+        const input = {
+          code: "us_dataset_command_failed",
+          unitKey: "request_september",
+          stage: "package",
+          verificationFailure: tuple,
+        };
+        const diagnostic = fixtureSupport.datasetPositiveCommandDiagnostic(
+          JSON.stringify(input) + "\n",
+          diagnose,
+          projectVerificationFailure,
+        );
+        assert.deepEqual(diagnostic, {
+          status: "available",
+          ...input,
+          verificationOperation: tuple.operation,
+          ...(Object.hasOwn(tuple, "artifact") ? { verificationArtifact: tuple.artifact } : {}),
+        });
+        assert.equal(
+          Object.hasOwn(diagnostic, "verificationArtifact"),
+          Object.hasOwn(tuple, "artifact"),
+        );
+      }
+    });
+    await check(async () => {
+      // Actual reporter + real parser/child boundary. Only the leaf program emits
+      // synthetic canonical failure JSON; no dataset executable or proof is used.
+      const reporter = String.raw`
+        import assert from 'node:assert/strict';
+        import test from 'node:test';
+        import net from 'node:net';
+        import {createRequire,syncBuiltinESMExports} from 'node:module';
+        import {resolve} from 'node:path';
+        import {compileFunction} from 'node:vm';
+        const noSocket = () => { throw Error('forbidden_socket_io'); };
+        net.Socket.prototype.connect = noSocket;
+        net.Server.prototype.listen = noSocket;
+        syncBuiltinESMExports();
+        const {runDatasetPositiveChild} = await import('./tools/us-development/test/support/dataset-command-positive-fixture.mjs');
+        const diagnose = compileFunction(${JSON.stringify(js)} + ';return exports.usDatasetCommandDiagnostic;', ['exports','usSixMonthDefinition'])({}, {units:[{key:'request_april',stages:['request','package']}]});
+        const projectVerificationFailure = compileFunction(${JSON.stringify(verificationJs)} + ';return exports.projectUsRequestVerificationFailure;', ['exports','require'])({},createRequire(resolve('apps/api/package.json')));
+        for(const tuple of [{operation:'read_private_object',artifact:'records.xlsx'},{operation:'read_plan'}]) {
+          test('projected '+tuple.operation+' remains visible', {timeout:2000}, async()=>{
+            const input = {code:'us_dataset_command_failed',unitKey:'request_april',stage:'package',verificationFailure:tuple};
+            let original;
+            try {
+              await runDatasetPositiveChild(process.execPath,['-e','process.stdout.write("hostile-secret");process.stderr.write('+JSON.stringify(JSON.stringify(input)+'\n')+');process.exitCode=1'],{env:{PATH:process.env.PATH},cap:1000,limit:4096,diagnose,projectVerificationFailure});
+            } catch(error) { original = error; }
+            assert.equal(original?.message,'us_dataset_positive_child_failed');
+            assert.equal(original.evidence.code,1);
+            assert.equal(original.evidence.signal,null);
+            assert.equal(original.evidence.timedOut,false);
+            assert.equal(original.evidence.overflow,false);
+            assert.ok(original.evidence.elapsedMs>=0 && original.evidence.elapsedMs<1000);
+            assert.deepEqual(original.evidence.diagnostic.verificationFailure,tuple);
+            throw original;
+          });
+        }
+      `;
+      const shown = spawnSync(
+        process.execPath,
+        ["--test-reporter=spec", "--input-type=module", "-e", reporter],
+        {
+          encoding: "utf8",
+          timeout: 4000,
+          maxBuffer: 256 * 1024,
+          env: { PATH: process.env.PATH },
+        },
+      );
+      assert.equal(shown.error, undefined);
+      assert.equal(shown.status, 1, "both real reporter cases must remain failures");
+      assert.equal(shown.signal, null);
+      assert.equal(shown.stderr, "");
+      assert.match(shown.stdout, /fail 2/);
+      assert.match(shown.stdout, /verificationFailure: \[Object\]/);
+      assert.match(
+        shown.stdout,
+        /verificationOperation: 'read_private_object'/,
+        "closed operation hidden by reporter",
+      );
+      assert.match(
+        shown.stdout,
+        /verificationArtifact: 'records.xlsx'/,
+        "closed artifact hidden by reporter",
+      );
+      const scalarLine = shown.stdout
+        .split("\n")
+        .find((line) => line.includes("verificationOperation: 'read_plan'"));
+      assert.ok(scalarLine, "operation-only boundary hidden by reporter");
+      assert.doesNotMatch(scalarLine, /verificationArtifact/);
+      assert.doesNotMatch(shown.stdout + shown.stderr, /hostile-secret|forbidden_socket_io/);
+    });
     await check(async () => {
       const [stderr, wanted] = diagnosticCases[0];
       await assert.rejects(
@@ -320,7 +461,12 @@ test(
           assert.equal(error.evidence.code, 1);
           assert.equal(error.evidence.timedOut, false);
           assert.equal(error.evidence.overflow, false);
-          assert.deepEqual(error.evidence.diagnostic, { status: "available", ...extension });
+          assert.deepEqual(error.evidence.diagnostic, {
+            status: "available",
+            ...extension,
+            verificationOperation: "read_private_object",
+            verificationArtifact: "records.xlsx",
+          });
           return true;
         },
       );

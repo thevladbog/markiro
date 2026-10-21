@@ -88,7 +88,15 @@ function commandDiagnostic(text, diagnose, projectVerificationFailure) {
       status: "available",
       code: safe.code,
       ...(safe.unitKey && safe.stage ? { unitKey: safe.unitKey, stage: safe.stage } : {}),
-      ...(verificationFailure ? { verificationFailure } : {}),
+      ...(verificationFailure
+        ? {
+            verificationFailure,
+            verificationOperation: verificationFailure.operation,
+            ...(Object.hasOwn(verificationFailure, "artifact")
+              ? { verificationArtifact: verificationFailure.artifact }
+              : {}),
+          }
+        : {}),
     };
   } catch {
     return { status: "unavailable" };
