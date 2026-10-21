@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { guardProductionPlan } from "../scripts/guard-production-plan.mjs";
+import {
+  guardProductionPlan,
+  releasePolicyReference as guardReleasePolicyReference,
+} from "../scripts/guard-production-plan.mjs";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 const script = path.join(root, "infra/yandex/scripts/guard-production-plan.mjs");
@@ -118,6 +121,11 @@ const publisherReference = [
   "yandex_iam_service_account.station_release_publisher.id",
   "yandex_iam_service_account.station_release_publisher",
 ];
+const standaloneApiReference = [
+  "yandex_iam_service_account.standalone_release_api.id",
+  "yandex_iam_service_account.standalone_release_api",
+];
+const releaseUploaderReference = [...publisherReference, ...standaloneApiReference];
 const releaseBucketReference = [
   "yandex_storage_bucket.releases.bucket",
   "yandex_storage_bucket.releases",
@@ -128,13 +136,11 @@ const releaseBucketDomainReference = [
 ];
 // Mirrors the per-occurrence traversal list emitted by Terraform 1.15.8.
 const releasePolicyReference = [
-  ...releaseBucketReference,
-  ...releaseBucketReference,
-  ...releaseBucketReference,
-  ...releaseBucketReference,
-  ...releaseBucketReference,
+  ...Array.from({ length: 12 }, () => releaseBucketReference).flat(),
   ...publisherReference,
   ...publisherReference,
+  ...standaloneApiReference,
+  ...standaloneApiReference,
   "var.terraform_service_account_id",
 ];
 const originGroupReference = [
@@ -160,8 +166,14 @@ function addExactReleaseConfiguration(plan) {
                 },
               },
               {
+                address: "yandex_iam_service_account_static_access_key.standalone_release_api",
+                expressions: {
+                  service_account_id: { references: standaloneApiReference },
+                },
+              },
+              {
                 address: "yandex_storage_bucket_iam_binding.publisher_uploader",
-                expressions: { members: { references: publisherReference } },
+                expressions: { members: { references: releaseUploaderReference } },
               },
               {
                 address: "yandex_storage_bucket_policy.releases",
@@ -217,12 +229,13 @@ function makeProviderComputedReleaseCreate(plan) {
   );
   key.change.after.service_account_id = null;
   key.change.after_unknown = { service_account_id: true };
+  makeStandaloneApiComputed(plan);
   const binding = resource(
     plan,
     "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
   );
-  binding.change.after.members = [null];
-  binding.change.after_unknown = { members: [true] };
+  binding.change.after.members = [null, null];
+  binding.change.after_unknown = { members: [true, true] };
   const policy = resource(plan, "module.station_releases.yandex_storage_bucket_policy.releases");
   policy.change.after.policy = null;
   policy.change.after_unknown = { policy: true };
@@ -237,6 +250,54 @@ function makeProviderComputedReleaseCreate(plan) {
   const dns = resource(plan, "module.station_releases.yandex_dns_recordset.public_release[0]");
   dns.change.after.data = null;
   dns.change.after_unknown = { data: true };
+}
+
+function makeStandaloneApiComputed(plan) {
+  const api = resource(
+    plan,
+    "module.station_releases.yandex_iam_service_account.standalone_release_api",
+  );
+  api.change.after.id = null;
+  api.change.after_unknown = { id: true };
+  const key = resource(
+    plan,
+    "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api",
+  );
+  key.change.after.service_account_id = null;
+  key.change.after.access_key = null;
+  key.change.after.encrypted_secret_key = null;
+  key.change.after_unknown = {
+    service_account_id: true,
+    access_key: true,
+    encrypted_secret_key: true,
+  };
+}
+
+// The first plan after this module gained the SaaS API identity: the Station
+// graph already exists, the API identity and its key are created, and the
+// binding and policy name an identity whose ID the provider does not know yet.
+function makeStandaloneApiIntroduction(plan) {
+  addExactReleaseConfiguration(plan);
+  for (const address of [
+    "module.station_releases.yandex_iam_service_account.standalone_release_api",
+    "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api",
+  ]) {
+    const change = resource(plan, address).change;
+    change.actions = ["create"];
+    change.before = null;
+  }
+  makeStandaloneApiComputed(plan);
+  const binding = resource(
+    plan,
+    "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+  );
+  binding.change.actions = ["update"];
+  binding.change.after.members = ["serviceAccount:publisher-sa-id", null];
+  binding.change.after_unknown = { members: [false, true] };
+  const policy = resource(plan, "module.station_releases.yandex_storage_bucket_policy.releases");
+  policy.change.actions = ["update"];
+  policy.change.after.policy = null;
+  policy.change.after_unknown = { policy: true };
 }
 
 async function withPlan(plan, callback) {
@@ -1085,6 +1146,401 @@ test("production plan guard accepts handheld access only within the exact releas
       );
     }
   }
+});
+
+test("guard release policy references match every occurrence in the Terraform policy", async () => {
+  const main = await readFile(
+    path.join(root, "infra/yandex/modules/station-releases/main.tf"),
+    "utf8",
+  );
+  // Only the jsonencode expression: the resource's own bucket argument is a
+  // separate expression with its own references.
+  const resourceStart = main.indexOf('resource "yandex_storage_bucket_policy" "releases"');
+  const start = main.indexOf("policy = jsonencode(", resourceStart);
+  const end = main.indexOf("depends_on", start);
+  assert.ok(resourceStart !== -1 && start > resourceStart && end > start);
+  const policy = main.slice(start, end);
+  const count = (pattern) => [...policy.matchAll(pattern)].length;
+  const expected = [
+    ...Array.from(
+      { length: count(/yandex_storage_bucket\.releases\.bucket\b/g) },
+      () => releaseBucketReference,
+    ).flat(),
+    ...Array.from(
+      { length: count(/yandex_iam_service_account\.station_release_publisher\.id\b/g) },
+      () => publisherReference,
+    ).flat(),
+    ...Array.from(
+      { length: count(/yandex_iam_service_account\.standalone_release_api\.id\b/g) },
+      () => standaloneApiReference,
+    ).flat(),
+    ...Array.from({ length: count(/var\.terraform_service_account_id\b/g) }, () => [
+      "var.terraform_service_account_id",
+    ]).flat(),
+  ];
+  assert.deepEqual([...guardReleasePolicyReference].sort(), expected.sort());
+  assert.deepEqual([...releasePolicyReference].sort(), expected.sort());
+});
+
+test("production plan guard accepts the first plan that adds the standalone API identity", async () => {
+  const introduction = await readFixture("safe");
+  makeStandaloneApiIntroduction(introduction);
+  assert.doesNotThrow(() => guardProductionPlan(introduction));
+
+  const configuration = (plan, address) =>
+    plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+      (candidate) => candidate.address === address,
+    ).expressions;
+  const cases = [
+    [
+      "release-policy-computed-value",
+      (plan) => {
+        // A computed policy on update is only legitimate while the API identity
+        // is being created; with a known ID the policy must be known too.
+        const api = resource(
+          plan,
+          "module.station_releases.yandex_iam_service_account.standalone_release_api",
+        );
+        api.change.after.id = "standalone-api-sa-id";
+        api.change.after_unknown = {};
+        const binding = resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+        ).change;
+        binding.after.members = [
+          "serviceAccount:publisher-sa-id",
+          "serviceAccount:standalone-api-sa-id",
+        ];
+        binding.after_unknown = {};
+      },
+    ],
+    [
+      "release-policy-computed-references",
+      (plan) => {
+        configuration(plan, "yandex_storage_bucket_policy.releases").policy.references =
+          releasePolicyReference.filter((reference) => !reference.includes("standalone"));
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        configuration(plan, "yandex_storage_bucket_iam_binding.publisher_uploader").members = {
+          references: publisherReference,
+        };
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+        ).change.after.members = ["serviceAccount:app-runtime-sa-id", null];
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        const binding = resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+        ).change;
+        binding.after.members = ["serviceAccount:publisher-sa-id", null, null];
+        binding.after_unknown = { members: [false, true, true] };
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        delete resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+        ).change.after_unknown.members;
+      },
+    ],
+    [
+      "release-standalone-api-key",
+      (plan) => {
+        configuration(
+          plan,
+          "yandex_iam_service_account_static_access_key.standalone_release_api",
+        ).service_account_id.references = publisherReference;
+      },
+    ],
+  ];
+  for (const [scope, mutate] of cases) {
+    const plan = copy(introduction);
+    mutate(plan);
+    assert.throws(() => guardProductionPlan(plan), {
+      message: `production plan rejected (${scope})`,
+    });
+  }
+});
+
+test("production plan guard keeps standalone/* to the SaaS API identity and public reads", async () => {
+  const safe = await readFixture("safe");
+  const policyOf = (plan) =>
+    resource(plan, "module.station_releases.yandex_storage_bucket_policy.releases").change;
+  const statementOf = (policy, sid) => policy.Statement.find((candidate) => candidate.Sid === sid);
+  const arn = "arn:aws:s3:::markiro-station-releases";
+  const cases = [
+    [
+      "public-resource",
+      (policy) => statementOf(policy, "AllowPublicReleaseObjects").Resource.pop(),
+    ],
+    [
+      "publisher-objects-resource",
+      (policy) =>
+        statementOf(policy, "AllowPublisherReleaseObjects").Resource.push(`${arn}/standalone/*`),
+    ],
+    [
+      "publisher-bucket-condition",
+      (policy) =>
+        statementOf(policy, "AllowPublisherReleaseBucketPreflight").Condition.StringLike[
+          "s3:prefix"
+        ].push("standalone/*"),
+    ],
+    [
+      "standalone-api-objects-resource",
+      (policy) =>
+        statementOf(policy, "AllowStandaloneReleaseApiObjects").Resource.push(`${arn}/station/*`),
+    ],
+    [
+      "standalone-api-objects-resource",
+      (policy) => {
+        statementOf(policy, "AllowStandaloneReleaseApiObjects").Resource = [`${arn}/*`];
+      },
+    ],
+    [
+      "standalone-api-objects-action",
+      (policy) =>
+        statementOf(policy, "AllowStandaloneReleaseApiObjects").Action.push("s3:DeleteObject"),
+    ],
+    [
+      "standalone-api-objects-principal",
+      (policy) => {
+        statementOf(policy, "AllowStandaloneReleaseApiObjects").Principal.CanonicalUser =
+          "publisher-sa-id";
+      },
+    ],
+    [
+      "standalone-api-objects-principal",
+      (policy) => {
+        statementOf(policy, "AllowStandaloneReleaseApiObjects").Principal.CanonicalUser =
+          "some-other-sa-id";
+      },
+    ],
+    [
+      "standalone-api-listing-principal",
+      (policy) => {
+        statementOf(policy, "AllowStandaloneReleaseApiListing").Principal.CanonicalUser =
+          "publisher-sa-id";
+      },
+    ],
+    [
+      "standalone-api-listing-action",
+      (policy) =>
+        statementOf(policy, "AllowStandaloneReleaseApiListing").Action.push("s3:GetBucketLocation"),
+    ],
+    [
+      "standalone-api-listing-resource",
+      (policy) => {
+        statementOf(policy, "AllowStandaloneReleaseApiListing").Resource = [`${arn}/*`];
+      },
+    ],
+    [
+      "standalone-api-listing-condition",
+      (policy) => {
+        statementOf(policy, "AllowStandaloneReleaseApiListing").Condition.StringLike["s3:prefix"] =
+          ["*"];
+      },
+    ],
+    [
+      "standalone-api-listing-condition",
+      (policy) => {
+        delete statementOf(policy, "AllowStandaloneReleaseApiListing").Condition;
+        statementOf(policy, "AllowStandaloneReleaseApiListing").Condition = {};
+      },
+    ],
+    [
+      "statement-count",
+      (policy) => {
+        policy.Statement = policy.Statement.filter(
+          (candidate) => candidate.Sid !== "AllowStandaloneReleaseApiListing",
+        );
+      },
+    ],
+  ];
+  for (const [scope, mutate] of cases) {
+    const plan = copy(safe);
+    const change = policyOf(plan);
+    const policy = JSON.parse(change.after.policy);
+    mutate(policy);
+    change.after.policy = JSON.stringify(policy);
+    assert.throws(
+      () => guardProductionPlan(plan),
+      { message: `production plan rejected (release-policy-${scope})` },
+      scope,
+    );
+  }
+});
+
+test("production plan guard pins the standalone API identity, its key and the uploader binding", async () => {
+  const safe = await readFixture("safe");
+  const apiAddress = "module.station_releases.yandex_iam_service_account.standalone_release_api";
+  const keyAddress =
+    "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api";
+  const bindingAddress =
+    "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader";
+  const cases = [
+    [
+      "missing-release-resource",
+      (plan) => {
+        plan.resource_changes = plan.resource_changes.filter((r) => r.address !== apiAddress);
+      },
+    ],
+    [
+      "missing-release-resource",
+      (plan) => {
+        plan.resource_changes = plan.resource_changes.filter((r) => r.address !== keyAddress);
+      },
+    ],
+    [
+      "release-resource-action",
+      (plan) => {
+        resource(plan, keyAddress).change.actions = ["delete", "create"];
+      },
+    ],
+    [
+      "release-standalone-api",
+      (plan) => {
+        resource(plan, apiAddress).change.after.name = "markiro-station-release-publisher";
+      },
+    ],
+    [
+      "release-standalone-api",
+      (plan) => {
+        resource(plan, apiAddress).change.after.id = "publisher-sa-id";
+      },
+    ],
+    [
+      "release-standalone-api",
+      (plan) => {
+        resource(plan, apiAddress).change.after.id = "terraform-sa-id";
+      },
+    ],
+    [
+      "release-standalone-api-key",
+      (plan) => {
+        resource(plan, keyAddress).change.after.service_account_id = "publisher-sa-id";
+      },
+    ],
+    [
+      "release-standalone-api-key",
+      (plan) => {
+        resource(plan, keyAddress).change.after.secret_key = "plain-secret";
+      },
+    ],
+    [
+      "release-standalone-api-key",
+      (plan) => {
+        resource(plan, keyAddress).change.after.pgp_key = " ";
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        resource(plan, bindingAddress).change.after.members = ["serviceAccount:publisher-sa-id"];
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        resource(plan, bindingAddress).change.after.members.push(
+          "serviceAccount:app-runtime-sa-id",
+        );
+      },
+    ],
+    [
+      "release-publisher-binding",
+      (plan) => {
+        resource(plan, bindingAddress).change.after.members = [
+          "serviceAccount:publisher-sa-id",
+          "serviceAccount:publisher-sa-id",
+        ];
+      },
+    ],
+  ];
+  for (const [scope, mutate] of cases) {
+    const plan = copy(safe);
+    mutate(plan);
+    assert.throws(
+      () => guardProductionPlan(plan),
+      { message: `production plan rejected (${scope})` },
+      scope,
+    );
+  }
+});
+
+test("production plan guard allows only the SaaS admin presigned PUT as bucket CORS", async () => {
+  const safe = await readFixture("safe");
+  const bucketAddress = "module.station_releases.yandex_storage_bucket.releases";
+  const ruleOf = (plan) => resource(plan, bucketAddress).change.after.cors_rule[0];
+  const cases = [
+    (plan) => {
+      delete resource(plan, bucketAddress).change.after.cors_rule;
+    },
+    (plan) => {
+      resource(plan, bucketAddress).change.after.cors_rule = [];
+    },
+    (plan) => {
+      const after = resource(plan, bucketAddress).change.after;
+      after.cors_rule.push(structuredClone(after.cors_rule[0]));
+    },
+    (plan) => {
+      ruleOf(plan).allowed_origins = ["*"];
+    },
+    (plan) => {
+      ruleOf(plan).allowed_origins.push("https://markiro.app");
+    },
+    (plan) => {
+      ruleOf(plan).allowed_origins = ["https://admin.markiro.app"];
+    },
+    (plan) => {
+      ruleOf(plan).allowed_methods.push("GET");
+    },
+    (plan) => {
+      ruleOf(plan).allowed_methods = ["DELETE"];
+    },
+    (plan) => {
+      ruleOf(plan).allowed_headers = ["*"];
+    },
+    (plan) => {
+      ruleOf(plan).expose_headers = ["etag"];
+    },
+    (plan) => {
+      ruleOf(plan).max_age_seconds = 86400;
+    },
+    (plan) => {
+      delete plan.variables.saas_admin_domain;
+    },
+    (plan) => {
+      plan.variables.saas_admin_domain.value = "evil.example.net";
+    },
+  ];
+  for (const [index, mutate] of cases.entries()) {
+    const plan = copy(safe);
+    mutate(plan);
+    assert.throws(
+      () => guardProductionPlan(plan),
+      { message: "production plan rejected (release-bucket-cors)" },
+      `case ${index}`,
+    );
+  }
+
+  const providerNullExpose = copy(safe);
+  ruleOf(providerNullExpose).expose_headers = null;
+  assert.doesNotThrow(() => guardProductionPlan(providerNullExpose));
 });
 
 test("production plan guard distinguishes release-policy failure classes", async () => {

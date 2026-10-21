@@ -188,6 +188,8 @@ const releaseAddresses = new Set([
   "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
   "module.station_releases.yandex_iam_service_account.station_release_publisher",
   "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
+  "module.station_releases.yandex_iam_service_account.standalone_release_api",
+  "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api",
   "module.station_releases.yandex_cdn_origin_group.releases",
   "module.station_releases.yandex_cm_certificate.releases",
   "module.station_releases.yandex_dns_recordset.certificate_validation[0]",
@@ -208,6 +210,14 @@ const releaseResourceTypes = new Map([
   ],
   [
     "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
+    "yandex_iam_service_account_static_access_key",
+  ],
+  [
+    "module.station_releases.yandex_iam_service_account.standalone_release_api",
+    "yandex_iam_service_account",
+  ],
+  [
+    "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api",
     "yandex_iam_service_account_static_access_key",
   ],
   ["module.station_releases.yandex_cdn_origin_group.releases", "yandex_cdn_origin_group"],
@@ -232,6 +242,11 @@ const publisherReference = [
   "yandex_iam_service_account.station_release_publisher.id",
   "yandex_iam_service_account.station_release_publisher",
 ];
+const standaloneApiReference = [
+  "yandex_iam_service_account.standalone_release_api.id",
+  "yandex_iam_service_account.standalone_release_api",
+];
+const releaseUploaderReference = [...publisherReference, ...standaloneApiReference];
 const releaseBucketReference = [
   "yandex_storage_bucket.releases.bucket",
   "yandex_storage_bucket.releases",
@@ -241,15 +256,14 @@ const releaseBucketDomainReference = [
   "yandex_storage_bucket.releases",
 ];
 // Terraform 1.15.8 preserves one full traversal pair for every reference
-// occurrence in the jsonencode expression: five bucket uses and two publisher uses.
-const releasePolicyReference = [
-  ...releaseBucketReference,
-  ...releaseBucketReference,
-  ...releaseBucketReference,
-  ...releaseBucketReference,
-  ...releaseBucketReference,
+// occurrence in the jsonencode expression: twelve bucket uses, two publisher
+// uses and two standalone API uses. The guard test counts them in main.tf.
+export const releasePolicyReference = [
+  ...Array.from({ length: 12 }, () => releaseBucketReference).flat(),
   ...publisherReference,
   ...publisherReference,
+  ...standaloneApiReference,
+  ...standaloneApiReference,
   "var.terraform_service_account_id",
 ];
 const originGroupReference = [
@@ -845,14 +859,27 @@ function releasePolicyScoped(scope, callback) {
   return scoped(`release-policy-${scope}`, callback);
 }
 
-function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, appRuntimeId) {
+function validateReleasePolicy(
+  plan,
+  resource,
+  bucketName,
+  expectedTerraformId,
+  appRuntimeId,
+  standaloneApiIdValue,
+) {
   const value = releasePolicyScoped("resource", () => after(resource));
   releasePolicyScoped("bucket", () => {
     if (value.bucket !== bucketName) rejected();
   });
   if (typeof value.policy !== "string") {
+    // A policy only becomes unknown when a principal it names is being created
+    // in the same plan: the whole release graph on first creation, or the
+    // standalone API identity added to an existing bucket.
     releasePolicyScoped("computed-value", () => {
-      if (!onlyCreate(resource) || !computed(resource, "policy")) rejected();
+      if (!computed(resource, "policy")) rejected();
+      const updateForNewApi =
+        standaloneApiIdValue === null && onlyAllowedAction(actions(resource), ["update"]);
+      if (!onlyCreate(resource) && !updateForNewApi) rejected();
     });
     releasePolicyScoped("computed-references", () => {
       proveExactReferences(plan, resource, "policy", releasePolicyReference);
@@ -869,18 +896,20 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
     if (policy.Version !== "2012-10-17") rejected();
   });
   releasePolicyScoped("statement-count", () => {
-    if (policy.Statement.length !== 4) rejected();
+    if (policy.Statement.length !== 6) rejected();
   });
 
   const bucketArn = `arn:aws:s3:::${bucketName}`;
-  // Match exactly the three product prefixes served by the release bucket.
-  // Unrelated objects must remain inaccessible to public readers and publishers.
+  // Match exactly the three device prefixes written by the Station publisher
+  // and the standalone prefix written by the SaaS API. Unrelated objects must
+  // remain inaccessible to public readers and to both writers.
   const releaseArns = [
     `${bucketArn}/station/*`,
     `${bucketArn}/signer/*`,
     `${bucketArn}/handheld/*`,
   ];
   const releasePrefixes = ["station/*", "signer/*", "handheld/*"];
+  const standaloneArn = `${bucketArn}/standalone/*`;
   const publicRead = releasePolicyScoped("public-statement", () =>
     statement(policy, "AllowPublicReleaseObjects", [
       "Sid",
@@ -894,7 +923,9 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
     if (publicRead.Principal !== "*") rejected();
   });
   releasePolicyScoped("public-action", () => exactStrings(publicRead.Action, ["s3:GetObject"]));
-  releasePolicyScoped("public-resource", () => exactStrings(publicRead.Resource, releaseArns));
+  releasePolicyScoped("public-resource", () =>
+    exactStrings(publicRead.Resource, [...releaseArns, standaloneArn]),
+  );
 
   const publisherObjects = releasePolicyScoped("publisher-objects-statement", () =>
     statement(policy, "AllowPublisherReleaseObjects", [
@@ -940,6 +971,53 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
     exactStrings(publisherBucket.Condition.StringLike["s3:prefix"], releasePrefixes);
   });
 
+  const apiObjects = releasePolicyScoped("standalone-api-objects-statement", () =>
+    statement(policy, "AllowStandaloneReleaseApiObjects", [
+      "Sid",
+      "Effect",
+      "Principal",
+      "Action",
+      "Resource",
+    ]),
+  );
+  const apiId = releasePolicyScoped("standalone-api-objects-principal", () => {
+    const value = canonicalUser(apiObjects);
+    if (value === publisherId || value === appRuntimeId) rejected();
+    if (standaloneApiIdValue !== null && value !== standaloneApiIdValue) rejected();
+    return value;
+  });
+  releasePolicyScoped("standalone-api-objects-action", () =>
+    exactStrings(apiObjects.Action, ["s3:GetObject", "s3:PutObject"]),
+  );
+  releasePolicyScoped("standalone-api-objects-resource", () =>
+    exactStrings(apiObjects.Resource, [standaloneArn]),
+  );
+
+  const apiListing = releasePolicyScoped("standalone-api-listing-statement", () =>
+    statement(policy, "AllowStandaloneReleaseApiListing", [
+      "Sid",
+      "Effect",
+      "Principal",
+      "Action",
+      "Resource",
+      "Condition",
+    ]),
+  );
+  releasePolicyScoped("standalone-api-listing-principal", () => {
+    if (canonicalUser(apiListing) !== apiId) rejected();
+  });
+  releasePolicyScoped("standalone-api-listing-action", () =>
+    exactStrings(apiListing.Action, ["s3:ListBucket"]),
+  );
+  releasePolicyScoped("standalone-api-listing-resource", () =>
+    exactStrings(apiListing.Resource, [bucketArn]),
+  );
+  releasePolicyScoped("standalone-api-listing-condition", () => {
+    exactKeys(apiListing.Condition, ["StringLike"]);
+    exactKeys(apiListing.Condition.StringLike, ["s3:prefix"]);
+    exactStrings(apiListing.Condition.StringLike["s3:prefix"], ["standalone/*"]);
+  });
+
   const terraform = releasePolicyScoped("terraform-statement", () =>
     statement(policy, "AllowTerraformReleaseManagement", [
       "Sid",
@@ -953,6 +1031,7 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
   releasePolicyScoped("terraform-identity", () => {
     if (
       terraformId === publisherId ||
+      terraformId === apiId ||
       terraformId !== expectedTerraformId ||
       terraformId === appRuntimeId
     )
@@ -992,43 +1071,85 @@ function validateReleaseBucket(resource) {
   return bucketName;
 }
 
+// The only CORS rule lets the SaaS admin origin upload by presigned PUT.
+// Anything wider would let another site drive browser writes or reads.
+function validateReleaseBucketCors(resource, uploadOrigin) {
+  const value = after(resource);
+  if (!Array.isArray(value.cors_rule) || value.cors_rule.length !== 1) rejected();
+  const rule = value.cors_rule[0];
+  if (!object(rule)) rejected();
+  exactStrings(rule.allowed_origins, [uploadOrigin]);
+  exactStrings(rule.allowed_methods, ["PUT"]);
+  exactStrings(rule.allowed_headers, ["content-type"]);
+  if (
+    rule.expose_headers !== null &&
+    rule.expose_headers !== undefined &&
+    (!Array.isArray(rule.expose_headers) || rule.expose_headers.length > 0)
+  )
+    rejected();
+  if (rule.max_age_seconds !== 3600) rejected();
+}
+
 function validatePublisher(resource) {
   const value = after(resource);
   if (value.name !== "markiro-station-release-publisher") rejected();
 }
 
-function validatePublisherKey(plan, resource, publisherId) {
+function validateStandaloneApi(resource) {
+  const value = after(resource);
+  if (value.name !== "markiro-standalone-release-api") rejected();
+}
+
+function validateReleaseKey(plan, resource, serviceAccountReference, serviceAccountIdValue) {
   const value = after(resource);
   if (typeof value.secret_key === "string" && value.secret_key.length > 0) rejected();
   const serviceAccountId = knownOrReferenced(
     plan,
     resource,
     "service_account_id",
-    publisherReference,
+    serviceAccountReference,
   );
-  if (serviceAccountId !== null && publisherId !== null && serviceAccountId !== publisherId)
+  if (
+    serviceAccountId !== null &&
+    serviceAccountIdValue !== null &&
+    serviceAccountId !== serviceAccountIdValue
+  )
     rejected();
   const pgpKey = knownOrComputed(resource, "pgp_key");
   if (pgpKey !== null) nonblank(pgpKey);
 }
 
-function validatePublisherBinding(plan, resource, bucketName, publisherId) {
+// storage.uploader on the release bucket goes to exactly the Station publisher
+// and the standalone API. A member the provider cannot know yet (an identity
+// created in the same plan) is accepted only with exact configuration
+// references, so the unknown slot can only be one of those two identities.
+function validateReleaseUploaderBinding(plan, resource, bucketName, publisherId, apiId) {
   const value = after(resource);
   if (value.bucket !== bucketName || value.role !== "storage.uploader") rejected();
-  const members = knownOrReferenced(plan, resource, "members", publisherReference);
+  const members = knownOrReferenced(plan, resource, "members", releaseUploaderReference);
   if (members === null) return;
-  if (
-    publisherId === null &&
-    Array.isArray(members) &&
-    members.length === 1 &&
-    members[0] === null &&
-    resource.change?.after_unknown?.members?.[0] === true
-  ) {
-    proveExactReferences(plan, resource, "members", publisherReference);
+  if (!Array.isArray(members) || members.length !== 2) rejected();
+  const expected = [publisherId, apiId]
+    .filter((id) => id !== null)
+    .map((id) => `serviceAccount:${id}`);
+  const unknown = resource.change?.after_unknown?.members;
+  const known = [];
+  members.forEach((member, index) => {
+    if (member === null) {
+      if (!Array.isArray(unknown) || unknown[index] !== true) rejected();
+    } else {
+      if (typeof member !== "string" || !expected.includes(member)) rejected();
+      known.push(member);
+    }
+  });
+  if (known.length === members.length) {
+    exactStrings(known, expected);
+    if (expected.length !== 2) rejected();
     return;
   }
-  if (publisherId === null) rejected();
-  exactStrings(members, [`serviceAccount:${publisherId}`]);
+  if (new Set(known).size !== known.length) rejected();
+  if (known.length + 2 - expected.length !== members.length) rejected();
+  proveExactReferences(plan, resource, "members", releaseUploaderReference);
 }
 
 function releaseOriginGroupScoped(scope, callback) {
@@ -1401,6 +1522,9 @@ export function guardProductionPlan(plan) {
 
   const bucket = resources.get("module.station_releases.yandex_storage_bucket.releases");
   const bucketName = scoped("release-bucket", () => validateReleaseBucket(bucket));
+  scoped("release-bucket-cors", () =>
+    validateReleaseBucketCors(bucket, `https://${planVariable(plan, "saas_admin_domain")}`),
+  );
   const publisher = resources.get(
     "module.station_releases.yandex_iam_service_account.station_release_publisher",
   );
@@ -1411,20 +1535,44 @@ export function guardProductionPlan(plan) {
     return value;
   });
   scoped("release-publisher-key", () =>
-    validatePublisherKey(
+    validateReleaseKey(
       plan,
       resources.get(
         "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
       ),
+      publisherReference,
       publisherIdValue,
     ),
   );
+  const standaloneApi = resources.get(
+    "module.station_releases.yandex_iam_service_account.standalone_release_api",
+  );
+  const standaloneApiIdValue = scoped("release-standalone-api", () => {
+    validateStandaloneApi(standaloneApi);
+    const value = knownOrComputed(standaloneApi, "id");
+    if (value === null) return null;
+    nonblank(value);
+    if (value === publisherIdValue || value === expectedTerraformId || value === appRuntimeId)
+      rejected();
+    return value;
+  });
+  scoped("release-standalone-api-key", () =>
+    validateReleaseKey(
+      plan,
+      resources.get(
+        "module.station_releases.yandex_iam_service_account_static_access_key.standalone_release_api",
+      ),
+      standaloneApiReference,
+      standaloneApiIdValue,
+    ),
+  );
   scoped("release-publisher-binding", () =>
-    validatePublisherBinding(
+    validateReleaseUploaderBinding(
       plan,
       resources.get("module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader"),
       bucketName,
       publisherIdValue,
+      standaloneApiIdValue,
     ),
   );
   validateReleasePolicy(
@@ -1433,6 +1581,7 @@ export function guardProductionPlan(plan) {
     bucketName,
     expectedTerraformId,
     appRuntimeId,
+    standaloneApiIdValue,
   );
   const releaseOriginGroupId = validateOriginGroup(
     plan,

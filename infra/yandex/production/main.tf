@@ -98,6 +98,7 @@ module "station_releases" {
   bucket_name                  = var.station_release_bucket_name
   terraform_service_account_id = var.terraform_service_account_id
   publisher_pgp_key            = var.station_release_publisher_pgp_key
+  standalone_upload_origin     = "https://${var.saas_admin_domain}"
   public_dns_enabled           = var.station_release_public_dns_enabled
 }
 
