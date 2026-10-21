@@ -22,6 +22,25 @@ import {
 import { PlatformReportRunnerService } from "../platform-reports/platform-report-runner.service";
 import { SupportChatJobsService } from "../modules/support-chat/support-chat-jobs.service";
 import { SupportChatSyncService } from "../modules/support-chat/support-chat-sync.service";
+import {
+  ANONYMIZE_LANDING_LEADS_CRON,
+  ANONYMIZE_LANDING_LEADS_QUEUE,
+  DISPATCH_LEAD_NOTIFICATIONS_QUEUE,
+  LandingLeadJobsService,
+  SEND_LEAD_DIGEST_CRON,
+  SEND_LEAD_DIGEST_QUEUE,
+} from "../modules/landing-leads/landing-lead-jobs.service";
+
+/**
+ * Jobs a (re)start must not run immediately: retention, the digest, and the Telegram
+ * outbox, whose external calls would hold up readiness (it runs within a minute).
+ */
+const SCHEDULE_ONLY = new Set([
+  "prune-email-deliveries",
+  DISPATCH_LEAD_NOTIFICATIONS_QUEUE,
+  SEND_LEAD_DIGEST_QUEUE,
+  ANONYMIZE_LANDING_LEADS_QUEUE,
+]);
 
 /** Only platform intent tables are repaired. Restored pgboss cloud queues remain untouched. */
 @Injectable()
@@ -38,6 +57,7 @@ export class PlatformJobsService
     private readonly retention: MailRetentionService,
     private readonly subscriptions: SubscriptionStatusJob,
     private readonly reports: PlatformReportRunnerService,
+    private readonly leads: LandingLeadJobsService,
     @Optional() private readonly support?: SupportChatJobsService,
     @Optional() private readonly sync?: SupportChatSyncService,
     @Optional()
@@ -91,6 +111,14 @@ export class PlatformJobsService
               boss.send("platform-report-run", { reportId }, { singletonKey: reportId }),
             ),
         ],
+        // Landing leads (spec 2026-10-20 §15.4-15.5, §15.2).
+        [DISPATCH_LEAD_NOTIFICATIONS_QUEUE, "* * * * *", () => this.leads.dispatchNotifications()],
+        [SEND_LEAD_DIGEST_QUEUE, SEND_LEAD_DIGEST_CRON, () => this.leads.sendDailyDigest()],
+        [
+          ANONYMIZE_LANDING_LEADS_QUEUE,
+          ANONYMIZE_LANDING_LEADS_CRON,
+          () => this.leads.anonymizeStale(),
+        ],
       ];
       await boss.createQueue("platform-report-run", {
         policy: "stately",
@@ -132,10 +160,11 @@ export class PlatformJobsService
           }),
         );
       }
-      // Startup repairs durable intent only; retention follows its daily schedule.
-      // A first boot against restored history must not immediately prune it.
+      // Startup repairs durable intent only; retention and the digest follow their
+      // daily schedules. A first boot against restored history must not prune it, and
+      // a restart must not send the owner an unscheduled digest.
       for (const [name, , run] of schedules) {
-        if (name !== "prune-email-deliveries") await run();
+        if (!SCHEDULE_ONLY.has(name)) await run();
       }
       this.started = true;
     } catch (error) {
@@ -152,7 +181,7 @@ export class PlatformJobsService
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("Platform queue unavailable");
     await this.boss.getDb().executeSql("SELECT 1");
-    const expected = this.support && this.sync ? 9 : 7;
+    const expected = this.support && this.sync ? 12 : 10;
     const wip = this.boss.getWipData();
     if (
       this.workerIds.length !== expected ||

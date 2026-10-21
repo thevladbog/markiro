@@ -1,4 +1,8 @@
 import { PlatformJobsService } from "./platform-jobs.service";
+import { LandingLeadJobsService } from "../modules/landing-leads/landing-lead-jobs.service";
+import { TelegramClient, telegramConfigFromEnv } from "../modules/landing-leads/telegram.client";
+import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
+import { PlatformAuditService } from "../platform-auth/platform-audit.service";
 import {
   Global,
   Inject,
@@ -1241,6 +1245,24 @@ export class JobsModule {
             useValue: env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA,
           },
           { provide: PgBossService, useClass: PlatformJobsService },
+          {
+            provide: LandingLeadJobsService,
+            inject: [DB, MailDeliveryService, PlatformAuditService],
+            useFactory: (db: Db, mail: MailDeliveryService, audit: PlatformAuditService) => {
+              const telegram = telegramConfigFromEnv(env);
+              return new LandingLeadJobsService(
+                db,
+                mail,
+                audit,
+                telegram === null ? null : new TelegramClient(telegram),
+                {
+                  recipient: env.LANDING_DEMO_RECIPIENT ?? "",
+                  adminOrigin: env.SAAS_ADMIN_ORIGIN,
+                  retentionMonths: env.LEAD_RETENTION_MONTHS,
+                },
+              );
+            },
+          },
           PlatformReportRunnerService,
           PlatformReportSourceService,
         ],

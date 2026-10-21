@@ -67,6 +67,24 @@ describe(".env.example", () => {
     );
     expect(production.VALIDATION_DM_DUPLICATE_ENABLED).toBe("");
   });
+  it("ships landing lead Telegram alerts disabled and the retention bounded", () => {
+    const env = loadEnv(EXAMPLE_ENV);
+    expect(env.LEAD_TELEGRAM_ENABLED).toBe(false);
+    expect(env.LEAD_TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(env.LEAD_RETENTION_MONTHS).toBe(12);
+    const production = parseExampleEnv(
+      readFileSync(join(__dirname, "../../../.env.production.example"), "utf8"),
+    );
+    for (const key of [
+      "LEAD_TELEGRAM_ENABLED",
+      "LEAD_TELEGRAM_BOT_TOKEN",
+      "LEAD_TELEGRAM_CHAT_ID",
+      "LEAD_RETENTION_MONTHS",
+    ]) {
+      expect(production[key], key).toBe("");
+    }
+  });
+
   it("boots the API exactly as `cp .env.example .env` leaves it", () => {
     expect(() => loadEnv(EXAMPLE_ENV)).not.toThrow();
   });

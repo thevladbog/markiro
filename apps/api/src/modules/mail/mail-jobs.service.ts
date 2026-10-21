@@ -1,7 +1,12 @@
 import type { ServerProfile } from "../../server-profile";
 import { randomUUID } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
-import { renderEmail, type EmailTemplateInput, type RenderedEmail } from "@markiro/email";
+import {
+  LANDING_LEAD_DIGEST_SECTIONS,
+  renderEmail,
+  type EmailTemplateInput,
+  type RenderedEmail,
+} from "@markiro/email";
 import { z } from "zod";
 import { MailCryptoService } from "./mail-crypto.service";
 import type { MailTransport } from "./mail.types";
@@ -160,10 +165,115 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
       contactEmail: z.email(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("landing-download-link"),
+      locale: z.enum(["ru", "en"]),
+      company: z.string().min(1),
+      downloadPageUrl: httpUrl,
+      contactEmail: z.email(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("landing-invoice-request-confirmation"),
+      locale: z.enum(["ru", "en"]),
+      company: z.string().min(1),
+      inn: z.string().regex(/^(?:\d{10}|\d{12})$/),
+      tariffCode: z.string().min(1).max(64),
+      email: z.email(),
+      contactEmail: z.email(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("landing-lead-notification"),
+      intent: z.enum(["download", "invoice"]),
+      locale: z.enum(["ru", "en"]),
+      requestId: z.uuid(),
+      receivedAt: z.coerce.date(),
+      sourcePath: z.string().min(1),
+      consentVersion: z.string().trim().min(1).max(64),
+      company: z.string().min(1),
+      email: z.email(),
+      name: z.string().min(1).optional(),
+      phone: z.string().min(1).optional(),
+      inn: z.string().min(1).optional(),
+      tariffCode: z.string().min(1).optional(),
+      productGroup: z.string().min(1).optional(),
+      linesBucket: z.string().min(1).optional(),
+      utm: z
+        .object({
+          source: z.string().min(1).optional(),
+          medium: z.string().min(1).optional(),
+          campaign: z.string().min(1).optional(),
+          content: z.string().min(1).optional(),
+          term: z.string().min(1).optional(),
+        })
+        .strict()
+        .optional(),
+      referrer: z.string().min(1).optional(),
+      firstContact: z.boolean(),
+      leadUrl: httpUrl,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("landing-lead-digest"),
+      digestDate: z.iso.date(),
+      leadsUrl: httpUrl,
+      sections: z
+        .array(
+          z
+            .object({
+              section: z.enum(LANDING_LEAD_DIGEST_SECTIONS),
+              leads: z
+                .array(z.object({ company: z.string().min(1), leadUrl: httpUrl }).strict())
+                .min(1),
+            })
+            .strict(),
+        )
+        .min(1),
+    })
+    .strict(),
   tenantBillingNotificationPayloadSchema,
 ]);
 
+/** Landing kinds whose recipient is a public visitor or the owner, never a platform user. */
+const PUBLIC_LANDING_KINDS = new Set<string>([
+  "landing-demo-notification",
+  "landing-demo-confirmation",
+  "landing-download-link",
+  "landing-invoice-request-confirmation",
+  "landing-lead-notification",
+  "landing-lead-digest",
+]);
+
+/** Kinds the platform-only profile delivers; every other recovered delivery is canceled. */
+const PLATFORM_ONLY_KINDS = new Set<string>([
+  "platform-user-activation",
+  "password-reset",
+  "email-verification",
+  ...PUBLIC_LANDING_KINDS,
+]);
+
+/** Drops `undefined` optionals the schema produced, as `exactOptionalPropertyTypes` requires. */
+function withoutUndefined<T extends object>(
+  value: T,
+): { [K in keyof T]: Exclude<T[K], undefined> } {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as {
+    [K in keyof T]: Exclude<T[K], undefined>;
+  };
+}
+
 function toEmailTemplateInput(input: z.output<typeof emailTemplateSchema>): EmailTemplateInput {
+  if (input.kind === "landing-lead-notification") {
+    const { utm, ...rest } = input;
+    return {
+      ...withoutUndefined(rest),
+      ...(utm !== undefined ? { utm: withoutUndefined(utm) } : {}),
+    };
+  }
   if (input.kind !== "landing-demo-notification" && input.kind !== "landing-demo-confirmation") {
     return input;
   }
@@ -250,15 +360,7 @@ export class MailJobsService {
 
       if (
         this.policy.profile === "platform-only" &&
-        (delivery.tenantId ||
-          delivery.userId ||
-          ![
-            "platform-user-activation",
-            "password-reset",
-            "email-verification",
-            "landing-demo-notification",
-            "landing-demo-confirmation",
-          ].includes(delivery.kind))
+        (delivery.tenantId || delivery.userId || !PLATFORM_ONLY_KINDS.has(delivery.kind))
       ) {
         await this.cancelDisabledDelivery(client, delivery.id);
         return;
@@ -552,10 +654,7 @@ export class MailJobsService {
 
   private platformDeliveryAllowed(delivery: DeliveryRow, template: EmailTemplateInput): boolean {
     if (delivery.kind !== template.kind || delivery.tenantId || delivery.userId) return false;
-    if (
-      template.kind === "landing-demo-notification" ||
-      template.kind === "landing-demo-confirmation"
-    )
+    if (PUBLIC_LANDING_KINDS.has(template.kind))
       return Boolean(delivery.publicRequestId) && !delivery.platformUserId;
     if (!delivery.platformUserId || delivery.publicRequestId || !("actionUrl" in template))
       return false;

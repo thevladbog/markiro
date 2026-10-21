@@ -3,6 +3,12 @@ import { Inject, Injectable } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
+import {
+  insertLeadEvent,
+  insertLeadNotification,
+  leadRequestSeen,
+  upsertLead,
+} from "../landing-leads/landing-lead-writer";
 import type { DemoRequestDto } from "./demo-request.schema";
 
 const EXPECTED_KINDS = new Set(["landing-demo-notification", "landing-demo-confirmation"]);
@@ -51,6 +57,9 @@ export class DemoRequestRepository {
         }
         throw new DemoRequestInvariantError();
       }
+      // Mail retention removes delivery rows after 30 days; the lead event keeps the
+      // request id for good, so a late replay is still recognized as accepted.
+      if (await leadRequestSeen(tx, requestId)) return "existing";
 
       const receivedAt = this.now();
       const phone = input.phone === undefined ? {} : { phone: input.phone };
@@ -86,6 +95,35 @@ export class DemoRequestRepository {
           contactEmail: this.options.replyTo,
         },
       });
+      // The demo form is a lead too (spec 2026-10-20 §15.3): same transaction, same
+      // idempotency key as its two e-mails.
+      const { leadId, created } = await upsertLead(
+        tx,
+        {
+          email: input.email,
+          company: input.company,
+          name: input.name,
+          locale: input.locale,
+          sourcePath: input.sourcePath,
+          ...phone,
+        },
+        receivedAt,
+      );
+      const eventId = await insertLeadEvent(
+        tx,
+        {
+          leadId,
+          kind: "demo_request",
+          publicRequestId: requestId,
+          payload: { sourcePath: input.sourcePath, locale: input.locale },
+        },
+        receivedAt,
+      );
+      await insertLeadNotification(
+        tx,
+        { leadId, eventId, kind: "new_lead", firstContact: created },
+        receivedAt,
+      );
       return "created";
     });
   }

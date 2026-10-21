@@ -67,6 +67,8 @@ import { StationShiftCloseModule } from "./modules/station-shift-close/station-s
 import { StationWriteoffsModule } from "./modules/station-writeoffs/station-writeoffs.module";
 import { StationPalletsModule } from "./modules/station-pallets/station-pallets.module";
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
+import { LandingLeadsModule } from "./modules/landing-leads/landing-leads.module";
+import { PlatformLeadsModule } from "./modules/landing-leads/platform-leads.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
 import { InventoriesModule } from "./modules/inventories/inventories.module";
@@ -101,6 +103,8 @@ export class AppModule {
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
     const supportChatModule = SupportChatModule.forRoot(env);
+    // One instance: the leads section imports it for provisioning (see PlatformLeadsModule).
+    const platformTenantsModule = PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN);
     if (env.SERVER_PROFILE === "platform-only") {
       if (!setup.platformAuth) throw new Error("Platform auth is required for platform-only");
       return {
@@ -113,7 +117,7 @@ export class AppModule {
           PlatformStandaloneLicensesModule.forRoot(env),
           PlatformCatalogModule,
           PlatformEntitlementsModule,
-          PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
+          platformTenantsModule,
           PlatformReportsModule,
           PlatformAgreementsModule,
           PlatformOffersModule,
@@ -125,11 +129,13 @@ export class AppModule {
           PlatformBillingRequestsModule,
           PlatformOperationsModule.forRoot(env),
           PlatformServicePeriodsModule,
+          PlatformLeadsModule.forRoot(platformTenantsModule),
           SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
           TenantBillingModule.forRoot(env.ADMIN_ORIGIN, true),
           supportChatModule,
           JobsModule.forRoot(setup.databaseUrl, env, supportChatModule),
           DemoRequestsModule.forRoot(env),
+          LandingLeadsModule.forRoot(env),
           StorageModule.forRoot(env),
           HealthModule.forRoot(),
         ],
@@ -149,7 +155,7 @@ export class AppModule {
               PlatformStandaloneLicensesModule.forRoot(env),
               PlatformCatalogModule,
               PlatformEntitlementsModule,
-              PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
+              platformTenantsModule,
               PlatformReportsModule,
               PlatformAgreementsModule,
               PlatformOffersModule,
@@ -161,6 +167,7 @@ export class AppModule {
               PlatformBillingRequestsModule,
               PlatformOperationsModule.forRoot(env),
               PlatformServicePeriodsModule,
+              PlatformLeadsModule.forRoot(platformTenantsModule),
             ]
           : []),
         AuthorizationModule,
@@ -169,6 +176,7 @@ export class AppModule {
         supportChatModule,
         JobsModule.forRoot(setup.databaseUrl, env, supportChatModule),
         DemoRequestsModule.forRoot(env),
+        LandingLeadsModule.forRoot(env),
         OrgProfileModule,
         CounterpartiesModule,
         ProductsModule,

@@ -147,6 +147,7 @@ export const LANDING_LEAD_ERROR_CODES = [
   "lead_not_found",
   "lead_anonymized",
   "lead_tenant_not_found",
+  "lead_tenant_slug_taken",
 ] as const;
 export type LandingLeadErrorCode = (typeof LANDING_LEAD_ERROR_CODES)[number];
 
