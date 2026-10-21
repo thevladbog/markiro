@@ -44,6 +44,7 @@ export default defineConfig({
     "./src/schema/national-catalog-import.ts",
     "./src/schema/standalone-licenses.ts",
     "./src/schema/standalone-support-diagnostics.ts",
+    "./src/schema/landing-leads.ts",
   ],
   out: "./migrations",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },
