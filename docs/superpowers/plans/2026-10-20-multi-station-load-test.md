@@ -4,9 +4,11 @@
 
 **Goal:** Build the load and soak harness that decides spec §8's acceptance of «several stations in one shift on one line»: four stations and two handhelds scanning into one shift of a real host for minutes (CI smoke) or hours (soak), with every figure the spec names measured (p99 of the fact routes, WAL checkpoint behaviour, a backup under load, a restore, the write path) and every total reconciled against what the host acknowledged.
 
-**Architecture:** A new workspace crate `apps/standalone/loadtest` (`markiro-loadtest`: a library and one binary) starts the real `markiro-host` binary as a child process on a throwaway data folder, makes the site through the host's own routes (wizard, one product, templates, small SSCC blocks, the line's limit, paired stations and handhelds, one shared shift), and runs one simulated device per station or handheld: a pure state machine (`engine.rs`: outbox, open box and pallet, SSCC blocks by the half rule) wrapped in four network tasks (scanner, syncer, link, stream). A ledger of the receipts is the oracle: at the end the host's totals (API) and its database (read-only, from outside) must equal it exactly. The run ends with the devices closing their parts in a chosen order, five drills on fresh shifts (three close orders, a forced close, a missing reason), a last backup, the host's stop and a restore of that backup into a folder of its own. A JSON report and a Markdown summary go to a folder outside the repository; a second command compares two reports.
+**Architecture:** A new workspace crate `apps/standalone/loadtest` (`markiro-loadtest`: a library and one binary) starts the real `markiro-host` binary as a child process on a throwaway data folder, makes the site through the host's own routes (wizard, one product, templates, small SSCC blocks, the line's limit, paired stations and handhelds, one shared shift), and runs one simulated device per station or handheld: a pure state machine (`engine.rs`: outbox, open box and pallet, SSCC blocks by the half rule) wrapped in four network tasks (scanner, syncer, link, stream). A ledger of the receipts is the oracle: at the end the host's totals (API) and its database (read-only, from outside) must equal it exactly. The run ends with the devices closing their parts in a chosen order, six drills on fresh shifts (three close orders, a forced close, a missing reason, a stale leave), a last backup, the host's stop and a restore of that backup into a folder of its own. A JSON report and a Markdown summary go to a folder outside the repository; a second command compares two reports.
 
 **Tech Stack:** Rust 2021 (tokio, reqwest with a pinned-fingerprint rustls verifier as the devices have, sqlx read-only on the host's SQLite, serde, sha2), the host library (`markiro-host`) and the wire types (`markiro-proto`); GitHub Actions (`workflow_dispatch`) and `node --test` for the CI contract.
+
+**Amended to the host contract as implemented** (`claude/ms-host`, host plan «Implementation status»): `GET /v1/device/shifts` carries `totals`/`byDevice` for `active` shifts only, so nothing here reads a closed shift's figures from the list (the totals poll counts only polls of the active run shift; the restore probe reads the closed run shift's total from the one-shift answer of `POST …/leave`, which carries the figures for any non-planned status and writes nothing for a closed shift); the leave takes the optional strict body `{ "joinedRev": n }`, and a sixth drill (`stale-leave`) proves that a leave carrying an earlier stay's token never undoes a re-entry. Thresholds are unchanged.
 
 **Spec:** `docs/superpowers/specs/2026-10-20-standalone-multi-station-shift-design.md` (§8 SQLite decision and acceptance, §9 step 2, §11 risks). **Host contract:** the end of `docs/superpowers/plans/2026-10-20-multi-station-host.md` (its «Host-side hooks the load/soak plan needs» and «Host contract for the other plans»). This is part 5 of 5: the host plan is part 1 and **must be merged first** for every task that runs more than one device (Tasks 7 and 9 onward use `maxStations`, `participants`, `totals`, `byDevice`, `closeReasonMissing`, `PUT /v1/office/shifts/{id}/close-reason`, the `partClosed` and `reasonMissing` receipts and the capability `multi-station-v1`, all named by that contract). Tasks 1-6, 8 and 10-12's unit tests need nothing from it.
 
@@ -23,7 +25,7 @@ From the spec (§8, §9, §11), the host plan and the owner's decisions:
 - Revisit when (§8): more than ~20 simultaneous devices on a host, more than ~50 million rows in `scans`, or a need for a warm standby (then continuous copying and a standby host first, not a change of engine).
 - Risks to cover (§11): a duplicate scan on two stations (the registry decides, the earliest scan wins; a test with two stations); the shift-wide total is the host's, from the registry; a hanging participant blocks the automatic close (the office force-closes); late data after a forced close stays late and never reopens the shift.
 - Profiles fixed by the task: smoke = 4 stations + 2 handhelds × 5 scans/s for 3 minutes; soak = the same × 10 scans/s for 4 hours.
-- Host contract used (plan 2b): `POST /v1/device/shifts/{id}/enter` with `{ "supports": ["multi-station-v1"] }` (handhelds add `handheld-host-v1`), `POST /v1/device/facts` (1-100 records, idempotent by `(device_id, record_id)` and digest), `GET /v1/device/shifts` (the totals poll), `POST /v1/office/shifts/{id}/close`, `GET /v1/office/shifts/{id}`, `PUT /v1/office/lines/{id}` with `maxStations`, `PUT /v1/office/shifts/{id}/close-reason`; the line's limit is `lines.max_stations` 1-16 and a slot is an active participant.
+- Host contract used (plan 2b): `POST /v1/device/shifts/{id}/enter` with `{ "supports": ["multi-station-v1"] }` (handhelds add `handheld-host-v1`), `POST /v1/device/facts` (1-100 records, idempotent by `(device_id, record_id)` and digest), `GET /v1/device/shifts` (the totals poll; `totals`/`byDevice` for `active` shifts only), `POST /v1/device/shifts/{id}/leave` (optional `{ "joinedRev": n }`; a stale token answers the part still `active` and writes nothing), `POST /v1/office/shifts/{id}/close`, `GET /v1/office/shifts/{id}`, `PUT /v1/office/lines/{id}` with `maxStations`, `PUT /v1/office/shifts/{id}/close-reason`; the line's limit is `lines.max_stations` 1-16 and a slot is an active participant.
 - Release order is host first; this plan changes no product code (only a new crate, a workflow, a CI contract and docs).
 
 From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
@@ -49,7 +51,7 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
 - **D7. WAL behaviour is read from the wal-index, not forced.** A checkpoint cannot be run from outside without writing. `host.db-shm` holds `mxFrame` and `nBackfill`; their difference is the log's backlog (frames no checkpoint has copied). It is sampled every `sampleS` seconds with the file sizes; a torn read is read again. The WAL file's size alone says little (SQLite reuses the file from its start and never shrinks it): the backlog and its p99 are the figures. Where `host.db-shm` cannot be read (Windows may refuse), the run warns and judges what it has.
 - **D8. A backup under load is judged by bounds, a restore by equality.** A copy taken while devices write holds every scan acknowledged before it was asked for and none that was not yet sent when it finished: `acked_before <= scans_in_copy <= acked_after + devices × batchMax (+ the drills' scans for the last one)`; it must also pass `integrity_check`, the foreign-key check and the structural checks (no SSCC twice, no code live twice, blocks disjoint). At rest, the last copy is restored into a folder of its own and the nine fact tables must hold exactly the live database's counts; a host started on it must answer the shift's total to a device whose key the copy kept.
 - **D9. Thresholds are code, with numbers and a policy.** `Thresholds::for_profile` holds them (Task 2, table in the runbook). They are the starting numbers; the first three smoke runs on the CI runner and on the owner's PC are calibration, and a threshold moves only with the three reports attached to the change (it may tighten freely, loosen only with the owner's yes). `tiny` is the harness's own self-test: the same rules, latency four times looser.
-- **D10. Drills run after the main run, on fresh shifts, with scripted devices.** The line is free once the main shift is closed. Each drill plans a shift, has every device enter, make 2 × capacity + 1 scans (so a partial box exists), close its box and pallet, and then closes in an order: stations first, handhelds first, shuffled; or the office closes while one part is open (the part's three later scans must be accepted as late and the shift stay closed); or a plan that differs from the made quantity is closed with no reason (the last receipt says `reasonMissing`, the office gives the reason with `PUT …/close-reason`). A record id is derived from the shift and the device, or a second drill's close would meet the first's receipt as a `payload_mismatch`.
+- **D10. Drills run after the main run, on fresh shifts, with scripted devices.** The line is free once the main shift is closed. Each drill plans a shift, has every device enter, make 2 × capacity + 1 scans (so a partial box exists), close its box and pallet, and then closes in an order: stations first, handhelds first, shuffled; or the office closes while one part is open (the part's three later scans must be accepted as late and the shift stay closed); or a plan that differs from the made quantity is closed with no reason (the last receipt says `reasonMissing`, the office gives the reason with `PUT …/close-reason`); or, with no scans, one device leaves with its `joinedRev`, enters again (a new token) and a leave carrying the first token must leave it `active` with no revision (`stale-leave`; the office then closes that shift). A record id is derived from the shift and the device, or a second drill's close would meet the first's receipt as a `payload_mismatch`.
 - **D11. Reports live outside the repository; a throwaway host only.** The report folder (`--out`, `$MARKIRO_LOAD_OUT`, default `~/markiro-load`) is refused when it is inside a git checkout. The data of a passing run is deleted (`--keep-data` keeps it); a failing run keeps `data/`, `restored/` and the host log. `markiro-host run` binds every interface (it has no flag for less), so a run belongs on a machine you trust, and attach mode creates devices and shifts on its target: never a production site.
 - **D12. What the harness does not simulate** (listed so nobody reads a green run as more than it is): box and pallet label checks (`box_label`, `pallet_label`), box exceptions, validation shifts, disaggregation, warehouse pallets, the handheld's warehouse and pallet-event routes, real printers and scanners, a real LAN, the Windows service. A handheld here is a full participant that works the shift as a station does (plan 2b: «a handheld is a full participant, equal to a station»).
 - **D13. The write review of §8 is a test.** `tests/write_review.rs` scans the host's source: no function opens a deferred transaction (`pool.begin()`) and writes after it, the hot write paths (`receive_facts`, `issue_block`, `enter_shift`) call `begin_write`, the code check reads on a plain connection, a facts batch is one transaction of at most 100 records, a backup is one `VACUUM INTO`. It is a heuristic: a flagged line is read by a person.
@@ -71,7 +73,7 @@ From `apps/standalone/AGENTS.md` and the root `AGENTS.md`:
 | `loadtest/src/device.rs`                                                                                                                        | the simulated device's network tasks, `Shared`, injection plan        | 9     |
 | `loadtest/src/dbcheck.rs`                                                                                                                       | structural and reconciling database checks                            | 10    |
 | `loadtest/src/report.rs`                                                                                                                        | report, verdict, Markdown, comparison                                 | 11    |
-| `loadtest/src/probes.rs`, `drills.rs`                                                                                                           | backup under load, restore round trip; the five drills                | 12    |
+| `loadtest/src/probes.rs`, `drills.rs`                                                                                                           | backup under load, restore round trip; the six drills                 | 12    |
 | `loadtest/src/run.rs`, `cli.rs`, `main.rs`, `loadtest/tests/self_run.rs`                                                                        | the run, the command line, the self-test                              | 13    |
 | `loadtest/tests/write_review.rs`                                                                                                                | the write review as a test                                            | 14    |
 | `tools/ci/affected.mjs`, `tools/ci/test/affected.test.mjs`, `.github/workflows/standalone-load.yml`, `tools/ci/test/workflow-triggers.test.mjs` | CI routing and the opt-in workflow                                    | 15    |
@@ -4766,6 +4768,8 @@ impl SimDevice {
                     .iter()
                     .find(|shift| shift["id"] == json!(self.shared.shift_id))
             });
+        // The list carries `totals` for an active shift only (host `35020185a`): a poll of a
+        // closed shift counts nothing, so neither a regression nor a mismatch can come of it.
         let Some(totals) = shift.and_then(|shift| shift.get("totals")) else {
             return;
         };
@@ -6174,7 +6178,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: The backup and restore probes and the five drills
+### Task 12: The backup and restore probes and the six drills
 
 **Files:**
 
@@ -6184,7 +6188,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 
 - Consumes: `api::{Api, Auth}`, `checks::Check`, `dbcheck`, `device::Shared`, `engine::{Engine, EngineCfg, Block}`, `gen`, `host::Host`, `metrics::{Metrics, Route}`, `profile::{CloseOrder, Profile}`, `report::{BackupResult, DrillResult, RestoreResult}`, `rng::Rng`, `site::{Office, Res, Site, ShiftInfo, DeviceSpec, plan_and_enter}`, `markiro_host::restore::{restore_now, IdentityChoice, RestoreOptions}`.
-- Produces: `probes::backup(office: &Office, data_dir: &Path, shared: &Shared, at_fraction: f64, outside_the_ledger: u64) -> Res<(BackupResult, PathBuf)>` (asks `POST /v1/office/backups`, expects 202, polls `GET /v1/office/backups` until nothing runs and a new copy is listed, opens it `immutable`, judges it by D8; while it waits the facts route is also counted as `facts_during_backup`); `probes::restore_roundtrip(live_dir, copy, work, device_key, shift_id, expected_total, metrics) -> Res<RestoreResult>` (restores into `<work>/restored`, compares the nine tables' counts with the live database, starts a host in this process on the restored folder and reads the shift's total through a device key the copy kept); `drills::scans_made(profile, devices) -> u64`; `drills::closing_order(devices, order, rng) -> Vec<usize>`; `drills::run_all(site, profile, run) -> Vec<DrillResult>` (`close-stations-first`, `close-handhelds-first`, `close-shuffled`, `force-close`, `missing-reason`).
+- Produces: `probes::backup(office: &Office, data_dir: &Path, shared: &Shared, at_fraction: f64, outside_the_ledger: u64) -> Res<(BackupResult, PathBuf)>` (asks `POST /v1/office/backups`, expects 202, polls `GET /v1/office/backups` until nothing runs and a new copy is listed, opens it `immutable`, judges it by D8; while it waits the facts route is also counted as `facts_during_backup`); `probes::restore_roundtrip(live_dir, copy, work, device_key, shift_id, expected_total, metrics) -> Res<RestoreResult>` (restores into `<work>/restored`, compares the nine tables' counts with the live database, starts a host in this process on the restored folder and reads the closed shift's total through a device key the copy kept, from the answer of `POST /v1/device/shifts/{id}/leave` with no body: the list carries no figures for a closed shift, the one-shift answer does, and a leave on a closed shift writes nothing); `drills::scans_made(profile, devices) -> u64`; `drills::closing_order(devices, order, rng) -> Vec<usize>`; `drills::run_all(site, profile, run) -> Vec<DrillResult>` (`close-stations-first`, `close-handhelds-first`, `close-shuffled`, `force-close`, `missing-reason`, `stale-leave`).
 
 `probes.rs` has no unit test: a backup needs a running host and is exercised by Task 13's self-test (a backup under load and a last one) and Task 17's runs. The drill tests below cover the pure part (the order of closing and the count of scans a drill makes); the rest of `drills.rs` runs in the same self-test.
 
@@ -6264,7 +6268,7 @@ mod tests {
     #[test]
     fn the_drills_scans_are_counted_for_the_last_backup() {
         let smoke = Profile::preset("smoke").unwrap();
-        // 25 scans a device, six devices, five drills, and the three late ones.
+        // 25 scans a device, six devices, five drills that scan (`stale-leave` makes none), and the three late ones.
         assert_eq!(scans_made(&smoke, 6), 5 * 6 * 25 + 3);
     }
 }
@@ -6282,7 +6286,8 @@ Expected: FAIL to compile (`cannot find function closing_order`, `scans_made`).
 //! scans: the devices close their parts in each order, the office closes
 //! the whole shift while one part is open (and the part's later scans are
 //! late, not lost), and the last closer who gives no reason leaves the
-//! office to give it.
+//! office to give it; and a leave of an earlier stay (an old `joinedRev`)
+//! never undoes a re-entry.
 
 use std::sync::Arc;
 
@@ -6301,8 +6306,9 @@ fn scans_per_device(profile: &Profile) -> u32 {
     2 * profile.box_capacity + 1
 }
 
-/// The scans every drill makes together: five drills of every device, and
-/// the three late scans of the forced close.
+/// The scans every drill makes together: the five drills that scan, of every
+/// device, and the three late scans of the forced close (`stale-leave` makes
+/// none).
 pub fn scans_made(profile: &Profile, devices: usize) -> u64 {
     5 * devices as u64 * u64::from(scans_per_device(profile)) + 3
 }
@@ -6643,6 +6649,113 @@ async fn missing_reason_drill(site: &Site, profile: &Profile, run: u32) -> Drill
     result("missing-reason", outcome)
 }
 
+/// A device's `POST` straight to the host: the body of a 2xx, else an error naming the answer.
+async fn device_post(
+    site: &Site,
+    device: &DeviceSpec,
+    route: crate::metrics::Route,
+    path: &str,
+    body: Option<Value>,
+) -> Res<Value> {
+    let reply = site
+        .office
+        .api
+        .send(
+            route,
+            "POST",
+            path,
+            crate::api::Auth { device_key: Some(&device.key), session: None },
+            body.as_ref(),
+        )
+        .await
+        .map_err(|error| format!("POST {path}: {error:?}"))?;
+    if reply.ok() {
+        Ok(reply.body)
+    } else {
+        Err(format!("POST {path}: {} {}", reply.status, reply.body))
+    }
+}
+
+/// `device`'s leave token in a shift as an answer names it (`participants[].joinedRev`).
+fn joined_rev(shift: &Value, device: &DeviceSpec) -> Option<u64> {
+    shift
+        .get("participants")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|part| part["deviceId"] == Value::String(device.id.clone()))?
+        .get("joinedRev")
+        .and_then(Value::as_u64)
+}
+
+/// A leave of an earlier stay must not undo a re-entry (host D5 as amended): the
+/// first device leaves with its token, enters again (a return from `left`
+/// stamps a new token), and a leave carrying the first token is answered with
+/// the part still `active`, no revision and nothing written. No scans; the
+/// office closes the shift at the end, so the line is free again.
+async fn stale_leave_drill(site: &Site, profile: &Profile) -> DrillResult {
+    let outcome: Res<Vec<Check>> = async {
+        let shift = plan_and_enter(site, profile, None).await?;
+        let device = &site.devices[0];
+        let enter = format!("/v1/device/shifts/{}/enter", shift.id);
+        let leave = format!("/v1/device/shifts/{}/leave", shift.id);
+        let mut checks = Vec::new();
+        let first = joined_rev(&office_shift(site, &shift.id).await?, device)
+            .ok_or("the participant names no joinedRev (a host before the leave token)")?;
+        let left = device_post(
+            site,
+            device,
+            crate::metrics::Route::Other,
+            &leave,
+            Some(json!({ "joinedRev": first })),
+        )
+        .await?;
+        checks.push(Check::same("leave_with_the_current_token", "left", left["myState"].as_str().unwrap_or("")));
+        let entered = device_post(
+            site,
+            device,
+            crate::metrics::Route::Enter,
+            &enter,
+            Some(json!({ "supports": device.supports() })),
+        )
+        .await?;
+        checks.push(Check::same("entered_again", "active", entered["myState"].as_str().unwrap_or("")));
+        checks.push(Check::same(
+            "a_return_stamps_a_new_token",
+            true,
+            joined_rev(&entered, device).is_some_and(|rev| rev > first),
+        ));
+        let before = office_shift(site, &shift.id).await?;
+        let stale = device_post(
+            site,
+            device,
+            crate::metrics::Route::Other,
+            &leave,
+            Some(json!({ "joinedRev": first })),
+        )
+        .await?;
+        checks.push(Check::same("a_stale_leave_leaves_the_part_active", "active", stale["myState"].as_str().unwrap_or("")));
+        let after = office_shift(site, &shift.id).await?;
+        checks.push(Check::same("a_stale_leave_takes_no_revision", before["rev"].as_u64(), after["rev"].as_u64()));
+        checks.push(Check::same(
+            "participants_after_the_stale_leave",
+            vec!["active".to_owned(); site.devices.len()],
+            states(&after),
+        ));
+        let closed = site
+            .office
+            .ok(
+                "POST",
+                &format!("/v1/office/shifts/{}/close", shift.id),
+                Some(json!({ "reason": "Нагрузочная проверка устаревшего выхода", "expectedRev": after["rev"] })),
+            )
+            .await?;
+        checks.push(Check::same("status_after_the_drill", "closed", closed["status"].as_str().unwrap_or("")));
+        Ok(checks)
+    }
+    .await;
+    result("stale-leave", outcome)
+}
+
 fn result(name: &str, outcome: Res<Vec<Check>>) -> DrillResult {
     DrillResult {
         name: name.to_owned(),
@@ -6686,6 +6799,7 @@ pub async fn run_all(site: &Site, profile: &Profile, run: u32) -> Vec<DrillResul
     );
     results.push(force_drill(site, profile, run + 4).await);
     results.push(missing_reason_drill(site, profile, run + 5).await);
+    results.push(stale_leave_drill(site, profile).await);
     results
 }
 ```
@@ -6845,7 +6959,11 @@ pub async fn backup(
 
 /// Put `copy` into a folder of its own, compare it with the live database
 /// (the host is stopped: nothing writes to either) and start a host on it
-/// that answers the shift's total to a device whose key the copy kept.
+/// that answers the shift's total to a device whose key the copy kept. The
+/// run's shift is closed by then, and the device list carries no figures for
+/// a closed shift (host `35020185a`): the total is read from the one-shift
+/// answer of a leave with no body, which carries them for any non-planned
+/// status and writes nothing for a closed shift.
 pub async fn restore_roundtrip(
     live_dir: &Path,
     copy: &Path,
@@ -6897,9 +7015,9 @@ pub async fn restore_roundtrip(
     let api = Api::new(&host.base, &host.fingerprint, metrics);
     let reply = api
         .send(
-            Route::DeviceShifts,
-            "GET",
-            "/v1/device/shifts",
+            Route::Other,
+            "POST",
+            &format!("/v1/device/shifts/{shift_id}/leave"),
             Auth {
                 device_key: Some(device_key),
                 session: None,
@@ -6908,14 +7026,9 @@ pub async fn restore_roundtrip(
         )
         .await;
     let total = reply.ok().and_then(|reply| {
-        reply
-            .body
-            .get("shifts")?
-            .as_array()?
-            .iter()
-            .find(|shift| shift["id"] == serde_json::json!(shift_id))?
-            .pointer("/totals/accepted")?
-            .as_u64()
+        (reply.body["id"] == serde_json::json!(shift_id))
+            .then(|| reply.body.pointer("/totals/accepted").and_then(Value::as_u64))
+            .flatten()
     });
     checks.push(Check::new(
         "restore_host_answers_the_shift_total",
@@ -6944,7 +7057,7 @@ Run: `cargo fmt --manifest-path "$WT/apps/standalone/Cargo.toml" --all -- --chec
 git -C "$WT" add apps/standalone/loadtest/src/lib.rs \
   apps/standalone/loadtest/src/drills.rs \
   apps/standalone/loadtest/src/probes.rs
-git -C "$WT" commit -m "feat(standalone): load test drills (close orders, forced close, missing reason) and backup and restore probes
+git -C "$WT" commit -m "feat(standalone): load test drills (close orders, forced close, missing reason, stale leave) and backup and restore probes
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
@@ -6963,7 +7076,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Consumes: every module above.
 - Produces: `run::HostChoice { InProcess, Spawn { bin }, Attach { base, fingerprint, data_dir, pid, credentials } }`, `run::RunOptions { profile, thresholds, host, work_dir }`, `run::execute(RunOptions) -> Res<Report>`; `cli::{Command, RunArgs, HostArg, USAGE, parse, run, inside_checkout, compare_files, summary_of}`; the binary `markiro-loadtest` with `run`, `compare` and `summary`; exit codes 0 (pass), 1 (a failed verdict or a regression), 2 (a run that could not be made, or a bad line).
 
-`execute` in order: start the host, `hello`, provision the site and the shift, spawn four tasks for every device and the sampler, schedule the profile's backups, wait the duration (a progress line every 30 s on stderr), stop the scanners, bring every link up, drain every outbox, reconcile (API tier through every device's and the office's view, database tier from outside, read-only), the devices close their parts in the profile's order (every close but the last must answer `partClosed`, and the last must close the shift), the five drills, the last backup, the host's stop, the restore round trip, the log scan, the report. The new check `conflicts_injected_vs_observed` requires that of the late duplicates and taken races injected, 90-100 % show as conflicts or displacements.
+`execute` in order: start the host, `hello`, provision the site and the shift, spawn four tasks for every device and the sampler, schedule the profile's backups, wait the duration (a progress line every 30 s on stderr), stop the scanners, bring every link up, drain every outbox, reconcile (API tier through every device's and the office's view, database tier from outside, read-only), the devices close their parts in the profile's order (every close but the last must answer `partClosed`, and the last must close the shift; the device list then names the closed shift without `totals`), the six drills, the last backup, the host's stop, the restore round trip, the log scan, the report. The new check `conflicts_injected_vs_observed` requires that of the late duplicates and taken races injected, 90-100 % show as conflicts or displacements.
 
 The command line: `markiro-loadtest run --profile tiny|smoke|soak [--set field=value]… [--out DIR] [--keep-data] [--host spawn|in-process|attach] [--host-bin PATH] [--attach-url URL --fingerprint HEX [--data-dir DIR] [--pid N]]`, `markiro-loadtest compare OLD.json NEW.json`, `markiro-loadtest summary REPORT.json`. The default host is `spawn`, the `markiro-host` binary next to this one (both are built into one `target/` directory). A report folder inside a git checkout is refused. Attach reads `MARKIRO_LOAD_OFFICE_DEVICE_KEY`, `MARKIRO_LOAD_ADMIN_LOGIN` and `MARKIRO_LOAD_ADMIN_PASSWORD` from the environment.
 
@@ -7156,7 +7269,7 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
             .sum::<u64>()
             > 0
     );
-    assert_eq!(report.drills.len(), 5);
+    assert_eq!(report.drills.len(), 6);
     assert!(report.backups.len() >= 2, "one under load, one at the end");
     assert!(report.restore.is_some());
     let first = &report.latency["facts"];
@@ -7575,6 +7688,27 @@ pub async fn execute(options: RunOptions) -> Res<Report> {
             view["status"].as_str().unwrap_or(""),
         )),
         Err(error) => checks.push(Check::new("shift_closed_by_its_last_part", false, error)),
+    }
+    // The device list names the closed shift with its participants and this device's state, but
+    // without live figures (host `35020185a`: totals for active shifts only).
+    match devices[0].view().await {
+        Some(view) => {
+            checks.push(Check::same(
+                "closed_shift_list_my_state",
+                "closed",
+                view["myState"].as_str().unwrap_or(""),
+            ));
+            checks.push(Check::same(
+                "closed_shift_list_carries_no_totals",
+                true,
+                view.get("totals").is_none() && view.get("byDevice").is_none(),
+            ));
+        }
+        None => checks.push(Check::new(
+            "closed_shift_in_the_list",
+            false,
+            "the closed shift is not in the device's list",
+        )),
     }
     let drills = drills::run_all(&site, &profile, run_id).await;
     // The last copy, then the host stops and the copy is put back.
@@ -7998,7 +8132,7 @@ Expected: PASS, 5 tests; the build finishes (the host binary is `markiro-host`, 
 - [ ] **Step 5: Run the self-test** (a host on a loopback socket and about a minute: sandbox disabled if the sandbox refuses `listen`; the host of plan 2b must be merged):
 
 Run: `cargo --offline --locked test --manifest-path "$WT/apps/standalone/Cargo.toml" -p markiro-loadtest --test self_run -- --ignored --nocapture`
-Expected: PASS, 1 test. It asserts the verdict passes, three devices of which one handheld, more than 100 accepted codes, at least one conflict or displacement, more than 10 boxes and 3 pallets closed, at least one resend and one offline period, five drills, at least two backups (one under load, one at the end) and a restore. If it fails, the failing check's name and numbers are in the printed `Verdict`: a failure in a check named `totals_*`, `by_device_*`, `participants_*`, `close_*`, `office_*` or a drill's is a defect of the host plan's task that makes it (fix it there with a focused failing test), never a reason to loosen this test.
+Expected: PASS, 1 test. It asserts the verdict passes, three devices of which one handheld, more than 100 accepted codes, at least one conflict or displacement, more than 10 boxes and 3 pallets closed, at least one resend and one offline period, six drills, at least two backups (one under load, one at the end) and a restore. If it fails, the failing check's name and numbers are in the printed `Verdict`: a failure in a check named `totals_*`, `by_device_*`, `participants_*`, `close_*`, `office_*` or a drill's is a defect of the host plan's task that makes it (fix it there with a focused failing test), never a reason to loosen this test.
 
 - [ ] **Step 6: Run the binary once from the command line** (the same load through the real command line, the host as a child process):
 
@@ -8553,7 +8687,8 @@ on a throwaway folder, makes the site through the host's own routes (wizard, pro
 `maxStations`, stations by local pairing and handhelds by code, one shared shift), and runs one simulated device per station or
 handheld (`engine.rs`, a pure state machine: outbox, open box and pallet, blocks by the half rule; `device.rs`, its network
 tasks). A ledger of receipts is the oracle: at the end the host's totals and its database (read-only, from outside) must equal
-it exactly. Drills (`drills.rs`) then close fresh shifts in three orders, force-close one and close one with no reason; a
+it exactly. Drills (`drills.rs`) then close fresh shifts in three orders, force-close one, close one with no reason and
+prove that a leave with an old `joinedRev` never undoes a re-entry; a
 backup is taken under load and at the end, and the last one is restored into a folder of its own (`probes.rs`).
 
 - Commands (the owner's runbook is `docs/runbooks/standalone-load-test.md`): `markiro-loadtest run --profile tiny|smoke|soak
@@ -8674,7 +8809,7 @@ Expected: all pass; the workspace run includes the crate's 63 tests and one igno
 3. **WAL checkpoints cannot be forced or asked from outside.** The harness reads `mxFrame - nBackfill` from `host.db-shm` (D7). If `host.db-shm` is unreadable (Windows may refuse a second reader) the run only warns. The host never runs an explicit checkpoint after a batch: with a reader always open the backlog could grow; the threshold and the p99 are what would show it, and an explicit `PRAGMA wal_checkpoint(PASSIVE)` after a batch is the first remedy to try (a host change, not here).
 4. **The plan depends on names, not on code.** The multi-device fields and routes (`maxStations`, `participants`, `totals`, `byDevice`, `closeReasonMissing`, `PUT …/close-reason`, `partClosed`, `reasonMissing`, `multi-station-v1`) were read from the host plan's contract; the code does not exist yet. Everything else was run against today's host (see «Verification at planning time»). If the host plan renames one, `site.rs`, `device.rs`, `drills.rs` and `run.rs` change with it.
 5. **A handheld is a station here.** It uses the facts routes and the same shift entry (plan 2b makes it a full participant). The handheld's own routes (warehouse lookups and reprints, pallet events, box registry) and the Kotlin client are not exercised; a load of those is a separate plan if the owner wants it.
-6. **Leave and re-entry under load are not driven.** Link drops are network drops (the device keeps its slot), as an offline station does; `POST …/leave` and a device returning into a freed slot are covered by the host plan's tests, not by the load. The line-full refusal is covered there too.
+6. **Leave and re-entry under load are not driven.** Link drops are network drops (the device keeps its slot), as an offline station does; `POST …/leave` and a device returning into a freed slot are exercised once, at rest, by the `stale-leave` drill (a leave with an old `joinedRev` must not undo the re-entry), and otherwise by the host plan's tests. The line-full refusal is covered there too.
 7. **Soak on a CI runner is possible but not the point.** The workflow allows it (330 minutes); the factory's disks and Windows are what the owner's four hours are for.
 8. **Attach mode writes to its target.** It creates devices, a product, templates and shifts, and changes the line's limit and the SSCC block sizes of that site: throwaway hosts only.
 9. **The first thresholds are unmeasured on CI.** They were chosen from the host's design (a commit is one fsync; a debug-build host answered a single device's facts at p99 21 ms in the planning-time run on a laptop), the 300 ms rule of the station and the 5 s busy timeout. The policy of D9 makes the first three runs calibration.
