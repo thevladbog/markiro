@@ -60,6 +60,7 @@ import { ShiftExports } from "./ShiftExports.js";
 import { ShiftScans } from "./ShiftScans.js";
 import { PalletCountTag } from "./PalletCountTag.js";
 import { ShiftMarks } from "./ShiftMarks.js";
+import { OVERVIEW_POLL_MS } from "../overview/use-overview-data.js";
 import { isSharedShift } from "./participation.js";
 import { ShiftStations } from "./ShiftStations.js";
 
@@ -164,7 +165,11 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
   });
   const [asking, setAsking] = useState<"close" | "cancel" | null>(null);
   const formId = useId();
-  const shift = useOfficeQuery(officeKeys.shift(id), (api, token) => api.getShift(token, id));
+  // A shift at work is read again as the overview reads its list (its parts and totals move); a
+  // planned or closed one cannot change under the card but by this office.
+  const shift = useOfficeQuery(officeKeys.shift(id), (api, token) => api.getShift(token, id), {
+    refetchInterval: (data) => (data?.status === "active" ? OVERVIEW_POLL_MS : false),
+  });
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
   const counterparties = useOfficeQuery(officeKeys.counterparties, (api, token) =>

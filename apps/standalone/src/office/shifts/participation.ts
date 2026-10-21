@@ -66,16 +66,22 @@ export function lastSign(participant: ShiftParticipant): string {
   return participant.lastSeenAt ?? participant.joinedAt;
 }
 
-/** An active participant not heard for more than `PARTICIPANT_SILENT_MS` before `nowMs`. */
-export function isSilent(participant: ShiftParticipant, nowMs: number): boolean {
-  if (participant.state !== "active") return false;
+/**
+ * An active participant not heard for more than `PARTICIPANT_SILENT_MS` before `nowMs`, the host's
+ * time; `null` (the host's time is not known) claims no silence.
+ */
+export function isSilent(participant: ShiftParticipant, nowMs: number | null): boolean {
+  if (nowMs === null || participant.state !== "active") return false;
   return nowMs - Date.parse(lastSign(participant)) > PARTICIPANT_SILENT_MS;
 }
 
 /** What a participant looks like: the word and the glyph of a phase, never a colour alone. */
 export type ParticipantLook = "active" | "silent" | "left" | "closedDevice" | "closedOffice";
 
-export function participantLook(participant: ShiftParticipant, nowMs: number): ParticipantLook {
+export function participantLook(
+  participant: ShiftParticipant,
+  nowMs: number | null,
+): ParticipantLook {
   if (participant.state === "closed") {
     return participant.closedBy === "office_user" ? "closedOffice" : "closedDevice";
   }

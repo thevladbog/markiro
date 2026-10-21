@@ -17,6 +17,7 @@ import {
   STATION_ID,
 } from "./support/shifts.js";
 import type { FakeOfficeSession } from "./support/office.js";
+import { HEALTHY_BACKUPS } from "./support/backups.js";
 
 const deviceRecord = (id: string, revokedAt: string | null): DeviceRecord => ({
   id,
@@ -28,6 +29,13 @@ const deviceRecord = (id: string, revokedAt: string | null): DeviceRecord => ({
   lastSeenAt: null,
   revokedAt,
 });
+
+/** A session whose host says it is `NOW` (the card measures silence by the host's clock). */
+function cardSession(...args: Parameters<typeof shiftsSession>): FakeOfficeSession {
+  const session = shiftsSession(...args);
+  session.api.getBackups.mockResolvedValue({ ...HEALTHY_BACKUPS, now: NOW.toISOString() });
+  return session;
+}
 
 const UNITS = new Intl.NumberFormat("ru");
 /** Four minutes after the station last spoke (09:41); the handheld spoke at the same time. */
@@ -70,7 +78,7 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
   });
 
   it("lists each device with its entry, state and its part of the totals", async () => {
-    await openCard(shiftsSession([SHARED]), "OCT26-004", "Станции");
+    await openCard(cardSession([SHARED]), "OCT26-004", "Станции");
     expect(stationsRows()).toEqual([
       ["Станция линии 1Станция", "08.10.2026, 09:02", "▸Работает", "427", "35"],
       ["ТСД 1ТСД", "08.10.2026, 10:10", "▸Работает", "120", "10"],
@@ -83,7 +91,7 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
   });
 
   it("names the columns the spec lists: device and kind, entry, state, accepted, boxes (pallets only when the shift has them)", async () => {
-    await openCard(shiftsSession([SHARED]), "OCT26-004", "Станции");
+    await openCard(cardSession([SHARED]), "OCT26-004", "Станции");
     const region = screen.getByRole("region", { name: "Станции смены" });
     expect(
       within(region)
@@ -94,30 +102,53 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
 
   it("adds the pallets column for a shift with pallets", async () => {
     const withPallets = { ...SHARED, palletsEnabled: true, palletBoxCapacity: 40 };
-    const session = shiftsSession([withPallets]);
+    const session = cardSession([withPallets]);
     session.api.listShiftPallets.mockResolvedValue([]);
     await openCard(session, "OCT26-004", "Станции");
     const region = screen.getByRole("region", { name: "Станции смены" });
     expect(within(region).getAllByRole("columnheader").at(-1)?.textContent).toBe("Паллет");
   });
 
-  it("marks a participant the host has not heard for more than ten minutes, with the time it last did", async () => {
+  it("marks a participant the host has not heard for more than ten minutes, by the host's clock, with the time it last did", async () => {
+    const session = cardSession([SHARED]);
+    session.api.getBackups.mockResolvedValue({ ...HEALTHY_BACKUPS, now: "2026-10-08T10:00:00Z" });
+    await openCard(session, "OCT26-004", "Станции");
+    await waitFor(() =>
+      expect(stationsRows().map((row) => row[2])).toEqual([
+        "!Нет связиСлышали: 08.10.2026, 12:41",
+        "!Нет связиСлышали: 08.10.2026, 12:41",
+      ]),
+    );
+  });
+
+  it("does not take this PC's clock for the host's: a PC far ahead marks nobody silent", async () => {
     vi.setSystemTime(new Date("2026-10-08T10:00:00Z"));
-    await openCard(shiftsSession([SHARED]), "OCT26-004", "Станции");
-    expect(stationsRows().map((row) => row[2])).toEqual([
-      "!Нет связиСлышали: 08.10.2026, 12:41",
-      "!Нет связиСлышали: 08.10.2026, 12:41",
-    ]);
+    const session = cardSession([SHARED]);
+    session.api.getBackups.mockResolvedValue({ ...HEALTHY_BACKUPS, now: NOW.toISOString() });
+    await openCard(session, "OCT26-004", "Станции");
+    await waitFor(() => expect(session.api.getBackups).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(stationsRows().map((row) => row[2])).toEqual(["▸Работает", "▸Работает"]),
+    );
+  });
+
+  it("claims no silence while the host's time is unavailable", async () => {
+    vi.setSystemTime(new Date("2026-10-08T10:00:00Z"));
+    const session = cardSession([SHARED]);
+    session.api.getBackups.mockRejectedValue(new Error("down"));
+    await openCard(session, "OCT26-004", "Станции");
+    await waitFor(() => expect(session.api.getBackups).toHaveBeenCalled());
+    expect(stationsRows().map((row) => row[2])).toEqual(["▸Работает", "▸Работает"]);
   });
 
   it("names a device by its id when the host sent no name", async () => {
     const nameless = { ...SHARED, participants: [participant({ deviceName: "" })] };
-    await openCard(shiftsSession([nameless]), "OCT26-004", "Станции");
+    await openCard(cardSession([nameless]), "OCT26-004", "Станции");
     expect(stationsRows()[0]?.[0]).toMatch(/^Устройство 7c9e6679….*Станция/);
   });
 
   it("keeps a revoked device listed, marked, and still not closed: it blocks the automatic close", async () => {
-    const session = shiftsSession([SHARED]);
+    const session = cardSession([SHARED]);
     session.api.listDevices.mockResolvedValue([
       deviceRecord(STATION_ID, "2026-10-08T12:00:00Z"),
       deviceRecord(HANDHELD_ID, null),
@@ -129,7 +160,7 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
   });
 
   it("marks nothing while the devices are unread", async () => {
-    await openCard(shiftsSession([SHARED]), "OCT26-004", "Станции");
+    await openCard(cardSession([SHARED]), "OCT26-004", "Станции");
     expect(stationsRows()[0]?.[0]).not.toContain("отозвано");
   });
 
@@ -146,7 +177,7 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
         }),
       ],
     };
-    await openCard(shiftsSession([paused]), "OCT26-004", "Станции");
+    await openCard(cardSession([paused]), "OCT26-004", "Станции");
     expect(stationsRows()[0]?.[2]).toBe("·На паузе");
   });
 
@@ -170,7 +201,7 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
         },
       ],
     };
-    await openCard(shiftsSession([closed]), "OCT26-004", "Станции");
+    await openCard(cardSession([closed]), "OCT26-004", "Станции");
     expect(stationsRows().map((row) => row[2])).toEqual([
       "✓Часть закрытаЗакрыто 08.10.2026, 17:10Принято при закрытии: 427Причина расхождения: Остановка оборудования!Данные после закрытия",
       "✓Закрыто из офисаЗакрыто 08.10.2026, 17:10",
@@ -185,7 +216,7 @@ describe("the participants in the list of shifts (plan 2b)", () => {
       id: "7e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
       number: "OCT26-007",
     };
-    await openShifts(shiftsSession([SHARED, other]));
+    await openShifts(cardSession([SHARED, other]));
     expect(
       within(shiftRow("OCT26-004")).getAllByText("Устройств: 2, закрыли часть: 0"),
     ).toHaveLength(1);
@@ -198,14 +229,42 @@ describe("the participants in the list of shifts (plan 2b)", () => {
       id: "7e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
       number: "OCT26-007",
     };
-    await openShifts(shiftsSession([SHARED, other]));
+    await openShifts(cardSession([SHARED, other]));
     expect(within(shiftRow("OCT26-007")).getByText("Причина не указана")).toBeTruthy();
     expect(within(shiftRow("OCT26-004")).queryByText("Причина не указана")).toBeNull();
   });
 
   it("shows a shift of a host before protocol 7 as it was", async () => {
-    await openShifts(shiftsSession([ACTIVE]));
+    await openShifts(cardSession([ACTIVE]));
     expect(within(shiftRow("OCT26-004")).queryByText(/^Устройств:/)).toBeNull();
     expect(within(shiftRow("OCT26-004")).queryByText("Причина не указана")).toBeNull();
+  });
+});
+
+describe("the card of a shift reads again while the shift is at work", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reads an active shift every thirty seconds, so the parts do not go stale", async () => {
+    const session = cardSession([SHARED]);
+    session.api.getShift.mockResolvedValue(SHARED);
+    await openCard(session, "OCT26-004", "Станции");
+    await waitFor(() => expect(session.api.getShift).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await waitFor(() => expect(session.api.getShift.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("does not poll a closed shift", async () => {
+    const session = cardSession([SHARED_NO_REASON]);
+    session.api.getShift.mockResolvedValue(SHARED_NO_REASON);
+    await openCard(session, "OCT26-004");
+    await waitFor(() => expect(session.api.getShift).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(session.api.getShift).toHaveBeenCalledTimes(1);
   });
 });

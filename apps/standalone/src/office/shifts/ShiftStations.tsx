@@ -7,6 +7,7 @@ import { Card, StatusChip, type TableColumn } from "@markiro/ui";
 import type { OfficeShift, ShiftParticipant } from "../../host/protocol.js";
 import { useOfficeSession } from "../office-session.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { hostNowMs, useHostClock } from "../overview/use-overview-data.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import {
   closedParticipants,
@@ -28,14 +29,15 @@ export interface ShiftStationsProps {
 /**
  * «Станции смены» (plan 2b, spec §7): the devices that entered the shift, each with its kind, its
  * entry, its state and its part of the totals; above them the shift-wide figures against the plan
- * and how many parts are closed. A participant the host has not heard for more than ten minutes is
- * marked, in a word and a glyph. Read from the shift the card already holds: no request of its own.
+ * and how many parts are closed. A participant the host has not heard for more than ten minutes (by the host's clock) is
+ * marked, in a word and a glyph. Read from the shift the card already holds, plus the host's clock to measure the silence by.
  */
 export function ShiftStations({ shift, at }: ShiftStationsProps) {
   const { t } = useTranslation();
   const titleId = useId();
-  // One reading of the clock for the whole table.
-  const nowMs = Date.now();
+  // One reading of the host's clock for the whole table (the overview's source, not this PC's);
+  // while it is unknown nobody is marked silent.
+  const nowMs = hostNowMs(useHostClock());
   const participants = participantsOf(shift);
   // Which devices were revoked since they entered: an administrator's list; nothing is marked
   // while it is unread. A revoked device's open part stays listed, for it blocks the automatic close.
@@ -149,7 +151,7 @@ function ParticipantState({
   at,
 }: {
   participant: ShiftParticipant;
-  nowMs: number;
+  nowMs: number | null;
   at: (instant: string | null) => string;
 }) {
   const { t } = useTranslation();
