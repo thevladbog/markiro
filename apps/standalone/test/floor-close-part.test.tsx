@@ -443,7 +443,7 @@ describe("the closed panel when the part's state is not known (plan 2b, Task 11 
     "Состояние закрытия вашей части уточняется. Откройте «Очередь отправки», если оно не появится.";
   const QUEUED = "Ваша часть закрыта на этой станции. Данные будут отправлены автоматически.";
 
-  function panelOf(part: ComponentProps<typeof ShiftClosedPanel>["part"]) {
+  function panelOf(part: NonNullable<ComponentProps<typeof ShiftClosedPanel>["part"]> | null) {
     render(
       <ThemeProvider>
         <ShiftClosedPanel
