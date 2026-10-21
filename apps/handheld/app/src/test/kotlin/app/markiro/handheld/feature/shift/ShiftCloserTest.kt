@@ -281,6 +281,26 @@ class ShiftCloserTest {
         assertEquals(0, p.othersOpen)
     }
 
+    /** Final review M1: a Wi-Fi that answers nothing must not hold the close screen for the transport's whole timeout. */
+    @Test
+    fun aRefreshThatHangsIsGivenUpAfterAFewSecondsAndThePreviewUsesWhatIsKnown() = runTest {
+        keep(shared(othersOpen = 1))
+        var finished = false
+        val closer = ShiftCloser(
+            db,
+            refresh = {
+                kotlinx.coroutines.delay(30_000)
+                keep(shared(othersOpen = 0))
+                finished = true
+                true
+            },
+        ) { t0 }
+        val p = closer.preview("s1")!!
+        assertTrue("given up after ${testScheduler.currentTime} ms", testScheduler.currentTime <= 3_000)
+        assertFalse(finished)
+        assertEquals(1, p.othersOpen)
+    }
+
     @Test
     fun aRefreshThatFailsIsNotAFailureOfThePreview() = runTest {
         val p = ShiftCloser(db, refresh = { throw java.io.IOException("no host") }) { t0 }.preview("s1")!!

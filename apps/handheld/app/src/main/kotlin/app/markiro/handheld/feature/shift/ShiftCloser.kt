@@ -8,6 +8,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftCloseEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 /** Port of the station's closeShiftOffline: the close is a durable local fact before any network. */
@@ -53,9 +54,10 @@ class ShiftCloser(
 
     suspend fun preview(shiftId: String): Preview? {
         val shift = db.shiftDao().get(shiftId) ?: return null
-        // Best effort: it decides how the close is worded and whether a reason is asked now, never whether the close can be made.
+        // Best effort: it decides how the close is worded and whether a reason is asked now, never whether the close can be made. Bounded, so a
+        // Wi-Fi that answers nothing does not hold the close screen for the transport's whole timeout (final review M1); what is known is used.
         try {
-            refresh()
+            withTimeoutOrNull(REFRESH_TIMEOUT_MS) { refresh() }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -161,6 +163,9 @@ class ShiftCloser(
     }
 
     companion object {
+        /** How long the close waits for the host's fresh figures before it judges with what it knows. */
+        const val REFRESH_TIMEOUT_MS = 3_000L
+
         val REASONS = listOf(
             "production_defect",
             "material_shortage",
