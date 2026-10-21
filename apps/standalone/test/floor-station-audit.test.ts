@@ -510,3 +510,26 @@ describe("the duplicate's steps on the work screen", () => {
     expect(rule(unit, ".work-unit-label__tag")["height"]).toBe("40px");
   });
 });
+
+describe("the shared shift's card (plan 2b)", () => {
+  const hub = rulesOf("src/floor/shifts/shift-hub.css");
+
+  it("keeps who works the shift on one line, cut with an ellipsis, the full list in its title", () => {
+    const line = rule(hub, ".shift-hub .shift-card__participants");
+    expect([line["white-space"], line["text-overflow"], line["overflow"]]).toEqual([
+      "nowrap",
+      "ellipsis",
+      "hidden",
+    ]);
+    expect(textOf("src/floor/shifts/ShiftCard.tsx")).toContain(
+      'className="shift-card__participants" title={participantsLine}',
+    );
+  });
+
+  it("measures the shared cards on the hub's whole matrix", () => {
+    const cases = textOf("test/harness/station-fit/measure-others.mjs");
+    for (const multi of ["join", "full", "mine", "closed"]) {
+      expect(cases).toContain(`multi=${multi}`);
+    }
+  });
+});

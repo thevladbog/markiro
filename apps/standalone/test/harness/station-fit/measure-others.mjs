@@ -67,6 +67,13 @@ const HUB_CASES = [
   "view=hub&shifts=3&offline=1&queue=3&rejected=1&photo=transparent",
   "view=hub&shifts=2&long=1&photo=png",
   "view=hub&shifts=0&offline=1",
+  // Plan 2b: a shift several devices work — join, a full line, this station among three with long
+  // names offline, a closed part; and a join without the link (the tallest notes: who, link).
+  "view=hub&shifts=2&multi=join&photo=png",
+  "view=hub&shifts=2&multi=join&offline=1&long=1",
+  "view=hub&shifts=1&multi=full&long=1&photo=jpeg",
+  "view=hub&shifts=2&multi=mine&long=1&offline=1&photo=transparent",
+  "view=hub&shifts=3&multi=closed",
   "view=work&queue=3&rejected=1&printer=error&scanner=off&long=1",
   "view=signin",
 ];
@@ -107,6 +114,14 @@ for (const [width, height] of VIEWPORTS) {
         const guard = await import("/test/harness/station-fit/measure-fit.ts");
         return guard.measureFit();
       });
+      // Plan 2b: a card's «who works the shift» line must keep a line of its own: the notes row
+      // may shrink (it is `min-height: 0`), and a squashed line is clipped, not reported, above.
+      const squashed = await page.evaluate(() =>
+        [...globalThis.document.querySelectorAll(".shift-card__participants")]
+          .filter((line) => line.getBoundingClientRect().height < 16)
+          .map((line) => `participants line squashed to ${line.getBoundingClientRect().height}px`),
+      );
+      result.problems.push(...squashed);
       if (process.env.SHOT)
         await page.screenshot({
           path: `${process.env.SHOT}/${width}x${height}-${theme}-${entry.name.replace(/[^a-z0-9]+/gi, "_")}.png`,
