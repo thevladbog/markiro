@@ -49,6 +49,8 @@ class HostParticipation(
             cfg.activeShiftId?.let { store.markStale(it) }
             false
         } catch (_: HttpException) {
+            // A refusal (409 STATION_UPDATE_REQUIRED and the like) gave no figures either: what is kept is the last known, not current.
+            cfg.activeShiftId?.let { store.markStale(it) }
             false
         }
     }
@@ -111,7 +113,9 @@ class HostParticipation(
         try {
             store.save(calls.run { api().enter(shiftId) })
         } catch (_: IOException) {
+            // The host did not answer: nothing was changed and the next beat reads the list and asks again.
         } catch (_: HttpException) {
+            // Refused (a full line, a closed shift): nothing was changed; production goes on and the next beat asks again.
         }
     }
 }

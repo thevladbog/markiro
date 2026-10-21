@@ -66,8 +66,10 @@ class HostParticipationTest {
     private var clock = 1_000L
     private fun store() = ShiftParticipationStore(db, myDeviceId = { me }, clock = { clock })
 
+    private var revocations = 0
+
     private fun participation(transport: Exact) =
-        HostParticipation(db, { HostApi(transport) }, HostCalls { }, store(), db.deviceConfigDao())
+        HostParticipation(db, { HostApi(transport) }, HostCalls { revocations++ }, store(), db.deviceConfigDao())
 
     @Test
     fun aBeatWhileAShiftIsWorkedReadsTheListAndKeepsItsFigures() = runTest {
@@ -343,5 +345,76 @@ class HostParticipationTest {
         }
         assertEquals(7L, owed.joinedRev)
         assertEquals(99L, store().owedLeaves().single().joinedRev)
+    }
+
+    private val keyRejected = refusal(401, """{"error":{"code":"unauthorized","message":"m","details":{"credential":"device"}}}""")
+
+    @Test
+    fun aRejectedDeviceKeyRevokesEndsTheSendingPassAndLosesNoLeave() = runTest {
+        owe(shift)
+        owe(other)
+        val first = store().pendingLeaves().first()
+        // The second leave and the list are not scripted for the key to be accepted: a call to them would fail the test.
+        val transport = Exact(
+            mutableMapOf(
+                "/v1/device/shifts/$first/leave" to ArrayDeque(listOf(keyRejected)),
+                listPath to ArrayDeque(listOf(keyRejected)),
+            ),
+        )
+        participation(transport).beat()
+        assertEquals(1, transport.requests.count { it.startsWith("POST") })
+        assertEquals(setOf(shift, other), store().pendingLeaves().toSet())
+        // The leave's refusal and the list's refusal each revoke the credential generation they started under (HostCalls guards the repeat).
+        assertEquals(2, revocations)
+    }
+
+    @Test
+    fun aChangedHostCertificateEndsTheSendingPassAndLosesNoLeave() = runTest {
+        owe(shift)
+        owe(other)
+        val first = store().pendingLeaves().first()
+        val transport = Exact(
+            mutableMapOf(
+                "/v1/device/shifts/$first/leave" to ArrayDeque(listOf(HostResult.Failed(TransportFailure.CERT_MISMATCH))),
+                listPath to ArrayDeque(listOf(HostResult.Failed(TransportFailure.CERT_MISMATCH))),
+            ),
+        )
+        participation(transport).beat()
+        assertEquals(1, transport.requests.count { it.startsWith("POST") })
+        assertEquals(setOf(shift, other), store().pendingLeaves().toSet())
+        assertEquals(0, revocations)
+    }
+
+    @Test
+    fun aHostThatRefusesTheListWithAnHttpErrorMarksTheWorkedShiftsFiguresStale() = runTest {
+        store().save(Json { ignoreUnknownKeys = true }.decodeFromString(app.markiro.handheld.core.network.host.DeviceShiftsDto.serializer(), listBody()).shifts)
+        // `protocol_unsupported`: the host wants a newer app (STATION_UPDATE_REQUIRED); the figures are the last known ones, not current.
+        val transport = Exact(mutableMapOf(listPath to ArrayDeque(listOf(refusal(409, envelope("protocol_unsupported"))))))
+        assertFalse(participation(transport).refresh())
+        assertTrue(store().get(shift)!!.stale)
+    }
+
+    private fun oneShiftWithMyState(state: String): String =
+        kotlinx.serialization.json.JsonObject(
+            Json.parseToJsonElement(oneShift()).jsonObject + ("myState" to kotlinx.serialization.json.JsonPrimitive(state)),
+        ).toString()
+
+    @Test
+    fun aRejoinTheHostAnswersClosedKeepsTheClosedPartAndStopsAsking() = runTest {
+        db.shiftDao().upsert(HostFactsFixtures.shift().copy(leftAt = null))
+        val enterPath = "/v1/device/shifts/$shift/enter"
+        val transport = Exact(
+            mutableMapOf(
+                listPath to ArrayDeque(listOf(ok(listWithMyState("left")), ok(listWithMyState("closed")))),
+                enterPath to ArrayDeque(listOf(ok(oneShiftWithMyState("closed")))),
+            ),
+        )
+        val p = participation(transport)
+        p.beat()
+        assertEquals(listOf("GET $listPath", "POST $enterPath"), transport.requests)
+        assertEquals("closed", store().get(shift)!!.myState)
+        // The next beat reads the part as closed: no entry is asked again.
+        p.beat()
+        assertEquals(listOf("GET $listPath", "POST $enterPath", "GET $listPath"), transport.requests)
     }
 }
