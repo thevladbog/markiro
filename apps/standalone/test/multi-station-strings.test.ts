@@ -78,6 +78,7 @@ const KEYS = [
   "office.overview.attention.shiftWaits.detail",
   "office.overview.attention.shiftWaits.action",
   "office.devices.revokeOpenShifts",
+  "office.devices.shiftOnStationShared",
 ] as const;
 
 const PLURALS = [
@@ -124,5 +125,6 @@ describe("the texts of the multi-station office (plan 2b)", () => {
     expect(text("office.overview.attention.participant.title")).toContain("{{duration}}");
     expect(text("office.overview.attention.shiftWaits.title")).toContain("{{number}}");
     expect(text("office.devices.revokeOpenShifts")).toContain("{{shifts}}");
+    expect(text("office.devices.shiftOnStationShared")).toContain("{{number}}");
   });
 });

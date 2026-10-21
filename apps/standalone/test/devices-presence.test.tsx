@@ -122,6 +122,8 @@ describe("the devices' participation in a shift (plan 2b)", () => {
 
 describe("the warning before a station moves, by the shift it works (plan 2b)", () => {
   const warning = /^На станции идёт смена OCT26-004\./;
+  const sharedWarning =
+    /^На станции идёт общая смена OCT26-004: в ней работают и другие устройства\./;
 
   /** Opens a station's dialog once the table shows what the shifts say of it, and picks another line. */
   async function openMove(
@@ -146,7 +148,31 @@ describe("the warning before a station moves, by the shift it works (plan 2b)", 
     const dialog = await openMove(session([shift], [STATION, SECOND]), "Станция 2", () =>
       within(rowOf("Станция 2")).findByText("В смене OCT26-004"),
     );
-    expect(await within(dialog).findByText(warning)).toBeTruthy();
+    // Two devices work it: the warning is the shared shift's, not the lone station's.
+    expect(await within(dialog).findByText(sharedWarning)).toBeTruthy();
+    expect(within(dialog).queryByText(warning)).toBeNull();
+  });
+
+  it("warns a lone station in the plain words, and a station of a shared shift that its part stays open", async () => {
+    const alone = { ...SHARED, participants: [PARTICIPANT_A] };
+    const plain = await openMove(
+      session([alone], [STATION, HANDHELD, IDLE]),
+      "Станция линии 1",
+      () => within(rowOf("Станция линии 1")).findByText("В смене OCT26-004"),
+    );
+    expect(await within(plain).findByText(warning)).toBeTruthy();
+    expect(within(plain).queryByText(sharedWarning)).toBeNull();
+  });
+
+  it("tells the station of a shared shift that its part stays open, pausing, and blocks the shift's own close", async () => {
+    const dialog = await openMove(session([SHARED]), "Станция линии 1", () =>
+      within(rowOf("Станция линии 1")).findByText("В смене OCT26-004"),
+    );
+    expect(
+      await within(dialog).findByText(
+        "На станции идёт общая смена OCT26-004: в ней работают и другие устройства. После перевода или снятия линии станция доделает начатую работу и выведет оператора, но её часть останется открытой, на паузе, и не даст смене закрыться сама. Закройте смену целиком на странице «Смены»: это закроет и части других устройств.",
+      ),
+    ).toBeTruthy();
   });
 
   it("does not warn the opener once it left and another device works the shift", async () => {
