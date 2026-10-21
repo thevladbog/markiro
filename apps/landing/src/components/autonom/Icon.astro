@@ -1,0 +1,75 @@
+---
+/** Line icons of the standalone pages, drawn on a 24px grid with a 1.75 stroke. */
+export type IconName =
+  | "alert"
+  | "arrow-right"
+  | "arrow-up-right"
+  | "check"
+  | "check-circle"
+  | "close"
+  | "copy"
+  | "download"
+  | "file-download"
+  | "handheld"
+  | "mail"
+  | "menu"
+  | "monitor"
+  | "moon"
+  | "office"
+  | "phone"
+  | "printer"
+  | "scanner"
+  | "send"
+  | "spark"
+  | "sun"
+  | "wifi-off";
+
+interface Props {
+  name: IconName;
+  class?: string | undefined;
+  size?: number;
+}
+
+const { name, class: className, size = 20 } = Astro.props;
+
+const PATHS: Readonly<Record<IconName, readonly string[]>> = {
+  alert: ["M12 8v5", "M12 16.5v.5", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
+  "arrow-right": ["M5 12h14", "m13 6 6 6-6 6"],
+  "arrow-up-right": ["M7 17 17 7", "M8 7h9v9"],
+  check: ["m5 12.5 4.5 4.5L19 7.5"],
+  "check-circle": ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z", "m8.5 12.2 2.4 2.4 4.8-4.9"],
+  close: ["M6 6l12 12", "M18 6 6 18"],
+  copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+  download: ["M12 4v11", "m7 10 5 5 5-5", "M5 20h14"],
+  "file-download": ["M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7Z", "M14 3v4h4", "M12 10v7", "m9 14 3 3 3-3"],
+  handheld: ["M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z", "M10 18h4", "M9.5 6h5v7h-5z"],
+  mail: ["M4 6h16v12H4z", "m4 7 8 6 8-6"],
+  menu: ["M4 7h16", "M4 12h16", "M4 17h16"],
+  monitor: ["M4 5h16v10H4z", "M9 19h6", "M12 15v4"],
+  moon: ["M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"],
+  office: ["M3 5h12v9H3z", "M7 18h4", "M9 14v4", "M17 7h4v13h-4z", "M18.5 10h1", "M18.5 13h1"],
+  phone: ["M6.5 3h3l1.5 4-2 1.5a11 11 0 0 0 6.5 6.5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A16 16 0 0 1 4.5 5a2 2 0 0 1 2-2Z"],
+  printer: ["M7 8V3h10v5", "M5 8h14a1 1 0 0 1 1 1v7h-3", "M7 16H4V9a1 1 0 0 1 1-1", "M7 13h10v8H7z"],
+  scanner: ["M4 8V5h3", "M17 5h3v3", "M20 16v3h-3", "M7 19H4v-3", "M8 9v6", "M11 9v6", "M13.5 9v6", "M16 9v6"],
+  send: ["M21 3 10 14", "m21 3-7 18-4-7-7-4Z"],
+  spark: ["M12 3v4", "M12 17v4", "M3 12h4", "M17 12h4", "m12 8 1.5 2.5L16 12l-2.5 1.5L12 16l-1.5-2.5L8 12l2.5-1.5Z"],
+  sun: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M12 2v2", "M12 20v2", "M4.9 4.9l1.4 1.4", "M17.7 17.7l1.4 1.4", "M2 12h2", "M20 12h2", "M4.9 19.1l1.4-1.4", "M17.7 6.3l1.4-1.4"],
+  "wifi-off": ["M3 3l18 18", "M8.5 16.5a5 5 0 0 1 7 0", "M5 12.5a10 10 0 0 1 4-2.2", "M14.5 10.3a10 10 0 0 1 4.5 2.2", "M2 9a14.5 14.5 0 0 1 4.5-2.8", "M11 5.6A14.5 14.5 0 0 1 22 9", "M12 20h.01"],
+};
+---
+
+<svg
+  class:list={["ax-icon", className]}
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.75"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  focusable="false"
+>
+  {PATHS[name].map((d) => <path d={d} />)}
+</svg>

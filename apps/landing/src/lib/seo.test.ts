@@ -114,7 +114,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(72);
+    expect(sitemap.match(/<url>/g)).toHaveLength(74);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -132,8 +132,10 @@ describe("SEO generators", () => {
     expect(llms).not.toContain("Паллетная агрегация запланирована");
     expect(llms).not.toContain("для линий розлива");
     expect(llms).toContain(
-      "> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.",
+      "> «Маркиро Автоном»: программа маркировки и агрегации для Windows. Программа, база и копии работают на ПК заказчика, интернет для смены не нужен.",
     );
+    expect(llms).toContain("https://markiro.app/skachat/");
+    expect(llms).toContain("https://markiro.app/stoimost/");
     expect(llms).toContain("https://markiro.app/sscc-i-agregatsiya/");
     expect(llms).toContain("https://markiro.app/stati/agregatsiya-piva-v-koroba/");
     expect(llms).toContain("https://markiro.app/stati/markirovka-piva-2026/");
@@ -167,14 +169,16 @@ describe("SEO generators", () => {
     expect(llms).toContain("## Коротко о продукте");
     expect(llms).toContain("единица → короб");
     expect(llms).toContain("hello@markiro.app");
-    expect(llms).toContain("https://markiro.app/#demo");
+    expect(llms).toContain("https://markiro.app/kak-rabotaet/#demo");
     expect(llms).toContain("## Полные тексты");
     expect(llms).toContain("https://markiro.app/llms-full.txt");
     expect(llms).toContain("https://markiro.app/faq.md");
     expect(llms).toContain("## About the product");
-    expect(llms).not.toMatch(
-      /(?<!\p{L})(?:цена|цены|прайс|price|pricing|клиент\p{L}*|customer\p{L}*|гарант\p{L}*)(?!\p{L})/iu,
+    // Prices are public since 2026-10-21 (spec 2026-10-20, 9.1) and come from content/pricing.ts.
+    expect(llms).toContain(
+      "«Старт» 60 000 ₽, «Линия» 120 000 ₽, «Цех» 240 000 ₽, «Завод» по запросу",
     );
+    expect(llms).not.toMatch(/(?<!\p{L})(?:клиент\p{L}*|customer\p{L}*|гарант\p{L}*)(?!\p{L})/iu);
   });
 
   it("publishes an RSS feed per locale with every article", () => {
@@ -220,7 +224,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(72);
+    expect(sitemap.match(/<url>/g)).toHaveLength(74);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );

@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { connection, ensure, hash, keys, plain, runtime } from "../backup/schemas.mjs";
-import { readPrivateAbsolute } from "../backup/local-runtime.mjs";
+import {
+  readPrivateAbsolute,
+  withRecoveryBackupRuntime,
+  readBackupRuntime,
+} from "../backup/local-runtime.mjs";
 import { createDatabaseBackup } from "../backup/archive.mjs";
 import { verifyDatabaseRestore } from "../backup/restore.mjs";
 import { assertBindFileSync, assertPrivateRootSync, readPrivateFile } from "./files.mjs";
@@ -12,12 +16,15 @@ import { createHostObservers, validateObservationPolicy } from "./observe.mjs";
 import { observePostgresAdmin } from "./probe.mjs";
 import { runHostProcess } from "./process.mjs";
 import { withHostState } from "./state.mjs";
-import { sameTarget, validateIdentity } from "./state-validation.mjs";
+import { snapshot, sameTarget, validateIdentity } from "./state-validation.mjs";
+import { canonical } from "../backup/schemas.mjs";
+import { validateRecoveryAdmission } from "./recovery-admission.mjs";
 import { hostFenceEnforcementSha256 } from "./command.mjs";
 
-function targetBackupError(error, terminated) {
+function targetBackupError(error, terminated, stage) {
   const result = new Error("Target recovery backup failed.");
   result.code = "ERR_TARGET_BACKUP";
+  result.targetBackupStage = stage;
   result.recoveryRequired = true;
   if (!terminated || error?.terminationConfirmed === false) result.terminationConfirmed = false;
   if (error?.durabilityUncertain === true) result.durabilityUncertain = true;
@@ -56,12 +63,82 @@ function validateConnectionFiles(serviceBytes, passwordBytes) {
   );
 }
 
-export async function createTargetRecoveryBackup(
-  { operation, observationPolicy, hbaPath, hbaSha256, connectionFile, roleMapping, verifySources },
-  options = {},
+export async function createTargetRecoveryBackup(input, options = {}) {
+  return produceTargetBackup(input, options, (root, action) =>
+    withHostState(root, async (store) => {
+      const journal = await store.read();
+      ensure(
+        !journal.current ||
+          (journal.current.phase === "healthy" &&
+            journal.current.status === "completed" &&
+            sameTarget(journal.current.identity.target, input.operation.identity.target)),
+      );
+      return action(journal);
+    }),
+  );
+}
+
+export async function createHeldTargetRecoveryBackup(input, capability, admission, options = {}) {
+  const admitted = snapshot(admission);
+  return withRecoveryBackupRuntime(capability, async ({ root, state }, createRuntime) => {
+    ensure(root === input.operation.root);
+    const ledgerBytes = await readPrivateFile(root, "recovery-state.json");
+    const check = async () => {
+      const verified = validateRecoveryAdmission(admitted, {
+        stateBytes: await readPrivateFile(root, "state.json"),
+        now: Date.now(),
+      });
+      ensure(canonical(verified.identity) === canonical(input.operation.identity));
+      ensure((await readPrivateFile(root, "recovery-state.json")).equals(ledgerBytes));
+      const ledger = JSON.parse(ledgerBytes);
+      keys(ledger, ["version", "admission", "sequence", "phase", "status", "backup"]);
+      ensure(
+        ledger.version === 1 &&
+          ledger.sequence === 5 &&
+          ledger.phase === "backup-verified" &&
+          ledger.status === "entered" &&
+          ledger.backup === null &&
+          canonical(ledger.admission) === canonical(verified),
+      );
+    };
+    await check();
+    const recoveryRuntime = await createRuntime(admitted);
+    return produceTargetBackup(
+      {
+        ...input,
+        recoveryRuntime,
+        verifySources: async () => {
+          await check();
+          await input.verifySources();
+          await check();
+        },
+      },
+      options,
+      async (actualRoot, action) => {
+        ensure(actualRoot === root);
+        return action(state);
+      },
+    );
+  });
+}
+
+async function produceTargetBackup(
+  {
+    operation,
+    observationPolicy,
+    hbaPath,
+    hbaSha256,
+    connectionFile,
+    roleMapping,
+    verifySources,
+    recoveryRuntime,
+  },
+  options,
+  withOwner,
 ) {
   let terminated = true,
-    uncertain = false;
+    uncertain = false,
+    stage = "input-validation";
   try {
     const op = plain(operation);
     keys(op, ["root", "identity", "configuration", "dockerConfig"]);
@@ -90,19 +167,18 @@ export async function createTargetRecoveryBackup(
         throw error;
       }
     };
-    return await withHostState(op.root, async (store) => {
+    stage = "host-state";
+    return await withOwner(op.root, async (journal) => {
       let producerInFlight = false;
       try {
-        const journal = await store.read();
-        ensure(
-          !journal.current ||
-            (journal.current.phase === "healthy" &&
-              journal.current.status === "completed" &&
-              sameTarget(journal.current.identity.target, op.identity.target)),
-        );
         // Snapshot the actual private files; every boundary must still read the
         // same bytes, including after isolated restore has removed its workers.
-        const runtimeBytes = await readPrivateFile(op.root, "backup-runtime.json");
+        stage = "private-inputs";
+        const runtimeBytes = await readBackupRuntime(
+          op.root,
+          op.identity.operationId,
+          recoveryRuntime,
+        );
         const config = runtime(JSON.parse(runtimeBytes));
         ensure(
           config.executorSha === op.identity.executorSha &&
@@ -121,13 +197,13 @@ export async function createTargetRecoveryBackup(
         const passwordBytes = await readPrivateAbsolute(op.root, descriptor.passFile);
         const caBytes = await readPrivateAbsolute(op.root, descriptor.caFile);
         const privateInputs = [
-          [join(op.root, "backup-runtime.json"), runtimeBytes],
           [connectionFile, connectionBytes],
           [descriptor.serviceFile, serviceBytes],
           [descriptor.passFile, passwordBytes],
           [descriptor.caFile, caBytes],
         ];
         validateConnectionFiles(serviceBytes, passwordBytes);
+        stage = "observer-setup";
         const observers = createHostObservers(op, policy, {
           runProcess: run,
           ...(options.signal ? { signal: options.signal } : {}),
@@ -146,6 +222,11 @@ export async function createTargetRecoveryBackup(
           ensure(
             (await fingerprintHostConfiguration({ root: op.root, ...op.configuration }))
               .configurationSha256 === op.identity.configurationSha256,
+          );
+          ensure(
+            (await readBackupRuntime(op.root, op.identity.operationId, recoveryRuntime)).equals(
+              runtimeBytes,
+            ),
           );
           for (const [path, bytes] of privateInputs)
             ensure((await readPrivateAbsolute(op.root, path)).equals(bytes));
@@ -171,7 +252,9 @@ export async function createTargetRecoveryBackup(
           await observePostgresAdmin({ context: c, state, command: observers.command, hbaSha256 });
           ensure(terminated && !uncertain);
         };
+        stage = "entry-observation";
         await inspect("entry");
+        stage = "writer-fence";
         const fence = {
           fenceId: randomUUID(),
           beganAt: new Date().toISOString(),
@@ -182,12 +265,14 @@ export async function createTargetRecoveryBackup(
           }),
         };
         producerInFlight = true;
+        stage = "archive-production";
         const backup = await createDatabaseBackup({
           root: op.root,
           operationId: op.identity.operationId,
           target: op.identity.target,
           connectionFile,
           run,
+          recoveryRuntime,
           writerFence: {
             observe: async ({ boundary }) => {
               await inspect(boundary);
@@ -204,6 +289,7 @@ export async function createTargetRecoveryBackup(
             },
           },
         });
+        stage = "isolated-restore";
         const restoreEvidence = await verifyDatabaseRestore({
           root: op.root,
           operationId: op.identity.operationId,
@@ -211,8 +297,10 @@ export async function createTargetRecoveryBackup(
           backup,
           roleMapping: mapping,
           run,
+          recoveryRuntime,
         });
         producerInFlight = false;
+        stage = "post-restore-observation";
         await inspect("after-restore");
         return { backup, restoreEvidence, fence };
       } catch (error) {
@@ -224,6 +312,6 @@ export async function createTargetRecoveryBackup(
       }
     });
   } catch (error) {
-    throw targetBackupError(error, terminated);
+    throw targetBackupError(error, terminated, stage);
   }
 }

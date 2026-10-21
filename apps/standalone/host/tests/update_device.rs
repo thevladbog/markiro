@@ -98,7 +98,7 @@ async fn each_state_of_the_package_is_told_and_only_ok_carries_the_manifest() {
 #[tokio::test]
 async fn the_offer_answers_any_protocol_but_only_a_live_device_key() {
     let admin = host_with(Some("0.3.0"), "0.3.0").await;
-    for protocol in [Some("1"), Some("7"), Some("abc"), None] {
+    for protocol in [Some("1"), Some("8"), Some("abc"), None] {
         let (status, body) = offer(&admin.app, &admin.key, protocol).await;
         assert_eq!(
             (status, &body["package"]["state"]),
@@ -113,7 +113,7 @@ async fn the_offer_answers_any_protocol_but_only_a_live_device_key() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/device")
-                .header(markiro_proto::PROTOCOL_HEADER, "7")
+                .header(markiro_proto::PROTOCOL_HEADER, "8")
                 .header("authorization", format!("Bearer {}", admin.key)),
         ))
         .await;

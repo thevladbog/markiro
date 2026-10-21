@@ -4,24 +4,35 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, relative } from "node:path";
 import { assertPrivateRootSync, syncPrivateDirectory, privateFileError } from "../host/files.mjs";
 
+function archivePrivateError(reason) {
+  const error = privateFileError();
+  error.archiveReason = reason;
+  return error;
+}
 function pathInRoot(root, path) {
-  assertPrivateRootSync(root);
+  try {
+    assertPrivateRootSync(root);
+  } catch {
+    throw archivePrivateError("root");
+  }
   const rel = relative(root, path);
   if (!rel || rel.startsWith(".") || !/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/u.test(rel))
-    throw privateFileError();
-  assertPrivateRootSync(dirname(path));
+    throw archivePrivateError("path");
+  try {
+    assertPrivateRootSync(dirname(path));
+  } catch {
+    throw archivePrivateError("parent");
+  }
 }
 function metadata(info) {
-  if (
-    !info.isFile() ||
-    info.uid !== process.getuid() ||
-    (info.mode & 0o7777) !== 0o600 ||
-    info.nlink !== 1
-  )
-    throw privateFileError();
+  if (!info.isFile()) throw archivePrivateError("type");
+  if (info.uid !== process.getuid()) throw archivePrivateError("owner");
+  if ((info.mode & 0o7777) !== 0o600) throw archivePrivateError("mode");
+  if (info.nlink !== 1) throw archivePrivateError("links");
 }
-function unchanged(a, b) {
-  return ["dev", "ino", "size", "mtimeNs", "ctimeNs"].every((k) => a[k] === b[k]);
+function assertUnchanged(a, b, observation) {
+  for (const key of ["dev", "ino", "size", "mtimeNs", "ctimeNs"])
+    if (a[key] !== b[key]) throw archivePrivateError(`${observation}-${key}`);
 }
 async function stream(root, path, onChunk) {
   pathInRoot(root, path);
@@ -42,12 +53,9 @@ async function stream(root, path, onChunk) {
     }
     const after = await handle.stat({ bigint: true });
     metadata(await handle.stat());
-    if (
-      !unchanged(before, after) ||
-      !unchanged(before, await lstat(path, { bigint: true })) ||
-      BigInt(bytes) !== before.size
-    )
-      throw privateFileError();
+    assertUnchanged(before, after, "opened");
+    assertUnchanged(before, await lstat(path, { bigint: true }), "path");
+    if (BigInt(bytes) !== before.size) throw archivePrivateError("read-length");
     return { path, sha256: hash.digest("hex"), bytes };
   } finally {
     await handle.close();

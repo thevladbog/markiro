@@ -611,6 +611,91 @@ describe("DocumentComposer", () => {
     expect(globalCss).toMatch(/\.document-line__action\s*\{[^}]*min-width:\s*44px;/);
   });
 
+  it("sells a plan for an explicit date term at a whole-term price", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    const { props } = renderComposer({
+      initialDraft: {
+        tenantId: tenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [
+          createLineFromCatalog(
+            {
+              ...plan,
+              subject: "software_license",
+              documentNameRu: "Лицензия",
+              documentNameEn: "License",
+              sellerPolicyRevision: 2,
+            },
+            "term-plan",
+          ),
+        ],
+      },
+    });
+    expect((screen.getByLabelText("Количество Лицензия") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Действует с, Лицензия"), {
+      target: { value: "2026-11-01" },
+    });
+    fireEvent.change(screen.getByLabelText("Действует по (включительно), Лицензия"), {
+      target: { value: "2027-05-27" },
+    });
+    const price = screen.getByLabelText("Цена Лицензия") as HTMLInputElement;
+    await user.clear(price);
+    await user.type(price, "70000");
+    expect(screen.getByText("plan-basic · v3 · Период")).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    expect(props.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            quantity: 1,
+            agreedUnitPrice: "70000.00",
+            commercialTerms: expect.objectContaining({
+              version: 3,
+              termStart: "2026-11-01",
+              termEnd: "2027-05-27",
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("blocks submission while only one term date is entered", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    const { props } = renderComposer({
+      initialDraft: {
+        tenantId: tenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [
+          createLineFromCatalog(
+            {
+              ...plan,
+              subject: "software_license",
+              documentNameRu: "Лицензия",
+              documentNameEn: "License",
+              sellerPolicyRevision: 2,
+            },
+            "term-plan",
+          ),
+        ],
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Действует с, Лицензия"), {
+      target: { value: "2026-11-01" },
+    });
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Укажите обе даты срока или очистите обе").length).toBeGreaterThan(
+      0,
+    );
+  });
+
   it("normalizes the price on blur and submits the optional line comment", async () => {
     await i18n.changeLanguage("ru");
     const user = userEvent.setup();

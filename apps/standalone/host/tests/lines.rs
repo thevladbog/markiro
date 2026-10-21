@@ -45,7 +45,7 @@ async fn an_administrator_creates_renames_and_archives_lines() {
     let id = created["id"].as_str().unwrap().to_owned();
     assert_eq!(
         created,
-        json!({ "id": id, "name": "Линия 3", "archived": false, "rev": 2 })
+        json!({ "id": id, "name": "Линия 3", "archived": false, "maxStations": 1, "rev": 2 })
     );
     assert_eq!(
         audit_trail(&admin.app, "line.create").await,
@@ -68,7 +68,7 @@ async fn an_administrator_creates_renames_and_archives_lines() {
     assert_eq!(status, StatusCode::OK, "{renamed}");
     assert_eq!(
         renamed,
-        json!({ "id": id, "name": "Упаковка", "archived": false, "rev": 3 })
+        json!({ "id": id, "name": "Упаковка", "archived": false, "maxStations": 1, "rev": 3 })
     );
     let (status, archived) = admin
         .call(
@@ -80,7 +80,7 @@ async fn an_administrator_creates_renames_and_archives_lines() {
     assert_eq!(status, StatusCode::OK, "{archived}");
     assert_eq!(
         archived,
-        json!({ "id": id, "name": "Упаковка", "archived": true, "rev": 4 })
+        json!({ "id": id, "name": "Упаковка", "archived": true, "maxStations": 1, "rev": 4 })
     );
     assert_eq!(
         audit_trail(&admin.app, "line.update").await,
@@ -227,7 +227,7 @@ async fn a_line_may_be_renamed_to_a_case_variant_of_its_own_name() {
     assert_eq!(status, StatusCode::OK, "{renamed}");
     assert_eq!(
         renamed,
-        json!({ "id": id, "name": "ЛИНИЯ 1", "archived": false, "rev": 2 })
+        json!({ "id": id, "name": "ЛИНИЯ 1", "archived": false, "maxStations": 1, "rev": 2 })
     );
     assert_eq!(
         audit_trail(&admin.app, "line.update").await,
@@ -269,7 +269,7 @@ async fn an_archived_line_comes_back_when_its_name_is_free() {
     assert_eq!(status, StatusCode::OK, "{restored}");
     assert_eq!(
         restored,
-        json!({ "id": id, "name": "Линия 1", "archived": false, "rev": 3 })
+        json!({ "id": id, "name": "Линия 1", "archived": false, "maxStations": 1, "rev": 3 })
     );
     assert!(lines(&admin).await.contains(&restored));
     let archive = |from: bool, to: bool| {
@@ -320,7 +320,7 @@ async fn an_archived_line_may_take_the_name_of_an_active_one() {
     assert_eq!(status, StatusCode::OK, "{renamed}");
     assert_eq!(
         renamed,
-        json!({ "id": first, "name": "линия 2", "archived": true, "rev": 3 })
+        json!({ "id": first, "name": "линия 2", "archived": true, "maxStations": 1, "rev": 3 })
     );
     // Two lines now share the name: the active one and the archived one.
     let sharing: Vec<bool> = sqlx::query_scalar(

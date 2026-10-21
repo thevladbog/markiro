@@ -8,6 +8,8 @@ import { useCan } from "./access.js";
 import { backupWarnings } from "./backups/backup-warnings.js";
 import { useBackupTime } from "./backups/backup-time.js";
 import { BackupWarnings } from "./backups/BackupWarnings.js";
+import { DemoDataNotice } from "./demo/DemoDataNotice.js";
+import { withoutDemo } from "./demo/demo.js";
 import { HostAddressNotice } from "./overview/HostAddressNotice.js";
 import { LicenseNotices, useLicenseNotices } from "./info/license/LicenseNotices.js";
 import { AttentionPanel } from "./overview/AttentionPanel.js";
@@ -56,7 +58,13 @@ export function OfficeOverview() {
   );
   const { admin, zone, today, nowMs } = data;
 
-  const shifts = data.shifts.data ?? NO_SHIFTS;
+  const allShifts = data.shifts.data ?? NO_SHIFTS;
+  // The demo shifts (spec 2026-10-21) are no production: the day's figures, the chart, the line
+  // cards and the first steps leave them out; the shifts panel lists them, marked.
+  const shifts = useMemo(
+    () => withoutDemo(allShifts, data.products.data),
+    [allShifts, data.products.data],
+  );
   const shiftsState = blockState(data.shifts);
   const linesState = blockState(data.shifts, data.lines);
   const days = useMemo(() => recentDays(shifts, today, 7), [shifts, today]);
@@ -189,7 +197,7 @@ export function OfficeOverview() {
     org: data.org.data ?? null,
     lines: data.lines.data ?? [],
     devices: admin ? (data.devices.data ?? null) : null,
-    products: data.products.data ?? [],
+    products: (data.products.data ?? []).filter((product) => product.demo !== true),
     shifts,
   });
 
@@ -230,6 +238,7 @@ export function OfficeOverview() {
       */}
       <div className="backup-alerts" aria-live="polite">
         <OverviewLicense />
+        <DemoDataNotice />
         <OverviewBackups />
         {admin && <HostAddressNotice />}
       </div>
@@ -304,8 +313,8 @@ export function OfficeOverview() {
             state={shiftsState}
             error={data.shifts.error}
             onRetry={retry}
-            today={shiftDayRow(shifts, today, true)}
-            tomorrow={shiftDayRow(shifts, data.tomorrow, false)}
+            today={shiftDayRow(allShifts, today, true)}
+            tomorrow={shiftDayRow(allShifts, data.tomorrow, false)}
           />
           {!empty && <SystemPanel data={data} />}
         </div>

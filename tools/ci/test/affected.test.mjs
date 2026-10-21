@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { classifyChangedFiles } from "../affected.mjs";
+import { classifyChangedFiles, HEAVY_JOBS, OPTIONAL_JOBS } from "../affected.mjs";
 
 const jobNames = [
   "verify_static",
@@ -21,6 +21,11 @@ const jobNames = [
   "standalone_rust",
   "standalone_windows_build",
   "standalone_app_tests",
+  "landing_browser",
+  "landing_lighthouse",
+  "saas_admin_browser",
+  // Optional: classified here, but outside ci-required.
+  "cabinet_station_galleries",
 ];
 
 const signerOnly = {
@@ -39,6 +44,10 @@ const signerOnly = {
     standalone_rust: false,
     standalone_windows_build: false,
     standalone_app_tests: false,
+    landing_browser: false,
+    landing_lighthouse: false,
+    saas_admin_browser: false,
+    cabinet_station_galleries: false,
   },
 };
 
@@ -48,6 +57,12 @@ function enabledJobs(result) {
     .filter(([, enabled]) => enabled)
     .map(([name]) => name);
 }
+
+test("the cabinet and station galleries are classified but never required", () => {
+  assert.deepEqual(OPTIONAL_JOBS, ["cabinet_station_galleries"]);
+  assert.deepEqual([...HEAVY_JOBS, ...OPTIONAL_JOBS], jobNames);
+  for (const job of OPTIONAL_JOBS) assert.ok(!HEAVY_JOBS.includes(job), job);
+});
 
 test("a Signer version bump does not select unrelated product jobs", () => {
   assert.deepEqual(classifyChangedFiles(["apps/signer/src-tauri/tauri.conf.json"]), signerOnly);
@@ -89,12 +104,13 @@ test("Station native and web changes select different downstream work", () => {
   assert.deepEqual(enabledJobs(native), ["station_rust", "station_windows_build"]);
 
   const web = classifyChangedFiles(["apps/station/src/App.tsx"]);
+  // The cloud station is no longer served, so no platform image depends on it.
   assert.deepEqual(enabledJobs(web), [
     "verify_static",
     "verify_app_tests",
-    "production_bundle",
     "station_rust",
     "station_windows_build",
+    "cabinet_station_galleries",
   ]);
 });
 
@@ -155,15 +171,32 @@ test("application changes select their documented jobs", () => {
   const cases = [
     [
       "apps/api/src/main.ts",
-      ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
+      [
+        "verify_static",
+        "verify_api_tests",
+        "tenant_team_infrastructure",
+        "production_bundle",
+        "saas_admin_browser",
+      ],
     ],
-    ["apps/admin/src/App.tsx", ["verify_static", "verify_app_tests", "production_bundle"]],
-    ["apps/kiosk/src/App.tsx", ["verify_static", "verify_app_tests", "production_bundle"]],
+    // The cabinet and the kiosk are no longer served online: no platform image
+    // or required browser job depends on them, only the optional galleries.
+    ["apps/admin/src/App.tsx", ["verify_static", "verify_app_tests", "cabinet_station_galleries"]],
+    ["apps/kiosk/src/App.tsx", ["verify_static", "verify_app_tests", "cabinet_station_galleries"]],
     [
       "apps/landing/src/pages/index.astro",
-      ["verify_static", "verify_app_tests", "production_bundle"],
+      [
+        "verify_static",
+        "verify_app_tests",
+        "production_bundle",
+        "landing_browser",
+        "landing_lighthouse",
+      ],
     ],
-    ["apps/saas-admin/src/App.tsx", ["verify_static", "verify_app_tests", "production_bundle"]],
+    [
+      "apps/saas-admin/src/App.tsx",
+      ["verify_static", "verify_app_tests", "production_bundle", "saas_admin_browser"],
+    ],
   ];
 
   for (const [path, expected] of cases) {
@@ -182,6 +215,7 @@ test("the demo-form source allow-list also runs the landing suite that renders t
       "verify_app_tests",
       "tenant_team_infrastructure",
       "production_bundle",
+      "saas_admin_browser",
     ],
   );
 });
@@ -201,6 +235,10 @@ test("shared packages fan out to their current consumers", () => {
         "standalone_rust",
         "standalone_windows_build",
         "standalone_app_tests",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
       ],
     ],
     [
@@ -215,6 +253,10 @@ test("shared packages fan out to their current consumers", () => {
         "standalone_rust",
         "standalone_windows_build",
         "standalone_app_tests",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
       ],
     ],
     [
@@ -227,19 +269,44 @@ test("shared packages fan out to their current consumers", () => {
         "production_bundle",
         "station_rust",
         "station_windows_build",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
       ],
     ],
     [
       "packages/email/src/index.ts",
-      ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
+      [
+        "verify_static",
+        "verify_api_tests",
+        "tenant_team_infrastructure",
+        "production_bundle",
+        "saas_admin_browser",
+      ],
     ],
     [
       "packages/legal-documents/src/index.ts",
-      ["verify_static", "verify_api_tests", "verify_app_tests", "production_bundle"],
+      [
+        "verify_static",
+        "verify_api_tests",
+        "verify_app_tests",
+        "production_bundle",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+      ],
     ],
     [
       "packages/platform-contracts/src/commercial.ts",
-      ["verify_static", "verify_api_tests", "verify_app_tests", "production_bundle"],
+      [
+        "verify_static",
+        "verify_api_tests",
+        "verify_app_tests",
+        "production_bundle",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
+      ],
     ],
   ];
 
@@ -262,6 +329,10 @@ test("only the mirrored CHZ Signer contract selects native Signer verification",
         "production_bundle",
         "signer_rust",
         "signer_windows_build",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
       ],
       path,
     );
@@ -282,6 +353,10 @@ test("shared Station recovery contract and fixtures select handheld verification
         "verify_app_tests",
         "production_bundle",
         "handheld_android",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
       ],
       path,
     );
@@ -291,8 +366,25 @@ test("shared Station recovery contract and fixtures select handheld verification
 test("deployment and release tooling selects its consuming jobs", () => {
   const cases = [
     ["deploy/production/preflight.mjs", ["production_bundle"]],
-    ["infra/yandex/main.tf", ["production_bundle"]],
-    ["tools/production-browser/tests/docs.spec.ts", ["production_bundle"]],
+    ["deploy/platform/ci-stack.mjs", ["production_bundle"]],
+    // The retired Yandex runtime has no CI job; yandex-infrastructure.yml owns it.
+    ["infra/yandex/main.tf", []],
+    ["deploy/yandex/runtime-diagnostics-probe.mjs", []],
+    [
+      "tools/production-browser/tests/landing-seo.spec.ts",
+      ["landing_browser", "landing_lighthouse", "saas_admin_browser", "cabinet_station_galleries"],
+    ],
+    // ci-stack.mjs smokes the platform stack in the Chromium this package installs.
+    [
+      "tools/production-browser/pnpm-lock.yaml",
+      [
+        "production_bundle",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
+      ],
+    ],
     ["tools/station-release/build-manifest.mjs", ["station_rust", "station_windows_build"]],
     ["tools/signer-release/build-manifest.mjs", ["signer_rust", "signer_windows_build"]],
     ["tools/standalone-release/smoke.ps1", ["standalone_rust", "standalone_windows_build"]],
@@ -376,6 +468,7 @@ test("deployment workflow does not hide other changed areas or full-run requirem
     "verify_api_tests",
     "tenant_team_infrastructure",
     "production_bundle",
+    "saas_admin_browser",
   ]);
   for (const path of [
     ".github/workflows/ci.yml",
@@ -407,9 +500,9 @@ test("multiple changed paths union their selected jobs", () => {
   assert.deepEqual(enabledJobs(result), [
     "verify_static",
     "verify_app_tests",
-    "production_bundle",
     "signer_rust",
     "signer_windows_build",
+    "cabinet_station_galleries",
   ]);
 });
 
@@ -444,6 +537,10 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "standalone_rust=false",
       "standalone_windows_build=false",
       "standalone_app_tests=false",
+      "landing_browser=false",
+      "landing_lighthouse=false",
+      "saas_admin_browser=false",
+      "cabinet_station_galleries=false",
       "",
     ].join("\n"),
   );
@@ -506,6 +603,10 @@ test("offline grant protocol and signed fixture changes exercise every native co
         "standalone_rust",
         "standalone_windows_build",
         "standalone_app_tests",
+        "landing_browser",
+        "landing_lighthouse",
+        "saas_admin_browser",
+        "cabinet_station_galleries",
       ],
       path,
     );

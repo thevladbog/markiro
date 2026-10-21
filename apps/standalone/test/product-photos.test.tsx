@@ -276,6 +276,20 @@ describe("the shift card", () => {
       />,
     );
 
+  it("marks a demo shift «Демо» beside its number (spec 2026-10-21)", () => {
+    const view = render(
+      <ShiftCard
+        copy={{ ...COPY, number: "DEMO-001" }}
+        action={{ kind: "open", enabled: true }}
+        busy={false}
+        onAction={() => undefined}
+      />,
+    );
+    expect(view.getByText("Демо")).toBeTruthy();
+    view.unmount();
+    expect(card().queryByText("Демо")).toBeNull();
+  });
+
   it("shows the product's photo on its panel once the station holds it", async () => {
     const { executor } = await feedProducts([productItem(A, 5, SUM_1)], 5);
     await syncProductPhotos({ local: executor, fetchPhoto: async () => photo(SUM_1) });

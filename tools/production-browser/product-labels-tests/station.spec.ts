@@ -431,9 +431,13 @@ test("printer settings remain usable on the existing 1024 by 768 floor viewport"
   for (const language of ["ZPL", "TSPL"]) {
     const label = page.getByRole("radio", { name: language, exact: true }).locator("..");
     await expect(label).toBeInViewport({ ratio: 1 });
-    expect(
-      await label.locator("span").evaluate((span) => span.scrollWidth <= span.clientWidth),
-    ).toBe(true);
+    const textWidth = await label.locator("span").evaluate((span) => ({
+      scrollWidth: span.scrollWidth,
+      clientWidth: span.clientWidth,
+    }));
+    expect(textWidth.scrollWidth, `${language} text width`).toBeLessThanOrEqual(
+      textWidth.clientWidth,
+    );
   }
   const footer = await page.getByTestId("setup-footer").boundingBox();
   expect(footer && footer.y + footer.height).toBeLessThanOrEqual(768);

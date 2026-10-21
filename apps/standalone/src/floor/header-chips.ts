@@ -24,7 +24,8 @@ export type ChipKind =
   | "conflicts"
   | "displaced"
   | "stranded"
-  | "stock";
+  | "stock"
+  | "demo";
 
 /** The three kinds of floor screen the header tells apart. */
 export type HeaderScreen = "sign-in" | "hub" | "work";

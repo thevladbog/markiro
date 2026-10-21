@@ -322,7 +322,7 @@ async fn the_download_answers_any_protocol_but_only_a_device_key() {
                 .method("GET")
                 .uri("/v1/device/update/installer")
                 .header("authorization", format!("Bearer {}", admin.key))
-                .header(markiro_proto::PROTOCOL_HEADER, "7")
+                .header(markiro_proto::PROTOCOL_HEADER, "8")
                 .body(Body::empty())
                 .unwrap(),
         )

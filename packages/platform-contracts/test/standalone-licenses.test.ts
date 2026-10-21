@@ -21,7 +21,12 @@ import {
   standaloneLicenseSigningKeysetSchema,
   standaloneLicenseRightsSchema,
   standaloneSiteRegisterSchema,
+  standaloneSiteSchema,
   standaloneActivationExportSchema,
+  STANDALONE_DEMO_PLAN_VERSION_ID,
+  STANDALONE_DEMO_TERM_MAX_DAYS,
+  standaloneDemoTermsSchema,
+  standaloneIssuancePreviewSchema,
 } from "../src/index.js";
 
 const ORIGIN = "https://api.example.invalid";
@@ -299,11 +304,12 @@ describe("standalone issuance confirmation and file", () => {
     }
   });
 
-  it("knows the three sources and ties each to its term reasons and assignments", () => {
+  it("knows the four sources and ties each to its term reasons and assignments", () => {
     expect([...STANDALONE_ISSUANCE_SOURCES]).toEqual([
       "subscription",
       "offline",
       "offline_assignments",
+      "offline_demo",
     ]);
     const base = {
       licenseId: randomUUID(),
@@ -353,6 +359,9 @@ describe("standalone issuance confirmation and file", () => {
     expect(ok("subscription", "one_year_cap", refs)).toBe(false);
     expect(ok("subscription", "offline_term", null)).toBe(false);
     expect(ok("offline", "offline_term", refs)).toBe(false);
+    // The demo term reason belongs to the offline demo only.
+    expect(ok("subscription", "demo_term", null)).toBe(false);
+    expect(ok("offline_assignments", "demo_term", refs)).toBe(false);
   });
 
   it("bounds the file to 16 KiB and the canonical file name", () => {
@@ -437,5 +446,190 @@ describe("activation exports with usage statistics", () => {
       expect(standaloneActivationExportSchema.safeParse({ ...request, supportToken }).success).toBe(
         false,
       );
+  });
+});
+
+describe("the offline demo file of a tenant without a cabinet (spec 2026-10-20 §4.2)", () => {
+  const summary = {
+    licenseId: randomUUID(),
+    siteId: randomUUID(),
+    sequence: 2,
+    hostId: request.hostId,
+    source: "offline_demo",
+    plan: "demo",
+    planVersionId: STANDALONE_DEMO_PLAN_VERSION_ID,
+    entitlementRevision: "0",
+    validFrom: "2026-10-21T00:00:00.000Z",
+    validUntil: "2026-11-04T00:00:00.000Z",
+    validUntilReason: "demo_term",
+    graceDays: 0,
+    kid: "lic-1",
+    sha256: "a".repeat(64),
+    issuedAt: "2026-10-21T00:00:00.000Z",
+    issuedByPlatformUserId: "admin",
+    replaces: null,
+    sourceAssignments: null,
+    customer: { name: "ООО «Завод»", inn: "7707083893" },
+    rights: {
+      quotas: { lines: null, stations: null, kiosks: null, cabinetUsers: null },
+      features: {
+        labelEditor: true,
+        publicApi: true,
+        pallets: true,
+        chzIntegration: true,
+        inventory: true,
+        commerceMl: true,
+        handheld: true,
+        customLogo: true,
+      },
+    },
+  };
+  const refs = [{ kind: "plan", id: randomUUID(), catalogVersionId: randomUUID() }];
+
+  it("takes a term of 1 to 45 whole days and nothing else", () => {
+    expect(STANDALONE_DEMO_TERM_MAX_DAYS).toBe(45);
+    for (const termDays of [1, 14, 45])
+      expect(standaloneDemoTermsSchema.parse({ termDays })).toEqual({ termDays });
+    for (const invalid of [
+      { termDays: 0 },
+      { termDays: 46 },
+      { termDays: 1.5 },
+      { termDays: -1 },
+      { termDays: "14" },
+      {},
+      { termDays: 14, planVersionId: randomUUID() },
+    ])
+      expect(standaloneDemoTermsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("carries the demo term in the preview and the confirmation; an old client sends none", () => {
+    const expected = {
+      entitlementRevision: "0",
+      previousSequence: 0,
+      boundaryAt: null,
+      termsDigest: "b".repeat(64),
+    };
+    expect(
+      standaloneIssuancePreviewRequestSchema.parse({
+        graceDays: null,
+        offline: null,
+        demo: { termDays: 14 },
+      }).demo,
+    ).toEqual({ termDays: 14 });
+    expect(
+      standaloneIssuancePreviewRequestSchema.parse({ graceDays: null, offline: null }).demo,
+    ).toBeUndefined();
+    expect(
+      standaloneIssuanceConfirmSchema.parse({
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        demo: { termDays: 45 },
+        expected,
+      }).demo,
+    ).toEqual({ termDays: 45 });
+    expect(
+      standaloneIssuancePreviewRequestSchema.safeParse({
+        graceDays: null,
+        offline: null,
+        demo: { termDays: 46 },
+      }).success,
+    ).toBe(false);
+    expect(
+      standaloneIssuanceConfirmSchema.safeParse({
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        demo: { termDays: 0 },
+        expected,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("is a demo plan with no grace under the demo term, with or without named assignments", () => {
+    expect(standaloneIssuanceSummarySchema.parse(summary).source).toBe("offline_demo");
+    expect(
+      standaloneIssuanceSummarySchema.safeParse({ ...summary, sourceAssignments: refs }).success,
+    ).toBe(true);
+    for (const invalid of [
+      { ...summary, plan: "subscription" },
+      { ...summary, graceDays: 14 },
+      { ...summary, validUntilReason: "one_year_cap" },
+      { ...summary, validUntilReason: "offline_term" },
+      { ...summary, sourceAssignments: [] },
+    ])
+      expect(standaloneIssuanceSummarySchema.safeParse(invalid).success).toBe(false);
+    const next = Object.fromEntries(
+      Object.entries(summary).filter(
+        ([key]) =>
+          !["licenseId", "siteId", "hostId", "kid", "sha256", "issuedAt"].includes(key) &&
+          !["issuedByPlatformUserId", "replaces"].includes(key),
+      ),
+    );
+    const shape = standaloneIssuancePreviewSchema.shape.next;
+    expect(shape.safeParse(next).success).toBe(true);
+    expect(shape.safeParse({ ...next, graceDays: 3 }).success).toBe(false);
+  });
+
+  it("is the term bound the database enforces, so the contract and the constraint cannot drift", () => {
+    const sql = readFileSync(
+      new URL("../../db/migrations/0198_standalone_offline_demo.sql", import.meta.url),
+      "utf8",
+    );
+    expect(sql).toContain(
+      `"standalone_license_issuances"."valid_from" <= interval '${STANDALONE_DEMO_TERM_MAX_DAYS} days'`,
+    );
+  });
+
+  it("signs a plan version id the host accepts when no tariff is assigned", () => {
+    // markiro_proto::trust::is_uuid: a version nibble 1-8 and an RFC variant.
+    expect(STANDALONE_DEMO_PLAN_VERSION_ID).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+  });
+});
+
+describe("the landing lead of a standalone site (spec 2026-10-20 §15.6)", () => {
+  const site = {
+    id: randomUUID(),
+    tenantId: "tenant-1",
+    hostId: request.hostId,
+    name: "Цех",
+    requestInn: "7707083893",
+    hostVersion: null,
+    usage: null,
+    requestCreatedAt: null,
+    hostHistory: [
+      {
+        hostId: request.hostId,
+        requestInn: "7707083893",
+        requestId: randomUUID(),
+        boundAt: "2026-10-21T00:00:00.000Z",
+        boundByPlatformUserId: "admin",
+      },
+    ],
+    lastIssuedSequence: 0,
+    latestIssuance: null,
+    renewalDue: false,
+    createdAt: "2026-10-21T00:00:00.000Z",
+  };
+
+  it("names the matching leads by id only: linked, unresolved or none; no INN, no match", () => {
+    const leadId = randomUUID();
+    for (const leadLink of [
+      { state: "linked", leadIds: [leadId] },
+      { state: "unresolved", leadIds: [leadId, randomUUID()] },
+      { state: "none", leadIds: [] },
+      null,
+    ])
+      expect(standaloneSiteSchema.parse({ ...site, leadLink }).leadLink).toEqual(leadLink);
+    for (const leadLink of [
+      { state: "linked", leadIds: [] },
+      { state: "unresolved", leadIds: [] },
+      { state: "none", leadIds: [leadId] },
+      { state: "linked", leadIds: [leadId], email: "a@example.invalid" },
+      { state: "maybe", leadIds: [leadId] },
+    ])
+      expect(standaloneSiteSchema.safeParse({ ...site, leadLink }).success).toBe(false);
   });
 });

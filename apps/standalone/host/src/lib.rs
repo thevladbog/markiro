@@ -11,6 +11,7 @@ pub mod cloud_history;
 pub mod cloud_import;
 pub mod config;
 pub mod db;
+pub mod demo;
 pub mod device_kinds;
 pub mod disaggregation;
 pub mod error;
@@ -34,6 +35,8 @@ pub mod secrets;
 pub mod server;
 #[cfg(windows)]
 pub mod service;
+pub mod shift_participants;
+pub mod shift_totals;
 pub mod shifts;
 pub mod templates;
 pub mod tls;

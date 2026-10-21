@@ -1,0 +1,47 @@
+---
+import { CALL_HREF, DOWNLOAD_PATH, HOME_COPY } from "../../content/autonom";
+import { SITE_CONTACTS } from "../../content/contacts";
+import type { PublicPhone } from "../../lib/site-config";
+import Icon from "./Icon.astro";
+
+interface Props {
+  phone: PublicPhone | null;
+  /** The old site linked «/#demo» from every article; the final block keeps that anchor. */
+  id?: string;
+}
+
+const { phone, id } = Astro.props;
+const copy = HOME_COPY.final;
+---
+
+<section class="ax-section ax-final" id={id} data-theme="dark" aria-labelledby="final-title">
+  <div class="ax-container ax-final__inner">
+    <div>
+      <p class="ax-kicker">{copy.kicker}</p>
+      <h2 class="ax-h2 ax-h2--lg" id="final-title">{copy.title}</h2>
+      <div class="ax-actions">
+        <a class="ax-btn ax-btn--accent ax-btn--lg" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="final">
+          <span>Скачать пробную версию</span>
+          <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
+        </a>
+        <a class="ax-btn ax-btn--outline ax-btn--lg" href={CALL_HREF} data-analytics="landing_demo_click" data-placement="final">{copy.call}</a>
+      </div>
+    </div>
+    <dl class="ax-contacts">
+      {phone && (
+        <div>
+          <dt>Телефон</dt>
+          <dd><a href={phone.href} data-analytics="landing_phone_click" data-placement="final">{phone.display}</a></dd>
+        </div>
+      )}
+      <div>
+        <dt>Telegram</dt>
+        <dd><a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a></dd>
+      </div>
+      <div>
+        <dt>Почта</dt>
+        <dd><a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a></dd>
+      </div>
+    </dl>
+  </div>
+</section>

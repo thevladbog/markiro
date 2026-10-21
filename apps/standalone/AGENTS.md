@@ -155,6 +155,12 @@ loserDeviceId, winnerShiftId }` — never the code nor its hash; both office
 roles may, a conflict reviewed already answers as it is and writes no row,
 and a review takes a host revision (no feed item) so the stations' streams
 wake and ask after their conflicts.
+Plan 2b adds `shift.join` and `shift.leave` (the device; `{ number, rejoined }`
+and `{ number }`), `shift.part_closed` (the device; `{ number, actualQty,
+closedBoxCount, reasonCode }`), `shift.force_closed` (the office user; `{ reason,
+notClosed }`), `shift.close_reason` (the office user; `{ reasonCode }`) and
+`line.max_stations_changed` (the administrator; `{ from, to }`). A repeated entry
+or leave writes none.
 Disaggregation (plan ДЗГ) writes `disaggregation_reason.create` / `.update` (target
 `disaggregation_reason`; details `{ name, sortOrder }` and the update's `changed`),
 and, with the target `disaggregation_document`: `disaggregation.create`
@@ -172,6 +178,9 @@ administrators and technologists (`require_disaggregation_in`), no revision, the
 its target, details `{ formatId, formatVersion, packingCount }`. The host checks that the
 document is applied (`conflict` `document_not_applied`) and that `packingCount` is the number
 of its distinct SSCCs (a refusal writes no row); it never sees the file.
+«Удалить демо-данные» writes `demo_data.delete` (the administrator, target `product`/the demo
+product's id, details `{ shifts, boxes, pallets, codes }`); the rows of earlier actions on the demo
+objects stay. `host.bootstrap` names `demoData` (its production date) when the wizard installed it.
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -795,8 +804,8 @@ record of its `operatorId`.
 The catalog grants no access, so its flags stay flags: an archived product
 and a disabled template ride the feed with `archived` and `enabled`, since a
 station keeps them for history and leaves them out of its pickers. A
-product is never deleted and never has a tombstone; a deleted template
-leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
+product is never deleted and never has a tombstone, except the demo product, which «Удалить
+демо-данные» deletes («Demo data»); a deleted template leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
 `markiro_proto::category_default_id`, the same text `FEED_KEYS` builds in
 SQL), and clearing it writes a tombstone of that key. The organization's
 three defaults ride its record (`defaultBoxTemplateId`,
@@ -1073,6 +1082,54 @@ leaves the badge working and does not count). The watch is the shell's
 never takes the screen down. Verified in a browser (Chromium, a harness with a
 fake local database) at 1280×800, 1920×1080 and 1024×600; not on WebView2, a
 real panel or a real scanner.
+
+## Demo data
+
+Spec `docs/superpowers/specs/2026-10-21-standalone-wizard-demo-data-design.md` (owner's decisions
+of 2026-10-21: О4 option В, Д1–Д3). The wizard's «Установить демо-данные» sends
+`demoData: { productionDate }` (the wizard's today in the organization's zone; the host keeps no
+zone database), and `bootstrap` makes the set in its own transaction and revision
+(`host/src/demo.rs`): the demo product (`products.demo = 1`, migration `0053`, GTIN
+`02900000000018` of restricted circulation, its photo built in with `include_bytes!`), the SSCC
+counters of the demo prefix `290000000` (extensions 0 and 1) and a planned demo shift on the first
+line with the stock box and pallet defaults. Without both defaults, or with an organization whose
+prefix is the demo one, the wizard is `validation_failed` on `demoData` and nothing is created. The
+trial starts with the wizard either way.
+
+- `products.demo` is the one flag: a shift is a demo shift when its product is (the product is no
+  field of a shift edit). The flag is set only by the wizard; `PUT` of the demo product and of its
+  photo is `conflict` on `demo_product`, so a real GTIN can never hide behind it.
+- A demo shift's number is drawn from the counter `DEMO` (`DEMO-001`, `/S` from a station;
+  `shifts::insert`), and its snapshot's `issuerPrefix` is the demo prefix
+  (`shift_snapshot`), so it spends nothing of the organization's numbering. `0053` rebuilds
+  `shift_number_counters` (with its rowids) to let the key `DEMO` past its five-character
+  `CHECK`. `GET /v1/office/sscc` leaves the demo prefix out while the demo product exists, and its
+  `PUT` answers `not_found`; the organization takes no GLN of the demo prefix meanwhile.
+- Isolation: the office's export record and the export-file upload refuse a format
+  `*_xml_gismt_*` of a demo shift (`conflict` `demo_shift`, `demo::refuse_gismt`); its TXT and CSV
+  are saved as `DEMO_…`. Adding a demo box or pallet to a disaggregation document refuses the
+  whole addition (`conflict` `demo_box`, `details.ssccs`). Every shift-bound query of
+  `usage_stats.rs` leaves demo shifts out (the partial index `products_demo` keeps the plans off the
+  catalog), and the office's «Обзор» leaves them out of the figures, the chart, the line cards and
+  the first steps.
+- `GET /v1/office/demo-data` (every office role) and `DELETE` (administrators) in
+  `routes/demo_data.rs`: one transaction and one revision delete every fact, box, pallet, export
+  file, warehouse pallet and reprint of the demo shifts, the shifts, the `DEMO` counter, the demo
+  prefix's blocks and counters, the photo and the product; the product leaves the feed as a
+  tombstone (the only product that ever does). An open demo shift refuses it (`conflict`
+  `demo_shift_active`, `details.shifts`). Nothing there answers `present: false` with no
+  revision or row. The audit keeps its rows; the delete writes `demo_data.delete`.
+- The removed shifts' ids stay in `demo_removed_shifts`: a station's late fact of one is
+  acknowledged `accepted` and dropped (`facts::apply`), so its queue drains. The table is business
+  data of the cloud import's replacement (`BUSINESS_TABLES`), and a replacement over demo data
+  also drops the demo prefix's counters and the `DEMO` counter rather than keep them as floors.
+- The station knows a demo shift by its number (`isDemoShiftNumber`): «Демо-код» on the work
+  screen feeds the next demo code it holds no scan of (`nextDemoCode`) through the scan gate; a
+  label of a demo shift without a printer shows as a preview in the label panel, and «Готово» is
+  «Продолжить без этикетки» without its question (a `sent` job needs printer bytes). The shell's
+  migration `0021` adds `ref_products.demo`; after a sync and in the hourly pass
+  `purgeRemovedDemo` deletes the copies of demo-prefix shifts whose product left the copies once
+  their queue is answered.
 
 ## Catalog and label templates
 
@@ -1735,10 +1792,15 @@ the host keeps accepting the previous version. It is 5 since part B of plan
 snapshot's frozen `validationPrint` and the `unit_label` fact; 4 since its part
 A for shift modes: the body of a shift entry, `ShiftEnter`, and a validation
 shift's `ok` scan with `boxId: null`; 3 since plan ПЛ-Х for pallets, 2 since
-plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
-stage 1, of stage 2a, of pallets and of shift modes, and a station finds a
+plan 2a1), 6 since plan ТСД (the handheld on the host) and 7 since plan 2b
+(several devices in one shift: a `shift_closed` fact closes a part; app build
+1.1.0), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
+stage 1, of stage 2a, of pallets and of shift modes (a device of protocol 5 or
+older is accepted by a 7 host, since the minimum stays 1), and a station finds a
 host of an older protocol too old (`host_too_old` at the probe;
-`hello-future.json` stays one protocol ahead, now 6).
+`hello-future.json` stays one protocol ahead, now 8). The owner records each
+release in `tools/standalone-release/releases.json` (for 1.1.0: version 1.1.0,
+protocol 7, minProtocol 1); the tooling does not enforce it.
 The print policy (`markiro_proto::ValidationPrint`, `validationPrintSchema`) is
 the cloud's `validationPrint` without its reprocessing of earlier codes (part
 C): `{ "mode": "none" }` or `{ "mode": "duplicate_dm", "verification":
@@ -1817,6 +1879,46 @@ knows every writer into `boxes`; a new writer must touch `changed_at`.
 A touch stamps at least the newest stamp committed so far (`registry_touch::stamp`, under the write lock), and
 a walk's `until` is the newest `changed_at` its snapshot holds (not the clock), so a change that commits after
 a walk read its snapshot lands in the next window; `since` is inclusive and the boxes at `until` repeat.
+
+### Several devices in one shift (plan 2b)
+
+Protocol 7; host migration `0052_multi_station_shifts.sql` (columns only). A line has
+`max_stations` (1–16, default 1; `OfficeLine.maxStations`, `PUT /v1/office/lines/{id}` with
+`maxStations`, administrators, never below the live devices of an active shift: `conflict`
+`line_stations_in_use` `{ active }`; `line.max_stations_changed` `{ from, to }`). A participant
+(`shift_participants`) is `active` (holds a slot), `left` (`POST /v1/device/shifts/{id}/leave`,
+frees the slot; repeating changes nothing; `shift.leave` `{ number }`; never entered:
+`shift_not_entered`) or `closed`. Each participant row carries `joinedRev` (`shift_participants.joined_rev`, the
+host revision of the write that took the slot: a first entry or a return from `left`; migration 0052 backfills
+a row already there with its shift's revision) and the wire shape exposes it (`ShiftParticipant.joinedRev`,
+optional for older hosts). The leave takes an optional strict body `ShiftLeave { joinedRev }`
+(`shift-leave.json`): when the token is not the row's current one (a re-entry came after that leave was sent)
+the host answers the shift as it is with no write, no audit row and no revision, so a stale or in-flight leave
+cannot undo a re-entry; with no body the leave acts on the current state, as before; a malformed body is
+`validation_failed`. A client echoes the `joinedRev` of its own row from its last enter/list answer. A slot is an active participant whose device is not revoked.
+Entry into an open shift (`host/src/shift_participants.rs` `decide_entry`): an active participant
+enters again (no revision and no audit row, only its last-entered instant is touched); a closed one that names `multi-station-v1` reads the shift back with no write (`myState` `closed`), while a build that does not name it gets `shift_status` `closed` (every old build shows «закрыта»; the read-back's `active` would send it on producing into a closed part); a left or new device
+takes a slot while fewer than `max_stations` others hold one (`shift.join`); a new device that does
+not name `multi-station-v1` is `shift_busy`. A `shift_closed` fact closes the sender's part; with no
+other participant active or left it closes the shift (`closed_by_kind = 'device'`, `closed_by` the
+last closer; `closed_at` is the LATEST instant among the device-closed parts, because an offline
+station's earlier close may arrive last). A shift opened by an old build can be joined by a capable device (decision D4 checks only the joiner's capability); when the old opener closes its own `shift_closed` only its part closes. Receipts: `partClosed`, `reasonMissing`, `alreadyClosed`. The reason
+(`reason_need`, fixture `shift-close-reason-shared.json`): a one-device shift keeps stage 2a's
+refusal; in a shared shift only the closing close may need one, by the whole shift's accepted
+units against `shifts.planned_qty`, and a close without it closes the shift with
+`close_reason_missing`, which the office clears with `PUT /v1/office/shifts/{id}/close-reason`
+(`shift.close_reason`). A closed part's later facts are accepted and stamp its `late_data_at`.
+Every participant change stamps the shift's `rev` with a revision. `GET /v1/device/shifts` and the
+entry's answer carry, for an open or closed shift, `maxStations`, `participants` and `myState`;
+`totals { accepted, boxesClosed, pallets, asOf }` and `byDevice` (`host/src/shift_totals.rs`, read
+from the facts through `boxes_shift`, `box_items_live`, `pallets_shift`, `code_owners_shift_unboxed`;
+a scan takes no revision, so devices read the list again to refresh totals) come in the LIST for an
+`active` shift only (a closed shift of the last 30 days would cost a query over its units on every
+poll of every device; a client keeps a closed shift's figures from the last answer that had them),
+while the answer of one shift (an entry, a leave, a closed shift read back) carries them for any
+non-planned status; `OfficeShift` carries
+`participants`, `byDevice` and `closeReasonMissing`. The export's `stationClosedAt` is the latest accepted close
+instant of the shift's devices (`NULL` when the office closed it).
 
 ## Signed documents and trust keys
 
@@ -3830,15 +3932,18 @@ planned (`conflict` on `duplicate_template_not_fit`, after the pallet
 template), and `shift.open` names `validationPrintTemplateId` and
 `validationPrintTemplateRev`. A
 closed shift is `shift_status` for every station, a shift of another line (or a
-station without one) `shift_line`, a shift another station opened
-`shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
+station without one) `shift_line`, a shift a device that never entered an open
+shift and names no `multi-station-v1` meets `shift_busy` (stage 2a's answer,
+kept for older builds), and one that names it `shift_line_full` while every
+slot of the line's `maxStations` is held (plan 2b, below). The snapshot is at most
 320 KB (a `CHECK` of `0009`, `shifts::MAX_SNAPSHOT_BYTES`): a box layout and a
 pallet layout (or a duplicate layout) that together exceed it keep the shift planned (`conflict` on
 `snapshot_too_large`, checked at the entry after the templates, before a
 revision is taken). The host never checks a layout's content: the station
 does, with `labelTemplateSpecSchema`, when it enters. The opening writes
-`shift.open`; a second device's first entry (`shift.enter`) comes with plan
-2b, since in stage 2a a station's first entry is the opening.
+`shift.open`; a later device's first entry, or its return after it left, writes
+`shift.join` (`{ number, rejoined }`, plan 2b; the name `shift.enter` foreseen
+here was not used).
 
 The create and the enter, like the block issue, read the device again inside
 the write transaction (`AuthDevice::require_station_in`, first after
@@ -3867,7 +3972,7 @@ re-entry reads it through `ShiftSnapshot`: a field added to the struct later
 is an `Option` with `#[serde(default)]`, or the shifts opened before cannot be
 entered again.
 
-The audit rows of this part are six, all `ok`: `shift.create` (an office user,
+The audit rows of this part are seven, all `ok`: `shift.create` (an office user,
 or a station as the device; target `shift`, details `{ number, productId,
 lineId, productionDate }`), `shift.update` (an office user; the update details
 of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
@@ -3875,7 +3980,9 @@ of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
 `palletTemplateId`, no row when nothing changed), `shift.delete` (an office
 user; `{ number }`), `shift.open` (the station; `{ number, templateId,
 templateRev }`, plus `palletTemplateId` and `palletTemplateRev` for a shift
-with pallets), `shift.close` (an office user; `{ reason }`) and
+with pallets), `shift.close` (the device whose close closed the shift; plan 2b adds
+`participants`, `acceptedTotal`, `reasonMissing` for a shared shift),
+`shift.force_closed` (an office user; `{ reason, notClosed }`) and
 `sscc.block.issue` (a station; target `sscc_block`; `{ issuerPrefix,
 extension, fromSerial, toSerial }`). A refusal writes none.
 
@@ -3883,8 +3990,10 @@ The office closes an active shift (`POST …/{id}/close`, `{ reason,
 expectedRev }`, administrators and technologists), for a station that died or
 a shift nobody will finish: the reason is words, 3–500 characters without
 control characters (`validate::close_reason`), kept in `close_reason_text`; a
-planned or a closed shift is `shift_status`. The close writes the audit row
-`shift.close` with the details `{ reason }` (the trimmed text). The refusals
+planned or a closed shift is `shift_status`. The close also closes every part still open as the
+office's and writes `shift.force_closed` with `{ reason, notClosed: [{ deviceId,
+state }] }` (plan 2b; before it the office wrote `shift.close` `{ reason }`,
+which old rows keep), `reason` being the trimmed text. The refusals
 come in the order of `PUT`: a bad reason is 400 even for an unknown id, then
 the lookup (404), then a stale `expectedRev` (`stale_revision`), then
 `shift_status`. A station's close is a fact (plan 2a2) with one of the

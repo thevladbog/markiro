@@ -18,6 +18,7 @@ import {
   syncReferences,
 } from "../local/reference-sync.js";
 import { noteRestoreEpoch, reconcileRestore, restoreDue } from "../local/restore-reconcile.js";
+import { purgeRemovedDemo } from "../local/retention.js";
 import {
   deviceRejection,
   shellActionFor,
@@ -373,7 +374,17 @@ export function useHostLink({
           stopAll();
         }
         dispatch({ type: "sync_finished", result });
-        if (result.kind === "synced") photoPass();
+        if (result.kind === "synced") {
+          photoPass();
+          // A demo product's tombstone lets its removed shifts go (spec 2026-10-21); a failure
+          // waits for the hourly retention pass.
+          purgeRemovedDemo(local, { hostId, deviceId }).then(
+            (purged) => {
+              if (active && purged > 0) dispatch({ type: "outbox_changed" });
+            },
+            () => undefined,
+          );
+        }
       } catch (error) {
         if (!active) return;
         // A rejected key or a changed certificate needs a new pairing.

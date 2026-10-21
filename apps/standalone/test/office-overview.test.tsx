@@ -1,7 +1,14 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeviceRecord, HostNetwork, HostStatus, OfficeShift } from "../src/host/protocol.js";
+import { HostError } from "../src/host/client.js";
+import type {
+  DemoDataSummary,
+  DeviceRecord,
+  HostNetwork,
+  HostStatus,
+  OfficeShift,
+} from "../src/host/protocol.js";
 import {
   CLOCK_SKEW_MS,
   clockSkewMs,
@@ -197,8 +204,28 @@ function overviewSession(user?: typeof TECHNOLOGIST): FakeOfficeSession {
     second: { ...HEALTHY_BACKUPS.local, copies: [backupCopy(agoIso(3 * 60 * MIN))] },
   });
   session.api.getHostNetwork.mockResolvedValue(STATIC_NETWORK);
+  session.api.getDemoData.mockResolvedValue(NO_DEMO);
   return session;
 }
+
+const NO_DEMO: DemoDataSummary = {
+  present: false,
+  productId: null,
+  shifts: 0,
+  boxes: 0,
+  pallets: 0,
+  codes: 0,
+  activeShifts: [],
+};
+const DEMO: DemoDataSummary = {
+  present: true,
+  productId: WATER.id,
+  shifts: 1,
+  boxes: 4,
+  pallets: 2,
+  codes: 20,
+  activeShifts: [],
+};
 
 const ONLINE: HostStatus = {
   state: "online",
@@ -623,5 +650,80 @@ describe("«Обзор» of the office (design 2026-10, phase 1)", () => {
     );
     const live = document.querySelector(".backup-alerts") as HTMLElement;
     expect(live.getAttribute("aria-live")).toBe("polite");
+  });
+});
+
+describe("the demo data on «Обзор» (spec 2026-10-21)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    window.innerWidth = 1440;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    window.innerWidth = 1024;
+  });
+
+  it("leaves a demo shift out of the day's figures", async () => {
+    const session = overviewSession();
+    // Line 10's shift is of the demo product: only line 2's 8 580 count.
+    session.api.listProducts.mockResolvedValue([MILK, { ...WATER, demo: true }]);
+    renderOffice(session);
+    const strip = await screen.findByRole("group", { name: "Показатели за сутки" });
+    await waitFor(() => expect(within(strip).getByText("8 580")).toBeTruthy());
+    expect(within(strip).queryByText("18 420")).toBeNull();
+  });
+
+  it("says the demo data is there, and only an administrator gets «Удалить демо-данные»", async () => {
+    const session = overviewSession(TECHNOLOGIST);
+    session.api.getDemoData.mockResolvedValue(DEMO);
+    renderOffice(session);
+    const notice = await screen.findByRole("alert", { name: "Установлены демо-данные" });
+    expect(within(notice).getByText(/не попадают в выгрузки для ГИС МТ/)).toBeTruthy();
+    expect(within(notice).queryByRole("button", { name: "Удалить демо-данные" })).toBeNull();
+  });
+
+  it("deletes the demo data after asking, and says so", async () => {
+    const session = overviewSession();
+    session.api.getDemoData.mockResolvedValue(DEMO);
+    session.api.deleteDemoData.mockResolvedValue(DEMO);
+    renderOffice(session);
+    const notice = await screen.findByRole("alert", { name: "Установлены демо-данные" });
+    fireEvent.click(within(notice).getByRole("button", { name: "Удалить демо-данные" }));
+    const dialog = await screen.findByRole("dialog", { name: "Удалить демо-данные?" });
+    expect(
+      within(dialog).getByText(
+        "Удалятся демо-товар и всё, что сделано в его сменах: смен — 1, коробов — 4, паллет — 2, кодов — 20. Отменить нельзя.",
+      ),
+    ).toBeTruthy();
+    session.api.getDemoData.mockResolvedValue(NO_DEMO);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+    expect(await screen.findByText("Демо-данные удалены.")).toBeTruthy();
+    expect(session.api.deleteDemoData).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Удалить демо-данные?" })).toBeNull();
+  });
+
+  it("names the open demo shift that stops the delete", async () => {
+    const session = overviewSession();
+    session.api.getDemoData.mockResolvedValue(DEMO);
+    session.api.deleteDemoData.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "a demo shift is open: close it first",
+        details: { constraint: "demo_shift_active", shifts: ["DEMO-001"] },
+      }),
+    );
+    renderOffice(session);
+    const notice = await screen.findByRole("alert", { name: "Установлены демо-данные" });
+    fireEvent.click(within(notice).getByRole("button", { name: "Удалить демо-данные" }));
+    const dialog = await screen.findByRole("dialog", { name: "Удалить демо-данные?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+    expect(
+      await within(dialog).findByText(
+        "Сначала закройте демо-смену на станции или в офисе: DEMO-001.",
+      ),
+    ).toBeTruthy();
   });
 });

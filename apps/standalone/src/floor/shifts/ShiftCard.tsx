@@ -5,6 +5,7 @@ import { Badge, Button, Card, StatusChip, type TagPhase } from "@markiro/ui";
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { LicenseRefusal } from "../license.js";
+import { isDemoShiftNumber } from "../demo/demo-codes.js";
 import { Glyph } from "../kit/StatusIcons.js";
 import { ProductPanel } from "./ProductPhoto.js";
 import type { ShiftCopy } from "./shift-copies.js";
@@ -153,6 +154,11 @@ export function ShiftCard({
               label={t(`floor.shifts.status.${phase}`)}
             />
             <span className="shift-card__number">{copy.number}</span>
+            {isDemoShiftNumber(copy.number) && (
+              <Badge size="floor" tone="magenta">
+                {t("floor.demo.badge")}
+              </Badge>
+            )}
           </div>
           <div className="shift-card__product shift-card__product--only" title={title}>
             {title}

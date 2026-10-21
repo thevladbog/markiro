@@ -880,7 +880,8 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 /// not examine either: the table `ref_product_photos`, and `ref_products`, which got
 /// `photo_checksum` appended to its text, and migration `0018` (beta 3, the shift date on the
 /// station): `floor_shifts`, which got `planned_date` appended to its text.
-/// The independent native generation table of `0020` is pinned by the dataset tests.
+/// The independent native generation table of `0020` is pinned by the dataset tests, and the
+/// demo flag `0021` appends to `ref_products` (spec 2026-10-21) is set aside with `0017`'s column.
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     rows.into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
@@ -895,10 +896,11 @@ fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
                 let (old_sql, new_sql) =
                     (old["sql"].as_str().unwrap(), row["sql"].as_str().unwrap());
                 const COLUMN: &str = ", photo_checksum TEXT";
+                const DEMO: &str = ", demo INTEGER NOT NULL DEFAULT 0 CHECK (demo IN (0, 1))";
                 assert_eq!(
-                    new_sql.replacen(COLUMN, "", 1),
+                    new_sql.replacen(COLUMN, "", 1).replacen(DEMO, "", 1),
                     old_sql,
-                    "0017 only adds its column to ref_products"
+                    "0017 and 0021 only add their columns to ref_products"
                 );
                 row["sql"] = old["sql"].clone();
             }

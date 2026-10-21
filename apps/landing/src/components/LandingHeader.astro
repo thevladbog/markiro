@@ -2,13 +2,14 @@
 import type { PublicPhone } from "../lib/site-config";
 import { getUiCopy } from "../content/ui";
 import type { PageMetadata } from "../lib/seo";
+import { DOWNLOAD_PATH, SITE_NAV } from "../content/autonom";
 import { hubPath } from "../content/hubs";
 import BrandMark from "./BrandMark.astro";
 
 interface Props {
   page: Pick<PageMetadata, "locale" | "path" | "alternatePath">;
   phone: PublicPhone | null;
-  /** Overrides the demo button's target for a page with its own #demo section, such as the film. */
+  /** English pages: overrides the demo button's target for a page with its own #demo section, such as the film. */
   demoHref?: string;
 }
 
@@ -17,9 +18,19 @@ const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
 const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
 const enPath = page.locale === "en" ? page.path : (page.alternatePath ?? "/en/");
-const paths = page.locale === "ru"
-  ? { faq: "/faq/", film: "/kak-rabotaet/" }
-  : { faq: "/en/faq/", film: "/en/how-it-works/" };
+// Russian pages share the standalone navigation; the English site keeps the cloud-era set.
+const links = page.locale === "ru"
+  ? SITE_NAV.map((item) => [item.href, item.label] as const)
+  : ([
+      ["/en/#product", copy.nav.product],
+      ["/en/how-it-works/", copy.nav.howItWorks],
+      [hubPath("en", "instructions"), copy.nav.instructions],
+      [hubPath("en", "articles"), copy.nav.articles],
+      ["/en/faq/", copy.nav.faq],
+    ] as const);
+const cta = page.locale === "ru"
+  ? { href: DOWNLOAD_PATH, label: "Скачать пробную версию", analytics: "landing_download_click" }
+  : { href: demoHref ?? `${homePath}#demo`, label: copy.requestDemoShort, analytics: "landing_demo_click" };
 ---
 
 <header class="landing-header" data-header>
@@ -28,11 +39,7 @@ const paths = page.locale === "ru"
   </a>
 
   <nav class="landing-nav" id="landing-navigation" aria-label={copy.navigationLabel} data-menu>
-    <a href={`${homePath}#product`}>{copy.nav.product}</a>
-    <a href={paths.film}>{copy.nav.howItWorks}</a>
-    <a href={hubPath(page.locale, "instructions")}>{copy.nav.instructions}</a>
-    <a href={hubPath(page.locale, "articles")}>{copy.nav.articles}</a>
-    <a href={paths.faq}>{copy.nav.faq}</a>
+    {links.map(([href, label]) => <a href={href}>{label}</a>)}
     {phone && (
       <a
         class="landing-nav__phone"
@@ -50,8 +57,8 @@ const paths = page.locale === "ru"
     </span>
   </nav>
 
-  <a class="button button--compact landing-header__cta" href={demoHref ?? `${homePath}#demo`} data-analytics="landing_demo_click" data-placement="header">
-    {copy.requestDemoShort}
+  <a class="button button--compact landing-header__cta" href={cta.href} data-analytics={cta.analytics} data-placement="header">
+    {cta.label}
   </a>
   <button
     class="menu-trigger"

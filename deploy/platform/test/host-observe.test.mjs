@@ -543,3 +543,88 @@ test("Docker command pins the local daemon even with a private remote currentCon
   );
   await command(["info", "--format", "{{json .}}"]);
 });
+
+for (const mode of [
+  "image command omitted",
+  "image command null",
+  "changed command",
+  "changed entrypoint",
+]) {
+  test(`edge observation handles Docker optional Cmd: ${mode}`, async (t) => {
+    const f = await dockerFixture(t);
+    const selected = f.op.identity.admission.registry.edge;
+    const image = {
+      Id: selected.imageId,
+      Os: "linux",
+      Architecture: "amd64",
+      RepoDigests: [selected.reference],
+      Config: { Entrypoint: ["/usr/bin/edge-entrypoint"], Env: [] },
+    };
+    if (mode === "image command null") image.Config.Cmd = null;
+    f.state.images.push(image);
+    const env = Object.fromEntries(
+      [
+        "MARKIRO_RETIRED_ADMIN_DOMAIN",
+        "MARKIRO_SAAS_ADMIN_DOMAIN",
+        "MARKIRO_RETIRED_KIOSK_DOMAIN",
+        "MARKIRO_LANDING_DOMAIN",
+        "S3_PUBLIC_ORIGIN",
+        "ACME_EMAIL",
+      ].map((key) => [key, f.f.env[key]]),
+    );
+    Object.assign(env, {
+      SERVER_PROFILE: "platform-only",
+      VITE_SERVER_PROFILE: "platform-only",
+      MARKIRO_RELEASE_SHA: f.op.identity.admission.manifest.sourceSha,
+    });
+    const edge = {
+      Id: "8".repeat(64),
+      Name: "/markiro-platform-edge-1",
+      Image: selected.imageId,
+      State: { Running: true, Restarting: false, Paused: false, Status: "running" },
+      Config: {
+        Image: selected.reference,
+        Labels: {
+          "com.docker.compose.project": "markiro-platform",
+          "com.docker.compose.service": "edge",
+          "com.docker.compose.oneoff": "False",
+        },
+        Entrypoint: ["/usr/bin/edge-entrypoint"],
+        Cmd: mode === "changed command" ? ["sh", "-c", "unexpected"] : null,
+        Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
+      },
+      HostConfig: {
+        NetworkMode: f.policy.networks.default.name,
+        ReadonlyRootfs: true,
+        Privileged: false,
+        CapDrop: ["ALL"],
+        SecurityOpt: ["no-new-privileges:true"],
+        PortBindings: { "8443/tcp": [{ HostPort: "443" }] },
+      },
+      NetworkSettings: {
+        Networks: {
+          [f.policy.networks.default.name]: { NetworkID: f.policy.networks.default.id },
+        },
+      },
+      Mounts: ["data", "config"].map((name) => ({
+        Type: "volume",
+        Name: `markiro-platform_caddy-${name}`,
+        Destination: `/${name}`,
+        RW: true,
+      })),
+    };
+    if (mode === "changed entrypoint") edge.Config.Entrypoint = ["sh"];
+    f.state.containers.push(edge);
+    f.state.networks[0].Containers[edge.Id] = {};
+    f.context.allowedServices = ["postgres", "edge"];
+    f.context.phase = "edge-started";
+    await f.publish();
+    if (mode.startsWith("changed")) await assert.rejects(f.observers.inventory(f.context));
+    else
+      assert.equal(
+        (await f.observers.inventory(f.context)).owned.find((row) => row.service === "edge")
+          .container.Id,
+        edge.Id,
+      );
+  });
+}

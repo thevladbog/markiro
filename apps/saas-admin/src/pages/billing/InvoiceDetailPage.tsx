@@ -362,6 +362,12 @@ export function InvoiceDetailPage() {
                       {line.commercialTerms?.billingPeriod ? (
                         <>
                           <span>{t(`catalog.units.${line.commercialTerms.billingPeriod}`)}</span>
+                          {line.commercialTerms.version === 3 ? (
+                            <>
+                              <br />
+                              {line.commercialTerms.termStart} — {line.commercialTerms.termEnd}
+                            </>
+                          ) : null}
                           <br />
                           {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
                         </>

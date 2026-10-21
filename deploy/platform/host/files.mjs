@@ -5,6 +5,29 @@ import { basename, dirname, isAbsolute, join, normalize, parse } from "node:path
 
 const maxBytes = 1024 * 1024;
 const uid = () => process.getuid();
+// Explicit opt-in for bounded database inventory documents. Control files keep
+// the default 1 MiB limit; callers cannot request an unbounded allocation.
+export const inventoryDocumentOptions = Object.freeze({ maxBytes: 2 * maxBytes });
+function fileOptions(options, allowReplace = false) {
+  if (!options || ![Object.prototype, null].includes(Object.getPrototypeOf(options)))
+    throw privateFileError();
+  for (const key of Reflect.ownKeys(options)) {
+    const d = Object.getOwnPropertyDescriptor(options, key);
+    if (
+      !d.enumerable ||
+      !Object.hasOwn(d, "value") ||
+      (key !== "maxBytes" && !(allowReplace && key === "replace"))
+    )
+      throw privateFileError();
+  }
+  const limit = Object.hasOwn(options, "maxBytes") ? options.maxBytes : maxBytes;
+  if (
+    ![maxBytes, inventoryDocumentOptions.maxBytes].includes(limit) ||
+    (Object.hasOwn(options, "replace") && typeof options.replace !== "boolean")
+  )
+    throw privateFileError();
+  return { limit, replace: options.replace ?? false };
+}
 
 export function privateFileError(durabilityUncertain = false) {
   const error = new Error("Protected host file operation failed.");
@@ -72,11 +95,11 @@ function descendant(root, relativePath) {
   return path;
 }
 
-function fileMetadata(info, privateFile) {
+function fileMetadata(info, privateFile, limit = maxBytes) {
   if (
     !info.isFile() ||
     info.nlink !== 1 ||
-    info.size > maxBytes ||
+    info.size > limit ||
     (privateFile ? info.uid !== uid() || (info.mode & 0o7777) !== 0o600 : (info.mode & 0o022) !== 0)
   )
     throw privateFileError();
@@ -106,21 +129,22 @@ export function assertPrivateFileSync(path) {
   }
 }
 
-export async function readPrivateFile(root, relativePath) {
+export async function readPrivateFile(root, relativePath, options = {}) {
   let handle;
   try {
+    const { limit } = fileOptions(options);
     const path = descendant(root, relativePath);
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    fileMetadata(await handle.stat(), true);
-    const buffer = Buffer.alloc(maxBytes + 1);
+    fileMetadata(await handle.stat(), true, limit);
+    const buffer = Buffer.alloc(limit + 1);
     let length = 0;
     while (length < buffer.length) {
       const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
       if (!bytesRead) break;
       length += bytesRead;
     }
-    if (length > maxBytes) throw privateFileError();
-    fileMetadata(await handle.stat(), true);
+    if (length > limit) throw privateFileError();
+    fileMetadata(await handle.stat(), true, limit);
     await handle.close();
     handle = undefined;
     return buffer.subarray(0, length);
@@ -170,23 +194,14 @@ export async function writePrivateFile(root, relativePath, bytes, options = {}) 
   let scratch;
   let durabilityUncertain = false;
   try {
-    if (
-      !options ||
-      ![Object.prototype, null].includes(Object.getPrototypeOf(options)) ||
-      Reflect.ownKeys(options).some((key) => key !== "replace")
-    )
-      throw privateFileError();
-    const descriptor = Object.getOwnPropertyDescriptor(options, "replace");
-    if (descriptor && (!descriptor.enumerable || typeof descriptor.value !== "boolean"))
-      throw privateFileError();
-    const replace = descriptor?.value ?? false;
+    const { limit, replace } = fileOptions(options, true);
     const path = descendant(root, relativePath);
-    if (!(Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) || bytes.byteLength > maxBytes)
+    if (!(Buffer.isBuffer(bytes) || bytes instanceof Uint8Array) || bytes.byteLength > limit)
       throw privateFileError();
     if (typeof replace !== "boolean") throw privateFileError();
     if (replace) {
       try {
-        fileMetadata(lstatSync(path), true);
+        fileMetadata(lstatSync(path), true, limit);
       } catch (error) {
         if (error.code !== "ENOENT") throw privateFileError();
       }

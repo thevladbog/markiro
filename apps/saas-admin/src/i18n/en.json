@@ -937,6 +937,10 @@
       "actions": "Actions"
     },
     "quantityFor": "Quantity for {{name}}",
+    "termStartFor": "Valid from, {{name}}",
+    "termEndFor": "Valid through (inclusive), {{name}}",
+    "termHint": "Dated term: quantity stays 1, enter the price for the whole term. Empty means the catalog term.",
+    "termLabel": "Term {{start}} — {{end}}",
     "priceFor": "Price for {{name}}",
     "commentFor": "Comment for {{name}}",
     "priceOverrideReasonFor": "Price change reason for {{name}}",
@@ -990,7 +994,11 @@
       "activation_policy_unsupported": "Activation policy is unavailable",
       "commercial_plan_sequence_invalid": "Use one plan or two in order: on payment application, then after the current term.",
       "commercial_plan_sequence_review_required": "Review the plan sequence. Apply the first line before its renewal; another line of this sale cannot replace a purchased term.",
-      "commercial_plan_quantity_invalid": "A plan quantity must be 1."
+      "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
+      "term_both_dates_required": "Enter both term dates or clear both",
+      "term_date_invalid": "The date must be formatted YYYY-MM-DD",
+      "term_end_before_start": "The end date cannot be before the start date",
+      "term_requires_catalog_terms": "This catalog item has no document terms, so a dated term is unavailable"
     }
   },
   "reports": {
@@ -1180,7 +1188,11 @@
     "organization": "Our organization",
     "language": "Interface language",
     "sessionConfirmed": "2FA · session secured",
-    "agreements": "Agreements"
+    "agreements": "Agreements",
+    "leads": "Leads",
+    "standaloneReleases": "Standalone releases",
+    "leadsNew_one": "{{count}} new",
+    "leadsNew_other": "{{count}} new"
   },
   "servicePeriods": {
     "eyebrow": "Service packages",
@@ -1664,6 +1676,8 @@
     "units": {
       "month": "Month",
       "year": "Year",
+      "period": "Period",
+      "custom": "Period",
       "unit": "Unit",
       "hour": "Hour",
       "person": "Person",
@@ -1939,7 +1953,8 @@
         "source": {
           "subscription": "subscription",
           "offline": "offline terms",
-          "offline_assignments": "tenant assignments"
+          "offline_assignments": "tenant assignments",
+          "offline_demo": "demo for a tenant without a cabinet"
         },
         "scrollLabel": "Standalone sites",
         "noValue": "—",
@@ -1948,7 +1963,8 @@
           "host": "Host",
           "inn": "Request INN",
           "license": "License",
-          "actions": "Actions"
+          "actions": "Actions",
+          "lead": "Lead"
         },
         "licenseLine": "No. {{sequence}} · until {{validUntil}}",
         "phase": {
@@ -2046,11 +2062,23 @@
             "subscription_end": "subscription end",
             "entitlement_reduction": "next reduction of rights",
             "one_year_cap": "one-year cap",
-            "offline_term": "offline terms' term"
+            "offline_term": "offline terms' term",
+            "demo_term": "demo term"
           },
           "yearCapNote": "The file is valid for at most a year from issuance (a subscription or an assignment without an end date, or a longer one). When it lapses, the tenant requests a new file from us free of charge.",
           "issued": "File No. {{sequence}} issued and downloaded.",
-          "openLabel": "Issue offline license: {{name}}"
+          "openLabel": "Issue offline license: {{name}}",
+          "kind": {
+            "label": "File kind",
+            "subscription": "From the tenant's assignments",
+            "demo": "Demo — a trial extension or a bridge while an invoice is paid"
+          },
+          "demoTerm": "Demo term, days",
+          "demoTermHint": "1 to 45 days from issuance. A demo has no grace period.",
+          "demoTermInvalid": "A whole number from 1 to 45.",
+          "demoNoTariff": "No tariff assigned — the demo extends the trial: every feature, no quotas.",
+          "demoBridge": "Bridge while the invoice is paid: the assigned tariff's rights, no grace period.",
+          "demoExtension": "Trial extension: every feature without quotas, no grace period."
         },
         "warnings": {
           "request_inn_missing": "The request has no organization INN.",
@@ -2081,7 +2109,9 @@
           "generic": "The operation failed. Retry.",
           "standalone_assignment_limit_reached": "The tenant has more assignments than a license can name (65). Retire an add-on and preview again.",
           "standalone_license_assignments_required": "There is no current plan assignment. Change the tenant's rights.",
-          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page."
+          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page.",
+          "standalone_license_demo_term_invalid": "The demo term is a whole number of days from 1 to 45.",
+          "standalone_license_demo_offline_only": "A demo file is issued only to a tenant without a cabinet. Reload the page."
         },
         "assignmentsTenant": "A tenant without a cabinet: the license is issued from its assignments — the plan and add-ons on the tenant card. No cloud access is opened.",
         "assignments": {
@@ -2097,6 +2127,12 @@
           "change": "Change the tenant's rights",
           "empty": "The tenant has no current plan. Assign a plan flagged «Available to offline customers».",
           "loadError": "Could not load the tenant's assignments."
+        },
+        "lead": {
+          "linked": "Website lead",
+          "unresolved": "Leads with this INN: {{count}} — not linked, choose one manually",
+          "unresolvedLink": "Open the leads with INN {{inn}}",
+          "none": "No lead has this INN"
         }
       },
       "diagnostics": {
@@ -3042,5 +3078,346 @@
     "devices": "Cloud device management has been retired. Standalone sites and offline license issuance are available below.",
     "productionReports": "Production reports contain historical cloud data and do not describe current standalone activity. Actual standalone figures, report source and timestamp are available in tenant diagnostics; without a report they are unknown. Commercial reports reflect platform operations.",
     "createNotice": "Tenant without a cabinet: no owner, activation email or demo is created. Standalone sites and offline licenses are available. You send invoices and acts yourself."
+  },
+  "leads": {
+    "noCompany": "Company not given",
+    "title": "Leads",
+    "description": "Downloads, invoice requests and demo requests from the website. Times are Moscow time.",
+    "forbidden": "You have no access to website leads.",
+    "loading": "Loading leads",
+    "loadError": "Could not load leads.",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "registry": "Lead registry",
+    "tableRegion": "Leads table",
+    "count_one": "{{count}} lead",
+    "count_other": "{{count}} leads",
+    "anonymizedShort": "contacts anonymized",
+    "innShort": "INN {{inn}}",
+    "empty": {
+      "title": "No leads yet",
+      "hint": "They appear when a visitor sends a form on the website."
+    },
+    "filteredEmpty": {
+      "title": "Nothing found",
+      "hint": "Change the search or clear the filters."
+    },
+    "columns": {
+      "company": "Company",
+      "lastEvent": "Last event",
+      "tariff": "Plan",
+      "status": "Status",
+      "nextTouch": "Next contact"
+    },
+    "filters": {
+      "label": "Lead filters",
+      "search": "Company, email or INN",
+      "status": "Status",
+      "allStatuses": "All statuses",
+      "kind": "Kind",
+      "allKinds": "All kinds",
+      "from": "Created from",
+      "to": "Created to",
+      "clear": "Clear",
+      "timezone": "Period dates are Moscow dates, inclusive.",
+      "invalid": "The page address has an invalid filter. Clear the filters."
+    },
+    "pagination": {
+      "label": "Lead pages",
+      "previous": "Previous",
+      "next": "Next",
+      "page": "Page {{page}} of {{pageCount}}"
+    },
+    "status": {
+      "new": "New",
+      "contacted": "Contacted",
+      "trial": "Trial",
+      "invoice_sent": "Invoice sent",
+      "won": "Paid",
+      "lost": "Lost"
+    },
+    "eventKind": {
+      "download": "Download",
+      "invoice_request": "Invoice request",
+      "demo_request": "Demo request",
+      "status_change": "Status change",
+      "touch": "Marked as contacted",
+      "note": "Note",
+      "linked_tenant": "Tenant link",
+      "activation_request": "Activation request",
+      "anonymized": "Anonymization"
+    },
+    "lines": {
+      "1": "1 line",
+      "2-3": "2–3 lines",
+      "4+": "4 or more"
+    },
+    "locale": {
+      "ru": "Russian",
+      "en": "English"
+    },
+    "payload": {
+      "sourcePath": "Page",
+      "locale": "Language",
+      "utm": "UTM",
+      "referrer": "Referrer",
+      "productGroup": "Product group",
+      "linesBucket": "Lines",
+      "inn": "INN",
+      "tariffCode": "Plan"
+    },
+    "anonymizeReason": {
+      "lost": "status «Lost»",
+      "inactive": "no activity for 12 months",
+      "manual": "manually"
+    },
+    "detail": {
+      "description": "Created {{date}}",
+      "actions": "Lead actions",
+      "back": "All leads",
+      "invalidTitle": "Lead not found",
+      "invalidId": "The page address has an invalid lead id.",
+      "loadingTitle": "Lead",
+      "loading": "Loading the lead",
+      "loadErrorTitle": "Lead unavailable"
+    },
+    "contacts": {
+      "title": "Contacts",
+      "email": "Email",
+      "name": "Name",
+      "phone": "Phone",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyEmail": "Copy email",
+      "copyPhone": "Copy phone",
+      "anonymized": "Contacts anonymized on {{date}}"
+    },
+    "facts": {
+      "title": "Company",
+      "company": "Company",
+      "inn": "INN",
+      "productGroup": "Product group",
+      "lines": "Lines",
+      "tariff": "Plan",
+      "source": "First page",
+      "utm": "UTM",
+      "referrer": "Referrer",
+      "locale": "Site language",
+      "createdAt": "Created"
+    },
+    "work": {
+      "title": "Follow-up",
+      "status": "Lead status",
+      "contacted": "Mark as contacted",
+      "contactedHint_one": "A new lead becomes «Contacted»; next contact in {{count}} day.",
+      "contactedHint_other": "A new lead becomes «Contacted»; next contact in {{count}} days.",
+      "nextTouch": "Next contact",
+      "nextTouchHint": "At 09:00 Moscow time the lead joins the morning digest.",
+      "saveNextTouch": "Save date",
+      "note": "Note",
+      "noteLength": "{{count}} of {{max}}",
+      "saveNote": "Save note"
+    },
+    "tenant": {
+      "title": "Tenant",
+      "none": "No tenant linked",
+      "create": "Create a tenant without a cabinet",
+      "link": "Link an existing tenant"
+    },
+    "createTenant": {
+      "title": "New tenant without a cabinet",
+      "hint": "No owner, activation email or demo is created. A cabinet can be granted later on the tenant page.",
+      "name": "Name",
+      "slug": "Slug",
+      "slugHint": "Lowercase Latin letters, digits and single hyphens.",
+      "submit": "Create tenant",
+      "validation": {
+        "required": "This field is required",
+        "nameTooLong": "Use no more than 300 characters",
+        "slugTooLong": "Use no more than 128 characters",
+        "slug": "Use lowercase Latin letters, digits and single hyphens only"
+      }
+    },
+    "linkTenant": {
+      "title": "Link an existing tenant",
+      "tenant": "Tenant",
+      "placeholder": "Choose a tenant",
+      "search": "Find a tenant",
+      "empty": "No tenants found",
+      "loading": "Loading tenants",
+      "loadError": "Could not load tenants.",
+      "scope": "The search covers the loaded page of 100 tenants.",
+      "submit": "Link"
+    },
+    "journal": {
+      "title": "Lead journal",
+      "empty": "No events yet.",
+      "form": "Website form",
+      "system": "System",
+      "nextTouch": "Next contact: {{date}}",
+      "noteCleared": "Note removed",
+      "noteChanged": "Note changed",
+      "noteLength_one": "Note changed, {{count}} character",
+      "noteLength_other": "Note changed, {{count}} characters",
+      "tenantCreated": "A tenant without a cabinet was created.",
+      "tenantLinked": "Linked to a tenant.",
+      "openTenant": "Open tenant",
+      "previousTenant": "Previous tenant: {{id}}",
+      "anonymizedReason": "Reason: {{reason}}",
+      "viaActivation": "Automatically, by a site activation request.",
+      "activationCreate": "A site was registered from an activation request.",
+      "activationRebind": "A new host was bound to the site from an activation request."
+    },
+    "anonymize": {
+      "title": "Anonymization",
+      "hint": "Removes the email, name, phone, note and a sole proprietor's 12-digit INN. Company and journal stay for statistics.",
+      "action": "Anonymize",
+      "confirmTitle": "Anonymize this lead?",
+      "confirmDescription": "The email, name and phone are removed for good."
+    },
+    "notice": {
+      "statusChanged": "Status changed.",
+      "contacted": "Marked as contacted.",
+      "nextTouchSaved": "Next contact date saved.",
+      "noteSaved": "Note saved.",
+      "tenantCreated": "Tenant created and linked to the lead.",
+      "tenantLinked": "Lead linked to the tenant.",
+      "anonymized": "Lead anonymized."
+    },
+    "errors": {
+      "lead_not_found": "Lead not found. It may have been removed.",
+      "lead_anonymized": "This lead's contacts are anonymized.",
+      "lead_tenant_not_found": "Tenant not found. Refresh the list and choose again.",
+      "lead_tenant_slug_taken": "This slug already belongs to another tenant. Use another one or link the lead to the existing tenant.",
+      "tenant_cabinet_access_mismatch": "A tenant with this slug already exists and has a cabinet. Use another slug.",
+      "update_failed": "Could not save the changes. Try again.",
+      "contacted_failed": "Could not mark the contact. Try again.",
+      "link_failed": "Could not link the lead to the tenant.",
+      "create_tenant_failed": "Could not create the tenant. Check the name and slug.",
+      "anonymize_failed": "Could not anonymize the lead."
+    }
+  },
+  "standaloneReleases": {
+    "title": "Standalone releases",
+    "description": "Signed «Markiro Standalone» packages in the public bucket and each channel's latest.json pointer. The panel signs nothing: a package is signed offline with the release key, and the API re-checks the signature, SHA-256 and size.",
+    "forbidden": "Only a platform administrator can open this section.",
+    "loading": "Loading releases",
+    "publicOrigin": "Files are served from {{origin}}.",
+    "unconfigured": {
+      "title": "Release storage is not configured",
+      "hint": "The owner sets the RELEASES_S3_* variables on the API server: the bucket, access keys and public address. Until then releases cannot be uploaded or published."
+    },
+    "channel": {
+      "stable": "Stable",
+      "beta": "Beta"
+    },
+    "channelTitle": {
+      "stable": "Stable channel",
+      "beta": "Beta channel"
+    },
+    "list": {
+      "latest": "Latest: {{version}}",
+      "noLatest": "No latest version published",
+      "latestUnreadable": "The channel's latest.json cannot be read: the site and standalone hosts may not find the latest version. Make the right version latest to rewrite the pointer.",
+      "latestBadge": "Latest",
+      "empty": "No versions yet",
+      "tableRegion": "Versions of the {{channel}} channel",
+      "version": "Version",
+      "releasedAt": "Released",
+      "registeredAt": "Registered",
+      "size": "Installer",
+      "megabytes": "{{value}} MB",
+      "sha256": "Installer SHA-256",
+      "copy": "Copy",
+      "copyShaFor": "Copy SHA-256 of version {{version}}",
+      "kid": "Key",
+      "notes": "What's new",
+      "files": "Files",
+      "installerLink": "Installer",
+      "manifestLink": "Manifest",
+      "action": "Pointer"
+    },
+    "pending": {
+      "title": "Unfinished uploads",
+      "hint": "These versions have files in the bucket but are not registered, for example because the tab was closed before verification. Verification checks the signature and the installer; on refusal the files are removed.",
+      "register": "Verify and register"
+    },
+    "pointer": {
+      "promote": "Make latest",
+      "rollback": "Roll back to this version",
+      "rollbackConfirm": "Roll back",
+      "cancel": "Cancel",
+      "promoteTitle": "Make {{version}} the latest?",
+      "rollbackTitle": "Roll the channel back to {{version}}?",
+      "promoteDescription": "The site will serve version {{version}} instead of {{previous}}, and standalone hosts on the {{channel}} channel will see it as an update. The version's files are re-checked before the pointer moves.",
+      "promoteDescriptionFirst": "The site will serve version {{version}}, and standalone hosts on the {{channel}} channel will see it as an update. The version's files are re-checked before the pointer moves.",
+      "rollbackDescription": "The site will serve version {{version}} instead of {{previous}} on the {{channel}} channel. Version files are never deleted, so the pointer can be moved back at any time.",
+      "done": "The latest version of the {{channel}} channel is {{version}}."
+    },
+    "upload": {
+      "title": "Upload a release",
+      "hint": "Choose the signed .update.jws manifest and the .exe installer of the same version. The channel and version come from the manifest. The installer goes straight to the bucket, not through the API; the API then checks the signature, SHA-256 and size and only then registers the version.",
+      "drop": "Drop the manifest and the installer, or click",
+      "dropHint": "markiro-standalone-<version>.update.jws and markiro-standalone-<version>-windows-x86_64-setup.exe",
+      "dropLabel": "Choose release files",
+      "wrongFile": "“{{name}}” does not fit: choose an .update.jws manifest or an .exe installer.",
+      "selection": "Selected release",
+      "channel": "Channel",
+      "version": "Version",
+      "manifest": "Manifest",
+      "installer": "Installer",
+      "expectedSha": "SHA-256 per manifest",
+      "notChosen": "not chosen",
+      "fileWithSize": "{{name}} · {{size}} MB",
+      "manifestProblems": {
+        "too_large": "The manifest file is too large to be an update manifest.",
+        "not_jws": "This is not an update manifest: a single-line JWS of three parts is expected.",
+        "unreadable": "The manifest cannot be read: it lacks a version, a channel or an installer description.",
+        "wrong_product": "The manifest is not for «Markiro Standalone»."
+      },
+      "issues": {
+        "installer_size": "The chosen installer's size ({{actual}} bytes) differs from the manifest ({{expected}} bytes). Choose this version's installer.",
+        "installer_name": "The installer name “{{actual}}” differs from the expected “{{expected}}”. Make sure it is the same version.",
+        "manifest_name": "The manifest name “{{actual}}” differs from the expected “{{expected}}”. Make sure it is the right version's manifest."
+      },
+      "steps": {
+        "preparing": "Preparing upload links…",
+        "manifest": "Uploading the manifest to the bucket…",
+        "installer": "Uploading the installer to the bucket…",
+        "registering": "The API is checking the signature and the installer…"
+      },
+      "result": {
+        "registered": "Version {{version}} is registered on the {{channel}} channel. To have the site serve it, press “Make latest”.",
+        "unchanged": "Version {{version}} is already registered with the same files."
+      },
+      "submit": "Upload and verify",
+      "cancel": "Cancel upload",
+      "reset": "Choose other files"
+    },
+    "errors": {
+      "standalone_releases_not_configured": "Release storage is not configured: the owner must set RELEASES_S3_* on the API server.",
+      "standalone_releases_storage_unavailable": "Release storage is unavailable right now. Try again later.",
+      "standalone_release_version_exists": "Version {{version}} is already uploaded to this channel. An unfinished upload can be verified and registered from the channel list.",
+      "standalone_release_version_not_newer": "The version must be higher than every version already published on the channel.",
+      "standalone_release_files_missing": "One of the version's files is missing from storage. Upload both files again.",
+      "standalone_release_installer_too_large": "The installer exceeds the allowed size.",
+      "standalone_release_manifest_malformed": "The manifest is damaged or is not a standalone update manifest.",
+      "standalone_release_manifest_unknown_key": "The manifest is signed with a key standalone hosts do not know. Sign the package with a current release key.",
+      "standalone_release_manifest_bad_signature": "The manifest signature does not verify: the file changed after signing or was signed with another key.",
+      "standalone_release_manifest_mismatch": "The manifest describes a different product, channel, version or installer than the uploaded files.",
+      "standalone_release_installer_size_mismatch": "The installer size does not match the manifest.",
+      "standalone_release_installer_hash_mismatch": "The installer SHA-256 does not match the manifest.",
+      "standalone_release_immutable": "This version is already published with different files: paths are immutable.",
+      "standalone_release_not_found": "The channel has no such version. Refresh the list.",
+      "standalone_release_integrity_failed": "The version's files changed after registration or its key was revoked; the pointer did not move.",
+      "filesRemoved": "This attempt's files were removed from storage; upload the corrected package again.",
+      "bucket_network": "Storage did not accept the file. Check the release bucket CORS (PUT with a Content-Type header from the admin origin) and the connection, then retry.",
+      "bucket_aborted": "Upload cancelled. If some files made it, the version appears among the channel's unfinished uploads.",
+      "bucketRejected": "Storage rejected the file (HTTP {{status}}). The upload link may have expired; start again.",
+      "network": "No connection to the platform server. Try again.",
+      "uploadFailed": "Could not prepare the upload.",
+      "registerFailed": "Could not verify and register the version.",
+      "setLatestFailed": "Could not move the pointer."
+    }
   }
 }

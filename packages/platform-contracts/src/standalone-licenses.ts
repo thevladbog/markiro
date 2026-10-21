@@ -121,6 +121,8 @@ const validUntilReasonSchema = z.enum([
   "entitlement_reduction",
   "one_year_cap",
   "offline_term",
+  // Spec 2026-10-20 §4.2: the operator's term of an offline demo file.
+  "demo_term",
 ]);
 const customerSchema = z.object({ name: z.string().min(1).max(300), inn: innSchema }).strict();
 const planSchema = z.enum(["demo", "subscription"]);
@@ -137,6 +139,7 @@ export const STANDALONE_ISSUANCE_SOURCES = [
   "subscription",
   "offline",
   "offline_assignments",
+  "offline_demo",
 ] as const;
 export const standaloneIssuanceSourceSchema = z.enum(STANDALONE_ISSUANCE_SOURCES);
 export type StandaloneIssuanceSource = z.infer<typeof standaloneIssuanceSourceSchema>;
@@ -148,6 +151,23 @@ export const standaloneOfflineTermsSchema = z
   })
   .strict();
 export type StandaloneOfflineTerms = z.infer<typeof standaloneOfflineTermsSchema>;
+
+/**
+ * Spec 2026-10-20 §4.2–4.3: a tenant without a cabinet may get a demo file
+ * (`offline_demo`) of 1 to 45 days — a trial extension, or a bridge while an
+ * invoice is paid. Longer is an agreement, not a demo.
+ */
+export const STANDALONE_DEMO_TERM_MAX_DAYS = 45;
+export const standaloneDemoTermsSchema = z
+  .object({ termDays: z.number().int().min(1).max(STANDALONE_DEMO_TERM_MAX_DAYS) })
+  .strict();
+export type StandaloneDemoTerms = z.infer<typeof standaloneDemoTermsSchema>;
+/**
+ * The plan version a demo file signs when no tariff is assigned: its rights are
+ * the built-in trial's, and no catalog plan stands behind them. A version-8 UUID,
+ * because the host refuses the nil UUID (`markiro_proto::trust::is_uuid`).
+ */
+export const STANDALONE_DEMO_PLAN_VERSION_ID = "00000000-0000-8000-8000-000000000000";
 
 /**
  * Spec 2026-10-16: a tenant without a cabinet is issued from its direct plan and
@@ -177,14 +197,21 @@ export const standaloneAssignmentRefsSchema = z
 /**
  * `offline` rows (the removed manual terms) are paid plans with the offline
  * term reason and no assignments; `offline_assignments` rows are paid plans
- * with named assignments and a derived term; a cloud file has neither.
+ * with named assignments and a derived term; `offline_demo` rows are demo files
+ * without grace under the demo term, naming the assignments when a tariff is
+ * assigned (the bridge) and none otherwise (the trial extension); a cloud file
+ * has no assignments and neither offline reason.
  */
 function sourceMatchesReason(value: {
   source: StandaloneIssuanceSource;
   plan: "demo" | "subscription";
+  graceDays: number;
   validUntilReason: z.infer<typeof validUntilReasonSchema>;
   sourceAssignments: unknown[] | null;
 }): boolean {
+  if (value.source === "offline_demo")
+    return value.validUntilReason === "demo_term" && value.plan === "demo" && value.graceDays === 0;
+  if (value.validUntilReason === "demo_term") return false;
   if (value.source === "offline")
     return (
       value.validUntilReason === "offline_term" &&
@@ -227,6 +254,33 @@ export const standaloneIssuanceSummarySchema = z
   .refine(sourceMatchesReason);
 export type StandaloneIssuanceSummary = z.infer<typeof standaloneIssuanceSummarySchema>;
 
+/**
+ * Spec 2026-10-20 §15.6: the landing leads with the site's request INN, by id
+ * only (no contact data). `linked` — a lead of this INN is linked to the tenant;
+ * `unresolved` — leads of this INN exist, none linked to it (several, linked
+ * elsewhere, or arrived later): the operator chooses in «Заявки»; `none` — no
+ * lead has this INN. A site without a request INN has no key, so `null`.
+ */
+export const STANDALONE_SITE_LEAD_IDS_MAX = 10;
+export const standaloneSiteLeadLinkSchema = z
+  .discriminatedUnion("state", [
+    z
+      .object({
+        state: z.literal("linked"),
+        leadIds: z.array(platformUuidSchema).min(1).max(STANDALONE_SITE_LEAD_IDS_MAX),
+      })
+      .strict(),
+    z
+      .object({
+        state: z.literal("unresolved"),
+        leadIds: z.array(platformUuidSchema).min(1).max(STANDALONE_SITE_LEAD_IDS_MAX),
+      })
+      .strict(),
+    z.object({ state: z.literal("none"), leadIds: z.array(platformUuidSchema).max(0) }).strict(),
+  ])
+  .nullable();
+export type StandaloneSiteLeadLink = z.infer<typeof standaloneSiteLeadLinkSchema>;
+
 const siteUsageSchema = z
   .object({ stations: countSchema, cabinetUsers: countSchema, lines: countSchema })
   .strict();
@@ -245,6 +299,7 @@ export const standaloneSiteSchema = z
     lastIssuedSequence: z.number().int().nonnegative(),
     latestIssuance: standaloneIssuanceSummarySchema.nullable(),
     renewalDue: z.boolean(),
+    leadLink: standaloneSiteLeadLinkSchema,
     createdAt: platformTimestampSchema,
   })
   .strict();
@@ -333,6 +388,8 @@ export const standaloneIssuancePreviewRequestSchema = z
   .object({
     graceDays: graceDaysSchema.nullable(),
     offline: standaloneOfflineTermsSchema.nullable(),
+    /** A demo file instead of the subscription-shaped one; only for a tenant without a cabinet. */
+    demo: standaloneDemoTermsSchema.nullable().optional(),
   })
   .strict();
 export type StandaloneIssuancePreviewRequest = z.infer<
@@ -347,7 +404,8 @@ export const standaloneIssuanceExpectationSchema = z
     boundaryAt: platformTimestampSchema.nullable(),
     /**
      * SHA-256 of everything the file would sign apart from its instants: source,
-     * plan, plan version, grace, host, customer, rights, offline terms, reason.
+     * plan, plan version, grace, host, customer, rights, offline terms, reason
+     * and, for a demo, its term.
      */
     termsDigest: sha256Schema,
   })
@@ -386,6 +444,7 @@ export const standaloneIssuanceConfirmSchema = z
     requestId: platformUuidSchema,
     graceDays: graceDaysSchema.nullable(),
     offline: standaloneOfflineTermsSchema.nullable(),
+    demo: standaloneDemoTermsSchema.nullable().optional(),
     expected: standaloneIssuanceExpectationSchema,
   })
   .strict();

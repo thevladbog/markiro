@@ -8,6 +8,15 @@ const fail = (key) => {
   throw new Error(`invalid platform configuration: ${key}`);
 };
 const domain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/;
+/** The release bucket's upload origin; `saas_admin_csp` in the Caddyfile allows exactly it. */
+export const RELEASES_UPLOAD_ORIGIN = "https://storage.yandexcloud.net";
+const RELEASES_STORAGE_KEYS = [
+  "RELEASES_S3_ENDPOINT",
+  "RELEASES_S3_REGION",
+  "RELEASES_S3_BUCKET",
+  "RELEASES_S3_ACCESS_KEY_ID",
+  "RELEASES_S3_SECRET_ACCESS_KEY",
+];
 const required = [
   "SERVER_PROFILE",
   "VITE_SERVER_PROFILE",
@@ -170,6 +179,39 @@ export function validateConfig(env, manifest) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(env[key] ?? "")) fail(key);
     if (!env.SMARTCAPTCHA_SERVER_KEY?.startsWith("ysc2_")) fail("SMARTCAPTCHA_SERVER_KEY");
   }
+  // Landing lead alerts are optional and never gate readiness: Telegram only
+  // needs a token and a chat when it is switched on. The token is never echoed;
+  // `fail` names the key only.
+  if (env.LEAD_TELEGRAM_ENABLED && !["true", "false"].includes(env.LEAD_TELEGRAM_ENABLED))
+    fail("LEAD_TELEGRAM_ENABLED");
+  if (env.LEAD_TELEGRAM_ENABLED === "true") {
+    if (!/^\d{1,20}:[A-Za-z0-9_-]{20,100}$/u.test(env.LEAD_TELEGRAM_BOT_TOKEN ?? ""))
+      fail("LEAD_TELEGRAM_BOT_TOKEN");
+    if (!/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/u.test(env.LEAD_TELEGRAM_CHAT_ID ?? ""))
+      fail("LEAD_TELEGRAM_CHAT_ID");
+  }
+  if (
+    env.LEAD_RETENTION_MONTHS !== undefined &&
+    !(
+      /^[0-9]{1,2}$/u.test(env.LEAD_RETENTION_MONTHS) &&
+      Number(env.LEAD_RETENTION_MONTHS) >= 1 &&
+      Number(env.LEAD_RETENTION_MONTHS) <= 60
+    )
+  )
+    fail("LEAD_RETENTION_MONTHS");
+  // «Выпуски автонома» are optional and never gate readiness. The bucket's keys
+  // come as a set; the endpoint must be the upload origin the admin CSP allows,
+  // since the browser PUTs path-style to it. Keys are never echoed.
+  const releaseStorage = RELEASES_STORAGE_KEYS.filter((key) => env[key]);
+  if (releaseStorage.length > 0) {
+    for (const key of RELEASES_STORAGE_KEYS) if (!env[key]) fail(key);
+    if (env.RELEASES_S3_ENDPOINT !== RELEASES_UPLOAD_ORIGIN) fail("RELEASES_S3_ENDPOINT");
+    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(env.RELEASES_S3_BUCKET))
+      fail("RELEASES_S3_BUCKET");
+    if (env.RELEASES_S3_BUCKET === env.S3_BUCKET) fail("RELEASES_S3_BUCKET");
+  }
+  if (env.RELEASES_PUBLIC_ORIGIN !== undefined)
+    exactHttpsOrigin(env.RELEASES_PUBLIC_ORIGIN, "RELEASES_PUBLIC_ORIGIN");
   // Disabled product surfaces must not accidentally inherit legacy credentials,
   // workers or deferred CRM configuration from a shared env file.
   for (const key of [

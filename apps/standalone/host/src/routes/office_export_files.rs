@@ -741,6 +741,9 @@ pub async fn begin(
             "no such shift, pallet, box or document",
         ));
     };
+    if let Some(shift_id) = &shift_id {
+        crate::demo::refuse_gismt(&mut tx, shift_id, &begin.format_id).await?;
+    }
     // A stale half-sent file may hold the (batch, part) this one wants.
     sweep(&mut tx, &at, None).await?;
     let taken: Option<String> =

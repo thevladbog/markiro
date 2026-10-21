@@ -44,6 +44,7 @@ pub const BUSINESS_TABLES: &[&str] = &[
     "shift_participants",
     "fact_receipts",
     "device_event_receipts",
+    "demo_removed_shifts",
     "shifts",
     "sscc_blocks",
     "export_file_chunks",
@@ -160,6 +161,9 @@ pub async fn clear(conn: &mut SqliteConnection) -> Result<Vec<(String, String)>,
             .fetch_all(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
+    // The wizard's demo data (spec 2026-10-21) goes with the products; its counters are no
+    // organization's numbering, so they go too instead of being kept as floors.
+    let demo = crate::demo::present(&mut *conn).await?;
     sqlx::query("PRAGMA defer_foreign_keys=ON")
         .execute(&mut *conn)
         .await
@@ -178,6 +182,18 @@ pub async fn clear(conn: &mut SqliteConnection) -> Result<Vec<(String, String)>,
         .execute(&mut *conn).await.map_err(ApiError::internal)?;
     for table in BUSINESS_TABLES {
         sqlx::query(&format!("DELETE FROM {table}"))
+            .execute(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+    }
+    if demo {
+        sqlx::query("DELETE FROM sscc_counters WHERE issuer_prefix = ?")
+            .bind(crate::demo::DEMO_PREFIX)
+            .execute(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+        sqlx::query("DELETE FROM shift_number_counters WHERE month_key = ?")
+            .bind(crate::demo::DEMO_NUMBER_KEY)
             .execute(&mut *conn)
             .await
             .map_err(ApiError::internal)?;

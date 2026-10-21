@@ -298,6 +298,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::device_shifts::enter_shift),
         )
         .route(
+            "/v1/device/shifts/{id}/leave",
+            post(crate::routes::device_shifts::leave_shift),
+        )
+        .route(
             "/v1/device/sscc/blocks",
             post(crate::routes::sscc_blocks::issue_block),
         )
@@ -400,6 +404,11 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/warehouse-pallets",
             get(crate::routes::office_warehouse_pallets::list),
+        )
+        .route(
+            "/v1/office/demo-data",
+            get(crate::routes::demo_data::get_demo_data)
+                .delete(crate::routes::demo_data::delete_demo_data),
         )
         .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
         .route(
@@ -600,6 +609,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/shifts/{id}/close",
             post(crate::routes::office_shifts::close_shift),
+        )
+        .route(
+            "/v1/office/shifts/{id}/close-reason",
+            put(crate::routes::office_shifts::set_close_reason),
         )
         .route(
             "/v1/office/shifts/{id}/boxes",
@@ -992,9 +1005,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 6 (handhelds on the host, plan ТСД) is this build's;
-        // 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
+        // Protocol 7 (several devices in one shift, plan 2b) is this build's;
+        // 6 (handhelds on the host, plan ТСД), 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
         // (stage 1) are still taken.
+        assert_eq!(call(Some("7")).await.0, StatusCode::OK);
         assert_eq!(call(Some("6")).await.0, StatusCode::OK);
         assert_eq!(call(Some("5")).await.0, StatusCode::OK);
         assert_eq!(call(Some("4")).await.0, StatusCode::OK);
@@ -1010,7 +1024,7 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 6);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 7);
     }
 
     #[tokio::test]
@@ -1020,6 +1034,6 @@ mod tests {
         assert_eq!(body["error"]["details"]["protocol"], 8);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("7")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("9")).await.0, StatusCode::BAD_REQUEST);
     }
 }

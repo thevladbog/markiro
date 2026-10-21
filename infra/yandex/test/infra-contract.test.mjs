@@ -234,10 +234,14 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
   );
   assert.match(uploader, /bucket\s*=\s*yandex_storage_bucket\.releases\.bucket/);
   assert.match(uploader, /role\s*=\s*"storage\.uploader"/);
+  // The binding is authoritative for storage.uploader on the bucket, so both
+  // release identities must share it: a second binding for the same role would
+  // remove the other member on every apply.
   assert.match(
     uploader,
-    /members\s*=\s*\["serviceAccount:\$\{yandex_iam_service_account\.station_release_publisher\.id\}"\]/,
+    /members\s*=\s*\[\s*"serviceAccount:\$\{yandex_iam_service_account\.station_release_publisher\.id\}",\s*"serviceAccount:\$\{yandex_iam_service_account\.standalone_release_api\.id\}",?\s*\]/,
   );
+  assert.equal([...releases.matchAll(/resource\s+"yandex_storage_bucket_iam_binding"/g)].length, 1);
 
   const policy = block(releases, 'resource "yandex_storage_bucket_policy" "releases"');
   assert.match(policy, /AllowPublicReleaseObjects/);
@@ -256,29 +260,71 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
     /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*",\s*"signer\/\*",\s*"handheld\/\*"\]/,
   );
 
-  // The bucket serves the Station under station/*, the signer agent under
-  // signer/* and the Android handheld under handheld/*. Every grant must name
-  // every prefix: a policy that only allowed writes would leave that product's
-  // latest.json unreadable, so the device would never see an update and the
-  // release would fail silently rather than loudly.
-  for (const sid of ["AllowPublicReleaseObjects", "AllowPublisherReleaseObjects"]) {
-    // Bounded to this statement: slicing to the end of the block would let a
-    // later statement's signer/* satisfy an earlier statement's assertion, and
-    // the check would pass on a policy that grants writes but not reads.
-    const start = policy.indexOf(sid);
+  // Bounded to one statement: slicing to the end of the block would let a later
+  // statement's signer/* satisfy an earlier statement's assertion, and the check
+  // would pass on a policy that grants writes but not reads.
+  const statementOf = (sid) => {
+    const start = policy.indexOf(`"${sid}"`);
     assert.notEqual(start, -1, `${sid} must exist`);
     const next = policy.indexOf("Sid       =", start + sid.length);
-    const grant = next === -1 ? policy.slice(start) : policy.slice(start, next);
-    for (const prefix of ["station", "signer", "handheld"]) {
-      assert.match(
-        grant,
-        new RegExp(
-          `"arn:aws:s3:::\\$\\{yandex_storage_bucket\\.releases\\.bucket\\}/${prefix}/\\*"`,
-        ),
-        `${sid} must grant ${prefix}/*`,
-      );
-    }
+    return next === -1 ? policy.slice(start) : policy.slice(start, next);
+  };
+  const objectArn = (prefix) =>
+    new RegExp(`"arn:aws:s3:::\\$\\{yandex_storage_bucket\\.releases\\.bucket\\}/${prefix}/\\*"`);
+
+  // The bucket serves the Station under station/*, the signer agent under
+  // signer/*, the Android handheld under handheld/* and the standalone product
+  // under standalone/*. Every published prefix must be publicly readable: a
+  // policy that only allowed writes would leave that product's latest.json
+  // unreadable, so the release would fail silently rather than loudly.
+  for (const prefix of ["station", "signer", "handheld", "standalone"]) {
+    assert.match(
+      statementOf("AllowPublicReleaseObjects"),
+      objectArn(prefix),
+      `AllowPublicReleaseObjects must grant ${prefix}/*`,
+    );
   }
+  // The Station publisher writes only the three device prefixes; standalone/*
+  // belongs to the SaaS API identity alone.
+  for (const prefix of ["station", "signer", "handheld"]) {
+    assert.match(
+      statementOf("AllowPublisherReleaseObjects"),
+      objectArn(prefix),
+      `AllowPublisherReleaseObjects must grant ${prefix}/*`,
+    );
+  }
+  for (const sid of ["AllowPublisherReleaseObjects", "AllowPublisherReleaseBucketPreflight"])
+    assert.doesNotMatch(statementOf(sid), /standalone/, `${sid} must not reach standalone/*`);
+
+  const apiObjects = statementOf("AllowStandaloneReleaseApiObjects");
+  assert.match(
+    apiObjects,
+    /Principal\s*=\s*\{\s*CanonicalUser\s*=\s*yandex_iam_service_account\.standalone_release_api\.id\s*\}/,
+  );
+  assert.match(apiObjects, /Action\s*=\s*\["s3:GetObject",\s*"s3:PutObject"\]/);
+  assert.match(
+    apiObjects,
+    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.releases\.bucket\}\/standalone\/\*"\]/,
+  );
+  const apiListing = statementOf("AllowStandaloneReleaseApiListing");
+  assert.match(
+    apiListing,
+    /Principal\s*=\s*\{\s*CanonicalUser\s*=\s*yandex_iam_service_account\.standalone_release_api\.id\s*\}/,
+  );
+  assert.match(apiListing, /Action\s*=\s*\["s3:ListBucket"\]/);
+  assert.match(
+    apiListing,
+    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.releases\.bucket\}"\]/,
+  );
+  assert.match(
+    apiListing,
+    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["standalone\/\*"\]/,
+  );
+  for (const sid of ["AllowStandaloneReleaseApiObjects", "AllowStandaloneReleaseApiListing"])
+    assert.doesNotMatch(
+      statementOf(sid),
+      /station_release_publisher|station\/|signer\/|handheld\//,
+    );
   assert.match(
     policy,
     /AllowTerraformReleaseManagement[\s\S]*CanonicalUser\s*=\s*var\.terraform_service_account_id/,
@@ -289,20 +335,66 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
     /app_service_account|runtime_service_account|deploy_service_account|backup_service_account/,
   );
 
+  const api = block(releases, 'resource "yandex_iam_service_account" "standalone_release_api"');
+  assert.match(api, /name\s*=\s*"markiro-standalone-release-api"/);
+  assert.match(api, /folder_id\s*=\s*var\.folder_id/);
+  const apiKey = block(
+    releases,
+    'resource "yandex_iam_service_account_static_access_key" "standalone_release_api"',
+  );
+  assert.match(
+    apiKey,
+    /service_account_id\s*=\s*yandex_iam_service_account\.standalone_release_api\.id/,
+  );
+  assert.match(apiKey, /pgp_key\s*=\s*var\.publisher_pgp_key/);
+  assert.doesNotMatch(apiKey, /\bsecret_key\s*=/);
+
+  // Browser uploads from the SaaS admin go straight to the bucket by presigned
+  // PUT, so the bucket answers the CORS preflight for that one origin only.
+  const corsRules = [...bucket.matchAll(/cors_rule\s*\{/g)];
+  assert.equal(corsRules.length, 1);
+  const cors = block(bucket, "cors_rule");
+  assert.match(cors, /allowed_origins\s*=\s*\[var\.standalone_upload_origin\]/);
+  assert.match(cors, /allowed_methods\s*=\s*\["PUT"\]/);
+  assert.match(cors, /allowed_headers\s*=\s*\["content-type"\]/);
+  assert.match(cors, /max_age_seconds\s*=\s*3600/);
+  assert.doesNotMatch(cors, /expose_headers|"\*"|GET|POST|DELETE|HEAD/);
+  const originVariable = block(variables, 'variable "standalone_upload_origin"');
+  assert.match(originVariable, /type\s*=\s*string/);
+  assert.match(originVariable, /nullable\s*=\s*false/);
+  assert.match(originVariable, /validation\s*\{/);
+
   const pgpVariable = block(variables, 'variable "publisher_pgp_key"');
   assert.match(pgpVariable, /type\s*=\s*string/);
   assert.match(pgpVariable, /sensitive\s*=\s*true/);
-  for (const outputName of ["publisher_access_key_id", "publisher_encrypted_secret_key"]) {
+  for (const outputName of [
+    "publisher_access_key_id",
+    "publisher_encrypted_secret_key",
+    "standalone_api_access_key_id",
+    "standalone_api_encrypted_secret_key",
+  ]) {
     assert.match(block(outputs, `output "${outputName}"`), /sensitive\s*=\s*true/);
   }
   assert.match(
     block(outputs, 'output "publisher_encrypted_secret_key"'),
     /yandex_iam_service_account_static_access_key\.publisher\.encrypted_secret_key/,
   );
+  assert.match(
+    block(outputs, 'output "standalone_api_access_key_id"'),
+    /yandex_iam_service_account_static_access_key\.standalone_release_api\.access_key/,
+  );
+  assert.match(
+    block(outputs, 'output "standalone_api_encrypted_secret_key"'),
+    /yandex_iam_service_account_static_access_key\.standalone_release_api\.encrypted_secret_key/,
+  );
+  assert.doesNotMatch(outputs, /standalone_release_api\.secret_key/);
 });
 
 test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata behind an issued certificate", async () => {
-  const releases = await source("infra/yandex/modules/station-releases/main.tf");
+  const [releases, variables] = await Promise.all([
+    source("infra/yandex/modules/station-releases/main.tf"),
+    source("infra/yandex/modules/station-releases/variables.tf"),
+  ]);
 
   const originGroup = block(releases, 'resource "yandex_cdn_origin_group" "releases"');
   assert.match(
@@ -341,6 +433,15 @@ test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata be
   assert.match(cdn, /custom_host_header\s*=\s*yandex_storage_bucket\.releases\.bucket_domain_name/);
   assert.doesNotMatch(cdn, /forward_host_header\s*=\s*true/);
   assert.doesNotMatch(cdn, /browser_cache_settings|cache_http_headers/);
+  // The landing reads standalone/<channel>/latest.json cross-origin. The CDN
+  // answers with Access-Control-Allow-Origin only for the landing host; the
+  // header is never a static one, which could not be scoped to an origin.
+  assert.match(cdn, /cors\s*=\s*\[var\.download_origin_domain\]/);
+  assert.doesNotMatch(cdn, /"access-control-/i);
+  const downloadOrigin = block(variables, 'variable "download_origin_domain"');
+  assert.match(downloadOrigin, /type\s*=\s*string/);
+  assert.match(downloadOrigin, /nullable\s*=\s*false/);
+  assert.match(downloadOrigin, /validation\s*\{/);
   assert.match(
     cdn,
     /static_response_headers\s*=\s*\{[\s\S]*"x-content-type-options"\s*=\s*"nosniff"/,
@@ -379,6 +480,11 @@ test("production wires the fixed Station release origin behind a separate public
   assert.match(releaseModule, /domain\s*=\s*var\.station_release_domain/);
   assert.match(releaseModule, /publisher_pgp_key\s*=\s*var\.station_release_publisher_pgp_key/);
   assert.match(releaseModule, /public_dns_enabled\s*=\s*var\.station_release_public_dns_enabled/);
+  assert.match(
+    releaseModule,
+    /standalone_upload_origin\s*=\s*"https:\/\/\$\{var\.saas_admin_domain\}"/,
+  );
+  assert.match(releaseModule, /download_origin_domain\s*=\s*var\.landing_domain/);
   assert.doesNotMatch(
     releaseModule,
     /app_service_account_id|runtime_secret_id|module\.compute|public_dns_enabled\s*=\s*var\.public_dns_enabled/,
@@ -408,9 +514,19 @@ test("production wires the fixed Station release origin behind a separate public
   for (const outputName of [
     "station_release_publisher_access_key_id",
     "station_release_publisher_encrypted_secret_key",
+    "standalone_release_api_access_key_id",
+    "standalone_release_api_encrypted_secret_key",
   ]) {
     assert.match(block(outputs, `output "${outputName}"`), /sensitive\s*=\s*true/);
   }
+  assert.match(
+    block(outputs, 'output "standalone_release_api_access_key_id"'),
+    /module\.station_releases\.standalone_api_access_key_id/,
+  );
+  assert.match(
+    block(outputs, 'output "standalone_release_api_encrypted_secret_key"'),
+    /module\.station_releases\.standalone_api_encrypted_secret_key/,
+  );
   assert.match(outputs, /module\.station_releases\.cdn_provider_cname/);
   assert.match(outputs, /module\.station_releases\.certificate_id/);
 });
@@ -551,7 +667,7 @@ test("active Terraform contains no literal credentials and managed release edge 
   assert.doesNotMatch(general, /static_access_key|hmac_key|yandex_cdn_|yandex_cm_certificate/);
   assert.equal(
     [...releases.matchAll(/resource\s+"yandex_iam_service_account_static_access_key"/g)].length,
-    1,
+    2,
   );
   assert.equal([...releases.matchAll(/resource\s+"yandex_cdn_resource"/g)].length, 1);
   assert.equal([...releases.matchAll(/resource\s+"yandex_cm_certificate"/g)].length, 1);

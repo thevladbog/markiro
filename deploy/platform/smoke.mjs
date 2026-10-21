@@ -10,6 +10,7 @@ export async function smokePlatform({ request, sourceSha }) {
     ["landing.localhost", "/", "GET", 200, "text/html"],
     ["landing.localhost", "/missing-document", "GET", 404, "text/html"],
     ["landing.localhost", "/api/demo-requests", "POST", 404, "application/json"],
+    ["landing.localhost", "/api/landing-leads", "POST", 404, "application/json"],
   ];
   for (const host of ["saas-admin.localhost", "landing.localhost"]) {
     for (const path of [
@@ -17,6 +18,8 @@ export async function smokePlatform({ request, sourceSha }) {
       "/api/unknown",
       "/api/auth/get-session",
       "/api/demo-requests/unknown",
+      "/api/landing-leads",
+      "/api/landing-leads/unknown",
       "/station",
       "/station/sync",
       "/kiosk",

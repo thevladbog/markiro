@@ -41,7 +41,8 @@ source SHA с установленной версией. Station публику�
 workflow после проверки серверного выпуска; `scope=api-only` не выпускает её.
 
 Изменение только `.github/workflows/deploy-production.yml` выбирает CI job
-`production-bundle`: он выполняет production и Yandex workflow contracts.
+`production-bundle`: он выполняет production workflow contracts. Контур Yandex
+(legacy edge, Compose-смоук, `test:yandex-runtime`) из CI убран 21.10.2026.
 Дополнительные файлы включают свои consumer jobs. Изменение самого CI,
 классификатора, общих toolchain files или неизвестного пути требует полного CI.
 Обязательный `ci-required` продолжает проверять все выбранные результаты;
