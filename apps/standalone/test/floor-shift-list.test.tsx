@@ -1480,3 +1480,119 @@ describe("the shifts several devices work (plan 2b)", () => {
     expect(within(card(SHARED.number)).queryByText(/В смене/)).toBeNull();
   });
 });
+
+describe("what an entry into a shared shift comes to (plan 2b)", () => {
+  const OTHER_ROW = () => participant(OTHER_STATION, "Станция линии 2", "active");
+  const joinable = () =>
+    sharedShift({
+      participants: [{ row: OTHER_ROW(), accepted: 300 }],
+      ownerDeviceId: OTHER_STATION,
+    });
+
+  it("says the line is full with the host's numbers, and keeps the list", async () => {
+    const shift = joinable();
+    const { executor } = await copiesOf([shift]);
+    const full = new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "every slot of this line is taken in this shift",
+      details: { constraint: "shift_line_full", maxStations: 2, active: 2 },
+    });
+    const { handlers } = renderList(executor, { enter: vi.fn(async () => Promise.reject(full)) });
+    fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+    expect(
+      await screen.findByText(
+        "Линия занята: 2 из 2. Присоединиться можно, когда одна из станций выйдет из смены или закроет свою часть.",
+      ),
+    ).toBeTruthy();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+    expect(screen.getByText(shift.number)).toBeTruthy();
+  });
+
+  it("says the line is full in words when the refusal names no numbers", async () => {
+    const shift = joinable();
+    const { executor } = await copiesOf([shift]);
+    const full = new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "full",
+      details: { constraint: "shift_line_full" },
+    });
+    renderList(executor, { enter: vi.fn(async () => Promise.reject(full)) });
+    fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+    expect(
+      await screen.findByText(
+        "Линия занята: все места этой смены заняты. Присоединиться можно, когда одна из станций выйдет из смены или закроет свою часть.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("works nothing of a part the host says is closed, enters no copy, and keeps the answer's figures for the card", async () => {
+    const shift = sharedShift({
+      participants: [
+        { row: participant(DEVICE_ID, "Станция линии 1", "active"), accepted: 40 },
+        { row: OTHER_ROW(), accepted: 300 },
+      ],
+      myState: "active",
+    });
+    const { executor } = await copiesOf([shift]);
+    const closed = enteredOf(
+      sharedShift({
+        participants: [
+          { row: participant(DEVICE_ID, "Станция линии 1", "closed"), accepted: 40 },
+          { row: OTHER_ROW(), accepted: 300 },
+        ],
+        myState: "closed",
+      }),
+    );
+    const { handlers } = renderList(executor, { enter: vi.fn(async () => closed) });
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    expect(
+      await screen.findByText("Ваша часть этой смены уже закрыта: войти в неё снова нельзя."),
+    ).toBeTruthy();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+    expect((await readShiftCopy(executor, PAIRING, shift.id))?.entered).toBe(false);
+    // The read-back is a one-shift answer, so it carries the totals even for a closed part (host
+    // `35020185a`): the cache takes it, and the card says the closed part without a new list.
+    expect(await readParticipation(executor, PAIRING, shift.id)).toMatchObject({
+      myState: "closed",
+      totals: { accepted: 340 },
+    });
+  });
+
+  it("enters a known shift without the link and drops the pause the host has not heard", async () => {
+    const { db, executor } = await copiesOf([SHARED], [SHARED_ENTERED]);
+    db.prepare("UPDATE floor_shift_participation SET leave_requested_at = ?").run(
+      "2026-10-08T10:00:00.000Z",
+    );
+    const context: EntryContext = {
+      local: executor,
+      pairing: PAIRING,
+      online: false,
+      enter: vi.fn(async () => SHARED_ENTERED),
+      now: () => new Date("2026-10-08T10:05:00.000Z"),
+    };
+    const copy = await readShiftCopy(executor, PAIRING, SHARED.id);
+    if (copy === null) throw new Error("the shared shift is not kept");
+    expect(await enterShift(context, copy)).toMatchObject({ kind: "entered", offline: true });
+    expect((await readParticipation(executor, PAIRING, SHARED.id))?.leaveRequestedAt).toBeNull();
+    expect(context.enter).not.toHaveBeenCalled();
+  });
+
+  it("still says stage 2a's «занята» for `shift_busy`", async () => {
+    const shift = joinable();
+    const { executor } = await copiesOf([shift]);
+    const busy = new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "busy",
+      details: { constraint: "shift_busy" },
+    });
+    renderList(executor, { enter: vi.fn(async () => Promise.reject(busy)) });
+    fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+    expect(await screen.findByText("Эту смену уже открыла другая станция.")).toBeTruthy();
+  });
+});

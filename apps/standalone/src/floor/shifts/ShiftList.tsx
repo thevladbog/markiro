@@ -9,7 +9,7 @@ import type { Pairing } from "../../local/reference-sync.js";
 import { readRefusedCloses } from "../close/shift-close.js";
 import { readOutboxStatus, type OutboxStatus } from "../outbox-status.js";
 import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.js";
-import { enterShift, type EntryRefusal } from "./shift-entry.js";
+import { enterShift, type EntryRefusal, type LineSlots } from "./shift-entry.js";
 import {
   readParticipations,
   sharedCount,
@@ -90,7 +90,9 @@ export function ShiftList({
   const [copies, setCopies] = useState<HubCopies>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [entering, setEntering] = useState<string | null>(null);
-  const [refusal, setRefusal] = useState<EntryRefusal | null>(null);
+  const [refusal, setRefusal] = useState<{ reason: EntryRefusal; line: LineSlots | null } | null>(
+    null,
+  );
   const [requestedPage, setRequestedPage] = useState(1);
   const [outbox, setOutbox] = useState<OutboxStatus | null>(null);
   const alive = useRef(true);
@@ -194,7 +196,7 @@ export function ShiftList({
         current.current.onHostError(result.error);
         return;
       }
-      setRefusal(result.reason);
+      setRefusal({ reason: result.reason, line: result.line ?? null });
       // The host may have changed the shift (closed, opened elsewhere): read again.
       setAttempt((value) => value + 1);
     } finally {
@@ -209,7 +211,12 @@ export function ShiftList({
   const standing =
     refusal !== null ? (
       <Alert tone="error" role="presentation">
-        {t(`floor.shifts.refused.${refusal}`)}
+        {refusal.line === null
+          ? t(`floor.shifts.refused.${refusal.reason}`)
+          : t("floor.shifts.lineFullRefused", {
+              active: refusal.line.active,
+              max: refusal.line.maxStations,
+            })}
       </Alert>
     ) : null;
   // Without the host, the list that did not update says nothing more.
