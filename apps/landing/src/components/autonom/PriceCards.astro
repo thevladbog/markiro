@@ -3,6 +3,13 @@ import { DOWNLOAD_PATH, CALL_HREF, invoiceHref } from "../../content/autonom";
 import { findTariff, formatRoubles, monthlyEquivalent, TARIFFS } from "../../content/pricing";
 import Icon from "./Icon.astro";
 
+interface Props {
+  /** /stoimost/ puts the cards straight under its h1, so they are h2 there. */
+  headingLevel?: 2 | 3;
+}
+
+const { headingLevel = 3 } = Astro.props;
+const Heading = headingLevel === 2 ? "h2" : "h3";
 /** «Линия», «Цех» and «Завод» as cards, then «Старт» as the special offer for one PC. */
 const grid = TARIFFS.filter((tariff) => tariff.code !== "start");
 const start = findTariff("start");
@@ -19,7 +26,7 @@ const startPrice = start.pricePerYear ?? start.priceFrom;
         aria-labelledby={`plan-${tariff.code}`}
       >
         <div class="ax-plan__head">
-          <h3 id={`plan-${tariff.code}`}>{tariff.name}</h3>
+          <Heading id={`plan-${tariff.code}`}>{tariff.name}</Heading>
           {tariff.recommended && <span class="ax-plan__badge">Рекомендуем</span>}
         </div>
         <p class="ax-plan__audience">{tariff.audience}</p>
@@ -66,7 +73,7 @@ const startPrice = start.pricePerYear ?? start.priceFrom;
   <article class="ax-start" data-tariff="start" aria-labelledby="plan-start">
     <div class="ax-start__body">
       <p class="ax-start__badge"><Icon name="spark" size={14} /><span class="ax-start__badge-long">Особое предложение для небольших производств</span><span class="ax-start__badge-short">Особое предложение</span></p>
-      <h3 id="plan-start">{start.name} <span>{start.audience}</span></h3>
+      <Heading id="plan-start">{start.name} <span>{start.audience}</span></Heading>
       <p class="ax-start__text">
         Хост, офис и станция работают на одном ПК. Все функции программы, установка самостоятельно,
         поддержка в почте и Telegram. Когда понадобится больше, перейдёте на «Линию», остаток года засчитаем.

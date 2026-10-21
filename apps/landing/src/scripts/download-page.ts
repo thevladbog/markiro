@@ -23,6 +23,9 @@ function fill(root: ParentNode, field: string, text: string): void {
 }
 
 export function showReleaseFacts(root: ParentNode, release: StandaloneRelease): void {
+  for (const element of root.querySelectorAll<HTMLElement>("[data-release-fact]")) {
+    element.hidden = false;
+  }
   fill(root, "version", release.version);
   fill(root, "date", formatReleaseDate(release.releasedAt));
   fill(root, "size", formatInstallerSize(release.sizeBytes));
@@ -82,13 +85,24 @@ export function initDownloadPage(
   root: Document,
   runtime: DownloadPageRuntime,
 ): {
+  /** Starts reading `latest.json`; the page calls it when the visitor turns to the form. */
+  readonly prefetch: () => void;
   readonly accept: (email: string) => Promise<void>;
   readonly dispose: () => void;
 } {
-  let release: Promise<StandaloneRelease | null> = runtime.fetchRelease();
-  void release.then((value) => {
-    if (value !== null) showReleaseFacts(root, value);
-  });
+  // Nothing is fetched at page load: the release bucket is a third party, so the page
+  // asks it only once the visitor starts on the form.
+  let release: Promise<StandaloneRelease | null> | null = null;
+  const load = (): Promise<StandaloneRelease | null> => {
+    if (release === null) {
+      const pending = runtime.fetchRelease();
+      release = pending;
+      void pending.then((value) => {
+        if (value !== null) showReleaseFacts(root, value);
+      });
+    }
+    return release;
+  };
 
   const onClick = (event: Event): void => {
     if (!(event.target instanceof Element)) return;
@@ -107,12 +121,15 @@ export function initDownloadPage(
   root.addEventListener("click", onClick);
 
   return {
+    prefetch: () => {
+      void load();
+    },
     accept: async (email) => {
-      let value = await release;
+      let value = await load();
       if (value === null) {
-        // A failed read at page load gets one more chance before the visitor sees «готовится».
-        release = runtime.fetchRelease();
-        value = await release;
+        // A failed read gets one more chance before the visitor sees «готовится».
+        release = null;
+        value = await load();
       }
       showAccepted(root, email, value);
     },

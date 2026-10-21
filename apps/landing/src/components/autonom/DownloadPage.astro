@@ -39,9 +39,9 @@ const phoneText = config.phone === null ? "" : `, ${config.phone.display}`;
           <span class="ax-only-narrow">{copy.leadPhone}</span>
         </p>
         <dl class="ax-meta">
-          <div><dt>{copy.meta.version}</dt><dd data-release="version">{copy.pending}</dd></div>
-          <div><dt>{copy.meta.released}</dt><dd data-release="date">—</dd></div>
-          <div><dt>{copy.meta.size}</dt><dd data-release="size">—</dd></div>
+          <div data-release-fact hidden><dt>{copy.meta.version}</dt><dd data-release="version"></dd></div>
+          <div data-release-fact hidden><dt>{copy.meta.released}</dt><dd data-release="date"></dd></div>
+          <div data-release-fact hidden><dt>{copy.meta.size}</dt><dd data-release="size"></dd></div>
           <div><dt>{copy.meta.system}</dt><dd>{copy.system}</dd></div>
         </dl>
       </div>
@@ -247,6 +247,8 @@ const phoneText = config.phone === null ? "" : `, ${config.phone.display}`;
     });
     const form = document.querySelector<HTMLFormElement>("[data-lead-form]");
     if (form !== null) {
+      form.addEventListener("focusin", downloadPage.prefetch, { once: true });
+      form.addEventListener("pointerdown", downloadPage.prefetch, { once: true });
       initLeadForm(form, browserLeadFormRuntime(window), ({ email }) => {
         void downloadPage.accept(email);
       });

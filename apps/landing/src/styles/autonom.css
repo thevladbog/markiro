@@ -41,6 +41,11 @@
   color: var(--fg-1);
 }
 
+/* Component display rules (grid, flex) must not reveal what a script hides. */
+.ax-page [hidden] {
+  display: none !important;
+}
+
 .ax-container {
   width: min(83rem, calc(100% - 2 * var(--ax-gutter)));
   margin-inline: auto;
@@ -834,7 +839,7 @@
 
 .ax-network__hub small,
 .ax-network__nodes small {
-  color: var(--fg-3);
+  color: var(--fg-2);
   font: 400 0.75rem / 1.2 var(--font-mono);
 }
 
@@ -1164,7 +1169,7 @@
   gap: 1rem;
 }
 
-.ax-plan__head h3 {
+.ax-plan__head :is(h2, h3) {
   margin: 0;
   font: 600 1.375rem / 1.2 var(--font-ui);
 }
@@ -1280,12 +1285,12 @@
   display: none;
 }
 
-.ax-start h3 {
+.ax-start :is(h2, h3) {
   margin: 1.25rem 0 0;
   font: 600 2rem / 1.1 var(--font-ui);
 }
 
-.ax-start h3 span {
+.ax-start :is(h2, h3) span {
   margin-left: 0.75rem;
   color: var(--fg-2);
   font: 400 1.0625rem / 1 var(--font-ui);
@@ -1750,11 +1755,16 @@
 }
 
 .ax-consent input {
+  /* Sits exactly over the drawn box, so a tap on the box hits the real checkbox. */
   position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
   width: 1.375rem;
   height: 1.375rem;
   margin: 0;
   opacity: 0;
+  cursor: pointer;
 }
 
 .ax-consent label {
@@ -2914,7 +2924,7 @@ li.ax-compare__ours {
     display: inline;
   }
 
-  .ax-start h3 span {
+  .ax-start :is(h2, h3) span {
     display: block;
     margin: 0.75rem 0 0;
   }

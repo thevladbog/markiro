@@ -18,7 +18,7 @@ const RELEASE: StandaloneRelease = {
 
 function render(): void {
   document.body.innerHTML = `
-    <section data-download-start><dd data-release="version">готовится</dd><dd data-release="size">—</dd></section>
+    <section data-download-start><div data-release-fact hidden><dd data-release="version"></dd></div><dd data-release="size"></dd></section>
     <section data-download-ready hidden>
       <div data-release-only>
         <h2 tabindex="-1" data-ready-heading>Ссылка готова</h2>
@@ -42,15 +42,28 @@ afterEach(() => {
 });
 
 describe("download page", () => {
-  it("fills the facts at load and shows the link once the form is accepted", async () => {
+  it("reads latest.json only once the visitor turns to the form", () => {
+    render();
+    const fetchRelease = vi.fn(() => Promise.resolve(RELEASE));
+    const page = initDownloadPage(document, { fetchRelease, copy: vi.fn() });
+    expect(fetchRelease).not.toHaveBeenCalled();
+    page.prefetch();
+    page.prefetch();
+    expect(fetchRelease).toHaveBeenCalledOnce();
+    page.dispose();
+  });
+
+  it("fills the facts on first use and shows the link once the form is accepted", async () => {
     render();
     window.scrollTo = vi.fn();
     const page = initDownloadPage(document, {
       fetchRelease: vi.fn(() => Promise.resolve(RELEASE)),
       copy: vi.fn(() => Promise.resolve()),
     });
+    page.prefetch();
     await Promise.resolve();
     await Promise.resolve();
+    expect(document.querySelector("[data-release-fact]")?.hasAttribute("hidden")).toBe(false);
     expect(document.querySelector('[data-release="version"]')?.textContent).toBe("0.4.0");
     expect(document.querySelector('[data-release="size"]')?.textContent).toBe("62 МБ");
 
@@ -90,6 +103,7 @@ describe("download page", () => {
       fetchRelease: vi.fn(() => Promise.resolve(RELEASE)),
       copy,
     });
+    page.prefetch();
     await Promise.resolve();
     await Promise.resolve();
     document.querySelector<HTMLButtonElement>('[data-copy="sha256"]')?.click();

@@ -357,10 +357,20 @@ test.describe("standalone lead forms", () => {
     });
 
     await page.goto("/?utm_source=yandex&utm_medium=cpc");
-    await page.goto("/skachat/");
-    await expect(page.locator('[data-release="version"]').first()).toHaveText("0.4.0");
+    let releaseReads = 0;
+    page.on("request", (request) => {
+      if (request.url().endsWith("/standalone/stable/latest.json")) releaseReads += 1;
+    });
+    await page.goto("/skachat/", { waitUntil: "networkidle" });
+    // The cookie panel covers the form on phones; a visitor answers it first.
+    await page.locator("[data-consent-reject]").click();
+    // The release bucket and the captcha are third parties: nothing is asked before the form.
+    expect(releaseReads).toBe(0);
+    await expect(page.locator("[data-release-fact]").first()).toBeHidden();
     const form = page.locator("form[data-lead-form]");
     await form.locator('input[name="email"]').fill("ivan@zavod");
+    await expect(page.locator('[data-release="version"]').first()).toHaveText("0.4.0");
+    expect(releaseReads).toBe(1);
     await form.locator('button[type="submit"]').click();
     await expect(form.locator('[data-error-for="email"]')).toHaveText(
       "Проверьте почту: не хватает домена, например zavod.ru",
@@ -408,6 +418,7 @@ test.describe("standalone lead forms", () => {
       route.fulfill({ body: "{}", contentType: "application/json", status: 202 }),
     );
     await page.goto("/skachat/");
+    await page.locator("[data-consent-reject]").click();
     const form = page.locator("form[data-lead-form]");
     await form.locator('input[name="email"]').fill("ivan@zavod.ru");
     await form.locator('input[name="company"]').fill("Завод");
@@ -427,6 +438,7 @@ test.describe("standalone lead forms", () => {
       else await route.fulfill({ body: "{}", contentType: "application/json", status: 202 });
     });
     await page.goto("/skachat/");
+    await page.locator("[data-consent-reject]").click();
     const form = page.locator("form[data-lead-form]");
     await form.locator('input[name="email"]').fill("ivan@zavod.ru");
     await form.locator('input[name="company"]').fill("Завод");
@@ -448,6 +460,7 @@ test.describe("standalone lead forms", () => {
       await route.fulfill({ body: "{}", contentType: "application/json", status: 202 });
     });
     await page.goto("/stoimost/");
+    await page.locator("[data-consent-reject]").click();
     await page.locator('[data-tariff="workshop"] a[data-invoice-tariff]').click();
     const form = page.locator("form[data-lead-form]");
     await expect(form.locator('select[name="tariffCode"]')).toHaveValue("workshop");

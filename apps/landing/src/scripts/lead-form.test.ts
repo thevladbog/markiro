@@ -74,7 +74,6 @@ function runtime(responses: readonly (LeadResponse | Error)[] = [{ ok: true, sta
     }),
     resetCaptcha: vi.fn(),
     track: vi.fn(),
-    whenNear: vi.fn(() => vi.fn()),
   };
   return value;
 }
@@ -151,7 +150,7 @@ describe("download lead form", () => {
     expect(form.querySelector<HTMLInputElement>('[name="smart-token"]')?.value).toBe("");
   });
 
-  it("loads the captcha only when the visitor comes near the form", () => {
+  it("loads the captcha only when the visitor starts on the form", () => {
     const form = renderDownload();
     const current = runtime();
     initLeadForm(form, current, vi.fn());

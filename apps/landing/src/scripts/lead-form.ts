@@ -56,7 +56,6 @@ export interface LeadFormRuntime {
   readonly request: (endpoint: string, payload: LandingLeadPayload) => Promise<LeadResponse>;
   readonly resetCaptcha: (form: HTMLFormElement) => void;
   readonly track: (eventName: string, properties: Readonly<Record<string, string>>) => void;
-  readonly whenNear: (element: Element, callback: () => void) => () => void;
 }
 
 export const LEAD_FORM_COPY = {
@@ -298,12 +297,12 @@ export function initLeadForm(
   form.addEventListener("input", onInput, { once: true });
   form.addEventListener("submit", handleSubmit);
 
-  let stopWatching: () => void = () => undefined;
+  // The captcha is a third party: it loads when the visitor starts on the form, never on
+  // page load or scroll, so the page sets no third-party cookies before that.
   let captchaRequested = false;
   const requestCaptcha = (): void => {
     if (captchaRequested) return;
     captchaRequested = true;
-    stopWatching();
     form.removeEventListener("focusin", requestCaptcha);
     form.removeEventListener("pointerdown", requestCaptcha);
     runtime.loadCaptcha();
@@ -311,7 +310,6 @@ export function initLeadForm(
   if (form.querySelector(".smart-captcha") !== null) {
     form.addEventListener("focusin", requestCaptcha);
     form.addEventListener("pointerdown", requestCaptcha);
-    stopWatching = runtime.whenNear(form, requestCaptcha);
   }
 
   return () => {
@@ -319,7 +317,6 @@ export function initLeadForm(
     form.removeEventListener("submit", handleSubmit);
     form.removeEventListener("focusin", requestCaptcha);
     form.removeEventListener("pointerdown", requestCaptcha);
-    stopWatching();
   };
 }
 
@@ -354,7 +351,6 @@ export function browserLeadFormRuntime(browserWindow: Window & typeof globalThis
     },
     resetCaptcha: demo.resetCaptcha,
     track: demo.track,
-    whenNear: demo.whenNear,
   };
 }
 

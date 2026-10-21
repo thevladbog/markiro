@@ -232,7 +232,6 @@ export const DOWNLOAD_COPY = {
     "Установщик ставится на компьютер с Windows. Оставьте почту: ссылка придёт письмом, откройте его на компьютере.",
   meta: { version: "Версия", released: "Выпущена", size: "Размер", system: "Система" },
   system: "Windows 10, 11 · x64",
-  pending: "готовится",
   insideTitle: "Что внутри",
   inside: [
     {
