@@ -1,10 +1,10 @@
 import type { TFunction } from "i18next";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, DefinitionGrid, Modal } from "@markiro/ui";
 
-import type { DeviceRecord, OfficeShift } from "../../host/protocol.js";
+import type { DeviceRecord, DeviceTotals, OfficeShift } from "../../host/protocol.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
@@ -101,6 +101,48 @@ function deviceLabel(id: string, devices: readonly DeviceRecord[] | undefined, t
     : t("office.shifts.totals.revokedDevice", { name: device.name });
 }
 
+/**
+ * «По устройствам» (plan 2b, spec §7): each device's part of the shift's totals, in the order of
+ * the participants. A device is named by the host's own record of the participant (so a technologist
+ * sees names), else as `deviceLabel` names it. A validation shift puts its codes in no box.
+ */
+function DeviceBreakdown({
+  shift,
+  devices,
+}: {
+  shift: OfficeShift;
+  devices: readonly DeviceRecord[] | undefined;
+}) {
+  const { t } = useTranslation();
+  const titleId = useId();
+  const named = (id: string) =>
+    shift.participants?.find((each) => each.deviceId === id)?.deviceName ??
+    deviceLabel(id, devices, t);
+  const value = (part: DeviceTotals) =>
+    shift.mode === "validation"
+      ? t("office.shifts.totals.byDeviceUnits", { units: UNITS.format(part.accepted) })
+      : t("office.shifts.totals.byDeviceValue", {
+          units: UNITS.format(part.accepted),
+          boxes: UNITS.format(part.boxesClosed),
+          pallets: UNITS.format(part.pallets),
+        });
+  return (
+    <section aria-labelledby={titleId}>
+      <h3 id={titleId} className="shift-breakdown__title">
+        {t("office.shifts.totals.byDevice")}
+      </h3>
+      <DefinitionGrid
+        items={(shift.byDevice ?? []).map((part) => ({
+          id: part.deviceId,
+          term: named(part.deviceId),
+          description: value(part),
+          mono: true,
+        }))}
+      />
+    </section>
+  );
+}
+
 interface ShiftFiguresProps {
   shift: OfficeShift;
   zone: string | null;
@@ -195,6 +237,9 @@ function ShiftFigures({
       )}
       {devicesNote !== null && totals.deviceIds.length > 0 && (
         <p className="office-note">{t(`office.shifts.totals.${devicesNote}`)}</p>
+      )}
+      {shift.byDevice !== undefined && shift.byDevice.length > 1 && (
+        <DeviceBreakdown shift={shift} devices={devices} />
       )}
     </>
   );
