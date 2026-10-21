@@ -141,8 +141,8 @@ physical, viewer or overall US-11 completion claim follows from source checks.
 The check-only no-service `dataset_command_refusals` job owns the explicit policy
 and runtime tests, checked compilation and refusal smoke. It does not execute
 the positive workload or require private-provider services. Task 3B uses a
-separate independently owned exact-named PG17 installation and the existing
-pinned MinIO/mc versions, exactly one initialize and one verify (each within the
+separate independently owned exact-named PG17 installation and pinned
+SeaweedFS4.48, exactly one initialize and one verify (each within the
 existing900000 ms whole-volume envelope), with no retry or subset. The approved
 new job envelope is45 minutes; existing assertion/setup/disposal limits and old
 jobs remain unchanged. Its detailed provider mutation observation and normal
@@ -153,10 +153,24 @@ The additive `dataset_command_positive` job now owns that compiled smoke. It
 refuses before external I/O outside its exact GitHub-hosted CI job. The fixture
 attests an initially empty actual `markiro_us_dev` database and provisions only
 the original owner/profile through actual services before the sole compiled
-initialize. Its own pinned MinIO process uses ephemeral data and two private
-buckets with distinct restricted generated accounts. A transparent streaming
-observer forwards real SDK traffic from19000 to19002, retaining counters only.
+initialize. Its own pinned SeaweedFS process uses ephemeral data and two private
+buckets with distinct restricted generated accounts. It runs `/usr/bin/weed`
+as the actual nonroot runner UID:GID, with matching `0700` tmpfs `/data` and an owned
+`0600` read-only identity configuration; only its separate bootstrap identity gets
+Admin. No application credential grants global administration or bucket creation.
+A transparent streaming observer forwards real SDK traffic from19000 to19002,
+retaining counters only.
 Both compiled commands use the actual clean checked build descriptor.
+
+Before initialize, the unchanged total60000ms setup budget includes the image
+pull and actual signed SDK readiness, own-bucket Get/Put/List/Delete, both
+directions of cross-bucket List/Get/Put403, anonymous Get/Put403, application
+CreateBucket403, valid streaming SHA256 and invalid-checksum refusal. Conditional
+PUT must reject a sequential overwrite with412 and unchanged bytes, and a real
+two-writer race must have exactly one winner with those exact bytes retained.
+Probe objects are drained/deleted and both buckets must be empty before the
+dataset runs. Any failed probe prevents initialize; no mock or header workaround
+can establish this acceptance.
 
 Compiled verify compares every public table through the existing full MVCC
 snapshot helper and requires provider reads with zero mutations, failures or
@@ -170,5 +184,12 @@ drop only the attested runner database and remove only recorded/attested
 container IDs, verifying absence; cleanup failure fails the gate.
 
 Local observer/tooling/refusal checks do not execute this positive workload.
-Actual current15 native and compiled-positive CI remain pending; viewer work,
-hosting, production and release acceptance have not been performed.
+Exact653 current15 native and full Trace CI passed independently. Its first
+compiled-positive attempt failed during pinned MinIO Docker creation, before
+initialize; historical stderr was not retained and its exact cause is unknown.
+The former pins are currently anonymously inaccessible. The selected replacement
+uses SeaweedFS4.48 at manifest digest
+`sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d`;
+registry/source checks do not prove actual startup or SDK compatibility.
+New-source real positive and all CI gates remain required. Viewer work, hosting,
+production and release acceptance have not been performed.

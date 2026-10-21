@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-20-us-11-dataset-command-design.md`
 
+**Provider amendment (2026-10-21):** The owner authorized alternatives to MinIO.
+Task5 implements `docs/superpowers/specs/2026-10-21-us-development-s3-provider-design.md`.
+It supersedes only the MinIO/mc-specific provider choices in Task4; all existing
+data, authorization, verification, resource, timeout and release boundaries stand.
+
 ## Global Constraints
 
 - Work only in `/Users/thevladbog/PRSOME/q/.worktrees/us-docs-audit`, branch `codex/us-mvp`; preserve unrelated `docs/us/demo-hosting-options.md`.
@@ -256,3 +261,95 @@ environment policy remains unchanged. Small helper tests use owned random ports.
       root final ordinary API/whole-increment review and authorized exact-source CI
       follow. Current15 native and compiled positive must actually pass before CLI
       acceptance or viewer implementation. Keep all failed/partial evidence distinct.
+
+### Task 5: Replace unavailable US MinIO with pinned SeaweedFS
+
+**Requirements:** Read the provider amendment above and the frozen finite
+`.superpowers/sdd/2026-10-20-us-11-dataset-command/task-5-provider-comparison.md`.
+The comparison's concrete command, image digest, resource matrix and sixteen
+top-level cases are requirements, not permission for a local service run.
+Standing owner approval removes repeated approval prompts; it does not remove
+independent review or actual CI acceptance.
+
+**Files:**
+
+- Modify `tools/us-development/test/support/dataset-command-positive-fixture.mjs`:
+  consume one real provider and retain all existing DB/CLI/byte/observer lifecycle.
+- Create `tools/us-development/test/support/dataset-command-object-store.mjs`:
+  test-only identity/config/container contract, capability probes, safe diagnostics.
+- Create `tools/us-development/test/dataset-command-object-store.test.mjs`:
+  four focused behavior cases from the frozen matrix.
+- Modify `tools/us-development/test/dataset-command-positive-ownership.test.mjs`:
+  migrate provider-specific expectations, preserve four original behavioral gates.
+- Modify `deploy/us-development/compose.yml`; create
+  `deploy/us-development/s3-identities.example.json` for synthetic local bootstrap.
+- Modify the local dependency-stack contract in
+  `tools/us-development/test/isolation.test.mjs` and the current operator sections
+  of `docs/us/development-isolation.md`, `docs/us/dataset-command.md`,
+  `docs/us/implementation-plan.md`. Leave archived evidence/history unchanged.
+- `deploy/us-development/local.env.example` only if necessary for matching the
+  actual synthetic bootstrap; do not rewrite any existing personal environment.
+- No workflow/normalizer change, product API change, SDK/dependency change or
+  hosting document mutation is expected. Report a concrete conflict before widening.
+
+**Interfaces:** Keep the existing fixture exports and positive smoke command.
+The helper exposes `datasetObjectStoreConfig`, `datasetObjectStoreContainer`,
+`assertDatasetObjectStoreContainer`, `verifyDatasetObjectStoreCapabilities` and
+`datasetObjectStoreFailureCategory`. Configuration/container functions consume
+trusted generated identities, exact owned config path and actual nonroot uid/gid;
+they return bounded owned JSON/argv structures without I/O. Attestation consumes
+the actual inspect object and exact expected ownership contract. Capability proof
+consumes actual SDK clients for the admin/plan/request identities and their two
+owned buckets. It returns only private-safe capability evidence or throws; no
+success/proof injection in the executable or fixture. Error categorization emits
+fixed identifiers only. Keep all provider-specific code test-only.
+
+- [ ] Write four focused tests first: scoped config/uid contract; exact container
+      attestation; capability failure stopping initialization (including incorrect
+      conditional winner/checksum/403 outcomes); bounded redaction/partial-acquisition
+      cleanup. Preserve seven observer and four ownership cases. Save genuine
+      behavioral RED before successful implementations, not missing-import failures
+      or a retrospective replay. Doubles verify helper failure orchestration only.
+- [ ] Implement the literal image+digest from the frozen comparison. CI uses one
+      container with `/usr/bin/weed` entrypoint, nonroot actual runner uid/gid,
+      workdir `/data`, same-uid/gid0700tmpfs for declared `/data`, read-only bind of
+      the owned0600config from an owned0700directory. Attest every mount, label,
+      entrypoint, command, user, workdir, image and S3-only19002:8333loopback mapping.
+      Never invoke the image's root/chown entrypoint or acquire an unknown resource.
+- [ ] Use the exact `mini` command from the frozen comparison, with admin UI,
+      WebDAV, Iceberg/Lance listeners, telemetry and automatic bucket creation
+      disabled. No management/master/filer/RPC host port, root secret argv/env or
+      external volume. Generate three distinct identities/accounts; only bootstrap
+      admin gets global Admin, applications get exact Read/Write/List:ownbucket.
+      Use signed real SDK readiness within the same total60000ms setup budget.
+- [ ] Before any dataset call, run actual own-bucket Get/Put/List/Delete, both
+      directions cross-bucket List/Get/Put403, anonymous Get/Put403 and application
+      global CreateBucket403. Check SHA256/streaming bytes with the unchanged SDK
+      and refuse an invalid checksum. Sequential conditional A then B must return
+      412 for B and retain A; two concurrent fresh-key conditional writes must have
+      one winner and a precondition/conflict loser, GET equals exact winner bytes.
+      Drain and delete only probe objects, verify both owned buckets empty. Any
+      failure prevents initialize; no fallback, header removal or budget increase.
+- [ ] Preserve exactly one actual full compiled initialize and verify, all existing
+      census/private bytes/ZIP/PDF/hash/read-only measurements, actual GNU-time
+      child peak RSS and exact awaited DB/provider/client/observer/temp disposal.
+      Publish only public fixed operation/category/image diagnostics on failure,
+      never raw Docker/S3 output, credentials or object keys.
+- [ ] Replace only the isolated local provider with the same pinned image, its own
+      new `s3data` volume and checked-in synthetic identity config. Preserve the
+      general local S3 environment/bucket; use explicit bootstrap for that bucket
+      and confirm the chosen exact-release flags before writing Compose. Remove
+      the obsolete console19001 contract rather than relabelling a filer as a
+      private console. Do not start local services, migrate/delete old miniodata,
+      alter primary Compose or create private stores from general credentials.
+- [ ] Run focused helpers/ownership/isolation, then full US and tools/ci Node tests,
+      ESLint, scoped/full format, isolation checker, `git diff --check` and static
+      Compose validation without starting services. Preserve predecessor workflow
+      AST/byte hashes and every selector/cap. Do not rerun unchanged broad API/native
+      suites locally. Freeze a scoped diff/report for independent spec+quality review.
+- [ ] Root alone resolves review, stages explicit paths and commits/pushes only US
+      with the required four identity variables and author/committer readback.
+      Require exact new-SHA all13USjobs and Cases, especially real SeaweedFS positive
+      success/probe metrics/disposal. Source/unit success is not provider acceptance.
+      Retain exact653 fifteen-case/fullTrace proof as source-specific predecessor
+      evidence, not permission to skip the new-SHA jobs. Viewer remains afterward.

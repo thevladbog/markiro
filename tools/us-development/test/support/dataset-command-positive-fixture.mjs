@@ -2,14 +2,19 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { startDatasetProviderObservation } from "./dataset-command-provider.mjs";
+import {
+  datasetObjectStoreConfig,
+  datasetObjectStoreContainer,
+  assertDatasetObjectStoreContainer,
+  verifyDatasetObjectStoreCapabilities,
+  datasetObjectStoreFailureCategory,
+} from "./dataset-command-object-store.mjs";
 
-export const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
-export const MC_IMAGE = "minio/mc:RELEASE.2025-08-13T08-35-41Z";
 export const DATABASE_URL =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 
@@ -35,48 +40,11 @@ export function assertDatasetPositiveDatabase(identity, tables) {
   assert.equal(tables.length, 0);
 }
 
-export function assertDatasetPositiveContainer(item, { id, image, owner, directory }) {
-  assert.match(id, /^[a-f0-9]{64}$/);
-  assert.equal(item.Id, id);
-  assert.equal(item.Config.Image, image);
-  assert.match(item.Image, /^sha256:[a-f0-9]{64}$/);
-  assert.equal(item.Config.Labels["markiro.us-dataset-positive"], owner);
-  assert.equal(item.HostConfig.LogConfig.Type, "none");
-  if (image === MINIO_IMAGE) {
-    assert.deepEqual(item.HostConfig.Binds ?? [], []);
-    assert.deepEqual(item.Config.Cmd, ["server", "/data"]);
-    assert.deepEqual(item.HostConfig.PortBindings, {
-      "9000/tcp": [{ HostIp: "127.0.0.1", HostPort: "19002" }],
-    });
-    assert.deepEqual(item.HostConfig.Tmpfs, { "/data": "rw" });
-    assert.ok(
-      item.Mounts.every((mount) => mount.Type === "tmpfs" && mount.Destination === "/data"),
-    );
-  } else {
-    assert.equal(image, MC_IMAGE);
-    assert.deepEqual(item.HostConfig.Binds, [`${directory}:/owned:ro`]);
-    assert.equal(item.HostConfig.NetworkMode, "host");
-    assert.deepEqual(item.Config.Cmd.slice(0, -1), [
-      "--config-dir",
-      "/owned",
-      "--json",
-      "admin",
-      "user",
-      "svcacct",
-      "add",
-      "fixture",
-      "datasetfixtureadmin",
-      "--policy",
-    ]);
-    assert.match(item.Config.Cmd.at(-1), /^\/owned\/policy-[01]\.json$/);
-    assert.equal(item.Mounts.length, 1);
-    assert.equal(item.Mounts[0].Source, directory);
-    assert.equal(item.Mounts[0].Destination, "/owned");
-    assert.equal(item.Mounts[0].RW, false);
-  }
+export function assertDatasetPositiveContainer(item, target) {
+  assertDatasetObjectStoreContainer(item, target);
 }
 
-// Output is held in memory. Docker/MC may return credentials; never echo a raw error/output.
+// Output is held in memory. Never echo raw Docker/provider errors/output.
 async function child(file, args, { env = process.env, cap = 60_000, limit = 256 * 1024 } = {}) {
   const started = performance.now();
   const process_ = spawn(file, args, { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -159,6 +127,10 @@ async function child(file, args, { env = process.env, cap = 60_000, limit = 256 
 
 export async function createDatasetPositiveFixture(env = process.env) {
   assertDatasetPositiveRunner(env);
+  const uid = process.getuid?.(),
+    gid = process.getgid?.();
+  if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0)
+    throw new Error("us_dataset_object_store_config_failed");
   const setupStarted = performance.now();
   const root = process.cwd();
   const git = await child("git", ["status", "--porcelain=v1", "--untracked-files=all"]);
@@ -185,15 +157,13 @@ export async function createDatasetPositiveFixture(env = process.env) {
     ),
   );
   const owner = randomUUID();
-  const label = `markiro.us-dataset-positive=${owner}`;
-  // Parent account identifier is public; the root password and generated accounts are secret.
-  const rootUser = "datasetfixtureadmin",
-    rootPassword = randomBytes(32).toString("hex");
-  const dockerEnv = {
-    ...process.env,
-    MINIO_ROOT_USER: rootUser,
-    MINIO_ROOT_PASSWORD: rootPassword,
-  };
+  const buckets = [`dataset-plan-${owner}`, `dataset-package-${owner}`];
+  const accounts = ["admin", "plan", "request"].map((role) => ({
+    name: `dataset-${role}-${owner}`,
+    accountId: `dataset-${role}-${owner}`,
+    accessKeyId: randomBytes(16).toString("hex"),
+    secretAccessKey: randomBytes(32).toString("hex"),
+  }));
   const ids = new Map();
   const clients = new Set();
   let poolFailure;
@@ -201,44 +171,75 @@ export async function createDatasetPositiveFixture(env = process.env) {
     connection,
     observer,
     directory,
-    closed;
-  const docker = (args, options) => child("docker", args, options);
-  async function inspect(id, image) {
+    closed,
+    storeContract,
+    configBytes,
+    disposalStarted;
+  const remaining = (started) => {
+    const cap = Math.floor(60_000 - (performance.now() - started));
+    if (cap <= 0) throw new Error("us_dataset_positive_phase_exceeded");
+    return cap;
+  };
+  const docker = async (args) => {
+    try {
+      return await child("docker", args, { cap: remaining(disposalStarted ?? setupStarted) });
+    } catch (error) {
+      const operations = new Set(["create", "inspect", "start", "stop", "rm", "container"]);
+      console.info(
+        "Positive fixture provider operation failed",
+        JSON.stringify({
+          operation: operations.has(args[0]) ? args[0] : "unknown",
+          category: datasetObjectStoreFailureCategory(error),
+          image: storeContract?.image,
+        }),
+      );
+      throw Object.assign(new Error("us_dataset_object_store_child_failed"), {
+        category: datasetObjectStoreFailureCategory(error),
+      });
+    }
+  };
+  async function assertConfig() {
+    const file = await lstat(storeContract.configPath),
+      parent = await lstat(directory);
+    if (
+      !file.isFile() ||
+      file.uid !== uid ||
+      file.gid !== gid ||
+      (file.mode & 0o777) !== 0o600 ||
+      !parent.isDirectory() ||
+      parent.uid !== uid ||
+      parent.gid !== gid ||
+      (parent.mode & 0o777) !== 0o700 ||
+      !(await readFile(storeContract.configPath)).equals(configBytes)
+    )
+      throw new Error("us_dataset_object_store_config_failed");
+  }
+  async function inspect(id) {
     assert.match(id, /^[a-f0-9]{64}$/);
     const result = JSON.parse((await docker(["inspect", id])).stdout);
     assert.equal(result.length, 1);
     const item = result[0];
-    assertDatasetPositiveContainer(item, { id, image, owner, directory });
+    assertDatasetPositiveContainer(item, { ...storeContract, id, uid, gid });
+    await assertConfig();
     return item;
   }
-  async function ownContainer(args, image, environment) {
-    const result = await docker(
-      [
-        "create",
-        "--log-driver",
-        "none",
-        "--label",
-        label,
-        ...args,
-        image,
-        ...(image === MINIO_IMAGE ? ["server", "/data"] : []),
-      ],
-      { env: environment },
-    );
+  async function ownContainer() {
+    await assertConfig();
+    const result = await docker(storeContract.args);
     const id = result.stdout.trim();
     // Until inspection succeeds this ID is unknown and cannot be cleaned here.
-    await inspect(id, image);
-    ids.set(id, image);
+    const item = await inspect(id);
+    ids.set(id, item.Image);
     console.info(
       "Positive fixture container ownership attested",
-      JSON.stringify({ id, image, imageId: (await inspect(id, image)).Image }),
+      JSON.stringify({ id, image: storeContract.image, imageId: item.Image }),
     );
     return id;
   }
   async function remove(id) {
-    const image = ids.get(id);
-    if (!image) throw new Error("us_dataset_positive_unknown_container");
-    await inspect(id, image);
+    const imageId = ids.get(id);
+    if (!imageId) throw new Error("us_dataset_positive_unknown_container");
+    assert.equal((await inspect(id)).Image, imageId);
     await docker(["rm", id]);
     const remaining = (
       await docker(["container", "ls", "--all", "--quiet", "--no-trunc", "--filter", `id=${id}`])
@@ -246,12 +247,13 @@ export async function createDatasetPositiveFixture(env = process.env) {
     assert.equal(remaining, "");
     ids.delete(id);
   }
-  function s3(credentials) {
+  function s3(credentials, anonymous = false) {
     const client = new sdk.S3Client({
       endpoint: "http://127.0.0.1:19002",
       region: "us-east-1",
       forcePathStyle: true,
       credentials,
+      ...(anonymous ? { signer: { sign: async (request) => request } } : {}),
       maxAttempts: 1,
       requestHandler: new NodeHttpHandler({
         connectionTimeout: 3000,
@@ -266,6 +268,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
   async function close() {
     if (closed) return closed;
     closed = (async () => {
+      disposalStarted = performance.now();
       const failures = [];
       const settle = async (action) => {
         try {
@@ -309,14 +312,17 @@ export async function createDatasetPositiveFixture(env = process.env) {
             await admin.pool.end();
           }
         });
-      for (const [id, image] of ids)
+      for (const [id, imageId] of ids)
         await settle(async () => {
-          const item = await inspect(id, image);
+          const item = await inspect(id);
+          assert.equal(item.Image, imageId);
           if (item.State.Running) await docker(["stop", id]);
           await remove(id);
           console.info(`Positive fixture container normally removed and absence verified: ${id}`);
         });
       if (directory) await settle(() => rm(directory, { recursive: true }));
+      if (performance.now() - disposalStarted > 60_000)
+        failures.push(new Error("us_dataset_positive_disposal_exceeded"));
       if (failures.length)
         throw new AggregateError(failures, "us_dataset_positive_disposal_failed");
     })();
@@ -370,159 +376,63 @@ export async function createDatasetPositiveFixture(env = process.env) {
       { mode: 0o600, flag: "wx" },
     );
     const { snapshotUsDatasetTables } = require(snapshotPath);
-    const id = await ownContainer(
-      [
-        "--name",
-        `us-dataset-positive-${owner}`,
-        "--publish",
-        "127.0.0.1:19002:9000",
-        "--tmpfs",
-        "/data:rw",
-        "--env",
-        "MINIO_ROOT_USER",
-        "--env",
-        "MINIO_ROOT_PASSWORD",
-      ],
-      MINIO_IMAGE,
-      dockerEnv,
+    storeContract = datasetObjectStoreContainer({
+      owner,
+      uid,
+      gid,
+      configPath: join(directory, "s3.json"),
+    });
+    configBytes = Buffer.from(
+      JSON.stringify(datasetObjectStoreConfig({ ...storeContract, uid, gid, buckets, accounts })),
     );
+    await writeFile(storeContract.configPath, configBytes, { mode: 0o600, flag: "wx" });
+    const id = await ownContainer();
     await docker(["start", id]);
-    // A finite health wait only, never a dataset/command retry.
+    const rootClient = s3(accounts[0]);
+    const signal = AbortSignal.timeout(remaining(setupStarted));
+    // Only readiness is polled; commands, setup probes and dataset calls never retry.
     let healthy = false;
     while (performance.now() - setupStarted < 60_000) {
       try {
-        const response = await fetch("http://127.0.0.1:19002/minio/health/ready", {
-          signal: AbortSignal.timeout(2000),
-        });
-        if (response.ok) {
-          healthy = true;
-          break;
-        }
+        await rootClient.send(new sdk.ListBucketsCommand({}), { abortSignal: signal });
+        healthy = true;
+        break;
       } catch {
-        /* finite readiness only */
+        if (signal.aborted) break;
       }
       await new Promise((accept) => setTimeout(accept, 100));
     }
-    assert.equal(healthy, true, "pinned provider did not become ready within setup cap");
-    const rootClient = s3({ accessKeyId: rootUser, secretAccessKey: rootPassword });
-    const buckets = [`dataset-plan-${owner}`, `dataset-package-${owner}`];
-    await writeFile(
-      join(directory, "config.json"),
-      JSON.stringify({
-        version: "10",
-        aliases: {
-          fixture: {
-            url: "http://127.0.0.1:19002",
-            accessKey: rootUser,
-            secretKey: rootPassword,
-            api: "S3v4",
-            path: "on",
-          },
-        },
-      }),
-      { mode: 0o600, flag: "wx" },
+    if (!healthy) throw new Error("us_dataset_object_store_readiness_failed");
+    try {
+      for (const bucket of buckets)
+        await rootClient.send(new sdk.CreateBucketCommand({ Bucket: bucket }), {
+          abortSignal: signal,
+        });
+    } catch (error) {
+      throw Object.assign(new Error("us_dataset_object_store_bootstrap_failed"), {
+        category: datasetObjectStoreFailureCategory(error),
+      });
+    }
+    const credentials = accounts
+      .slice(1)
+      .map(({ accessKeyId, secretAccessKey }) => ({ accessKeyId, secretAccessKey }));
+    // Only the anonymous negative probes omit signing; real SDK HTTP still runs.
+    const anonymous = s3(
+      { accessKeyId: "anonymous-probe", secretAccessKey: "anonymous-probe" },
+      true,
     );
-    const credentials = [];
-    for (const [index, bucket] of buckets.entries()) {
-      await rootClient.send(new sdk.CreateBucketCommand({ Bucket: bucket }));
-      const policy = {
-        Version: "2012-10-17",
-        Statement: [
-          {
-            Effect: "Allow",
-            Action: ["s3:GetBucketLocation", "s3:ListBucket"],
-            Resource: [`arn:aws:s3:::${bucket}`],
-          },
-          {
-            Effect: "Allow",
-            Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-            Resource: [`arn:aws:s3:::${bucket}/*`],
-          },
-        ],
-      };
-      await writeFile(join(directory, `policy-${index}.json`), JSON.stringify(policy), {
-        mode: 0o600,
-        flag: "wx",
-      });
-      // create then attest before start; no credentials appear in Docker arguments.
-      const created = await docker([
-        "create",
-        "--log-driver",
-        "none",
-        "--label",
-        label,
-        "--network",
-        "host",
-        "--volume",
-        `${directory}:/owned:ro`,
-        MC_IMAGE,
-        "--config-dir",
-        "/owned",
-        "--json",
-        "admin",
-        "user",
-        "svcacct",
-        "add",
-        "fixture",
-        rootUser,
-        "--policy",
-        `/owned/policy-${index}.json`,
-      ]);
-      const clientId = created.stdout.trim();
-      await inspect(clientId, MC_IMAGE);
-      ids.set(clientId, MC_IMAGE);
-      const output = await docker(["start", "--attach", clientId]);
-      assert.equal((await inspect(clientId, MC_IMAGE)).State.ExitCode, 0);
-      await remove(clientId);
-      const account = JSON.parse(output.stdout);
-      assert.equal(account.status, "success");
-      assert.equal(typeof account.accessKey, "string");
-      assert.equal(typeof account.secretKey, "string");
-      credentials.push({ accessKeyId: account.accessKey, secretAccessKey: account.secretKey });
-    }
-    assert.ok(credentials[0].accessKeyId !== credentials[1].accessKeyId);
-    for (const [index, account] of credentials.entries()) {
-      const client = s3(account);
-      await client.send(new sdk.ListObjectsV2Command({ Bucket: buckets[index] }));
-      await assert.rejects(
-        client.send(new sdk.ListObjectsV2Command({ Bucket: buckets[1 - index] })),
-        (error) => error.$metadata?.httpStatusCode === 403,
-      );
-      const key = "owned-private-permission-probe";
-      await rootClient.send(
-        new sdk.PutObjectCommand({
-          Bucket: buckets[index],
-          Key: key,
-          Body: Buffer.from("owned synthetic permission probe"),
-        }),
-      );
-      const ownObject = await client.send(
-        new sdk.GetObjectCommand({ Bucket: buckets[index], Key: key }),
-      );
-      await ownObject.Body.transformToByteArray();
-      await assert.rejects(
-        s3(credentials[1 - index]).send(
-          new sdk.GetObjectCommand({ Bucket: buckets[index], Key: key }),
-        ),
-        (error) => error.$metadata?.httpStatusCode === 403,
-      );
-      await assert.rejects(
-        s3(credentials[1 - index]).send(
-          new sdk.PutObjectCommand({
-            Bucket: buckets[index],
-            Key: "denied",
-            Body: Buffer.alloc(0),
-          }),
-        ),
-        (error) => error.$metadata?.httpStatusCode === 403,
-      );
-      const response = await fetch(`http://127.0.0.1:19002/${buckets[index]}/${key}`, {
-        signal: AbortSignal.timeout(15000),
-      });
-      await response.arrayBuffer();
-      assert.equal(response.status, 403);
-      await client.send(new sdk.DeleteObjectCommand({ Bucket: buckets[index], Key: key }));
-    }
+    const capabilities = await verifyDatasetObjectStoreCapabilities({
+      admin: rootClient,
+      plan: s3(credentials[0]),
+      request: s3(credentials[1]),
+      anonymous,
+      buckets,
+      signal,
+    });
+    console.info(
+      "Positive fixture provider capabilities verified",
+      JSON.stringify({ image: storeContract.image, ...capabilities }),
+    );
     observer = await startDatasetProviderObservation({ port: 19000, upstreamPort: 19002 });
     for (const [index, prefix] of ["US_PLAN_ARTIFACT_S3", "US_REQUEST_PACKAGE_S3"].entries())
       Object.assign(environment, {
@@ -596,7 +506,14 @@ export async function createDatasetPositiveFixture(env = process.env) {
       async privateBytes() {
         const values = [];
         for (const bucket of buckets) {
-          const listed = await rootClient.send(new sdk.ListObjectsV2Command({ Bucket: bucket }));
+          let listed;
+          try {
+            listed = await rootClient.send(new sdk.ListObjectsV2Command({ Bucket: bucket }));
+          } catch (error) {
+            throw Object.assign(new Error("us_dataset_object_store_measurement_failed"), {
+              category: datasetObjectStoreFailureCategory(error),
+            });
+          }
           assert.ok(!listed.IsTruncated);
           values.push((listed.Contents ?? []).reduce((n, object) => n + object.Size, 0));
         }

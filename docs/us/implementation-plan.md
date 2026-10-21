@@ -62,9 +62,12 @@ Task3B now adds the separate `dataset_command_positive` CI harness for actual
 compiled initialize and verify against the same independently owned
 `markiro_us_dev`/`markiro_us` installation and real private provider. Its source
 records resources, full persisted-state equality, real provider read-only replay
-and normal exact disposal; actual positive execution remains pending CI together
-with the current15 native cases. The shared local base remains unpopulated by
-this work. Remaining demo acceptance includes those CLI gates and measurements,
+and normal exact disposal. Exact653 current15 native and full Trace CI passed;
+its positive attempt failed at provider creation before initialize. The isolated
+provider is now replaced in source with digest-pinned SeaweedFS4.48, actual
+nonroot CI ownership and mandatory conditional-write/checksum/403 setup probes.
+New-source actual positive and all CI gates remain pending. The shared local base
+remains unpopulated by this work. Remaining demo acceptance includes those CLI gates and measurements,
 viewer/browser journeys and screenshots/video.
 Hosting outside Russia, live viewer access and release enablement remain
 external gates. Private provider transport in native tests is fixture-owned;

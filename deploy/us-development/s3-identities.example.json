@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "us-general-development",
+      "account": { "id": "us-general-development" },
+      "credentials": [{ "accessKey": "markiro_us", "secretKey": "markiro-us-development-only" }],
+      "actions": [
+        "Read:markiro-us-development",
+        "Write:markiro-us-development",
+        "List:markiro-us-development"
+      ]
+    }
+  ]
+}

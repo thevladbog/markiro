@@ -4132,7 +4132,45 @@ test("US dependency stack has private ports and independently named persistent d
   assert.equal(stack.services.postgres.environment.POSTGRES_DB, "markiro_us_dev");
   assert.deepEqual(stack.services.postgres.ports, ["127.0.0.1:55432:5432"]);
   assert.deepEqual(stack.services.mailpit.ports, ["127.0.0.1:11025:1025", "127.0.0.1:18025:8025"]);
-  assert.deepEqual(stack.services.minio.ports, ["127.0.0.1:19000:9000", "127.0.0.1:19001:9001"]);
+  assert.equal(stack.services.minio, undefined);
+  assert.equal(stack.services["minio-init"], undefined);
+  assert.equal(
+    stack.services.s3.image,
+    "chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d",
+  );
+  assert.deepEqual(stack.services.s3.ports, ["127.0.0.1:19000:8333"]);
+  assert.deepEqual(stack.services.s3.volumes, [
+    "s3data:/data",
+    "./s3-identities.example.json:/etc/us-s3.json:ro",
+  ]);
+  assert.ok(stack.services.s3.command.includes("-bucket=markiro-us-development"));
+  assert.ok(stack.services.s3.command.includes("-s3.config=/etc/us-s3.json"));
+  for (const flag of [
+    "-admin.ui=false",
+    "-webdav=false",
+    "-s3.port.iceberg=0",
+    "-s3.port.lance=0",
+    "-master.telemetry=false",
+    "-s3.autoCreateBucket=false",
+  ])
+    assert.ok(stack.services.s3.command.includes(flag));
+  const config = JSON.parse(
+    readFileSync("deploy/us-development/s3-identities.example.json", "utf8"),
+  );
+  assert.deepEqual(config.identities, [
+    {
+      name: "us-general-development",
+      account: { id: "us-general-development" },
+      credentials: [{ accessKey: "markiro_us", secretKey: "markiro-us-development-only" }],
+      actions: [
+        "Read:markiro-us-development",
+        "Write:markiro-us-development",
+        "List:markiro-us-development",
+      ],
+    },
+  ]);
+  assert.ok(Object.hasOwn(stack.volumes, "s3data"));
+  assert.ok(!Object.hasOwn(stack.volumes, "miniodata"));
   for (const volume of Object.values(stack.volumes)) {
     assert.equal(volume?.external, undefined);
     assert.equal(volume?.name, undefined);

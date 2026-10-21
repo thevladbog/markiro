@@ -32,39 +32,26 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: markiro_us
-      MINIO_ROOT_PASSWORD: markiro-us-development-only
-    ports:
-      - "127.0.0.1:19000:9000"
-      - "127.0.0.1:19001:9001"
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: markiro_us
-      MINIO_ROOT_PASSWORD: markiro-us-development-only
-      MINIO_BUCKET: markiro-us-development
-    entrypoint: ["/bin/sh", "-c"]
+  s3:
+    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
     command:
-      - >-
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
-        mc mb --ignore-existing "local/$${MINIO_BUCKET}" &&
-        mc anonymous set none "local/$${MINIO_BUCKET}"
+      - mini
+      - -dir=/data
+      - -s3.port=8333
+      - -s3.config=/etc/us-s3.json
+      - -bucket=markiro-us-development
+      - -admin.ui=false
+      - -webdav=false
+      - -s3.port.iceberg=0
+      - -s3.port.lance=0
+      - -master.telemetry=false
+      - -s3.autoCreateBucket=false
+    ports:
+      - "127.0.0.1:19000:8333"
+    volumes:
+      - s3data:/data
+      - ./s3-identities.example.json:/etc/us-s3.json:ro
 volumes:
   pgdata:
   mailpitdata:
-  miniodata:
+  s3data:

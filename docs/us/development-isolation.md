@@ -29,20 +29,33 @@ In particular, never dispatch the infrastructure workflow from `main` with a US 
 
 Use only synthetic data. Never copy the primary checkout's `.env`, database, volumes, backups or credentials. `deploy/us-development/compose.yml` is a standalone dependency stack, not an overlay on production or the normal development stack:
 
-| Surface               | US local endpoint | Isolation                                                   |
-| --------------------- | ----------------- | ----------------------------------------------------------- |
-| PostgreSQL            | `127.0.0.1:55432` | Database `markiro_us_dev`, separate user and project volume |
-| S3-compatible storage | `127.0.0.1:19000` | Bucket `markiro-us-development`, separate project volume    |
-| Storage console       | `127.0.0.1:19001` | Loopback only                                               |
-| SMTP capture          | `127.0.0.1:11025` | Mailpit, no external SMTP delivery                          |
-| Mail UI               | `127.0.0.1:18025` | Separate project volume, loopback only                      |
+| Surface               | US local endpoint | Isolation                                                           |
+| --------------------- | ----------------- | ------------------------------------------------------------------- |
+| PostgreSQL            | `127.0.0.1:55432` | Database `markiro_us_dev`, separate user and project volume         |
+| S3-compatible storage | `127.0.0.1:19000` | SeaweedFS4.48, bucket `markiro-us-development`, new `s3data` volume |
+| SMTP capture          | `127.0.0.1:11025` | Mailpit, no external SMTP delivery                                  |
+| Mail UI               | `127.0.0.1:18025` | Separate project volume, loopback only                              |
 
 The fixed Compose project is `markiro-us-development`. Do not override it with `-p`, `COMPOSE_PROJECT_NAME`, external volumes, or additional Compose files. Do not run the normal `docker-compose.dev.yml` for US work. After local validation, dependencies can be started explicitly with:
 
 ```sh
-docker compose --env-file /dev/null -f deploy/us-development/compose.yml up -d postgres mailpit minio
-docker compose --env-file /dev/null -f deploy/us-development/compose.yml run --rm minio-init
+docker compose --env-file /dev/null -f deploy/us-development/compose.yml up -d postgres mailpit s3
 ```
+
+The provider is pinned to `chrislusf/seaweedfs:4.48` and manifest digest
+`sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d`.
+Its explicit `mini -bucket=markiro-us-development` bootstrap creates only the
+general local bucket; `s3-identities.example.json` contains synthetic credentials
+matching `local.env.example`, restricted to that bucket. There is no anonymous
+identity, public console or19001 mapping; master/filer/RPC ports are not published.
+Admin UI, WebDAV, Iceberg/Lance and telemetry are disabled. These general
+credentials must never be used for private Plan/Request storage.
+
+This is a source-only provider replacement, not an existing-stack migration.
+The former `miniodata` volume is not mounted, migrated or deleted. Do not use
+`down -v`, remove old resources or take over an occupied19000 port implicitly;
+resolve ownership of an existing local stack before an explicit operator start.
+No local service or provider compatibility was exercised by the source checks.
 
 `local.env.example` in the same directory contains matching synthetic loopback settings. A personal copy belongs at the ignored `.env.us-development`; never overwrite an existing file. Application ports are reserved as API `3100`, admin `5174` and platform admin `5474`. No containers or application servers are started by the isolation checker itself; the separately invoked runtime smoke test starts and stops a loopback-only API.
 

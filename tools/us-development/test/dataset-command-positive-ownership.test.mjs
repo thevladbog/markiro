@@ -109,8 +109,8 @@ test(
       "utf8",
     );
     for (const value of [
-      "minio/minio:RELEASE.2025-09-07T16-13-09Z",
-      "minio/mc:RELEASE.2025-08-13T08-35-41Z",
+      "verifyDatasetObjectStoreCapabilities",
+      "datasetObjectStoreContainer",
       "port: 19000, upstreamPort: 19002",
       'DROP DATABASE "markiro_us_dev"',
       '"/usr/bin/time"',
@@ -207,24 +207,50 @@ test(
     );
     const target = {
       id: "a".repeat(64),
-      owner: "owned-fixture",
-      image: "minio/minio:RELEASE.2025-09-07T16-13-09Z",
+      owner: "11111111-2222-4333-8444-555555555555",
+      image:
+        "chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d",
+      uid: 1001,
+      gid: 1001,
+      configPath: "/tmp/owned-positive/s3.json",
     };
     const container = {
       Id: target.id,
-      Image: `sha256:${"b".repeat(64)}`,
+      Image: "sha256:7b5ca1f11aa4c91593612d2d4a9e253ec9152a4bd13a19e551290a042a4c52f5",
       Config: {
         Image: target.image,
         Labels: { "markiro.us-dataset-positive": target.owner },
-        Cmd: ["server", "/data"],
+        Entrypoint: ["/usr/bin/weed"],
+        User: "1001:1001",
+        WorkingDir: "/data",
+        Cmd: [
+          "mini",
+          "-dir=/data",
+          "-s3.port=8333",
+          "-s3.config=/run/us-s3.json",
+          "-admin.ui=false",
+          "-webdav=false",
+          "-s3.port.iceberg=0",
+          "-s3.port.lance=0",
+          "-master.telemetry=false",
+          "-s3.autoCreateBucket=false",
+        ],
       },
       HostConfig: {
         Binds: [],
         LogConfig: { Type: "none" },
-        Tmpfs: { "/data": "rw" },
-        PortBindings: { "9000/tcp": [{ HostIp: "127.0.0.1", HostPort: "19002" }] },
+        Mounts: [
+          { Type: "bind", Source: target.configPath, Target: "/run/us-s3.json", ReadOnly: true },
+        ],
+        Tmpfs: { "/data": "rw,uid=1001,gid=1001,mode=0700" },
+        PortBindings: { "8333/tcp": [{ HostIp: "127.0.0.1", HostPort: "19002" }] },
+        Privileged: false,
+        PublishAllPorts: false,
+        NetworkMode: "default",
       },
-      Mounts: [],
+      Mounts: [
+        { Type: "bind", Source: target.configPath, Destination: "/run/us-s3.json", RW: false },
+      ],
     };
     assert.doesNotThrow(() => assertDatasetPositiveContainer(container, target));
     for (const mutate of [
@@ -232,19 +258,19 @@ test(
         c.Id = "c".repeat(64);
       },
       (c) => {
-        c.Config.Image = "minio/minio:latest";
+        c.Config.Image = "chrislusf/seaweedfs:latest";
       },
       (c) => {
         c.Config.Labels["markiro.us-dataset-positive"] = "unknown";
       },
       (c) => {
-        c.Config.Cmd = ["server", "/external"];
+        c.Config.Cmd = ["mini", "-dir=/external"];
       },
       (c) => {
         c.HostConfig.Binds = ["production:/data"];
       },
       (c) => {
-        c.HostConfig.PortBindings["9000/tcp"][0].HostIp = "0.0.0.0";
+        c.HostConfig.PortBindings["8333/tcp"][0].HostIp = "0.0.0.0";
       },
       (c) => {
         c.HostConfig.LogConfig.Type = "json-file";
@@ -254,56 +280,23 @@ test(
       mutate(candidate);
       assert.throws(() => assertDatasetPositiveContainer(candidate, target));
     }
-    const clientTarget = {
-      ...target,
-      image: "minio/mc:RELEASE.2025-08-13T08-35-41Z",
-      directory: "/tmp/owned-positive",
-    };
-    const client = {
-      Id: target.id,
-      Image: container.Image,
-      Config: {
-        Image: clientTarget.image,
-        Labels: container.Config.Labels,
-        Cmd: [
-          "--config-dir",
-          "/owned",
-          "--json",
-          "admin",
-          "user",
-          "svcacct",
-          "add",
-          "fixture",
-          "datasetfixtureadmin",
-          "--policy",
-          "/owned/policy-0.json",
-        ],
-      },
-      HostConfig: {
-        Binds: ["/tmp/owned-positive:/owned:ro"],
-        NetworkMode: "host",
-        LogConfig: { Type: "none" },
-      },
-      Mounts: [{ Source: "/tmp/owned-positive", Destination: "/owned", RW: false }],
-    };
-    assert.doesNotThrow(() => assertDatasetPositiveContainer(client, clientTarget));
     for (const mutate of [
       (c) => {
-        c.HostConfig.Binds = ["/unknown:/owned:ro"];
+        c.HostConfig.Mounts[0].Source = "/unknown/config.json";
       },
       (c) => {
         c.Mounts[0].RW = true;
       },
       (c) => {
-        c.Config.Cmd[8] = "unknown-account";
+        c.Config.User = "0:0";
       },
       (c) => {
-        c.Config.Cmd[10] = "/personal/policy.json";
+        c.Config.Cmd[3] = "-s3.config=/personal/config.json";
       },
     ]) {
-      const candidate = structuredClone(client);
+      const candidate = structuredClone(container);
       mutate(candidate);
-      assert.throws(() => assertDatasetPositiveContainer(candidate, clientTarget));
+      assert.throws(() => assertDatasetPositiveContainer(candidate, target));
     }
   },
 );
@@ -354,6 +347,15 @@ test(
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, "us_dataset_positive_ci_only\n");
+    // Even forged CI metadata cannot reach acquisition as root. This negative
+    // child installs I/O tripwires only; it cannot produce a successful fixture.
+    const rootProbe = `import net from 'node:net'; import cp from 'node:child_process'; import {syncBuiltinESMExports} from 'node:module'; import {createDatasetPositiveFixture} from './tools/us-development/test/support/dataset-command-positive-fixture.mjs'; const fail=()=>{throw Error('forbidden_io_opened')}; net.Socket.prototype.connect=fail; net.Server.prototype.listen=fail; cp.spawn=fail; syncBuiltinESMExports(); Object.defineProperty(process,'platform',{value:'linux'}); process.getuid=()=>0; process.getgid=()=>1001; try {await createDatasetPositiveFixture(${JSON.stringify(trusted)}); process.exitCode=2} catch(e){if(e.message!=='us_dataset_object_store_config_failed')throw e; console.log(e.message)}`;
+    const rootResult = spawnSync(process.execPath, ["--input-type=module", "-e", rootProbe], {
+      encoding: "utf8",
+      timeout: 4000,
+    });
+    assert.equal(rootResult.status, 0, rootResult.stderr);
+    assert.equal(rootResult.stdout, "us_dataset_object_store_config_failed\n");
     const smoke = spawnSync(
       process.execPath,
       ["--test", "tools/us-development/test/dataset-command-positive.smoke.mjs"],
