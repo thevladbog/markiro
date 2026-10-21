@@ -2,6 +2,7 @@ pub mod api;
 pub mod checks;
 pub mod gen;
 pub mod histogram;
+pub mod host;
 pub mod metrics;
 pub mod procstat;
 pub mod profile;
