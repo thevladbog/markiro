@@ -202,6 +202,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # ubuntu-latest moved to 26.04, where /tmp is a tmpfs. Astro moves the
+      # prerendered assets out of apps/landing/.astro with rename(), so the
+      # landing render tests' build into os.tmpdir() failed with EXDEV (run
+      # 39546812945). Temporary directories stay on the workspace disk; turbo
+      # passes TMPDIR through (turbo.json globalPassThroughEnv).
+      - run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       # No Postgres and no DATABASE_URL on purpose: every suite in this slice
       # is database-free, and a suite that grows a database dependency must
       # move to verify-api-tests instead of silently skipping here. The
@@ -301,7 +307,10 @@ jobs:
   production-bundle:
     needs: classify-changes
     if: needs.classify-changes.outputs.production_bundle == 'true'
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 (ubuntu-latest since October 2026) the backup
+    # harness's recovery-image export fails with ERR_RECOVERY_IMAGE (runs
+    # 39549522646, 39544537071; 24.04 passes). Move together with a harness fix.
+    runs-on: ubuntu-24.04
     # Galleries, image builds and landing checks take ~20 minutes on slow runners.
     # Leave time for migrations and the production/API-docs smoke checks as well.
     # The shift and National Catalog import instruction frames added ~4 minutes

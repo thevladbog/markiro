@@ -80,6 +80,8 @@ import { PlatformAuditController } from "../src/platform-auth/platform-audit.con
 import { PlatformMeController } from "../src/platform-auth/platform-me.controller";
 import { PlatformTeamController } from "../src/platform-auth/platform-team.controller";
 import { PlatformTeamService } from "../src/platform-auth/platform-team.service";
+import { PlatformLeadsController } from "../src/modules/landing-leads/platform-leads.controller";
+import { PlatformLeadsService } from "../src/modules/landing-leads/platform-leads.service";
 import {
   CURRENT_SAAS_ROUTE_KEYS,
   CURRENT_SAAS_ROUTES,
@@ -193,6 +195,7 @@ async function createPlatformDocument(): Promise<{
     StandaloneSitesService,
     StandaloneLicenseIssuanceService,
     StandaloneDiagnosticsService,
+    PlatformLeadsService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
@@ -226,6 +229,7 @@ async function createPlatformDocument(): Promise<{
       PlatformGrantRollbackController,
       PlatformStandaloneLicensesController,
       PlatformStandaloneDiagnosticsController,
+      PlatformLeadsController,
     ],
     providers,
   }).compile();
@@ -250,7 +254,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(268);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(281);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

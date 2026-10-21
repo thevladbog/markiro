@@ -1,5 +1,5 @@
 {
-  "id": "4697fef3-1f84-449d-9614-942d61bba8c4",
+  "id": "29563524-adfb-4043-aef5-af09ecd3ae29",
   "prevId": "e5ad84d4-c785-4aaa-8585-b7e63ceb3f93",
   "version": "7",
   "dialect": "postgresql",
@@ -13304,7 +13304,7 @@
       "checkConstraints": {
         "commercial_offer_lines_commercial_terms_check": {
           "name": "commercial_offer_lines_commercial_terms_check",
-          "value": "\"commercial_offer_lines\".\"commercial_terms\" is null or coalesce((\n    jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\") = 'object'\n    and \"commercial_offer_lines\".\"commercial_terms\" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']\n    and jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'documentNameRu') = 'string'\n    and length(btrim(\"commercial_offer_lines\".\"commercial_terms\"->>'documentNameRu')) between 1 and 300\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'documentNameEn' = 'null'::jsonb or (jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'documentNameEn') = 'string' and length(btrim(\"commercial_offer_lines\".\"commercial_terms\"->>'documentNameEn')) between 1 and 300))\n    and case when jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'sellerPolicyRevision') = 'number' and (\"commercial_offer_lines\".\"commercial_terms\"->>'sellerPolicyRevision') ~ '^[1-9][0-9]{0,9}$' then (\"commercial_offer_lines\".\"commercial_terms\"->>'sellerPolicyRevision')::numeric <= 2147483647 else false end\n    and (\n      (\"commercial_offer_lines\".\"commercial_terms\"->'version' = '1'::jsonb\n        and \"commercial_offer_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule'] = '{}'::jsonb\n        and ((\"commercial_offer_lines\".\"kind\"::text in ('plan','addon') and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n          and \"commercial_offer_lines\".\"commercial_terms\"->>'billingPeriod' in ('month','year') and \"commercial_offer_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n          and \"commercial_offer_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current') and (\"commercial_offer_lines\".\"kind\" <> 'plan' or \"commercial_offer_lines\".\"quantity\" = 1))\n          or (\"commercial_offer_lines\".\"kind\"::text in ('service','custom') and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n          and \"commercial_offer_lines\".\"commercial_terms\"->'billingPeriod' = 'null'::jsonb and \"commercial_offer_lines\".\"commercial_terms\"->'billingTimezone' = 'null'::jsonb and \"commercial_offer_lines\".\"commercial_terms\"->'activationRule' = 'null'::jsonb)))\n      or (\"commercial_offer_lines\".\"commercial_terms\"->'version' = '2'::jsonb\n        and \"commercial_offer_lines\".\"kind\"::text = 'service' and \"commercial_offer_lines\".\"quantity\" = 1\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'billingPeriod' = 'month'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'activationRule' = 'after_current'\n        and \"commercial_offer_lines\".\"commercial_terms\" ? 'serviceTerms'\n        and \"commercial_offer_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','serviceTerms'] = '{}'::jsonb\n        and jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')) = 'object'\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms') ?& array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn']\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms') - array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn'] = '{}'::jsonb\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'cadence' = 'month'\n    and case when jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'includedMinutes') = 'number' and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes') ~ '^[1-9][0-9]{0,9}$' then ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 2147483647 else false end\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 100000\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'carryover' = 'none'\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'excessPolicy' = 'external_approval'\n    and jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'scopeRu') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeRu')) between 1 and 4000\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeEn')) between 1 and 4000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursRu')) between 1 and 1000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursEn')) between 1 and 1000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsRu')) between 1 and 1000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsEn')) between 1 and 1000)))\n      or (\"commercial_offer_lines\".\"commercial_terms\"->'version' = '3'::jsonb\n        and \"commercial_offer_lines\".\"kind\"::text = 'plan' and \"commercial_offer_lines\".\"quantity\" = 1\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'billingPeriod' = 'custom'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current')\n        and \"commercial_offer_lines\".\"commercial_terms\" ?& array['termStart','termEnd']\n        and \"commercial_offer_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','termStart','termEnd'] = '{}'::jsonb\n        and (jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'termStart') = 'string'\n    and \"commercial_offer_lines\".\"commercial_terms\"->>'termStart' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')\n        and (jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'termEnd') = 'string'\n    and \"commercial_offer_lines\".\"commercial_terms\"->>'termEnd' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'termStart' <= \"commercial_offer_lines\".\"commercial_terms\"->>'termEnd')\n    )\n  ), false)"
+          "value": "\"commercial_offer_lines\".\"commercial_terms\" is null or coalesce((\n    jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\") = 'object'\n    and \"commercial_offer_lines\".\"commercial_terms\" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']\n    and jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'documentNameRu') = 'string'\n    and length(btrim(\"commercial_offer_lines\".\"commercial_terms\"->>'documentNameRu')) between 1 and 300\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'documentNameEn' = 'null'::jsonb or (jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'documentNameEn') = 'string' and length(btrim(\"commercial_offer_lines\".\"commercial_terms\"->>'documentNameEn')) between 1 and 300))\n    and case when jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'sellerPolicyRevision') = 'number' and (\"commercial_offer_lines\".\"commercial_terms\"->>'sellerPolicyRevision') ~ '^[1-9][0-9]{0,9}$' then (\"commercial_offer_lines\".\"commercial_terms\"->>'sellerPolicyRevision')::numeric <= 2147483647 else false end\n    and (\n      (\"commercial_offer_lines\".\"commercial_terms\"->'version' = '1'::jsonb\n        and \"commercial_offer_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule'] = '{}'::jsonb\n        and ((\"commercial_offer_lines\".\"kind\"::text in ('plan','addon') and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n          and \"commercial_offer_lines\".\"commercial_terms\"->>'billingPeriod' in ('month','year') and \"commercial_offer_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n          and \"commercial_offer_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current') and (\"commercial_offer_lines\".\"kind\" <> 'plan' or \"commercial_offer_lines\".\"quantity\" = 1))\n          or (\"commercial_offer_lines\".\"kind\"::text in ('service','custom') and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n          and \"commercial_offer_lines\".\"commercial_terms\"->'billingPeriod' = 'null'::jsonb and \"commercial_offer_lines\".\"commercial_terms\"->'billingTimezone' = 'null'::jsonb and \"commercial_offer_lines\".\"commercial_terms\"->'activationRule' = 'null'::jsonb)))\n      or (\"commercial_offer_lines\".\"commercial_terms\"->'version' = '2'::jsonb\n        and \"commercial_offer_lines\".\"kind\"::text = 'service' and \"commercial_offer_lines\".\"quantity\" = 1\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'billingPeriod' = 'month'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n        and \"commercial_offer_lines\".\"commercial_terms\"->>'activationRule' = 'after_current'\n        and \"commercial_offer_lines\".\"commercial_terms\" ? 'serviceTerms'\n        and \"commercial_offer_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','serviceTerms'] = '{}'::jsonb\n        and jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')) = 'object'\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms') ?& array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn']\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms') - array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn'] = '{}'::jsonb\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'cadence' = 'month'\n    and case when jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'includedMinutes') = 'number' and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes') ~ '^[1-9][0-9]{0,9}$' then ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 2147483647 else false end\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 100000\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'carryover' = 'none'\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'excessPolicy' = 'external_approval'\n    and jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'scopeRu') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeRu')) between 1 and 4000\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeEn')) between 1 and 4000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursRu')) between 1 and 1000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursEn')) between 1 and 1000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsRu')) between 1 and 1000))\n    and ((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn' = 'null'::jsonb or (jsonb_typeof((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn') = 'string' and length(btrim((\"commercial_offer_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsEn')) between 1 and 1000)))\n    )\n  ), false)"
         },
         "commercial_offer_lines_position_positive": {
           "name": "commercial_offer_lines_position_positive",
@@ -14813,7 +14813,7 @@
       "checkConstraints": {
         "subscription_addons_commercial_period_check": {
           "name": "subscription_addons_commercial_period_check",
-          "value": "\"subscription_addons\".\"commercial_period\" is null or coalesce((\n    jsonb_typeof(\"subscription_addons\".\"commercial_period\") = 'object'\n    and \"subscription_addons\".\"commercial_period\" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']\n    and \"subscription_addons\".\"commercial_period\" - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb\n    and \"subscription_addons\".\"commercial_period\"->>'billingPeriod' in ('month','year','custom') and \"subscription_addons\".\"commercial_period\"->>'billingTimezone' = 'Europe/Moscow'\n    and \"subscription_addons\".\"commercial_period\"->'calendarPolicyVersion' = '1'::jsonb\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'cycle') = 'number' and (\"subscription_addons\".\"commercial_period\"->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'anchorAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'startsAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'endsAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n  ), false)"
+          "value": "\"subscription_addons\".\"commercial_period\" is null or coalesce((\n    jsonb_typeof(\"subscription_addons\".\"commercial_period\") = 'object'\n    and \"subscription_addons\".\"commercial_period\" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']\n    and \"subscription_addons\".\"commercial_period\" - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb\n    and \"subscription_addons\".\"commercial_period\"->>'billingPeriod' in ('month','year') and \"subscription_addons\".\"commercial_period\"->>'billingTimezone' = 'Europe/Moscow'\n    and \"subscription_addons\".\"commercial_period\"->'calendarPolicyVersion' = '1'::jsonb\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'cycle') = 'number' and (\"subscription_addons\".\"commercial_period\"->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'anchorAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'startsAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'endsAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n  ), false)"
         },
         "subscription_addons_kind_check": {
           "name": "subscription_addons_kind_check",
@@ -15200,7 +15200,7 @@
       "checkConstraints": {
         "tenant_subscriptions_commercial_period_check": {
           "name": "tenant_subscriptions_commercial_period_check",
-          "value": "\"tenant_subscriptions\".\"commercial_period\" is null or coalesce((\n    jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\") = 'object'\n    and \"tenant_subscriptions\".\"commercial_period\" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']\n    and \"tenant_subscriptions\".\"commercial_period\" - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb\n    and \"tenant_subscriptions\".\"commercial_period\"->>'billingPeriod' in ('month','year','custom') and \"tenant_subscriptions\".\"commercial_period\"->>'billingTimezone' = 'Europe/Moscow'\n    and \"tenant_subscriptions\".\"commercial_period\"->'calendarPolicyVersion' = '1'::jsonb\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'cycle') = 'number' and (\"tenant_subscriptions\".\"commercial_period\"->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'anchorAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'startsAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'endsAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n  ), false)"
+          "value": "\"tenant_subscriptions\".\"commercial_period\" is null or coalesce((\n    jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\") = 'object'\n    and \"tenant_subscriptions\".\"commercial_period\" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']\n    and \"tenant_subscriptions\".\"commercial_period\" - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb\n    and \"tenant_subscriptions\".\"commercial_period\"->>'billingPeriod' in ('month','year') and \"tenant_subscriptions\".\"commercial_period\"->>'billingTimezone' = 'Europe/Moscow'\n    and \"tenant_subscriptions\".\"commercial_period\"->'calendarPolicyVersion' = '1'::jsonb\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'cycle') = 'number' and (\"tenant_subscriptions\".\"commercial_period\"->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'anchorAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'startsAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'endsAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n  ), false)"
         },
         "tenant_subscriptions_plan_kind_check": {
           "name": "tenant_subscriptions_plan_kind_check",
@@ -19155,7 +19155,7 @@
       "checkConstraints": {
         "invoice_lines_commercial_terms_check": {
           "name": "invoice_lines_commercial_terms_check",
-          "value": "\"invoice_lines\".\"commercial_terms\" is null or coalesce((\n    jsonb_typeof(\"invoice_lines\".\"commercial_terms\") = 'object'\n    and \"invoice_lines\".\"commercial_terms\" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']\n    and jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'documentNameRu') = 'string'\n    and length(btrim(\"invoice_lines\".\"commercial_terms\"->>'documentNameRu')) between 1 and 300\n    and (\"invoice_lines\".\"commercial_terms\"->'documentNameEn' = 'null'::jsonb or (jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'documentNameEn') = 'string' and length(btrim(\"invoice_lines\".\"commercial_terms\"->>'documentNameEn')) between 1 and 300))\n    and case when jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'sellerPolicyRevision') = 'number' and (\"invoice_lines\".\"commercial_terms\"->>'sellerPolicyRevision') ~ '^[1-9][0-9]{0,9}$' then (\"invoice_lines\".\"commercial_terms\"->>'sellerPolicyRevision')::numeric <= 2147483647 else false end\n    and (\n      (\"invoice_lines\".\"commercial_terms\"->'version' = '1'::jsonb\n        and \"invoice_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule'] = '{}'::jsonb\n        and ((\"invoice_lines\".\"kind\"::text in ('plan','addon') and \"invoice_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n          and \"invoice_lines\".\"commercial_terms\"->>'billingPeriod' in ('month','year') and \"invoice_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n          and \"invoice_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current') and (\"invoice_lines\".\"kind\" <> 'plan' or \"invoice_lines\".\"quantity\" = 1))\n          or (\"invoice_lines\".\"kind\"::text in ('service','custom') and \"invoice_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n          and \"invoice_lines\".\"commercial_terms\"->'billingPeriod' = 'null'::jsonb and \"invoice_lines\".\"commercial_terms\"->'billingTimezone' = 'null'::jsonb and \"invoice_lines\".\"commercial_terms\"->'activationRule' = 'null'::jsonb)))\n      or (\"invoice_lines\".\"commercial_terms\"->'version' = '2'::jsonb\n        and \"invoice_lines\".\"kind\"::text = 'service' and \"invoice_lines\".\"quantity\" = 1\n        and \"invoice_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n        and \"invoice_lines\".\"commercial_terms\"->>'billingPeriod' = 'month'\n        and \"invoice_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n        and \"invoice_lines\".\"commercial_terms\"->>'activationRule' = 'after_current'\n        and \"invoice_lines\".\"commercial_terms\" ? 'serviceTerms'\n        and \"invoice_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','serviceTerms'] = '{}'::jsonb\n        and jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')) = 'object'\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms') ?& array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn']\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms') - array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn'] = '{}'::jsonb\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'cadence' = 'month'\n    and case when jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'includedMinutes') = 'number' and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes') ~ '^[1-9][0-9]{0,9}$' then ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 2147483647 else false end\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 100000\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'carryover' = 'none'\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'excessPolicy' = 'external_approval'\n    and jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'scopeRu') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeRu')) between 1 and 4000\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeEn')) between 1 and 4000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursRu')) between 1 and 1000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursEn')) between 1 and 1000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsRu')) between 1 and 1000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsEn')) between 1 and 1000)))\n      or (\"invoice_lines\".\"commercial_terms\"->'version' = '3'::jsonb\n        and \"invoice_lines\".\"kind\"::text = 'plan' and \"invoice_lines\".\"quantity\" = 1\n        and \"invoice_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n        and \"invoice_lines\".\"commercial_terms\"->>'billingPeriod' = 'custom'\n        and \"invoice_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n        and \"invoice_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current')\n        and \"invoice_lines\".\"commercial_terms\" ?& array['termStart','termEnd']\n        and \"invoice_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','termStart','termEnd'] = '{}'::jsonb\n        and (jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'termStart') = 'string'\n    and \"invoice_lines\".\"commercial_terms\"->>'termStart' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')\n        and (jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'termEnd') = 'string'\n    and \"invoice_lines\".\"commercial_terms\"->>'termEnd' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')\n        and \"invoice_lines\".\"commercial_terms\"->>'termStart' <= \"invoice_lines\".\"commercial_terms\"->>'termEnd')\n    )\n  ), false)"
+          "value": "\"invoice_lines\".\"commercial_terms\" is null or coalesce((\n    jsonb_typeof(\"invoice_lines\".\"commercial_terms\") = 'object'\n    and \"invoice_lines\".\"commercial_terms\" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']\n    and jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'documentNameRu') = 'string'\n    and length(btrim(\"invoice_lines\".\"commercial_terms\"->>'documentNameRu')) between 1 and 300\n    and (\"invoice_lines\".\"commercial_terms\"->'documentNameEn' = 'null'::jsonb or (jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'documentNameEn') = 'string' and length(btrim(\"invoice_lines\".\"commercial_terms\"->>'documentNameEn')) between 1 and 300))\n    and case when jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'sellerPolicyRevision') = 'number' and (\"invoice_lines\".\"commercial_terms\"->>'sellerPolicyRevision') ~ '^[1-9][0-9]{0,9}$' then (\"invoice_lines\".\"commercial_terms\"->>'sellerPolicyRevision')::numeric <= 2147483647 else false end\n    and (\n      (\"invoice_lines\".\"commercial_terms\"->'version' = '1'::jsonb\n        and \"invoice_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule'] = '{}'::jsonb\n        and ((\"invoice_lines\".\"kind\"::text in ('plan','addon') and \"invoice_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n          and \"invoice_lines\".\"commercial_terms\"->>'billingPeriod' in ('month','year') and \"invoice_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n          and \"invoice_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current') and (\"invoice_lines\".\"kind\" <> 'plan' or \"invoice_lines\".\"quantity\" = 1))\n          or (\"invoice_lines\".\"kind\"::text in ('service','custom') and \"invoice_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n          and \"invoice_lines\".\"commercial_terms\"->'billingPeriod' = 'null'::jsonb and \"invoice_lines\".\"commercial_terms\"->'billingTimezone' = 'null'::jsonb and \"invoice_lines\".\"commercial_terms\"->'activationRule' = 'null'::jsonb)))\n      or (\"invoice_lines\".\"commercial_terms\"->'version' = '2'::jsonb\n        and \"invoice_lines\".\"kind\"::text = 'service' and \"invoice_lines\".\"quantity\" = 1\n        and \"invoice_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n        and \"invoice_lines\".\"commercial_terms\"->>'billingPeriod' = 'month'\n        and \"invoice_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n        and \"invoice_lines\".\"commercial_terms\"->>'activationRule' = 'after_current'\n        and \"invoice_lines\".\"commercial_terms\" ? 'serviceTerms'\n        and \"invoice_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule','serviceTerms'] = '{}'::jsonb\n        and jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')) = 'object'\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms') ?& array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn']\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms') - array['cadence','includedMinutes','carryover','excessPolicy','scopeRu','scopeEn','operatingHoursRu','operatingHoursEn','schedulingTermsRu','schedulingTermsEn'] = '{}'::jsonb\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'cadence' = 'month'\n    and case when jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'includedMinutes') = 'number' and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes') ~ '^[1-9][0-9]{0,9}$' then ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 2147483647 else false end\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'includedMinutes')::numeric <= 100000\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'carryover' = 'none'\n    and (\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'excessPolicy' = 'external_approval'\n    and jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'scopeRu') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeRu')) between 1 and 4000\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'scopeEn') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'scopeEn')) between 1 and 4000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursRu') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursRu')) between 1 and 1000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'operatingHoursEn') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'operatingHoursEn')) between 1 and 1000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsRu') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsRu')) between 1 and 1000))\n    and ((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn' = 'null'::jsonb or (jsonb_typeof((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->'schedulingTermsEn') = 'string' and length(btrim((\"invoice_lines\".\"commercial_terms\"->'serviceTerms')->>'schedulingTermsEn')) between 1 and 1000)))\n    )\n  ), false)"
         },
         "invoice_lines_position_positive": {
           "name": "invoice_lines_position_positive",
@@ -39911,6 +39911,590 @@
         "standalone_support_usage_months_stats_check": {
           "name": "standalone_support_usage_months_stats_check",
           "value": "jsonb_typeof(\"standalone_support_usage_months\".\"stats\") = 'object' and octet_length(\"standalone_support_usage_months\".\"stats\"::text) <= 4096"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.landing_lead_events": {
+      "name": "landing_lead_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "lead_id": {
+          "name": "lead_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "public_request_id": {
+          "name": "public_request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_platform_user_id": {
+          "name": "actor_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "landing_lead_events_lead_created_idx": {
+          "name": "landing_lead_events_lead_created_idx",
+          "columns": [
+            {
+              "expression": "lead_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "landing_lead_events_kind_created_idx": {
+          "name": "landing_lead_events_kind_created_idx",
+          "columns": [
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "landing_lead_events_lead_id_landing_leads_id_fk": {
+          "name": "landing_lead_events_lead_id_landing_leads_id_fk",
+          "tableFrom": "landing_lead_events",
+          "tableTo": "landing_leads",
+          "columnsFrom": [
+            "lead_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "landing_lead_events_actor_platform_user_id_platform_users_id_fk": {
+          "name": "landing_lead_events_actor_platform_user_id_platform_users_id_fk",
+          "tableFrom": "landing_lead_events",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "actor_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "landing_lead_events_public_request_uq": {
+          "name": "landing_lead_events_public_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "public_request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "landing_lead_events_kind_check": {
+          "name": "landing_lead_events_kind_check",
+          "value": "\"landing_lead_events\".\"kind\" in ('download','invoice_request','demo_request','status_change','touch','note','linked_tenant','activation_request','anonymized')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.landing_leads": {
+      "name": "landing_leads",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "company": {
+          "name": "company",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inn": {
+          "name": "inn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "product_group": {
+          "name": "product_group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lines_bucket": {
+          "name": "lines_bucket",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'new'"
+        },
+        "status_changed_at": {
+          "name": "status_changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "next_touch_at": {
+          "name": "next_touch_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_note": {
+          "name": "owner_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_source_path": {
+          "name": "first_source_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_utm": {
+          "name": "first_utm",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_referrer": {
+          "name": "first_referrer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "anonymized_at": {
+          "name": "anonymized_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "landing_leads_email_uq": {
+          "name": "landing_leads_email_uq",
+          "columns": [
+            {
+              "expression": "lower(btrim(\"email\"))",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"landing_leads\".\"email\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "landing_leads_status_idx": {
+          "name": "landing_leads_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "landing_leads_next_touch_idx": {
+          "name": "landing_leads_next_touch_idx",
+          "columns": [
+            {
+              "expression": "next_touch_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"landing_leads\".\"next_touch_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "landing_leads_inn_idx": {
+          "name": "landing_leads_inn_idx",
+          "columns": [
+            {
+              "expression": "inn",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"landing_leads\".\"inn\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "landing_leads_tenant_idx": {
+          "name": "landing_leads_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"landing_leads\".\"tenant_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "landing_leads_updated_idx": {
+          "name": "landing_leads_updated_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "landing_leads_tenant_id_organization_id_fk": {
+          "name": "landing_leads_tenant_id_organization_id_fk",
+          "tableFrom": "landing_leads",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "landing_leads_shape_check": {
+          "name": "landing_leads_shape_check",
+          "value": "\"landing_leads\".\"status\" in ('new','contacted','trial','invoice_sent','won','lost') and \"landing_leads\".\"locale\" in ('ru','en') and (\"landing_leads\".\"lines_bucket\" is null or \"landing_leads\".\"lines_bucket\" in ('1','2-3','4+')) and (\"landing_leads\".\"owner_note\" is null or char_length(\"landing_leads\".\"owner_note\") <= 2000) and (\"landing_leads\".\"company\" is null or char_length(\"landing_leads\".\"company\") between 1 and 300)"
+        },
+        "landing_leads_anonymized_check": {
+          "name": "landing_leads_anonymized_check",
+          "value": "(\"landing_leads\".\"anonymized_at\" is null and \"landing_leads\".\"email\" is not null) or (\"landing_leads\".\"anonymized_at\" is not null and \"landing_leads\".\"email\" is null and \"landing_leads\".\"name\" is null and \"landing_leads\".\"phone\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.lead_notifications": {
+      "name": "lead_notifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "lead_id": {
+          "name": "lead_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "digest_date": {
+          "name": "digest_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "lead_notifications_due_idx": {
+          "name": "lead_notifications_due_idx",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"lead_notifications\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lead_notifications_digest_date_uq": {
+          "name": "lead_notifications_digest_date_uq",
+          "columns": [
+            {
+              "expression": "digest_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"lead_notifications\".\"kind\" = 'daily_digest'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lead_notifications_lead_idx": {
+          "name": "lead_notifications_lead_idx",
+          "columns": [
+            {
+              "expression": "lead_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lead_notifications_lead_id_landing_leads_id_fk": {
+          "name": "lead_notifications_lead_id_landing_leads_id_fk",
+          "tableFrom": "lead_notifications",
+          "tableTo": "landing_leads",
+          "columnsFrom": [
+            "lead_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lead_notifications_event_id_landing_lead_events_id_fk": {
+          "name": "lead_notifications_event_id_landing_lead_events_id_fk",
+          "tableFrom": "lead_notifications",
+          "tableTo": "landing_lead_events",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "lead_notifications_shape_check": {
+          "name": "lead_notifications_shape_check",
+          "value": "\"lead_notifications\".\"kind\" in ('new_lead','invoice_request','daily_digest') and \"lead_notifications\".\"status\" in ('pending','sent','failed','skipped') and \"lead_notifications\".\"attempts\" >= 0 and ((\"lead_notifications\".\"kind\" = 'daily_digest') = (\"lead_notifications\".\"lead_id\" is null)) and ((\"lead_notifications\".\"kind\" = 'daily_digest') = (\"lead_notifications\".\"digest_date\" is not null)) and (\"lead_notifications\".\"last_error_code\" is null or \"lead_notifications\".\"last_error_code\" ~ '^[a-z0-9_]{1,64}$')"
         }
       },
       "isRLSEnabled": false

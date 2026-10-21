@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "every slot of this line is taken in this shift",
+    "details": { "constraint": "shift_line_full", "maxStations": 2, "active": 2 }
+  }
+}

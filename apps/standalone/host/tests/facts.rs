@@ -2869,10 +2869,10 @@ async fn facts_of_a_closed_shift_are_taken_and_mark_it_late_once() {
     );
     assert_eq!(shift_state(&admin, shift).await, after);
     assert_eq!(host_revision(&admin.app).await, revision + 1);
-    assert!(audit_trail(&admin.app, "shift.close")
-        .await
-        .iter()
-        .all(|row| row.0 == "office_user"));
+    let forced = audit_trail(&admin.app, "shift.force_closed").await;
+    assert_eq!(forced.len(), 1);
+    assert!(forced.iter().all(|row| row.0 == "office_user"));
+    assert!(audit_trail(&admin.app, "shift.close").await.is_empty());
 }
 
 /// A station's close and a fact after it in one batch: the fact is late, and

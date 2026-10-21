@@ -57,6 +57,9 @@ pub mod actions {
     pub const COUNTERPARTY_UPDATE: &str = "counterparty.update";
     pub const LINE_CREATE: &str = "line.create";
     pub const LINE_UPDATE: &str = "line.update";
+    /// An administrator changed a line's limit of devices in one shift (plan 2b): `{ from, to }`.
+    /// A name or archive change in the same request writes its own `line.update`.
+    pub const LINE_MAX_STATIONS_CHANGED: &str = "line.max_stations_changed";
     pub const OPERATOR_CREATE: &str = "operator.create";
     pub const OPERATOR_UPDATE: &str = "operator.update";
     pub const OPERATOR_BADGE_CREATE: &str = "operator_badge.create";
@@ -91,9 +94,27 @@ pub mod actions {
     pub const DEMO_DATA_DELETE: &str = "demo_data.delete";
     /// A station opened a planned shift: its snapshot is frozen.
     pub const SHIFT_OPEN: &str = "shift.open";
-    /// The office closed an active shift (a station's close is a fact, plan
-    /// 2a2).
+    /// A device became a participant of an open shift it did not open, or came back to it after
+    /// it left (plan 2b): `{ number, rejoined }`; the device is the actor. An active
+    /// participant's entry again writes none.
+    pub const SHIFT_JOIN: &str = "shift.join";
+    /// A participant paused its part and freed its slot (plan 2b): `{ number }`; the device is
+    /// the actor. A leave repeated writes none.
+    pub const SHIFT_LEAVE: &str = "shift.leave";
+    /// A shift closed by the close of its last participant (a station's or a handheld's close is
+    /// a fact, plan 2a2; plan 2b: a shared shift's row adds `participants`, `acceptedTotal`,
+    /// `reasonMissing`). The office's close writes `shift.force_closed` since plan 2b.
     pub const SHIFT_CLOSE: &str = "shift.close";
+    /// A participant closed its part while another still works the shift (plan 2b): `{ number,
+    /// actualQty, closedBoxCount, reasonCode }`; the device is the actor. The close of the last
+    /// part writes `shift.close` instead.
+    pub const SHIFT_PART_CLOSED: &str = "shift.part_closed";
+    /// The office closed an active shift whole (plan 2b; `shift.close` before it): every part
+    /// still open closed as the office's; `{ reason, notClosed: [{ deviceId, state }] }`.
+    pub const SHIFT_FORCE_CLOSED: &str = "shift.force_closed";
+    /// The office gave the reason a shift its devices closed without lacked (plan 2b, spec
+    /// §12.9): `{ reasonCode }`.
+    pub const SHIFT_CLOSE_REASON: &str = "shift.close_reason";
     /// A station got a block of SSCC serials.
     pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
     /// The cloud's data moved into this site (plan IMP); the row holds the

@@ -863,6 +863,19 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformOffersController.pay": platform(
     "platform payment fulfilment is guarded by platform capabilities",
   ),
+  "PlatformLeadsController.update": platform(
+    "landing lead status, note and next touch are guarded by leads.write",
+  ),
+  "PlatformLeadsController.contacted": platform("«Написал» is guarded by leads.write"),
+  "PlatformLeadsController.linkTenant": platform(
+    "linking a lead to a tenant is guarded by leads.write",
+  ),
+  "PlatformLeadsController.createTenant": platform(
+    "creating a tenant without cabinet from a lead is guarded by leads.write and tenants.write",
+  ),
+  "PlatformLeadsController.anonymize": platform(
+    "erasing a lead's personal data is guarded by leads.write",
+  ),
   "ProfileController.deleteAvatar": profile,
   "ProfileController.updateProfile": profile,
   "ProfileController.uploadAvatar": profile,
@@ -877,6 +890,10 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "DemoRequestsController.submit": {
     reason:
       "public landing submission is intentionally unauthenticated and enforces strict input, bounded rate limits, consent, captcha, and fixed recipients",
+  },
+  "LandingLeadsController.submit": {
+    reason:
+      "public landing download/invoice form is intentionally unauthenticated and enforces the demo form's strict input, rate limits, consent, captcha and fixed recipients",
   },
   "InvitationsController.accept": {
     reason: "public invitation token/session lifecycle is an authentication and security flow",

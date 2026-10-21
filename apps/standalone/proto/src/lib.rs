@@ -13,7 +13,13 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 6 since plan ТСД (handhelds on the
+/// Protocol version this build speaks: 7 came with plan 2b (several devices
+/// in one shift): a `shift_closed` fact closes the sender's part and the
+/// shift only with its last part, the capability `multi-station-v1`, `POST
+/// /v1/device/shifts/{id}/leave`, a shift's `participants`, `totals` and
+/// `byDevice`, and a line's `maxStations`; a station of protocol 7 against a
+/// host of 6 is `host_too_old`, so it never sends a part's close to a host
+/// that would close the whole shift. 6 since plan ТСД (handhelds on the
 /// host): the channel `POST /v1/device/pallet-events`, `GET
 /// /v1/device/box-registry`, `GET /v1/device/org/print`, `recoverDeviceId` of
 /// a claim and the capability `handheld-host-v1`; a handheld of protocol 6
@@ -27,7 +33,7 @@ use sha2::{Digest, Sha256};
 /// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
 /// new meaning of one raises it, because an older host refuses such a record
 /// for good.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -1464,7 +1470,15 @@ pub struct OfficeLine {
     pub id: String,
     pub name: String,
     pub archived: bool,
+    /// How many devices one shift of the line takes at a time (plan 2b, protocol 7); a host
+    /// before it sends none, which reads as stage 2a's one.
+    #[serde(default = "default_max_stations")]
+    pub max_stations: u32,
     pub rev: i64,
+}
+
+fn default_max_stations() -> u32 {
+    1
 }
 
 /// `POST /v1/office/lines`.
@@ -1486,6 +1500,9 @@ pub struct LineUpdate {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived: Option<bool>,
+    /// The line's new limit of devices in one shift, 1–16 (plan 2b); administrators only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_stations: Option<u32>,
     pub expected_rev: i64,
 }
 
@@ -1939,6 +1956,10 @@ pub mod shift_supports {
     /// A handheld that speaks the host's protocol (plan ТСД, protocol 6): named in its claim's
     /// `capabilities` and on every entry into a shift, which the host always asks of a handheld.
     pub const HANDHELD_HOST: &str = "handheld-host-v1";
+    /// Several devices in one shift (plan 2b, protocol 7): a device that names it joins an open
+    /// shift another device works while its line has a free slot; one that does not still finds
+    /// such a shift `shift_busy`, as every build before plan 2b expects.
+    pub const MULTI_STATION: &str = "multi-station-v1";
 }
 
 /// Whether the operator must scan a printed duplicate before the next unit
@@ -1999,6 +2020,122 @@ pub struct ShiftEnter {
     pub supports: Vec<String>,
 }
 
+/// A device's part in a shift (plan 2b, protocol 7, host migration `0052`): `active` holds one of
+/// its line's `maxStations` slots, `left` paused and freed it (it may enter again while a slot is
+/// free), `closed` closed its part for good.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParticipantState {
+    Active,
+    Left,
+    Closed,
+}
+
+impl ParticipantState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ParticipantState::Active => "active",
+            ParticipantState::Left => "left",
+            ParticipantState::Closed => "closed",
+        }
+    }
+}
+
+impl std::str::FromStr for ParticipantState {
+    type Err = UnknownVariant;
+
+    /// The name [`ParticipantState::as_str`] gives, as `shift_participants.state` stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("participant state", text)
+    }
+}
+
+/// Who closed a participant's part: the device itself (its `shift_closed` fact) or the office
+/// (its close of the whole shift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParticipantClosedBy {
+    Device,
+    OfficeUser,
+}
+
+impl ParticipantClosedBy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ParticipantClosedBy::Device => "device",
+            ParticipantClosedBy::OfficeUser => "office_user",
+        }
+    }
+}
+
+impl std::str::FromStr for ParticipantClosedBy {
+    type Err = UnknownVariant;
+
+    /// The name [`ParticipantClosedBy::as_str`] gives, as `shift_participants.closed_by_kind`
+    /// stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("participant closed by", text)
+    }
+}
+
+/// A device that entered a shift (plan 2b), as the shift's answers list it, first entry first:
+/// its kind and name, its state, when it first entered and last took a slot, when it left or closed
+/// and who closed it, the figures of its own close, when its first fact after that close arrived,
+/// and when the host last heard from it (the office's «молчит» check).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftParticipant {
+    pub device_id: String,
+    pub device_kind: DeviceKind,
+    pub device_name: String,
+    pub state: ParticipantState,
+    pub first_entered_at: String,
+    pub joined_at: String,
+    pub left_at: Option<String>,
+    pub closed_at: Option<String>,
+    pub closed_by: Option<ParticipantClosedBy>,
+    pub closed_actual_qty: Option<u32>,
+    pub closed_reason_code: Option<String>,
+    pub late_data_at: Option<String>,
+    pub last_seen_at: Option<String>,
+    /// The host revision stamped by the write that took this slot (first entry or return from
+    /// `left`): the token a client echoes in [`ShiftLeave`]. Absent from an older host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joined_rev: Option<u64>,
+}
+
+/// The optional body of `POST /v1/device/shifts/{id}/leave` (plan 2b, protocol 7): the `joinedRev`
+/// of the participant row as the client last read it. A leave whose token is not the row's current
+/// one belongs to an earlier stay: the host answers the shift as it is and writes nothing. Without
+/// a body the leave works on the row's current state, as before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftLeave {
+    pub joined_rev: u64,
+}
+
+/// One device's part of a shift's totals (plan 2b): units it accepted, its boxes closed and not
+/// taken apart, its pallets closed and not taken apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceTotals {
+    pub device_id: String,
+    pub accepted: u64,
+    pub boxes_closed: u32,
+    pub pallets: u32,
+}
+
+/// A shift's totals as a device reads them (plan 2b): the whole shift's accepted units, closed
+/// boxes and closed pallets (none taken apart), read from the facts at `asOf`, the host's time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceShiftTotals {
+    pub accepted: u64,
+    pub boxes_closed: u32,
+    pub pallets: u32,
+    pub as_of: String,
+}
+
 /// A shift as the office sees it (`GET /v1/office/shifts`, `GET …/{id}` and
 /// the answer of every office write). `number` is the host's
 /// (`OCT26-004`, `/S` for a station's). Names come from the office's own
@@ -2051,6 +2188,17 @@ pub struct OfficeShift {
     pub rev: i64,
     /// What the facts of the shift add up to (plan 2a2), in every answer.
     pub totals: ShiftTotals,
+    /// The devices that entered the shift, first entry first (plan 2b, protocol 7); left out for
+    /// a planned shift and by a host before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<ShiftParticipant>,
+    /// Each participant's part of `totals` (plan 2b), in the order of `participants`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_device: Vec<DeviceTotals>,
+    /// Its last device closed the shift without the reason the shift-wide total needed (plan 2b,
+    /// spec §12.9); the office gives it (`PUT …/close-reason`). Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub close_reason_missing: bool,
 }
 
 /// A shift's numbers as its facts give them (stage 2a spec §4.5): units
@@ -2201,6 +2349,15 @@ pub struct ShiftClose {
     pub expected_rev: i64,
 }
 
+/// `PUT /v1/office/shifts/{id}/close-reason` (plan 2b): the office gives one of the six reason
+/// codes ([`shift_close_reasons`]) to a shift its devices closed without it, over `expectedRev`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftCloseReasonSet {
+    pub reason_code: String,
+    pub expected_rev: i64,
+}
+
 /// A shift as a station sees it (`GET /v1/device/shifts` and the answer of
 /// `POST /v1/device/shifts`). The product's name and GTIN and the
 /// counterparty's name are the snapshot's once the shift is open, so a
@@ -2239,11 +2396,27 @@ pub struct DeviceShift {
     /// the snapshot's [`SnapshotValidationPrint`] is the same policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_print: Option<ValidationPrint>,
-    /// The station that opened the shift: another one's id means the shift
-    /// is busy (stage 2a puts one device on a shift).
+    /// The device that opened the shift (plan 2b: no special right; who works it is
+    /// `participants`). A host before protocol 7 meant «busy» by another device's id here.
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
     pub closed_at: Option<String>,
+    /// The line's limit of devices in one shift (plan 2b, protocol 7): only for an open or a
+    /// closed shift; left out for a planned one and by a host before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_stations: Option<u32>,
+    /// The devices that entered the shift, first entry first (plan 2b): open and closed shifts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participants: Option<Vec<ShiftParticipant>>,
+    /// The asking device's own state in the shift; left out when it never entered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub my_state: Option<ParticipantState>,
+    /// The whole shift's totals as of the read (plan 2b): open and closed shifts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totals: Option<DeviceShiftTotals>,
+    /// Each participant's part of `totals`, in the order of `participants`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by_device: Option<Vec<DeviceTotals>>,
     /// What the shift froze when it opened: only in the answer of
     /// `POST /v1/device/shifts/{id}/enter`, never in the list.
     #[serde(default, skip_serializing_if = "Option::is_none")]

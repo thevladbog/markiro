@@ -73,7 +73,11 @@ it("constructs the real platform module without cabinet auth and rejects disable
     expect(paths.some((p) => p.includes("standalone"))).toBe(true);
     expect(
       paths.filter(
-        (p) => !p.startsWith("/platform/") && !p.startsWith("/health") && p !== "/demo-requests",
+        (p) =>
+          !p.startsWith("/platform/") &&
+          !p.startsWith("/health") &&
+          p !== "/demo-requests" &&
+          p !== "/landing-leads",
       ),
     ).toEqual([]);
     const actor = {

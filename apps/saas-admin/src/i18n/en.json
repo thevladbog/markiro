@@ -1188,7 +1188,10 @@
     "organization": "Our organization",
     "language": "Interface language",
     "sessionConfirmed": "2FA · session secured",
-    "agreements": "Agreements"
+    "agreements": "Agreements",
+    "leads": "Leads",
+    "leadsNew_one": "{{count}} new",
+    "leadsNew_other": "{{count}} new"
   },
   "servicePeriods": {
     "eyebrow": "Service packages",
@@ -3052,5 +3055,220 @@
     "devices": "Cloud device management has been retired. Standalone sites and offline license issuance are available below.",
     "productionReports": "Production reports contain historical cloud data and do not describe current standalone activity. Actual standalone figures, report source and timestamp are available in tenant diagnostics; without a report they are unknown. Commercial reports reflect platform operations.",
     "createNotice": "Tenant without a cabinet: no owner, activation email or demo is created. Standalone sites and offline licenses are available. You send invoices and acts yourself."
+  },
+  "leads": {
+    "noCompany": "Company not given",
+    "title": "Leads",
+    "description": "Downloads, invoice requests and demo requests from the website. Times are Moscow time.",
+    "forbidden": "You have no access to website leads.",
+    "loading": "Loading leads",
+    "loadError": "Could not load leads.",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "registry": "Lead registry",
+    "tableRegion": "Leads table",
+    "count_one": "{{count}} lead",
+    "count_other": "{{count}} leads",
+    "anonymizedShort": "contacts anonymized",
+    "innShort": "INN {{inn}}",
+    "empty": {
+      "title": "No leads yet",
+      "hint": "They appear when a visitor sends a form on the website."
+    },
+    "filteredEmpty": {
+      "title": "Nothing found",
+      "hint": "Change the search or clear the filters."
+    },
+    "columns": {
+      "company": "Company",
+      "lastEvent": "Last event",
+      "tariff": "Plan",
+      "status": "Status",
+      "nextTouch": "Next contact"
+    },
+    "filters": {
+      "label": "Lead filters",
+      "search": "Company, email or INN",
+      "status": "Status",
+      "allStatuses": "All statuses",
+      "kind": "Kind",
+      "allKinds": "All kinds",
+      "from": "Created from",
+      "to": "Created to",
+      "clear": "Clear",
+      "timezone": "Period dates are Moscow dates, inclusive.",
+      "invalid": "The page address has an invalid filter. Clear the filters."
+    },
+    "pagination": {
+      "label": "Lead pages",
+      "previous": "Previous",
+      "next": "Next",
+      "page": "Page {{page}} of {{pageCount}}"
+    },
+    "status": {
+      "new": "New",
+      "contacted": "Contacted",
+      "trial": "Trial",
+      "invoice_sent": "Invoice sent",
+      "won": "Paid",
+      "lost": "Lost"
+    },
+    "eventKind": {
+      "download": "Download",
+      "invoice_request": "Invoice request",
+      "demo_request": "Demo request",
+      "status_change": "Status change",
+      "touch": "Marked as contacted",
+      "note": "Note",
+      "linked_tenant": "Tenant link",
+      "activation_request": "Activation request",
+      "anonymized": "Anonymization"
+    },
+    "lines": {
+      "1": "1 line",
+      "2-3": "2–3 lines",
+      "4+": "4 or more"
+    },
+    "locale": {
+      "ru": "Russian",
+      "en": "English"
+    },
+    "payload": {
+      "sourcePath": "Page",
+      "locale": "Language",
+      "utm": "UTM",
+      "referrer": "Referrer",
+      "productGroup": "Product group",
+      "linesBucket": "Lines",
+      "inn": "INN",
+      "tariffCode": "Plan"
+    },
+    "anonymizeReason": {
+      "lost": "status «Lost»",
+      "inactive": "no activity for 12 months",
+      "manual": "manually"
+    },
+    "detail": {
+      "description": "Created {{date}}",
+      "actions": "Lead actions",
+      "back": "All leads",
+      "invalidTitle": "Lead not found",
+      "invalidId": "The page address has an invalid lead id.",
+      "loadingTitle": "Lead",
+      "loading": "Loading the lead",
+      "loadErrorTitle": "Lead unavailable"
+    },
+    "contacts": {
+      "title": "Contacts",
+      "email": "Email",
+      "name": "Name",
+      "phone": "Phone",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyEmail": "Copy email",
+      "copyPhone": "Copy phone",
+      "anonymized": "Contacts anonymized on {{date}}"
+    },
+    "facts": {
+      "title": "Company",
+      "company": "Company",
+      "inn": "INN",
+      "productGroup": "Product group",
+      "lines": "Lines",
+      "tariff": "Plan",
+      "source": "First page",
+      "utm": "UTM",
+      "referrer": "Referrer",
+      "locale": "Site language",
+      "createdAt": "Created"
+    },
+    "work": {
+      "title": "Follow-up",
+      "status": "Lead status",
+      "contacted": "Mark as contacted",
+      "contactedHint_one": "A new lead becomes «Contacted»; next contact in {{count}} day.",
+      "contactedHint_other": "A new lead becomes «Contacted»; next contact in {{count}} days.",
+      "nextTouch": "Next contact",
+      "nextTouchHint": "At 09:00 Moscow time the lead joins the morning digest.",
+      "saveNextTouch": "Save date",
+      "note": "Note",
+      "noteLength": "{{count}} of {{max}}",
+      "saveNote": "Save note"
+    },
+    "tenant": {
+      "title": "Tenant",
+      "none": "No tenant linked",
+      "create": "Create a tenant without a cabinet",
+      "link": "Link an existing tenant"
+    },
+    "createTenant": {
+      "title": "New tenant without a cabinet",
+      "hint": "No owner, activation email or demo is created. A cabinet can be granted later on the tenant page.",
+      "name": "Name",
+      "slug": "Slug",
+      "slugHint": "Lowercase Latin letters, digits and single hyphens.",
+      "submit": "Create tenant",
+      "validation": {
+        "required": "This field is required",
+        "nameTooLong": "Use no more than 300 characters",
+        "slugTooLong": "Use no more than 128 characters",
+        "slug": "Use lowercase Latin letters, digits and single hyphens only"
+      }
+    },
+    "linkTenant": {
+      "title": "Link an existing tenant",
+      "tenant": "Tenant",
+      "placeholder": "Choose a tenant",
+      "search": "Find a tenant",
+      "empty": "No tenants found",
+      "loading": "Loading tenants",
+      "loadError": "Could not load tenants.",
+      "scope": "The search covers the loaded page of 100 tenants.",
+      "submit": "Link"
+    },
+    "journal": {
+      "title": "Lead journal",
+      "empty": "No events yet.",
+      "form": "Website form",
+      "system": "System",
+      "nextTouch": "Next contact: {{date}}",
+      "noteCleared": "Note removed",
+      "noteChanged": "Note changed",
+      "noteLength_one": "Note changed, {{count}} character",
+      "noteLength_other": "Note changed, {{count}} characters",
+      "tenantCreated": "A tenant without a cabinet was created.",
+      "tenantLinked": "Linked to a tenant.",
+      "openTenant": "Open tenant",
+      "previousTenant": "Previous tenant: {{id}}",
+      "anonymizedReason": "Reason: {{reason}}"
+    },
+    "anonymize": {
+      "title": "Anonymization",
+      "hint": "Removes the email, name, phone, note and a sole proprietor's 12-digit INN. Company and journal stay for statistics.",
+      "action": "Anonymize",
+      "confirmTitle": "Anonymize this lead?",
+      "confirmDescription": "The email, name and phone are removed for good."
+    },
+    "notice": {
+      "statusChanged": "Status changed.",
+      "contacted": "Marked as contacted.",
+      "nextTouchSaved": "Next contact date saved.",
+      "noteSaved": "Note saved.",
+      "tenantCreated": "Tenant created and linked to the lead.",
+      "tenantLinked": "Lead linked to the tenant.",
+      "anonymized": "Lead anonymized."
+    },
+    "errors": {
+      "lead_not_found": "Lead not found. It may have been removed.",
+      "lead_anonymized": "This lead's contacts are anonymized.",
+      "lead_tenant_not_found": "Tenant not found. Refresh the list and choose again.",
+      "lead_tenant_slug_taken": "This slug already belongs to another tenant. Use another one or link the lead to the existing tenant.",
+      "tenant_cabinet_access_mismatch": "A tenant with this slug already exists and has a cabinet. Use another slug.",
+      "update_failed": "Could not save the changes. Try again.",
+      "contacted_failed": "Could not mark the contact. Try again.",
+      "link_failed": "Could not link the lead to the tenant.",
+      "create_tenant_failed": "Could not create the tenant. Check the name and slug.",
+      "anonymize_failed": "Could not anonymize the lead."
+    }
   }
 }
