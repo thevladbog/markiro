@@ -34,7 +34,11 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     "platform-only",
   );
   const service = new PlatformLeadsService(db, audit, provisioning);
-  const now = new Date("2026-10-21T09:00:00.000Z");
+  // Stored event timestamps come from the database clock, so the service clock must sit safely
+  // after it: a fixed past date makes the ordering of "last event" depend on the real date.
+  const now = new Date(Math.ceil((Date.now() + 60 * 60_000) / 60_000) * 60_000);
+  const touchIn = (days: number, hoursEarlier = 0) =>
+    new Date(now.getTime() + days * DAY - hoursEarlier * 3_600_000).toISOString();
   service.now = () => now;
   const run = randomUUID().slice(0, 8);
   const users = {
@@ -251,11 +255,11 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     service.now = () => new Date(now.getTime() + 60_000);
     const noted = await service.update(admin, row.id, {
       ownerNote: "Счёт отправлен на buyer@example.test",
-      nextTouchAt: "2026-10-24T06:00:00.000Z",
+      nextTouchAt: touchIn(3, 3),
     });
     expect(noted).toMatchObject({
       ownerNote: "Счёт отправлен на buyer@example.test",
-      nextTouchAt: "2026-10-24T06:00:00.000Z",
+      nextTouchAt: touchIn(3, 3),
     });
     expect(noted.events[0]).toMatchObject({ kind: "note", payload: { length: 36 } });
     expect(await auditFor(row.id, "landing_lead.status_changed")).toHaveLength(1);
@@ -270,17 +274,17 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     });
     expect(contacted.events[0]).toMatchObject({
       kind: "status_change",
-      payload: { from: "new", to: "contacted", nextTouchAt: "2026-10-24T09:00:00.000Z" },
+      payload: { from: "new", to: "contacted", nextTouchAt: touchIn(3) },
     });
     // Journal order is by time; give each action its own instant.
     service.now = () => new Date(now.getTime() + 60_000);
     const again = await service.contacted(admin, row.id, {
-      nextTouchAt: "2026-10-30T06:00:00.000Z",
+      nextTouchAt: touchIn(9, 3),
     });
-    expect(again).toMatchObject({ status: "contacted", nextTouchAt: "2026-10-30T06:00:00.000Z" });
+    expect(again).toMatchObject({ status: "contacted", nextTouchAt: touchIn(9, 3) });
     expect(again.events[0]).toMatchObject({
       kind: "touch",
-      payload: { nextTouchAt: "2026-10-30T06:00:00.000Z" },
+      payload: { nextTouchAt: touchIn(9, 3) },
     });
     service.now = () => new Date(now.getTime() + 120_000);
     await service.update(admin, row.id, { status: "trial" });
