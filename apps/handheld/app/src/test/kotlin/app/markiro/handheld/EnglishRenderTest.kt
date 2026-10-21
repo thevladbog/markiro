@@ -430,4 +430,22 @@ class EnglishRenderTest {
             assertEquals(true, compose.onAllNodes(androidx.compose.ui.test.hasText("", substring = true).not()).fetchSemanticsNodes().isNotEmpty())
         }
     }
+
+    @Test
+    fun theSharedShiftStripRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                app.markiro.handheld.feature.work.WorkScreen(
+                    app.markiro.handheld.feature.work.WorkUi(
+                        shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1").copy(productName = "Water 0.5 l", lineName = "Line 2"),
+                        last = null, total = 547, plan = 1200, thisTerminal = 427,
+                        errors = 0, duplicates = 0, feed = emptyList(), sync = app.markiro.handheld.core.sync.SyncState(), reachable = false, team = null,
+                        strip = app.markiro.handheld.feature.shift.SharedStrip(427, 547, 1200, 2, 3, staleAtMillis = 1_760_000_000_000L),
+                    ),
+                    app.markiro.handheld.feature.work.WorkCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
 }

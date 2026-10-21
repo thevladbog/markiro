@@ -871,4 +871,9 @@
     <string name="shifts_busy_text">Эту смену ведёт другое устройство, а эта версия сервера не пускает второе. Обновите сервер на площадке или дождитесь закрытия смены.</string>
     <string name="shifts_part_closed_title">Ваша часть закрыта</string>
     <string name="shifts_part_closed_text">Это устройство уже закрыло свою часть смены, продолжать работу в ней нельзя. Смена закроется, когда закроют остальные.</string>
+    <string name="work_shift_total">Всего в смене</string>
+    <string name="work_shift_total_of">%1$s из %2$s</string>
+    <string name="work_my_part">Моя смена</string>
+    <string name="work_shared_devices">Работают: %1$d из %2$d</string>
+    <string name="work_close_part">Закрыть свою часть</string>
 </resources>

@@ -194,7 +194,7 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.work_close)) },
+                        text = { Text(stringResource(if (state.strip != null) R.string.work_close_part else R.string.work_close)) },
                         onClick = {
                             menu = false
                             cb.onClose()
@@ -236,10 +236,13 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
             if (state.validation != null) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4)) {
-                        val total = state.plan?.let { stringResource(R.string.work_plan_of, numbers.format(state.total), numbers.format(it)) }
-                            ?: numbers.format(state.total)
-                        Box(Modifier.weight(1f)) { Counter(stringResource(R.string.work_total), total) }
-                        Box(Modifier.weight(1f)) { Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal)) }
+                        val total = state.plan?.let {
+                            stringResource(if (state.strip != null) R.string.work_shift_total_of else R.string.work_plan_of, numbers.format(state.total), numbers.format(it))
+                        } ?: numbers.format(state.total)
+                        Box(Modifier.weight(1f)) { Counter(stringResource(if (state.strip != null) R.string.work_shift_total else R.string.work_total), total) }
+                        Box(Modifier.weight(1f)) {
+                            Counter(stringResource(if (state.strip != null) R.string.work_my_part else R.string.work_this_terminal), numbers.format(state.thisTerminal))
+                        }
                     }
                     Row(Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp2), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4)) {
                         Counter(stringResource(R.string.work_errors), numbers.format(state.errors), tone = if (state.errors > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
@@ -251,14 +254,20 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                val total = state.plan?.let { stringResource(R.string.work_plan_of, numbers.format(state.total), numbers.format(it)) }
-                    ?: numbers.format(state.total)
-                Counter(stringResource(R.string.work_total), total, modifier = Modifier.weight(1f))
-                Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal), modifier = Modifier.weight(1f))
+                val total = state.plan?.let {
+                    stringResource(if (state.strip != null) R.string.work_shift_total_of else R.string.work_plan_of, numbers.format(state.total), numbers.format(it))
+                } ?: numbers.format(state.total)
+                Counter(stringResource(if (state.strip != null) R.string.work_shift_total else R.string.work_total), total, modifier = Modifier.weight(1f))
+                Counter(
+                    stringResource(if (state.strip != null) R.string.work_my_part else R.string.work_this_terminal),
+                    numbers.format(state.thisTerminal),
+                    modifier = Modifier.weight(1f),
+                )
                 Counter(stringResource(R.string.work_errors), numbers.format(state.errors), tone = if (state.errors > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
                 Counter(stringResource(R.string.work_duplicates), numbers.format(state.duplicates), tone = if (state.duplicates > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
             }
             }
+            state.strip?.let { SharedShiftCaption(it) }
             Column((if (state.validation != null) Modifier else Modifier.weight(if (box != null) 0.38f else 0.6f)).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
                 if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
                 state.feed.forEach { event ->

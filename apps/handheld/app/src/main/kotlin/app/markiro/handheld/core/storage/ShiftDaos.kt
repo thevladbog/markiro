@@ -69,6 +69,16 @@ interface CodeDao {
     )
     suspend fun lostForShift(shiftId: String): Int
 
+    /** [lostForShift] kept current: the work screen's strip must move when the host answers `conflict` or `rejected` for a scan. */
+    @Query(
+        "SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") e WHERE e.shiftId = :shiftId " +
+            "AND EXISTS (SELECT 1 FROM codes_mirror c WHERE c.codeHash = e.codeHash AND c.shiftId = e.shiftId) " +
+            "AND (e.codeHash IN (SELECT codeHash FROM conflicts_mirror) " +
+            "OR e.codeHash IN (SELECT o.codeHash FROM outbox o JOIN host_outbox h ON h.sourceKind = 'scan' AND h.sourceKey = CAST(o.id AS TEXT) " +
+            "WHERE h.state = 'quarantined' AND o.shiftId = :shiftId AND o.codeHash IS NOT NULL))",
+    )
+    fun observeLostForShift(shiftId: String): Flow<Int>
+
     @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
     fun observeCountForShift(shiftId: String): Flow<Int>
 

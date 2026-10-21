@@ -841,4 +841,9 @@
     <string name="shifts_busy_text">Another device works this shift, and this server version does not admit a second one. Update the server on the site or wait for the shift to close.</string>
     <string name="shifts_part_closed_title">Your part is closed</string>
     <string name="shifts_part_closed_text">This device has already closed its part of the shift and cannot work in it any more. The shift closes when the others close theirs.</string>
+    <string name="work_shift_total">In the shift total</string>
+    <string name="work_shift_total_of">%1$s of %2$s</string>
+    <string name="work_my_part">My shift</string>
+    <string name="work_shared_devices">Working: %1$d of %2$d</string>
+    <string name="work_close_part">Close my part</string>
 </resources>
