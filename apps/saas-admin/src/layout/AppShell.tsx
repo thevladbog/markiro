@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 
-import { Button, OperationalRail, type OperationalRailGroup } from "@markiro/ui";
+import { Button, OperationalRail, VisuallyHidden, type OperationalRailGroup } from "@markiro/ui";
 import type { PlatformCapability } from "@markiro/platform-contracts";
 
 import { usePlatformPrincipal } from "../auth/PlatformAuthBoundary.js";
 import { useAuthClient } from "../auth/client.js";
 import { MarkiroLogo } from "../components/MarkiroLogo.js";
+import { getLeadSummary, leadKeys } from "../pages/leads/api.js";
 import { IS_PLATFORM_ONLY } from "../server-profile.js";
 import { SUPPORT_CHAT_ENABLED } from "../features.js";
 import i18n from "../i18n/index.js";
@@ -33,14 +35,31 @@ function AppShellContent() {
     principal.capabilities.includes(capability);
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
-  const item = (id: string, label: string, to: string) => ({
+  const item = (id: string, label: string, to: string, badge?: ReactNode) => ({
     id,
     label,
     to,
     active: isActive(to),
+    ...(badge === undefined ? {} : { badge }),
   });
   const when = (capability: PlatformCapability, ...items: ReturnType<typeof item>[]) =>
     hasCapability(capability) ? items : [];
+
+  // The badge is a hint, not a page: a failed summary simply shows no count.
+  const leadSummary = useQuery({
+    queryKey: leadKeys.summary(),
+    queryFn: getLeadSummary,
+    enabled: hasCapability("leads.read"),
+    staleTime: 60_000,
+  });
+  const newLeads = leadSummary.data?.newCount ?? 0;
+  const leadsBadge =
+    newLeads > 0 ? (
+      <>
+        <span aria-hidden="true">{newLeads}</span>
+        <VisuallyHidden>, {t("shell.leadsNew", { count: newLeads })}</VisuallyHidden>
+      </>
+    ) : undefined;
 
   const draftGroups = [
     {
@@ -53,6 +72,7 @@ function AppShellContent() {
           "billing.read",
           item("billing-requests", t("shell.billingRequests"), "/billing-requests"),
         ),
+        ...when("leads.read", item("leads", t("shell.leads"), "/leads", leadsBadge)),
         ...(SUPPORT_CHAT_ENABLED || IS_PLATFORM_ONLY
           ? when("billing.read", item("support", t("shell.supportEpisodes"), "/support"))
           : []),

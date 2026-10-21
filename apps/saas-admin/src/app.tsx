@@ -100,6 +100,12 @@ const BillingRequestsPage = lazy(() =>
     default: module.BillingRequestsPage,
   })),
 );
+const LeadsPage = lazy(() =>
+  import("./pages/leads/LeadsPage.js").then((module) => ({ default: module.LeadsPage })),
+);
+const LeadPage = lazy(() =>
+  import("./pages/leads/LeadPage.js").then((module) => ({ default: module.LeadPage })),
+);
 const SupportEpisodesPage = lazy(() =>
   import("./pages/support/SupportEpisodesPage.js").then((module) => ({
     default: module.SupportEpisodesPage,
@@ -211,6 +217,8 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/billing-requests" element={<BillingRequestsPage />} />
         <Route path="/billing-requests/:requestId" element={<BillingRequestsPage />} />
+        <Route path="/leads" element={<LeadsPage />} />
+        <Route path="/leads/:leadId" element={<LeadPage />} />
         {SUPPORT_CHAT_ENABLED || IS_PLATFORM_ONLY ? (
           <>
             <Route path="/support" element={<SupportEpisodesPage />} />

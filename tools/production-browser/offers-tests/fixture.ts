@@ -295,6 +295,9 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           capabilities: platformCapabilitiesForRole.platform_admin,
           twoFactorReady: true,
         };
+      // The rail's lead badge asks for it on every page.
+      else if (url.pathname === "/api/platform/leads/summary" && method === "GET")
+        json = { newCount: 0 };
       else if (url.pathname === "/api/platform/tenants" && method === "GET")
         json = { items: [tenant], page: 1, limit: 100, total: 1 };
       else if (url.pathname === "/api/platform/offers/registry" && method === "GET") {

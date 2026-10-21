@@ -4946,3 +4946,137 @@ p.offer-muted {
 .subscription-grid {
   align-items: start;
 }
+
+/* Website leads: a filterable registry and a two-column card. */
+.leads-page {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.leads-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(150px, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+.leads-filters > * {
+  min-width: 0;
+}
+.leads-muted {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+.leads-cell {
+  display: grid;
+  gap: 4px;
+}
+.leads-cell small {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+.leads-pagination {
+  min-height: 44px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+.leads-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.leads-column,
+.leads-work,
+.leads-note,
+.leads-tenant-form {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.leads-card .mk-definition-grid__description {
+  overflow-wrap: anywhere;
+}
+.leads-actions,
+.leads-inline-form,
+.leads-contact,
+.leads-tenant {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.leads-inline-form {
+  align-items: end;
+}
+.leads-inline-form > .mk-field {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.leads-journal {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+.leads-journal__entry {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.leads-journal__entry:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.leads-journal__entry p {
+  margin: 0;
+}
+.leads-journal__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.leads-journal__header time,
+.leads-journal__header span {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+.leads-journal__details {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  font: var(--text-body-sm);
+}
+.leads-journal__details > div {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  gap: 12px;
+}
+.leads-journal__details dt {
+  color: var(--fg-3);
+}
+.leads-journal__details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  .leads-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .leads-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .leads-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
