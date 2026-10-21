@@ -5,7 +5,5 @@
   "boxes": 4,
   "pallets": 2,
   "codes": 20,
-  "activeShifts": [
-    "DEMO-001"
-  ]
+  "activeShifts": ["DEMO-001"]
 }

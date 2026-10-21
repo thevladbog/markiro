@@ -8,18 +8,14 @@
     "name": "ООО «Атолл»",
     "inn": "7707083893",
     "gln": "4600682000010",
-    "gs1Prefixes": [
-      "4600682"
-    ],
+    "gs1Prefixes": ["4600682"],
     "timeZone": "Europe/Moscow"
   },
   "sscc": {
     "boxNextSerial": 1,
     "palletNextSerial": 0
   },
-  "lines": [
-    "Линия 1"
-  ],
+  "lines": ["Линия 1"],
   "demoData": {
     "productionDate": "2026-10-21"
   }
