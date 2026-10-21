@@ -127,6 +127,35 @@ describe("the work screen of a shared shift (plan 2b)", () => {
     expect(screen.queryByText(/План выполнен/)).toBeNull();
   });
 
+  it("a close opened and left before the plan was reached does not take away the notice that comes later (final review m5)", async () => {
+    const below = enteredOf(
+      sharedShift({
+        participants: [
+          { row: STATION_ROW, accepted: 0 },
+          { row: participant(HANDHELD, "ТСД 1", "active", "handheld"), accepted: 1198 },
+        ],
+        myState: "active",
+      }),
+    );
+    const { executor } = openLocalDb();
+    const shift = await enteredShift(executor, below);
+    const work = renderWork({ local: executor, shift }, { overrides: { online: true } });
+    await waitFor(() => expect(count()).toBe(formatQuantity(1198)));
+    await work.scanner.listening();
+    await work.scan(km("B1"));
+    await waitFor(() => expect(count()).toBe(formatQuantity(1199)));
+    // No notice shows while the close is opened and left: there is none to dismiss.
+    await work.press("Закрыть мою часть");
+    await screen.findByRole("region", { name: /Закрытие моей части смены/ });
+    await work.press("Назад к работе");
+    await work.scan(km("B2"));
+    expect(
+      await screen.findByText(
+        plain(`План выполнен: принято ${formatQuantity(1200)} из ${formatQuantity(1200)}.`),
+      ),
+    ).toBeTruthy();
+  });
+
   it("keeps a solo station's screen as it was on a line of one", async () => {
     const solo = enteredOf(
       sharedShift({

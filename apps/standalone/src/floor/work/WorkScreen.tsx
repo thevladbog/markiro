@@ -2081,7 +2081,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const openClose = () => {
     if (leavingNow() || stopRef.current !== null) return;
     setPlanReached(false);
-    setPlanDismissed(true);
+    // Only a shared plan notice that was showing is dismissed (final review m5): opened before the
+    // plan was reached, the close takes away no notice that has yet to come.
+    if (sharedReached) setPlanDismissed(true);
     setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
     void live.current
       .track(readSummary())
