@@ -195,6 +195,9 @@ const categories = new Set([
   "us_dataset_command_schema_invalid",
   "us_dataset_command_prerequisite_invalid",
   "us_dataset_command_disposal_failed",
+  "us_request_worker_checkpoint_mismatch",
+  "us_dataset_request_conflict",
+  "us_dataset_request_incomplete",
 ]);
 
 function ownValue(value: unknown, key: string): unknown {
@@ -211,10 +214,24 @@ export function usDatasetCommandDiagnostic(error: unknown): Readonly<{
 }> {
   try {
     const message = ownValue(error, "message");
-    const code =
+    let code =
       typeof message === "string" && categories.has(message)
         ? message
         : "us_dataset_command_failed";
+    if (code === "us_dataset_command_failed") {
+      let responseCode: unknown;
+      try {
+        responseCode = ownValue(ownValue(error, "response"), "code");
+      } catch {
+        // Opaque optional response metadata cannot discard the original location.
+      }
+      if (
+        responseCode === "us_request_worker_checkpoint_mismatch" ||
+        responseCode === "us_dataset_request_conflict" ||
+        responseCode === "us_dataset_request_incomplete"
+      )
+        code = responseCode;
+    }
     const seen = new Set<object>();
     for (let cause = error, depth = 0; cause && typeof cause === "object" && depth < 32; depth++) {
       if (seen.has(cause)) break;

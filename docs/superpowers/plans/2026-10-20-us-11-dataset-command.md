@@ -353,3 +353,77 @@ fixed identifiers only. Keep all provider-specific code test-only.
       success/probe metrics/disposal. Source/unit success is not provider acceptance.
       Retain exact653 fifteen-case/fullTrace proof as source-specific predecessor
       evidence, not permission to skip the new-SHA jobs. Viewer remains afterward.
+
+### Task 6: Finite Request failure propagation (original Task3A worker)
+
+**Ownership:** The original runtime implementer alone implements this follow-up.
+The positive-fixture worker prepares the amendment/brief only and must not edit
+the API in parallel. Root selects the independent reviewer and owns integration.
+The approved spec amendment above is a diagnostic-contract correction, not a
+claim that the historical551 initialization cause has been identified.
+
+**Files (exact four source/test paths):**
+
+- Modify `apps/api/src/modules/traceability/demo/us-dataset-request-contract.ts`.
+- Modify `apps/api/src/modules/traceability/demo/us-dataset-request-seed.ts`.
+- Modify `apps/api/src/deployment/us-dataset-command-runtime.ts`.
+- Modify `apps/api/test/us-dataset-command-runtime.test.ts`.
+
+**Interfaces:** Add the internal `annotateUsDatasetRequestFailure` helper in the
+Request contract; it returns the exact input error without wrapping:
+
+```ts
+export function annotateUsDatasetRequestFailure(
+  error: unknown,
+  location:
+    Readonly<{ unitKey: UsDatasetRequestUnitKey; stage: "request" | "package" }> | undefined,
+): unknown;
+```
+
+It consumes only trusted validated service location and existing error metadata;
+it grants no execution/proof/authorization authority. It preserves existing valid
+canonical location on the error or bounded own-data cause chain and ignores
+frozen/opaque/unsafe descriptors without invoking accessors. Existing
+`usDatasetCommandDiagnostic(error)` retains its signature/output fields, command
+category priority, unknown fallback and bounded recipe-location traversal. Add
+only `us_request_worker_checkpoint_mismatch`, `us_dataset_request_conflict` and
+`us_dataset_request_incomplete` to the finite diagnostic boundary, using safe own
+data `message`/`response.code` reads only, not `getResponse` or raw error output.
+Keep that sanitizer self-contained with its existing `categories` and `ownValue`
+declarations: the approved tooling compiles those three declarations in isolation.
+Do not add an unprovided top-level runtime dependency or widen the four-path scope
+to rewrite the tooling extractor; report a concrete conflict before doing so.
+
+- [ ] Read the amended spec and ignored `task-6-runtime-propagation-brief.md`,
+      verified551 investigation and raw pure-probe logs. Verify HEAD/worktree and
+      closest guides; `apps/api/AGENTS.md` is absent in this US checkout, so do not
+      import primary-worktree changes. Preserve hostingdoc/evidence and all gates.
+- [ ] Add exactly six focused cases to the existing runtime test: actual pure
+      checkpoint model drift, changed bytes, descriptor conflict, incomplete,
+      hostile/unknown metadata table, and same-error/frozen/lower-location table.
+      Reuse real refusal predicates; do not fabricate a successful owner/proof.
+      Save genuine forward behavioral RED before implementing propagation; a
+      missing export/import/collection error is not behavioral RED.
+- [ ] Implement the helper and an outer Request service catch returning/rethrowing
+      that same original error. Trust a Request location only after the existing
+      unit validation; switch to `package` immediately before the existing first
+      package-stage read. Preserve prior canonical native location and every
+      query/action/reconciliation/worker-result/clock/byte-assertion order. No
+      new classification of worker outcomes, altered equality or retry behavior.
+- [ ] Preserve only the three approved codes through runtime projection. Existing
+      command categories win; arbitrary messages/SQL/provider codes and unsafe
+      metadata stay generic. Preserve own-data recipe checks, cycle/depth bounds,
+      output field set, frozen errors and cause identity. Run the focused file to
+      GREEN without changing assertions, caps, selectors or accepted source policy.
+- [ ] Run API lint/typecheck/build, full US and tools/ci tooling, format/diff and
+      static source-preservation checks. Use Node24/existing dependencies; no
+      services, actual positive, native/fullTrace or broad ordinary API run by the
+      worker. Root reserves the single final isolated ordinary API integration.
+      Expected policy+runtime refusal total becomes117 from111, unfiltered through
+      the same existing two-file selector; positive16 top-level cases unchanged.
+- [ ] Freeze four-path source/report with RED/GREEN commands, logs, counts/skips/
+      warnings and unchanged-boundary proof for independent review. Root owns
+      final API, explicit-path user-identity commit/push and new exact-source CI.
+      Current15 native, whole compiled initialize/verify, provider/provenance and
+      all existing acceptance gates remain mandatory. Unknown historical551 cause
+      is not relabelled as checkpoint, renderer, timeout or performance failure.

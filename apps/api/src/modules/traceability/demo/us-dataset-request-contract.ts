@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { types } from "node:util";
 import { usTraceRequestCreateBodySchema } from "@markiro/platform-contracts";
 import type { UsPlanArtifactStore } from "../plans/us-plan-artifacts.js";
 import type { UsRequestPackageArtifactStore } from "../requests/us-request-package-artifacts.js";
@@ -88,6 +89,70 @@ const resultSchema = z
 export type UsDatasetRequestResult = Readonly<z.infer<typeof resultSchema>>;
 export function requestError(code: "conflict" | "incomplete" | "unit_invalid") {
   return new Error(`us_dataset_request_${code}`);
+}
+export function annotateUsDatasetRequestFailure(
+  error: unknown,
+  location:
+    Readonly<{ unitKey: UsDatasetRequestUnitKey; stage: "request" | "package" }> | undefined,
+): unknown {
+  try {
+    if (
+      !error ||
+      typeof error !== "object" ||
+      types.isProxy(error) ||
+      !types.isNativeError(error) ||
+      !Object.isExtensible(error) ||
+      !location ||
+      types.isProxy(location) ||
+      Object.getPrototypeOf(location) !== Object.prototype ||
+      Reflect.ownKeys(location).length !== 2
+    )
+      return error;
+    const unit = Object.getOwnPropertyDescriptor(location, "unitKey");
+    const stage = Object.getOwnPropertyDescriptor(location, "stage");
+    const unitValue: unknown = unit && "value" in unit ? unit.value : undefined;
+    const stageValue: unknown = stage && "value" in stage ? stage.value : undefined;
+    if (
+      !requestUnitSchema.options.some((key) => key === unitValue) ||
+      (stageValue !== "request" && stageValue !== "package")
+    )
+      return error;
+    // Never replace lower-level location, even when its metadata is opaque/unsafe.
+    // Inspect only own data causes, with the same finite horizon as command projection.
+    const seen = new Set<object>();
+    for (let current: unknown = error, depth = 0; current && typeof current === "object"; depth++) {
+      if (depth >= 32 || seen.has(current) || types.isProxy(current)) return error;
+      seen.add(current);
+      const cause = Object.getOwnPropertyDescriptor(current, "cause");
+      const prototypes = new Set<object>();
+      for (
+        let prototype: object | null = current, prototypeDepth = 0;
+        prototype;
+        prototypeDepth++
+      ) {
+        if (prototypeDepth >= 32 || prototypes.has(prototype) || types.isProxy(prototype))
+          return error;
+        prototypes.add(prototype);
+        for (const key of ["unitKey", "stage"]) {
+          if (Object.getOwnPropertyDescriptor(prototype, key)) return error;
+        }
+        if (!cause && Object.getOwnPropertyDescriptor(prototype, "cause")) return error;
+        // An ordinary object's prototype can itself be opaque; reject it next
+        // iteration before any descriptor or prototype operation on that object.
+        prototype = Reflect.getPrototypeOf(prototype);
+      }
+      if (!cause) break;
+      if (!("value" in cause)) return error;
+      current = cause.value;
+    }
+    Object.defineProperties(error, {
+      unitKey: { value: unitValue, enumerable: true, configurable: true, writable: true },
+      stage: { value: stageValue, enumerable: true, configurable: true, writable: true },
+    });
+  } catch {
+    // Diagnostics are best effort and cannot replace the original failure.
+  }
+  return error;
 }
 export function equalRequest(a: unknown, b: unknown): void {
   if (!canonicalExportEqual(a, b)) throw requestError("conflict");

@@ -132,6 +132,46 @@ Measurements (elapsed time, peak process RSS, database/artifact bytes) are hones
 observations reported separately, never part of stable replay digests. No
 unmeasured free-tier or two-minute claim.
 
+### Finite Request failure propagation amendment (2026-10-21)
+
+The exact `55152433183a797a6f6e65ab98983758eee08971` positive invocation passed
+image provenance and provider capability checks, then initialize exited nonzero.
+Its underlying cause remains unknown. Conditional interpretation of aggregated
+provider counts is not historical stage-completion proof. No timeout, renderer,
+checkpoint or performance fix is authorized by that observation.
+
+A separate deterministic, database-free regression is established: actual pure
+checkpoint model/byte drift throws `us_request_worker_checkpoint_mismatch`, and
+actual descriptor inequality throws `us_dataset_request_conflict`; the existing
+command projection loses both finite codes and Request location. A Request's
+finite `us_dataset_request_incomplete` likewise becomes generic. Correct this
+trusted service/runtime propagation, not the successful seed or its checks.
+
+Only those three additional literal codes may survive command projection.
+Existing command-category precedence and unknown fallback remain. Read only own
+data `message` or own data `response.code`; do not invoke `getResponse`, getters,
+inherited values or serialize the raw response/error/cause. Keep output fields
+exactly `code` and optional canonical `unitKey`/`stage`, with the existing bounded
+cause traversal and recipe validation. This does not allow arbitrary worker,
+database or provider codes, new fields, raw messages, URLs, stacks or evidence.
+
+After its existing unit validation, the Request service may best-effort attach
+the trusted Request unit and `request` or `package` location to the same original
+extensible Error. Preserve its class, identity and cause, frozen/opaque errors,
+and any valid lower-level canonical location, including an own-data cause.
+Do not clobber unsafe existing location descriptors or execute accessors. Before
+a trusted unit exists, do not invent a location. Request/package location is a
+failure boundary, not proof of completion or measured internal-stage duration.
+
+Keep every query, action, worker result/reconciliation, replay, clock, byte/hash
+assertion, deadline, output limit and resource-disposal order unchanged. No
+successful owner/proof injection, new retry, provider/fixture diagnostic loop or
+fixture-only substitute for the production correction. The original runtime
+implementer owns this follow-up; its production/API gates and independent review
+are separate from tooling proof. Root owns the single final ordinary API run,
+user-identity commit/push and exact-source CI. Actual whole initialize/verify and
+all other acceptance gates remain required; viewer acceptance remains afterward.
+
 ## Verification and sequencing
 
 First implement and independently review the pure strict command/configuration

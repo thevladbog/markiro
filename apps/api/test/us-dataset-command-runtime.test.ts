@@ -1,4 +1,6 @@
 import { S3Client } from "@aws-sdk/client-s3";
+import { createHash } from "node:crypto";
+import { ConflictException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertUsDatasetCommandPreflight,
@@ -12,6 +14,14 @@ import {
   captureUsRequestBuildDescriptor,
   loadUsRequestBuildDescriptor,
 } from "../src/deployment/us-request-build-descriptor";
+import {
+  annotateUsDatasetRequestFailure,
+  equalRequest,
+  requestError,
+} from "../src/modules/traceability/demo/us-dataset-request-contract";
+import { UsRequestWorkerCheckpoints } from "../src/modules/traceability/requests/us-request-worker-checkpoint";
+import type { UsRequestPackageInputs } from "../src/modules/traceability/requests/us-request-package-types";
+import { stableStringify } from "../src/modules/traceability/requests/us-request-snapshot";
 
 const args = [
   "verify",
@@ -42,6 +52,364 @@ const storage = {
   US_REQUEST_PACKAGE_S3_SECRET_ACCESS_KEY: "synthetic-package-secret",
   US_REQUEST_PACKAGE_S3_FORCE_PATH_STYLE: "true",
 };
+
+// Canonical empty codec data from us-request-package-zip.test.ts; not dataset/Ready proof.
+function checkpointRefusalFixture() {
+  const bytes = Buffer.from('{"fixture":1}');
+  const validation = {
+    name: "validation.json" as const,
+    mediaType: "application/json",
+    byteSize: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+  const inputs: UsRequestPackageInputs = {
+    model: {
+      schemaVersion: 1,
+      identity: {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        requestRevision: 1,
+        runId: "22222222-2222-4222-8222-222222222222",
+        runRevision: 1,
+        mode: "available_records_incomplete",
+        preparedBy: "codec-fixture-actor",
+      },
+      request: {
+        id: "11111111-1111-4111-8111-111111111111",
+        revision: 1,
+        requestNumber: "CODEC-EMPTY",
+        requesterName: "Synthetic codec",
+        requesterOrganization: null,
+        requesterContact: "private@example.test",
+        receivedAt: "2026-10-04T00:00:00Z",
+        dueAt: "2026-10-05T00:00:00Z",
+        alternateDeadlineReason: null,
+      },
+      scope: { tlcs: ["EMPTY-CODEC"] },
+      timing: {
+        schemaVersion: 1,
+        preparationStartedAt: "2026-10-04T00:00:00.000Z",
+        workerStartedAt: null,
+        reportDataPreparedAt: "2026-10-04T00:00:02.000Z",
+        elapsedToReportDataPreparationMs: 2000,
+      },
+      tenantOrigin: {
+        schemaVersion: 1,
+        verificationPolicy: "us-request-tenant-origin-v1",
+        result: "not_attested",
+        trustedSeed: null,
+      },
+      stamps: {
+        profile: "US_FSMA204_PROCESSOR",
+        timeZone: "America/New_York",
+        baselineId: "codec-fixture-baseline",
+        registryId: "fda_sortable_xlsx",
+        registryVersion: 1,
+        registryHash: "a".repeat(64),
+        build: { apiVersion: "codec-fixture", gitSha: "a".repeat(40), dirty: false },
+      },
+      selectionSummary: {
+        capturedRevisionCount: 0,
+        workbookEventCount: 0,
+        byType: { receiving: 0, transformation: 0, shipping: 0 },
+        byLifecycle: { current_finalized: 0, historical_finalized: 0, draft: 0, void: 0 },
+      },
+      findingsSummary: {
+        validation: { error: 0, warning: 0, info: 0 },
+        render: { error: 0, warning: 0, info: 0 },
+      },
+      renderFindings: [],
+      warningAcknowledgement: null,
+      plan: null,
+      digests: { scopedContentDigest: "b".repeat(64), inputDigest: null },
+      preReportFiles: [validation],
+      missingFiles: [
+        { name: "records.xlsx", code: "empty_selection" },
+        { name: "plan.pdf", code: "plan_absent" },
+      ],
+    },
+    preReportFiles: [{ ...validation, bytes }],
+  };
+  const checkpoint = {
+    model: structuredClone(inputs.model),
+    modelDigest: createHash("sha256").update(stableStringify(inputs.model)).digest("hex"),
+    executionDigest: "e".repeat(64),
+    packageVersion: "us-request-package-v1",
+    reportVersion: "us-request-report-pdf-v1",
+  };
+  const check = () =>
+    UsRequestWorkerCheckpoints.prototype.assertReproduction(checkpoint, inputs, "e".repeat(64));
+  expect(check).not.toThrow();
+  return { inputs, check };
+}
+function actualRefusal(operation: () => void): unknown {
+  try {
+    operation();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected actual refusal predicate to throw");
+}
+const requestFailureLocation = { unitKey: "request_september", stage: "package" } as const;
+
+describe("finite Request failure propagation", () => {
+  it("retains actual checkpoint model-drift code and trusted Request location", () => {
+    const { inputs, check } = checkpointRefusalFixture();
+    inputs.model.request.requesterName = "Changed canonical model";
+    const error = actualRefusal(check);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(annotateUsDatasetRequestFailure(error, requestFailureLocation)).toBe(error);
+    expect(usDatasetCommandDiagnostic(error)).toEqual({
+      code: "us_request_worker_checkpoint_mismatch",
+      unitKey: "request_september",
+      stage: "package",
+    });
+  });
+  it("retains actual unchanged-descriptor changed-byte checkpoint refusal", () => {
+    const { inputs, check } = checkpointRefusalFixture();
+    const file = inputs.preReportFiles[0];
+    if (!file) throw new Error("Missing codec validation bytes");
+    file.bytes.fill(0);
+    const error = actualRefusal(check);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(annotateUsDatasetRequestFailure(error, requestFailureLocation)).toBe(error);
+    expect(usDatasetCommandDiagnostic(error)).toEqual({
+      code: "us_request_worker_checkpoint_mismatch",
+      unitKey: "request_september",
+      stage: "package",
+    });
+  });
+  it("retains actual descriptor inequality code and trusted Request location", () => {
+    const error = actualRefusal(() =>
+      equalRequest({ sha256: "a".repeat(64) }, { sha256: "b".repeat(64) }),
+    );
+    expect(annotateUsDatasetRequestFailure(error, requestFailureLocation)).toBe(error);
+    expect(usDatasetCommandDiagnostic(error)).toEqual({
+      code: "us_dataset_request_conflict",
+      unitKey: "request_september",
+      stage: "package",
+    });
+  });
+  it("retains finite Request incomplete at its trusted request boundary", () => {
+    const error = requestError("incomplete");
+    expect(
+      annotateUsDatasetRequestFailure(error, { unitKey: "request_april", stage: "request" }),
+    ).toBe(error);
+    expect(usDatasetCommandDiagnostic(error)).toEqual({
+      code: "us_dataset_request_incomplete",
+      unitKey: "request_april",
+      stage: "request",
+    });
+  });
+  it("keeps hostile and unknown metadata private and existing command categories dominant", () => {
+    let touched = 0;
+    const getter = {
+      get: () => {
+        touched++;
+        throw new Error("private accessor");
+      },
+    };
+    const inherited = Object.setPrototypeOf({}, { code: "us_request_worker_checkpoint_mismatch" });
+    for (const error of [
+      new Error("SELECT credential postgres://private.invalid"),
+      new Error("us_request_worker_deadline_exceeded"),
+      {
+        message: "unknown",
+        response: { code: "us_request_package_storage_checksum_mismatch", private: "raw-secret" },
+      },
+      { message: "unknown", response: inherited },
+      Object.defineProperty({}, "response", getter),
+      { response: Object.defineProperty({}, "code", getter) },
+      Object.defineProperty({}, "message", getter),
+      Object.setPrototypeOf({}, { message: "us_dataset_request_conflict" }),
+      Object.assign(new Error("unknown"), { unitKey: "request_september", stage: "shipping" }),
+    ])
+      expect(usDatasetCommandDiagnostic(error)).toEqual({ code: "us_dataset_command_failed" });
+    for (const code of [
+      "us_dataset_command_schema_invalid",
+      "us_dataset_command_disposal_failed",
+    ]) {
+      const error = Object.assign(new Error(code), {
+        response: { code: "us_request_worker_checkpoint_mismatch" },
+      });
+      expect(usDatasetCommandDiagnostic(error)).toEqual({ code });
+      const opaqueResponse = new Proxy(
+        {},
+        {
+          getOwnPropertyDescriptor: () => {
+            touched++;
+            throw new Error("private response trap");
+          },
+        },
+      );
+      expect(
+        usDatasetCommandDiagnostic(Object.assign(new Error(code), { response: opaqueResponse })),
+      ).toEqual({ code });
+    }
+    const known = new ConflictException({
+      code: "us_dataset_request_conflict",
+      private: "raw-secret",
+    });
+    expect(usDatasetCommandDiagnostic(known)).toEqual({ code: "us_dataset_request_conflict" });
+    const wrongLocation = Object.assign(requestError("incomplete"), {
+      unitKey: "chain_0260",
+      stage: "package",
+    });
+    expect(usDatasetCommandDiagnostic(wrongLocation)).toEqual({
+      code: "us_dataset_request_incomplete",
+    });
+    const opaqueResponse = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor: () => {
+          throw new Error("private response trap");
+        },
+      },
+    );
+    expect(
+      usDatasetCommandDiagnostic(
+        Object.assign(new Error("unknown"), {
+          response: opaqueResponse,
+          unitKey: "chain_0259",
+          stage: "shipping",
+        }),
+      ),
+    ).toEqual({ code: "us_dataset_command_failed", unitKey: "chain_0259", stage: "shipping" });
+    expect(touched).toBe(0);
+  });
+  it("preserves original identity, frozen and unsafe metadata and valid lower canonical locations", () => {
+    let touched = 0;
+    const cause = new Error("original private cause");
+    const error = new ConflictException(
+      { code: "us_request_worker_checkpoint_mismatch" },
+      { cause },
+    );
+    expect(annotateUsDatasetRequestFailure(error, requestFailureLocation)).toBe(error);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(error.cause).toBe(cause);
+    expect(usDatasetCommandDiagnostic(error)).toEqual({
+      code: "us_request_worker_checkpoint_mismatch",
+      unitKey: "request_september",
+      stage: "package",
+    });
+    for (const root of [
+      Object.assign(requestError("conflict"), { unitKey: "chain_0259", stage: "shipping" }),
+      new Error("wrapper", {
+        cause: Object.assign(requestError("conflict"), {
+          unitKey: "orphan_0001",
+          stage: "void_receiving",
+        }),
+      }),
+    ]) {
+      const before = Object.getOwnPropertyDescriptors(root);
+      const diagnostic = usDatasetCommandDiagnostic(root);
+      expect(annotateUsDatasetRequestFailure(root, requestFailureLocation)).toBe(root);
+      expect(Object.getOwnPropertyDescriptors(root)).toEqual(before);
+      expect(usDatasetCommandDiagnostic(root)).toEqual(diagnostic);
+    }
+    const unsafe = Object.defineProperty(new Error("private"), "unitKey", {
+      get: () => {
+        touched++;
+        return "private";
+      },
+    });
+    const unsafeCause = Object.defineProperty(new Error("private"), "cause", {
+      get: () => {
+        touched++;
+        return cause;
+      },
+    });
+    const inheritedLocation = Object.setPrototypeOf(
+      new Error("private"),
+      Object.assign(new Error("prototype"), { unitKey: "private", stage: "private" }),
+    );
+    const cyclic = new Error("private");
+    Object.defineProperty(cyclic, "cause", { value: cyclic });
+    let deep: Error = new Error("private");
+    for (let depth = 0; depth < 32; depth++) deep = new Error("wrapper", { cause: deep });
+    const opaque = new Proxy(new Error("private"), {
+      defineProperty: () => {
+        touched++;
+        throw new Error("private error trap");
+      },
+    });
+    const frozen = Object.freeze(requestError("incomplete"));
+    for (const root of [
+      frozen,
+      unsafe,
+      unsafeCause,
+      inheritedLocation,
+      cyclic,
+      deep,
+      opaque,
+      { private: true },
+      null,
+      "private",
+    ]) {
+      const before =
+        root && typeof root === "object" ? Object.getOwnPropertyDescriptors(root) : undefined;
+      expect(annotateUsDatasetRequestFailure(root, requestFailureLocation)).toBe(root);
+      if (before) expect(Object.getOwnPropertyDescriptors(root)).toEqual(before);
+    }
+    for (const trap of ["has", "getPrototypeOf"] as const) {
+      const original = new Error("original operational failure");
+      let trapCalls = 0;
+      const prototype = {};
+      Object.setPrototypeOf(prototype, Error.prototype);
+      Object.setPrototypeOf(
+        original,
+        new Proxy(
+          prototype,
+          trap === "has"
+            ? {
+                has: (target, key) => {
+                  trapCalls++;
+                  original.message = "changed by inherited has trap";
+                  return Reflect.has(target, key);
+                },
+              }
+            : {
+                getPrototypeOf: (target) => {
+                  trapCalls++;
+                  original.message = "changed by inherited getPrototypeOf trap";
+                  return Reflect.getPrototypeOf(target);
+                },
+              },
+        ),
+      );
+      const before = Object.getOwnPropertyDescriptors(original);
+      const result = annotateUsDatasetRequestFailure(original, requestFailureLocation);
+      expect.soft(result).toBe(original);
+      expect.soft(trapCalls, trap).toBe(0);
+      expect.soft(original.message, trap).toBe("original operational failure");
+      expect.soft(Object.getOwnPropertyDescriptors(original), trap).toEqual(before);
+      expect.soft(Object.hasOwn(original, "unitKey"), trap).toBe(false);
+      expect.soft(Object.hasOwn(original, "stage"), trap).toBe(false);
+    }
+    const absent = new Error("private");
+    expect(annotateUsDatasetRequestFailure(absent, undefined)).toBe(absent);
+    expect(Object.hasOwn(absent, "unitKey")).toBe(false);
+    const locationAccessor = {
+      get unitKey() {
+        touched++;
+        return "request_september" as const;
+      },
+      stage: "package" as const,
+    };
+    expect(annotateUsDatasetRequestFailure(absent, locationAccessor)).toBe(absent);
+    expect(Object.hasOwn(absent, "unitKey")).toBe(false);
+    for (const location of [
+      Object.defineProperty({ ...requestFailureLocation }, "unitKey", { value: "chain_0259" }),
+      Object.defineProperty({ ...requestFailureLocation }, "stage", { value: "shipping" }),
+      { ...requestFailureLocation, untrusted: true },
+    ]) {
+      expect(annotateUsDatasetRequestFailure(absent, location)).toBe(absent);
+      expect(Object.hasOwn(absent, "unitKey")).toBe(false);
+    }
+    expect(usDatasetCommandDiagnostic(frozen)).toEqual({ code: "us_dataset_request_incomplete" });
+    expect(touched).toBe(0);
+  });
+});
 
 describe("dataset executable policy and private diagnostics", () => {
   afterEach(() => vi.restoreAllMocks());
