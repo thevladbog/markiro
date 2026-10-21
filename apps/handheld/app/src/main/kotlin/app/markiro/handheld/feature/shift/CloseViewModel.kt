@@ -3,6 +3,7 @@ package app.markiro.handheld.feature.shift
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.markiro.handheld.core.host.ShiftParticipationStore
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.sync.SyncDriver
 import app.markiro.handheld.feature.signin.SessionHolder
@@ -13,7 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class CloseOutcome { ACCEPTED, CONFLICT, PENDING }
+enum class CloseOutcome { ACCEPTED, CONFLICT, PENDING, PART_CLOSED, REASON_MISSING }
 
 sealed interface CloseStep {
     data object Loading : CloseStep
@@ -29,6 +30,8 @@ sealed interface CloseStep {
         val outcome: CloseOutcome,
         val boxes: Int? = null,
         val pallets: Int? = null,
+        /** The close was of this device's part of a shared shift. */
+        val part: Boolean = false,
     ) : CloseStep
 }
 
@@ -40,6 +43,22 @@ class CloseViewModel @Inject constructor(
     private val db: HandheldDatabase,
     private val session: SessionHolder,
 ) : ViewModel() {
+    companion object {
+        /**
+         * The outcome the summary reports from the close row's state and the host's note on it (plan 2b): a close the host accepted with
+         * `partClosed` or `reasonMissing` says so; a conflict or a close still queued stays what it was, whatever an older note says.
+         */
+        fun outcomeOf(rowState: String?, note: String?): CloseOutcome = when (rowState) {
+            null, "accepted" -> when (note) {
+                ShiftParticipationStore.NOTE_PART_CLOSED -> CloseOutcome.PART_CLOSED
+                ShiftParticipationStore.NOTE_REASON_MISSING -> CloseOutcome.REASON_MISSING
+                else -> CloseOutcome.ACCEPTED
+            }
+            "conflict" -> CloseOutcome.CONFLICT
+            else -> CloseOutcome.PENDING
+        }
+    }
+
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -83,15 +102,11 @@ class CloseViewModel @Inject constructor(
             sync.drainAll()
             watcher.cancel()
             val row = db.shiftCloseDao().forShift(shiftId)
-            val outcome = when (row?.state) {
-                null, "accepted" -> CloseOutcome.ACCEPTED
-                "conflict" -> CloseOutcome.CONFLICT
-                else -> CloseOutcome.PENDING
-            }
+            val outcome = outcomeOf(row?.state, ShiftParticipationStore(db).closeNote(shiftId))
             val conflicts = db.conflictDao().count().first()
             _step.value = CloseStep.Summary(
                 preview.accepted, preview.errors, preview.duplicates, conflicts, outcome,
-                boxes = preview.closedBoxes, pallets = preview.closedPallets,
+                boxes = preview.closedBoxes, pallets = preview.closedPallets, part = preview.shared,
             )
         }
     }

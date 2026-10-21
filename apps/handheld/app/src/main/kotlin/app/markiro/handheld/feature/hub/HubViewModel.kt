@@ -136,6 +136,8 @@ class HubViewModel(
     /** The host link and its refused records; absent in tests of the cloud's hub. */
     hostLink: Flow<app.markiro.handheld.core.host.HostLinkStatus?> = flowOf(null),
     hostQuarantined: Flow<Int> = flowOf(0),
+    /** What the host last said of a shift's participants and totals; absent (nothing known) in tests of the cloud's hub. */
+    private val participation: (String) -> Flow<app.markiro.handheld.core.host.ShiftParticipation?> = { flowOf(null) },
 ) : ViewModel() {
     @Inject
     constructor(
@@ -162,6 +164,7 @@ class HubViewModel(
         backend: app.markiro.handheld.core.backend.StationBackend,
         hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
         hostOutbox: app.markiro.handheld.core.storage.HostOutboxDao,
+        participation: app.markiro.handheld.core.host.ShiftParticipationStore,
     ) : this(
         recovery,
         api,
@@ -188,6 +191,7 @@ class HubViewModel(
         backend = backend,
         hostLink = hostLink.state.map { app.markiro.handheld.core.host.HostLinkStatus.of(it) },
         hostQuarantined = hostOutbox.observeQuarantinedCount(),
+        participation = participation::observe,
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -210,10 +214,13 @@ class HubViewModel(
                         emit(last)
                     }
                 }
-                combine(codes.observeCountForShift(id), summary) { local, shared ->
+                // The same figures as the work screen's strip: a shared shift's total is the host's, corrected for the codes this device lost to
+                // another one (`lost`), never this device's own uncorrected count taken against the cloud summary.
+                combine(codes.observeCountForShift(id), summary, participation(id), codes.observeLostForShift(id)) { local, shared, figures, lost ->
+                    val strip = app.markiro.handheld.feature.shift.SharedShiftRules.strip(figures, local, shift.plannedQty, lost)
                     HubActiveShift(
                         shift = shift,
-                        acceptedUnits = maxOf(shared?.acceptedUnits ?: 0, local),
+                        acceptedUnits = strip?.total ?: maxOf(shared?.acceptedUnits ?: 0, local),
                         summaryAt = shared?.takeIf { it.acceptedUnits != null }?.at,
                     )
                 }

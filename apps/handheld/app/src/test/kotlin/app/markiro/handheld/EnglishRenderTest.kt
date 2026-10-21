@@ -448,4 +448,23 @@ class EnglishRenderTest {
         }
         assertNoCyrillic()
     }
+
+    @Test
+    fun theSharedCloseRendersInEnglish() {
+        val preview = app.markiro.handheld.feature.shift.ShiftCloser.Preview(120, 1, 0, 1200, reasonRequired = false, alreadyClosed = false, shared = true, othersOpen = 2)
+        val steps = listOf(
+            app.markiro.handheld.feature.shift.CloseStep.Confirm(preview),
+            app.markiro.handheld.feature.shift.CloseStep.Confirm(preview.copy(othersOpen = 0)),
+            app.markiro.handheld.feature.shift.CloseStep.Confirm(preview.copy(othersOpen = null)),
+            app.markiro.handheld.feature.shift.CloseStep.Summary(120, 1, 0, 0, app.markiro.handheld.feature.shift.CloseOutcome.PART_CLOSED, part = true),
+            app.markiro.handheld.feature.shift.CloseStep.Summary(120, 1, 0, 0, app.markiro.handheld.feature.shift.CloseOutcome.REASON_MISSING, part = true),
+        )
+        val shown = androidx.compose.runtime.mutableStateOf<app.markiro.handheld.feature.shift.CloseStep>(steps.first())
+        compose.setContent { MarkiroTheme { app.markiro.handheld.feature.shift.CloseScreen(shown.value, app.markiro.handheld.feature.shift.CloseCallbacks()) } }
+        for (step in steps) {
+            shown.value = step
+            compose.waitForIdle()
+            assertNoCyrillic()
+        }
+    }
 }

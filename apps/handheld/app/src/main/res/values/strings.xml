@@ -876,4 +876,11 @@
     <string name="work_my_part">Моя смена</string>
     <string name="work_shared_devices">Работают: %1$d из %2$d</string>
     <string name="work_close_part">Закрыть свою часть</string>
+    <string name="close_part_confirm_title">Закрыть свою часть?</string>
+    <string name="close_part_confirm_text_others">Принято %1$d, ошибок %2$d, дублей %3$d. Смена закроется, когда закроют остальные: %4$d.</string>
+    <string name="close_part_confirm_text_last">Принято %1$d, ошибок %2$d, дублей %3$d. Вы закрываете последним: смена закроется.</string>
+    <string name="close_part_confirm_text_unknown">Принято %1$d, ошибок %2$d, дублей %3$d. Смена закроется, когда закроют остальные участники.</string>
+    <string name="close_summary_part_title">Ваша часть закрыта</string>
+    <string name="close_summary_part_closed">Смена закроется, когда закроют остальные</string>
+    <string name="close_summary_reason_missing">Смена закрыта. Причину недовыполнения плана внесёт офис</string>
 </resources>

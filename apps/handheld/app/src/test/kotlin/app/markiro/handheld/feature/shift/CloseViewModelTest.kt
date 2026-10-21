@@ -130,4 +130,16 @@ class CloseViewModelTest {
         assertEquals("active",db.shiftDao().get("s1")?.status)
         assertEquals(0,server.requestCount)
     }
+
+    @Test
+    fun aHostNotedPartCloseOrMissingReasonDecidesTheSummaryOutcome() = runTest {
+        val store = app.markiro.handheld.core.host.ShiftParticipationStore(db)
+        store.noteClose("s1", app.markiro.handheld.core.host.ShiftParticipationStore.NOTE_PART_CLOSED)
+        assertEquals(CloseOutcome.PART_CLOSED, CloseViewModel.outcomeOf("accepted", store.closeNote("s1")))
+        store.noteClose("s1", app.markiro.handheld.core.host.ShiftParticipationStore.NOTE_REASON_MISSING)
+        assertEquals(CloseOutcome.REASON_MISSING, CloseViewModel.outcomeOf(null, store.closeNote("s1")))
+        assertEquals(CloseOutcome.ACCEPTED, CloseViewModel.outcomeOf("accepted", null))
+        assertEquals(CloseOutcome.CONFLICT, CloseViewModel.outcomeOf("conflict", "part_closed"))
+        assertEquals(CloseOutcome.PENDING, CloseViewModel.outcomeOf("pending", "part_closed"))
+    }
 }

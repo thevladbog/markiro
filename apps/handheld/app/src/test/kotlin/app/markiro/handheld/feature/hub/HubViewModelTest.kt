@@ -162,6 +162,7 @@ class HubViewModelTest {
         team: TeamRefresher = TeamRefresher { null },
         tick: Flow<Unit> = flowOf(Unit),
         repository: app.markiro.handheld.feature.shift.ShiftRepository? = null,
+        participation: (String) -> Flow<app.markiro.handheld.core.host.ShiftParticipation?> = { flowOf(null) },
     ): HubViewModel {
         val engine = SyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
@@ -180,7 +181,7 @@ class HubViewModelTest {
                 api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
                 BoxRepository(db), db.codeDao(), team, writeoffEngine, db.writeoffPermissionDao(),
                 db.palletPermissionDao(), db.palletMembershipDao(),
-                scannerLabel = { "встроенный" }, now = { clock }, tick = tick, shiftRepository = repository,
+                scannerLabel = { "встроенный" }, now = { clock }, tick = tick, shiftRepository = repository, participation = participation,
             ),
         )
     }
@@ -504,5 +505,27 @@ class HubViewModelTest {
             ),
         )
         assertEquals(true, model.state.first { it.printerConfigured }.printerConfigured)
+    }
+
+    private fun sharedFigures(accepted: Long, mine: Long) = app.markiro.handheld.core.host.ShiftParticipation(
+        shiftId = "s1", maxStations = 2, myState = "active", participantsEver = 2, active = 2, othersOpen = 1,
+        accepted = accepted, myAccepted = mine, asOf = "2026-10-08T10:00:00Z", fetchedAt = clock,
+    )
+
+    /** The card is the second consumer of the shift-wide total: a code the host gave to another device must not count twice here either. */
+    @Test
+    fun aSharedShiftsCardShowsTheCorrectedShiftTotalNotTheOwnUncorrectedCount() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        db.codeDao().insert(CodeEntity("h1", "s1", "04600682000013", "one", "2026-09-12T10:00:00Z"))
+        db.codeDao().insert(CodeEntity("h2", "s1", "04600682000013", "two", "2026-09-12T10:00:01Z"))
+        val store = app.markiro.handheld.core.host.ShiftParticipationStore(db)
+        val model = vm(api(), participation = store::observe)
+        db.metaDao().put(app.markiro.handheld.core.storage.MetaEntity(app.markiro.handheld.core.host.ShiftParticipationStore.key("s1"), kotlinx.serialization.json.Json.encodeToString(app.markiro.handheld.core.host.ShiftParticipation.serializer(), sharedFigures(accepted = 120, mine = 0))))
+        // Others 120 + own 2 (nothing lost yet).
+        assertEquals(122, model.state.first { it.activeShift?.acceptedUnits == 122 }.activeShift?.acceptedUnits)
+        // The host gave h1 to another device: it is in the 120 already.
+        db.conflictDao().insertIgnore(listOf(app.markiro.handheld.core.storage.ConflictEntity("h1", null, "2026-09-12T09:00:00.000Z", "2026-09-12T10:00:00.000Z")))
+        assertEquals(121, model.state.first { it.activeShift?.acceptedUnits == 121 }.activeShift?.acceptedUnits)
     }
 }

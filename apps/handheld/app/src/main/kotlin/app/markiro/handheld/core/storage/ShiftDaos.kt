@@ -178,6 +178,10 @@ interface ShiftCloseDao {
     @Query("SELECT * FROM shift_close_outbox WHERE shiftId = :shiftId")
     suspend fun forShift(shiftId: String): ShiftCloseEntity?
 
+    /** The close a host receipt names: the host knows it by this id (`HostOutboxEntity.sourceKey`). */
+    @Query("SELECT * FROM shift_close_outbox WHERE eventId = :eventId")
+    suspend fun forEvent(eventId: String): ShiftCloseEntity?
+
     @Query("SELECT * FROM shift_close_outbox WHERE shiftId = :shiftId")
     fun observeForShift(shiftId: String): Flow<ShiftCloseEntity?>
 

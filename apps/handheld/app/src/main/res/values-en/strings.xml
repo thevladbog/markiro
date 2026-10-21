@@ -846,4 +846,11 @@
     <string name="work_my_part">My shift</string>
     <string name="work_shared_devices">Working: %1$d of %2$d</string>
     <string name="work_close_part">Close my part</string>
+    <string name="close_part_confirm_title">Close your part?</string>
+    <string name="close_part_confirm_text_others">Accepted %1$d, errors %2$d, duplicates %3$d. The shift closes when the others close theirs: %4$d.</string>
+    <string name="close_part_confirm_text_last">Accepted %1$d, errors %2$d, duplicates %3$d. You are the last to close: the shift will close.</string>
+    <string name="close_part_confirm_text_unknown">Accepted %1$d, errors %2$d, duplicates %3$d. The shift closes when the other participants close theirs.</string>
+    <string name="close_summary_part_title">Your part is closed</string>
+    <string name="close_summary_part_closed">The shift closes when the others close theirs</string>
+    <string name="close_summary_reason_missing">The shift is closed. The office will enter the reason the plan was not met</string>
 </resources>
