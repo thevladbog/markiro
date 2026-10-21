@@ -68,60 +68,55 @@ function assertProtectedDemoRuntimeInventory(step, submissionEnabled = "false") 
   }
 }
 
-test("CI keeps production bundle, Yandex runtime and infrastructure contracts", async () => {
+// The Yandex runtime is retired (owner decision 2026-10-21): CI keeps this
+// contract suite, which the platform release re-runs, and drops the legacy
+// image, Compose smoke and documentation smoke. release-images.yml keeps them.
+test("CI keeps the production contracts but no longer runs the retired Yandex contour", async () => {
   const [workflow, source] = await Promise.all([
     parse(".github/workflows/ci.yml"),
     read(".github/workflows/ci.yml"),
   ]);
-  for (const command of ["test:production-bundle:contract", "test:yandex-runtime", "test:indexnow"])
+  for (const command of ["test:production-bundle:contract", "test:indexnow"])
     assert.match(source, new RegExp(command.replaceAll(":", "\\:")));
   assert.match(source, /pnpm format:check/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
-  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*saas-admin\.localhost/);
-  assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
   assertNoRetiredLegalEnvironmentVariables(source);
-  assertProtectedDemoRuntimeInventory(
-    namedStep(workflow, "production-bundle", "Generate masked test-only environment"),
+  for (const retired of [
+    "test:yandex-runtime",
+    "test:production-docs:browser",
+    "deploy/production/edge.Dockerfile",
+    "deploy/production/smoke.mjs",
+    "compose.production.yml",
+  ])
+    assert.ok(!source.includes(retired), retired);
+  // The platform edge is built with its defaults: the demo form off, no keys.
+  const edge = namedStep(
+    workflow,
+    "production-bundle",
+    "Build local platform-only edge preparation image",
   );
-  assertEdgeBuildStep(
-    namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
-    Object.fromEntries(
-      publicLandingBuildVariables.map((variable) => [
-        variable,
-        variable === "PUBLIC_DEMO_SUBMISSION_ENABLED" ? "false" : "",
-      ]),
-    ),
+  assert.equal(edge.with.file, "deploy/platform/edge.Dockerfile");
+  assert.equal(edge.with["build-args"], undefined);
+  assert.equal(edge.env, undefined);
+});
+
+test("release-images.yml isolates platform contracts from the legacy Compose project", async () => {
+  const workflow = await parse(".github/workflows/release-images.yml");
+  assert.equal(workflow.jobs["production-bundle"].env.COMPOSE_PROJECT_NAME, "markiro-production");
+  assert.equal(
+    namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts").run,
+    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
   );
 });
 
-for (const file of ["ci.yml", "release-images.yml"]) {
-  test(`${file} isolates platform contracts from the legacy Compose project`, async () => {
-    const workflow = await parse(`.github/workflows/${file}`);
-    assert.equal(workflow.jobs["production-bundle"].env.COMPOSE_PROJECT_NAME, "markiro-production");
-    assert.equal(
-      namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts")
-        .run,
-      "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
-    );
-  });
-}
-
-test("CI validates the edge image before landing browser gates", async () => {
+test("ci.yml runs platform contracts without an ambient Compose project", async () => {
   const workflow = await parse(".github/workflows/ci.yml");
-  const steps = workflow.jobs["production-bundle"].steps;
-  const step = namedStep(
-    workflow,
-    "production-bundle",
-    "Verify landing browser and Lighthouse release gates",
+  assert.equal(workflow.jobs["production-bundle"].env, undefined);
+  assert.equal(
+    namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts").run,
+    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
   );
-  const stepIndex = steps.indexOf(step);
-  const imageBuildIndex = steps.indexOf(
-    namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
-  );
-  assert.ok(imageBuildIndex < stepIndex, "the PDF/A-validating edge build must precede browsers");
-  assert.match(step.run, /^pnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/);
-  assert.equal(step.env, undefined);
 });
 
 test("CI builds legal verifier dependencies immediately before production contracts", async () => {

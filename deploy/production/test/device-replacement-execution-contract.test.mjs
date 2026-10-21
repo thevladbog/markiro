@@ -38,13 +38,18 @@ test("replacement migrations ship in journal order and API image before readers"
 
 test("every replacement runtime has a release artifact and owned CI gate", async () => {
   const edge = await read("deploy/production/edge.Dockerfile");
-  for (const app of ["admin", "saas-admin"]) {
+  for (const app of ["admin", "saas-admin"])
     assert.ok(edge.includes(`/workspace/apps/${app}/dist /srv/${app}`));
-    assert.equal(
-      classifyChangedFiles([`apps/${app}/src/replacement.ts`]).jobs.production_bundle,
-      true,
-    );
-  }
+  // The platform edge serves the SaaS admin; the cabinet is no longer served
+  // online (2026-10-21) and keeps its suites in the optional galleries.
+  assert.equal(
+    classifyChangedFiles(["apps/saas-admin/src/replacement.ts"]).jobs.production_bundle,
+    true,
+  );
+  assert.equal(
+    classifyChangedFiles(["apps/admin/src/replacement.ts"]).jobs.cabinet_station_galleries,
+    true,
+  );
   assert.match(
     await read(".github/workflows/release-images.yml"),
     /deploy\/production\/api\.Dockerfile/,
@@ -72,7 +77,7 @@ test("every replacement runtime has a release artifact and owned CI gate", async
     ],
     [
       "tools/production-browser/device-replacement-tests/replacement.spec.ts",
-      ["production_bundle"],
+      ["cabinet_station_galleries"],
     ],
   ]) {
     const result = classifyChangedFiles([path]);

@@ -201,7 +201,7 @@ test("CI routes platform files to bundle checks and builds isolated preparation 
   const workflow = load(read(".github/workflows/ci.yml"));
   const steps = workflow.jobs["production-bundle"].steps;
   assert.ok(steps.some((s) => s.run?.includes("node --test deploy/platform/test/*.test.mjs")));
-  assert.ok(steps.some((s) => s.run?.includes("deploy/platform/edge.Dockerfile")));
+  assert.ok(steps.some((s) => s.with?.file === "deploy/platform/edge.Dockerfile"));
   assert.ok(steps.some((s) => s.run?.includes("node deploy/platform/ci-stack.mjs")));
   const release = load(read(".github/workflows/release-images.yml"));
   assert.ok(release.on.push.paths.includes("deploy/platform/**"));
