@@ -106,6 +106,11 @@ const LeadsPage = lazy(() =>
 const LeadPage = lazy(() =>
   import("./pages/leads/LeadPage.js").then((module) => ({ default: module.LeadPage })),
 );
+const StandaloneReleasesPage = lazy(() =>
+  import("./pages/standalone-releases/StandaloneReleasesPage.js").then((module) => ({
+    default: module.StandaloneReleasesPage,
+  })),
+);
 const SupportEpisodesPage = lazy(() =>
   import("./pages/support/SupportEpisodesPage.js").then((module) => ({
     default: module.SupportEpisodesPage,
@@ -241,6 +246,7 @@ export const appRoutes = createRoutesFromElements(
             )
           }
         />
+        <Route path="/standalone-releases" element={<StandaloneReleasesPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/reports" element={<ReportsPage />} />

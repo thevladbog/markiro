@@ -53,9 +53,10 @@ export const STANDALONE_DIAGNOSTICS_CLOCK = Symbol("STANDALONE_DIAGNOSTICS_CLOCK
 export const STANDALONE_LATEST_BUILD = Symbol("STANDALONE_LATEST_BUILD");
 
 /**
- * Where the newest PUBLISHED standalone build comes from (owner decision В5). Nothing in the cloud
- * publishes one yet — the owner signs update packages by hand — so the default knows none and
- * the overview carries `latestPublishedVersion: null` and no «outdated» verdict.
+ * Where the newest PUBLISHED standalone build comes from (owner decision В5): the stable
+ * `latest.json` that «Выпуски автонома» writes (spec 2026-10-20 §5.3). Without release storage,
+ * or without a pointer yet, it knows none and the overview carries `latestPublishedVersion: null`
+ * and no «outdated» verdict.
  */
 export interface StandaloneLatestBuildSource {
   latestPublishedVersion(): Promise<string | null>;

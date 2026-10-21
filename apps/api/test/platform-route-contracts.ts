@@ -33,6 +33,7 @@ import {
   platformDeviceRetentionContracts,
   platformStandaloneDiagnosticsContracts,
   platformStandaloneLicenseContracts,
+  platformStandaloneReleaseContracts,
   platformOfflineGrantPolicyContracts,
   platformGrantReadinessContracts,
   platformGrantActivationContracts,
@@ -44,7 +45,7 @@ import {
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
-export type PlatformHttpMethod = "delete" | "get" | "post" | "patch";
+export type PlatformHttpMethod = "delete" | "get" | "post" | "patch" | "put";
 export type PlatformSuccessStatus = "200" | "201";
 
 export interface PlatformRouteContract {
@@ -456,6 +457,33 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/tenants/{tenantId}/standalone-diagnostics/{diagnosticId}",
     "200",
     platformStandaloneDiagnosticsContracts.detail.response,
+  ),
+  route(
+    "get",
+    "/platform/standalone-releases",
+    "200",
+    platformStandaloneReleaseContracts.list.response,
+  ),
+  route(
+    "post",
+    "/platform/standalone-releases/uploads",
+    "200",
+    platformStandaloneReleaseContracts.upload.response,
+    { body: platformStandaloneReleaseContracts.upload.body },
+  ),
+  route(
+    "post",
+    "/platform/standalone-releases/registrations",
+    "200",
+    platformStandaloneReleaseContracts.register.response,
+    { body: platformStandaloneReleaseContracts.register.body },
+  ),
+  route(
+    "put",
+    "/platform/standalone-releases/{channel}/latest",
+    "200",
+    platformStandaloneReleaseContracts.setLatest.response,
+    { body: platformStandaloneReleaseContracts.setLatest.body },
   ),
   route("get", "/platform/leads", "200", platformLeadContracts.list.response, {
     query: platformLeadContracts.list.query,

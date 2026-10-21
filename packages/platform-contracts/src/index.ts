@@ -765,3 +765,4 @@ export {
   publicInventoryResultsSchema,
 } from "./public-api.js";
 export * from "./landing-leads.js";
+export * from "./standalone-releases.js";
