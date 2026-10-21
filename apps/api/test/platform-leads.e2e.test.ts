@@ -36,6 +36,9 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
   const service = new PlatformLeadsService(db, audit, provisioning);
   const now = new Date("2026-10-21T09:00:00.000Z");
   service.now = () => now;
+  // Leads arrive an hour before the pinned clock, so the journal order does not depend on
+  // whether the wall clock has passed `now`.
+  const receivedAt = new Date(now.getTime() - 3_600_000);
   const run = randomUUID().slice(0, 8);
   const users = {
     admin: `leads-admin-${run}`,
@@ -69,12 +72,17 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
       phone: "+79991234567",
       ...overrides,
     });
-    await new LandingLeadRepository(db, mail, {
-      recipient: "owner@example.test",
-      replyTo: "hello@example.test",
-      landingOrigin: "https://markiro.example",
-      adminOrigin: "https://admin.markiro.example",
-    }).accept(input);
+    await new LandingLeadRepository(
+      db,
+      mail,
+      {
+        recipient: "owner@example.test",
+        replyTo: "hello@example.test",
+        landingOrigin: "https://markiro.example",
+        adminOrigin: "https://admin.markiro.example",
+      },
+      () => receivedAt,
+    ).accept(input);
     const [row] = await db
       .select()
       .from(schema.landingLeads)
@@ -302,7 +310,6 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     await db
       .insert(schema.organization)
       .values({ id: tenantId, name: "Существующий", slug: tenantId, createdAt: now });
-    service.now = () => new Date(Date.now());
     const detail = await service.linkTenant(admin, row.id, tenantId);
     expect(detail.tenant).toEqual({ id: tenantId, name: "Существующий", cabinetAccess: "enabled" });
     expect(detail.events[0]).toMatchObject({
@@ -326,7 +333,6 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
 
   it("creates a tenant without cabinet from the lead, idempotently by slug", async () => {
     const row = await lead();
-    service.now = () => new Date(Date.now());
     const slug = `inn-7707083893-${run}-${randomUUID().slice(0, 6)}`;
     const detail = await service.createTenant(admin, row.id, {
       tenantName: String(row.company),
@@ -358,7 +364,6 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
 
   it("refuses to «create» a tenant whose slug already belongs to another tenant", async () => {
     const row = await lead();
-    service.now = () => new Date(Date.now());
     const slug = `taken-${run}-${randomUUID().slice(0, 6)}`;
     const other = await provisioning.provision(
       { tenantName: "Чужой клиент", tenantSlug: slug, cabinetAccess: "none" },
