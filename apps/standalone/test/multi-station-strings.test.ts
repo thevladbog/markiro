@@ -27,6 +27,7 @@ const KEYS = [
   "office.shifts.closeAllIntro",
   "office.shifts.notClosed",
   "office.shifts.notClosedItem",
+  "office.shifts.notClosedItemRevoked",
   "office.shifts.notClosedState.active",
   "office.shifts.notClosedState.left",
   "office.shifts.stationsLine",
@@ -111,6 +112,9 @@ describe("the texts of the multi-station office (plan 2b)", () => {
 
   it("keeps the placeholders the components pass", () => {
     expect(text("office.shifts.notClosedItem")).toBe("{{name}} ({{state}})");
+    expect(text("office.shifts.notClosedItemRevoked")).toBe(
+      "{{name}} ({{state}}, устройство отозвано)",
+    );
     expect(text("office.shifts.totals.byDeviceValue")).toContain("{{units}}");
     expect(text("office.shifts.totals.byDeviceValue")).toContain("{{boxes}}");
     expect(text("office.shifts.totals.byDeviceValue")).toContain("{{pallets}}");

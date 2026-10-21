@@ -11,9 +11,10 @@ import { shiftClose } from "../../host/requests.js";
 import { closeReasonRule } from "../../lib/rules.js";
 import type { AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
-import { useOfficeMutation } from "../office-query.js";
+import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
 import { StaleAlert, WriteFailureAlert } from "../page-state.js";
-import { isSharedShift, notClosedParticipants } from "./participation.js";
+import { isSharedShift, notClosedParticipants, revokedDeviceIds } from "./participation.js";
 import { shiftWriteFailure } from "./shift-form.js";
 import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
 
@@ -66,6 +67,13 @@ export function CloseShiftDialog({
   const rereadIfLost = useRereadShiftsOnLostAnswer();
   const shared = isSharedShift(shift);
   const open = notClosedParticipants(shift);
+  // A revoked device's open part is closed with the rest, and the list says which they are: an
+  // administrator's devices list tells it; unread, nothing is claimed.
+  const isAdmin = useOfficeSession().user.role === "admin";
+  const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
+    enabled: isAdmin && open.length > 0,
+  });
+  const revoked = revokedDeviceIds(isAdmin ? devices.data : undefined);
   const close = useOfficeMutation((api, token, reason: string) =>
     api.closeShift(token, shift.id, shiftClose(reason, shift.rev)),
   );
@@ -132,10 +140,18 @@ export function CloseShiftDialog({
           {t("office.shifts.notClosed", {
             devices: open
               .map((each) =>
-                t("office.shifts.notClosedItem", {
-                  name: each.deviceName,
-                  state: t(`office.shifts.notClosedState.${each.state}`),
-                }),
+                t(
+                  revoked.has(each.deviceId)
+                    ? "office.shifts.notClosedItemRevoked"
+                    : "office.shifts.notClosedItem",
+                  {
+                    name:
+                      each.deviceName === ""
+                        ? t("office.shifts.totals.unknownDevice", { id: each.deviceId.slice(0, 8) })
+                        : each.deviceName,
+                    state: t(`office.shifts.notClosedState.${each.state}`),
+                  },
+                ),
               )
               .join(", "),
           })}

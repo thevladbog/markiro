@@ -2,13 +2,14 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import type { OfficeShift } from "../src/host/protocol.js";
+import type { DeviceRecord, OfficeShift } from "../src/host/protocol.js";
 import type { FakeOfficeSession } from "./support/office.js";
 import { hasRowAction, pressRowAction } from "./support/row-menu.js";
 import {
   ACTIVE,
   expectFocusedNotice,
   HANDHELD_ID,
+  STATION_ID,
   openShifts,
   participant,
   PARTICIPANT_A,
@@ -26,6 +27,17 @@ const CLOSED_SHARED: OfficeShift = {
   closedAt: "2026-10-08T14:10:00Z",
   rev: 72,
 };
+
+const device = (id: string, revokedAt: string | null): DeviceRecord => ({
+  id,
+  kind: "station",
+  name: "Станция",
+  lineId: null,
+  appVersion: "0.1.0",
+  pairedAt: "2026-09-26T09:15:00Z",
+  lastSeenAt: null,
+  revokedAt,
+});
 
 async function openWhole(session: FakeOfficeSession): Promise<HTMLElement> {
   await openShifts(session);
@@ -73,6 +85,34 @@ describe("closing a shared shift from the office (plan 2b)", () => {
     const dialog = await openWhole(shiftsSession([shift]));
     expect(
       within(dialog).getByText("Не закрыли: ТСД 1 (на паузе), Станция 2 (работает)."),
+    ).toBeTruthy();
+  });
+
+  it("marks a revoked device that has not closed, and keeps it in the list", async () => {
+    const session = shiftsSession([SHARED]);
+    session.api.listDevices.mockResolvedValue([
+      device(STATION_ID, "2026-10-08T12:00:00Z"),
+      device(HANDHELD_ID, null),
+    ]);
+    const dialog = await openWhole(session);
+    expect(
+      await within(dialog).findByText(
+        "Не закрыли: Станция линии 1 (работает, устройство отозвано), ТСД 1 (работает).",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("names a device by its id when the host sent no name, and claims nothing of revocation while the devices are unread", async () => {
+    const shift: OfficeShift = {
+      ...SHARED,
+      participants: [participant({ deviceName: "" }), PARTICIPANT_B],
+    };
+    const session = shiftsSession([shift]);
+    session.api.listDevices.mockRejectedValue(new Error("down"));
+    const dialog = await openWhole(session);
+    await waitFor(() => expect(session.api.listDevices).toHaveBeenCalled());
+    expect(
+      within(dialog).getByText("Не закрыли: Устройство 7c9e6679… (работает), ТСД 1 (работает)."),
     ).toBeTruthy();
   });
 
