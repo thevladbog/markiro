@@ -207,7 +207,7 @@ describe("the shifts of the station's line", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, {
-      supports: ["validation-v1", "validation-dm-duplicate-v1"],
+      supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
     });
     const [shift] = handlers.onEntered.mock.calls[0] ?? [];
     expect(shift).toMatchObject({

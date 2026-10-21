@@ -1154,9 +1154,9 @@ describe("the close of a shift with an unresolved label", () => {
 });
 
 describe("the entry", () => {
-  it("names the duplicate print among what this station works", () => {
+  it("names the duplicate print and several devices in one shift among what this station works", () => {
     expect(STATION_SHIFT_ENTER).toEqual({
-      supports: ["validation-v1", "validation-dm-duplicate-v1"],
+      supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
     });
   });
 });

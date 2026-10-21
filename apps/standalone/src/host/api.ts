@@ -219,6 +219,7 @@ import {
   type ShiftClose,
   type ShiftCreate,
   type ShiftEnter,
+  type ShiftLeave,
   type ShiftExportRecord,
   type ShiftExportRows,
   type BoxReportRows,
@@ -652,6 +653,15 @@ export interface HostApi {
    * validation shift to a station that does not name `validation-v1`.
    */
   enterShift: (id: string, enter: ShiftEnter) => Promise<EnteredShift>;
+  /**
+   * Pauses this station's part of a shift it works (plan 2b, protocol 7): the host frees its slot
+   * of the line (`left`) and answers the shift as this station sees it, without the snapshot.
+   * `leave` is this station's own `joinedRev` (`ShiftLeave`, `shift-leave.json`) from its last
+   * entry answer; a token that is no longer the host's (a later entry stamped a new one) changes
+   * nothing and the answer's `myState` stays `active`. `null` sends no body (no token known).
+   * Repeating it changes nothing; `conflict` `shift_not_entered` for a shift it never entered.
+   */
+  leaveShift: (id: string, leave: ShiftLeave | null) => Promise<DeviceShift>;
   /**
    * A block of SSCC serials for this station; the same `requestId` answers the
    * same block, and the same id with another prefix is `validation_failed` on
@@ -1200,6 +1210,13 @@ export function createHostApi(client: HostClient): HostApi {
         body: enter,
         schema: enteredShiftSchema,
       }),
+    leaveShift: (id, leave) =>
+      leave === null
+        ? client.request("POST", `/v1/device/shifts/${id}/leave`, { schema: deviceShiftSchema })
+        : client.request("POST", `/v1/device/shifts/${id}/leave`, {
+            body: leave,
+            schema: deviceShiftSchema,
+          }),
     requestSsccBlock: (request) =>
       client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
     checkCode: (codeHash) =>
