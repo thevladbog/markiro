@@ -34,7 +34,9 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     "platform-only",
   );
   const service = new PlatformLeadsService(db, audit, provisioning);
-  const now = new Date("2026-10-21T09:00:00.000Z");
+  // The service writes at `now`, the public form at the real time: `now` must stay after
+  // it, so it is an hour ahead of the run (a fixed date turned into a past one on its day).
+  const now = new Date(Math.ceil(Date.now() / 1_000) * 1_000 + 3_600_000);
   service.now = () => now;
   const run = randomUUID().slice(0, 8);
   const users = {
@@ -270,7 +272,11 @@ describe.skipIf(!url)("platform leads section (spec 2026-10-20 §15.6)", () => {
     });
     expect(contacted.events[0]).toMatchObject({
       kind: "status_change",
-      payload: { from: "new", to: "contacted", nextTouchAt: "2026-10-24T09:00:00.000Z" },
+      payload: {
+        from: "new",
+        to: "contacted",
+        nextTouchAt: new Date(now.getTime() + 3 * DAY).toISOString(),
+      },
     });
     // Journal order is by time; give each action its own instant.
     service.now = () => new Date(now.getTime() + 60_000);
