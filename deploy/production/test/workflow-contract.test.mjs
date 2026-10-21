@@ -9,12 +9,6 @@ import { assertLegalVerifierBuildsImmediatelyBeforeProductionContracts } from ".
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const parse = async (path) => load(await read(path));
-const publicLandingBuildVariables = Object.freeze([
-  "PUBLIC_DEMO_SUBMISSION_ENABLED",
-  "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
-  "PUBLIC_PHONE",
-  "PUBLIC_INDEXNOW_KEY",
-]);
 const demoRuntimeVariables = Object.freeze([
   "LANDING_DEMO_SUBMISSION_ENABLED",
   "LANDING_ORIGIN",
@@ -40,37 +34,10 @@ function namedStep(workflow, job, name) {
   return step;
 }
 
-function assertEdgeBuildStep(step, expectedEnvironment) {
-  assert.deepEqual(step.env, expectedEnvironment);
-  assert.deepEqual(
-    [...step.run.matchAll(/--build-arg\s+([A-Z0-9_]+)=/g)].map((match) => match[1]),
-    publicLandingBuildVariables,
-  );
-  for (const variable of publicLandingBuildVariables) {
-    assert.ok(step.run.includes(`--build-arg ${variable}="$${variable}"`));
-  }
-  assert.doesNotMatch(step.run, /--build-arg\s+(?:LANDING_|SMARTCAPTCHA_SERVER_KEY)/);
-  assert.doesNotMatch(step.run, /(?:echo|printf)[^\n]*PUBLIC_/);
-  assert.doesNotMatch(step.run, /set\s+-x/);
-}
-
-function assertProtectedDemoRuntimeInventory(step, submissionEnabled = "false") {
-  assert.match(step.run, /captcha_server_key="ysc2_\$\(openssl rand -hex 24\)"/);
-  assert.ok(step.run.includes('"$captcha_server_key"'));
-  for (const [variable, value] of Object.entries({
-    LANDING_DEMO_SUBMISSION_ENABLED: submissionEnabled,
-    LANDING_ORIGIN: "https://landing.localhost:18443",
-    LANDING_DEMO_RECIPIENT: "demo-recipient@markiro.local",
-    LANDING_DEMO_REPLY_TO: "demo-reply-to@markiro.local",
-    SMARTCAPTCHA_SERVER_KEY: "$captcha_server_key",
-  })) {
-    assert.ok(step.run.includes(`"${variable}=${value}"`), `${variable} must use the env file`);
-  }
-}
-
 // The Yandex runtime is retired (owner decision 2026-10-21): CI keeps this
 // contract suite, which the platform release re-runs, and drops the legacy
-// image, Compose smoke and documentation smoke. release-images.yml keeps them.
+// image, Compose smoke and documentation smoke; the Yandex release and deploy
+// workflows themselves are gone too.
 test("CI keeps the production contracts but no longer runs the retired Yandex contour", async () => {
   const [workflow, source] = await Promise.all([
     parse(".github/workflows/ci.yml"),
@@ -101,93 +68,18 @@ test("CI keeps the production contracts but no longer runs the retired Yandex co
   assert.equal(edge.env, undefined);
 });
 
-test("release-images.yml isolates platform contracts from the legacy Compose project", async () => {
-  const workflow = await parse(".github/workflows/release-images.yml");
-  assert.equal(workflow.jobs["production-bundle"].env.COMPOSE_PROJECT_NAME, "markiro-production");
-  assert.equal(
-    namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts").run,
-    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
-  );
-});
-
 test("ci.yml runs platform contracts without an ambient Compose project", async () => {
   const workflow = await parse(".github/workflows/ci.yml");
-  assert.equal(workflow.jobs["production-bundle"].env, undefined);
+  assert.equal(workflow.jobs["platform-contracts"].env, undefined);
   assert.equal(
-    namedStep(workflow, "production-bundle", "Verify portable platform preparation contracts").run,
-    "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+    namedStep(workflow, "platform-contracts", "Verify portable platform preparation contracts").run,
+    "env -u COMPOSE_PROJECT_NAME node --test --test-shard=${{ matrix.shard }}/2 deploy/platform/test/*.test.mjs",
   );
 });
 
 test("CI builds legal verifier dependencies immediately before production contracts", async () => {
   assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(
     await parse(".github/workflows/ci.yml"),
-  );
-});
-
-test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {
-  const [workflow, source] = await Promise.all([
-    parse(".github/workflows/release-images.yml"),
-    read(".github/workflows/release-images.yml"),
-  ]);
-  assert.deepEqual(workflow.on.push.branches, ["main"]);
-  assert.ok(workflow.on.push.paths.includes("apps/api/**"));
-  assert.ok(workflow.on.push.paths.includes("apps/landing/**"));
-  assert.ok(workflow.on.push.paths.includes("deploy/production/**"));
-  assert.equal(workflow.on.push.paths.includes("apps/station/**"), false);
-  assert.equal(workflow.on.push.paths.includes("apps/signer/**"), false);
-  assert.equal(workflow.on.push.paths.includes("infra/yandex/**"), false);
-  assert.equal(workflow.jobs["production-bundle"].permissions.contents, "read");
-  assert.match(source, /markiro-api/);
-  assert.match(source, /markiro-edge/);
-  assert.match(source, /release-manifest\.mjs|manifest\.json/);
-  assert.match(source, /markiro-release-manifest-\$\{\{/);
-  assert.doesNotMatch(source, /:latest\b/);
-  for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
-    assert.match(source, new RegExp(variable));
-  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*saas-admin\.localhost/);
-  assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
-  assertNoRetiredLegalEnvironmentVariables(source);
-  const runtimeStep = namedStep(
-    workflow,
-    "production-bundle",
-    "Generate masked test-only environment",
-  );
-  assert.deepEqual(runtimeStep.env, {
-    LANDING_DEMO_SUBMISSION_ENABLED:
-      "${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED == 'true' && 'true' || 'false' }}",
-  });
-  assertProtectedDemoRuntimeInventory(runtimeStep, "$LANDING_DEMO_SUBMISSION_ENABLED");
-  const smokeStep = namedStep(workflow, "production-bundle", "Smoke the production bundle");
-  assert.equal(
-    smokeStep.env.MARKIRO_LANDING_DEMO_SUBMISSION_STATE,
-    "${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED == 'true' && 'enabled' || 'disabled' }}",
-  );
-  assertEdgeBuildStep(
-    namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
-    Object.fromEntries(
-      publicLandingBuildVariables.map((variable) => [variable, "${{ vars." + variable + " }}"]),
-    ),
-  );
-});
-
-test("release image cleanup survives downstream evidence failures after a successful publish", async () => {
-  const workflow = await parse(".github/workflows/release-images.yml");
-  const steps = workflow.jobs.publish.steps;
-  const publish = namedStep(workflow, "publish", "Publish the exact verified production images");
-  const cleanup = namedStep(
-    workflow,
-    "publish",
-    "Delete the verified images artifact after publish",
-  );
-
-  assert.ok(steps.indexOf(publish) < steps.indexOf(cleanup));
-  assert.equal(cleanup.if, "${{ always() && steps.published-images.outcome == 'success' }}");
-});
-
-test("release builds legal verifier dependencies immediately before production contracts", async () => {
-  assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(
-    await parse(".github/workflows/release-images.yml"),
   );
 });
 
@@ -211,61 +103,6 @@ test("demo server settings stay in the protected API environment file", async ()
       assert.doesNotMatch(composeArguments, new RegExp(variable));
     }
   }
-});
-
-test("production deploy is one protected manual GitHub-hosted SSH job", async () => {
-  const [workflow, source] = await Promise.all([
-    parse(".github/workflows/deploy-production.yml"),
-    read(".github/workflows/deploy-production.yml"),
-  ]);
-  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
-    "release_run_id",
-    "release_sha",
-    "landing_demo_submission_state",
-    "scope",
-  ]);
-  assert.deepEqual(workflow.on.workflow_dispatch.inputs.scope.options, ["full", "api-only"]);
-  assert.equal(workflow.on.workflow_dispatch.inputs.scope.default, "full");
-  assert.equal(workflow.jobs.deploy.env.MARKIRO_DEPLOY_SCOPE, "${{ inputs.scope }}");
-  assert.deepEqual(workflow.on.workflow_dispatch.inputs.landing_demo_submission_state, {
-    description: "Expected API demo-submission state during public smoke",
-    required: true,
-    type: "choice",
-    options: ["disabled", "enabled"],
-  });
-  assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
-  const deploy = workflow.jobs.deploy;
-  assert.equal(deploy["runs-on"], "ubuntu-latest");
-  assert.equal(deploy.environment, "production-deploy");
-  assert.deepEqual(deploy.permissions, { actions: "read", contents: "read", packages: "read" });
-  assert.match(source, /release-manifest\.mjs validate/);
-  assert.match(source, /remote-deploy\.mjs run/);
-  assert.match(source, /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
-  assert.match(source, /APP_SSH_HOST_KEYS_B64/);
-  assert.match(source, /ACME_EMAIL:\s*\$\{\{ vars\.ACME_EMAIL \}\}/);
-  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*\$\{\{ vars\.MARKIRO_SAAS_ADMIN_DOMAIN \}\}/);
-  assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
-  assert.match(
-    source,
-    /MARKIRO_LANDING_DEMO_SUBMISSION_STATE:\s*\$\{\{ inputs\.landing_demo_submission_state \}\}/,
-  );
-  assert.match(source, /GHCR_TOKEN:\s*\$\{\{ github\.token \}\}/);
-  assert.match(source, /if:\s*always\(\)/);
-
-  const delivery = namedStep(workflow, "deploy", "Deploy immutable Compose bundle");
-  const indexNow = namedStep(workflow, "deploy", "Submit changed landing URLs to IndexNow");
-  const cleanup = namedStep(workflow, "deploy", "Remove local deployment credentials");
-  assert.ok(deploy.steps.indexOf(delivery) < deploy.steps.indexOf(indexNow));
-  assert.ok(deploy.steps.indexOf(indexNow) < deploy.steps.indexOf(cleanup));
-  assert.equal(indexNow.if, "${{ inputs.scope != 'api-only' && vars.PUBLIC_INDEXNOW_KEY != '' }}");
-  assert.deepEqual(indexNow.env, { PUBLIC_INDEXNOW_KEY: "${{ vars.PUBLIC_INDEXNOW_KEY }}" });
-  assert.match(indexNow.run, /^node tools\/indexnow\/submit\.mjs\n?$/);
-  assert.doesNotMatch(source, /(?:echo|printf)[^\n]*INDEXNOW/);
-  assert.doesNotMatch(
-    source,
-    /workflow_run|self-hosted|id-token|deployment_phase|rollback_rehearsal|production-controller|production-cleanup|YC_IAM|YC_LOAD_BALANCER/i,
-  );
 });
 
 test("v-b deploy is a protected manual digest-bound private executor", async () => {
@@ -344,8 +181,10 @@ test("infrastructure workflow passes the SaaS admin and landing domains to Terra
   assert.match(source, /TF_VAR_landing_domain:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
 });
 
-test("retired DNS and post-DNS workflows are absent", async () => {
+test("retired Yandex release, deploy, DNS and post-DNS workflows are absent", async () => {
   for (const path of [
+    ".github/workflows/release-images.yml",
+    ".github/workflows/deploy-production.yml",
     ".github/workflows/yandex-dns-convergence.yml",
     ".github/workflows/yandex-post-dns-smoke.yml",
   ])
@@ -355,8 +194,8 @@ test("retired DNS and post-DNS workflows are absent", async () => {
 test("all third-party actions in active production workflows are commit pinned", async () => {
   for (const path of [
     ".github/workflows/ci.yml",
-    ".github/workflows/release-images.yml",
-    ".github/workflows/deploy-production.yml",
+    ".github/workflows/release-platform-images.yml",
+    ".github/workflows/deploy-platform.yml",
     ".github/workflows/deploy-vbtech-production.yml",
     ".github/workflows/yandex-infrastructure.yml",
     ".github/workflows/station-beta-release.yml",

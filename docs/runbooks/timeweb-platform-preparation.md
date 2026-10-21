@@ -31,12 +31,11 @@ cannot be fed into the existing production deployment path. Synthetic CI uses
 placeholder runtime digests and local SHA tags. Only the protected publisher
 below creates release evidence and real registry digest references.
 
-The `release-images.yml` trigger and Node validation now include this package;
-its exact legacy manifest, published outputs and `deploy-production.yml` remain
-unchanged. The platform edge is built and exercised by the mandatory PR/main CI
-bundle job; that legacy publisher exports only the verified legacy images. The
-separate `release-platform-images.yml` publishes the platform images after
-approval, and does not deploy them. Do not invoke
+The legacy Yandex publisher (`release-images.yml`) and deploy workflow
+(`deploy-production.yml`) were removed on 2026-10-21. The platform edge is built
+and exercised by the mandatory PR/main CI bundle job, and
+`release-platform-images.yml` publishes the platform images after approval; it
+does not deploy them. Do not invoke
 `deploy/yandex/remote-deploy.mjs` as a shortcut; it has unrelated host and
 secret-management responsibilities.
 
@@ -253,9 +252,10 @@ The mandatory production-bundle CI job builds the API image and the platform edg
 (with a GitHub Actions layer cache that only main writes; the release workflows
 still build from scratch) and, after the role, backup and recovery harnesses, runs
 `node deploy/platform/ci-stack.mjs --local-ci` with the local image source SHA.
-The landing browser and Lighthouse gates and the SaaS-admin browser suites run in
-their own required jobs (`landing-browser`, `landing-lighthouse`,
-`saas-admin-browser`); the cabinet and station galleries run in the optional
+The `deploy/platform` Node contracts run in the required `platform-contracts` job,
+split across two runners with `node --test --test-shard`. The landing browser and
+Lighthouse gates and the SaaS-admin browser suites run in their own required jobs
+(`landing-browser`, `landing-lighthouse`, `saas-admin-browser`); the cabinet and station galleries run in the optional
 `cabinet-galleries` and `station-galleries` jobs, outside `ci-required`.
 This harness verifies a local Unix Docker endpoint, uses a unique project,
 synthetic credentials in a protected temporary file and loopback-only edge ports.

@@ -30,6 +30,7 @@ jobs:
       verify_app_tests: ${{ steps.affected.outputs.verify_app_tests }}
       tenant_team_infrastructure: ${{ steps.affected.outputs.tenant_team_infrastructure }}
       production_bundle: ${{ steps.affected.outputs.production_bundle }}
+      platform_contracts: ${{ steps.affected.outputs.platform_contracts }}
       landing_browser: ${{ steps.affected.outputs.landing_browser }}
       landing_lighthouse: ${{ steps.affected.outputs.landing_lighthouse }}
       saas_admin_browser: ${{ steps.affected.outputs.saas_admin_browser }}
@@ -346,12 +347,9 @@ jobs:
       # before it builds anything, so a change that breaks it must fail here.
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
-      - name: Verify portable platform preparation contracts
-        # The host executor rejects ambient Compose overrides.
-        run: env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs
       # Layer cache only: pull requests read what main wrote, and only main
       # writes, so pull requests cannot evict each other from the 10 GB Actions
-      # cache. The release workflows still build both images from scratch.
+      # cache. The platform release still builds both images from scratch.
       # `use: false`: the backup and recovery harnesses below run plain
       # `docker build` and need the default builder, whose results land in the
       # local image store. Only the two cached builds name this one.
@@ -435,6 +433,40 @@ jobs:
           name: platform-preparation-evidence
           path: ${{ runner.temp }}/platform-preparation-evidence
           if-no-files-found: ignore
+
+  # The deploy/platform Node contracts, split off production-bundle. They are
+  # CPU-bound: each slow case starts hundreds of real fake-docker processes
+  # through the production process adapter (~70 ms of CPU each), and on one
+  # 4-vCPU runner the suite took 252-367 s however its files were arranged.
+  # `--test-shard` splits the files by index, so a new test file always lands
+  # in one of the shards.
+  platform-contracts:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.platform_contracts == 'true'
+    # The same image as production-bundle, where these contracts ran before.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    name: platform-contracts (${{ matrix.shard }}/2)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # deploy/platform/browser-smoke.mjs resolves @playwright/test from here.
+      - name: Install the browser harness package
+        run: pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
+      - name: Verify portable platform preparation contracts
+        # The host executor rejects ambient Compose overrides.
+        run: env -u COMPOSE_PROJECT_NAME node --test --test-shard=${{ matrix.shard }}/2 deploy/platform/test/*.test.mjs
 
   # The landing is built once, with the environment both gates expect
   # (tools/production-browser/scripts/landing-build.mjs), and the browser and
@@ -1018,6 +1050,7 @@ jobs:
       - verify-app-tests
       - tenant-team-infrastructure
       - production-bundle
+      - platform-contracts
       - station-rust
       - station-windows-build
       - signer-rust

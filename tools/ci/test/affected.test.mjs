@@ -13,6 +13,7 @@ const jobNames = [
   "verify_app_tests",
   "tenant_team_infrastructure",
   "production_bundle",
+  "platform_contracts",
   "station_rust",
   "station_windows_build",
   "signer_rust",
@@ -36,6 +37,7 @@ const signerOnly = {
     verify_app_tests: false,
     tenant_team_infrastructure: false,
     production_bundle: false,
+    platform_contracts: false,
     station_rust: false,
     station_windows_build: false,
     signer_rust: true,
@@ -62,6 +64,21 @@ test("the cabinet and station galleries are classified but never required", () =
   assert.deepEqual(OPTIONAL_JOBS, ["cabinet_station_galleries"]);
   assert.deepEqual([...HEAVY_JOBS, ...OPTIONAL_JOBS], jobNames);
   for (const job of OPTIONAL_JOBS) assert.ok(!HEAVY_JOBS.includes(job), job);
+});
+
+test("the platform contracts run whenever production_bundle does, and only then", () => {
+  for (const path of [
+    "deploy/platform/ci-stack.mjs",
+    "deploy/production/api.Dockerfile",
+    "apps/landing/src/pages/index.astro",
+    "packages/db/src/schema/products.ts",
+    "apps/admin/src/App.tsx",
+    "apps/signer/src/App.tsx",
+    "docs/architecture.md",
+  ]) {
+    const { jobs } = classifyChangedFiles([path]);
+    assert.equal(jobs.platform_contracts, jobs.production_bundle, path);
+  }
 });
 
 test("a Signer version bump does not select unrelated product jobs", () => {
@@ -176,6 +193,7 @@ test("application changes select their documented jobs", () => {
         "verify_api_tests",
         "tenant_team_infrastructure",
         "production_bundle",
+        "platform_contracts",
         "saas_admin_browser",
       ],
     ],
@@ -189,13 +207,20 @@ test("application changes select their documented jobs", () => {
         "verify_static",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "landing_browser",
         "landing_lighthouse",
       ],
     ],
     [
       "apps/saas-admin/src/App.tsx",
-      ["verify_static", "verify_app_tests", "production_bundle", "saas_admin_browser"],
+      [
+        "verify_static",
+        "verify_app_tests",
+        "production_bundle",
+        "platform_contracts",
+        "saas_admin_browser",
+      ],
     ],
   ];
 
@@ -215,6 +240,7 @@ test("the demo-form source allow-list also runs the landing suite that renders t
       "verify_app_tests",
       "tenant_team_infrastructure",
       "production_bundle",
+      "platform_contracts",
       "saas_admin_browser",
     ],
   );
@@ -228,6 +254,7 @@ test("shared packages fan out to their current consumers", () => {
         "verify_static",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "station_rust",
         "station_windows_build",
         "signer_rust",
@@ -248,6 +275,7 @@ test("shared packages fan out to their current consumers", () => {
         "verify_api_tests",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "station_rust",
         "station_windows_build",
         "standalone_rust",
@@ -267,6 +295,7 @@ test("shared packages fan out to their current consumers", () => {
         "verify_app_tests",
         "tenant_team_infrastructure",
         "production_bundle",
+        "platform_contracts",
         "station_rust",
         "station_windows_build",
         "saas_admin_browser",
@@ -280,6 +309,7 @@ test("shared packages fan out to their current consumers", () => {
         "verify_api_tests",
         "tenant_team_infrastructure",
         "production_bundle",
+        "platform_contracts",
         "saas_admin_browser",
       ],
     ],
@@ -290,6 +320,7 @@ test("shared packages fan out to their current consumers", () => {
         "verify_api_tests",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "landing_browser",
         "landing_lighthouse",
         "saas_admin_browser",
@@ -302,6 +333,7 @@ test("shared packages fan out to their current consumers", () => {
         "verify_api_tests",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "landing_browser",
         "landing_lighthouse",
         "saas_admin_browser",
@@ -327,6 +359,7 @@ test("only the mirrored CHZ Signer contract selects native Signer verification",
         "verify_api_tests",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "signer_rust",
         "signer_windows_build",
         "landing_browser",
@@ -352,6 +385,7 @@ test("shared Station recovery contract and fixtures select handheld verification
         "verify_api_tests",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "handheld_android",
         "landing_browser",
         "landing_lighthouse",
@@ -365,8 +399,8 @@ test("shared Station recovery contract and fixtures select handheld verification
 
 test("deployment and release tooling selects its consuming jobs", () => {
   const cases = [
-    ["deploy/production/preflight.mjs", ["production_bundle"]],
-    ["deploy/platform/ci-stack.mjs", ["production_bundle"]],
+    ["deploy/production/preflight.mjs", ["production_bundle", "platform_contracts"]],
+    ["deploy/platform/ci-stack.mjs", ["production_bundle", "platform_contracts"]],
     // The retired Yandex runtime has no CI job; yandex-infrastructure.yml owns it.
     ["infra/yandex/main.tf", []],
     ["deploy/yandex/runtime-diagnostics-probe.mjs", []],
@@ -379,6 +413,7 @@ test("deployment and release tooling selects its consuming jobs", () => {
       "tools/production-browser/pnpm-lock.yaml",
       [
         "production_bundle",
+        "platform_contracts",
         "landing_browser",
         "landing_lighthouse",
         "saas_admin_browser",
@@ -445,38 +480,13 @@ test("root toolchain and workflow changes select the complete workflow", () => {
     ".github/workflows/ci.yml",
     ".github/workflows/new-workflow.yml",
     ".github/workflows/deploy-production.yaml",
+    // The retired Yandex deploy workflow lost its narrow route with the workflow.
+    ".github/workflows/deploy-production.yml",
     "tools/ci/affected.mjs",
     "tools/ci/required-results.mjs",
     "tools/ci/test/affected.test.mjs",
   ]) {
     const result = classifyChangedFiles([path]);
-    assert.equal(result.full, true, path);
-    assert.deepEqual(enabledJobs(result), jobNames, path);
-  }
-});
-
-test("production deployment workflow changes select only the bundle owning its contracts", () => {
-  const result = classifyChangedFiles([".github/workflows/deploy-production.yml"]);
-  assert.equal(result.full, false);
-  assert.deepEqual(enabledJobs(result), ["production_bundle"]);
-});
-
-test("deployment workflow does not hide other changed areas or full-run requirements", () => {
-  const workflow = ".github/workflows/deploy-production.yml";
-  assert.deepEqual(enabledJobs(classifyChangedFiles([workflow, "apps/api/src/main.ts"])), [
-    "verify_static",
-    "verify_api_tests",
-    "tenant_team_infrastructure",
-    "production_bundle",
-    "saas_admin_browser",
-  ]);
-  for (const path of [
-    ".github/workflows/ci.yml",
-    "pnpm-lock.yaml",
-    "tools/ci/affected.mjs",
-    "services/new-worker/src/index.ts",
-  ]) {
-    const result = classifyChangedFiles([workflow, path]);
     assert.equal(result.full, true, path);
     assert.deepEqual(enabledJobs(result), jobNames, path);
   }
@@ -529,6 +539,7 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "verify_app_tests=false",
       "tenant_team_infrastructure=false",
       "production_bundle=false",
+      "platform_contracts=false",
       "station_rust=false",
       "station_windows_build=false",
       "signer_rust=true",
@@ -597,6 +608,7 @@ test("offline grant protocol and signed fixture changes exercise every native co
         "verify_api_tests",
         "verify_app_tests",
         "production_bundle",
+        "platform_contracts",
         "station_rust",
         "station_windows_build",
         "handheld_android",

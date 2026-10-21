@@ -200,24 +200,20 @@ test("CI routes platform files to bundle checks and builds isolated preparation 
     assert.equal(classifyChangedFiles([path]).jobs.production_bundle, true);
   const workflow = load(read(".github/workflows/ci.yml"));
   const steps = workflow.jobs["production-bundle"].steps;
-  assert.ok(steps.some((s) => s.run?.includes("node --test deploy/platform/test/*.test.mjs")));
-  assert.ok(steps.some((s) => s.with?.file === "deploy/platform/edge.Dockerfile"));
-  assert.ok(steps.some((s) => s.run?.includes("node deploy/platform/ci-stack.mjs")));
-  const release = load(read(".github/workflows/release-images.yml"));
-  assert.ok(release.on.push.paths.includes("deploy/platform/**"));
   assert.ok(
-    release.jobs["production-bundle"].steps.some(
-      (s) => s.run === "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+    workflow.jobs["platform-contracts"].steps.some((s) =>
+      s.run?.includes("deploy/platform/test/*.test.mjs"),
     ),
   );
-  assert.doesNotMatch(
-    JSON.stringify(release.jobs.publish),
-    /markiro-platform-edge|deploy\/platform/u,
-  );
-  assert.doesNotMatch(
-    read(".github/workflows/deploy-production.yml"),
-    /markiro-platform-edge|deploy\/platform\/ci-stack/u,
-  );
+  assert.ok(steps.some((s) => s.with?.file === "deploy/platform/edge.Dockerfile"));
+  assert.ok(steps.some((s) => s.run?.includes("node deploy/platform/ci-stack.mjs")));
+  // The platform release re-runs these contracts and builds the platform edge;
+  // the retired Yandex release and deploy workflows are gone (2026-10-21).
+  const release = read(".github/workflows/release-platform-images.yml");
+  assert.match(release, /node --test deploy\/platform\/test\/\*\.test\.mjs/u);
+  assert.match(release, /--file deploy\/platform\/edge\.Dockerfile/u);
+  for (const retired of ["release-images.yml", "deploy-production.yml"])
+    assert.throws(() => read(`.github/workflows/${retired}`), /ENOENT/u, retired);
 });
 
 test("edge entrypoint rejects multiline Caddy injection without relying on preflight", async () => {
