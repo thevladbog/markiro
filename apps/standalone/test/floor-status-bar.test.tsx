@@ -364,6 +364,17 @@ describe("the floor's status bar", () => {
     expect(within(region).queryByText("Смена")).toBeNull();
   });
 
+  it("says «Демо-данные» while the operator works in a demo shift (spec 2026-10-21)", async () => {
+    const local = await synced([ORG, line("Линия розлива 2")]);
+    const demo = { ...ENTERED, number: "DEMO-001" };
+    await keepEnteredShift(local, PAIRING, demo, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    const view = render(bar({ local, shiftId: demo.id }));
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(await within(region).findByText("Демо-данные")).toBeTruthy();
+    view.rerender(bar({ local, shiftId: null }));
+    expect(within(region).queryByText("Демо-данные")).toBeNull();
+  });
+
   it("shows the link as stopped while the host's refusal waits, whatever the link's last status says", async () => {
     const local = await synced([ORG]);
     const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
