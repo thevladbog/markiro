@@ -11,8 +11,8 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::{
-    already_closed, audit_count, close_record, enter_all, error_code, part, part_closed, prefixed,
-    scripted_work, Ctx, HostKind, Res, LOAD_S,
+    already_closed, audit_count, close_fact, close_record, enter_all, error_code, part,
+    part_closed, prefixed, scripted_work, Ctx, HostKind, Res, LOAD_S,
 };
 use crate::checks::Check;
 use crate::gen;
@@ -148,12 +148,7 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
             .map_err(|error| error.to_string())??
             .remove(0);
         let view = ctx.office_shift(&shift).await?;
-        let racer_part = part(&view, &racer.id).map(|part| {
-            (
-                part["state"].as_str().unwrap_or("").to_owned(),
-                part["closedBy"].as_str().unwrap_or("").to_owned(),
-            )
-        });
+        let racer_part = part_close(&view, &racer.id);
         let order = match (
             office_reply.status,
             error_code(&office_reply),
@@ -221,7 +216,166 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
         }
     }
     ctx.observe("orders", json!(orders));
+    ctx.note.push_str(&order_note(&orders));
+    // Each order once more, sequentially and so deterministically, on fresh shifts.
+    office_then_device(ctx, &line).await?;
+    device_then_office(ctx, &line).await?;
     Ok(())
+}
+
+/// The office closes the shift, then a participant's close of its part arrives: the shift took
+/// the part as the office's, so the device's close is `accepted` with `alreadyClosed` and kept in
+/// `shift_close_events` as `already_closed` (host `facts/shift_closed.rs`, `Closing::ShiftClosed`).
+async fn office_then_device(ctx: &mut Ctx, line: &str) -> Res<()> {
+    let p = "office_then_device_";
+    let device = ctx.device(1);
+    let shift = ctx.plan(line, None).await?;
+    let issuer = enter_all(ctx, &shift, &[0, 1, 2]).await?;
+    scripted_work(ctx, &device, &shift, &issuer, 20, 2).await?;
+    let closed = ctx
+        .office_close(&shift, "Нагрузочная проверка: офис закрывает первым")
+        .await?;
+    ctx.same(&format!("{p}the_office_closes"), 200u16, closed.status);
+    let receipt = close_fact(ctx, &device, &shift, 300, None, 2, 1, None, None).await?;
+    ctx.check(Check::new(
+        &format!("{p}answers_already_closed"),
+        receipt["outcome"] == "accepted" && already_closed(&receipt) && !part_closed(&receipt),
+        receipt.to_string(),
+    ));
+    let view = ctx.office_shift(&shift).await?;
+    ctx.same(
+        &format!("{p}part_is_the_offices"),
+        Some(("closed".to_owned(), "office_user".to_owned())),
+        part_close(&view, &device.id),
+    );
+    ctx.same(
+        &format!("{p}status"),
+        "closed",
+        view["status"].as_str().unwrap_or(""),
+    );
+    let events = close_outcomes(ctx, &shift, &device.id).await;
+    ctx.same(
+        &format!("{p}event_recorded_already_closed"),
+        Ok(vec!["already_closed".to_owned()]),
+        events,
+    );
+    invariants(ctx, p, &shift).await
+}
+
+/// A participant closes its part (not the last), then the office closes the shift over the
+/// revision it read before: the part's close stamped the shift's revision, so the office gets
+/// `409 stale_revision`, and its retry over the fresh revision closes the shift
+/// (host `routes/office_shifts.rs::close_shift`).
+async fn device_then_office(ctx: &mut Ctx, line: &str) -> Res<()> {
+    let p = "device_then_office_";
+    let device = ctx.device(1);
+    let shift = ctx.plan(line, None).await?;
+    let issuer = enter_all(ctx, &shift, &[0, 1, 2]).await?;
+    scripted_work(ctx, &device, &shift, &issuer, 21, 2).await?;
+    let stale = ctx.office_shift(&shift).await?["rev"].clone();
+    let receipt = close_fact(ctx, &device, &shift, 301, None, 2, 1, None, None).await?;
+    ctx.check(Check::new(
+        &format!("{p}part_closed"),
+        receipt["outcome"] == "accepted" && part_closed(&receipt) && !already_closed(&receipt),
+        receipt.to_string(),
+    ));
+    let events = close_outcomes(ctx, &shift, &device.id).await;
+    ctx.same(
+        &format!("{p}event_recorded_accepted"),
+        Ok(vec!["accepted".to_owned()]),
+        events,
+    );
+    let refused = ctx
+        .site
+        .office
+        .call(
+            "POST",
+            &format!("/v1/office/shifts/{shift}/close"),
+            Some(json!({
+                "reason": "Нагрузочная проверка: офис по устаревшей ревизии",
+                "expectedRev": stale
+            })),
+        )
+        .await?;
+    ctx.same(
+        &format!("{p}stale_revision"),
+        (409u16, Some("stale_revision")),
+        (refused.status, error_code(&refused)),
+    );
+    let retried = ctx
+        .office_close(&shift, "Нагрузочная проверка: повтор по свежей ревизии")
+        .await?;
+    ctx.same(
+        &format!("{p}retry_with_the_fresh_revision"),
+        200u16,
+        retried.status,
+    );
+    let view = ctx.office_shift(&shift).await?;
+    ctx.same(
+        &format!("{p}keeps_the_devices_own_close"),
+        Some(("closed".to_owned(), "device".to_owned())),
+        part_close(&view, &device.id),
+    );
+    ctx.same(
+        &format!("{p}status"),
+        "closed",
+        view["status"].as_str().unwrap_or(""),
+    );
+    invariants(ctx, p, &shift).await
+}
+
+/// A participant's state and who closed it, in a shift answer.
+fn part_close(view: &serde_json::Value, device_id: &str) -> Option<(String, String)> {
+    part(view, device_id).map(|part| {
+        (
+            part["state"].as_str().unwrap_or("").to_owned(),
+            part["closedBy"].as_str().unwrap_or("").to_owned(),
+        )
+    })
+}
+
+/// The outcomes `shift_close_events` kept for `device_id`'s closes of `shift`, in order.
+async fn close_outcomes(ctx: &Ctx, shift: &str, device_id: &str) -> Res<Vec<String>> {
+    let pool = ctx.db().await?;
+    let rows = sqlx::query_scalar(
+        "SELECT outcome FROM shift_close_events WHERE shift_id = ? AND device_id = ? \
+         ORDER BY received_at, rowid",
+    )
+    .bind(shift)
+    .bind(device_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("shift_close_events: {error}"));
+    pool.close().await;
+    rows
+}
+
+/// The participant invariants of `shift`, prefixed.
+async fn invariants(ctx: &mut Ctx, p: &str, shift: &str) -> Res<()> {
+    let pool = ctx.db().await?;
+    let found = crate::dbcheck::participant_invariants(&pool, shift).await;
+    pool.close().await;
+    match found {
+        Ok(checks) => ctx.checks(prefixed(p, checks)),
+        Err(error) => ctx.check(Check::new(&format!("{p}db_invariants"), false, error)),
+    }
+    Ok(())
+}
+
+/// What the office-against-device races did not exercise this run: an order no race took. Its
+/// checks then did not run in a race; the sequential cases still cover both orders' outcomes.
+fn order_note(orders: &BTreeMap<&str, u32>) -> String {
+    let mut note = String::new();
+    for order in ["office-first", "device-first"] {
+        if orders.get(order).copied().unwrap_or(0) == 0 {
+            note.push_str(&format!(
+                "no office-against-device race ran {order} this run, so that order's race checks \
+                 did not run (the sequential office_then_device_/device_then_office_ cases still \
+                 check its outcome). "
+            ));
+        }
+    }
+    note
 }
 
 #[cfg(test)]
@@ -253,6 +407,19 @@ mod tests {
             "race_3_one_forced_close_row",
             "race_3_close_events_match_device_closed_parts",
             "close_events_match_device_closed_parts",
+            "office_then_device_the_office_closes",
+            "office_then_device_answers_already_closed",
+            "office_then_device_part_is_the_offices",
+            "office_then_device_status",
+            "office_then_device_event_recorded_already_closed",
+            "office_then_device_shift_closed_once",
+            "device_then_office_part_closed",
+            "device_then_office_event_recorded_accepted",
+            "device_then_office_stale_revision",
+            "device_then_office_retry_with_the_fresh_revision",
+            "device_then_office_keeps_the_devices_own_close",
+            "device_then_office_status",
+            "device_then_office_shift_closed_once",
         ] {
             assert!(
                 result.checks.iter().any(|check| check.name == name),
@@ -260,5 +427,38 @@ mod tests {
             );
         }
         assert!(result.observed.contains_key("orders"));
+        let orders = &result.observed["orders"];
+        for order in ["office-first", "device-first"] {
+            let ran = orders
+                .get(order)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            assert_eq!(
+                ran == 0,
+                result.note.contains(order),
+                "{order}: {}",
+                result.note
+            );
+        }
+    }
+
+    #[test]
+    fn a_race_order_that_never_happened_is_said_in_the_note() {
+        let mut orders = BTreeMap::new();
+        orders.insert("device-first", 4);
+        let note = order_note(&orders);
+        assert!(note.contains("office-first"), "{note}");
+        assert!(!note.contains("device-first"), "{note}");
+        orders.insert("office-first", 0);
+        assert_eq!(order_note(&orders), note);
+        orders.insert("device-first", 0);
+        let both = order_note(&orders);
+        assert!(
+            both.contains("office-first") && both.contains("device-first"),
+            "{both}"
+        );
+        orders.insert("office-first", 1);
+        orders.insert("device-first", 3);
+        assert_eq!(order_note(&orders), "");
     }
 }
