@@ -1358,8 +1358,8 @@ test("release hosting runbook inventories the Timeweb bucket, keys and edge", as
   // An empty bucket must not silently restart the handheld versionCode or
   // promise a station publish the tooling refuses.
   const transfer = section("### 8. Перенос уже выпущенных артефактов");
-  assert.match(transfer, /Не запускайте выпуск ТСД/u);
-  assert.match(transfer, /`versionCode 1`/u);
+  assert.match(transfer, /`empty_channel_confirmation=1\.6\.1 \(15\)`/u);
+  assert.match(transfer, /`versionCode 1` он больше не выпускает/u);
   assert.match(transfer, /`seed-baseline`[\s\S]*не подходит/u);
   assert.match(hosting, /## Что проверено и что нет/u);
 });

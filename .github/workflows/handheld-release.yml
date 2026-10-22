@@ -34,6 +34,11 @@ on:
         type: choice
         default: stable
         options: [stable, beta]
+      empty_channel_confirmation:
+        description: Only when the channel serves no latest.json - type the recorded last build, e.g. "1.6.1 (15)", to continue after it
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -91,10 +96,13 @@ jobs:
         id: version
         shell: bash
         env:
-          # Pilot artifacts must upgrade an installed stable APK too. An empty
-          # beta channel would instead restart versionCode at 1.
+          # Pilot artifacts must upgrade an installed stable APK too.
           CHANNEL: ${{ github.ref == 'refs/heads/standalone/pilot-mvp' && 'stable' || inputs.channel }}
           BUMP: ${{ inputs.bump }}
+          # An empty channel continues after the build terminals already run
+          # (HANDHELD_LAST_DISTRIBUTED), never from versionCode 1, and only when
+          # the dispatch types that record back.
+          EMPTY_CHANNEL_CONFIRMATION: ${{ inputs.empty_channel_confirmation }}
         run: |
           set -euo pipefail
           node tools/handheld-release/resolve.mjs

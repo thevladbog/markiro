@@ -17,11 +17,12 @@
    выпусков Timeweb S3 и положить в окружение secrets
    `RELEASES_S3_ACCESS_KEY_ID`, `RELEASES_S3_SECRET_ACCESS_KEY` и variable
    `RELEASES_S3_BUCKET` ([хостинг выпусков](release-hosting.md)).
-6. Убедиться, что `handheld/stable/latest.json` отдаётся. Если указателя нет
-   (`404`), workflow считает канал пустым и выпускает `versionCode 1`, а
-   установленные терминалы такое обновление отклонят. После переезда на
-   Timeweb сначала восстановите указатель (шаг 8 в
-   [хостинге выпусков](release-hosting.md)).
+6. Проверить, отдаётся ли `handheld/stable/latest.json`. Если указателя нет
+   (`404`), выпуск продолжает не с `versionCode 1`, а с последней сборки,
+   которая может стоять на терминалах. Она записана в
+   `HANDHELD_LAST_DISTRIBUTED` (`tools/handheld-release/version.mjs`): сейчас
+   это `1.6.1 (15)`. Без явного подтверждения workflow откажет — см.
+   «Первый выпуск в пустой канал».
 
 ## Каждый выпуск
 
@@ -52,6 +53,53 @@
 
 Шаг 4 не формальность. Юнит-тесты и зелёная сборка не проверяют вендорский
 сканер, принтер и поведение на настоящем экране.
+
+## Первый выпуск в пустой канал
+
+После переезда на Timeweb бакет пуст, и `handheld/<channel>/latest.json` отвечает
+`404`. Последняя сборка на терминалах записана в
+`HANDHELD_LAST_DISTRIBUTED` и вычислена по истории прогонов этого workflow:
+
+- stable `1.6.0` (`versionCode 14`) — последний опубликованный выпуск, прогон
+  `38116056639` от 11.10.2026;
+- `1.6.1` (`versionCode 15`) — сборка пилота с ветки `standalone/pilot-mvp`,
+  прогон `39088123680` от 18.10.2026. Она не публиковалась, но могла быть
+  поставлена вручную;
+- в канал `beta` ничего не публиковалось.
+
+Порядок первого выпуска:
+
+1. Слить PR с переездом выпусков на Timeweb, создать бакет, завести в окружении
+   `handheld-release` secrets `RELEASES_S3_ACCESS_KEY_ID`,
+   `RELEASES_S3_SECRET_ACCESS_KEY` и variable `RELEASES_S3_BUCKET`, выкатить
+   edge платформы и перевести DNS `releases.markiro.app`
+   ([хостинг выпусков](release-hosting.md), шаги 1–7).
+2. Убедиться, что указатель отвечает `404`, а не ошибкой:
+
+       curl -s -o /dev/null -w '%{http_code}\n' https://releases.markiro.app/handheld/stable/latest.json
+
+   Любой код, кроме `200` и `404`, останавливает выпуск: прокси или бакет
+   настроены неверно.
+
+3. Запустить **Build handheld release** с ветки `main`: `action=release`,
+   `bump=minor`, `owner_confirmation=BUILD-HANDHELD-RELEASE`, `publish`
+   включён, `channel=stable`, `empty_channel_confirmation` — ровно
+   `1.6.1 (15)`. Получится `1.7.0` с `versionCode 16`, выше и stable 1.6.0, и
+   пилотной 1.6.1.
+4. Проверить summary, затем указатель, APK и ссылку скачивания:
+
+       curl -s https://releases.markiro.app/handheld/stable/latest.json
+       curl -sI https://releases.markiro.app/handheld/stable/releases/1.7.0/markiro-tsd-1.7.0.apk
+       curl -sI https://releases.markiro.app/handheld/download
+
+5. Дальше — как в «Каждый выпуск»: один терминал, полная смена, потом остальные.
+
+Если канал уже отдаёт указатель, подтверждение запрещено и выпуск откажет:
+поле предназначено только для пустого канала. Если указатель восстановили из
+старой копии со значением ниже `1.6.1 (15)` (например, `1.6.0 (14)`), выпуск
+тоже откажет, потому что следующий `versionCode 15` не обновил бы пилотные
+терминалы. Поднимать `HANDHELD_LAST_DISTRIBUTED` можно только отдельным
+проверенным коммитом и только по тем же источникам.
 
 ## Подписанный APK для пилота «Автонома»
 
