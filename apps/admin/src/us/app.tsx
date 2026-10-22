@@ -6,11 +6,18 @@ import { createUsBrowserClient, UsClientError, type UsBrowserClient } from "./cl
 import { masterDataCopy } from "./master-data/copy.js";
 import { MasterDataWorkspace } from "./master-data/workspace.js";
 import { UsBrandMark } from "./brand-mark.js";
+import { US_CAPABILITY } from "@markiro/domain";
+import {
+  isUsReadOnlyAccess,
+  isUsSyntheticDemoOrganization,
+  usSyntheticDemoCopy,
+} from "./synthetic-demo.js";
 
 const copy = {
   "en-US": {
     translation: {
       ...masterDataCopy["en-US"],
+      ...usSyntheticDemoCopy["en-US"],
       brandTitle: "Lot records, from receipt to shipment.",
       brandBody: "Traceability built for daily operations.",
       signIn: "Sign in",
@@ -77,6 +84,7 @@ const copy = {
   "es-US": {
     translation: {
       ...masterDataCopy["es-US"],
+      ...usSyntheticDemoCopy["es-US"],
       brandTitle: "Registros de lotes, desde la recepción hasta el envío.",
       brandBody: "Trazabilidad creada para las operaciones diarias.",
       signIn: "Iniciar sesión",
@@ -205,6 +213,7 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
   const [organizations, setOrganizations] = useState<Org[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Org>();
   const [profile, setProfile] = useState<Profile>();
+  const [profileCapabilities, setProfileCapabilities] = useState<readonly string[] | null>(null);
   const [profileCode, setProfileCode] = useState<
     "" | "US_FSMA204_PROCESSOR" | "US_GENERIC_LOT_TRACEABILITY"
   >("");
@@ -226,6 +235,7 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
     setOrganizations([]);
     setSelectedOrganization(undefined);
     setProfile(undefined);
+    setProfileCapabilities(null);
     setProfileCode("");
     setTimeZone("");
     setRetention("5");
@@ -309,16 +319,29 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   async function readProfile(run = generation.current) {
+    setProfileCapabilities(null);
     try {
-      const value = await client.profile();
+      const value = await client.profile().catch((error: unknown) => {
+        if (error instanceof UsClientError && error.code === "profile_not_provisioned") return null;
+        throw error;
+      });
       if (run !== generation.current) return;
-      setProfile(value);
-      setStage("profile");
+      const access = await client.access();
+      if (run !== generation.current) return;
+      if (
+        !access.capabilities.includes(US_CAPABILITY.READ) ||
+        (!value && !access.capabilities.includes(US_CAPABILITY.SETTINGS_MANAGE))
+      )
+        throw new UsClientError("forbidden");
+      setProfileCapabilities(access.capabilities);
+      if (value) {
+        setProfile(value);
+        setStage("profile");
+      } else setStage("profile-setup");
     } catch (error) {
       if (run !== generation.current) return;
-      if (error instanceof UsClientError && error.code === "profile_not_provisioned")
-        setStage("profile-setup");
-      else if (error instanceof UsClientError && error.code === "session_required") sessionLost();
+      setProfileCapabilities(null);
+      if (error instanceof UsClientError && error.code === "session_required") sessionLost();
       else {
         setNotice(
           error instanceof UsClientError && error.code === "forbidden" ? "denied" : "unavailable",
@@ -463,6 +486,7 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
     });
   }
   const secret = enrollment ? new URL(enrollment.totpURI).searchParams.get("secret") : null;
+  const syntheticDemo = isUsSyntheticDemoOrganization(selectedOrganization);
 
   if (stage === "master-data" && profile && selectedOrganization) {
     return (
@@ -488,8 +512,14 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
         <MasterDataWorkspace
           client={client}
           organization={selectedOrganization}
+          syntheticDemo={syntheticDemo}
           profile={profile}
-          onBack={() => setStage("profile")}
+          onBack={() =>
+            void action(async (run) => {
+              setStage("profile");
+              await readProfile(run);
+            })
+          }
           onSessionLost={sessionLost}
         />
       </main>
@@ -526,6 +556,14 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
           </Button>
         </div>
         <div className="us-card" aria-busy={pending}>
+          {(stage === "profile" || stage === "profile-setup") &&
+            profileCapabilities &&
+            (syntheticDemo || isUsReadOnlyAccess(profileCapabilities)) && (
+              <div className="us-notice" role="status">
+                {syntheticDemo && <p>{t("syntheticDemo")}</p>}
+                {isUsReadOnlyAccess(profileCapabilities) && <p>{t("readOnlyAccess")}</p>}
+              </div>
+            )}
           {notice && (
             <div className="us-notice" role="alert">
               {t(notice)}
@@ -717,7 +755,9 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
                 </dd>
               </dl>
               <p className="us-notice">{t("unfinished")}</p>
-              <Button onClick={() => setStage("master-data")}>{t("openReferenceData")}</Button>
+              <Button disabled={pending} onClick={() => setStage("master-data")}>
+                {t("openReferenceData")}
+              </Button>
               <Button variant="secondary" disabled={logoutPending} onClick={() => void logout()}>
                 {t("signOut")}
               </Button>

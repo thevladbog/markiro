@@ -6,6 +6,7 @@ import { chmod, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
+import { fileURLToPath } from "node:url";
 import { startDatasetProviderObservation } from "./dataset-command-provider.mjs";
 import {
   datasetObjectStoreConfig,
@@ -17,6 +18,10 @@ import {
 
 export const DATABASE_URL =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
+export const datasetFixtureRoot = fileURLToPath(new URL("../../../../", import.meta.url)).replace(
+  /\/$/,
+  "",
+);
 
 /** This synchronous boundary precedes imports, filesystem, child, DB and network I/O. */
 export function assertDatasetPositiveRunner(env = process.env, platform = process.platform) {
@@ -31,6 +36,21 @@ export function assertDatasetPositiveRunner(env = process.env, platform = proces
     env.NODE_PATH
   )
     throw new Error("us_dataset_positive_ci_only");
+}
+
+/** Pure predicate only; the actual viewer entry always reads the real process. */
+export function assertDemoViewerRunner(env = process.env, platform = process.platform) {
+  if (
+    env.CI !== "true" ||
+    env.GITHUB_ACTIONS !== "true" ||
+    env.GITHUB_JOB !== "demo_viewer_acceptance" ||
+    env.RUNNER_ENVIRONMENT !== "github-hosted" ||
+    platform !== "linux" ||
+    env.US_TEST_DATABASE_URL !== DATABASE_URL ||
+    env.NODE_OPTIONS ||
+    env.NODE_PATH
+  )
+    throw new Error("us_demo_viewer_ci_only");
 }
 
 export function assertDatasetPositiveDatabase(identity, tables) {
@@ -159,10 +179,15 @@ async function child(
     limit = 256 * 1024,
     diagnose,
     projectVerificationFailure,
+    cwd,
   } = {},
 ) {
   const started = performance.now();
-  const process_ = spawn(file, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+  const process_ = spawn(file, args, {
+    env,
+    ...(cwd ? { cwd } : {}),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let stdout = Buffer.alloc(0),
     stderr = Buffer.alloc(0),
     overflow = false,
@@ -249,29 +274,38 @@ async function child(
 
 export async function createDatasetPositiveFixture(env = process.env) {
   assertDatasetPositiveRunner(env);
+  return acquireDatasetInstallation();
+}
+
+export async function createDemoViewerInstallationFixture() {
+  assertDemoViewerRunner();
+  return acquireDatasetInstallation();
+}
+
+async function acquireDatasetInstallation() {
   const uid = process.getuid?.(),
     gid = process.getgid?.();
   if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0)
     throw new Error("us_dataset_object_store_config_failed");
   const setupStarted = performance.now();
-  const root = process.cwd();
-  const git = await child("git", ["status", "--porcelain=v1", "--untracked-files=all"]);
+  const root = datasetFixtureRoot;
+  const git = await child("git", ["-C", root, "status", "--porcelain=v1", "--untracked-files=all"]);
   assert.equal(git.stdout, "", "positive requires an actual clean checkout");
-  const require = createRequire(resolve("apps/api/package.json"));
+  const require = createRequire(resolve(root, "apps/api/package.json"));
   await child("/usr/bin/time", ["--version"]);
   const environment = {
-    ...parseEnv(await readFile("deploy/us-development/local.env.example", "utf8")),
+    ...parseEnv(await readFile(resolve(root, "deploy/us-development/local.env.example"), "utf8")),
   };
   const { createDb } = require("@markiro/db");
   const { migrate } = require("drizzle-orm/node-postgres/migrator");
   const sdk = require("@aws-sdk/client-s3");
   const { NodeHttpHandler } = require("@smithy/node-http-handler");
-  const compiled = (path) => require(resolve(`apps/api/dist/${path}.js`));
+  const compiled = (path) => require(resolve(root, `apps/api/dist/${path}.js`));
   const { loadUsRequestBuildDescriptor } = compiled("deployment/us-request-build-descriptor");
   const checked = await loadUsRequestBuildDescriptor(environment);
   assert.equal(
     checked.document.build.gitSha,
-    (await child("git", ["rev-parse", "HEAD"])).stdout.trim(),
+    (await child("git", ["-C", root, "rev-parse", "HEAD"])).stdout.trim(),
   );
   assert.ok(
     checked.document.files.some(
@@ -496,7 +530,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
     ).rows;
     assertDatasetPositiveDatabase(identityRows, tableRows);
     databaseOwned = true;
-    await migrate(connection.db, { migrationsFolder: resolve("packages/db/migrations") });
+    await migrate(connection.db, { migrationsFolder: resolve(root, "packages/db/migrations") });
     const { UsDevelopmentOwnerStore } = compiled("deployment/us-development-owner");
     const { UsProfileStore } = compiled("modules/traceability/profile/us-profile-store");
     const identity = await new UsDevelopmentOwnerStore(connection.db).provision(
@@ -513,7 +547,10 @@ export async function createDatasetPositiveFixture(env = process.env) {
     directory = await mkdtemp(join(tmpdir(), "us-dataset-positive-"));
     await chmod(directory, 0o700);
     const ts = require("typescript");
-    const snapshotSource = await readFile("apps/api/test/support/us-dataset-snapshot.ts", "utf8");
+    const snapshotSource = await readFile(
+      resolve(root, "apps/api/test/support/us-dataset-snapshot.ts"),
+      "utf8",
+    );
     const snapshotPath = join(directory, "snapshot.cjs");
     await writeFile(
       snapshotPath,
@@ -644,6 +681,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
             ],
             {
               env: environment,
+              cwd: root,
               cap: 900_000,
               diagnose: usDatasetCommandDiagnostic,
               projectVerificationFailure: projectUsRequestVerificationFailure,

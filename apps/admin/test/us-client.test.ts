@@ -173,13 +173,13 @@ describe("US browser client boundary", () => {
     );
   });
 
-  it("lists organizations without exposing metadata and selects only the supplied ID", async () => {
+  it("retains only bounded string organization metadata and selects only the supplied ID", async () => {
     const send = transport([
       { id: "org-1", name: "Synthetic", slug: "synthetic", metadata: "private" },
     ]);
     const api = client.createUsBrowserClient(send);
     expect(await api.organizations()).toEqual([
-      { id: "org-1", name: "Synthetic", slug: "synthetic" },
+      { id: "org-1", name: "Synthetic", slug: "synthetic", metadata: "private" },
     ]);
     send.mockResolvedValueOnce(
       Response.json({ id: "org-1", name: "Synthetic", slug: "synthetic" }),
@@ -187,6 +187,28 @@ describe("US browser client boundary", () => {
     await api.selectOrganization({ organizationId: "org-1" });
     expect(send.mock.calls[1]?.[0]).toBe("/api/us-auth/organization/set-active");
     expect(send.mock.calls[1]?.[1]?.body).toBe('{"organizationId":"org-1"}');
+  });
+
+  it.each([undefined, null, {}, [], 42, "é".repeat(257), "x".repeat(513)])(
+    "preserves organization identity when metadata is invalid %#",
+    async (metadata) => {
+      const organization = { id: "org-1", name: "Synthetic", slug: "synthetic" };
+      await expect(
+        client.createUsBrowserClient(transport([{ ...organization, metadata }])).organizations(),
+      ).resolves.toEqual([organization]);
+    },
+  );
+
+  it("preserves a 512-byte metadata string from the normal organization response", async () => {
+    const organization = {
+      id: "org-1",
+      name: "Synthetic",
+      slug: "synthetic",
+      metadata: "é".repeat(256),
+    };
+    await expect(
+      client.createUsBrowserClient(transport([organization])).organizations(),
+    ).resolves.toEqual([organization]);
   });
 
   it("signs out only through US auth", async () => {

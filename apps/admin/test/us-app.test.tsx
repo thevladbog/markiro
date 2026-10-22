@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@markiro/ui";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,42 @@ const metadata = {
 };
 const user = { id: "u1", email: "owner@example.test", name: "Owner", twoFactorEnabled: false };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
+const syntheticOrganization = {
+  id: "org-1",
+  name: "Synthetic US development",
+  slug: "us-development-demo",
+  metadata: JSON.stringify({ synthetic: true, seedVersion: "us-development-owner-v1" }),
+};
+const syntheticText = "Synthetic demo data — not real customer activity.";
+const readOnlyCapabilities = ["traceability.read", "traceability.export.read"];
+const existingProfile = {
+  code: "US_FSMA204_PROCESSOR",
+  timeZone: "America/Los_Angeles",
+  retentionYears: 2,
+  baselineVersion: "US-REG-2026-09-03",
+  effectiveAt: "2026-09-05T00:00:00.000Z",
+};
+
+function authenticated(
+  respond: (path: string, init?: RequestInit) => Response | Promise<Response> | undefined,
+  activeOrganizationId: string | null = "org-1",
+) {
+  return renderWith((path, init) => {
+    const response = respond(path, init);
+    if (response) return response;
+    if (path === "/api/us/deployment") return json(metadata);
+    if (path.endsWith("get-session"))
+      return json({ user: { ...user, twoFactorEnabled: true }, session: { activeOrganizationId } });
+    if (path.endsWith("organization/list")) return json([syntheticOrganization]);
+    if (path.endsWith("set-active")) return json(syntheticOrganization);
+    if (path.endsWith("sign-out")) return json({ success: true });
+    if (path.endsWith("/profile")) return json(existingProfile);
+    if (path.endsWith("/access")) return json({ capabilities: readOnlyCapabilities });
+    if (path.startsWith("/api/us/traceability/parties?"))
+      return json({ items: [], limit: 50, offset: 0 });
+    return json({}, 404);
+  });
+}
 afterEach(cleanup);
 
 function renderWith(responder: (path: string, init?: RequestInit) => Response | Promise<Response>) {
@@ -28,6 +64,129 @@ function renderWith(responder: (path: string, init?: RequestInit) => Response | 
 }
 
 describe("US access and profile application", () => {
+  it("shows non-dismissable localized synthetic and exact read-only status after normal selection", async () => {
+    authenticated(() => undefined, null);
+    const selection = await screen.findByRole("button", { name: syntheticOrganization.name });
+    expect(screen.queryByText(syntheticText)).toBeNull();
+    selection.focus();
+    await userEvent.keyboard("{Enter}");
+    await screen.findByRole("heading", { name: "Traceability profile" });
+    expect(screen.getByText(syntheticText).closest('[role="status"]')).toBeTruthy();
+    expect(screen.getByText("Read-only access")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /dismiss/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Language" }));
+    expect(
+      screen.getByText("Datos de demostración sintéticos — no son actividad real de clientes."),
+    ).toBeTruthy();
+    expect(screen.getByText("Acceso de solo lectura")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Abrir datos de referencia" }));
+    await screen.findByRole("heading", { name: "Partes" });
+    expect(screen.getByText("Acceso de solo lectura")).toBeTruthy();
+    expect(
+      screen.getByText("Datos de demostración sintéticos — no son actividad real de clientes."),
+    ).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Perfil/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Cerrar sesión" }));
+    await screen.findByRole("heading", { name: "Iniciar sesión" });
+    expect(screen.queryByText("Acceso de solo lectura")).toBeNull();
+    expect(
+      screen.queryByText("Datos de demostración sintéticos — no son actividad real de clientes."),
+    ).toBeNull();
+  });
+
+  it("requires fresh settings capability before opening absent-profile setup", async () => {
+    authenticated((path) =>
+      path.endsWith("/profile")
+        ? json({ code: "traceability_profile_not_provisioned" }, 503)
+        : undefined,
+    );
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "You do not have permission to view or configure this profile.",
+    );
+    expect(screen.queryByRole("heading", { name: "Set up traceability profile" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save profile" })).toBeNull();
+  });
+
+  it("keeps synthetic owner setup available without mislabelling it read-only", async () => {
+    authenticated((path) => {
+      if (path.endsWith("/profile"))
+        return json({ code: "traceability_profile_not_provisioned" }, 503);
+      if (path.endsWith("/access"))
+        return json({ capabilities: [...readOnlyCapabilities, "tenant.settings.manage"] });
+      return undefined;
+    });
+    await screen.findByRole("heading", { name: "Set up traceability profile" });
+    expect(screen.getByText(syntheticText)).toBeTruthy();
+    expect(screen.queryByText("Read-only access")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeTruthy();
+  });
+
+  it.each([401, 403, 503])(
+    "fails closed when current profile access returns %s",
+    async (status) => {
+      authenticated((path) => (path.endsWith("/access") ? json({}, status) : undefined));
+      await screen.findByRole("alert");
+      expect(screen.queryByText("Read-only access")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Open reference data" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save profile" })).toBeNull();
+      if (status === 401)
+        expect(await screen.findByRole("heading", { name: "Sign in" })).toBeTruthy();
+    },
+  );
+
+  it("clears selected synthetic and read-only status after workspace session loss", async () => {
+    let accessReads = 0;
+    authenticated((path) => {
+      if (path.endsWith("/access") && ++accessReads === 2) return json({}, 401);
+      return undefined;
+    });
+    await screen.findByText("Read-only access");
+    await userEvent.click(screen.getByRole("button", { name: "Open reference data" }));
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(screen.queryByText(syntheticText)).toBeNull();
+    expect(screen.queryByText("Read-only access")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open reference data" })).toBeNull();
+  });
+
+  it("ignores deferred profile access after logout and clears a synthetic marker for the next organization", async () => {
+    let release!: (value: Response) => void;
+    const access = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    let accessReads = 0;
+    let nextOrganization = false;
+    const { send } = authenticated((path) => {
+      if (path.endsWith("/access") && ++accessReads === 3) return access;
+      if (path.endsWith("organization/list") && nextOrganization)
+        return json([{ id: "org-1", name: "Ordinary organization", slug: "ordinary" }]);
+      if (path.endsWith("sign-in/email")) return json({ twoFactorRedirect: true });
+      if (path.endsWith("verify-totp")) return json({ token: "hidden", user });
+      return undefined;
+    });
+    await screen.findByText("Read-only access");
+    await userEvent.click(screen.getByRole("button", { name: "Open reference data" }));
+    await screen.findByRole("heading", { name: "Parties" });
+    await userEvent.click(screen.getByRole("button", { name: /Profile/ }));
+    await waitFor(() =>
+      expect(send.mock.calls.filter(([path]) => String(path).endsWith("/access"))).toHaveLength(3),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await act(async () => {
+      release(json({ capabilities: readOnlyCapabilities }));
+    });
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(screen.queryByText(syntheticText)).toBeNull();
+    nextOrganization = true;
+    await userEvent.type(screen.getByLabelText("Email"), user.email);
+    await userEvent.type(screen.getByLabelText("Password"), "synthetic-password");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.type(await screen.findByLabelText("6-digit authenticator code"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await screen.findByText("Organization: Ordinary organization");
+    expect(screen.queryByText(syntheticText)).toBeNull();
+  });
+
   it("retains the Latin brand symbol and wordmark across locale and theme changes", async () => {
     renderWith((path) => (path === "/api/us/deployment" ? json(metadata) : json(null)));
     await screen.findByRole("heading", { name: "Sign in" });
@@ -175,6 +334,8 @@ describe("US access and profile application", () => {
         return json({ id: "org-1", name: "Synthetic Foods", slug: "synthetic" });
       if (path.endsWith("profile") && init?.method === "GET")
         return json({ code: "traceability_profile_not_provisioned" }, 503);
+      if (path.endsWith("/access"))
+        return json({ capabilities: ["traceability.read", "tenant.settings.manage"] });
       return json({ success: true });
     });
     await userEvent.click(await screen.findByRole("button", { name: "Synthetic Foods" }));

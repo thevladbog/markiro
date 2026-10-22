@@ -125,7 +125,15 @@ test(
     ])
       assert.ok(fixture.includes(value), value);
     assert.ok(!fixture.includes("DROP DATABASE FORCE"));
-    assert.ok(fixture.includes('readFile("apps/api/test/support/us-dataset-snapshot.ts"'));
+    assert.match(
+      fixture,
+      /readFile\(\s*resolve\(root, "apps\/api\/test\/support\/us-dataset-snapshot\.ts"\)/,
+    );
+    assert.match(fixture, /const root = datasetFixtureRoot;/);
+    assert.match(
+      fixture,
+      /fileURLToPath\(new URL\("\.\.\/\.\.\/\.\.\/\.\.\/", import\.meta\.url\)\)/,
+    );
     assert.equal(fixture.split('docker(["image", "inspect", storeContract.image])').length - 1, 1);
     assert.ok(fixture.includes("{ ...storeContract, id, uid, gid, imageInspection }"));
     // Exercise the actual sanitizer implementation, with independent recipe

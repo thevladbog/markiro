@@ -20,11 +20,13 @@ import { PlanView } from "../plans/view.js";
 import { RequestsView, type RequestEntry } from "../requests/view.js";
 import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
+import { isUsReadOnlyAccess } from "../synthetic-demo.js";
 import "./master-data.css";
 
 export type MasterDataProps = {
   client: UsBrowserClient;
   organization: { id: string; name: string };
+  syntheticDemo?: boolean;
   profile: Awaited<ReturnType<UsBrowserClient["profile"]>>;
   onBack: () => void;
   onSessionLost: () => void;
@@ -55,12 +57,17 @@ type Entry =
 type ReturnFrame = { entry: Entry };
 type Notice = { kind: NoticeKind; key: string } | null;
 
-export function MasterDataWorkspace({
+export function MasterDataWorkspace(props: MasterDataProps) {
+  return <OrganizationWorkspace key={props.organization.id} {...props} />;
+}
+
+function OrganizationWorkspace({
   client,
   organization,
   profile,
   onBack,
   onSessionLost,
+  syntheticDemo = false,
 }: MasterDataProps) {
   const { t, i18n } = useTranslation();
   const [capabilities, setCapabilities] = useState<readonly string[] | null>(null);
@@ -116,6 +123,7 @@ export function MasterDataWorkspace({
     } catch (error) {
       if (!alive.current || run !== accessRun.current) return;
       if (error instanceof UsClientError && error.code === "session_required") {
+        setCapabilities([]);
         onSessionLost();
         return;
       }
@@ -396,6 +404,14 @@ export function MasterDataWorkspace({
       </aside>
 
       <section ref={main} role="main" tabIndex={-1} className="us-md-main">
+        {syntheticDemo || (!accessError && !accessPending && isUsReadOnlyAccess(capabilities)) ? (
+          <div className="us-md-notice" role="status">
+            {syntheticDemo && <p>{t("syntheticDemo")}</p>}
+            {!accessError && !accessPending && isUsReadOnlyAccess(capabilities) && (
+              <p>{t("readOnlyAccess")}</p>
+            )}
+          </div>
+        ) : null}
         {accessError ? (
           <div className="us-md-notice us-md-notice--alert" role="alert">
             <p>{t("md.accessError")}</p>

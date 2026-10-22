@@ -191,7 +191,14 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
       .join("") +
     `(\\?${casesQueryField}(?:&${casesQueryField}){0,2})?$`;
+  const planPath = `^/api/us/traceability/plans(?:/${canonicalUuid}(?:/pdf)?)?$`;
+  const planRoute = new RegExp(planPath);
   const proxy = {
+    [planPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
     [`^/api/us/traceability/(?:requests|export-runs)(?:/[^?#]*)?(?:\\?[^#]*)?$`]: {
       target: "http://localhost:3100",
       changeOrigin: true,
@@ -377,27 +384,33 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       const path = request.url ?? "/";
       if (
         path.startsWith("/api/") &&
-        (path.startsWith(requestRoot) || path.startsWith(runRoot)
-          ? !allowsUsRequestsProxy(request.method ?? "", path, request.headers.range !== undefined)
-          : path.startsWith("/api/us/traceability/readiness")
-            ? request.method !== "GET" || !readinessRoute.test(path)
-            : path.startsWith("/api/us/traceability/shipments") ||
-                path.includes("/shipping-balance")
-              ? !shippingRoutes.some(
-                  (route) =>
-                    route.pattern.test(path) &&
-                    route.methods.includes(request.method ?? "") &&
-                    (!path.includes("expectedDraftVersion=") ||
-                      Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
-                )
-              : /^\/api\/us\/traceability\/(?:search(?:[/?]|$)|lots\/[^/]+\/card(?:[/?]|$))/.test(
-                    path,
+        (path.startsWith("/api/us/traceability/plans")
+          ? request.method !== "GET" || request.headers.range !== undefined || !planRoute.test(path)
+          : path.startsWith(requestRoot) || path.startsWith(runRoot)
+            ? !allowsUsRequestsProxy(
+                request.method ?? "",
+                path,
+                request.headers.range !== undefined,
+              )
+            : path.startsWith("/api/us/traceability/readiness")
+              ? request.method !== "GET" || !readinessRoute.test(path)
+              : path.startsWith("/api/us/traceability/shipments") ||
+                  path.includes("/shipping-balance")
+                ? !shippingRoutes.some(
+                    (route) =>
+                      route.pattern.test(path) &&
+                      route.methods.includes(request.method ?? "") &&
+                      (!path.includes("expectedDraftVersion=") ||
+                        Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
                   )
-                ? request.method !== "GET" ||
-                  !searchCardRoutes.some((pattern) => pattern.test(path))
-                : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
-                  ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
-                  : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
+                : /^\/api\/us\/traceability\/(?:search(?:[/?]|$)|lots\/[^/]+\/card(?:[/?]|$))/.test(
+                      path,
+                    )
+                  ? request.method !== "GET" ||
+                    !searchCardRoutes.some((pattern) => pattern.test(path))
+                  : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
+                    ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
+                    : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
       ) {
         response.writeHead(404, { "Cache-Control": "no-store" });
         response.end();

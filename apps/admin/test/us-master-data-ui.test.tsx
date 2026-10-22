@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsClientError, type UsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
+import { list as plans, published } from "./us-plans-fixtures.js";
+import { requestsFixture } from "./us-requests-fixtures.js";
+import { usSyntheticDemoCopy } from "../src/us/synthetic-demo.js";
 
 const party = {
   id: "a0000000-0000-4000-8000-000000000001",
@@ -91,6 +94,8 @@ function renderWorkspace(
     onBack?: () => void;
     onSessionLost?: () => void;
     strict?: boolean;
+    syntheticDemo?: boolean;
+    organizationId?: string;
     profile?:
       typeof profile | (Omit<typeof profile, "code"> & { code: "US_GENERIC_LOT_TRACEABILITY" });
   } = {},
@@ -98,8 +103,8 @@ function renderWorkspace(
   const instance = i18next.createInstance();
   void instance.init({
     resources: {
-      "en-US": { translation: masterDataCopy["en-US"] },
-      "es-US": { translation: masterDataCopy["es-US"] },
+      "en-US": { translation: { ...masterDataCopy["en-US"], ...usSyntheticDemoCopy["en-US"] } },
+      "es-US": { translation: { ...masterDataCopy["es-US"], ...usSyntheticDemoCopy["es-US"] } },
     },
     lng: options.locale ?? "en-US",
     fallbackLng: "en-US",
@@ -108,12 +113,18 @@ function renderWorkspace(
   });
   const onBack = options.onBack ?? vi.fn();
   const onSessionLost = options.onSessionLost ?? vi.fn();
-  const workspace: ReactNode = (
+  const workspace = (
+    next: { syntheticDemo?: boolean; organizationId?: string } = {},
+  ): ReactNode => (
     <ThemeProvider defaultTheme="light">
       <I18nextProvider i18n={instance}>
         <MasterDataWorkspace
           client={client}
-          organization={{ id: "tenant-1", name: "North River Fresh Foods" }}
+          organization={{
+            id: next.organizationId ?? options.organizationId ?? "tenant-1",
+            name: "North River Fresh Foods",
+          }}
+          syntheticDemo={next.syntheticDemo ?? options.syntheticDemo ?? false}
           profile={options.profile ?? profile}
           onBack={onBack}
           onSessionLost={onSessionLost}
@@ -121,11 +132,157 @@ function renderWorkspace(
       </I18nextProvider>
     </ThemeProvider>
   );
-  render(options.strict ? <StrictMode>{workspace}</StrictMode> : workspace);
-  return { instance, onBack, onSessionLost };
+  const view = render(options.strict ? <StrictMode>{workspace()}</StrictMode> : workspace());
+  return {
+    instance,
+    onBack,
+    onSessionLost,
+    rerenderWorkspace: (next: { syntheticDemo?: boolean; organizationId?: string }) =>
+      view.rerender(workspace(next)),
+  };
 }
 
 describe("connected US master-data workspace", () => {
+  it.each(["en-US", "es-US"] as const)(
+    "shows synthetic auditor status in %s while preserving read navigation and keyboard focus",
+    async (locale) => {
+      const client = requestsFixture();
+      vi.spyOn(client, "access").mockResolvedValue({
+        capabilities: ["traceability.read", "traceability.export.read"],
+      });
+      vi.mocked(client.session).mockResolvedValue({
+        user: {
+          id: "viewer",
+          email: "viewer@example.test",
+          name: "Viewer",
+          twoFactorEnabled: true,
+        },
+        activeOrganizationId: "tenant-1",
+      });
+      vi.spyOn(client, "getPlan").mockResolvedValue(published);
+      vi.spyOn(client, "listPlans").mockResolvedValue({
+        ...plans,
+        publicationAvailability: "available",
+      });
+      vi.spyOn(client, "listParties").mockResolvedValue({ items: [party], limit: 50, offset: 0 });
+      vi.spyOn(client, "getParty").mockResolvedValue(party);
+      renderWorkspace(client, { locale, syntheticDemo: true });
+      const synthetic =
+        locale === "en-US"
+          ? "Synthetic demo data — not real customer activity."
+          : "Datos de demostración sintéticos — no son actividad real de clientes.";
+      const readOnly = locale === "en-US" ? "Read-only access" : "Acceso de solo lectura";
+      expect((await screen.findByText(synthetic)).closest('[role="status"]')).toBeTruthy();
+      expect(screen.getByText(readOnly)).toBeTruthy();
+      await userEvent.click(await screen.findByRole("button", { name: party.name }));
+      await screen.findByRole("dialog", { name: party.name });
+      expect(screen.queryByRole("button", { name: /Edit party|Editar parte/ })).toBeNull();
+      await userEvent.keyboard("{Escape}");
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: party.name }));
+      const plan = screen.getByRole("button", { name: locale === "en-US" ? "Plan" : "Plan" });
+      plan.focus();
+      await userEvent.keyboard("{Enter}");
+      await userEvent.click(
+        await screen.findByRole("button", { name: locale === "en-US" ? "View v2" : "Ver v2" }),
+      );
+      expect(
+        await screen.findByRole("button", {
+          name: locale === "en-US" ? "Download published PDF" : "Descargar PDF publicado",
+        }),
+      ).toHaveProperty("disabled", false);
+      await userEvent.click(
+        screen.getByRole("button", { name: locale === "en-US" ? "Requests" : "Solicitudes" }),
+      );
+      await userEvent.click(await screen.findByRole("button", { name: "REQ-1" }));
+      await screen.findByText("Synthetic Requester");
+      expect(
+        screen.queryByRole("button", {
+          name: /New request|Edit request|Close request|Validate|Acknowledge|Prepare|Retry preparation|Nueva solicitud|Editar solicitud|Cerrar solicitud|Validar|Preparar|Reintentar preparación/,
+        }),
+      ).toBeNull();
+      for (const method of [
+        "create",
+        "update",
+        "close",
+        "validate",
+        "acknowledgeWarnings",
+        "prepare",
+        "retry",
+      ] as const)
+        expect(client.requests[method]).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps synthetic owner editing and never labels additional or partial capabilities read-only", async () => {
+    renderWorkspace(workspaceClient(), { syntheticDemo: true });
+    expect(
+      await screen.findByText("Synthetic demo data — not real customer activity."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Read-only access")).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "Add party" }));
+    expect(await screen.findByRole("dialog", { name: "Add party" })).toBeTruthy();
+  });
+
+  it("clears stale access and presentation on organization switch and ignores the old response", async () => {
+    let release!: (value: {
+      capabilities: ("traceability.read" | "traceability.export.read")[];
+    }) => void;
+    const previous = new Promise<{
+      capabilities: ("traceability.read" | "traceability.export.read")[];
+    }>((resolve) => {
+      release = resolve;
+    });
+    const access = vi
+      .fn()
+      .mockReturnValueOnce(previous)
+      .mockResolvedValue({ capabilities: ["traceability.read"] });
+    const { rerenderWorkspace } = renderWorkspace(workspaceClient({ access }), {
+      syntheticDemo: true,
+    });
+    rerenderWorkspace({ organizationId: "other", syntheticDemo: false });
+    await screen.findByRole("heading", { name: "Parties" });
+    await act(async () => {
+      release({ capabilities: ["traceability.read", "traceability.export.read"] });
+    });
+    expect(access).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Read-only access")).toBeNull();
+    expect(screen.queryByText("Synthetic demo data — not real customer activity.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add party" })).toBeNull();
+  });
+
+  it.each(["pending", "error", "revoked"] as const)(
+    "clears the read-only label during a %s access refresh",
+    async (state) => {
+      let release!: (value: Awaited<ReturnType<UsBrowserClient["access"]>>) => void;
+      const next = new Promise<Awaited<ReturnType<UsBrowserClient["access"]>>>((resolve) => {
+        release = resolve;
+      });
+      const access = vi
+        .fn()
+        .mockResolvedValueOnce({ capabilities: ["traceability.read", "traceability.export.read"] });
+      if (state === "pending") access.mockReturnValue(next);
+      else if (state === "error") access.mockRejectedValue(new UsClientError("unavailable"));
+      else access.mockRejectedValue(new UsClientError("forbidden"));
+      const client = workspaceClient({
+        access,
+        listPlans: vi.fn().mockRejectedValue(new UsClientError("forbidden")),
+      });
+      renderWorkspace(client, { syntheticDemo: true });
+      await screen.findByText("Read-only access");
+      await userEvent.click(screen.getByRole("button", { name: "Plan" }));
+      // Plan's read rejection uses the workspace's existing onForbidden refresh.
+      await waitFor(() => expect(access).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText("Read-only access")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Add party" })).toBeNull();
+      if (state === "pending") {
+        await act(async () => {
+          release({ capabilities: ["traceability.read"] });
+        });
+        expect(screen.queryByText("Read-only access")).toBeNull();
+      }
+    },
+  );
+
   it.each(["en-US", "es-US"] as const)("shows the complete Latin brand in %s", async (locale) => {
     renderWorkspace(workspaceClient(), { locale });
     const brand = await screen.findByRole("img", { name: "Markiro" });

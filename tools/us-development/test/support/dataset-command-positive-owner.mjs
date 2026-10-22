@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import { withoutDemoViewerOwner, withoutDemoViewerOwnerBytes } from "./demo-viewer-owner.mjs";
 
 const id = "dataset_command_positive";
 const block = `
@@ -47,16 +48,21 @@ const expected = load(block)[id];
 
 /** Strip only the exact whole reviewed addition; malformed additions stay visible. */
 export function withoutDatasetCommandPositiveOwner(workflow) {
-  const result = structuredClone(workflow);
+  const result = isDeepStrictEqual(workflow.jobs?.[id], expected)
+    ? withoutDemoViewerOwner(workflow)
+    : structuredClone(workflow);
   if (isDeepStrictEqual(result.jobs?.[id], expected)) delete result.jobs[id];
   return result;
 }
 export function withoutDatasetCommandPositiveOwnerBytes(source) {
+  const candidate = isDeepStrictEqual(load(source).jobs?.[id], expected)
+    ? withoutDemoViewerOwnerBytes(source)
+    : source;
   if (
-    !isDeepStrictEqual(load(source).jobs?.[id], expected) ||
-    source.split(block).length !== 2 ||
-    !source.endsWith(block)
+    !isDeepStrictEqual(load(candidate).jobs?.[id], expected) ||
+    candidate.split(block).length !== 2 ||
+    !candidate.endsWith(block)
   )
     return source;
-  return source.slice(0, -block.length);
+  return candidate.slice(0, -block.length);
 }

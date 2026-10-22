@@ -139,6 +139,7 @@ import { matchesReceivingCsvPreview } from "./receiving/csv-integrity.js";
 import { readPlanPdfResponse } from "./plans/pdf-transport.js";
 import { createUsRequestsClient } from "./requests/client.js";
 import type { UsRequestsClientErrorCode } from "./requests/error-codes.js";
+import { isBoundedUsOrganizationMetadata } from "./synthetic-demo.js";
 
 const planConflictCode = z.enum([
   "us_plan_revision_conflict",
@@ -352,7 +353,16 @@ const signedInSchema = z.union([
     .object({ token: z.string().min(1), user: userSchema })
     .transform(() => ({ step: "password_session" as const })),
 ]);
-const organizationSchema = z.object({ id: z.string().min(1), name: z.string(), slug: z.string() });
+const organizationSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    slug: z.string(),
+    metadata: z.unknown().optional(),
+  })
+  .transform(({ metadata, ...organization }) =>
+    isBoundedUsOrganizationMetadata(metadata) ? { ...organization, metadata } : organization,
+  );
 const verificationSchema = z
   .object({ token: z.string().min(1), user: userSchema })
   .transform(() => undefined);
