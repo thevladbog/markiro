@@ -70,6 +70,16 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
         "{:#?}",
         report.checks
     );
+    // Every scenario of the profile ran: a judged one held (the verdict says so), a spawn-only
+    // one is not judged with a host in this process.
+    assert_eq!(
+        report.scenarios.len(),
+        markiro_loadtest::profile::SCENARIOS.len()
+    );
+    for scenario in &report.scenarios {
+        let spawn_only = markiro_loadtest::scenarios::SPAWN_ONLY.contains(&scenario.name.as_str());
+        assert_eq!(scenario.judged, !spawn_only, "{}", scenario.name);
+    }
     // `execute` hands back a report with the run's secrets already removed.
     let text = serde_json::to_string(&report).unwrap();
     assert!(!text.contains("Load-"), "the administrator password leaked");

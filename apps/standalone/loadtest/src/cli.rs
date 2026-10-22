@@ -289,6 +289,7 @@ pub async fn run(args: RunArgs) -> Result<bool, String> {
         // The data of a passing run is a copy of a throwaway site: of no use and large.
         let _ = std::fs::remove_dir_all(work_dir.join("data"));
         let _ = std::fs::remove_dir_all(work_dir.join("restored"));
+        let _ = std::fs::remove_dir_all(work_dir.join("scenarios"));
     }
     Ok(report.verdict.pass)
 }

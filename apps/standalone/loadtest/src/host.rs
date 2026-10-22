@@ -196,6 +196,12 @@ impl Host {
                 Ok(true)
             }
             Process::Spawned { mut child, log } => {
+                if child.try_wait()?.is_some() {
+                    // Ended already (stopped before, or killed): nothing to ask, and its pid may
+                    // belong to another process by now.
+                    self.process = Process::Spawned { child, log };
+                    return Ok(false);
+                }
                 let asked = ask_to_stop(&child);
                 let started = Instant::now();
                 let graceful = loop {
@@ -230,8 +236,15 @@ impl Drop for Host {
     }
 }
 
+/// The pids `ask_to_stop` signalled (tests only: a signal to a pid that already ended is the
+/// hazard the stop guard exists for, and it cannot be seen from outside).
+#[cfg(test)]
+static SIGNALLED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
 #[cfg(unix)]
 fn ask_to_stop(child: &Child) -> bool {
+    #[cfg(test)]
+    SIGNALLED.lock().unwrap().push(child.id());
     Command::new("kill")
         .args(["-INT", &child.id().to_string()])
         .status()
@@ -375,5 +388,39 @@ mod tests {
         assert!(!host.local);
         assert!(!host.stop().await.unwrap());
         assert_eq!(host.log_scan(), LogScan::default());
+    }
+
+    #[tokio::test]
+    async fn a_stopped_spawned_host_is_not_signalled_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("host.log");
+        let mut host = Host::spawned(&host_binary(), &dir.path().join("data"), &log)
+            .await
+            .unwrap();
+        let pid = host.pid.unwrap();
+        let first = host.stop().await.unwrap();
+        assert_eq!(first, cfg!(unix));
+        let signalled = |pid: u32| {
+            SIGNALLED
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|p| **p == pid)
+                .count()
+        };
+        assert_eq!(
+            signalled(pid),
+            usize::from(cfg!(unix)),
+            "one request to stop"
+        );
+        // The child ended: a second stop asks nothing of a pid that may be another process's now.
+        let started = Instant::now();
+        assert!(!host.stop().await.unwrap());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            signalled(pid),
+            usize::from(cfg!(unix)),
+            "the second stop signalled nothing"
+        );
     }
 }

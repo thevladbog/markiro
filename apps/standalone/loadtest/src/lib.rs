@@ -17,5 +17,6 @@ pub mod report;
 pub mod rng;
 pub mod run;
 pub mod sampler;
+pub mod scenarios;
 pub mod site;
 pub mod wal;

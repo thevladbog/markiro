@@ -26,6 +26,7 @@ use crate::report::{
 };
 use crate::rng::Rng;
 use crate::sampler;
+use crate::scenarios::{self, HostKind};
 use crate::site::{provision, AttachCredentials, Office, Res};
 
 pub enum HostChoice {
@@ -289,13 +290,14 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         .unwrap_or_default();
     let metrics = Arc::new(Metrics::new());
     let data_dir = work_dir.join("data");
-    let (mut host, kind, attach) = match choice {
+    let (mut host, kind, attach, scenario_host) = match choice {
         HostChoice::InProcess => (
             Host::in_process(&data_dir)
                 .await
                 .map_err(|e| e.to_string())?,
             "in-process",
             None,
+            HostKind::InProcess,
         ),
         HostChoice::Spawn { bin } => (
             Host::spawned(&bin, &data_dir, &work_dir.join("host-stdout.log"))
@@ -303,6 +305,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
                 .map_err(|e| e.to_string())?,
             "spawn",
             None,
+            HostKind::Spawn { bin },
         ),
         HostChoice::Attach {
             base,
@@ -314,6 +317,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
             Host::attached(&base, &fingerprint, data_dir, pid),
             "attach",
             Some(credentials),
+            HostKind::Attach,
         ),
     };
     let hello = pinned_client(&host.fingerprint, Duration::from_secs(5))
@@ -549,6 +553,10 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         }
         _ => None,
     };
+    // The scenarios, each on a fresh host of the same mode: the main host is stopped by now and
+    // nothing of theirs reaches the main run's metrics, series or log.
+    let (scenario_results, scenario_secrets) =
+        scenarios::run_all(&scenario_host, &work_dir, &profile).await;
     let latency = metrics
         .latency()
         .into_iter()
@@ -587,7 +595,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         drills,
         backups,
         restore,
-        scenarios: Vec::new(),
+        scenarios: scenario_results,
         log: host.log_scan(),
         graceful_stop: graceful,
         verdict: Verdict::default(),
@@ -595,5 +603,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         profile,
     };
     report.verdict = evaluate(&report);
-    Ok((report, site.secrets.clone()))
+    let mut secrets = site.secrets.clone();
+    secrets.extend(scenario_secrets);
+    Ok((report, secrets))
 }
