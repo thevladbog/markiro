@@ -306,8 +306,10 @@ export function ShiftCard({
               // In place of «Открыть» (spec §9.6): the host would refuse, and the operator is told why.
               <p className="shift-card__hint">{t(`floor.shifts.refused.${action.refusal}`)}</p>
             )}
-            {full !== null && (
+            {full !== null && !needsLink && (
               // Advisory (PR #775): the host decides, `shift_line_full` with its numbers if it refuses.
+              // Without the link the hint says what blocks the join instead; the participants line
+              // still says «В смене N из M» (and a third note would squash it at 1024x640).
               <p className="shift-card__hint">
                 {t("floor.shifts.lineFull", {
                   active: formatQuantity(full.active),

@@ -1940,7 +1940,8 @@ zeros). A shift is shared when `maxStations > 1` or more than one device ever en
 The hub card joins («Присоединиться», online only), names who works the shift when another
 device does, and says a part the host reports closed. When the other devices hold every slot by
 the cache it says «Линия занята: N из M» and keeps the join (and the resume of a paused part),
-online only — the hint is advisory and the host decides capacity: the host's list names a revoked
+online only (offline the card says «Нужна связь с хостом» in place of the count, which the
+participants line still gives) — the hint is advisory and the host decides capacity: the host's list names a revoked
 device's part `active`, but a revoked device holds no slot on the host (`active_others`), so a
 station that replaces a revoked one gets in although its card counts the line full (PR #775). A
 refusal `shift_line_full` is said with its numbers, an entry answered `myState: "closed"` is `part_closed`, enters no copy and caches the

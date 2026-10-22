@@ -1430,8 +1430,10 @@ describe("the shifts several devices work (plan 2b)", () => {
     renderList(executor, { online: false, enter });
     await screen.findByText(shift.number);
     const full = card(shift.number);
-    expect(within(full).getByText("Линия занята: 1 из 1")).toBeTruthy();
+    // What blocks the join is the link; who holds the slots stays said by the participants line.
     expect(within(full).getByText("Нужна связь с хостом")).toBeTruthy();
+    expect(within(full).getByText("В смене 1 из 1: Станция линии 2 · станция")).toBeTruthy();
+    expect(within(full).queryByText("Линия занята: 1 из 1")).toBeNull();
     expect(within(full).getByRole("button", { name: "Присоединиться" })).toHaveProperty(
       "disabled",
       true,
