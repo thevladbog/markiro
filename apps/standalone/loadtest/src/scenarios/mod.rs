@@ -587,16 +587,17 @@ impl Load {
 
     /// Stop scanning, drain every outbox (each syncer closes its open box and pallet first), and
     /// say whether each device drained and answered its resends alike.
-    pub async fn stop(self, prefix: &str) -> (Arc<Shared>, Vec<Arc<SimDevice>>, Vec<Check>) {
+    pub async fn stop(mut self, prefix: &str) -> (Arc<Shared>, Vec<Arc<SimDevice>>, Vec<Check>) {
         self.shared.stop.store(true, Ordering::SeqCst);
-        for task in self.scanners {
+        for task in std::mem::take(&mut self.scanners) {
             let _ = task.await;
         }
         for device in &self.devices {
             device.quiesce();
         }
         let mut checks = Vec::new();
-        for (device, task) in self.devices.iter().zip(self.syncers) {
+        let syncers = std::mem::take(&mut self.syncers);
+        for (device, task) in self.devices.iter().zip(syncers) {
             let index = device.spec.index;
             let outcome = task
                 .await
@@ -613,7 +614,29 @@ impl Load {
                 device.stats().resend_mismatches,
             ));
         }
-        (self.shared, self.devices, checks)
+        (
+            self.shared.clone(),
+            std::mem::take(&mut self.devices),
+            checks,
+        )
+    }
+}
+
+impl Drop for Load {
+    /// A load left behind by a scenario that returned early (a `?`) or panicked stops with it:
+    /// a dropped `JoinHandle` only detaches its task, which would scan and send for the rest of
+    /// the process beside the next scenarios. After `stop` nothing is left to abort.
+    fn drop(&mut self) {
+        self.shared.stop.store(true, Ordering::SeqCst);
+        for device in &self.devices {
+            device.quiesce();
+        }
+        for task in self.scanners.drain(..) {
+            task.abort();
+        }
+        for task in self.syncers.drain(..) {
+            task.abort();
+        }
     }
 }
 
@@ -1293,6 +1316,59 @@ mod tests {
             result.checks
         );
         assert!(result.latency.contains_key("facts"));
+    }
+
+    /// Every request the scenario's devices made so far, any route.
+    fn requests_made(metrics: &Metrics) -> u64 {
+        metrics
+            .latency()
+            .values()
+            .map(|histogram| histogram.summary().count)
+            .sum()
+    }
+
+    /// A scenario that returns early (a `?`) or panics drops its `Load` without `stop()`: its
+    /// scanners and syncers stop with it instead of scanning and sending for the rest of the
+    /// process beside the next scenarios.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_load_dropped_without_stop_stops_its_devices() {
+        let work = tempfile::tempdir().unwrap();
+        let ctx = Ctx::new("dropped", &HostKind::InProcess, work.path(), &tiny(), 2, 0)
+            .await
+            .unwrap();
+        let line = ctx.site.line_ids[0].clone();
+        let shift = ctx.plan(&line, None).await.unwrap();
+        let prefix = enter_all(&ctx, &shift, &[0, 1]).await.unwrap();
+        let load = ctx.load(1, &shift, &prefix, &[0, 1]);
+        let shared = load.shared.clone();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(
+            shared.generated.load(Ordering::SeqCst) > 0,
+            "the load scanned"
+        );
+        drop(load);
+        // A request already on its way when the load was dropped may still land.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let (scans, requests) = (
+            shared.generated.load(Ordering::SeqCst),
+            requests_made(&ctx.metrics),
+        );
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(
+            shared.generated.load(Ordering::SeqCst),
+            scans,
+            "a scanner still scans after its load was dropped"
+        );
+        assert_eq!(
+            requests_made(&ctx.metrics),
+            requests,
+            "a syncer still sends after its load was dropped"
+        );
+        assert!(
+            shared.stop.load(Ordering::SeqCst),
+            "the stop flag is raised"
+        );
+        let _ = ctx.finish(Ok(())).await;
     }
 
     #[tokio::test]
