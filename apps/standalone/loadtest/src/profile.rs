@@ -28,6 +28,21 @@ impl std::str::FromStr for CloseOrder {
     }
 }
 
+/// The multi-station scenarios a run can take after its main run (plan
+/// `2026-10-22-multi-station-load-test-scenarios.md`), in the order it takes them. Each scenario
+/// task of that plan adds its name here.
+pub const SCENARIOS: &[&str] = &[
+    "line-full",
+    "capability",
+    "leave-reenter",
+    "closed-part",
+    "close-races",
+    "lines",
+    "backup-mid-close",
+    "kill-restart",
+    "outage",
+];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -65,6 +80,10 @@ pub struct Profile {
     pub sample_s: u64,
     pub seed: u64,
     pub close_order: CloseOrder,
+    /// The scenarios run after the main run, each on a fresh host (`scenarios::run_all`); an
+    /// older report has none.
+    #[serde(default)]
+    pub scenarios: Vec<String>,
 }
 
 impl Profile {
@@ -96,6 +115,7 @@ impl Profile {
             sample_s: 5,
             seed: 20_261_020,
             close_order: CloseOrder::Shuffled,
+            scenarios: SCENARIOS.iter().map(|name| (*name).to_owned()).collect(),
         };
         match name {
             "smoke" => Ok(smoke),
@@ -128,6 +148,7 @@ impl Profile {
                 race_rate: 0.05,
                 backup_at: vec![0.25, 0.5, 0.75],
                 sample_s: 15,
+                scenarios: Vec::new(),
                 ..smoke
             }),
             other => Err(format!("profile '{other}': tiny, smoke or soak")),
@@ -169,6 +190,17 @@ impl Profile {
                     .collect::<Result<_, _>>()?
             }
             "closeOrder" => self.close_order = value.parse()?,
+            "scenarios" => {
+                self.scenarios = match value {
+                    "all" => SCENARIOS.iter().map(|name| (*name).to_owned()).collect(),
+                    "none" | "" => Vec::new(),
+                    list => list
+                        .split(',')
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_owned)
+                        .collect(),
+                }
+            }
             other => return Err(format!("unknown profile field '{other}'")),
         }
         self.validate()
@@ -205,6 +237,20 @@ impl Profile {
         }
         if self.backup_at.iter().any(|at| !(0.0..1.0).contains(at)) {
             return Err("backupAt: fractions of the run, 0 up to 1".into());
+        }
+        // Each scenario runs on `<work>/scenarios/<name>/data`: named twice, its second run would
+        // open the first one's data instead of a fresh site.
+        let mut seen = std::collections::BTreeSet::new();
+        for name in &self.scenarios {
+            if !SCENARIOS.contains(&name.as_str()) {
+                return Err(format!(
+                    "scenarios: '{name}' is not one of: {} (all and none stand alone, not in a list)",
+                    SCENARIOS.join(", ")
+                ));
+            }
+            if !seen.insert(name.as_str()) {
+                return Err(format!("scenarios: '{name}' is listed more than once"));
+            }
         }
         Ok(())
     }
@@ -361,5 +407,48 @@ mod tests {
         assert_eq!((tiny.busy_errors, tiny.server_errors), (0, 0));
         assert_eq!(tiny.facts_p99_ms, smoke.facts_p99_ms * 4.0);
         assert_eq!(tiny.wal_backlog_max_frames, smoke.wal_backlog_max_frames);
+    }
+
+    #[test]
+    fn the_scenarios_are_all_by_default_none_for_soak_and_named_ones_only() {
+        let all: Vec<String> = SCENARIOS.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(Profile::preset("smoke").unwrap().scenarios, all);
+        assert_eq!(Profile::preset("tiny").unwrap().scenarios, all);
+        assert!(Profile::preset("soak").unwrap().scenarios.is_empty());
+        let mut profile = Profile::preset("smoke").unwrap();
+        profile.set("scenarios", "none").unwrap();
+        assert!(profile.scenarios.is_empty());
+        profile.set("scenarios", "all").unwrap();
+        assert_eq!(profile.scenarios, all);
+        let refused = profile.set("scenarios", "no-such-scenario").unwrap_err();
+        assert!(refused.contains("no-such-scenario"), "{refused}");
+        profile.scenarios.clear();
+        let mut value = serde_json::to_value(&profile).unwrap();
+        value.as_object_mut().unwrap().remove("scenarios");
+        let back: Profile = serde_json::from_value(value).unwrap();
+        assert!(
+            back.scenarios.is_empty(),
+            "a profile of an older report reads with no scenario"
+        );
+    }
+
+    /// A scenario named twice would run twice on the same `<work>/scenarios/<name>/data`: the
+    /// second host opens the first one's data, not a fresh site. A list naming `all` or `none` is
+    /// told that those stand alone, not that they are unknown.
+    #[test]
+    fn a_scenario_list_names_each_scenario_once_and_all_or_none_only_alone() {
+        let mut profile = Profile::preset("smoke").unwrap();
+        let twice = profile
+            .set("scenarios", "lines,line-full,lines")
+            .unwrap_err();
+        assert!(
+            twice.contains("'lines'") && twice.contains("more than once"),
+            "{twice}"
+        );
+        profile.set("scenarios", "lines,line-full").unwrap();
+        let in_a_list = profile.set("scenarios", "all,lines").unwrap_err();
+        assert!(in_a_list.contains("'all'"), "{in_a_list}");
+        assert!(in_a_list.contains("alone"), "{in_a_list}");
+        assert!(!in_a_list.contains("none of: all"), "{in_a_list}");
     }
 }

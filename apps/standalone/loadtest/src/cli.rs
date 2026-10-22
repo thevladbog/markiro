@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::profile::{Profile, Thresholds};
 use crate::report::{compare, redact, render_markdown, Report};
 use crate::run::{execute_raw, HostChoice, RunOptions};
+use crate::secret::{Redactions, Secret};
 use crate::site::AttachCredentials;
 
 pub const USAGE: &str = "usage:
@@ -15,6 +16,8 @@ pub const USAGE: &str = "usage:
   markiro-loadtest compare OLD.json NEW.json
   markiro-loadtest summary REPORT.json
 
+--set scenarios=all|none|NAME,NAME picks the multi-station scenarios run after the main run,
+each on a fresh host (default: all for tiny and smoke, none for soak).
 Attach reads MARKIRO_LOAD_OFFICE_DEVICE_KEY, MARKIRO_LOAD_ADMIN_LOGIN and
 MARKIRO_LOAD_ADMIN_PASSWORD from the environment, never from the command line.
 The default host is `spawn`: the markiro-host binary next to this one, or --host-bin.
@@ -216,7 +219,7 @@ pub fn exit_code(outcome: &Result<bool, String>) -> u8 {
 pub fn write_reports(
     report: &Report,
     dir: &Path,
-    secrets: &[String],
+    secrets: &Redactions,
 ) -> Result<(PathBuf, PathBuf), String> {
     let report = redact(report, secrets);
     let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
@@ -265,9 +268,9 @@ pub async fn run(args: RunArgs) -> Result<bool, String> {
                 data_dir,
                 pid,
                 credentials: AttachCredentials {
-                    office_device_key: env("MARKIRO_LOAD_OFFICE_DEVICE_KEY")?,
+                    office_device_key: Secret::new(env("MARKIRO_LOAD_OFFICE_DEVICE_KEY")?),
                     login: env("MARKIRO_LOAD_ADMIN_LOGIN")?,
-                    password: env("MARKIRO_LOAD_ADMIN_PASSWORD")?,
+                    password: Secret::new(env("MARKIRO_LOAD_ADMIN_PASSWORD")?),
                 },
             }
         }
@@ -287,14 +290,36 @@ pub async fn run(args: RunArgs) -> Result<bool, String> {
         // The data of a passing run is a copy of a throwaway site: of no use and large.
         let _ = std::fs::remove_dir_all(work_dir.join("data"));
         let _ = std::fs::remove_dir_all(work_dir.join("restored"));
+        let _ = std::fs::remove_dir_all(work_dir.join("scenarios"));
     }
     Ok(report.verdict.pass)
 }
 
+/// A report file this harness can read: its schema is checked first, so a report of a newer
+/// harness is refused by name rather than by its first unknown field.
 fn read_report(path: &Path) -> Result<Report, String> {
     let text =
         std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    match value.get("schema").and_then(serde_json::Value::as_u64) {
+        None => {
+            return Err(format!(
+                "{}: not a load-test report (no schema number)",
+                path.display()
+            ))
+        }
+        Some(schema) if schema > u64::from(crate::report::SCHEMA) => {
+            return Err(format!(
+                "{}: unsupported report schema {schema}: this markiro-loadtest reads schema {} and \
+                 older; use the harness that wrote it",
+                path.display(),
+                crate::report::SCHEMA
+            ))
+        }
+        Some(_) => {}
+    }
+    serde_json::from_value(value).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// The regressions of `new` against `old`, one to a line; empty text: none.
@@ -406,6 +431,26 @@ mod tests {
         assert!(compare_files(&old_path, &dir.path().join("none.json")).is_err());
     }
 
+    #[test]
+    fn a_report_of_a_newer_schema_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("newer.json");
+        let mut value = serde_json::to_value(crate::report::sample_passing()).unwrap();
+        value["schema"] = serde_json::json!(crate::report::SCHEMA + 1);
+        value["fieldOfTheFuture"] = serde_json::json!(1);
+        std::fs::write(&path, value.to_string()).unwrap();
+        let error = summary_of(&path).unwrap_err();
+        assert!(error.contains("unsupported report schema"), "{error}");
+        assert!(
+            error.contains(&format!("schema {}", crate::report::SCHEMA + 1)),
+            "{error}"
+        );
+        // Not a report at all: said so, not a field-by-field complaint.
+        std::fs::write(&path, "{\"hello\": 1}").unwrap();
+        let error = summary_of(&path).unwrap_err();
+        assert!(error.contains("not a load-test report"), "{error}");
+    }
+
     // --- added: network exposure, redaction of the written files, exit codes ---
 
     #[test]
@@ -488,14 +533,14 @@ mod tests {
             .verdict
             .failures
             .push(format!("detail {}", secrets[1]));
-        let secrets: Vec<String> = secrets.iter().map(|s| (*s).to_owned()).collect();
-        let (json, markdown) = write_reports(&report, dir.path(), &secrets).unwrap();
+        let redactions: Redactions = secrets.iter().copied().map(Secret::from).collect();
+        let (json, markdown) = write_reports(&report, dir.path(), &redactions).unwrap();
         for path in [json, markdown] {
             let text = std::fs::read_to_string(&path).unwrap();
             // The messages name no secret: a failing assertion's text is a log of its own.
             for secret in &secrets {
                 assert!(
-                    !text.contains(secret.as_str()),
+                    !text.contains(secret),
                     "a planted secret is in {}",
                     path.display()
                 );
@@ -504,7 +549,7 @@ mod tests {
         }
         // and the unredacted report really did carry them (the test can fail)
         let raw = serde_json::to_string(&report).unwrap();
-        assert!(secrets.iter().all(|secret| raw.contains(secret.as_str())));
+        assert!(secrets.iter().all(|secret| raw.contains(secret)));
     }
 
     #[test]

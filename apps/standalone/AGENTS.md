@@ -7699,7 +7699,7 @@ harness of spec 2026-10-20 §8. It drives the real `markiro-host` over HTTPS wit
 the end the host's totals and its database (read-only, from outside) must equal it exactly. Six drills (`drills.rs`) are the ways a
 shared shift ends: close in three orders, force-close from the office, close with no reason, and a stale `leave` that must not undo
 a re-entry. They are **not** fault injection. A backup is taken under load and at the end; the last is restored into a folder of its own
-(`probes.rs`). The owner's runbook is `docs/runbooks/standalone-load-test.md` (Russian).
+(`probes.rs`). After the main run, nine multi-station scenarios (`scenarios/`, plan `docs/superpowers/plans/2026-10-22-multi-station-load-test-scenarios.md`) run one by one, each on a fresh host and site in the run's host mode with its own metrics (its deliberate 409/401/refused connections never reach the main thresholds; its latencies are recorded, not judged): `line-full`, `capability`, `leave-reenter`, `closed-part`, `close-races`, `lines`, `backup-mid-close`, and, with `--host spawn` only, `kill-restart` and `outage` (not judged in-process or attached: a verdict warning). A failed scenario check is a correctness failure. `Profile.scenarios` (`--set scenarios=all|none|a,b`): all for tiny and smoke, none for soak. A file-only WAL observer (`wal_watch.rs`, 100 ms, the WAL header's checkpoint sequence and the wal-index) adds `walWatch` to the report; the harness never checkpoints. The owner's runbook is `docs/runbooks/standalone-load-test.md` (Russian).
 
 - Commands: `markiro-loadtest run --profile tiny|smoke|soak [--set field=value]… [--out DIR] [--keep-data] [--host spawn|in-process|attach]`,
   `compare OLD.json NEW.json`, `summary REPORT.json`. Exit 0 pass, 1 failed verdict or regression, 2 the run could not be made.
@@ -7715,7 +7715,11 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
 - Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
   redacted (`redact()` with the run's secrets) before writing; they are still internal results.
 - Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and the Windows job, routed by
-  `tools/ci/affected.mjs`); `tests/self_run.rs` is `#[ignore]`. The load itself is manual or the opt-in
+  `tools/ci/affected.mjs`); both must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
+  real `markiro-host` (it listens on `0.0.0.0`) or kills and restarts it on its port (`host.rs`, the spawned `kill-restart` and
+  `outage` scenarios, the spawned panic test in `scenarios/mod.rs`): run them with `-- --ignored` on a trusted machine. The
+  process control (stop, kill, `Drop`) is covered in the gate over a fake `sh`/`sleep` child (Unix). The `wal_watch.rs` tests that
+  read a live `-shm` are ignored on Windows ("Windows -shm read unverified"). The load itself is manual or the opt-in
   `.github/workflows/standalone-load.yml` (`workflow_dispatch` only, in-process, never required, never run on GitHub yet). Run a smoke
   after changing a hot write path (facts, SSCC blocks, entry, leave, close, backup, restore) or `db.rs`.
 - Payloads are built from `markiro-proto` types, so a renamed wire field breaks the build. The plan-2b names `maxStations`,
@@ -7728,9 +7732,23 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
 - Observed (one macOS debug build, in-process host): smoke 180 s, 5403 scans, facts p99 about 34 ms, `sscc_block` p99 112 ms, WAL
   backlog about 997 frames, 168 of 168 checks. The backlog sits just under SQLite's 1000-frame auto-checkpoint: it is the ceiling of
   the checkpoint sawtooth, not a load measure. This is not a performance validation.
+- Observed with the scenarios (one macOS release build, one machine, plan 2026-10-22 acceptance): smoke in-process 5394 scans, facts p99
+  17.9 ms, `sscc_block` p99 67 ms, 168 of 168 checks, 7 scenarios held and `kill-restart`/`outage` not judged; smoke spawned 5402
+  scans, facts p99 29.7 ms, `sscc_block` p99 94 ms, 168 of 168, all 9 scenarios held. The WAL watch shows the automatic checkpoint keeps
+  up (log restarts every 1-2 s on average, at most about 10 s apart, backlog above 1000 frames in 0.2-0.7 % of samples and at most
+  1100), but the log file grows to about twice the trigger (7-9 MiB; no `journal_size_limit`); no explicit checkpoint was needed.
 - Not simulated: label checks, box exceptions, validation shifts, disaggregation, warehouse pallets, the handheld's warehouse and
-  pallet-event routes, printers, scanners, a real LAN, the Windows service. Not exercised by the load: `shift_line_full`, a device without
-  `multi-station-v1` (`protocol_unsupported`), leave and re-entry under load, a closed part receiving live facts and last-closer races,
-  concurrent closes, several lines or shifts, backup or restore in the middle of a close, process-level faults (kill and restart
-  mid-write, WAL crash recovery, 5xx backoff). Windows-only and unverified: reading `host.db-shm`, retry of the restore's `os error 32`,
-  PowerShell vitals. `soak`, `attach`, Linux and the workflow have never run.
+  pallet-event routes, printers, scanners, a real LAN, the Windows service. Exercised by the scenarios, not by the main load:
+  `shift_line_full` and revoked devices, a build without `multi-station-v1` (the host answers `shift_busy`, and `shift_status` for a
+  closed part, never `protocol_unsupported`, which comes only from the protocol-version header; wizard-created lines default to limit
+  1, so scenarios set it), leave and re-entry under load, late facts of a closed part and two closers at once, N closes at once and
+  the office racing a device, three lines and shifts at once, a copy in the middle of the closes, and on a spawned host a `kill -9`
+  with WAL recovery and a stop with device back-off. Still not exercised: a host 5xx (no host test hook, so the device back-off is
+  tested against refused connections only), the stations' and handhelds' own back-off (the harness's device model is), a power cut,
+  the office closing after a device closed the LAST part, a kill landing inside a flush (`committedButUnacknowledged` was 0 in every
+  run, so the resend-after-crash stored-receipt path is unexercised), the process scenarios in-process or in the workflow.
+  Windows-only and unverified: reading `host.db-shm`, retry of the restore's `os error 32`, PowerShell vitals, restarting a host on
+  the same port. On Windows `kill-restart`, `outage` and `backup-mid-close` (restoring a copy the backup worker may hold) are not
+  judged (`scenarios::NOT_JUDGED_ON_WINDOWS`, `judged_in_process`). Release-build numbers are one macOS machine; `soak`, `attach`, Linux, a real LAN or handhelds, and the workflow
+  (never run on GitHub) have never run. Harness fixes made on the way: `api.rs` error classes (`net_*` metric keys) and `strip_ansi`
+  in `scan_log` (the host log's colour codes hid ERROR lines).

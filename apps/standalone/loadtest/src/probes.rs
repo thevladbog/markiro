@@ -351,7 +351,7 @@ mod tests {
             dir.path(),
             &copy,
             work.path(),
-            &site.devices[0].key,
+            site.devices[0].key.expose(),
             &shift.id,
             expected_total,
             metrics.clone(),

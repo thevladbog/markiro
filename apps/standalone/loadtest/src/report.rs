@@ -15,8 +15,9 @@ use crate::ledger::Expected;
 use crate::procstat::slope_per_hour;
 use crate::profile::{Profile, Thresholds};
 use crate::sampler::Sample;
+use crate::secret::Redactions;
 
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -131,6 +132,26 @@ pub struct Verdict {
     pub warnings: Vec<String>,
 }
 
+/// A multi-station scenario (plan `2026-10-22-multi-station-load-test-scenarios.md`): its checks,
+/// what it observed, and whether it was judged at all with this run's host.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScenarioResult {
+    pub name: String,
+    /// `false`: the scenario needs what this host mode lacks (a spawned host); `note` says why.
+    pub judged: bool,
+    /// Why it was not judged, or which path a judged run did not exercise this time.
+    pub note: String,
+    pub duration_ms: u64,
+    pub checks: Vec<Check>,
+    /// What the scenario saw that is recorded, not judged (which order a race took, ...).
+    pub observed: BTreeMap<String, serde_json::Value>,
+    /// Latency of the scenario's own requests by route: recorded, never judged.
+    pub latency: BTreeMap<String, LatencySummary>,
+    /// The scenario's own error classes: its refusals are deliberate.
+    pub errors: BTreeMap<String, u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Report {
@@ -152,6 +173,13 @@ pub struct Report {
     pub drills: Vec<DrillResult>,
     pub backups: Vec<BackupResult>,
     pub restore: Option<RestoreResult>,
+    /// The multi-station scenarios, each on a fresh host after the main run; a schema-1 report
+    /// has none.
+    #[serde(default)]
+    pub scenarios: Vec<ScenarioResult>,
+    /// The fine WAL watch of the main run (`wal_watch.rs`); a schema-1 report has none.
+    #[serde(default)]
+    pub wal_watch: Option<crate::wal_watch::WalWatch>,
     pub log: LogScan,
     /// `None` where a stop on request is not possible (Windows, in-process).
     pub graceful_stop: Option<bool>,
@@ -289,6 +317,18 @@ pub fn evaluate(report: &Report) -> Verdict {
             None => warnings.push("memory growth is unavailable: it was not judged".to_owned()),
         }
     }
+    if let Some(watch) = &report.wal_watch {
+        if watch.readable_points == 0 {
+            warnings.push(
+                "the WAL watch never read the wal-index: checkpoints were not observed".to_owned(),
+            );
+        } else if watch.restarts == 0 && watch.duration_s >= 60.0 {
+            warnings.push(format!(
+                "the WAL never started again in {:.0} s: the automatic checkpoint never caught up with the end of the log (see walWatch.findings)",
+                watch.duration_s
+            ));
+        }
+    }
     if r.fds_max.is_none() || r.fds_after_warmup.is_none() || r.fds_end.is_none() {
         warnings.push("the descriptor count is unavailable: it was not judged".to_owned());
     }
@@ -370,6 +410,19 @@ pub fn evaluate(report: &Report) -> Verdict {
     if let Some(restore) = &report.restore {
         failed("restore", &restore.checks);
     }
+    for scenario in report.scenarios.iter().filter(|scenario| scenario.judged) {
+        failed(&format!("scenario {}", scenario.name), &scenario.checks);
+    }
+    for scenario in &report.scenarios {
+        if !scenario.judged {
+            warnings.push(format!(
+                "scenario {} not judged: {}",
+                scenario.name, scenario.note
+            ));
+        } else if scenario.checks.is_empty() {
+            failures.push(format!("scenario {}: no check ran", scenario.name));
+        }
+    }
     Verdict {
         pass: failures.is_empty(),
         failures,
@@ -441,6 +494,13 @@ pub fn render_markdown(report: &Report) -> String {
         fmt_u(r.fds_max), fmt_u(r.fds_end), fmt(r.wal_file_max_mib),
         fmt_u(r.wal_backlog_max_frames), fmt_u(r.wal_backlog_p99_frames), fmt_u(r.wal_backlog_end_frames), fmt(r.db_end_mib)
     );
+    if let Some(watch) = &report.wal_watch {
+        let _ = writeln!(out, "## WAL watch\n");
+        for finding in &watch.findings {
+            let _ = writeln!(out, "- {finding}");
+        }
+        out.push('\n');
+    }
     let _ = writeln!(out, "## Under load and at the end\n");
     for backup in &report.backups {
         let _ = writeln!(
@@ -472,6 +532,28 @@ pub fn render_markdown(report: &Report) -> String {
                 "FAILED"
             }
         );
+    }
+    if !report.scenarios.is_empty() {
+        let _ = writeln!(out, "\n## Scenarios\n");
+        for scenario in &report.scenarios {
+            let failed = scenario.checks.iter().filter(|check| !check.ok).count();
+            let state = if !scenario.judged {
+                format!("not judged ({})", scenario.note)
+            } else if failed == 0 && !scenario.checks.is_empty() {
+                format!("held ({} checks)", scenario.checks.len())
+            } else {
+                format!("FAILED ({} checks, {failed} failed)", scenario.checks.len())
+            };
+            if scenario.judged && !scenario.note.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "- scenario {}: {state}; note: {}",
+                    scenario.name, scenario.note
+                );
+            } else {
+                let _ = writeln!(out, "- scenario {}: {state}", scenario.name);
+            }
+        }
     }
     out
 }
@@ -542,15 +624,15 @@ pub fn compare(old: &Report, new: &Report) -> Vec<Regression> {
 /// The report with every given secret replaced by `[redacted]` in every string
 /// (log lines, check details, file names), so a host that logs a credential
 /// does not carry it into the file a run leaves behind.
-pub fn redact(report: &Report, secrets: &[String]) -> Report {
-    fn clean(text: &str, secrets: &[String]) -> String {
+pub fn redact(report: &Report, secrets: &Redactions) -> Report {
+    fn clean(text: &str, secrets: &Redactions) -> String {
         let mut text = text.to_owned();
-        for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
-            text = text.replace(secret.as_str(), "[redacted]");
+        for secret in secrets.iter().filter(|secret| !secret.expose().is_empty()) {
+            text = text.replace(secret.expose(), "[redacted]");
         }
         text
     }
-    fn walk(value: &mut serde_json::Value, secrets: &[String]) {
+    fn walk(value: &mut serde_json::Value, secrets: &Redactions) {
         match value {
             serde_json::Value::String(text) => *text = clean(text, secrets),
             serde_json::Value::Array(items) => items.iter_mut().for_each(|v| walk(v, secrets)),
@@ -633,6 +715,8 @@ pub fn sample_passing() -> Report {
         drills: vec![],
         backups: vec![],
         restore: None,
+        scenarios: vec![],
+        wal_watch: None,
         log: LogScan {
             available: true,
             ..LogScan::default()
@@ -647,6 +731,7 @@ pub fn sample_passing() -> Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secret::Secret;
 
     #[test]
     fn a_clean_run_passes() {
@@ -1048,6 +1133,7 @@ mod tests {
         .iter()
         .map(|s| (*s).to_owned())
         .collect();
+        let redactions: Redactions = secrets.iter().cloned().map(Secret::new).collect();
         let mut report = sample_passing();
         // A host log may echo anything; a failing device may quote a request.
         report.log.first_errors = vec![format!("ERROR login {} {}", secrets[3], secrets[2])];
@@ -1075,7 +1161,7 @@ mod tests {
                 "the probe must be able to see every planted secret"
             );
         }
-        let clean = redact(&report, &secrets);
+        let clean = redact(&report, &redactions);
         let text = serde_json::to_string_pretty(&clean).unwrap() + &render_markdown(&clean);
         for secret in &secrets {
             assert!(!text.contains(secret.as_str()), "a planted secret leaked");
@@ -1099,5 +1185,214 @@ mod tests {
         assert!(compare(&old, &new)
             .iter()
             .any(|r| r.0.contains("WAL backlog")));
+    }
+
+    fn scenario(name: &str, judged: bool, checks: Vec<Check>) -> ScenarioResult {
+        ScenarioResult {
+            name: name.to_owned(),
+            judged,
+            note: if judged {
+                String::new()
+            } else {
+                "needs a spawned host".to_owned()
+            },
+            duration_ms: 1,
+            checks,
+            observed: BTreeMap::new(),
+            latency: BTreeMap::new(),
+            errors: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_failed_scenario_check_fails_the_verdict_and_an_unjudged_scenario_warns() {
+        let mut report = sample_passing();
+        report.scenarios.push(scenario(
+            "line-full",
+            true,
+            vec![Check::new("entries_admitted", true, "ok")],
+        ));
+        report
+            .scenarios
+            .push(scenario("kill-restart", false, vec![]));
+        let verdict = evaluate(&report);
+        assert!(verdict.pass, "{verdict:?}");
+        assert!(
+            verdict
+                .warnings
+                .iter()
+                .any(|w| w.contains("scenario kill-restart not judged") && w.contains("spawned")),
+            "{:?}",
+            verdict.warnings
+        );
+        report.scenarios[0].checks.push(Check::new(
+            "refusal_names_the_limit",
+            false,
+            "expected Some(3), got Some(4)",
+        ));
+        let verdict = evaluate(&report);
+        assert!(!verdict.pass);
+        assert!(
+            verdict.failures.iter().any(|f| f
+                == "scenario line-full refusal_names_the_limit: expected Some(3), got Some(4)"),
+            "{:?}",
+            verdict.failures
+        );
+    }
+
+    #[test]
+    fn a_judged_scenario_without_a_check_fails() {
+        let mut report = sample_passing();
+        report.scenarios.push(scenario("lines", true, vec![]));
+        let verdict = evaluate(&report);
+        assert!(!verdict.pass);
+        assert!(
+            verdict
+                .failures
+                .iter()
+                .any(|f| f.contains("scenario lines: no check ran")),
+            "{:?}",
+            verdict.failures
+        );
+    }
+
+    #[test]
+    fn a_report_of_schema_1_without_scenarios_still_reads() {
+        assert_eq!(SCHEMA, 2);
+        let mut value = serde_json::to_value(sample_passing()).unwrap();
+        value.as_object_mut().unwrap().remove("scenarios");
+        value["profile"]
+            .as_object_mut()
+            .unwrap()
+            .remove("scenarios");
+        value["schema"] = serde_json::json!(1);
+        let back: Report = serde_json::from_value(value).unwrap();
+        assert!(back.scenarios.is_empty());
+        assert!(back.profile.scenarios.is_empty());
+    }
+
+    /// A real report written by the previous report format (schema 1, base 55359a671).
+    #[test]
+    fn a_real_report_file_of_schema_1_still_reads() {
+        let text = include_str!("../tests/fixtures/report-schema-1.json");
+        let back: Report = serde_json::from_str(text).expect("a schema-1 report reads");
+        assert_eq!(back.schema, 1);
+        assert!(back.scenarios.is_empty());
+        assert!(back.profile.scenarios.is_empty());
+        assert!(render_markdown(&back).contains("# Load run"));
+    }
+
+    #[test]
+    fn the_markdown_lists_each_scenario_and_redaction_reaches_its_checks() {
+        let mut report = sample_passing();
+        report.scenarios.push(scenario(
+            "line-full",
+            true,
+            vec![Check::new("x", false, "key SECRET-KEY-1")],
+        ));
+        report.scenarios.push(scenario("outage", false, vec![]));
+        report.verdict = evaluate(&report);
+        let text = render_markdown(&report);
+        assert!(text.contains("## Scenarios"), "{text}");
+        assert!(
+            text.contains("- scenario line-full: FAILED (1 checks, 1 failed)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- scenario outage: not judged (needs a spawned host)"),
+            "{text}"
+        );
+        // A judged scenario's note (a path this run did not exercise) is shown with its line.
+        let mut held = scenario("close-races", true, vec![Check::new("x", true, "")]);
+        held.note = "no race ran office-first this run.".to_owned();
+        report.scenarios.push(held);
+        let text = render_markdown(&report);
+        assert!(
+            text.contains(
+                "- scenario close-races: held (1 checks); note: no race ran office-first this run."
+            ),
+            "{text}"
+        );
+        let clean = redact(
+            &report,
+            &[Secret::from("SECRET-KEY-1")].into_iter().collect(),
+        );
+        let all = serde_json::to_string(&clean).unwrap() + &render_markdown(&clean);
+        assert!(
+            !all.contains("SECRET-KEY-1"),
+            "a scenario's check leaked a secret"
+        );
+    }
+
+    #[test]
+    fn redaction_covers_every_scenario_string_and_map_key() {
+        let mut report = sample_passing();
+        let mut s = scenario(
+            "lines-SECRET-A",
+            false,
+            vec![Check::new("c-SECRET-B", true, "d SECRET-C")],
+        );
+        s.note = "note SECRET-D".to_owned();
+        s.observed
+            .insert("key-SECRET-E".to_owned(), serde_json::json!("v SECRET-F"));
+        s.observed.insert(
+            "nested".to_owned(),
+            serde_json::json!({"k-SECRET-G": ["x SECRET-H"]}),
+        );
+        s.errors.insert("err SECRET-I".to_owned(), 2);
+        s.latency.insert(
+            "route SECRET-J".to_owned(),
+            report
+                .latency
+                .values()
+                .next()
+                .cloned()
+                .expect("a latency summary"),
+        );
+        report.scenarios.push(s);
+        let redactions: Redactions = "ABCDEFGHIJ"
+            .chars()
+            .map(|c| Secret::new(format!("SECRET-{c}")))
+            .collect();
+        let clean = redact(&report, &redactions);
+        let all = serde_json::to_string(&clean).unwrap();
+        assert!(!all.contains("SECRET-"), "{all}");
+        assert_eq!(clean.scenarios[0].errors.values().sum::<u64>(), 2);
+        assert_eq!(clean.scenarios[0].checks.len(), 1);
+    }
+
+    #[test]
+    fn the_wal_watch_warns_when_the_log_never_restarted_and_reads_back() {
+        let mut report = sample_passing();
+        report.wal_watch = Some(crate::wal_watch::WalWatch {
+            every_ms: 100,
+            points: 1800,
+            readable_points: 1800,
+            duration_s: 180.0,
+            restarts: 0,
+            ..Default::default()
+        });
+        let verdict = evaluate(&report);
+        assert!(verdict.pass, "a WAL finding is a warning, not a failure");
+        assert!(
+            verdict
+                .warnings
+                .iter()
+                .any(|w| w.contains("never started again")),
+            "{:?}",
+            verdict.warnings
+        );
+        report.wal_watch.as_mut().unwrap().restarts = 12;
+        assert!(!evaluate(&report)
+            .warnings
+            .iter()
+            .any(|w| w.contains("never started again")));
+        let text = serde_json::to_string(&report).unwrap();
+        let back: Report = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.wal_watch, report.wal_watch);
+        let mut value = serde_json::to_value(&report).unwrap();
+        value.as_object_mut().unwrap().remove("walWatch");
+        let old: Report = serde_json::from_value(value).unwrap();
+        assert!(old.wal_watch.is_none());
     }
 }

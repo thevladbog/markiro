@@ -84,7 +84,7 @@ async fn work(
                 crate::metrics::Route::SsccBlock,
                 "POST",
                 "/v1/device/sscc/blocks",
-                crate::api::Auth { device_key: Some(&device.key), session: None },
+                crate::api::Auth { device_key: Some(device.key.expose()), session: None },
                 Some(&json!({ "requestId": request_id, "issuerPrefix": shift.issuer_prefix, "extension": extension })),
             )
             .await
@@ -114,7 +114,7 @@ async fn work(
             break;
         }
         let records: Vec<Value> = batch.iter().map(|queued| queued.record.clone()).collect();
-        let receipts = api.facts(&device.key, &records).await?;
+        let receipts = api.facts(device.key.expose(), &records).await?;
         if let Some(bad) = receipts
             .iter()
             .find(|receipt| receipt["outcome"] != "accepted")
@@ -153,7 +153,11 @@ async fn close(
         shift,
         data,
     );
-    let mut receipts = site.office.api.facts(&device.key, &[record]).await?;
+    let mut receipts = site
+        .office
+        .api
+        .facts(device.key.expose(), &[record])
+        .await?;
     Ok(receipts.remove(0))
 }
 
@@ -318,7 +322,7 @@ async fn force_drill(site: &Site, profile: &Profile, run: u32) -> DrillResult {
             engine.scan_ok(&code, None);
         }
         let records: Vec<Value> = engine.batch(10).iter().map(|queued| queued.record.clone()).collect();
-        let receipts = site.office.api.facts(&site.devices[held].key, &records).await?;
+        let receipts = site.office.api.facts(site.devices[held].key.expose(), &records).await?;
         checks.push(Check::same("late_scans_accepted", 3usize, receipts.iter().filter(|r| r["outcome"] == "accepted").count()));
         let office = office_shift(site, &shift.id).await?;
         checks.push(Check::same("status_after_late_scans", "closed", office["status"].as_str().unwrap_or("")));
@@ -381,7 +385,7 @@ async fn device_post(
             "POST",
             path,
             crate::api::Auth {
-                device_key: Some(&device.key),
+                device_key: Some(device.key.expose()),
                 session: None,
             },
             body.as_ref(),
@@ -541,7 +545,7 @@ mod tests {
             index: index as u32,
             kind,
             id: format!("d{index}"),
-            key: String::new(),
+            key: "".into(),
             name: String::new(),
         })
         .collect()
