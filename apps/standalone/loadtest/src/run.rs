@@ -587,6 +587,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         drills,
         backups,
         restore,
+        scenarios: Vec::new(),
         log: host.log_scan(),
         graceful_stop: graceful,
         verdict: Verdict::default(),

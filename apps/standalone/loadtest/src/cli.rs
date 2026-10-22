@@ -15,6 +15,8 @@ pub const USAGE: &str = "usage:
   markiro-loadtest compare OLD.json NEW.json
   markiro-loadtest summary REPORT.json
 
+--set scenarios=all|none|NAME,NAME picks the multi-station scenarios run after the main run,
+each on a fresh host (default: all for tiny and smoke, none for soak).
 Attach reads MARKIRO_LOAD_OFFICE_DEVICE_KEY, MARKIRO_LOAD_ADMIN_LOGIN and
 MARKIRO_LOAD_ADMIN_PASSWORD from the environment, never from the command line.
 The default host is `spawn`: the markiro-host binary next to this one, or --host-bin.
