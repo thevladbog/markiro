@@ -247,9 +247,13 @@ function jobsForPath(path) {
     ) {
       return ["verify_static", ...standaloneJobs, standaloneAppTests];
     }
+    // The load-test crate is a dev/acceptance tool: nothing in the host, the
+    // shell or the installer depends on it, so it needs the ubuntu Rust job
+    // only, not the 60-minute Windows installer pipeline. A change that also
+    // touches another standalone path still selects that path's jobs (union).
+    if (path.startsWith("apps/standalone/loadtest/")) return ["standalone_rust"];
     if (
       path.startsWith("apps/standalone/host/") ||
-      path.startsWith("apps/standalone/loadtest/") ||
       path.startsWith("apps/standalone/src-tauri/") ||
       /^apps\/standalone\/Cargo\.(?:toml|lock)$/u.test(path)
     ) {

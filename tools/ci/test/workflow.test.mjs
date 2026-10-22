@@ -281,18 +281,34 @@ test("the standalone app's Vitest suite runs in its own job and in no other app 
 });
 
 test("both standalone cargo test steps report every failing test binary in one run", () => {
-  for (const name of ["standalone-rust", "standalone-windows-build"]) {
+  // The load-test crate (~170 tests that start real in-process hosts) is run on
+  // ubuntu only; the Windows job excludes it and just compiles it.
+  const expected = {
+    "standalone-rust": /--manifest-path apps\/standalone\/Cargo\.toml --workspace --no-fail-fast$/,
+    "standalone-windows-build":
+      /--manifest-path apps\/standalone\/Cargo\.toml --workspace --exclude markiro-loadtest --no-fail-fast$/,
+  };
+  for (const [name, pattern] of Object.entries(expected)) {
     const commands = workflow.jobs[name].steps
       .flatMap((step) => (step.run ?? "").split("\n"))
       .map((line) => line.trim())
-      .filter((line) => /^cargo test\b/.test(line));
+      .filter((line) => /^cargo test\b/.test(line) && !line.includes("--no-run"));
     assert.equal(commands.length, 1, `${name} runs cargo test once`);
-    assert.match(
-      commands[0],
-      /--manifest-path apps\/standalone\/Cargo\.toml --workspace --no-fail-fast$/,
-      name,
-    );
+    assert.match(commands[0], pattern, name);
   }
+});
+
+test("the Windows standalone job still compiles the load-test crate it does not run", () => {
+  const steps = workflow.jobs["standalone-windows-build"].steps;
+  const index = steps.findIndex((step) =>
+    step.run?.includes("cargo test --no-run -p markiro-loadtest"),
+  );
+  assert.ok(index >= 0, "a compile-only step for markiro-loadtest exists");
+  assert.match(steps[index].run, /--manifest-path apps\/standalone\/Cargo\.toml/);
+  assert.ok(
+    steps.findIndex((step) => step.run?.includes("--exclude markiro-loadtest")) < index,
+    "it follows the excluded workspace run",
+  );
 });
 
 test("Signer Windows verification includes the stable release contract", () => {
