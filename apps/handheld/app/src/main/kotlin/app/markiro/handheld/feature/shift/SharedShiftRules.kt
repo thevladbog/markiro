@@ -32,12 +32,19 @@ object SharedShiftRules {
     fun isFresh(p: ShiftParticipation?, now: Long): Boolean = p != null && !p.stale && now - p.fetchedAt <= FRESH_MS
 
     /**
-     * What the others delivered (the host's total less this device's own delivered share) plus everything this device has counted, delivered or not,
-     * less the [lost] codes (`CodeDao.lostForShift`: answered `conflict` or `rejected`): the host gave those to another device, so they are inside the others'
-     * part already and would count twice (the station's `sharedCount(lost)`, final review I2); required, never defaulted, so a caller cannot forget it. Never below the device's own count.
+     * This device's own part: everything it has counted, delivered or not, less the [lost] codes (`CodeDao.lostForShift`: answered `conflict` or
+     * `rejected`) and less the acknowledged codes the host's last snapshot no longer credits to it ([ShiftParticipation.displaced], PR #775): the
+     * host gave those to another device. Never negative; without a snapshot, the count less the lost ones.
+     */
+    fun own(p: ShiftParticipation?, localAccepted: Int, lost: Int): Int = (localAccepted - lost - (p?.displaced ?: 0)).coerceAtLeast(0)
+
+    /**
+     * What the others delivered (the host's total less this device's own delivered share) plus this device's [own] part: the lost and displaced codes
+     * are inside the others' part already and would count twice (the station's `sharedCount(lost)` with its displaced kind, final review I2, PR #775);
+     * [lost] is required, never defaulted, so a caller cannot forget it.
      */
     fun shiftTotal(p: ShiftParticipation?, localAccepted: Int, lost: Int): Int {
-        val own = (localAccepted - lost).coerceAtLeast(0)
+        val own = own(p, localAccepted, lost)
         val accepted = p?.accepted ?: return own
         val others = (accepted - (p.myAccepted ?: 0L)).coerceAtLeast(0L)
         return (others + own).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
@@ -59,7 +66,7 @@ object SharedShiftRules {
     fun strip(p: ShiftParticipation?, localAccepted: Int, plan: Int?, lost: Int): SharedStrip? {
         if (p == null || !isShared(p)) return null
         return SharedStrip(
-            mine = (localAccepted - lost).coerceAtLeast(0),
+            mine = own(p, localAccepted, lost),
             total = shiftTotal(p, localAccepted, lost),
             plan = plan,
             active = p.active,

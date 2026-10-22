@@ -242,6 +242,19 @@ class ShiftCloserTest {
     }
 
     @Test
+    fun aCodeTheHostDisplacedAfterAcceptingItIsNotCountedTwiceInTheReasonDecision() = runTest {
+        // PR #775: plan 121; the host counts 121, 1 of them this device's (h2); h1 was accepted from this device, then displaced by another
+        // device's earlier scan, so it is inside the others' 120 already. The snapshot kept that as `displaced = 1`.
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 121))
+        keep(shared(accepted = 121, mine = 1).copy(displaced = 1))
+        val p = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertEquals("120 + (2 - 1 displaced)", 121, p.reasonBasis)
+        assertFalse("121 meets the plan once h1 is not counted twice", p.reasonRequired)
+        keep(shared(accepted = 121, mine = 1))
+        assertTrue(ShiftCloser(db) { t0 }.preview("s1")!!.reasonRequired)
+    }
+
+    @Test
     fun aDeviceThatIsNotTheLastToCloseIsNotAskedAndSaysHowManyAreStillOpen() = runTest {
         keep(shared(othersOpen = 2))
         val p = ShiftCloser(db) { t0 }.preview("s1")!!

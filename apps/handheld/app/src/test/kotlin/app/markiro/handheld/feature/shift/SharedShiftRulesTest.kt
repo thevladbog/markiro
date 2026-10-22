@@ -132,6 +132,33 @@ class SharedShiftRulesTest {
         assertTrue(SharedShiftRules.reasonRequired(572, 457, shared(), now, lost = 0))
     }
 
+    /**
+     * PR #775 (Codex P2): the host took this device's scan, then an earlier offline scan of the same code from another device displaced it. The
+     * code stays in `codes_mirror` and was answered `accepted`, so it is not `lost`; the host's snapshot says how many of this device's
+     * acknowledged codes it no longer credits (`displaced`), and they are inside the others' part already.
+     */
+    @Test
+    fun aScanTheHostTookAndThenDisplacedCountsOnceNotTwice() {
+        // One physical code: the host counts 1, none of it this device's; this device holds it, acknowledged, and the host displaced it.
+        val displaced = shared(accepted = 1, mine = 0).copy(displaced = 1)
+        assertEquals(1, SharedShiftRules.shiftTotal(displaced, 1, lost = 0))
+        assertEquals(0, checkNotNull(SharedShiftRules.strip(displaced, 1, 1200, lost = 0)).mine)
+        assertEquals(1, checkNotNull(SharedShiftRules.strip(displaced, 1, 1200, lost = 0)).total)
+        // A later scan of another code, not yet acknowledged: counted once, on top.
+        assertEquals(2, SharedShiftRules.shiftTotal(displaced, 2, lost = 0))
+        assertEquals(1, checkNotNull(SharedShiftRules.strip(displaced, 2, 1200, lost = 0)).mine)
+        // The reason follows: a plan of 1 is met by the one code (without the correction the total would read 2).
+        assertFalse(SharedShiftRules.reasonRequired(1, 1, displaced, now, lost = 0))
+        assertTrue(SharedShiftRules.reasonRequired(1, 1, displaced.copy(displaced = 0), now, lost = 0))
+        // A stale or old snapshot keeps the 90 s rule: no reason asked, whatever the correction.
+        assertFalse(SharedShiftRules.reasonRequired(1200, 1, displaced.copy(stale = true), now, lost = 0))
+        assertFalse(SharedShiftRules.reasonRequired(1200, 1, displaced.copy(fetchedAt = now - SharedShiftRules.FRESH_MS - 1), now, lost = 0))
+        // Never below zero, and with no snapshot the device's own count less the lost ones, as before.
+        assertEquals(1, SharedShiftRules.shiftTotal(displaced.copy(displaced = 5), 1, lost = 0))
+        assertEquals(1, SharedShiftRules.shiftTotal(null, 1, lost = 0))
+        assertEquals(1, SharedShiftRules.shiftTotal(null, 2, lost = 1))
+    }
+
     /** Final review I4: a full line never stops local production, and the strip says why this device has no slot. */
     @Test
     fun theStripNamesAFullLineOnlyWhileThisDevicesPartIsLeftAndEverySlotIsTaken() {

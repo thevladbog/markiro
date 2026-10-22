@@ -58,7 +58,8 @@ interface CodeDao {
      * its `host_outbox` record is quarantined and the scan stays in `outbox`). They are inside the others' part of a shared shift's total or in
      * nobody's, so `SharedShiftRules` takes them off this device's own count (its `lost`). A code is the shift's own when `codes_mirror` holds it
      * for this shift: the same hash accepted in another shift, or only reprocessed here, never counts. A code in both kinds counts once.
-     * The station's third kind, a code the host displaced since, has no counterpart: the handheld reads no displacement notices.
+     * The station's third kind, a code the host displaced since, is not here: the handheld reads no displacement notices, and the host's snapshot
+     * says how many of its acknowledged codes it no longer credits (`ShiftParticipation.displaced`, from [pendingForShift], PR #775).
      */
     @Query(
         "SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") e WHERE e.shiftId = :shiftId " +
@@ -81,6 +82,19 @@ interface CodeDao {
 
     @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
     fun observeCountForShift(shiftId: String): Flow<Int>
+
+    /**
+     * This shift's own codes whose scan still waits for the host's receipt (PR #775): an `outbox` row of the shift with the code, not quarantined
+     * (queued, or not frozen yet; an acknowledged scan leaves the outbox), and not lost. The host cannot credit them yet, so they are not among
+     * the codes it acknowledged: [countForShift] less [lostForShift] less these is what the host should credit to this device.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") e WHERE e.shiftId = :shiftId " +
+            "AND e.codeHash NOT IN (SELECT codeHash FROM conflicts_mirror) " +
+            "AND EXISTS (SELECT 1 FROM outbox o WHERE o.shiftId = e.shiftId AND o.codeHash = e.codeHash " +
+            "AND NOT EXISTS (SELECT 1 FROM host_outbox h WHERE h.sourceKind = 'scan' AND h.sourceKey = CAST(o.id AS TEXT) AND h.state = 'quarantined'))",
+    )
+    suspend fun pendingForShift(shiftId: String): Int
 
     /** The undo target: the most recent accepted code of this box. */
     @Query("SELECT * FROM codes_mirror WHERE boxId = :boxId ORDER BY scannedAt DESC, codeHash DESC LIMIT 1")

@@ -98,9 +98,14 @@ Android tests must also verify its interpretation.
   shift is active. An answer older than the stored one (`as_of` guard) is refused unless the stored value is more
   than 60 s old; a beat that does not reach the host marks the value stale and the strip says «данные на ЧЧ:ММ».
 - `SharedShiftRules` is the only place of the shift-wide total and of the reason rule, pinned by
-  `proto/fixtures/shift-close-reason-shared.json`; never re-derive it. The handheld has no displaced kind, so
-  `lost` is the shift's own conflicted/rejected codes (`CodeDao.lostForShift`); it is required in
-  `SharedShiftRules` and wired in the strip, the hub card and `ShiftCloser`. The hub card captions a shared
+  `proto/fixtures/shift-close-reason-shared.json`; never re-derive it. This device's own part is its count less
+  `lost` (the shift's own conflicted/rejected codes, `CodeDao.lostForShift`; required in `SharedShiftRules`) and
+  less `ShiftParticipation.displaced`: the handheld reads no displacement notices, so when an answer with this
+  device's `byDevice` share is kept, the codes the host acknowledged as accepted (count − lost − scans still
+  waiting for a receipt, `CodeDao.pendingForShift`) beyond that share are the ones another device's earlier scan
+  displaced on the host (PR #775). The heartbeat reads the list and drains the queue one after the other, so no
+  receipt lands between the two counts; a screen's list read during a drain may over-correct until the next beat.
+  All of it reaches the strip, the hub card and `ShiftCloser` through `SharedShiftRules`. The hub card captions a shared
   shift's figure «Всего в смене» and adds «данные на ЧЧ:ММ» while the figures are stale; a single-device shift
   keeps «На этом ТСД». The 90 s freshness applies only to
   the close reason, not to the strip.
@@ -127,4 +132,6 @@ Android tests must also verify its interpretation.
   totals and nothing stored creates a row with null figures; the hub card shows the corrected total only for shared
   shifts; a shift the office closes while the device works it is learnt only on re-entry (`409` → «Смена уже
   закрыта»): the beat drops its figures (the host lists open shifts only) but never touches the local row, and the
-  `Closed` result leaves the row and `activeShiftId` as they are.
+  `Closed` result leaves the row and `activeShiftId` as they are. A displacement is seen only with the next kept
+  answer that carries this device's share (offline, the last one stands); the part close's `actualQty` stays the
+  device's own count, uncorrected for lost or displaced codes.

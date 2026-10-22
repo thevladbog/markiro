@@ -40,6 +40,12 @@ data class ShiftParticipation(
     val stale: Boolean = false,
     /** This device's own leave token (`participants[me].joinedRev`), echoed by the leave; `null` while no answer named one (an older host). */
     val joinedRev: Long? = null,
+    /**
+     * This device's codes of the shift that the host acknowledged as accepted but no longer credits to it at [asOf] (PR #775): another device's
+     * earlier offline scan of the same code displaced them on the host. Counted when the answer is kept, as this device's acknowledged codes
+     * (its own count, less the `lost` ones and the scans still waiting for a receipt) beyond [myAccepted]; never negative, 0 without a share.
+     */
+    val displaced: Int = 0,
 )
 
 /** One leave still owed to the host: [marker] is what the pause wrote, [joinedRev] this device's token at the same read, [stillOut] whether the row says it is out. */
@@ -92,8 +98,13 @@ class ShiftParticipationStore(
      * never) takes its participants and state over the stored figures, which stay with their `fetchedAt` and `stale`; an answer with `totals` but
      * without `byDevice` keeps the stored share of this device. A closed shift with nothing stored gives nothing (no figures to show, never zeros).
      */
-    private fun merged(shift: DeviceShiftDto, row: ShiftParticipation, stored: ShiftParticipation?): ShiftParticipation? {
-        val kept = row.copy(joinedRev = row.joinedRev ?: stored?.joinedRev)
+    private suspend fun merged(shift: DeviceShiftDto, row: ShiftParticipation, stored: ShiftParticipation?): ShiftParticipation? {
+        // A share of this device read now: what it no longer credits is counted against the codes acknowledged now (PR #775); else the stored count.
+        val freshShare = shift.totals != null && shift.byDevice != null
+        val kept = row.copy(
+            joinedRev = row.joinedRev ?: stored?.joinedRev,
+            displaced = if (freshShare) displaced(shift.id, row.myAccepted) else stored?.displaced ?: 0,
+        )
         if (stored == null) return if (shift.totals == null && shift.status == "closed") null else kept
         val share = if (shift.byDevice == null) stored.myAccepted else kept.myAccepted
         if (shift.totals != null) return kept.copy(myAccepted = share)
@@ -106,6 +117,20 @@ class ShiftParticipationStore(
             fetchedAt = stored.fetchedAt,
             stale = stored.stale,
         )
+    }
+
+    /**
+     * This device's codes of [shiftId] the host acknowledged as accepted (its count, less the lost ones and the scans still waiting for a receipt)
+     * beyond what the host credits to it ([myAccepted]): displaced on the host by another device's earlier scan of the same code. Read in the commit
+     * that keeps the answer. The heartbeat reads the list and drains the queue one after the other, so no receipt lands between the host's count and
+     * this one; a list read by a screen while the queue drains may count a receipt the host's figures do not hold yet, which the next beat corrects.
+     * A host that credits more (a receipt lost on the way) displaces nothing; no share (an older host, a device the host does not list): nothing.
+     */
+    private suspend fun displaced(shiftId: String, myAccepted: Long?): Int {
+        val credited = myAccepted ?: return 0
+        val codes = db.codeDao()
+        val acknowledged = codes.countForShift(shiftId) - codes.lostForShift(shiftId) - codes.pendingForShift(shiftId)
+        return (acknowledged - credited).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
     }
 
     /**

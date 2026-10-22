@@ -299,6 +299,87 @@ class ShiftParticipationStoreTest {
         assertEquals(427L, p.myAccepted)
     }
 
+    private val at = "2026-10-08T09:40:00.000Z"
+
+    /** A code this device scanned in the fixture's shared shift; [pending]: its scan still waits for the host's receipt (an `outbox` row, frozen and queued). */
+    private suspend fun scanned(hash: String, pending: Boolean = false, quarantined: Boolean = false) {
+        db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity(hash, shiftId, "04600682000013", hash, at))
+        if (!pending && !quarantined) return
+        val id = db.outboxDao().insert(
+            app.markiro.handheld.core.storage.OutboxEntity(
+                shiftId = shiftId, raw = hash, verdict = "ok", scannedAt = at, operatorId = null, codeHash = hash, gtin14 = "04600682000013", serial = hash,
+            ),
+        )
+        db.hostOutboxDao().insert(
+            app.markiro.handheld.core.storage.HostOutboxEntity(
+                recordId = "rec-$hash", target = "facts", kind = "scan", sourceKind = "scan", sourceKey = id.toString(), body = "{}",
+                state = if (quarantined) "quarantined" else "queued", reason = if (quarantined) "validation_failed" else null, createdAt = at,
+            ),
+        )
+    }
+
+    private fun answer(accepted: Long, mine: Long, asOf: String = "2026-10-08T09:41:07Z"): DeviceShiftDto {
+        val active = shifts().first { it.status == "active" }
+        return active.copy(
+            totals = active.totals!!.copy(accepted = accepted, asOf = asOf),
+            byDevice = active.byDevice!!.map { if (it.deviceId == me) it.copy(accepted = mine) else it },
+        )
+    }
+
+    /**
+     * PR #775 (Codex P2): the host took this device's scan of X (acknowledged: the outbox row is gone), then an earlier offline scan of X from another
+     * device displaced it. The host's read credits this device with nothing: the acknowledged code it no longer credits is kept as `displaced`, so
+     * the shift-wide total counts X once.
+     */
+    @Test
+    fun anAcknowledgedCodeTheHostNoLongerCreditsIsKeptAsDisplaced() = runTest {
+        scanned("x")
+        store().save(listOf(answer(accepted = 1, mine = 0)))
+        val p = checkNotNull(store().get(shiftId))
+        assertEquals(1, p.displaced)
+        val local = db.codeDao().countForShift(shiftId)
+        assertEquals(1, app.markiro.handheld.feature.shift.SharedShiftRules.shiftTotal(p, local, db.codeDao().lostForShift(shiftId)))
+        // The host credits it again (or never displaced it): nothing displaced.
+        now += 15_000
+        store().save(listOf(answer(accepted = 1, mine = 1, asOf = "2026-10-08T09:41:22Z")))
+        assertEquals(0, store().get(shiftId)!!.displaced)
+    }
+
+    @Test
+    fun aScanStillWaitingForItsReceiptIsNotMistakenForADisplacedOne() = runTest {
+        // X was displaced; Y, scanned later, is not acknowledged yet, so the host cannot credit it; Z was refused (quarantined: `lost`).
+        scanned("x")
+        scanned("y", pending = true)
+        scanned("z", quarantined = true)
+        store().save(listOf(answer(accepted = 1, mine = 0)))
+        val p = checkNotNull(store().get(shiftId))
+        assertEquals(1, p.displaced)
+        val local = db.codeDao().countForShift(shiftId)
+        // X once (the other device's), Y once (this device's, pending), Z nobody's.
+        assertEquals(2, app.markiro.handheld.feature.shift.SharedShiftRules.shiftTotal(p, local, db.codeDao().lostForShift(shiftId)))
+    }
+
+    @Test
+    fun aReadWithoutPerDeviceRowsOrTotalsKeepsTheStoredDisplacedCount() = runTest {
+        scanned("x")
+        store().save(listOf(answer(accepted = 1, mine = 0)))
+        now += 20_000
+        val active = answer(accepted = 1, mine = 0)
+        // The host's share of this device did not change, so neither did what it no longer credits.
+        store().save(listOf(active.copy(byDevice = null, totals = active.totals!!.copy(asOf = "2026-10-08T09:42:00Z"))))
+        assertEquals(1, store().get(shiftId)!!.displaced)
+        store().save(listOf(active.copy(status = "closed", myState = "closed", totals = null, byDevice = null)))
+        assertEquals(1, store().get(shiftId)!!.displaced)
+    }
+
+    @Test
+    fun aHostThatCreditsMoreThanTheAcknowledgedCodesDisplacesNothing() = runTest {
+        // A receipt lost on the way: the host holds the scan, the device still waits for the receipt. Never a negative correction.
+        scanned("x", pending = true)
+        store().save(listOf(answer(accepted = 1, mine = 1)))
+        assertEquals(0, store().get(shiftId)!!.displaced)
+    }
+
     @Test
     fun aDatabaseReopenedFromItsFileStillOwesTheLeave() = runTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
