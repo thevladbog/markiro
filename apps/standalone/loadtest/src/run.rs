@@ -363,6 +363,13 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         .collect();
     let started = Instant::now();
     let (sampler_stop, sampler_watch) = watch::channel(false);
+    let wal_task = host.data_dir.clone().map(|dir| {
+        tokio::spawn(crate::wal_watch::run(
+            dir,
+            crate::wal_watch::EVERY,
+            sampler_watch.clone(),
+        ))
+    });
     let sampler = tokio::spawn(sampler::run(
         host.data_dir.clone(),
         host.pid,
@@ -518,6 +525,13 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
     }
     sampler_stop.send_replace(true);
     let series = sampler.await.unwrap_or_default();
+    let wal_points = match wal_task {
+        Some(task) => task.await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let wal_watch = (!wal_points.is_empty()).then(|| {
+        crate::wal_watch::summarize(&wal_points, crate::wal_watch::EVERY.as_millis() as u64)
+    });
     let graceful = match host.stop().await {
         Ok(graceful) => (kind == "spawn" && cfg!(unix)).then_some(graceful),
         Err(error) => {
@@ -596,6 +610,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         backups,
         restore,
         scenarios: scenario_results,
+        wal_watch,
         log: host.log_scan(),
         graceful_stop: graceful,
         verdict: Verdict::default(),

@@ -20,3 +20,4 @@ pub mod sampler;
 pub mod scenarios;
 pub mod site;
 pub mod wal;
+pub mod wal_watch;

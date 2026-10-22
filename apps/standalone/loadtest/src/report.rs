@@ -176,6 +176,9 @@ pub struct Report {
     /// has none.
     #[serde(default)]
     pub scenarios: Vec<ScenarioResult>,
+    /// The fine WAL watch of the main run (`wal_watch.rs`); a schema-1 report has none.
+    #[serde(default)]
+    pub wal_watch: Option<crate::wal_watch::WalWatch>,
     pub log: LogScan,
     /// `None` where a stop on request is not possible (Windows, in-process).
     pub graceful_stop: Option<bool>,
@@ -311,6 +314,18 @@ pub fn evaluate(report: &Report) -> Verdict {
                 "MiB/h",
             )),
             None => warnings.push("memory growth is unavailable: it was not judged".to_owned()),
+        }
+    }
+    if let Some(watch) = &report.wal_watch {
+        if watch.readable_points == 0 {
+            warnings.push(
+                "the WAL watch never read the wal-index: checkpoints were not observed".to_owned(),
+            );
+        } else if watch.restarts == 0 && watch.duration_s >= 60.0 {
+            warnings.push(format!(
+                "the WAL never started again in {:.0} s: the automatic checkpoint never caught up with the end of the log (see walWatch.findings)",
+                watch.duration_s
+            ));
         }
     }
     if r.fds_max.is_none() || r.fds_after_warmup.is_none() || r.fds_end.is_none() {
@@ -478,6 +493,13 @@ pub fn render_markdown(report: &Report) -> String {
         fmt_u(r.fds_max), fmt_u(r.fds_end), fmt(r.wal_file_max_mib),
         fmt_u(r.wal_backlog_max_frames), fmt_u(r.wal_backlog_p99_frames), fmt_u(r.wal_backlog_end_frames), fmt(r.db_end_mib)
     );
+    if let Some(watch) = &report.wal_watch {
+        let _ = writeln!(out, "## WAL watch\n");
+        for finding in &watch.findings {
+            let _ = writeln!(out, "- {finding}");
+        }
+        out.push('\n');
+    }
     let _ = writeln!(out, "## Under load and at the end\n");
     for backup in &report.backups {
         let _ = writeln!(
@@ -685,6 +707,7 @@ pub fn sample_passing() -> Report {
         backups: vec![],
         restore: None,
         scenarios: vec![],
+        wal_watch: None,
         log: LogScan {
             available: true,
             ..LogScan::default()
@@ -1311,5 +1334,40 @@ mod tests {
         assert!(!all.contains("SECRET-"), "{all}");
         assert_eq!(clean.scenarios[0].errors.values().sum::<u64>(), 2);
         assert_eq!(clean.scenarios[0].checks.len(), 1);
+    }
+
+    #[test]
+    fn the_wal_watch_warns_when_the_log_never_restarted_and_reads_back() {
+        let mut report = sample_passing();
+        report.wal_watch = Some(crate::wal_watch::WalWatch {
+            every_ms: 100,
+            points: 1800,
+            readable_points: 1800,
+            duration_s: 180.0,
+            restarts: 0,
+            ..Default::default()
+        });
+        let verdict = evaluate(&report);
+        assert!(verdict.pass, "a WAL finding is a warning, not a failure");
+        assert!(
+            verdict
+                .warnings
+                .iter()
+                .any(|w| w.contains("never started again")),
+            "{:?}",
+            verdict.warnings
+        );
+        report.wal_watch.as_mut().unwrap().restarts = 12;
+        assert!(!evaluate(&report)
+            .warnings
+            .iter()
+            .any(|w| w.contains("never started again")));
+        let text = serde_json::to_string(&report).unwrap();
+        let back: Report = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.wal_watch, report.wal_watch);
+        let mut value = serde_json::to_value(&report).unwrap();
+        value.as_object_mut().unwrap().remove("walWatch");
+        let old: Report = serde_json::from_value(value).unwrap();
+        assert!(old.wal_watch.is_none());
     }
 }
