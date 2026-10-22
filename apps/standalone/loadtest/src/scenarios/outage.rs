@@ -68,12 +68,25 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
         .map(|device| device.stats().flush_errors)
         .collect();
     let unanswered_before = facts_without_an_answer(&ctx.metrics);
+    let errors_before = ctx.metrics.errors();
     let began = Instant::now();
     let graceful = ctx.host.stop().await.map_err(|error| error.to_string())?;
     ctx.same("the_host_stopped_on_request", cfg!(unix), graceful);
     tokio::time::sleep(Duration::from_secs(OUTAGE_S)).await;
     let window_s = began.elapsed().as_secs_f64();
     let unanswered = facts_without_an_answer(&ctx.metrics) - unanswered_before;
+    let by_route: std::collections::BTreeMap<String, u64> = ctx
+        .metrics
+        .errors()
+        .into_iter()
+        .filter(|(class, _)| class.contains(":net_"))
+        .map(|(class, count)| {
+            let before = errors_before.get(&class).copied().unwrap_or(0);
+            (class, count - before)
+        })
+        .filter(|(_, count)| *count > 0)
+        .collect();
+    ctx.observe("unansweredByRoute", json!(by_route));
     let retried: Vec<u64> = work
         .devices
         .iter()
@@ -87,17 +100,36 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
         retried.iter().all(|count| *count > 0),
         format!("{retried:?} failed sends per device in {window_s:.1} s"),
     ));
-    // Without the back-off a device would retry every flush interval (300 ms): about 20 times in
-    // 6 s. With it: 0, 0.3, 0.8, 1.8, 3.8, 5.8 s — six. The bound leaves room for the stop itself.
-    let bound = work.devices.len() as u64 * (3 + window_s.ceil() as u64);
+    // Without the back-off a device would retry every flush interval; with it, the model's
+    // schedule (both derived from `flushMs`). Two more per device leave room for the request in
+    // flight at the stop and one at the window's edge. Only the facts route is backed off: the
+    // scanner's code checks, and the SSCC top-ups and the totals poll of the syncer's loop, have
+    // no back-off in the device model, so their requests without an answer are recorded
+    // (`unansweredByRoute`), never bounded.
+    let window_ms = (window_s * 1000.0) as u64;
+    let flush_ms = ctx.profile.flush_ms;
+    let devices = work.devices.len() as u64;
+    let per_device = backed_off_attempts(window_ms, flush_ms) + 2;
+    let bound = devices * per_device;
+    let unbacked = unbacked_attempts(window_ms, flush_ms);
+    ctx.observe("backOffBoundPerDevice", json!(per_device));
+    ctx.observe("unbackedAttemptsPerDevice", json!(unbacked));
     ctx.check(Check::new(
         "the_back_off_caps_the_retries",
         unanswered <= bound,
         format!(
-            "{unanswered} facts requests without an answer from {} devices in {window_s:.1} s, at most {bound}",
-            work.devices.len()
+            "{unanswered} facts requests without an answer from {devices} devices in \
+             {window_s:.1} s, at most {bound} ({per_device} each with the back-off, {unbacked} \
+             each without it at flushMs {flush_ms})"
         ),
     ));
+    if per_device * 2 > unbacked {
+        ctx.note.push_str(&format!(
+            "at flushMs {flush_ms} an outage of {window_s:.1} s cannot tell the back-off from none \
+             ({per_device} attempts allowed per device, {unbacked} without a back-off): the cap \
+             check is weak this run. "
+        ));
+    }
     ctx.check(Check::new(
         "no_device_gave_up",
         work.devices
@@ -142,9 +174,38 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
     Ok(())
 }
 
+/// The facts sends a device of the model makes in `window_ms` while every send fails: one at
+/// once, then each after its back-off (250 ms doubling to 2 s) and the flush interval.
+fn backed_off_attempts(window_ms: u64, flush_ms: u64) -> u64 {
+    let (mut at, mut backoff, mut attempts) = (0u64, 250u64, 0u64);
+    while at <= window_ms {
+        attempts += 1;
+        at += backoff + flush_ms;
+        backoff = (backoff * 2).min(2_000);
+    }
+    attempts
+}
+
+/// The facts sends a device would make in `window_ms` with no back-off: one per flush interval.
+fn unbacked_attempts(window_ms: u64, flush_ms: u64) -> u64 {
+    window_ms / flush_ms.max(1) + 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_back_off_bound_follows_the_flush_interval() {
+        // The device model (`device.rs` syncer): a failed flush sleeps 250 ms doubling to 2 s,
+        // then waits the flush interval again. 300 ms in 6.1 s: at 0, 0.55, 1.35, 2.65, 4.95 s.
+        assert_eq!(backed_off_attempts(6_100, 300), 5);
+        assert_eq!(unbacked_attempts(6_100, 300), 21);
+        // A longer interval: fewer attempts either way.
+        assert_eq!(backed_off_attempts(6_100, 1_000), 4);
+        assert_eq!(unbacked_attempts(6_100, 1_000), 7);
+        assert_eq!(backed_off_attempts(0, 300), 1);
+    }
 
     #[tokio::test]
     async fn the_outage_scenario_is_not_judged_in_this_process() {
