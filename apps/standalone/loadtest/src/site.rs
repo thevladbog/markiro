@@ -143,22 +143,29 @@ async fn device_call(
     }
 }
 
-/// A password only this run knows: the site is a throwaway, but a spawned host listens on the
-/// network for the run's length. It comes from the operating system's random source (through
-/// the TLS provider the harness already links), not from `profile.seed`, which the report writes
-/// and which has a default: everything else of a run stays repeatable from its seed.
-fn throwaway_password() -> Res<String> {
+/// Sixteen bytes of the operating system's random source (through the TLS provider the harness
+/// already links), not of `profile.seed`, which the report writes and which has a default:
+/// everything else of a run stays repeatable from its seed.
+fn os_random_bytes() -> Res<[u8; 16]> {
     let mut bytes = [0u8; 16];
     rustls::crypto::aws_lc_rs::default_provider()
         .secure_random
         .fill(&mut bytes)
         .map_err(|_| "the operating system's random source failed".to_owned())?;
+    Ok(bytes)
+}
+
+/// A password only this run knows, of `os_random_bytes`: the site is a throwaway, but a spawned
+/// host listens on the network for the run's length. Infallible on purpose: the fallible draw
+/// happens before it, so the password itself never travels inside a `Result` that a `?` could
+/// carry out of `provision_site`.
+fn throwaway_password(random: [u8; 16]) -> Secret {
     let hex = |half: &[u8]| {
         half.iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     };
-    Ok(format!("Load-{}-{}", hex(&bytes[..8]), hex(&bytes[8..])))
+    Secret::new(format!("Load-{}-{}", hex(&random[..8]), hex(&random[8..])))
 }
 
 /// A site ready for `profile`, with no shift: see the module's text.
@@ -196,10 +203,10 @@ pub async fn provision_site(
         }
         None => {
             let paired = pair_local(&api, "Нагрузка станция 1").await?;
-            let password = throwaway_password()?;
-            redactions.push(Secret::new(password.clone()));
+            let password = throwaway_password(os_random_bytes()?);
+            redactions.push(password.clone());
             let body = json!({
-                "admin": { "login": "admin", "name": "Нагрузка", "password": password },
+                "admin": { "login": "admin", "name": "Нагрузка", "password": password.expose() },
                 "org": {
                     "name": "ООО «Нагрузка»", "inn": "7707083893", "gln": "4600682000010",
                     "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow"
@@ -578,7 +585,12 @@ mod tests {
                 .expect("the password is among the secrets")
                 .expose()
                 .to_owned();
-            assert_eq!(password.len(), "Load-".len() + 32 + 1, "{password}");
+            // The messages name no password, nor anything counted from one: a failing
+            // assertion's text is a log of its own.
+            assert!(
+                password.len() == "Load-".len() + 32 + 1,
+                "the password is not Load- and two halves of 16 hex digits"
+            );
             let mut report = crate::report::sample_passing();
             report
                 .checks
@@ -587,7 +599,24 @@ mod tests {
             assert!(!serde_json::to_string(&clean).unwrap().contains(&password));
             passwords.push(password);
         }
-        assert_ne!(passwords[0], passwords[1], "the password followed the seed");
+        assert!(
+            passwords[0] != passwords[1],
+            "the password followed the seed"
+        );
+    }
+
+    /// The password is the random bytes in hex, in two halves; the draw is made apart from it.
+    #[test]
+    fn a_throwaway_password_spells_its_random_bytes() {
+        let mut random = [0u8; 16];
+        random[0] = 0xab;
+        random[15] = 0x01;
+        let made = throwaway_password(random);
+        assert!(
+            made.expose() == "Load-ab00000000000000-0000000000000001",
+            "the password does not spell its bytes"
+        );
+        assert!(os_random_bytes().is_ok());
     }
 
     /// A device's key and an attached host's credentials never reach a formatted text: a
