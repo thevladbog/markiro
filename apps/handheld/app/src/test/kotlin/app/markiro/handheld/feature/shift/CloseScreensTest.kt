@@ -100,4 +100,61 @@ class CloseScreensTest {
         // The close is offered, not withheld.
         compose.onNodeWithText("Закрыть").assertIsDisplayed()
     }
+
+    private val sharedPreview = { others: Int? ->
+        ShiftCloser.Preview(120, 1, 0, 1200, reasonRequired = false, alreadyClosed = false, shared = true, othersOpen = others)
+    }
+
+    @Test
+    fun aSharedCloseNamesThePartAndHowManyOthersAreStillOpen() {
+        compose.setContent { MarkiroTheme { CloseScreen(CloseStep.Confirm(sharedPreview(2)), CloseCallbacks()) } }
+        compose.onNodeWithText("Закрыть свою часть?").assertIsDisplayed()
+        compose.onNodeWithText("Смена закроется, когда закроют остальные: 2", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun theLastCloserIsToldTheShiftClosesWithIt() {
+        compose.setContent { MarkiroTheme { CloseScreen(CloseStep.Confirm(sharedPreview(0)), CloseCallbacks()) } }
+        compose.onNodeWithText("Вы закрываете последним: смена закроется", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aDeviceThatCannotKnowSaysItClosesItsPartAndTheShiftClosesWhenTheOthersClose() {
+        compose.setContent { MarkiroTheme { CloseScreen(CloseStep.Confirm(sharedPreview(null)), CloseCallbacks()) } }
+        compose.onNodeWithText("Смена закроется, когда закроют остальные участники", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun theReasonScreenComparesThePlanWithTheShiftWideTotal() {
+        compose.setContent {
+            MarkiroTheme {
+                CloseScreen(
+                    CloseStep.Reason(ShiftCloser.Preview(120, 1, 0, 1200, reasonRequired = true, alreadyClosed = false, shared = true, othersOpen = 0, reasonBasis = 547), null),
+                    CloseCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("План 1200, принято 547.").assertIsDisplayed()
+    }
+
+    @Test
+    fun theSummaryOfAPartCloseAndOfAMissingReasonSaySoInsteadOfShiftClosed() {
+        compose.setContent { MarkiroTheme { CloseScreen(CloseStep.Summary(120, 1, 0, 0, CloseOutcome.PART_CLOSED, part = true), CloseCallbacks()) } }
+        compose.onNodeWithText("Ваша часть закрыта").assertIsDisplayed()
+        compose.onNodeWithText("Смена закроется, когда закроют остальные", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aShiftClosedWithoutItsReasonSaysTheOfficeEntersIt() {
+        compose.setContent { MarkiroTheme { CloseScreen(CloseStep.Summary(120, 1, 0, 0, CloseOutcome.REASON_MISSING, part = true), CloseCallbacks()) } }
+        compose.onNodeWithText("Причину недовыполнения плана внесёт офис", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aPartCloseStillQueuedDoesNotClaimTheShiftIsClosed() {
+        compose.setContent { MarkiroTheme { CloseScreen(CloseStep.Summary(120, 1, 0, 0, CloseOutcome.PENDING, part = true), CloseCallbacks()) } }
+        compose.onNodeWithText("Смена закрыта").assertDoesNotExist()
+        compose.onNodeWithText("Ваша часть закрыта").assertIsDisplayed()
+        compose.onNodeWithText("Закрытие отправится, когда появится сеть").assertIsDisplayed()
+    }
 }

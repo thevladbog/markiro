@@ -41,6 +41,7 @@ import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
+import { CloseReasonDialog } from "./CloseReasonDialog.js";
 import {
   endsWithTail,
   isLateBox,
@@ -58,6 +59,10 @@ import { ShiftEditBody, type ShiftEditStatus } from "./ShiftEditor.js";
 import { ShiftExports } from "./ShiftExports.js";
 import { ShiftScans } from "./ShiftScans.js";
 import { PalletCountTag } from "./PalletCountTag.js";
+import { ShiftMarks } from "./ShiftMarks.js";
+import { OVERVIEW_POLL_MS } from "../overview/use-overview-data.js";
+import { isSharedShift } from "./participation.js";
+import { ShiftStations } from "./ShiftStations.js";
 
 /**
  * The export dialog comes with the domain's renderers and the check of every
@@ -85,11 +90,12 @@ const PACK_PHASE = {
 /** Counts with the thousands apart by a no-break space: «1 200». */
 const UNITS = new Intl.NumberFormat("ru");
 
-type CardDialog = "export" | "close";
+type CardDialog = "export" | "close" | "reason";
 
 /** The sections of the drawer, in the order of its tabs. */
 export const DRAWER_TABS = [
   "summary",
+  "stations",
   "boxes",
   "pallets",
   "scans",
@@ -109,6 +115,8 @@ export function drawerTabs(shift: OfficeShift): DrawerTab[] {
   if (shift.status === "planned") return ["summary"];
   const validation = shift.mode === "validation";
   return DRAWER_TABS.filter((tab) => {
+    // The devices of a shared shift (plan 2b); a host before protocol 7 names none.
+    if (tab === "stations") return (shift.participants?.length ?? 0) > 0;
     if (tab === "boxes") return !validation;
     if (tab === "pallets") return shift.palletsEnabled;
     // Box and pallet exceptions only: a validation shift can have none.
@@ -157,7 +165,11 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
   });
   const [asking, setAsking] = useState<"close" | "cancel" | null>(null);
   const formId = useId();
-  const shift = useOfficeQuery(officeKeys.shift(id), (api, token) => api.getShift(token, id));
+  // A shift at work is read again as the overview reads its list (its parts and totals move); a
+  // planned or closed one cannot change under the card but by this office.
+  const shift = useOfficeQuery(officeKeys.shift(id), (api, token) => api.getShift(token, id), {
+    refetchInterval: (data) => (data?.status === "active" ? OVERVIEW_POLL_MS : false),
+  });
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
   const counterparties = useOfficeQuery(officeKeys.counterparties, (api, token) =>
@@ -367,7 +379,12 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         )}
         {canPlan && current.status === "active" && (
           <Button variant="secondary" onClick={() => setDialog("close")}>
-            {t("office.shifts.close")}
+            {t(isSharedShift(current) ? "office.shifts.closeAll" : "office.shifts.close")}
+          </Button>
+        )}
+        {canPlan && current.status === "closed" && current.closeReasonMissing === true && (
+          <Button variant="secondary" onClick={() => setDialog("reason")}>
+            {t("office.shifts.supplyReason")}
           </Button>
         )}
         {current.status !== "closed" && (
@@ -411,6 +428,9 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
             templates={templates.data}
             sheets={palletSheets.data}
           />
+        )}
+        {active === "stations" && (
+          <ShiftStations key={`stations-${current.id}`} shift={current} at={at} />
         )}
         {active === "boxes" && (
           <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
@@ -465,6 +485,22 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
           onClosed={(closed) => {
             setDialog(null);
             setNotice(t("office.shifts.closed", { number: closed.number }));
+            readAgain();
+          }}
+          onReload={() => {
+            setDialog(null);
+            readAgain();
+          }}
+          onOutdated={readAgain}
+        />
+      )}
+      {canPlan && dialog === "reason" && (
+        <CloseReasonDialog
+          shift={current}
+          onClose={() => setDialog(null)}
+          onSaved={(saved) => {
+            setDialog(null);
+            setNotice(t("office.shifts.reasonSaved", { number: saved.number }));
             readAgain();
           }}
           onReload={() => {
@@ -705,6 +741,7 @@ function ShiftStatusLine({ shift, demo }: { shift: OfficeShift; demo: boolean })
           })}
         </span>
       )}
+      <ShiftMarks shift={shift} />
     </div>
   );
 }

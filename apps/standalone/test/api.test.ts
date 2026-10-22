@@ -1197,6 +1197,44 @@ describe("HostApi device shifts", () => {
     expect(stubbed.getDeviceShifts).toHaveBeenCalledTimes(1);
   });
 
+  it("pauses this station's part with its leave token, or no body without one, and reads the shift back (plan 2b)", async () => {
+    const shared = (
+      fixture("device-shifts-participants.json") as { shifts: Record<string, unknown>[] }
+    ).shifts[0];
+    const left = { ...shared, myState: "left" };
+    const leaving = recording(left);
+    // The token is this station's own `participants[].joinedRev` (`shift-leave.json`).
+    await expect(
+      leaving.api.leaveShift(SHIFT_ID, fixture("shift-leave.json") as { joinedRev: number }),
+    ).resolves.toMatchObject({ myState: "left", maxStations: 2 });
+    // Without a token (an older host named none) the leave goes with no body, as before.
+    await leaving.api.leaveShift(SHIFT_ID, null);
+    expect(leaving.sent).toEqual([
+      {
+        method: "POST",
+        path: `/v1/device/shifts/${SHIFT_ID}/leave`,
+        body: { joinedRev: 12 },
+        officeToken: undefined,
+      },
+      {
+        method: "POST",
+        path: `/v1/device/shifts/${SHIFT_ID}/leave`,
+        body: undefined,
+        officeToken: undefined,
+      },
+    ]);
+    const shell = overShell(200, left);
+    await shell.api.leaveShift(SHIFT_ID, { joinedRev: 12 });
+    expect(shell.call).toHaveBeenCalledWith("host_request", {
+      method: "POST",
+      path: `/v1/device/shifts/${SHIFT_ID}/leave`,
+      body: { joinedRev: 12 },
+      officeToken: null,
+    });
+    // An answer that is no shift is refused, as every device answer.
+    await expect(recording({ shifts: [] }).api.leaveShift(SHIFT_ID, null)).rejects.toThrow();
+  });
+
   it("reads a host answer that fails the schema as an invalid response, not as a shift", async () => {
     const { api } = overShell(200, { shifts: [{ id: 1 }] });
     await expect(api.getDeviceShifts()).rejects.toMatchObject({

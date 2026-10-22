@@ -2,7 +2,7 @@ import { hasValidCheckDigit, isValidGtin, normalizeToGtin14 } from "@markiro/dom
 import { z } from "zod";
 
 import { hasCyrillic } from "../host/pairing-code.js";
-import type { OrgProfileInput } from "../host/protocol.js";
+import { MAX_STATIONS, type OrgProfileInput } from "../host/protocol.js";
 import { isCivilDate } from "./civil-date.js";
 
 // Field rules shared by the first-run wizard and the office pages. They
@@ -343,6 +343,9 @@ export const shiftPalletBoxCapacityRule = requiredCountRule(
   MAX_PALLET_BOX_CAPACITY,
   "rules.shiftPalletBoxCapacity",
 );
+
+/** A line's limit of devices in one shift (plan 2b): 1 to `MAX_STATIONS`, always sent. */
+export const maxStationsRule = requiredCountRule(MAX_STATIONS, "rules.maxStations");
 
 /** A production date: a civil date the host takes (`validate::civil_date`). */
 export const productionDateRule = z.string().refine(isCivilDate, "rules.productionDate");

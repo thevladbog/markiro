@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.network.host.FactReceiptDto
+import app.markiro.handheld.core.network.host.flag
 import app.markiro.handheld.core.network.host.text
 import app.markiro.handheld.core.storage.ConflictEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -33,7 +34,10 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
             val receipt = byId[row.recordId] ?: continue // no receipt: stays queued, the next pass repeats it
             db.recovery.commit {
                 when (receipt.outcome) {
-                    "accepted" -> acknowledge(row)
+                    "accepted" -> {
+                        acknowledge(row)
+                        noteCloseReceipt(row, receipt)
+                    }
                     "conflict" -> if (row.sourceKind == HostPalletEvents.ADDED) {
                         // A box the host already holds on another pallet: the membership is refused, the queue goes on.
                         refuseBox(row, "box_on_pallet", receipt)
@@ -66,6 +70,21 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
                 db.metaDao().remove(HostPalletEvents.openedKey(row.sourceKey))
             }
         }
+    }
+
+    /**
+     * What the host said of a close beyond «accepted» (plan 2b): the part closed while the shift stays open for the others, or the shift closed
+     * without the reason its plan needed. Written with the acknowledgement, in the same commit; the close summary reads it once the queue is drained.
+     */
+    private suspend fun noteCloseReceipt(row: HostOutboxEntity, receipt: FactReceiptDto) {
+        if (row.sourceKind != "shift_close") return
+        val note = when {
+            receipt.details.flag("partClosed") -> ShiftParticipationStore.NOTE_PART_CLOSED
+            receipt.details.flag("reasonMissing") -> ShiftParticipationStore.NOTE_REASON_MISSING
+            else -> return
+        }
+        val shiftId = db.shiftCloseDao().forEvent(row.sourceKey)?.shiftId ?: return
+        db.metaDao().put(MetaEntity(ShiftParticipationStore.closeNoteKey(shiftId), note))
     }
 
     private suspend fun reject(row: HostOutboxEntity, receipt: FactReceiptDto) {

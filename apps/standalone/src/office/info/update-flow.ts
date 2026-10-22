@@ -4,6 +4,7 @@ import { HostError } from "../../host/client.js";
 import type { InstallRole } from "../../host/device.js";
 import type { DeviceRecord, OfficeShift } from "../../host/protocol.js";
 import { updateStarted } from "../../host/requests.js";
+import { deviceWorksShift } from "../shifts/participation.js";
 import type { UpdateShell, VerifiedReport } from "./update-shell.js";
 
 /** How long the host may take for the copy made before its own PC is updated (spec §10.4 step 3). */
@@ -62,6 +63,7 @@ export function installWarnings(input: {
   shifts: readonly OfficeShift[];
   thisDeviceId: string | null;
 }): InstallWarnings {
+  const own = input.thisDeviceId;
   const hostRole = input.role === "host";
   const minProtocol = input.report.manifest.minProtocol;
   return {
@@ -78,11 +80,9 @@ export function installWarnings(input: {
           .map((device) => device.name)
       : [],
     openShift:
-      input.thisDeviceId === null
+      own === null
         ? null
-        : (input.shifts.find(
-            (shift) => shift.status === "active" && shift.ownerDeviceId === input.thisDeviceId,
-          )?.number ?? null),
+        : (input.shifts.find((shift) => deviceWorksShift(shift, own))?.number ?? null),
     reinstall: input.report.confirmations.includes("reinstall"),
     hostSilent: input.report.confirmations.includes("host_unreachable"),
   };

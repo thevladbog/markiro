@@ -186,9 +186,12 @@ export function createOfficeQueryClient(): QueryClient {
   });
 }
 
-export interface OfficeQueryOptions {
-  /** Read again every this many milliseconds while mounted; never by default. */
-  refetchInterval?: number;
+export interface OfficeQueryOptions<T = unknown> {
+  /**
+   * Read again every this many milliseconds while mounted; never by default. A function chooses by the
+   * answer in hand (`undefined` before the first): a number to poll, `false` to stop.
+   */
+  refetchInterval?: number | ((data: T | undefined) => number | false);
   /**
    * How long an answer stays fresh: 0 by default, so a page reads again
    * whenever it opens; `Infinity` for data that never changes in a session.
@@ -202,13 +205,15 @@ export interface OfficeQueryOptions {
 export function useOfficeQuery<T>(
   key: QueryKey,
   read: (api: HostApi, token: string) => Promise<T>,
-  options: OfficeQueryOptions = {},
+  options: OfficeQueryOptions<T> = {},
 ): UseQueryResult<T, Error> {
   const { api, call } = useOfficeSession();
+  const interval = options.refetchInterval;
   return useQuery({
     queryKey: key,
     queryFn: () => call((token) => read(api, token)),
-    refetchInterval: options.refetchInterval ?? false,
+    refetchInterval:
+      typeof interval === "function" ? (query) => interval(query.state.data) : (interval ?? false),
     staleTime: options.staleTime ?? 0,
     enabled: options.enabled ?? true,
   });

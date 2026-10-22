@@ -18,6 +18,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "release-platform-images.yml": ["workflow_dispatch"],
     "signer-download-repair.yml": ["workflow_dispatch"],
     "signer-stable-release.yml": ["workflow_dispatch"],
+    "standalone-load.yml": ["workflow_dispatch"],
     "station-beta-release.yml": ["workflow_dispatch"],
     "station-release-reseed.yml": ["workflow_dispatch"],
     "station-stable-release.yml": ["workflow_dispatch"],

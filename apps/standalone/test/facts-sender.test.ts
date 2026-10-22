@@ -467,7 +467,7 @@ describe("what a batch leaves alone", () => {
     const { db, executor } = openLocalDb();
     const shift = await enteredShift(executor);
     const context = scanContext(executor, shift, { newId: countingIds() });
-    const result = await closeShift(context, "production_order_changed");
+    const result = await closeShift(context, "production_order_changed", [], false);
     expect(result.kind).toBe("closed");
     db.prepare(
       "UPDATE outbox SET outcome = 'rejected', outcome_code = 'box_state', acked_at = ? " +
@@ -603,6 +603,8 @@ describe("what a batch weighs", () => {
       const result = await closeShift(
         scanContext(executor, work, { newId: () => crypto.randomUUID() }),
         "production_order_changed",
+        [],
+        false,
       );
       expect(result.kind).toBe("closed");
     }
@@ -698,6 +700,8 @@ describe("what a batch weighs", () => {
     await closeShift(
       scanContext(executor, work, { newId: () => crypto.randomUUID() }),
       "material_shortage",
+      [],
+      false,
     );
     const down = new HostError({ kind: "transport", code: "unreachable", message: "down" });
     await expect(

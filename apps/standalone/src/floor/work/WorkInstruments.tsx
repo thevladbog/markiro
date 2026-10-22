@@ -7,7 +7,7 @@ import type { LocalExecutor } from "../../local/executor.js";
 import { productMonogram } from "../shifts/product-accent.js";
 import { usePhotoBacking } from "../shifts/photo-backing.js";
 import { ProductPhotoImage, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
-import { formatQuantity } from "../shifts/shift-text.js";
+import { formatClock, formatQuantity } from "../shifts/shift-text.js";
 import { cellSerialPlan, serialForCell, type CellSerialPlan } from "./box-cells.js";
 import { ScanCode } from "./ScanCode.js";
 
@@ -42,13 +42,23 @@ export interface ShiftBandProps {
   /** The station's database and the product's id: its photo (beta 3.2). */
   local?: LocalExecutor;
   productId?: string;
+  /**
+   * A shift several devices work (plan 2b): this station's own count (`mine`), the whole shift's
+   * (`total`: the others' part by the host and `mine`), the host's time of its part (`asOf`), and
+   * whether the link is down, when that time is said («данные от ЧЧ:ММ»).
+   */
+  shared?: { mine: number; total: number; asOf: string; stale: boolean };
 }
 
 /**
  * What the shift makes and how much of it is made, on the kit's one gradient card: the product's
  * photo whole in a rounded frame, its name and chips (the shift's number, the GTIN, the mode),
  * and the single counter «Принято в смене» — the only place the accepted count stands — with the
- * small «Дубли» and «Ошибки» of a validation shift beside it.
+ * small «Дубли» and «Ошибки» of a validation shift beside it. A shift several devices work
+ * (plan 2b) shows the whole shift's count in the large counter («Всего в смене», the plan by it)
+ * and this station's own in a small one beside it («Моя станция»), the group named «Моя станция:
+ * N · Всего в смене: K из M»; the time of the host's figures is said under the total while the
+ * link is down.
  */
 export function ShiftBand({
   productName,
@@ -61,12 +71,29 @@ export function ShiftBand({
   refused,
   local,
   productId,
+  shared,
 }: ShiftBandProps) {
   const { t } = useTranslation();
   // The photo the station holds; without a database (a test of the band alone) the monogram.
   const photo = useStoredProductPhoto(local ?? NO_LOCAL, productId ?? "");
   const backing = usePhotoBacking(local === undefined ? null : photo);
-  const ratio = plannedQty === null || plannedQty <= 0 ? null : Math.min(1, accepted / plannedQty);
+  // A shared shift counts and plans by the whole shift (plan 2b); a solo one by its own codes.
+  const counted = shared === undefined ? accepted : shared.total;
+  const ratio = plannedQty === null || plannedQty <= 0 ? null : Math.min(1, counted / plannedQty);
+  const totalLabel = t(shared === undefined ? "floor.work.accepted" : "floor.work.shared.total");
+  const summary =
+    shared === undefined
+      ? null
+      : plannedQty === null
+        ? t("floor.work.shared.summaryNoPlan", {
+            mine: formatQuantity(shared.mine),
+            total: formatQuantity(shared.total),
+          })
+        : t("floor.work.shared.summary", {
+            mine: formatQuantity(shared.mine),
+            total: formatQuantity(shared.total),
+            planned: formatQuantity(plannedQty),
+          });
   return (
     <section
       className="work-shift-band"
@@ -95,32 +122,46 @@ export function ShiftBand({
           )}
         </div>
       </div>
-      <div className="work-shift-band__counters">
+      <div
+        className="work-shift-band__counters"
+        {...(summary === null ? {} : { role: "group", "aria-label": summary })}
+      >
         <div className="work-shift-band__total">
-          <p className="work-shift-band__label">{t("floor.work.accepted")}</p>
-          <p className="work-shift-band__count">{formatQuantity(accepted)}</p>
+          <p className="work-shift-band__label">{totalLabel}</p>
+          <p className="work-shift-band__count">{formatQuantity(counted)}</p>
           {plannedQty !== null && ratio !== null && (
             <>
               <p className="work-shift-band__planned">{`/ ${formatQuantity(plannedQty)}`}</p>
               <div
                 className="work-shift-band__bar"
                 role="progressbar"
-                aria-label={t("floor.work.accepted")}
+                aria-label={totalLabel}
                 aria-valuemin={0}
                 aria-valuemax={plannedQty}
-                aria-valuenow={Math.min(accepted, plannedQty)}
-                aria-valuetext={`${formatQuantity(accepted)} / ${formatQuantity(plannedQty)}`}
+                aria-valuenow={Math.min(counted, plannedQty)}
+                aria-valuetext={`${formatQuantity(counted)} / ${formatQuantity(plannedQty)}`}
               >
                 <span style={{ width: `${Math.round(ratio * 1000) / 10}%` }} />
               </div>
               <p className="work-shift-band__meta">
                 {t("floor.work.layout.planPercent", {
-                  percent: PERCENT.format(accepted / plannedQty),
+                  percent: PERCENT.format(counted / plannedQty),
                 })}
               </p>
             </>
           )}
+          {shared?.stale === true && (
+            <p className="work-shift-band__stale">
+              {t("floor.work.shared.asOf", { time: formatClock(shared.asOf) })}
+            </p>
+          )}
         </div>
+        {shared !== undefined && (
+          <div className="work-shift-band__small work-shift-band__small--mine">
+            <p className="work-shift-band__label">{t("floor.work.shared.mine")}</p>
+            <p className="work-shift-band__small-count">{formatQuantity(shared.mine)}</p>
+          </div>
+        )}
         {refused !== undefined && (
           <>
             <div className="work-shift-band__small">

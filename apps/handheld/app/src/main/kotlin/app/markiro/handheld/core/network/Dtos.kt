@@ -125,4 +125,4 @@ data class InventoryTaskDto(
 data class InventoryTaskListResponse(val items: List<InventoryTaskDto>)
 
 @Serializable
-data class ErrorBody(val code: String? = null)
+data class ErrorBody(val code: String? = null, val maxStations: Int? = null, val active: Int? = null)

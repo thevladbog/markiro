@@ -263,11 +263,15 @@ describe("the shift's close and its open pallet (plan ПЛ-Ц)", () => {
     const at = await palletStation({ capacity: 40 });
     await closeBoxes(at, "A", 2);
     at.db.prepare("UPDATE floor_print_jobs SET state = 'sent'").run();
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: { kind: "open_pallet", boxes: 2 },
     });
     at.db.prepare("UPDATE floor_boxes SET disassembled_at = closed_at").run();
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: null,
     });
   });
@@ -282,9 +286,12 @@ describe("the shift's close and its open pallet (plan ПЛ-Ц)", () => {
     const held = holdingWrites(at.local);
     held.holdNext();
     const context = palletContext({ ...at, local: held.executor });
-    const closing = closeShift(context, "production_defect", [
-      openPalletGuard(PAIRING, at.shift.copy.id),
-    ]);
+    const closing = closeShift(
+      context,
+      "production_defect",
+      [openPalletGuard(PAIRING, at.shift.copy.id)],
+      false,
+    );
     await held.reached();
     // …and the box joins the pallet before the close writes.
     at.db.prepare("UPDATE floor_boxes SET pallet_id = ?").run(String(pallet?.["id"]));
@@ -293,9 +300,12 @@ describe("the shift's close and its open pallet (plan ПЛ-Ц)", () => {
     expect(rows(at.db, "SELECT local_state FROM floor_shifts")).toEqual([{ local_state: null }]);
     at.db.prepare("UPDATE floor_boxes SET pallet_id = NULL").run();
     await expect(
-      closeShift(palletContext(at), "production_defect", [
-        openPalletGuard(PAIRING, at.shift.copy.id),
-      ]),
+      closeShift(
+        palletContext(at),
+        "production_defect",
+        [openPalletGuard(PAIRING, at.shift.copy.id)],
+        false,
+      ),
     ).resolves.toMatchObject({ kind: "closed" });
   });
 });
@@ -753,16 +763,22 @@ describe("the close of a shift with pallets, in the order its blockers come (pla
     const at = await palletStation({ capacity: 40 });
     await closeBoxes(at, "A", 1);
     // A label waits (the box's), the pallet holds a box: the label first.
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: { kind: "label" },
     });
     at.db.prepare("UPDATE floor_print_jobs SET state = 'sent'").run();
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: { kind: "open_pallet", boxes: 1 },
     });
     // An open box with codes, on top of both.
     await processScan(palletContext(at), km("B1"));
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: { kind: "open_box", items: 1 },
     });
   });
@@ -773,22 +789,28 @@ describe("the close of a shift with pallets, in the order its blockers come (pla
     await closeBoxOnPallet(other, ["C1"]);
     at.db.prepare("UPDATE floor_print_jobs SET state = 'sent'").run();
     // The other shift's open pallet does not keep this shift open.
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: null,
     });
     await closeBoxes(at, "A", 2);
     at.db.prepare("UPDATE floor_print_jobs SET state = 'sent'").run();
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: { kind: "open_pallet", boxes: 2 },
     });
     // Closed, the pallet holds its boxes and keeps nothing open.
     const result = await closeOpenPallet(palletContext(at), at.pallets);
     expect(result.kind).toBe("closed");
     at.db.prepare("UPDATE floor_print_jobs SET state = 'sent'").run();
-    await expect(readCloseSummary(at.local, PAIRING, at.shift.copy.id)).resolves.toMatchObject({
+    await expect(
+      readCloseSummary(at.local, PAIRING, at.shift.copy.id, false),
+    ).resolves.toMatchObject({
       blocker: null,
     });
-    await expect(readCloseSummary(at.local, PAIRING, OTHER_SHIFT)).resolves.toMatchObject({
+    await expect(readCloseSummary(at.local, PAIRING, OTHER_SHIFT, false)).resolves.toMatchObject({
       blocker: { kind: "open_pallet", boxes: 1 },
     });
   });

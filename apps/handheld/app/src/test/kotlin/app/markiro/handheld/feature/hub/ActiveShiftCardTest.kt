@@ -122,4 +122,27 @@ class ActiveShiftCardTest {
         assertTrue(result.getLineBottom(result.lineCount - 1) <= result.size.height)
         compose.onNodeWithText("Продолжить").assertIsDisplayed()
     }
+
+    /** Final review I3: a shared shift's card shows the shift-wide total, so it must not say «На этом ТСД». */
+    @Test
+    fun aSharedShiftsCardSaysItIsTheShiftTotalAndFromWhenWhileStale() {
+        val at = 1_760_000_000_000L
+        val stale = androidx.compose.runtime.mutableStateOf<Long?>(at)
+        compose.setContent {
+            MarkiroTheme { Box(Modifier.width(320.dp)) { ActiveShiftCard(HubActiveShift(shift, 547, shared = true, staleAtMillis = stale.value), onContinue = {}) } }
+        }
+        compose.onNodeWithText("Всего в смене").assertIsDisplayed()
+        compose.onNodeWithText("данные на ${app.markiro.handheld.core.util.TimeText.hhmm(at)}").assertIsDisplayed()
+        compose.onNodeWithText("На этом ТСД").assertDoesNotExist()
+        stale.value = null
+        compose.waitForIdle()
+        compose.onNodeWithText("Всего в смене").assertIsDisplayed()
+        compose.onNodeWithText("данные на", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun aFullLineIsSaidOnTheHubCard() {
+        show(HubActiveShift(shift, 547, shared = true, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2)))
+        compose.onNodeWithText("Линия занята: 2 из 2 — продолжите работу, место вернётся, когда освободится").assertIsDisplayed()
+    }
 }

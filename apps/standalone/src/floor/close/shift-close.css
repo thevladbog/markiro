@@ -204,6 +204,18 @@
   font: var(--floor-body-strong) !important;
 }
 
+/* Plan 2b: a part's six tiles (the whole shift's count joins the five) stay in one row on a tall window too. */
+.shift-close__facts:has(> :nth-child(7)) {
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+}
+
+/* Plan 2b: what the close of a part does to the shift, under the result. */
+.shift-close__part {
+  margin: 0;
+  color: var(--fg);
+  font: var(--floor-body);
+}
+
 /*
  * A window up to 860 px high (the terminal's ~640-720 CSS px, and the 800 px panel): the card gives its air and its tiles
  * their height, the six reasons stand three to a row (two rows of 64 px, a long name on two lines),
@@ -262,6 +274,16 @@
     font: 600 20px/22px var(--font-mono);
   }
 
+  /* Plan 2b: a part has one tile more (the whole shift's count): the labels stay on one line. */
+  .shift-close__facts:has(> :nth-child(7)) > div {
+    padding: 0 var(--sp-2);
+  }
+
+  .shift-close__facts:has(> :nth-child(7)) > div:not(:first-child) dt {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
   .shift-close__facts > div:first-child dt,
   .shift-close__facts > div:first-child dd {
     font-size: 16px;
@@ -305,6 +327,16 @@
 
   .shift-close__note {
     font: 400 14px/18px var(--font-ui) !important;
+  }
+
+  .shift-close__part {
+    font: 400 15px/20px var(--font-ui);
+  }
+
+  /* Plan 2b: with the reasons to choose, the last closer's line gives its place up: the reasons'
+     title says what the close is waiting for. */
+  .shift-close__body:has(> .shift-close__reasons) > .shift-close__part {
+    display: none;
   }
 
   .shift-close .mk-alert {

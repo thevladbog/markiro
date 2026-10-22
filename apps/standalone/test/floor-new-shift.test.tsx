@@ -47,7 +47,7 @@ const [, PLANNED] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shif
   DeviceShift,
 ];
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
-const ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
+const ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"] };
 const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
 /**
  * The shift the host makes of `CREATED_BODY` (the form as it starts on `NOW`):

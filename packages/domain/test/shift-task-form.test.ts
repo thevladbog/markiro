@@ -239,6 +239,30 @@ describe("renderShiftTaskFormHtml", () => {
     expect(html).toContain("&lt;u&gt;Крат&lt;/u&gt;");
     expect(html).toContain("&lt;s&gt;Эмитент&lt;/s&gt;");
   });
+
+  it("prints the cloud's closing rule unless the form says each device closes its part", () => {
+    const cloud = renderShiftTaskFormHtml(fixture());
+    expect(cloud).toContain(
+      "<li>Смену закрывает станция, которая её открыла. Вторая станция — только через админку.</li>",
+    );
+    expect(renderShiftTaskFormHtml(fixture({ closingRule: "opener" }))).toBe(cloud);
+  });
+
+  it("prints «каждая станция закрывает свою часть» for the autonomous product, and no other line changes", () => {
+    const cloud = renderShiftTaskFormHtml(fixture());
+    const each = renderShiftTaskFormHtml(fixture({ closingRule: "each_part" }));
+    const old =
+      "<li>Смену закрывает станция, которая её открыла. Вторая станция — только через админку.</li>";
+    const next =
+      "<li>Каждая станция закрывает свою часть; смена закрывается, когда закрыли все, или из офиса.</li>";
+    expect(each).toContain(next);
+    expect(each).not.toContain("Вторая станция");
+    expect(each).toBe(cloud.replace(old, next));
+    // The pause rule that follows it is kept.
+    expect(each).toContain(
+      "Чтобы поставить работу на паузу, выйдите из смены: она останется активной.",
+    );
+  });
 });
 
 describe("the blank's header logo", () => {

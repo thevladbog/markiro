@@ -582,6 +582,30 @@
   font: var(--floor-body);
 }
 
+/* Plan 2b: who works a shared shift, on one line; the full list is the line's title. */
+.shift-hub .shift-card__participants {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * A tall window has the room: a long list of devices wraps to two lines instead of being cut at
+ * one, since a touch kiosk has no hover to show the title. A short window keeps one line.
+ */
+@media (min-height: 861px) {
+  .shift-hub .shift-card__participants {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+}
+
 /* The action: 84 px, bold words (a secondary one is not grey on white), at the card's bottom. */
 .shift-hub .shift-card__action.mk-btn {
   flex: none;
@@ -649,6 +673,19 @@
   .shift-hub .shift-card__photo-monogram {
     font-size: 72px;
   }
+
+  /*
+   * Plan 2b: a shared shift's card also carries who works it. A narrow card has no line for it
+   * under «Для:» (the office has it, and the 700 px window drops it anyway), so it gives way,
+   * and the product name keeps one line. The line is measured at every size of the matrix.
+   */
+  .shift-hub .shift-card__details:has(.shift-card__participants) .shift-card__counterparty {
+    display: none;
+  }
+
+  .shift-hub .shift-card__details:has(.shift-card__participants) .shift-card__product {
+    -webkit-line-clamp: 1;
+  }
 }
 
 /*
@@ -701,6 +738,16 @@
   }
 
   .shift-hub .shift-card__counterparty {
+    display: none;
+  }
+
+  .shift-hub .shift-card__participants {
+    font-size: 15px;
+    line-height: 18px;
+  }
+
+  /* A shared card in the shortest window: the count says the progress, the bar gives its row up. */
+  .shift-hub .shift-card__details:has(.shift-card__participants) .shift-card__progress-bar {
     display: none;
   }
 

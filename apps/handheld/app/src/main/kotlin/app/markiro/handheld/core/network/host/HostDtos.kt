@@ -51,6 +51,34 @@ data class ShiftSnapshotDto(
     val organization: JsonObject? = null,
 )
 
+/** A device's part in a shift (host protocol 7, `ShiftParticipant`): the strings are the host's, read as they come (`active|left|closed`). */
+@Serializable
+data class ShiftParticipantDto(
+    val deviceId: String,
+    val deviceKind: String,
+    val deviceName: String,
+    val state: String,
+    val firstEnteredAt: String? = null,
+    val joinedAt: String? = null,
+    /** The host revision of the write that took this slot: the token the leave echoes (`ShiftLeave`); absent from an older host. */
+    val joinedRev: Long? = null,
+    val leftAt: String? = null,
+    val closedAt: String? = null,
+    val closedBy: String? = null,
+    val closedActualQty: Int? = null,
+    val closedReasonCode: String? = null,
+    val lateDataAt: String? = null,
+    val lastSeenAt: String? = null,
+)
+
+/** One device's accepted units, closed boxes and closed pallets in a shift, counted by the host from the facts it holds. */
+@Serializable
+data class DeviceTotalsDto(val deviceId: String, val accepted: Long, val boxesClosed: Int = 0, val pallets: Int = 0)
+
+/** The shift-wide totals and the host's clock at the moment it counted them (`asOf`, a host instant: whole seconds, `Z`). */
+@Serializable
+data class DeviceShiftTotalsDto(val accepted: Long, val boxesClosed: Int = 0, val pallets: Int = 0, val asOf: String)
+
 @Serializable
 data class DeviceShiftDto(
     val id: String,
@@ -72,6 +100,16 @@ data class DeviceShiftDto(
     val openedAt: String? = null,
     val closedAt: String? = null,
     val snapshot: ShiftSnapshotDto? = null,
+    /**
+     * Protocol 7, open or closed shifts only; every one is absent from an older host and from a planned shift. In the list `totals` and `byDevice`
+     * come for an active shift only; the answer of an entry or a leave carries them for a closed shift too.
+     */
+    val maxStations: Int? = null,
+    val participants: List<ShiftParticipantDto>? = null,
+    /** This device's own state; absent when it never entered. */
+    val myState: String? = null,
+    val totals: DeviceShiftTotalsDto? = null,
+    val byDevice: List<DeviceTotalsDto>? = null,
 )
 
 @Serializable

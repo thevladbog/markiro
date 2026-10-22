@@ -573,6 +573,17 @@
   font: 600 13px/18px var(--font-ui);
 }
 
+/* «станций в смене: N из M» of a line of several devices: an icon and a sentence, wrapping by words. */
+.ov-line__stations {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-meta);
+  white-space: normal;
+}
+
 .ov-line__link {
   display: inline-flex;
   align-items: center;

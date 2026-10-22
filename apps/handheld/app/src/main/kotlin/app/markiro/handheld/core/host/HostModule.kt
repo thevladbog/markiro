@@ -103,6 +103,15 @@ object HostModule {
 
     @Provides
     @Singleton
+    fun shiftParticipationStore(db: HandheldDatabase): ShiftParticipationStore = ShiftParticipationStore(db)
+
+    @Provides
+    @Singleton
+    fun hostParticipation(db: HandheldDatabase, api: HostApi, revocation: HostRevocation, config: DeviceConfigDao, store: ShiftParticipationStore): HostParticipation =
+        HostParticipation(db, { api }, HostCalls(revocation::current) { revocation.reject(it) }, store, config)
+
+    @Provides
+    @Singleton
     fun hostHeartbeat(
         db: HandheldDatabase,
         monitor: HostLinkMonitor,
@@ -111,7 +120,11 @@ object HostModule {
         blocks: HostBlockSupplier,
         meta: MetaStore,
         reference: HostReferenceSync,
-    ): HostHeartbeat = HostHeartbeat(db, monitor, { api }, config, blocks, meta) { reference.refreshDevice() }
+        participation: HostParticipation,
+    ): HostHeartbeat = HostHeartbeat(
+        db, monitor, { api }, config, blocks, meta,
+        participation = participation::beat, participationStale = participation::markStale,
+    ) { reference.refreshDevice() }
 
     @Provides
     @Singleton
@@ -129,7 +142,8 @@ object HostModule {
         operators: OperatorDao,
         orgPrint: HostOrgPrint,
         registry: HostBoxRegistry,
-    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls(revocation::current) { revocation.reject(it) }, reference, operators, orgPrint, registry)
+        store: ShiftParticipationStore,
+    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls(revocation::current) { revocation.reject(it) }, reference, operators, orgPrint, registry, store)
 
     @Provides
     @Singleton

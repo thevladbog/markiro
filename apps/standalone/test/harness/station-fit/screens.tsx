@@ -11,7 +11,7 @@ import { ThemeProvider } from "@markiro/ui";
 import { FloorStatusBar } from "../../../src/floor/FloorStatusBar.js";
 import { Reconfirm } from "../../../src/floor/Reconfirm.js";
 import { ShiftClosePanel, ShiftClosedPanel } from "../../../src/floor/close/ShiftClosePanel.js";
-import type { CloseSummary } from "../../../src/floor/close/shift-close.js";
+import type { CloseSummary, PartState } from "../../../src/floor/close/shift-close.js";
 import { ExceptionFlow } from "../../../src/floor/exceptions/ExceptionFlow.js";
 import { FloorFooter } from "../../../src/floor/shifts/FloorScreen.js";
 import { UnitLabelHistory } from "../../../src/floor/unit-labels/UnitLabelHistory.js";
@@ -142,7 +142,47 @@ const SUMMARIES: Record<string, CloseSummary> = {
     reasonRequired: true,
     blocker: { kind: "open_pallet", boxes: 1 },
   },
+  // Plan 2b: a part of a shared shift — the others still open, the last one with its reason,
+  // offline, and the last one with an open pallet.
+  part: {
+    ...PLAIN,
+    actualQty: 280,
+    closedBoxes: 23,
+    part: { closesShift: false, total: 560, online: true },
+  },
+  "part-last": {
+    ...PLAIN,
+    actualQty: 280,
+    closedBoxes: 23,
+    reasonRequired: true,
+    part: { closesShift: true, total: 560, online: true },
+  },
+  "part-offline": {
+    ...PLAIN,
+    actualQty: 280,
+    closedBoxes: 23,
+    part: { closesShift: true, total: 560, online: false },
+  },
+  "part-pallet": {
+    ...PLAIN,
+    actualQty: 280,
+    closedBoxes: 23,
+    reasonRequired: true,
+    blocker: { kind: "open_pallet", boxes: 1 },
+    part: { closesShift: true, total: 560, online: true },
+  },
 };
+
+/** The closed part's states (plan 2b), by the closed view's variant. */
+const PART_STATES: readonly (PartState | "unknown")[] = [
+  "queued",
+  "waiting",
+  "shift_closed",
+  "reason_missing",
+  "refused",
+  "unknown",
+];
+const closedPart = PART_STATES.find((state) => state === variant) ?? null;
 
 const unitEntries = Array.from({ length: 6 }, (_, index) => ({
   id: `job-${index}`,
@@ -217,7 +257,10 @@ function Stage() {
           onClose={noop}
           onBack={noop}
           onLabel={noop}
-          palletCapacity={variant === "pallet" || variant === "reason" ? 2 : null}
+          palletCapacity={
+            variant === "pallet" || variant === "reason" || variant === "part-pallet" ? 2 : null
+          }
+          ownPart={variant.startsWith("part")}
           onClosePallet={noop}
         />
       )}
@@ -228,6 +271,7 @@ function Stage() {
           linkHeld={variant === "held"}
           leaving={false}
           onDone={noop}
+          part={closedPart}
         />
       )}
       {view === "history" && (

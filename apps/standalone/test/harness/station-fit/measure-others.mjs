@@ -61,12 +61,27 @@ const WORK_CASES = [
   "mode=pallets&capacity=6&items=4&big=1&long=1&photo=jpeg",
   "mode=check&rows=3&big=1",
   "mode=check&rows=0",
+  // Plan 2b: the strip of a shared shift — plain, with pallets big and stale with long names,
+  // a validation band with its three small counters, stale.
+  "mode=plain&capacity=12&items=5&shared=1",
+  "mode=pallets&capacity=6&items=4&big=1&long=1&photo=jpeg&shared=1&stale=1",
+  "mode=check&rows=3&big=1&shared=1&stale=1",
+  "mode=check&rows=0&shared=1",
 ];
 const HUB_CASES = [
   "view=hub&shifts=1&queue=2&photo=jpeg",
   "view=hub&shifts=3&offline=1&queue=3&rejected=1&photo=transparent",
   "view=hub&shifts=2&long=1&photo=png",
   "view=hub&shifts=0&offline=1",
+  // Plan 2b: a shift several devices work — join, a full line, this station among three with long
+  // names offline, a closed part; and a join without the link (the tallest notes: who, link).
+  "view=hub&shifts=2&multi=join&photo=png",
+  "view=hub&shifts=2&multi=join&offline=1&long=1",
+  "view=hub&shifts=1&multi=full&long=1&photo=jpeg",
+  // A line that looks full keeps its join (PR #775): offline, the tallest notes (who, link, full).
+  "view=hub&shifts=2&multi=full&long=1&offline=1",
+  "view=hub&shifts=2&multi=mine&long=1&offline=1&photo=transparent",
+  "view=hub&shifts=3&multi=closed",
   "view=work&queue=3&rejected=1&printer=error&scanner=off&long=1",
   "view=signin",
 ];
@@ -107,6 +122,14 @@ for (const [width, height] of VIEWPORTS) {
         const guard = await import("/test/harness/station-fit/measure-fit.ts");
         return guard.measureFit();
       });
+      // Plan 2b: a card's «who works the shift» line must keep a line of its own: the notes row
+      // may shrink (it is `min-height: 0`), and a squashed line is clipped, not reported, above.
+      const squashed = await page.evaluate(() =>
+        [...globalThis.document.querySelectorAll(".shift-card__participants")]
+          .filter((line) => line.getBoundingClientRect().height < 16)
+          .map((line) => `participants line squashed to ${line.getBoundingClientRect().height}px`),
+      );
+      result.problems.push(...squashed);
       if (process.env.SHOT)
         await page.screenshot({
           path: `${process.env.SHOT}/${width}x${height}-${theme}-${entry.name.replace(/[^a-z0-9]+/gi, "_")}.png`,

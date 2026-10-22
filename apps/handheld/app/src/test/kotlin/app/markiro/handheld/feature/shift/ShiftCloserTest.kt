@@ -1,6 +1,9 @@
 package app.markiro.handheld.feature.shift
 
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import app.markiro.handheld.core.storage.MetaEntity
+import app.markiro.handheld.core.host.ShiftParticipationStore
+import app.markiro.handheld.core.host.ShiftParticipation
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -191,5 +194,174 @@ class ShiftCloserTest {
         // The digest survives, so the queued event still describes what printed.
         assertEquals("b".repeat(64), job.bytesDigest)
         assertEquals(listOf("e1"), db.productLabelEventDao().unacked(10).map { it.eventId })
+    }
+
+    private val t0 = 1_757_500_000_000L
+
+    private suspend fun keep(p: ShiftParticipation) = db.recovery.commit {
+        db.metaDao().put(MetaEntity(ShiftParticipationStore.key("s1"), kotlinx.serialization.json.Json.encodeToString(ShiftParticipation.serializer(), p)))
+    }
+
+    private fun shared(
+        accepted: Long = 120,
+        mine: Long = 0,
+        ever: Int = 2,
+        othersOpen: Int = 0,
+        fetchedAt: Long = t0,
+        stale: Boolean = false,
+    ) = ShiftParticipation(
+        shiftId = "s1", maxStations = 2, myState = "active", participantsEver = ever, active = 1, othersOpen = othersOpen,
+        accepted = accepted, myAccepted = mine, asOf = "2026-09-10T10:00:00Z", fetchedAt = fetchedAt, stale = stale,
+    )
+
+    @Test
+    fun aSharedShiftsLastCloserIsAskedForAReasonByTheShiftWideTotal() = runTest {
+        // Plan 3; the others delivered 120 and this device has 2: the shift has 122, the plan is missed.
+        keep(shared())
+        val p = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertTrue(p.reasonRequired)
+        assertTrue(p.shared)
+        assertEquals(0, p.othersOpen)
+        assertEquals(122, p.reasonBasis)
+    }
+
+    @Test
+    fun aCodeLostToAnotherDeviceIsNotCountedTwiceInTheTotalAndTheReasonDecision() = runTest {
+        // Plan 121: the others delivered 120, this device holds h1 and h2, but the host gave h1 to another device (it is in the 120 already).
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 121))
+        keep(shared())
+        db.conflictDao().insertIgnore(listOf(app.markiro.handheld.core.storage.ConflictEntity("h1", null, "2026-09-10T09:00:00.000Z", "2026-09-10T10:00:00.000Z")))
+        val p = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertEquals("120 + (2 - 1 lost)", 121, p.reasonBasis)
+        assertFalse("121 meets the plan once h1 is not counted twice", p.reasonRequired)
+        // Without the conflict the same figures miss the plan.
+        db.conflictDao().clear()
+        val without = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertEquals(122, without.reasonBasis)
+        assertTrue(without.reasonRequired)
+    }
+
+    @Test
+    fun aCodeTheHostDisplacedAfterAcceptingItIsNotCountedTwiceInTheReasonDecision() = runTest {
+        // PR #775: plan 121; the host counts 121, 1 of them this device's (h2); h1 was accepted from this device, then displaced by another
+        // device's earlier scan, so it is inside the others' 120 already. The snapshot kept that as `displaced = 1`.
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 121))
+        keep(shared(accepted = 121, mine = 1).copy(displaced = 1))
+        val p = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertEquals("120 + (2 - 1 displaced)", 121, p.reasonBasis)
+        assertFalse("121 meets the plan once h1 is not counted twice", p.reasonRequired)
+        keep(shared(accepted = 121, mine = 1))
+        assertTrue(ShiftCloser(db) { t0 }.preview("s1")!!.reasonRequired)
+    }
+
+    @Test
+    fun aDeviceThatIsNotTheLastToCloseIsNotAskedAndSaysHowManyAreStillOpen() = runTest {
+        keep(shared(othersOpen = 2))
+        val p = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertFalse(p.reasonRequired)
+        assertEquals(2, p.othersOpen)
+    }
+
+    @Test
+    fun withoutFreshFiguresADeviceClosesItsPartWithoutAReasonAndDoesNotKnowWhoIsLast() = runTest {
+        keep(shared(stale = true))
+        val p = ShiftCloser(db) { t0 }.preview("s1")!!
+        assertFalse(p.reasonRequired)
+        assertTrue(p.shared)
+        assertEquals(null, p.othersOpen)
+        // The close itself does not refuse: the host marks the missing reason and the office supplies it.
+        val row = ShiftCloser(db) { t0 }.close("s1", "op-1", null)
+        assertEquals(null, row.reasonCode)
+        assertEquals("closed", db.shiftDao().get("s1")!!.status)
+    }
+
+    @Test
+    fun theCloseRefreshesTheFiguresBeforeItJudgesAndUsesTheAnswer() = runTest {
+        keep(shared(othersOpen = 1, fetchedAt = t0 - 10 * SharedShiftRules.FRESH_MS))
+        var refreshed = 0
+        val closer = ShiftCloser(
+            db,
+            refresh = {
+                refreshed++
+                // The host answered: the other device closed its part meanwhile.
+                keep(shared(othersOpen = 0))
+                true
+            },
+        ) { t0 }
+        val p = closer.preview("s1")!!
+        assertEquals(1, refreshed)
+        assertTrue(p.reasonRequired)
+        assertEquals(0, p.othersOpen)
+    }
+
+    /**
+     * CI run 39718319363: the bound on the refresh is a wall-clock bound. Under `runTest` a virtual-time timeout jumps to its deadline the moment
+     * the test thread waits for a real thread (Room's executors), so a refresh that merely takes real milliseconds was cut before its write and the
+     * preview judged with the old figures -- only on a runner slow enough to lose the race. A refresh that answers in 150 ms of real time is not late.
+     */
+    @Test
+    fun aRefreshThatTakesRealTimeButAnswersWithinTheBoundIsUsed() = runTest {
+        keep(shared(othersOpen = 1, fetchedAt = t0 - 10 * SharedShiftRules.FRESH_MS))
+        val closer = ShiftCloser(
+            db,
+            refresh = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(150) }
+                keep(shared(othersOpen = 0))
+                true
+            },
+        ) { t0 }
+        val p = closer.preview("s1")!!
+        assertTrue(p.reasonRequired)
+        assertEquals(0, p.othersOpen)
+    }
+
+    /** Final review M1: a Wi-Fi that answers nothing must not hold the close screen for the transport's whole timeout. */
+    @Test
+    fun aRefreshThatHangsIsGivenUpAfterAFewSecondsAndThePreviewUsesWhatIsKnown() = runTest {
+        keep(shared(othersOpen = 1))
+        var finished = false
+        val closer = ShiftCloser(
+            db,
+            refresh = {
+                kotlinx.coroutines.delay(30_000)
+                keep(shared(othersOpen = 0))
+                finished = true
+                true
+            },
+            refreshTimeoutMs = 300,
+        ) { t0 }
+        val began = System.nanoTime()
+        val p = closer.preview("s1")!!
+        val tookMs = (System.nanoTime() - began) / 1_000_000
+        assertTrue("given up after $tookMs ms of real time", tookMs < 10_000)
+        assertTrue("given up after ${testScheduler.currentTime} ms", testScheduler.currentTime <= 3_000)
+        assertFalse(finished)
+        assertEquals(1, p.othersOpen)
+    }
+
+    @Test
+    fun aRefreshThatFailsIsNotAFailureOfThePreview() = runTest {
+        val p = ShiftCloser(db, refresh = { throw java.io.IOException("no host") }) { t0 }.preview("s1")!!
+        assertTrue("one device, no figures: stage 2a's rule", p.reasonRequired)
+        assertFalse(p.shared)
+    }
+
+    @Test
+    fun aDeviceAloneInItsShiftStillCannotCloseWithoutTheReasonItsPlanNeeds() = runTest {
+        keep(shared(ever = 1, accepted = 2, mine = 2))
+        val result = runCatching { ShiftCloser(db) { t0 }.close("s1", null, null) }
+        assertTrue(result.exceptionOrNull() is IllegalArgumentException)
+    }
+
+    @Test
+    fun closingAPartKeepsEveryLocalScanUntilTheHostAnswers() = runTest {
+        keep(shared(othersOpen = 1))
+        ShiftCloser(db) { t0 }.close("s1", "op-1", null)
+        assertEquals(2, db.codeDao().countForShift("s1"))
+        assertEquals(1, db.scanEventDao().count("s1", "invalid"))
+        assertEquals("pending", db.shiftCloseDao().forShift("s1")!!.state)
+        // Idempotent: a second close returns the same fact.
+        val again = ShiftCloser(db) { t0 }.close("s1", "op-1", null)
+        assertEquals(db.shiftCloseDao().forShift("s1")!!.eventId, again.eventId)
     }
 }

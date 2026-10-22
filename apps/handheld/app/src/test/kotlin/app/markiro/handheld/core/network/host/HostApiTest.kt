@@ -1,6 +1,9 @@
 package app.markiro.handheld.core.network.host
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -94,12 +97,48 @@ class HostApiTest {
         }
     }
 
+    private fun fixture(name: String) = checkNotNull(javaClass.classLoader?.getResource(name)) { "$name is not in the test resources" }.readText()
+    private val shiftId = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b"
+
     @Test
-    fun anEntryNamesTheValidationCapabilityButNotTheDuplicate() = runTest {
+    fun anEntryNamesTheValidationAndTheMultiStationCapabilitiesButNotTheDuplicate() = runTest {
         val (transport, host) = api(error(409, "conflict", """{"constraint":"station_update"}"""))
         host.enter("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
         val body = transport.sent.single().third.orEmpty()
-        assertTrue(body, body.contains("\"supports\":[\"handheld-host-v1\",\"validation-v1\"]"))
+        assertTrue(body, body.contains("\"supports\":[\"handheld-host-v1\",\"validation-v1\",\"multi-station-v1\"]"))
         assertTrue(!body.contains("duplicate"))
+    }
+
+    @Test
+    fun aFullLineKeepsItsNumbersAndAnOldHostsBusyKeepsNone() = runTest {
+        val (_, full) = api(HostResult.Ok(409, fixture("error-shift-line-full.json"), null))
+        assertEquals(
+            HostFailure.Constraint("shift_line_full", maxStations = 2, active = 2),
+            (full.enter(shiftId).exceptionOrNull() as HostApiError).failure,
+        )
+        val (_, busy) = api(HostResult.Ok(409, fixture("error-shift-busy.json"), null))
+        assertEquals(HostFailure.Constraint("shift_busy"), (busy.enter(shiftId).exceptionOrNull() as HostApiError).failure)
+        // A number that is not a number is no number: the refusal still is a shift_line_full.
+        val (_, odd) = api(error(409, "conflict", """{"constraint":"shift_line_full","maxStations":"2","active":{"n":2}}"""))
+        assertEquals(HostFailure.Constraint("shift_line_full"), (odd.enter(shiftId).exceptionOrNull() as HostApiError).failure)
+    }
+
+    @Test
+    fun aLeavePostsItsTokenOrNothingAndReadsTheShiftBack() = runTest {
+        val shift = Json.parseToJsonElement(fixture("device-shifts-participants.json")).jsonObject.getValue("shifts").jsonArray[0].toString()
+        val (transport, host) = api(ok(shift))
+        val left = host.leave(shiftId, 12L).getOrThrow()
+        // The body is the host's `ShiftLeave` exactly (`shift-leave.json`, compared as JSON).
+        val sent = transport.sent.single()
+        assertEquals("POST" to "/v1/device/shifts/$shiftId/leave", sent.first to sent.second)
+        assertEquals(Json.parseToJsonElement(fixture("shift-leave.json")), Json.parseToJsonElement(sent.third.orEmpty()))
+        assertEquals(2, left.maxStations)
+        assertEquals("active", left.myState)
+        // No token known (an older host named none): no body, as before.
+        val (bare, old) = api(ok(shift))
+        old.leave(shiftId, null).getOrThrow()
+        assertEquals(Triple("POST", "/v1/device/shifts/$shiftId/leave", ""), bare.sent.single())
+        val (_, refused) = api(error(409, "conflict", """{"constraint":"shift_not_entered"}"""))
+        assertEquals(HostFailure.Constraint("shift_not_entered"), (refused.leave(shiftId, 12L).exceptionOrNull() as HostApiError).failure)
     }
 }
