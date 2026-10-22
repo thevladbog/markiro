@@ -129,7 +129,7 @@ test("the release runbook types the same confirmation the resolver expects", () 
   const runbook = readFileSync(
     new URL("../../../docs/runbooks/handheld-release.md", import.meta.url),
     "utf8",
-  );
+  ).replaceAll("\r\n", "\n");
   const section = runbook.slice(
     runbook.indexOf("## Первый выпуск в пустой канал"),
     runbook.indexOf("## Подписанный APK для пилота"),
