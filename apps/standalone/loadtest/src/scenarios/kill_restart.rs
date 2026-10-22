@@ -229,7 +229,11 @@ mod tests {
         let profile = Profile::preset("tiny").unwrap();
         let (result, secrets) = run(&HostKind::InProcess, work.path(), &profile).await;
         assert!(!result.judged);
-        assert!(result.note.contains("--host spawn"), "{}", result.note);
+        // On Windows the restart is unverified, so the scenario says that before it reads the
+        // host mode; elsewhere it names the host mode it needs.
+        let expected =
+            crate::scenarios::restart_unverified_note(cfg!(windows)).unwrap_or("--host spawn");
+        assert!(result.note.contains(expected), "{}", result.note);
         assert!(secrets.is_empty());
     }
 
