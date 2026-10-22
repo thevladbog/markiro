@@ -158,6 +158,9 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
         let states = judge_copy(ctx, "copy_", &path, &shift, work.devices.len()).await?;
         let closed = states.values().filter(|state| *state == "closed").count();
         ctx.observe("partsClosedInTheCopy", json!(closed));
+        if let Some(note) = mid_close_note(closed, work.devices.len()) {
+            ctx.note.push_str(&note);
+        }
         // The copy restored into a folder of its own, and a host started on it.
         let restored = ctx.dir.join("restored-mid-close");
         let done = match restore_now(
@@ -254,9 +257,39 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
     Ok(())
 }
 
+/// What this run's mid-close copy did not exercise: a copy that fell before the first close or
+/// after the last holds no close in its middle, so the rule «the closed parts are the close
+/// events» held trivially. `VACUUM INTO` reads one transaction; each close is a transaction of
+/// its own, so the copy can only split a close that spans several transactions, and where it
+/// falls is timing.
+fn mid_close_note(closed: usize, parts: usize) -> Option<String> {
+    let place = if closed == 0 {
+        "before the first close"
+    } else if closed == parts {
+        "after the last close"
+    } else {
+        return None;
+    };
+    Some(format!(
+        "the mid-close copy fell {place} ({closed} of {parts} parts closed in it), so the middle of \
+         the closes was not exercised this run. "
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_before_the_first_or_after_the_last_close_is_said_in_the_note() {
+        let before = mid_close_note(0, 6).expect("a note for 0 of 6");
+        assert!(before.contains("before the first close"), "{before}");
+        let after = mid_close_note(6, 6).expect("a note for 6 of 6");
+        assert!(after.contains("after the last close"), "{after}");
+        for closed in 1..6 {
+            assert_eq!(mid_close_note(closed, 6), None, "{closed}");
+        }
+    }
 
     // Restoring a copy the backup worker may still hold (`os error 32`) is unverified on Windows
     // (runbook §14).
