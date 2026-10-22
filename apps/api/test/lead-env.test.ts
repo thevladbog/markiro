@@ -75,9 +75,9 @@ describe("landing lead environment (spec 2026-10-20 §15.4)", () => {
 
 describe("standalone release storage environment (spec 2026-10-20 §5.4)", () => {
   const releases = {
-    RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net",
-    RELEASES_S3_REGION: "ru-central1",
-    RELEASES_S3_BUCKET: "releases.markiro.app",
+    RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+    RELEASES_S3_REGION: "ru-1",
+    RELEASES_S3_BUCKET: "markiro-releases",
     RELEASES_S3_ACCESS_KEY_ID: "fixture-access-key",
     RELEASES_S3_SECRET_ACCESS_KEY: "fixture-secret-key",
   };
@@ -91,13 +91,13 @@ describe("standalone release storage environment (spec 2026-10-20 §5.4)", () =>
         RELEASES_PUBLIC_ORIGIN: "",
       }).RELEASES_S3_BUCKET,
     ).toBeUndefined();
-    expect(loadEnv({ ...base, ...releases }).RELEASES_S3_BUCKET).toBe("releases.markiro.app");
+    expect(loadEnv({ ...base, ...releases }).RELEASES_S3_BUCKET).toBe("markiro-releases");
   });
 
   it("fails startup on a partial or malformed set, naming no secret", () => {
     for (const patch of [
       { RELEASES_S3_SECRET_ACCESS_KEY: undefined },
-      { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net/bucket" },
+      { RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru/bucket" },
       { RELEASES_PUBLIC_ORIGIN: "http://releases.markiro.app" },
     ]) {
       let message = "";

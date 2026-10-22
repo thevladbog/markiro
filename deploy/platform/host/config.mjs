@@ -29,6 +29,8 @@ const runtimeKeys = new Set([
   "MARKIRO_LANDING_DOMAIN",
   "MARKIRO_RETIRED_ADMIN_DOMAIN",
   "MARKIRO_RETIRED_KIOSK_DOMAIN",
+  "MARKIRO_RELEASES_DOMAIN",
+  "MARKIRO_RELEASES_BUCKET",
   "SAAS_ADMIN_ORIGIN",
   "PLATFORM_AUTH_URL",
   "LANDING_ORIGIN",
@@ -91,6 +93,7 @@ const domainKeys = [
   "MARKIRO_LANDING_DOMAIN",
   "MARKIRO_RETIRED_ADMIN_DOMAIN",
   "MARKIRO_RETIRED_KIOSK_DOMAIN",
+  "MARKIRO_RELEASES_DOMAIN",
 ];
 const pgFiles = [
   "MARKIRO_POSTGRES_CA_FILE",
@@ -102,6 +105,7 @@ const interpolationKeys = [
   "MARKIRO_API_IMAGE_DIGEST",
   "MARKIRO_PLATFORM_EDGE_IMAGE_DIGEST",
   ...domainKeys,
+  "MARKIRO_RELEASES_BUCKET",
   "MARKIRO_SOURCE_SHA",
   "S3_PUBLIC_ORIGIN",
   "ACME_EMAIL",
@@ -143,6 +147,8 @@ function validateInterpolation(value, runtimeOnly = false) {
   if (!/^[a-f0-9]{40}$/u.test(value.MARKIRO_SOURCE_SHA)) throw privateFileError();
   for (const key of domainKeys) if (!domain.test(value[key])) throw privateFileError();
   if (new Set(domainKeys.map((key) => value[key])).size !== domainKeys.length)
+    throw privateFileError();
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(value.MARKIRO_RELEASES_BUCKET))
     throw privateFileError();
   const origin = new URL(value.S3_PUBLIC_ORIGIN);
   if (

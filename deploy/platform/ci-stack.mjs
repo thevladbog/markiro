@@ -122,6 +122,8 @@ const environment = {
   MARKIRO_LANDING_DOMAIN: "landing.localhost",
   MARKIRO_RETIRED_ADMIN_DOMAIN: "admin.localhost",
   MARKIRO_RETIRED_KIOSK_DOMAIN: "kiosk.localhost",
+  MARKIRO_RELEASES_DOMAIN: "releases.localhost",
+  MARKIRO_RELEASES_BUCKET: "markiro-releases",
   S3_PUBLIC_ORIGIN: "https://storage.example.org",
   ACME_EMAIL: "ci@markiro.local",
   PLATFORM_CI_HTTP_PORT: String(httpPort),

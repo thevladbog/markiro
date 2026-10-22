@@ -165,6 +165,8 @@ try {
     MARKIRO_LANDING_DOMAIN: "landing.example.invalid",
     MARKIRO_RETIRED_ADMIN_DOMAIN: "admin.example.invalid",
     MARKIRO_RETIRED_KIOSK_DOMAIN: "kiosk.example.invalid",
+    MARKIRO_RELEASES_DOMAIN: "releases.example.invalid",
+    MARKIRO_RELEASES_BUCKET: "markiro-releases",
     S3_PUBLIC_ORIGIN: "https://storage.example.invalid",
     ACME_EMAIL: "test@example.invalid",
     MARKIRO_POSTGRES_CA_FILE: join(fixture, "ca.crt"),

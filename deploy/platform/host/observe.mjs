@@ -337,6 +337,8 @@ export function createHostObservers(operation, policyInput, options = {}) {
               "MARKIRO_SAAS_ADMIN_DOMAIN",
               "MARKIRO_RETIRED_KIOSK_DOMAIN",
               "MARKIRO_LANDING_DOMAIN",
+              "MARKIRO_RELEASES_DOMAIN",
+              "MARKIRO_RELEASES_BUCKET",
               "S3_PUBLIC_ORIGIN",
               "ACME_EMAIL",
             ].map((key) => [key, config[key]]),
