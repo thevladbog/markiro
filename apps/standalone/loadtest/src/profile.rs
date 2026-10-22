@@ -31,7 +31,7 @@ impl std::str::FromStr for CloseOrder {
 /// The multi-station scenarios a run can take after its main run (plan
 /// `2026-10-22-multi-station-load-test-scenarios.md`), in the order it takes them. Each scenario
 /// task of that plan adds its name here.
-pub const SCENARIOS: &[&str] = &["line-full", "capability", "leave-reenter"];
+pub const SCENARIOS: &[&str] = &["line-full", "capability", "leave-reenter", "closed-part"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

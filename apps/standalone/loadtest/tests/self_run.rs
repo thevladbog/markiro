@@ -117,6 +117,29 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
             "{name}"
         );
     }
+    let closed = report
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.name == "closed-part")
+        .expect("the closed-part scenario ran");
+    assert!(
+        closed.checks.iter().all(|check| check.ok),
+        "{:#?}",
+        closed.checks
+    );
+    for name in [
+        "late_facts_of_a_closed_part_are_accepted",
+        "shift_closes_at_the_latest_moment",
+        "race_2_exactly_one_close_closes_the_shift",
+    ] {
+        assert!(
+            closed
+                .checks
+                .iter()
+                .any(|check| check.name == name && check.ok),
+            "{name}"
+        );
+    }
     // `execute` hands back a report with the run's secrets already removed.
     let text = serde_json::to_string(&report).unwrap();
     assert!(!text.contains("Load-"), "the administrator password leaked");
