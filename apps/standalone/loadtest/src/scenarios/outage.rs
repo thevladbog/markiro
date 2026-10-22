@@ -24,6 +24,9 @@ pub async fn run(
     work_dir: &Path,
     base: &Profile,
 ) -> (ScenarioResult, Vec<String>) {
+    if let Some(skipped) = super::skip_on_windows(NAME) {
+        return (skipped, Vec::new());
+    }
     let HostKind::Spawn { bin } = kind else {
         return (
             super::not_judged(

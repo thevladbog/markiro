@@ -87,6 +87,21 @@ pub fn not_judged(name: &str, note: &str) -> ScenarioResult {
     result(name, false, note, Vec::new())
 }
 
+/// Why a scenario that kills or stops the host and starts it again on its port is not judged on
+/// this platform: `None` when it is judged. A restart on the same port is unverified on Windows.
+pub fn restart_unverified_note(windows: bool) -> Option<&'static str> {
+    windows.then_some(
+        "windows: restarting the host on the same port is unverified there (the port may stay held \
+         after the process ends); the restart scenarios are judged on Linux and macOS",
+    )
+}
+
+/// The not-judged result of a restart scenario on a platform where restarting on the same port is
+/// unverified (Windows), `None` elsewhere.
+pub fn skip_on_windows(name: &str) -> Option<ScenarioResult> {
+    restart_unverified_note(cfg!(windows)).map(|note| not_judged(name, note))
+}
+
 /// A scenario that could not even start: one failed check naming why.
 pub fn broken(name: &str, error: String) -> ScenarioResult {
     result(
@@ -952,6 +967,22 @@ mod tests {
 
     fn tiny() -> Profile {
         Profile::preset("tiny").unwrap()
+    }
+
+    #[test]
+    fn a_restart_on_the_same_port_is_not_judged_on_windows_only() {
+        assert_eq!(restart_unverified_note(false), None);
+        let note = restart_unverified_note(true).expect("a note on windows");
+        assert!(note.starts_with("windows: "), "{note}");
+        assert!(note.contains("same port"), "{note}");
+        // This build's own platform decides the runtime path.
+        let skipped = skip_on_windows("kill-restart");
+        assert_eq!(skipped.is_some(), cfg!(windows));
+        if let Some(result) = skipped {
+            assert!(!result.judged);
+            assert_eq!(result.note, note);
+            assert_eq!(result.name, "kill-restart");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -255,7 +255,7 @@ markiro-loadtest compare ~/markiro-load/baseline/smoke.json ~/markiro-load/smoke
 
 **Только Windows, не проверялось:** чтение `host.db-shm` для очереди WAL; повтор при `os error 32` в восстановлении
 (копия ещё занята процессом); сбор памяти и дескрипторов через PowerShell; на Windows хост завершается принудительно
-(там нет SIGINT).
+(там нет SIGINT); перезапуск хоста на том же порту (сценарии `kill-restart` и `outage` на Windows не судятся: результат «не судилось» с пояснением).
 
 **Не запускалось ни разу:** `soak`, `spawn` на `smoke`, `attach`, Linux (чтение `/proc`), workflow `standalone-load.yml` в
 GitHub.
