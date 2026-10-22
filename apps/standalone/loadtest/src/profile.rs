@@ -238,12 +238,18 @@ impl Profile {
         if self.backup_at.iter().any(|at| !(0.0..1.0).contains(at)) {
             return Err("backupAt: fractions of the run, 0 up to 1".into());
         }
+        // Each scenario runs on `<work>/scenarios/<name>/data`: named twice, its second run would
+        // open the first one's data instead of a fresh site.
+        let mut seen = std::collections::BTreeSet::new();
         for name in &self.scenarios {
             if !SCENARIOS.contains(&name.as_str()) {
                 return Err(format!(
-                    "scenarios: '{name}' is none of: all, none, {}",
+                    "scenarios: '{name}' is not one of: {} (all and none stand alone, not in a list)",
                     SCENARIOS.join(", ")
                 ));
+            }
+            if !seen.insert(name.as_str()) {
+                return Err(format!("scenarios: '{name}' is listed more than once"));
             }
         }
         Ok(())
@@ -424,5 +430,25 @@ mod tests {
             back.scenarios.is_empty(),
             "a profile of an older report reads with no scenario"
         );
+    }
+
+    /// A scenario named twice would run twice on the same `<work>/scenarios/<name>/data`: the
+    /// second host opens the first one's data, not a fresh site. A list naming `all` or `none` is
+    /// told that those stand alone, not that they are unknown.
+    #[test]
+    fn a_scenario_list_names_each_scenario_once_and_all_or_none_only_alone() {
+        let mut profile = Profile::preset("smoke").unwrap();
+        let twice = profile
+            .set("scenarios", "lines,line-full,lines")
+            .unwrap_err();
+        assert!(
+            twice.contains("'lines'") && twice.contains("more than once"),
+            "{twice}"
+        );
+        profile.set("scenarios", "lines,line-full").unwrap();
+        let in_a_list = profile.set("scenarios", "all,lines").unwrap_err();
+        assert!(in_a_list.contains("'all'"), "{in_a_list}");
+        assert!(in_a_list.contains("alone"), "{in_a_list}");
+        assert!(!in_a_list.contains("none of: all"), "{in_a_list}");
     }
 }
