@@ -7748,6 +7748,7 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
   the office closing after a device closed the LAST part, a kill landing inside a flush (`committedButUnacknowledged` was 0 in every
   run, so the resend-after-crash stored-receipt path is unexercised), the process scenarios in-process or in the workflow.
   Windows-only and unverified: reading `host.db-shm`, retry of the restore's `os error 32`, PowerShell vitals, restarting a host on
-  the same port. Release-build numbers are one macOS machine; `soak`, `attach`, Linux, a real LAN or handhelds, and the workflow
+  the same port. On Windows `kill-restart`, `outage` and `backup-mid-close` (restoring a copy the backup worker may hold) are not
+  judged (`scenarios::NOT_JUDGED_ON_WINDOWS`, `judged_in_process`). Release-build numbers are one macOS machine; `soak`, `attach`, Linux, a real LAN or handhelds, and the workflow
   (never run on GitHub) have never run. Harness fixes made on the way: `api.rs` error classes (`net_*` metric keys) and `strip_ansi`
   in `scan_log` (the host log's colour codes hid ERROR lines).

@@ -45,6 +45,16 @@ pub type Res<T> = Result<T, String>;
 /// same port and data folder); with another host they are not judged.
 pub const SPAWN_ONLY: &[&str] = &["kill-restart", "outage"];
 
+/// The scenarios not judged on Windows whatever the host mode: backup-mid-close restores a copy
+/// the backup worker may still hold (`os error 32`), unverified there; the restart scenarios
+/// restart on the same port (`skip_on_windows`).
+pub const NOT_JUDGED_ON_WINDOWS: &[&str] = &["backup-mid-close", "kill-restart", "outage"];
+
+/// Whether a scenario is judged with a host in this process on this platform.
+pub fn judged_in_process(name: &str, windows: bool) -> bool {
+    !SPAWN_ONLY.contains(&name) && !(windows && NOT_JUDGED_ON_WINDOWS.contains(&name))
+}
+
 /// How long a scenario's devices scan between its steps, in seconds.
 pub const LOAD_S: u64 = 3;
 
@@ -1143,6 +1153,18 @@ mod tests {
 
     fn tiny() -> Profile {
         Profile::preset("tiny").unwrap()
+    }
+
+    #[test]
+    fn which_scenarios_a_host_in_this_process_judges_depends_on_the_platform() {
+        for name in crate::profile::SCENARIOS {
+            let spawn_only = SPAWN_ONLY.contains(name);
+            assert_eq!(judged_in_process(name, false), !spawn_only, "{name}");
+        }
+        assert!(!judged_in_process(backup_mid_close::NAME, true));
+        assert!(judged_in_process(backup_mid_close::NAME, false));
+        assert!(judged_in_process(line_full::NAME, true));
+        assert!(!judged_in_process(kill_restart::NAME, true));
     }
 
     #[test]

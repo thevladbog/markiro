@@ -33,7 +33,7 @@ pub async fn run(
     base: &Profile,
 ) -> (ScenarioResult, Vec<String>) {
     // Restoring a copy the backup worker may still hold (`os error 32`) is unverified on Windows.
-    if cfg!(windows) {
+    if !super::judged_in_process(NAME, cfg!(windows)) {
         return (
             super::not_judged(
                 NAME,

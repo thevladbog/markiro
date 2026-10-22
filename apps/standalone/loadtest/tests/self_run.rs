@@ -71,14 +71,14 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
         report.checks
     );
     // Every scenario of the profile ran: a judged one held (the verdict says so), a spawn-only
-    // one is not judged with a host in this process.
+    // one is not judged with a host in this process, and on Windows neither is backup-mid-close.
     assert_eq!(
         report.scenarios.len(),
         markiro_loadtest::profile::SCENARIOS.len()
     );
     for scenario in &report.scenarios {
-        let spawn_only = markiro_loadtest::scenarios::SPAWN_ONLY.contains(&scenario.name.as_str());
-        assert_eq!(scenario.judged, !spawn_only, "{}", scenario.name);
+        let judged = markiro_loadtest::scenarios::judged_in_process(&scenario.name, cfg!(windows));
+        assert_eq!(scenario.judged, judged, "{}", scenario.name);
     }
     let capability = report
         .scenarios
