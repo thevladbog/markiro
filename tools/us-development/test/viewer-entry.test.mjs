@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -66,20 +66,78 @@ test("module-fixed checkout root is identical from repository and API cwd withou
   }
 });
 
-test("only approved root and guard substitutions reconstruct the whole frozen acquisition and command AST", () => {
-  const path = "tools/us-development/test/support/dataset-command-positive-fixture.mjs";
-  const base = "e5a00d71bf51aedd711269ca1a289749a8d172d8";
-  const original = execFileSync("git", ["-C", root, "show", `${base}:${path}`], {
+test("preservation executes with historical Git reads unavailable", () => {
+  const name =
+    "only approved root and guard substitutions reconstruct the whole frozen acquisition and command AST";
+  const source = `
+    const cp = require('node:child_process');
+    const { syncBuiltinESMExports } = require('node:module');
+    const { run } = require('node:test');
+    const original = cp.execFileSync;
+    cp.execFileSync = (file, args, ...rest) => {
+      if (file === 'git' && args.includes('show')) throw Error('historical_git_unavailable');
+      return original(file, args, ...rest);
+    };
+    syncBuiltinESMExports();
+    const stream = run({ files: [${JSON.stringify(fileURLToPath(import.meta.url))}], isolation: 'none', testNamePatterns: [${JSON.stringify(`^${name}$`)}], timeout: 4000 });
+    stream.on('test:pass', (event) => {
+      if (event.name !== ${JSON.stringify(name)}) return;
+      if (event.skip || event.todo) process.exitCode = 1;
+      else console.log('preservation_executed');
+    });
+    stream.on('test:fail', (event) => { process.exitCode = 1; console.error(event.details.error.message); });
+    stream.resume();
+  `;
+  const result = spawnSync(process.execPath, [`--test-name-pattern=^${name}$`, "-e", source], {
+    cwd: root,
+    env: { PATH: process.env.PATH },
     encoding: "utf8",
+    timeout: 5000,
   });
-  assert.equal(
-    createHash("sha256").update(original).digest("hex"),
-    "5a5bc9d873b673218e09e355c7b7640c0c73016603f781eb69cc5fc6710af5e7",
-  );
-  const current = readFileSync(
-    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-    "utf8",
-  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "preservation_executed\n");
+});
+
+// Independently derived from the actual original Git blobs, never the mutable current source.
+// Provenance: e5a00d71bf51aedd711269ca1a289749a8d172d8, TypeScript 6.0.3,
+// tools/us-development/test/support/dataset-command-positive-fixture.mjs raw SHA-256:
+// 5a5bc9d873b673218e09e355c7b7640c0c73016603f781eb69cc5fc6710af5e7.
+// CI deliberately requires no historical Git objects (checkout remains depth 1).
+const originalAstDigest = "d048145e4a4bd773ec5e436fe563a6e3acaa6d668336da749c127d4b5c4bf25f";
+const excludedSegments = [
+  {
+    start: "  const owner = randomUUID();",
+    end: "  try {\n    connection = createDb",
+    digest: "6b2af5794707e5b34a85ef7e61d643f8d4fc72a86591a8bbadc21eebe70a14b8",
+  },
+  {
+    start: "    storeContract = datasetObjectStoreContainer(",
+    end: "    const invoked = new Set();",
+    digest: "9a085dd0092f2e57b85bfe5dca96b98682d414a873f89eb0ab9e81481390fedd",
+  },
+];
+const excludedModules = {
+  "dataset-command-provider.mjs":
+    "57b3c8434bd81231e9d44a5a0f43309767d766f730be6236fa2fa46650573f86",
+  "dataset-command-object-store.mjs":
+    "80a4f30d29a8dd998dd9acc35c492847f8904d4524fc4a951e25334794605880",
+};
+const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+function preservationSources() {
+  return {
+    current: readFileSync(
+      new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+      "utf8",
+    ),
+    modules: Object.fromEntries(
+      Object.keys(excludedModules).map((name) => [
+        name,
+        readFileSync(new URL(`./support/${name}`, import.meta.url)),
+      ]),
+    ),
+  };
+}
+function assertFrozenFixture({ current, modules }) {
   const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
   const ts = require("typescript");
   const parse = (source) =>
@@ -94,6 +152,7 @@ test("only approved root and guard substitutions reconstruct the whole frozen ac
     "createDatasetPositiveFixture",
   ]);
   const ast = parse(current);
+  assert.equal(ast.parseDiagnostics.length, 0);
   let restored = current;
   for (const statement of [...ast.statements].reverse()) {
     if (
@@ -141,27 +200,24 @@ test("only approved root and guard substitutions reconstruct the whole frozen ac
     return [node.kind, node.flags, ts.isSourceFile(node) ? null : (node.text ?? null), children];
   };
   assert.equal(parse(restored).parseDiagnostics.length, 0);
-  assert.deepEqual(shape(parse(restored)), shape(parse(original)));
+  assert.equal(
+    digest(JSON.stringify(shape(parse(restored)))),
+    originalAstDigest,
+    "complete original AST digest",
+  );
   // Byte-level checks of the excluded SDK/container/acquisition/normal-disposal bodies.
-  for (const [start, end] of [
-    ["  const owner = randomUUID();", "  try {\n    connection = createDb"],
-    ["    storeContract = datasetObjectStoreContainer(", "    const invoked = new Set();"],
-  ]) {
-    assert.ok(original.includes(start) && original.includes(end));
+  for (const { start, end, digest: expected } of excludedSegments) {
+    assert.equal(current.split(start).length, 2, "unique excluded start boundary");
+    assert.equal(current.split(end).length, 2, "unique excluded end boundary");
+    assert.ok(current.indexOf(start) < current.indexOf(end), "ordered excluded boundaries");
     assert.equal(
-      current.slice(current.indexOf(start), current.indexOf(end)),
-      original.slice(original.indexOf(start), original.indexOf(end)),
+      digest(current.slice(current.indexOf(start), current.indexOf(end))),
+      expected,
+      "excluded segment byte digest",
     );
   }
-  for (const excluded of ["dataset-command-provider.mjs", "dataset-command-object-store.mjs"])
-    assert.equal(
-      readFileSync(new URL(`./support/${excluded}`, import.meta.url), "utf8"),
-      execFileSync(
-        "git",
-        ["-C", root, "show", `${base}:tools/us-development/test/support/${excluded}`],
-        { encoding: "utf8" },
-      ),
-    );
+  for (const [excluded, expected] of Object.entries(excludedModules))
+    assert.equal(digest(modules[excluded]), expected, "excluded module byte digest");
   const acquire = ast.statements
     .find((statement) => statementName(statement) === "acquireDatasetInstallation")
     .getText(ast);
@@ -173,4 +229,77 @@ test("only approved root and guard substitutions reconstruct the whole frozen ac
   );
   assert.ok(acquire.indexOf("checked.document.build.gitSha") < acquire.indexOf("ownContainer()"));
   assert.doesNotMatch(acquire, /process\.chdir|process\.env\.[A-Z_]+\s*=/);
+}
+
+test("only approved root and guard substitutions reconstruct the whole frozen acquisition and command AST", () => {
+  assertFrozenFixture(preservationSources());
+});
+
+test("preservation rejects semantic cap, query, action and literal mutants", () => {
+  const source = preservationSources();
+  for (const [before, after] of [
+    ["cap: 900_000,", "cap: 900_001,"],
+    ["SELECT tablename FROM pg_tables", "SELECT tablename FROM pg_views"],
+    ["invoked.add(mode);", "invoked.delete(mode);"],
+    ["positive disposal exceeded 60000ms", "positive disposal exceeded 60001ms"],
+  ]) {
+    assert.equal(source.current.split(before).length, 2, "one semantic mutant target");
+    assert.throws(
+      () => assertFrozenFixture({ ...source, current: source.current.replace(before, after) }),
+      /complete original AST digest/,
+    );
+  }
+});
+
+test("preservation rejects excluded byte changes and missing or duplicated exact boundaries", () => {
+  const source = preservationSources();
+  for (const { start, end } of excludedSegments) {
+    // Comments preserve the AST projection: these failures must reach the exact-byte proof.
+    assert.throws(
+      () =>
+        assertFrozenFixture({
+          ...source,
+          current: source.current.replace(start, `${start}\n/* byte-only mutant */`),
+        }),
+      /excluded segment byte digest/,
+    );
+    for (const [boundary, side] of [
+      [start, "start"],
+      [end, "end"],
+    ]) {
+      assert.throws(
+        () =>
+          assertFrozenFixture({
+            ...source,
+            current: source.current.replace(boundary, `${boundary} /*${boundary}*/`),
+          }),
+        new RegExp(`unique excluded ${side} boundary`),
+      );
+      // Break the exact boundary using a harmless comment between the first two tokens.
+      const missing = boundary.replace(/(\S+) /, "$1 /* boundary mutant */ ");
+      assert.notEqual(missing, boundary);
+      assert.throws(
+        () =>
+          assertFrozenFixture({ ...source, current: source.current.replace(boundary, missing) }),
+        new RegExp(`unique excluded ${side} boundary`),
+      );
+    }
+  }
+});
+
+test("preservation rejects changed provider and object-store module bytes", () => {
+  const source = preservationSources();
+  for (const name of Object.keys(excludedModules)) {
+    assert.throws(
+      () =>
+        assertFrozenFixture({
+          ...source,
+          modules: {
+            ...source.modules,
+            [name]: Buffer.concat([source.modules[name], Buffer.from("\n// byte-only mutant\n")]),
+          },
+        }),
+      /excluded module byte digest/,
+    );
+  }
 });
