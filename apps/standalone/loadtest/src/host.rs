@@ -665,13 +665,10 @@ mod tests {
         assert!(response.status().is_success());
         let real = host.log_scan();
         assert!(real.available);
-        // The real log is painted (the host's stdout layer colours a file too) and, being clean,
-        // counts nothing; an ERROR line of the host's own shape appended to it is then counted.
+        // The real log, being clean, counts nothing (it is painted, as the host's stdout layer
+        // colours a file too, unless NO_COLOR is set); an ERROR line of the host's own painted
+        // shape appended to it is then counted.
         let text = std::fs::read_to_string(&log).unwrap();
-        assert!(
-            text.contains('\x1b'),
-            "the spawned host's log carries no colour: {text}"
-        );
         assert_eq!((real.error_lines, real.busy_lines), (0, 0), "{text}");
         let error_line = "\x1b[2m2026-10-20T10:00:01.123456Z\x1b[0m \x1b[31mERROR\x1b[0m \x1b[2mmarkiro_host::error\x1b[0m\x1b[2m:\x1b[0m request failed\n";
         std::fs::OpenOptions::new()
