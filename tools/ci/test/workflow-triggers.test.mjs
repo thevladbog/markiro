@@ -13,18 +13,15 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "ci.yml": ["pull_request", "push", "workflow_dispatch"],
     "dependency-review.yml": ["pull_request"],
     "deploy-platform.yml": ["workflow_dispatch"],
-    "deploy-vbtech-production.yml": ["workflow_dispatch"],
-    "diagnose-production.yml": ["workflow_dispatch"],
     "handheld-release.yml": ["workflow_dispatch"],
-    "provision-platform-admin.yml": ["workflow_dispatch"],
     "recover-platform.yml": ["workflow_dispatch"],
     "release-platform-images.yml": ["workflow_dispatch"],
     "signer-download-repair.yml": ["workflow_dispatch"],
     "signer-stable-release.yml": ["workflow_dispatch"],
     "standalone-load.yml": ["workflow_dispatch"],
     "station-beta-release.yml": ["workflow_dispatch"],
+    "station-release-reseed.yml": ["workflow_dispatch"],
     "station-stable-release.yml": ["workflow_dispatch"],
-    "yandex-infrastructure.yml": ["pull_request", "workflow_dispatch"],
   };
   const workflowFiles = readdirSync(".github/workflows")
     .filter((name) => name.endsWith(".yml"))
@@ -62,38 +59,6 @@ test("dependency review runs only for supported dependency surface changes", () 
     "cancel-in-progress": true,
   });
 });
-
-test("Yandex pull-request validation runs only for infrastructure contract changes", () => {
-  const value = workflow("yandex-infrastructure.yml");
-
-  assert.deepEqual(value.on.pull_request, {
-    branches: ["main"],
-    paths: [
-      ".github/workflows/yandex-infrastructure.yml",
-      ".github/workflows/deploy-production.yml",
-      ".github/workflows/deploy-vbtech-production.yml",
-      ".npmrc",
-      "package.json",
-      "pnpm-lock.yaml",
-      "pnpm-workspace.yaml",
-      "patches/**",
-      "compose.production.yml",
-      "deploy/production/**",
-      "deploy/yandex/**",
-      "infra/yandex/**",
-      "docs/runbooks/saas-production-deploy.md",
-      "docs/runbooks/yandex-*.md",
-      "docs/superpowers/plans/2026-08-09-yandex-direct-vm-mvp.md",
-      "docs/superpowers/specs/2026-08-09-yandex-direct-vm-mvp-design.md",
-    ],
-  });
-  assert.deepEqual(value.concurrency, {
-    group:
-      "${{ github.event_name == 'pull_request' && format('markiro-yandex-pr-{0}', github.event.pull_request.number) || 'markiro-yandex-production-state' }}",
-    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
-  });
-});
-
 test("the standalone load test is opt-in, read-only and fits the job limit", () => {
   const value = workflow("standalone-load.yml");
 

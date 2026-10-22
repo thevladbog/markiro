@@ -92,8 +92,8 @@ activation и tenant smoke описан в `docs/runbooks/national-catalog-live-
 Эти имена входят в обязательный runtime inventory даже при выключенном импорте.
 Включение и заполнение списка разрешённых хостов выполняются после проверок из
 `docs/runbooks/national-catalog-import.md`.
-Порядок отдельной выкладки настроек описан в
-[`deploy/yandex/national-catalog-rollout.md`](../../deploy/yandex/national-catalog-rollout.md).
+Порядок отдельной выкладки настроек описывал `deploy/yandex/national-catalog-rollout.md`,
+удалённый вместе с Yandex-контуром 22.10.2026.
 
 ## Офлайн-лицензии «Markiro Автоном»
 

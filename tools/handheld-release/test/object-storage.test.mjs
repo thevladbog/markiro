@@ -12,12 +12,12 @@ import {
   verifyPublishedObject,
 } from "../object-storage.mjs";
 
-const endpoint = "https://storage.yandexcloud.net";
+const endpoint = "https://s3.twcstorage.ru";
 const env = {
-  YANDEX_STATION_RELEASE_ENDPOINT: endpoint,
-  YANDEX_STATION_RELEASE_BUCKET: "markiro-station-releases",
-  YANDEX_STATION_RELEASE_ACCESS_KEY_ID: "id",
-  YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: "secret",
+  RELEASES_S3_ENDPOINT: endpoint,
+  RELEASES_S3_BUCKET: "markiro-releases",
+  RELEASES_S3_ACCESS_KEY_ID: "id",
+  RELEASES_S3_SECRET_ACCESS_KEY: "secret",
 };
 
 test("the handheld shares the Station bucket, so keys outside its prefix are refused", () => {
@@ -54,16 +54,36 @@ test("an APK is served as an APK", () => {
 test("the store refuses to start against anything but the pinned endpoint", () => {
   assert.throws(() =>
     createHandheldObjectStore({
-      env: { ...env, YANDEX_STATION_RELEASE_ENDPOINT: "https://s3.amazonaws.com" },
+      env: { ...env, RELEASES_S3_ENDPOINT: "https://s3.amazonaws.com" },
     }),
   );
   assert.throws(() =>
-    createHandheldObjectStore({ env: { ...env, YANDEX_STATION_RELEASE_BUCKET: "../evil" } }),
+    createHandheldObjectStore({ env: { ...env, RELEASES_S3_BUCKET: "../evil" } }),
   );
   assert.throws(() =>
-    createHandheldObjectStore({ env: { ...env, YANDEX_STATION_RELEASE_ACCESS_KEY_ID: "" } }),
+    createHandheldObjectStore({ env: { ...env, RELEASES_S3_ACCESS_KEY_ID: "" } }),
   );
   assert.doesNotThrow(() => createHandheldObjectStore({ env, Client: class {} }));
+});
+
+test("the store talks path-style to Timeweb S3 without optional checksums", () => {
+  let config;
+  createHandheldObjectStore({
+    env,
+    Client: class {
+      constructor(value) {
+        config = value;
+      }
+    },
+  });
+  assert.deepEqual(config, {
+    endpoint,
+    region: "ru-1",
+    forcePathStyle: true,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+    credentials: { accessKeyId: "id", secretAccessKey: "secret" },
+  });
 });
 
 test("an immutable put whose bytes do not match its digest never reaches storage", async () => {
@@ -181,9 +201,9 @@ test("download copies only a channel's immutable APK with revalidation and its f
   });
   await store.copyDownload({ channel: "stable", versionName: "0.1.0" });
   assert.deepEqual(sent[0], {
-    Bucket: env.YANDEX_STATION_RELEASE_BUCKET,
+    Bucket: env.RELEASES_S3_BUCKET,
     Key: "handheld/download",
-    CopySource: `${env.YANDEX_STATION_RELEASE_BUCKET}/handheld/stable/releases/0.1.0/markiro-tsd-0.1.0.apk`,
+    CopySource: `${env.RELEASES_S3_BUCKET}/handheld/stable/releases/0.1.0/markiro-tsd-0.1.0.apk`,
     MetadataDirective: "REPLACE",
     ContentType: "application/vnd.android.package-archive",
     ContentDisposition: 'attachment; filename="markiro-tsd-0.1.0.apk"',

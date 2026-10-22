@@ -22,7 +22,7 @@ test("repair writes only after the protected release environment approves it", (
   assert.equal(repair.environment, "station-release");
   assert.equal(repair.permissions.contents, "read");
   assert.match(source, /tools\/signer-release\/repair-download\.mjs/);
-  assert.match(source, /secrets\.YANDEX_STATION_RELEASE_ACCESS_KEY_ID/);
-  assert.match(source, /secrets\.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY/);
+  assert.match(source, /secrets\.RELEASES_S3_ACCESS_KEY_ID/);
+  assert.match(source, /secrets\.RELEASES_S3_SECRET_ACCESS_KEY/);
   assert.doesNotMatch(source, /SIGNER_TAURI_SIGNING_PRIVATE_KEY/);
 });

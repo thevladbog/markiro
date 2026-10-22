@@ -597,7 +597,7 @@ test("provider reader uses only the fixed Yandex storage hostname and exact resp
   );
   assert.deepEqual(calls, [
     {
-      url: "https://storage.yandexcloud.net/markiro-station-releases/station/beta/latest.json",
+      url: "https://s3.twcstorage.ru/markiro-station-releases/station/beta/latest.json",
       init: { redirect: "error", cache: "no-store" },
     },
   ]);
@@ -631,7 +631,7 @@ test("provider reader accepts the canonical uppercase checksum asset key", async
     }),
     bytes,
   );
-  assert.equal(requestedUrl, `https://storage.yandexcloud.net/markiro-station-releases/${key}`);
+  assert.equal(requestedUrl, `https://s3.twcstorage.ru/markiro-station-releases/${key}`);
 });
 
 test("provider reader retries a transient public failure before accepting exact bytes", async () => {
@@ -1402,8 +1402,8 @@ test("CLI permits only the eight bounded commands and no promote-existing or cre
 test("constructs an explicit bounded environment-only AWS credential object", () => {
   assert.deepEqual(
     createYandexPublisherClientConfig({
-      YANDEX_STATION_RELEASE_ENDPOINT: "https://storage.yandexcloud.net",
-      YANDEX_STATION_RELEASE_BUCKET: "markiro-station-releases",
+      RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+      RELEASES_S3_BUCKET: "markiro-station-releases",
       AWS_ACCESS_KEY_ID: "A".repeat(20),
       AWS_SECRET_ACCESS_KEY: "s".repeat(40),
       AWS_SESSION_TOKEN: "temporary-session-token",
@@ -1411,8 +1411,11 @@ test("constructs an explicit bounded environment-only AWS credential object", ()
     {
       bucket: "markiro-station-releases",
       client: {
-        endpoint: "https://storage.yandexcloud.net",
-        region: "ru-central1",
+        endpoint: "https://s3.twcstorage.ru",
+        region: "ru-1",
+        forcePathStyle: true,
+        requestChecksumCalculation: "WHEN_REQUIRED",
+        responseChecksumValidation: "WHEN_REQUIRED",
         maxAttempts: 3,
         credentials: {
           accessKeyId: "A".repeat(20),
@@ -1426,12 +1429,15 @@ test("constructs an explicit bounded environment-only AWS credential object", ()
 
 test("rejects missing or malformed environment credentials before client construction", async () => {
   const base = {
-    YANDEX_STATION_RELEASE_ENDPOINT: "https://storage.yandexcloud.net",
-    YANDEX_STATION_RELEASE_BUCKET: "markiro-station-releases",
+    RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+    RELEASES_S3_BUCKET: "markiro-station-releases",
     AWS_ACCESS_KEY_ID: "A".repeat(20),
     AWS_SECRET_ACCESS_KEY: "s".repeat(40),
   };
   const environments = [
+    { ...base, RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net" },
+    { ...base, RELEASES_S3_ENDPOINT: undefined },
+    { ...base, RELEASES_S3_BUCKET: "../station" },
     { ...base, AWS_ACCESS_KEY_ID: undefined },
     { ...base, AWS_SECRET_ACCESS_KEY: undefined },
     { ...base, AWS_ACCESS_KEY_ID: "short" },

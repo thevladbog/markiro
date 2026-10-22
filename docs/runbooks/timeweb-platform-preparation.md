@@ -35,9 +35,13 @@ The legacy Yandex publisher (`release-images.yml`) and deploy workflow
 (`deploy-production.yml`) were removed on 2026-10-21. The platform edge is built
 and exercised by the mandatory PR/main CI bundle job, and
 `release-platform-images.yml` publishes the platform images after approval; it
-does not deploy them. Do not invoke
-`deploy/yandex/remote-deploy.mjs` as a shortcut; it has unrelated host and
-secret-management responsibilities.
+does not deploy them. The Yandex host runtime (`deploy/yandex`) and Terraform
+(`infra/yandex`) were removed on 2026-10-22.
+
+The edge also serves `MARKIRO_RELEASES_DOMAIN` (`releases.markiro.app`): a
+read-only, deny-by-default proxy onto the Timeweb S3 release bucket named by
+`MARKIRO_RELEASES_BUCKET`. It holds no bucket key. The bucket, its public read,
+CORS, keys and DNS are described in [release hosting](release-hosting.md).
 
 ## Protected runtime configuration
 

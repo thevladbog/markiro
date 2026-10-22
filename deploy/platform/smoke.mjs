@@ -59,6 +59,21 @@ export async function smokePlatform({ request, sourceSha }) {
     assert.equal(machine.status, 410);
     assert.match(machine.headers.get("content-type"), /application\/json/u);
   }
+  // The release host only forwards exact release layouts to the bucket, so
+  // these refusals hold without reaching object storage.
+  for (const path of [
+    "/",
+    "/?list-type=2",
+    "/station/",
+    "/station/beta/releases/",
+    "/media/tenant/file.png",
+    "/standalone/stable/latest.json/x",
+  ]) {
+    checks.push(["releases.localhost", path, "GET", 404]);
+    checks.push(["releases.localhost", path, "HEAD", 404]);
+  }
+  for (const method of ["POST", "PUT", "DELETE", "OPTIONS"])
+    checks.push(["releases.localhost", "/standalone/stable/latest.json", method, 404]);
   for (const [host, path, method, status, type] of checks) {
     const result = await request(host, path, { method });
     assert.equal(result.status, status, `${host} ${method} ${path}`);
@@ -71,6 +86,8 @@ export async function smokePlatform({ request, sourceSha }) {
     assert.equal(result.headers.get("x-markiro-release-sha"), sourceSha);
     if (type)
       assert.ok(result.headers.get("content-type")?.includes(type), `${host} ${path}: ${type}`);
+    if (host === "releases.localhost")
+      assert.equal(result.headers.get("cache-control"), "no-store", `${host} ${method} ${path}`);
     await result.arrayBuffer();
   }
   return checks.length + 4;

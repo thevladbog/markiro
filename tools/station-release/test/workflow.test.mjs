@@ -121,23 +121,14 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.match(text, /dtolnay\/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4/);
 
   const credentialSteps = workflow.jobs.release.steps.filter((step) =>
-    JSON.stringify(step.env ?? {}).includes("YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
+    JSON.stringify(step.env ?? {}).includes("RELEASES_S3_ACCESS_KEY_ID"),
   );
   assert.equal(credentialSteps.length, 2);
   for (const step of credentialSteps) {
-    assert.equal(step.env.AWS_ACCESS_KEY_ID, "${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}");
-    assert.equal(
-      step.env.AWS_SECRET_ACCESS_KEY,
-      "${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}",
-    );
-    assert.equal(
-      step.env.YANDEX_STATION_RELEASE_BUCKET,
-      "${{ vars.YANDEX_STATION_RELEASE_BUCKET }}",
-    );
-    assert.equal(
-      step.env.YANDEX_STATION_RELEASE_ENDPOINT,
-      "${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}",
-    );
+    assert.equal(step.env.AWS_ACCESS_KEY_ID, "${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}");
+    assert.equal(step.env.AWS_SECRET_ACCESS_KEY, "${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}");
+    assert.equal(step.env.RELEASES_S3_BUCKET, "${{ vars.RELEASES_S3_BUCKET }}");
+    assert.equal(step.env.RELEASES_S3_ENDPOINT, "${{ vars.RELEASES_S3_ENDPOINT }}");
     assert.match(step.run, /::add-mask::\$AWS_ACCESS_KEY_ID/);
     assert.match(step.run, /::add-mask::\$AWS_SECRET_ACCESS_KEY/);
     assert.match(step.run, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);
@@ -339,10 +330,7 @@ test("immutable publication and public dual-origin validation precede every mode
     /env -u GH_TOKEN -u GITHUB_TOKEN node tools\/station-release\/github-public\.mjs[\s\\]*download-release beta "\$version"/,
   );
   assert.doesNotMatch(publicValidation.run, /gh release download/);
-  assert.equal(
-    publicValidation.env.YANDEX_STATION_RELEASE_BUCKET,
-    "${{ vars.YANDEX_STATION_RELEASE_BUCKET }}",
-  );
+  assert.equal(publicValidation.env.RELEASES_S3_BUCKET, "${{ vars.RELEASES_S3_BUCKET }}");
   const seedPublicStart = publicValidation.run.lastIndexOf('"seed-baseline" ]; then');
   const seedPublicElse = publicValidation.run.indexOf("else", seedPublicStart);
   const seedPublicBranch = publicValidation.run.slice(seedPublicStart, seedPublicElse);
@@ -352,11 +340,11 @@ test("immutable publication and public dual-origin validation precede every mode
   );
   assert.match(
     seedPublicBranch,
-    /https:\/\/storage\.yandexcloud\.net\/\$YANDEX_STATION_RELEASE_BUCKET\/station\/beta\/releases/,
+    /https:\/\/s3\.twcstorage\.ru\/\$RELEASES_S3_BUCKET\/station\/beta\/releases/,
   );
   assert.doesNotMatch(seedPublicBranch, /https:\/\/releases\.markiro\.app/);
   assert.match(normalPublicBranch, /https:\/\/releases\.markiro\.app\/station\/beta\/releases/);
-  assert.doesNotMatch(normalPublicBranch, /storage\.yandexcloud\.net/);
+  assert.doesNotMatch(normalPublicBranch, /s3\.twcstorage\.ru/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin github beta/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin yandex beta/);
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);

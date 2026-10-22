@@ -45,9 +45,9 @@ test("draws every credential from the station-release environment", () => {
   assert.match(workflow, /environment: station-release/);
   assert.match(workflow, /secrets\.SIGNER_TAURI_SIGNING_PRIVATE_KEY\b/);
   assert.match(workflow, /secrets\.SIGNER_TAURI_SIGNING_PRIVATE_KEY_PASSWORD\b/);
-  assert.match(workflow, /secrets\.YANDEX_STATION_RELEASE_ACCESS_KEY_ID/);
-  assert.match(workflow, /secrets\.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY/);
-  assert.match(workflow, /vars\.YANDEX_STATION_RELEASE_BUCKET/);
+  assert.match(workflow, /secrets\.RELEASES_S3_ACCESS_KEY_ID/);
+  assert.match(workflow, /secrets\.RELEASES_S3_SECRET_ACCESS_KEY/);
+  assert.match(workflow, /vars\.RELEASES_S3_BUCKET/);
   assert.match(workflow, /secrets\.STATION_RELEASE_REPOSITORY_TOKEN/);
   // The Station's key must never sign a signer build, and vice versa.
   assert.doesNotMatch(workflow, /secrets\.TAURI_SIGNING_PRIVATE_KEY\b/);

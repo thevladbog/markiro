@@ -16,10 +16,10 @@ import {
 } from "../object-storage.mjs";
 
 const ENV = {
-  YANDEX_STATION_RELEASE_ENDPOINT: "https://storage.yandexcloud.net",
-  YANDEX_STATION_RELEASE_BUCKET: "markiro-prod-station-releases-b1gi7na10jf4j62m62df",
-  YANDEX_STATION_RELEASE_ACCESS_KEY_ID: "id",
-  YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: "secret",
+  RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+  RELEASES_S3_BUCKET: "markiro-releases",
+  RELEASES_S3_ACCESS_KEY_ID: "id",
+  RELEASES_S3_SECRET_ACCESS_KEY: "secret",
 };
 
 test("places a release artifact under the stable channel", () => {
@@ -51,17 +51,37 @@ test("refuses to build a store from an unexpected endpoint", () => {
   assert.throws(
     () =>
       createSignerObjectStore({
-        env: { ...ENV, YANDEX_STATION_RELEASE_ENDPOINT: "https://example.invalid" },
+        env: { ...ENV, RELEASES_S3_ENDPOINT: "https://example.invalid" },
       }),
     /endpoint/,
   );
+});
+
+test("talks path-style to Timeweb S3 without optional checksums", () => {
+  let config;
+  createSignerObjectStore({
+    env: ENV,
+    Client: class {
+      constructor(value) {
+        config = value;
+      }
+    },
+  });
+  assert.deepEqual(config, {
+    endpoint: "https://s3.twcstorage.ru",
+    region: "ru-1",
+    forcePathStyle: true,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+    credentials: { accessKeyId: "id", secretAccessKey: "secret" },
+  });
 });
 
 test("refuses to build a store when a credential is missing", () => {
   assert.throws(
     () =>
       createSignerObjectStore({
-        env: { ...ENV, YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: "" },
+        env: { ...ENV, RELEASES_S3_SECRET_ACCESS_KEY: "" },
       }),
     /credential/,
   );
@@ -75,7 +95,7 @@ test("stores immutable objects with their checksum metadata", async () => {
 
   await putSignerImmutableObject({
     client,
-    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    bucket: ENV.RELEASES_S3_BUCKET,
     key: "signer/stable/releases/0.1.5/file.bin",
     body,
     contentType: "application/octet-stream",
@@ -91,7 +111,7 @@ test("reads immutable checksum metadata and treats 404 as absent", async () => {
   const key = "signer/stable/releases/0.1.5/file.bin";
   const found = await headSignerObject({
     client: { send: async () => ({ Metadata: { "signer-sha256": "a".repeat(64) } }) },
-    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    bucket: ENV.RELEASES_S3_BUCKET,
     key,
   });
   assert.equal(found, "a".repeat(64));
@@ -104,7 +124,7 @@ test("reads immutable checksum metadata and treats 404 as absent", async () => {
         throw error;
       },
     },
-    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    bucket: ENV.RELEASES_S3_BUCKET,
     key,
   });
   assert.equal(missing, null);
@@ -117,16 +137,16 @@ test("copies the exact immutable stable installer to the versionless download", 
 
   await copySignerInstallerToDownload({
     client,
-    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    bucket: ENV.RELEASES_S3_BUCKET,
     immutableKey,
     attachmentFilename: "markiro-signer-0.1.0-windows-x86_64-setup.exe",
   });
 
   assert.equal(commands[0].constructor.name, "CopyObjectCommand");
   assert.deepEqual(commands[0].input, {
-    Bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    Bucket: ENV.RELEASES_S3_BUCKET,
     Key: "signer/download",
-    CopySource: `${ENV.YANDEX_STATION_RELEASE_BUCKET}/${immutableKey}`,
+    CopySource: `${ENV.RELEASES_S3_BUCKET}/${immutableKey}`,
     MetadataDirective: "REPLACE",
     ContentType: "application/vnd.microsoft.portable-executable",
     ContentDisposition: 'attachment; filename="markiro-signer-0.1.0-windows-x86_64-setup.exe"',
@@ -142,7 +162,7 @@ test("refuses to copy a beta or mismatched installer to the stable download", as
   await assert.rejects(
     copySignerInstallerToDownload({
       client,
-      bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+      bucket: ENV.RELEASES_S3_BUCKET,
       immutableKey: "signer/beta/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe",
       attachmentFilename: "markiro-signer-0.1.0-windows-x86_64-setup.exe",
     }),
@@ -151,7 +171,7 @@ test("refuses to copy a beta or mismatched installer to the stable download", as
   await assert.rejects(
     copySignerInstallerToDownload({
       client,
-      bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+      bucket: ENV.RELEASES_S3_BUCKET,
       immutableKey: "signer/stable/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe",
       attachmentFilename: "different.exe",
     }),
