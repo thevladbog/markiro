@@ -10,6 +10,7 @@ pub mod close_races;
 pub mod closed_part;
 pub mod leave_reenter;
 pub mod line_full;
+pub mod lines;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -888,6 +889,7 @@ async fn run_one(
         leave_reenter::NAME => leave_reenter::run(kind, work_dir, profile).await,
         closed_part::NAME => closed_part::run(kind, work_dir, profile).await,
         close_races::NAME => close_races::run(kind, work_dir, profile).await,
+        lines::NAME => lines::run(kind, work_dir, profile).await,
         other => (
             broken(other, format!("no scenario is named {other}")),
             Vec::new(),

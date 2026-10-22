@@ -37,6 +37,7 @@ pub const SCENARIOS: &[&str] = &[
     "leave-reenter",
     "closed-part",
     "close-races",
+    "lines",
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

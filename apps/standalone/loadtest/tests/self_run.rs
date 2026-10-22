@@ -164,6 +164,31 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
         );
     }
     assert!(races.observed.contains_key("orders"));
+    let lines = report
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.name == "lines")
+        .expect("the lines scenario ran");
+    assert!(
+        lines.checks.iter().all(|check| check.ok),
+        "{:#?}",
+        lines.checks
+    );
+    for name in [
+        "entry_into_another_lines_shift_is_refused",
+        "line_0_limit_below_its_own_slots_is_refused",
+        "a_later_scan_on_another_line_is_a_conflict_naming_the_owner_shift",
+        "totals_follow_the_owner_shift",
+        "shift_0_closed_by_its_last_part",
+    ] {
+        assert!(
+            lines
+                .checks
+                .iter()
+                .any(|check| check.name == name && check.ok),
+            "{name}"
+        );
+    }
     // `execute` hands back a report with the run's secrets already removed.
     let text = serde_json::to_string(&report).unwrap();
     assert!(!text.contains("Load-"), "the administrator password leaked");
