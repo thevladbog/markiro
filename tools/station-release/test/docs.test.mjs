@@ -1286,12 +1286,15 @@ test("beta and stable runbooks define exact post-success acceptance rollback inp
 });
 
 test("release hosting runbook inventories the Timeweb bucket, keys and edge", async () => {
-  const [hosting, bootstrap, beta, stable] = await Promise.all([
-    read("docs/runbooks/release-hosting.md"),
-    read("docs/runbooks/station-release-origin-bootstrap.md"),
-    read("docs/runbooks/station-beta-release.md"),
-    read("docs/runbooks/station-stable-release.md"),
-  ]);
+  // A Windows checkout reads CRLF; every boundary below is a line.
+  const [hosting, bootstrap, beta, stable] = (
+    await Promise.all([
+      read("docs/runbooks/release-hosting.md"),
+      read("docs/runbooks/station-release-origin-bootstrap.md"),
+      read("docs/runbooks/station-beta-release.md"),
+      read("docs/runbooks/station-stable-release.md"),
+    ])
+  ).map((text) => text.replaceAll("\r\n", "\n"));
   for (const deleted of [
     "docs/runbooks/yandex-infrastructure.md",
     "docs/runbooks/yandex-infrastructure-secrets.md",
@@ -1317,13 +1320,22 @@ test("release hosting runbook inventories the Timeweb bucket, keys and edge", as
     return hosting.slice(start, end === -1 ? undefined : end);
   };
   const environments = section("### 5. GitHub environments");
-  const inventory = (name) =>
-    [
-      ...environments
-        .slice(environments.indexOf(`\`${name}\``))
-        .split(/\n\n(?=`)/u)[0]
-        .matchAll(/- (secret|variable) `([^`]+)`/gu),
-    ].map((match) => `${match[1]} ${match[2]}`);
+  // Each environment owns exactly the list under its own heading line, up to
+  // the first line that is not a list item.
+  const inventory = (name) => {
+    const lines = environments.split("\n");
+    const heading = lines.findIndex((line) => line.startsWith(`\`${name}\` (`));
+    assert.notEqual(heading, -1, name);
+    assert.equal(lines[heading + 1], "", name);
+    const items = [];
+    for (const line of lines.slice(heading + 2)) {
+      if (!line.startsWith("- ")) break;
+      const match = /^- (secret|variable) `([^`]+)`/u.exec(line);
+      assert.ok(match, line);
+      items.push(`${match[1]} ${match[2]}`);
+    }
+    return items;
+  };
   assert.deepEqual(inventory("station-release"), [
     "secret RELEASES_S3_ACCESS_KEY_ID",
     "secret RELEASES_S3_SECRET_ACCESS_KEY",
