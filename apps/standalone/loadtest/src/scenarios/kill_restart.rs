@@ -17,16 +17,13 @@ use super::{enter_all, part_closed, prefixed, Ctx, HostKind, Res, LOAD_S};
 use crate::checks::Check;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "kill-restart";
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     if let Some(skipped) = super::skip_on_windows(NAME) {
-        return (skipped, Vec::new());
+        return (skipped, Redactions::default());
     }
     let HostKind::Spawn { bin } = kind else {
         return (
@@ -34,12 +31,12 @@ pub async fn run(
                 NAME,
                 "needs a host this harness spawned (--host spawn): a host in this process or an attached one cannot be killed and restarted",
             ),
-            Vec::new(),
+            Redactions::default(),
         );
     };
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 3, 1).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     ctx.faults = true;
     let outcome = body(&mut ctx, bin).await;

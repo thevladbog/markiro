@@ -17,6 +17,7 @@ use crate::checks::Check;
 use crate::gen;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 use crate::site::DeviceSpec;
 
 pub const NAME: &str = "closed-part";
@@ -29,14 +30,10 @@ const RACES: u32 = 3;
 /// The line's limit: the three stations and the handheld (a wizard line allows one by default).
 const LIMIT: u32 = 4;
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 3, 1).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await
@@ -67,7 +64,7 @@ async fn race_two(
         );
         tasks.push(tokio::spawn(async move {
             barrier.wait().await;
-            api.facts(&device.key, &[record]).await
+            api.facts(device.key.expose(), &[record]).await
         }));
     }
     let mut receipts = Vec::new();

@@ -19,21 +19,18 @@ use crate::checks::Check;
 use crate::metrics::Route;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "line-full";
 /// The line's limit; one device more than this enters at once.
 const LIMIT: u32 = 3;
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     // Five stations and a handheld: three stations and the handheld contend on line 1; the
     // office station (0) and station 4 scan on line 2 meanwhile.
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 5, 1).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await
@@ -69,7 +66,15 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
         tasks.push(tokio::spawn(async move {
             barrier.wait().await;
             let body = json!({ "supports": device.supports() });
-            let reply = send_raw(&api, &device.key, Route::Enter, "POST", &path, Some(body)).await;
+            let reply = send_raw(
+                &api,
+                device.key.expose(),
+                Route::Enter,
+                "POST",
+                &path,
+                Some(body),
+            )
+            .await;
             (at, reply)
         }));
     }

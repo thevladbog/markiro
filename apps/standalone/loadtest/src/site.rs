@@ -14,6 +14,7 @@ use crate::api::{Api, Auth, Reply};
 use crate::host::Host;
 use crate::metrics::{Metrics, Route};
 use crate::profile::Profile;
+use crate::secret::{Redactions, Secret};
 
 pub type Res<T> = Result<T, String>;
 
@@ -29,7 +30,7 @@ pub struct DeviceSpec {
     pub index: u32,
     pub kind: DeviceKind,
     pub id: String,
-    pub key: String,
+    pub key: Secret,
     pub name: String,
 }
 
@@ -52,15 +53,15 @@ impl DeviceSpec {
 #[derive(Clone)]
 pub struct Office {
     pub api: Api,
-    pub key: String,
-    pub token: String,
+    pub key: Secret,
+    pub token: Secret,
 }
 
 impl Office {
     pub async fn call(&self, method: &str, path: &str, body: Option<Value>) -> Res<Reply> {
         let auth = Auth {
-            device_key: Some(&self.key),
-            session: Some(&self.token),
+            device_key: Some(self.key.expose()),
+            session: Some(self.token.expose()),
         };
         self.api
             .send(Route::Other, method, path, auth, body.as_ref())
@@ -83,9 +84,9 @@ impl Office {
 /// administrator's login, read from the environment (never the command line).
 #[derive(Debug, Clone)]
 pub struct AttachCredentials {
-    pub office_device_key: String,
+    pub office_device_key: Secret,
     pub login: String,
-    pub password: String,
+    pub password: Secret,
 }
 
 #[derive(Clone)]
@@ -102,7 +103,7 @@ pub struct Site {
     /// What the run made or was given that must never reach a file it
     /// writes: the administrator's password, pairing codes, device keys and
     /// the session token.
-    pub secrets: Vec<String>,
+    pub redactions: Redactions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,31 +170,34 @@ pub async fn provision_site(
 ) -> Res<Site> {
     let api = Api::new(&host.base, &host.fingerprint, metrics.clone());
     let mut devices = Vec::new();
-    let mut secrets: Vec<String> = Vec::new();
+    let mut redactions = Redactions::default();
     // The office station: the first station, which also works the shift when
     // the host is the harness's own.
     let (office_key, token) = match attach {
         Some(credentials) => {
-            secrets.push(credentials.office_device_key.clone());
-            secrets.push(credentials.password.clone());
+            redactions.push(credentials.office_device_key.clone());
+            redactions.push(credentials.password.clone());
             let session = device_call(
                 &api,
                 Route::Other,
-                &credentials.office_device_key,
+                credentials.office_device_key.expose(),
                 "POST",
                 "/v1/office/login",
-                Some(json!({ "login": credentials.login, "password": credentials.password })),
+                Some(json!({
+                    "login": credentials.login,
+                    "password": credentials.password.expose()
+                })),
             )
             .await?;
             (
                 credentials.office_device_key,
-                str_of(&session, "/token")?.to_owned(),
+                Secret::new(str_of(&session, "/token")?),
             )
         }
         None => {
             let paired = pair_local(&api, "Нагрузка станция 1").await?;
             let password = throwaway_password()?;
-            secrets.push(password.clone());
+            redactions.push(Secret::new(password.clone()));
             let body = json!({
                 "admin": { "login": "admin", "name": "Нагрузка", "password": password },
                 "org": {
@@ -206,13 +210,13 @@ pub async fn provision_site(
             let done = device_call(
                 &api,
                 Route::Other,
-                &paired.key,
+                paired.key.expose(),
                 "POST",
                 "/v1/bootstrap",
                 Some(body),
             )
             .await?;
-            let token = str_of(&done, "/session/token")?.to_owned();
+            let token = Secret::new(str_of(&done, "/session/token")?);
             devices.push(paired);
             (devices[0].key.clone(), token)
         }
@@ -308,7 +312,7 @@ pub async fn provision_site(
                 DeviceKind::Station,
                 &name,
                 &mut claims,
-                &mut secrets,
+                &mut redactions,
             )
             .await?
         };
@@ -322,7 +326,7 @@ pub async fn provision_site(
                 DeviceKind::Handheld,
                 &name,
                 &mut claims,
-                &mut secrets,
+                &mut redactions,
             )
             .await?,
         );
@@ -341,7 +345,7 @@ pub async fn provision_site(
             device_call(
                 &api,
                 Route::Other,
-                &device.key,
+                device.key.expose(),
                 "PUT",
                 "/v1/device/line",
                 Some(json!({ "lineId": line_id })),
@@ -349,9 +353,11 @@ pub async fn provision_site(
             .await?;
         }
     }
-    secrets.push(office.token.clone());
-    secrets.push(office.key.clone());
-    secrets.extend(devices.iter().map(|device| device.key.clone()));
+    redactions.push(office.token.clone());
+    redactions.push(office.key.clone());
+    for device in &devices {
+        redactions.push(device.key.clone());
+    }
     let line_ids: Vec<String> = LINE_NAMES
         .iter()
         .filter_map(|name| {
@@ -371,7 +377,7 @@ pub async fn provision_site(
         product_id: str_of(&product, "/id")?.to_owned(),
         box_template_id: str_of(&box_template, "/id")?.to_owned(),
         pallet_template_id,
-        secrets,
+        redactions,
     })
 }
 
@@ -405,7 +411,7 @@ async fn pair_local(api: &Api, name: &str) -> Res<DeviceSpec> {
         index: 0,
         kind: DeviceKind::Station,
         id: str_of(&paired.body, "/deviceId")?.to_owned(),
-        key: str_of(&paired.body, "/deviceKey")?.to_owned(),
+        key: Secret::new(str_of(&paired.body, "/deviceKey")?),
         name: name.to_owned(),
     })
 }
@@ -416,7 +422,7 @@ async fn claim(
     kind: DeviceKind,
     name: &str,
     claims: &mut u32,
-    secrets: &mut Vec<String>,
+    redactions: &mut Redactions,
 ) -> Res<DeviceSpec> {
     if *claims > 0 && *claims % CLAIMS_PER_MINUTE == 0 {
         tokio::time::sleep(Duration::from_secs(61)).await;
@@ -424,7 +430,7 @@ async fn claim(
     *claims += 1;
     let code = office.ok("POST", "/v1/office/pairing-codes", None).await?;
     if let Some(pairing) = code.pointer("/code").and_then(Value::as_str) {
-        secrets.push(pairing.to_owned());
+        redactions.push(Secret::new(pairing));
     }
     let (version, capabilities) = match kind {
         DeviceKind::Handheld => (HANDHELD_VERSION, json!(["handheld-host-v1"])),
@@ -451,7 +457,7 @@ async fn claim(
         index: 0,
         kind,
         id: str_of(&paired.body, "/deviceId")?.to_owned(),
-        key: str_of(&paired.body, "/deviceKey")?.to_owned(),
+        key: Secret::new(str_of(&paired.body, "/deviceKey")?),
         name: name.to_owned(),
     })
 }
@@ -500,7 +506,7 @@ pub async fn plan_and_enter(
         let entered = device_call(
             &site.office.api,
             Route::Enter,
-            &device.key,
+            device.key.expose(),
             "POST",
             &format!("/v1/device/shifts/{id}/enter"),
             Some(json!({ "supports": device.supports() })),
@@ -566,21 +572,54 @@ mod tests {
                 .unwrap();
             host.stop().await.unwrap();
             let password = site
-                .secrets
+                .redactions
                 .iter()
-                .find(|secret| secret.starts_with("Load-"))
+                .find(|secret| secret.expose().starts_with("Load-"))
                 .expect("the password is among the secrets")
-                .clone();
+                .expose()
+                .to_owned();
             assert_eq!(password.len(), "Load-".len() + 32 + 1, "{password}");
             let mut report = crate::report::sample_passing();
             report
                 .checks
                 .push(crate::checks::Check::new("x", false, password.clone()));
-            let clean = crate::report::redact(&report, &site.secrets);
+            let clean = crate::report::redact(&report, &site.redactions);
             assert!(!serde_json::to_string(&clean).unwrap().contains(&password));
             passwords.push(password);
         }
         assert_ne!(passwords[0], passwords[1], "the password followed the seed");
+    }
+
+    /// A device's key and an attached host's credentials never reach a formatted text: a
+    /// `{:?}` of what holds them (a failed check's detail, a panic) says only that they are
+    /// redacted.
+    #[test]
+    fn what_holds_a_credential_prints_none_of_it() {
+        let spec = DeviceSpec {
+            index: 0,
+            kind: DeviceKind::Station,
+            id: "device-1".to_owned(),
+            key: "KEY-0123456789abcdef".into(),
+            name: "station".to_owned(),
+        };
+        let printed = format!("{spec:?}");
+        assert!(printed.contains("device-1"), "the id is still printed");
+        assert!(
+            !printed.contains("KEY-0123456789abcdef"),
+            "the device key is printed"
+        );
+        let credentials = AttachCredentials {
+            office_device_key: "KEY-office-fedcba".into(),
+            login: "admin".to_owned(),
+            password: "Load-hunter2-password".into(),
+        };
+        let printed = format!("{credentials:?}");
+        assert!(printed.contains("admin"), "the login is still printed");
+        assert!(
+            !printed.contains("KEY-office-fedcba"),
+            "the office key is printed"
+        );
+        assert!(!printed.contains("hunter2"), "the password is printed");
     }
 
     #[test]
@@ -589,7 +628,7 @@ mod tests {
             index: 0,
             kind,
             id: String::new(),
-            key: String::new(),
+            key: "".into(),
             name: String::new(),
         };
         assert_eq!(

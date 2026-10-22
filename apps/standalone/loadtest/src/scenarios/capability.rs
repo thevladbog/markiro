@@ -15,18 +15,15 @@ use crate::checks::Check;
 use crate::metrics::Route;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "capability";
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     // Device 0 is the office station, 1 and 2 are stations, 3 is the handheld.
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 3, 1).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await

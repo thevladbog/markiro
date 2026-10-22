@@ -13,6 +13,7 @@ use super::{
 use crate::checks::Check;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "leave-reenter";
 /// Pause-and-return cycles, one device after another.
@@ -20,15 +21,11 @@ const CYCLES: usize = 3;
 /// The line's limit: exactly the three working stations.
 const LIMIT: u32 = 3;
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     // Stations 0, 1 and 2 work; handheld 3 is the spare.
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 3, 1).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await

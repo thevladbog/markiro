@@ -18,19 +18,16 @@ use crate::metrics::Route;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
 use crate::rng::Rng;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "lines";
 /// (line index, its limit, its devices).
 const LAYOUT: [(usize, u32, &[usize]); 3] = [(0, 2, &[0, 1]), (1, 3, &[2, 3, 4]), (2, 1, &[5])];
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 4, 2).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await
@@ -106,7 +103,12 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
             &gen::text_of(gen::now_ms()),
         ),
     );
-    let receipts = ctx.site.office.api.facts(&first.key, &[stray]).await?;
+    let receipts = ctx
+        .site
+        .office
+        .api
+        .facts(first.key.expose(), &[stray])
+        .await?;
     ctx.same(
         "a_fact_for_a_shift_not_entered_is_rejected",
         (Some("rejected"), Some("not_entered")),

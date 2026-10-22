@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::profile::{Profile, Thresholds};
 use crate::report::{compare, redact, render_markdown, Report};
 use crate::run::{execute_raw, HostChoice, RunOptions};
+use crate::secret::{Redactions, Secret};
 use crate::site::AttachCredentials;
 
 pub const USAGE: &str = "usage:
@@ -218,7 +219,7 @@ pub fn exit_code(outcome: &Result<bool, String>) -> u8 {
 pub fn write_reports(
     report: &Report,
     dir: &Path,
-    secrets: &[String],
+    secrets: &Redactions,
 ) -> Result<(PathBuf, PathBuf), String> {
     let report = redact(report, secrets);
     let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
@@ -267,9 +268,9 @@ pub async fn run(args: RunArgs) -> Result<bool, String> {
                 data_dir,
                 pid,
                 credentials: AttachCredentials {
-                    office_device_key: env("MARKIRO_LOAD_OFFICE_DEVICE_KEY")?,
+                    office_device_key: Secret::new(env("MARKIRO_LOAD_OFFICE_DEVICE_KEY")?),
                     login: env("MARKIRO_LOAD_ADMIN_LOGIN")?,
-                    password: env("MARKIRO_LOAD_ADMIN_PASSWORD")?,
+                    password: Secret::new(env("MARKIRO_LOAD_ADMIN_PASSWORD")?),
                 },
             }
         }
@@ -532,14 +533,14 @@ mod tests {
             .verdict
             .failures
             .push(format!("detail {}", secrets[1]));
-        let secrets: Vec<String> = secrets.iter().map(|s| (*s).to_owned()).collect();
-        let (json, markdown) = write_reports(&report, dir.path(), &secrets).unwrap();
+        let redactions: Redactions = secrets.iter().copied().map(Secret::from).collect();
+        let (json, markdown) = write_reports(&report, dir.path(), &redactions).unwrap();
         for path in [json, markdown] {
             let text = std::fs::read_to_string(&path).unwrap();
             // The messages name no secret: a failing assertion's text is a log of its own.
             for secret in &secrets {
                 assert!(
-                    !text.contains(secret.as_str()),
+                    !text.contains(secret),
                     "a planted secret is in {}",
                     path.display()
                 );
@@ -548,7 +549,7 @@ mod tests {
         }
         // and the unredacted report really did carry them (the test can fail)
         let raw = serde_json::to_string(&report).unwrap();
-        assert!(secrets.iter().all(|secret| raw.contains(secret.as_str())));
+        assert!(secrets.iter().all(|secret| raw.contains(secret)));
     }
 
     #[test]

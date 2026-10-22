@@ -18,6 +18,7 @@ use crate::checks::Check;
 use crate::gen;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "close-races";
 /// Office-against-device races, each on a shift of its own.
@@ -25,14 +26,10 @@ const RACES: u32 = 4;
 /// The line's limit: four stations and two handhelds.
 const LIMIT: u32 = 6;
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 4, 2).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await
@@ -139,7 +136,7 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
             let barrier = barrier.clone();
             tokio::spawn(async move {
                 barrier.wait().await;
-                api.facts(&key, &[record]).await
+                api.facts(key.expose(), &[record]).await
             })
         };
         let office_reply = office_task.await.map_err(|error| error.to_string())??;

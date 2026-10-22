@@ -15,6 +15,7 @@ use crate::ledger::Expected;
 use crate::procstat::slope_per_hour;
 use crate::profile::{Profile, Thresholds};
 use crate::sampler::Sample;
+use crate::secret::Redactions;
 
 pub const SCHEMA: u32 = 2;
 
@@ -623,15 +624,15 @@ pub fn compare(old: &Report, new: &Report) -> Vec<Regression> {
 /// The report with every given secret replaced by `[redacted]` in every string
 /// (log lines, check details, file names), so a host that logs a credential
 /// does not carry it into the file a run leaves behind.
-pub fn redact(report: &Report, secrets: &[String]) -> Report {
-    fn clean(text: &str, secrets: &[String]) -> String {
+pub fn redact(report: &Report, secrets: &Redactions) -> Report {
+    fn clean(text: &str, secrets: &Redactions) -> String {
         let mut text = text.to_owned();
-        for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
-            text = text.replace(secret.as_str(), "[redacted]");
+        for secret in secrets.iter().filter(|secret| !secret.expose().is_empty()) {
+            text = text.replace(secret.expose(), "[redacted]");
         }
         text
     }
-    fn walk(value: &mut serde_json::Value, secrets: &[String]) {
+    fn walk(value: &mut serde_json::Value, secrets: &Redactions) {
         match value {
             serde_json::Value::String(text) => *text = clean(text, secrets),
             serde_json::Value::Array(items) => items.iter_mut().for_each(|v| walk(v, secrets)),
@@ -730,6 +731,7 @@ pub fn sample_passing() -> Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secret::Secret;
 
     #[test]
     fn a_clean_run_passes() {
@@ -1131,6 +1133,7 @@ mod tests {
         .iter()
         .map(|s| (*s).to_owned())
         .collect();
+        let redactions: Redactions = secrets.iter().cloned().map(Secret::new).collect();
         let mut report = sample_passing();
         // A host log may echo anything; a failing device may quote a request.
         report.log.first_errors = vec![format!("ERROR login {} {}", secrets[3], secrets[2])];
@@ -1158,7 +1161,7 @@ mod tests {
                 "the probe must be able to see every planted secret"
             );
         }
-        let clean = redact(&report, &secrets);
+        let clean = redact(&report, &redactions);
         let text = serde_json::to_string_pretty(&clean).unwrap() + &render_markdown(&clean);
         for secret in &secrets {
             assert!(!text.contains(secret.as_str()), "a planted secret leaked");
@@ -1310,7 +1313,10 @@ mod tests {
             ),
             "{text}"
         );
-        let clean = redact(&report, &["SECRET-KEY-1".to_owned()]);
+        let clean = redact(
+            &report,
+            &[Secret::from("SECRET-KEY-1")].into_iter().collect(),
+        );
         let all = serde_json::to_string(&clean).unwrap() + &render_markdown(&clean);
         assert!(
             !all.contains("SECRET-KEY-1"),
@@ -1344,11 +1350,11 @@ mod tests {
                 .expect("a latency summary"),
         );
         report.scenarios.push(s);
-        let secrets: Vec<String> = "ABCDEFGHIJ"
+        let redactions: Redactions = "ABCDEFGHIJ"
             .chars()
-            .map(|c| format!("SECRET-{c}"))
+            .map(|c| Secret::new(format!("SECRET-{c}")))
             .collect();
-        let clean = redact(&report, &secrets);
+        let clean = redact(&report, &redactions);
         let all = serde_json::to_string(&clean).unwrap();
         assert!(!all.contains("SECRET-"), "{all}");
         assert_eq!(clean.scenarios[0].errors.values().sum::<u64>(), 2);

@@ -226,7 +226,7 @@ impl SimDevice {
 
     fn auth(&self) -> Auth<'_> {
         Auth {
-            device_key: Some(&self.spec.key),
+            device_key: Some(self.spec.key.expose()),
             session: None,
         }
     }
@@ -280,7 +280,7 @@ impl SimDevice {
             &self.shared.shift_id,
             data,
         );
-        let mut receipts = self.api.facts(&self.spec.key, &[record]).await?;
+        let mut receipts = self.api.facts(self.spec.key.expose(), &[record]).await?;
         Ok(receipts.remove(0))
     }
 
@@ -396,7 +396,7 @@ impl SimDevice {
             &self.shared.shift_id,
             data,
         );
-        let mut receipts = self.api.facts(&self.spec.key, &[record]).await?;
+        let mut receipts = self.api.facts(self.spec.key.expose(), &[record]).await?;
         let receipt = receipts.remove(0);
         self.apply_receipt(markiro_proto::FactKind::ShiftClosed, &receipt);
         Ok(receipt)
@@ -1200,7 +1200,11 @@ mod tests {
             .iter()
             .map(|queued| queued.record.clone())
             .collect();
-        let first = device.api.facts(&device.spec.key, &lost).await.unwrap();
+        let first = device
+            .api
+            .facts(device.spec.key.expose(), &lost)
+            .await
+            .unwrap();
         assert_eq!(first.len(), lost.len());
         assert_eq!(shared.ledger.lock().unwrap().expected().records, 0);
         // The device retries the same records: the stored receipts come back.
@@ -1271,7 +1275,7 @@ mod tests {
         let profile = quiet(Profile::preset("tiny").unwrap());
         let (_dir, mut host, device, shared) = one_device_site(&profile).await;
         let mut spec = device.spec.clone();
-        spec.key = "not-a-device-key".to_owned();
+        spec.key = "not-a-device-key".into();
         let api = Api::new(&host.base, &host.fingerprint, shared.metrics.clone());
         let stranger = SimDevice::new(spec, api, shared.clone());
         {

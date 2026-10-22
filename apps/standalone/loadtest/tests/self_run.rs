@@ -217,12 +217,14 @@ async fn the_written_files_carry_none_of_the_runs_secrets() {
     // The messages name no secret, nor anything counted from them: a failing
     // assertion's text is a log of its own.
     assert!(secrets.len() >= 5, "the run made fewer than five secrets");
-    assert!(secrets.iter().any(|secret| secret.starts_with("Load-")));
+    assert!(secrets
+        .iter()
+        .any(|secret| secret.expose().starts_with("Load-")));
     // The scenario's own site made a second administrator password, and it is among them.
     assert!(
         secrets
             .iter()
-            .filter(|secret| secret.starts_with("Load-"))
+            .filter(|secret| secret.expose().starts_with("Load-"))
             .count()
             >= 2,
         "the scenario's secrets are not among the run's"
@@ -232,16 +234,16 @@ async fn the_written_files_carry_none_of_the_runs_secrets() {
     // then proves the writer removes them (it fails when redaction is skipped).
     raw.log.first_errors = secrets
         .iter()
-        .map(|secret| format!("ERROR the host logged {secret}"))
+        .map(|secret| format!("ERROR the host logged {}", secret.expose()))
         .collect();
     let out = dir.path().join("out");
     std::fs::create_dir_all(&out).unwrap();
     let (json, markdown) = markiro_loadtest::cli::write_reports(&raw, &out, &secrets).unwrap();
     for path in [json, markdown] {
         let text = std::fs::read_to_string(&path).unwrap();
-        for secret in &secrets {
+        for secret in secrets.iter() {
             assert!(
-                !text.contains(secret.as_str()),
+                !text.contains(secret.expose()),
                 "a secret of the run is in {}",
                 path.display()
             );

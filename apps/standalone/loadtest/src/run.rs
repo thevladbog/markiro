@@ -27,6 +27,7 @@ use crate::report::{
 use crate::rng::Rng;
 use crate::sampler;
 use crate::scenarios::{self, HostKind};
+use crate::secret::Redactions;
 use crate::site::{provision, AttachCredentials, Office, Res};
 
 pub enum HostChoice {
@@ -275,7 +276,7 @@ pub async fn execute(options: RunOptions) -> Res<Report> {
 /// The run and the secrets it made or was given. The report is NOT
 /// redacted: whoever writes it calls `report::redact` with the secrets
 /// first (`cli::write_reports` does).
-pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
+pub async fn execute_raw(options: RunOptions) -> Res<(Report, Redactions)> {
     let RunOptions {
         profile,
         thresholds,
@@ -552,7 +553,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
                     dir,
                     &copy,
                     &work_dir,
-                    &site.devices[0].key,
+                    site.devices[0].key.expose(),
                     &shift.id,
                     expected,
                     metrics.clone(),
@@ -569,7 +570,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
     };
     // The scenarios, each on a fresh host of the same mode: the main host is stopped by now and
     // nothing of theirs reaches the main run's metrics, series or log.
-    let (scenario_results, scenario_secrets) =
+    let (scenario_results, scenario_redactions) =
         scenarios::run_all(&scenario_host, &work_dir, &profile).await;
     let latency = metrics
         .latency()
@@ -618,7 +619,7 @@ pub async fn execute_raw(options: RunOptions) -> Res<(Report, Vec<String>)> {
         profile,
     };
     report.verdict = evaluate(&report);
-    let mut secrets = site.secrets.clone();
-    secrets.extend(scenario_secrets);
-    Ok((report, secrets))
+    let mut redactions = site.redactions.clone();
+    redactions.extend(scenario_redactions);
+    Ok((report, redactions))
 }

@@ -37,6 +37,7 @@ use crate::metrics::{Metrics, Route};
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
 use crate::rng::Rng;
+use crate::secret::Redactions;
 use crate::site::{provision_site, DeviceSpec, Site};
 
 pub type Res<T> = Result<T, String>;
@@ -270,7 +271,7 @@ impl Ctx {
     ) -> Res<Reply> {
         send_raw(
             &self.site.office.api,
-            &device.key,
+            device.key.expose(),
             route,
             method,
             path,
@@ -459,7 +460,7 @@ impl Ctx {
     /// must name no busy database, nor an ERROR unless the scenario injects faults; the
     /// scenario's own requests must have had no 5xx, nor a request without an answer unless it
     /// injects faults.
-    pub async fn finish(mut self, outcome: Res<()>) -> (ScenarioResult, Vec<String>) {
+    pub async fn finish(mut self, outcome: Res<()>) -> (ScenarioResult, Redactions) {
         if let Err(error) = outcome {
             self.checks.push(Check::new("scenario_ran", false, error));
         }
@@ -562,7 +563,7 @@ impl Ctx {
                 latency,
                 errors,
             },
-            self.site.secrets,
+            self.site.redactions,
         )
     }
 }
@@ -649,7 +650,7 @@ pub async fn send_with_protocol(
     let mut request = client
         .request(verb, format!("{}{path}", ctx.host.base))
         .header(markiro_proto::PROTOCOL_HEADER, protocol.to_string())
-        .header("authorization", format!("Bearer {}", device.key));
+        .header("authorization", format!("Bearer {}", device.key.expose()));
     if let Some(body) = &body {
         request = request.json(body);
     }
@@ -847,7 +848,13 @@ pub async fn scripted_work(
             break;
         }
         let records: Vec<Value> = batch.iter().map(|queued| queued.record.clone()).collect();
-        receipts.extend(ctx.site.office.api.facts(&device.key, &records).await?);
+        receipts.extend(
+            ctx.site
+                .office
+                .api
+                .facts(device.key.expose(), &records)
+                .await?,
+        );
         engine.ack(batch.len());
     }
     Ok(Scripted {
@@ -876,7 +883,12 @@ pub async fn scripted_scan(
         shift,
         gen::scan_ok(code, &rng.uuid(), &gen::text_of(at_ms)),
     );
-    let mut receipts = ctx.site.office.api.facts(&device.key, &[record]).await?;
+    let mut receipts = ctx
+        .site
+        .office
+        .api
+        .facts(device.key.expose(), &[record])
+        .await?;
     Ok(receipts.remove(0))
 }
 
@@ -921,7 +933,12 @@ pub async fn close_fact(
 ) -> Res<Value> {
     let at = closed_at.unwrap_or_else(|| gen::text_of(gen::now_ms()));
     let record = close_record(shift, device, variant, planned, actual, boxes, reason, &at);
-    let mut receipts = ctx.site.office.api.facts(&device.key, &[record]).await?;
+    let mut receipts = ctx
+        .site
+        .office
+        .api
+        .facts(device.key.expose(), &[record])
+        .await?;
     Ok(receipts.remove(0))
 }
 
@@ -1048,7 +1065,7 @@ async fn run_one(
     kind: &HostKind,
     work_dir: &Path,
     profile: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+) -> (ScenarioResult, Redactions) {
     match name {
         line_full::NAME => line_full::run(kind, work_dir, profile).await,
         capability::NAME => capability::run(kind, work_dir, profile).await,
@@ -1066,7 +1083,7 @@ async fn run_one(
         }
         other => (
             broken(other, format!("no scenario is named {other}")),
-            Vec::new(),
+            Redactions::default(),
         ),
     }
 }
@@ -1082,10 +1099,13 @@ async fn run_isolated(
     kind: &HostKind,
     work_dir: &Path,
     profile: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+) -> (ScenarioResult, Redactions) {
     match CatchUnwind(Box::pin(run_one(name, kind, work_dir, profile))).await {
         Ok(done) => done,
-        Err(payload) => (broken(name, panic_message(payload.as_ref())), Vec::new()),
+        Err(payload) => (
+            broken(name, panic_message(payload.as_ref())),
+            Redactions::default(),
+        ),
     }
 }
 
@@ -1124,9 +1144,9 @@ pub async fn run_all(
     kind: &HostKind,
     work_dir: &Path,
     profile: &Profile,
-) -> (Vec<ScenarioResult>, Vec<String>) {
+) -> (Vec<ScenarioResult>, Redactions) {
     let mut results = Vec::new();
-    let mut secrets = Vec::new();
+    let mut redactions = Redactions::default();
     for name in &profile.scenarios {
         let started = Instant::now();
         let (mut done, found) = if *kind == HostKind::Attach {
@@ -1135,7 +1155,7 @@ pub async fn run_all(
                     name,
                     "attach: the harness makes a fresh host for each scenario and cannot make one beside an attached host",
                 ),
-                Vec::new(),
+                Redactions::default(),
             )
         } else {
             run_isolated(name, kind, work_dir, profile).await
@@ -1155,9 +1175,9 @@ pub async fn run_all(
             started.elapsed().as_secs_f64()
         );
         results.push(done);
-        secrets.extend(found);
+        redactions.extend(found);
     }
-    (results, secrets)
+    (results, redactions)
 }
 
 #[cfg(test)]
@@ -1225,7 +1245,9 @@ mod tests {
             .iter()
             .any(|check| check.name == "no_5xx_answer"));
         assert!(
-            secrets.iter().any(|secret| secret.starts_with("Load-")),
+            secrets
+                .iter()
+                .any(|secret| secret.expose().starts_with("Load-")),
             "the scenario site's password is among its secrets"
         );
         // A host in this process has no log: its ERROR and busy lines are not judged, and the
@@ -1479,7 +1501,8 @@ mod tests {
         let (mut result, secrets) = ctx.finish(Ok(())).await;
         assert!(secrets.len() >= 2, "a password and device keys at least");
         // A scenario's findings carry the site's secrets everywhere text can go.
-        let (first, second) = (secrets[0].clone(), secrets[1].clone());
+        let mut planted = secrets.iter().map(|secret| secret.expose().to_owned());
+        let (first, second) = (planted.next().unwrap(), planted.next().unwrap());
         result.note = format!("note {first}");
         result.checks.push(Check::new(
             "leak",
@@ -1497,9 +1520,9 @@ mod tests {
             crate::cli::write_reports(&report, work.path(), &secrets).unwrap();
         for path in [json_path, md_path] {
             let text = std::fs::read_to_string(&path).unwrap();
-            for secret in &secrets {
+            for secret in secrets.iter() {
                 assert!(
-                    !text.contains(secret.as_str()),
+                    !text.contains(secret.expose()),
                     "a scenario secret is in {}",
                     path.display()
                 );
@@ -1512,6 +1535,6 @@ mod tests {
         assert!(secrets
             .iter()
             .take(2)
-            .all(|secret| raw.contains(secret.as_str())));
+            .all(|secret| raw.contains(secret.expose())));
     }
 }

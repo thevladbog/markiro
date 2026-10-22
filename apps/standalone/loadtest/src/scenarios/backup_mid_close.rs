@@ -22,16 +22,13 @@ use crate::host::Host;
 use crate::metrics::Route;
 use crate::profile::Profile;
 use crate::report::ScenarioResult;
+use crate::secret::Redactions;
 
 pub const NAME: &str = "backup-mid-close";
 /// The line's limit: the four stations and the two handhelds (a wizard line allows one).
 const LIMIT: u32 = 6;
 
-pub async fn run(
-    kind: &HostKind,
-    work_dir: &Path,
-    base: &Profile,
-) -> (ScenarioResult, Vec<String>) {
+pub async fn run(kind: &HostKind, work_dir: &Path, base: &Profile) -> (ScenarioResult, Redactions) {
     // Restoring a copy the backup worker may still hold (`os error 32`) is unverified on Windows.
     if !super::judged_in_process(NAME, cfg!(windows)) {
         return (
@@ -39,12 +36,12 @@ pub async fn run(
                 NAME,
                 "windows: restoring a copy the backup worker may hold (os error 32) is unverified",
             ),
-            Vec::new(),
+            Redactions::default(),
         );
     }
     let mut ctx = match Ctx::new(NAME, kind, work_dir, base, 4, 2).await {
         Ok(ctx) => ctx,
-        Err(error) => return (super::broken(NAME, error), Vec::new()),
+        Err(error) => return (super::broken(NAME, error), Redactions::default()),
     };
     let outcome = body(&mut ctx).await;
     ctx.finish(outcome).await
@@ -202,7 +199,7 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
                     "GET",
                     "/v1/device/shifts",
                     crate::api::Auth {
-                        device_key: Some(&device.key),
+                        device_key: Some(device.key.expose()),
                         session: None,
                     },
                     None,
@@ -246,7 +243,7 @@ async fn body(ctx: &mut Ctx) -> Res<()> {
             &data_dir,
             &last_path,
             &ctx.dir,
-            &key,
+            key.expose(),
             &shift,
             expected,
             ctx.metrics.clone(),
