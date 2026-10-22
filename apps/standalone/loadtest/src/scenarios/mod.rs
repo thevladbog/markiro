@@ -5,6 +5,8 @@
 //! the profile's thresholds. A scenario that needs what the run's host mode lacks says so
 //! (`judged: false`) instead of passing.
 
+pub mod line_full;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -876,8 +878,8 @@ async fn run_one(
     work_dir: &Path,
     profile: &Profile,
 ) -> (ScenarioResult, Vec<String>) {
-    let _ = (kind, work_dir, profile);
     match name {
+        line_full::NAME => line_full::run(kind, work_dir, profile).await,
         other => (
             broken(other, format!("no scenario is named {other}")),
             Vec::new(),

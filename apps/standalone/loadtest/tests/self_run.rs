@@ -94,6 +94,7 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
 async fn the_written_files_carry_none_of_the_runs_secrets() {
     let mut profile = Profile::preset("tiny").unwrap();
     profile.set("durationS", "10").unwrap();
+    profile.set("scenarios", "line-full").unwrap();
     let dir = tempfile::tempdir().unwrap();
     let (mut raw, secrets) = execute_raw(RunOptions {
         thresholds: Thresholds::for_profile("tiny").unwrap(),
@@ -108,6 +109,15 @@ async fn the_written_files_carry_none_of_the_runs_secrets() {
     // assertion's text is a log of its own.
     assert!(secrets.len() >= 5, "the run made fewer than five secrets");
     assert!(secrets.iter().any(|secret| secret.starts_with("Load-")));
+    // The scenario's own site made a second administrator password, and it is among them.
+    assert!(
+        secrets
+            .iter()
+            .filter(|secret| secret.starts_with("Load-"))
+            .count()
+            >= 2,
+        "the scenario's secrets are not among the run's"
+    );
     // A clean run leaks nothing by itself, so plant every real secret of this run
     // where a host's log line or an error text would carry one: the scan below
     // then proves the writer removes them (it fails when redaction is skipped).
