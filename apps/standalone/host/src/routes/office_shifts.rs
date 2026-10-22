@@ -249,9 +249,20 @@ pub struct ShiftListQuery {
     planned_to: Option<String>,
 }
 
+/// How many shifts owing a reason (`close_reason_missing`) the list adds
+/// beyond its period, newest production date first. The set empties as the
+/// office gives the reasons; past the cap the oldest wait for the newer ones
+/// (or a period that holds them).
+pub const REASON_MISSING_CAP: i64 = 100;
+
 /// `GET /v1/office/shifts`: without a period every planned and active shift
 /// and the closed ones produced in the last 31 days; with one, every shift
-/// produced in it. Newest production date first.
+/// produced in it. Whatever the period, also every shift closed without the
+/// reason its devices owed (`closeReasonMissing`, plan 2b, spec §12.9), up to
+/// `REASON_MISSING_CAP` of them, so the office's request for it never drops
+/// out of a window: the host filters by period only (status, line and search
+/// are the office's own filters over these rows). Each shift once, newest
+/// production date first.
 pub async fn list_shifts(
     State(state): State<AppState>,
     _context: OfficeContext,
@@ -287,11 +298,18 @@ pub async fn list_shifts(
     let end = |bound: Option<time::Date>, open: &str| {
         bound.map_or_else(|| open.to_owned(), shifts::civil_text)
     };
+    // The shifts owing a reason, beside the period: the cap's newest by the
+    // list's own order. A row both in the period and owing a reason is one row.
+    let reason_missing = format!(
+        "id IN (SELECT id FROM shifts WHERE close_reason_missing = 1 {order} \
+         LIMIT {REASON_MISSING_CAP})"
+    );
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let rows: Vec<ShiftRow> = if produced == (None, None) && planned == (None, None) {
         let cutoff = state.now().date() - time::Duration::days(RECENT_DAYS);
         sqlx::query_as(&format!(
-            "{SELECT} WHERE status <> 'closed' OR production_date >= ? {order}"
+            "{SELECT} WHERE status <> 'closed' OR production_date >= ? \
+             OR {reason_missing} {order}"
         ))
         .bind(shifts::civil_text(cutoff))
         .fetch_all(&mut *tx)
@@ -299,10 +317,10 @@ pub async fn list_shifts(
     } else {
         // Every row has a shift date (`0028` filled the old ones and a
         // trigger fills a new one), so the plain column serves the index
-        // `shifts_planned_date`.
+        // `shifts_planned_date` (beside the key, for the shifts owing a reason).
         sqlx::query_as(&format!(
-            "{SELECT} WHERE production_date >= ? AND production_date <= ? \
-             AND planned_date >= ? AND planned_date <= ? {order}"
+            "{SELECT} WHERE (production_date >= ? AND production_date <= ? \
+             AND planned_date >= ? AND planned_date <= ?) OR {reason_missing} {order}"
         ))
         .bind(end(produced.0, "0001-01-01"))
         .bind(end(produced.1, "9999-12-31"))
