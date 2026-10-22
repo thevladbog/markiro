@@ -1,7 +1,217 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { resolve } from "node:path";
 import { inspect } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import * as fixture from "./support/us-demo-viewer-browser-fixture";
+
+const task10Helper =
+  '/** Observation only: never used to decide whether the real entry may acquire resources. */\nexport function viewerGuardObservation(\n  env: Readonly<Record<string, string | undefined>>,\n  platform: string,\n): string {\n  const refused = [\n    env.CI !== "true",\n    env.GITHUB_ACTIONS !== "true",\n    env.GITHUB_JOB !== "demo_viewer_acceptance",\n    env.RUNNER_ENVIRONMENT !== "github-hosted",\n    platform !== "linux",\n    env.US_TEST_DATABASE_URL !==\n      "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",\n    Boolean(env.NODE_OPTIONS),\n    Boolean(env.NODE_PATH),\n    Boolean(env.DEBUG),\n    Boolean(env.PWDEBUG),\n  ];\n  const mask = refused.reduce((bits, failed, index) => bits | (failed ? 1 << index : 0), 0);\n  return `US_DEMO_VIEWER_GUARD_OBSERVATION ${mask}`;\n}\n\n';
+const task10Branch =
+  '  ) {\n    try {\n      console.error(\n        viewerGuardObservation(\n          {\n            CI: process.env.CI,\n            GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,\n            GITHUB_JOB: process.env.GITHUB_JOB,\n            RUNNER_ENVIRONMENT: process.env.RUNNER_ENVIRONMENT,\n            US_TEST_DATABASE_URL: process.env.US_TEST_DATABASE_URL,\n            NODE_OPTIONS: process.env.NODE_OPTIONS,\n            NODE_PATH: process.env.NODE_PATH,\n            DEBUG: process.env.DEBUG,\n            PWDEBUG: process.env.PWDEBUG,\n          },\n          process.platform,\n        ),\n      );\n    } catch {\n      // Observation failure must never replace the original refusal.\n    }\n    throw new Error("us_demo_viewer_ci_only");\n  }\n';
+const task10OriginalBranch = '  )\n    throw new Error("us_demo_viewer_ci_only");\n';
+const task10OriginalSha256 = "114ad0e525972a1d7429ba730a153edff1156e3ef6f4bddb71f99f5456121039";
+const task10Source = () =>
+  readFileSync(resolve(__dirname, "support/us-demo-viewer-browser-fixture.ts"), "utf8");
+function assertTask10Preserved(source: string) {
+  // Validate the entire introduced structure/wiring before any exact inverse erasure.
+  expect(source.split(task10Helper)).toHaveLength(2);
+  expect(source.split(task10Branch)).toHaveLength(2);
+  const original = source.replace(task10Helper, "").replace(task10Branch, task10OriginalBranch);
+  expect(createHash("sha256").update(original).digest("hex")).toBe(task10OriginalSha256);
+}
+
+describe("Task10 guard observation", () => {
+  const valid: Record<string, string | undefined> = {
+    CI: "true",
+    GITHUB_ACTIONS: "true",
+    GITHUB_JOB: "demo_viewer_acceptance",
+    RUNNER_ENVIRONMENT: "github-hosted",
+    US_TEST_DATABASE_URL:
+      "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
+  };
+
+  it("maps each independent predicate to its fixed bit without authorizing entry", () => {
+    // Synthetic PURE formatter data only: never call the actual entry with this object.
+    expect(fixture.viewerGuardObservation(valid, "linux")).toBe(
+      "US_DEMO_VIEWER_GUARD_OBSERVATION 0",
+    );
+    for (const [key, value, expected] of [
+      ["CI", "false", 1],
+      ["GITHUB_ACTIONS", "false", 2],
+      ["GITHUB_JOB", "other", 4],
+      ["RUNNER_ENVIRONMENT", "other", 8],
+      ["US_TEST_DATABASE_URL", "private-sentinel-url", 32],
+      ["NODE_OPTIONS", "private-sentinel-options", 64],
+      ["NODE_PATH", "private-sentinel-path", 128],
+      ["DEBUG", "private-sentinel-debug", 256],
+      ["PWDEBUG", "private-sentinel-pwdebug", 512],
+    ] as const) {
+      expect(fixture.viewerGuardObservation({ ...valid, [key]: value }, "linux")).toBe(
+        `US_DEMO_VIEWER_GUARD_OBSERVATION ${expected}`,
+      );
+    }
+    expect(fixture.viewerGuardObservation(valid, "darwin")).toBe(
+      "US_DEMO_VIEWER_GUARD_OBSERVATION 16",
+    );
+    expect(
+      fixture.viewerGuardObservation(
+        { CI: "false", NODE_OPTIONS: "x", NODE_PATH: "x", DEBUG: "x", PWDEBUG: "x" },
+        "darwin",
+      ),
+    ).toBe("US_DEMO_VIEWER_GUARD_OBSERVATION 1023");
+    expect(fixture.viewerGuardObservation({ ...valid, CI: "false", DEBUG: "x" }, "darwin")).toBe(
+      "US_DEMO_VIEWER_GUARD_OBSERVATION 273",
+    );
+  });
+
+  it("distinguishes exact identity strings from empty and truthy forbidden strings", () => {
+    for (const [key, bit] of [
+      ["CI", 1],
+      ["GITHUB_ACTIONS", 2],
+      ["GITHUB_JOB", 4],
+      ["RUNNER_ENVIRONMENT", 8],
+      ["US_TEST_DATABASE_URL", 32],
+    ] as const) {
+      for (const value of [undefined, "", "false", "0", "true "])
+        expect(fixture.viewerGuardObservation({ ...valid, [key]: value }, "linux")).toBe(
+          `US_DEMO_VIEWER_GUARD_OBSERVATION ${bit}`,
+        );
+    }
+    for (const [key, bit] of [
+      ["NODE_OPTIONS", 64],
+      ["NODE_PATH", 128],
+      ["DEBUG", 256],
+      ["PWDEBUG", 512],
+    ] as const) {
+      for (const value of [undefined, ""])
+        expect(fixture.viewerGuardObservation({ ...valid, [key]: value }, "linux")).toBe(
+          "US_DEMO_VIEWER_GUARD_OBSERVATION 0",
+        );
+      for (const value of ["false", "0", " ", "secret\nforged-observation"])
+        expect(fixture.viewerGuardObservation({ ...valid, [key]: value }, "linux")).toBe(
+          `US_DEMO_VIEWER_GUARD_OBSERVATION ${bit}`,
+        );
+    }
+  });
+
+  it("never reads unknown keys or serializes sentinel values, causes or getters", () => {
+    const env = { ...valid, NODE_PATH: "private-sentinel\nforged-log", DEBUG: "session-secret" };
+    Object.defineProperty(env, "unknown", {
+      enumerable: true,
+      get() {
+        throw new Error("unknown-private-sentinel");
+      },
+    });
+    Object.defineProperty(env, "toJSON", {
+      get() {
+        throw new Error("serializer-private-sentinel");
+      },
+    });
+    const line = fixture.viewerGuardObservation(env, "linux");
+    expect(line).toBe("US_DEMO_VIEWER_GUARD_OBSERVATION 384");
+    expect(line).not.toMatch(/sentinel|secret|session|unknown|forged/);
+    expect(Buffer.byteLength(line)).toBeLessThanOrEqual(37);
+  });
+
+  it("retains the exact real negative refusal if the synchronous output sink throws", async () => {
+    vi.stubEnv("CI", "false");
+    const output = vi.spyOn(console, "error").mockImplementation(() => {
+      throw new Error("private-output-sentinel", { cause: "private-cause" });
+    });
+    try {
+      await expect(fixture.startUsDemoViewerBrowserFixture()).rejects.toEqual(
+        new Error("us_demo_viewer_ci_only"),
+      );
+      expect(output).toHaveBeenCalledTimes(1);
+    } finally {
+      output.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("pins the complete original guard and post-branch bytes after an exact two-part inverse", () => {
+    assertTask10Preserved(task10Source());
+  });
+
+  it("rejects finite predicate, wiring, emission, catch, throw and acquisition mutants before erasure", () => {
+    const source = task10Source();
+    assertTask10Preserved(source);
+    const mutations: [string, string][] = [
+      ['    env.CI !== "true",', '    env.CI !== "false",'],
+      ["Boolean(env.NODE_PATH),", "false,"],
+      ["failed ? 1 << index : 0", "failed ? 1 << (index + 1) : 0"],
+      ["CI: process.env.CI,", 'CI: "true",'],
+      ["NODE_PATH: process.env.NODE_PATH,", "NODE_PATH: process.env.NODE_OPTIONS,"],
+      ["          process.platform,", '          "linux",'],
+      [
+        "console.error(\n        viewerGuardObservation(",
+        "console.log(\n        viewerGuardObservation(",
+      ],
+      [
+        "    try {\n      console.error(",
+        '    console.error("duplicate");\n    try {\n      console.error(',
+      ],
+      [
+        "    } catch {\n      // Observation",
+        "    } catch (error) {\n      throw error;\n      // Observation",
+      ],
+      ['    throw new Error("us_demo_viewer_ci_only");', "    return undefined;"],
+      ['    throw new Error("us_demo_viewer_ci_only");', '    throw new Error("changed");'],
+      [
+        '    throw new Error("us_demo_viewer_ci_only");',
+        '    if (false) throw new Error("us_demo_viewer_ci_only");',
+      ],
+      [
+        "  let installation: Installation | undefined, app: OwnedServer | undefined;",
+        '  console.error("success-output");\n  let installation: Installation | undefined, app: OwnedServer | undefined;',
+      ],
+      ['    process.env.CI !== "true" ||', '    process.env.CI !== "false" ||'],
+      ["    process.env.NODE_PATH ||", "    false ||"],
+      ["  const remaining = () => setup.remaining();", "  const remaining = () => 60_000;"],
+      [
+        '    vite = startOwnedServer("vite", process.env, cleanupDeadline);',
+        '    vite = startOwnedServer("vite", {}, cleanupDeadline);',
+      ],
+    ];
+    for (const [before, after] of mutations) {
+      expect(source.split(before)).toHaveLength(2);
+      expect(() => assertTask10Preserved(source.replace(before, after))).toThrow();
+    }
+    for (const candidate of [
+      source.replace(task10Helper, ""),
+      source.replace(task10Helper, task10Helper + task10Helper),
+      source.replace(task10Branch, ""),
+      source.replace(task10Branch, task10Branch + task10Branch),
+      source + "\n",
+    ])
+      expect(() => assertTask10Preserved(candidate)).toThrow();
+  });
+
+  it("emits one bounded failure observation while retaining the exact real negative refusal", async () => {
+    vi.stubEnv("CI", "false");
+    const output = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(fixture.startUsDemoViewerBrowserFixture()).rejects.toEqual(
+        new Error("us_demo_viewer_ci_only"),
+      );
+      expect(output).toHaveBeenCalledTimes(1);
+      const args: unknown[] | undefined = output.mock.calls[0];
+      expect(args).toHaveLength(1);
+      const line: unknown = args?.[0];
+      expect(typeof line).toBe("string");
+      if (typeof line !== "string") throw new Error("Missing finite guard observation");
+      expect(line).toMatch(/^US_DEMO_VIEWER_GUARD_OBSERVATION [0-9]{1,4}$/);
+      const mask = Number(line.split(" ")[1]);
+      expect(mask).toBeLessThanOrEqual(1023);
+      expect(mask & 1).toBe(1);
+    } finally {
+      output.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe("viewer browser failure-only boundaries", () => {
   it("keeps dependent browser normal order while held context does not block independent cleanup or cancellation", async () => {

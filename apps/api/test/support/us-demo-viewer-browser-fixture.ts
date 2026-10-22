@@ -627,6 +627,28 @@ async function provision(
   return result;
 }
 
+/** Observation only: never used to decide whether the real entry may acquire resources. */
+export function viewerGuardObservation(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: string,
+): string {
+  const refused = [
+    env.CI !== "true",
+    env.GITHUB_ACTIONS !== "true",
+    env.GITHUB_JOB !== "demo_viewer_acceptance",
+    env.RUNNER_ENVIRONMENT !== "github-hosted",
+    platform !== "linux",
+    env.US_TEST_DATABASE_URL !==
+      "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
+    Boolean(env.NODE_OPTIONS),
+    Boolean(env.NODE_PATH),
+    Boolean(env.DEBUG),
+    Boolean(env.PWDEBUG),
+  ];
+  const mask = refused.reduce((bits, failed, index) => bits | (failed ? 1 << index : 0), 0);
+  return `US_DEMO_VIEWER_GUARD_OBSERVATION ${mask}`;
+}
+
 /** No caller-selected identity/environment/root. The real Node entry guards again before acquisition. */
 export async function startUsDemoViewerBrowserFixture() {
   if (
@@ -641,8 +663,29 @@ export async function startUsDemoViewerBrowserFixture() {
     process.env.NODE_PATH ||
     process.env.DEBUG ||
     process.env.PWDEBUG
-  )
+  ) {
+    try {
+      console.error(
+        viewerGuardObservation(
+          {
+            CI: process.env.CI,
+            GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+            GITHUB_JOB: process.env.GITHUB_JOB,
+            RUNNER_ENVIRONMENT: process.env.RUNNER_ENVIRONMENT,
+            US_TEST_DATABASE_URL: process.env.US_TEST_DATABASE_URL,
+            NODE_OPTIONS: process.env.NODE_OPTIONS,
+            NODE_PATH: process.env.NODE_PATH,
+            DEBUG: process.env.DEBUG,
+            PWDEBUG: process.env.PWDEBUG,
+          },
+          process.platform,
+        ),
+      );
+    } catch {
+      // Observation failure must never replace the original refusal.
+    }
     throw new Error("us_demo_viewer_ci_only");
+  }
   let installation: Installation | undefined, app: OwnedServer | undefined;
   let vite: OwnedServer | undefined;
   let browser: ViewerBrowser | undefined, context: ViewerContext | undefined;
