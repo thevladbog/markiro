@@ -109,14 +109,32 @@ impl Host {
         })
     }
 
-    /// `bin run --data-dir <data_dir> --port <free port>` with its output in
-    /// `log`. The command line binds every interface (it has no flag for
-    /// less), for as long as the run lasts: run it on a machine you trust.
+    /// `bin run --data-dir <data_dir> --port <free port>` with its output in `log`. The command
+    /// line binds every interface (it has no flag for less), for as long as the run lasts: run
+    /// it on a machine you trust.
     pub async fn spawned(bin: &Path, data_dir: &Path, log: &Path) -> Result<Host, Error> {
         let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?
             .local_addr()?
             .port();
-        let out = std::fs::File::create(log)?;
+        Host::spawned_on(bin, data_dir, log, port, false).await
+    }
+
+    /// `spawned` on a given port; `append` keeps what `log` holds (a restart).
+    pub async fn spawned_on(
+        bin: &Path,
+        data_dir: &Path,
+        log: &Path,
+        port: u16,
+        append: bool,
+    ) -> Result<Host, Error> {
+        let out = if append {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)?
+        } else {
+            std::fs::File::create(log)?
+        };
         let child = Command::new(bin)
             .args(["run", "--data-dir"])
             .arg(data_dir)
@@ -137,26 +155,89 @@ impl Host {
                 log: log.to_path_buf(),
             },
         };
-        // The identity appears when the host has started; read it from disk.
+        // The identity appears when the host has started (at once on a restart); a child that
+        // ends meanwhile (its port taken, its folder refused) is said at once, not after a minute.
         let paths = HostPaths::new(data_dir);
         let started = Instant::now();
-        let fingerprint = loop {
-            if let Ok(identity) = markiro_host::tls::TlsIdentity::load(&paths.tls_dir()) {
-                break identity.fingerprint;
+        loop {
+            if let Process::Spawned { child, .. } = &mut host.process {
+                if let Some(status) = child.try_wait()? {
+                    return Err(format!(
+                        "markiro-host ended at its start ({status}): see {}",
+                        log.display()
+                    )
+                    .into());
+                }
+            }
+            if host.fingerprint.is_empty() {
+                if let Ok(identity) = markiro_host::tls::TlsIdentity::load(&paths.tls_dir()) {
+                    host.fingerprint = identity.fingerprint;
+                }
+            }
+            if !host.fingerprint.is_empty()
+                && wait_ready(&host.base, &host.fingerprint, Duration::from_millis(1))
+                    .await
+                    .is_ok()
+            {
+                return Ok(host);
             }
             if started.elapsed() > Duration::from_secs(60) {
                 host.stop().await.ok();
-                return Err("the host wrote no TLS identity in 60 s".into());
+                return Err("the host did not answer /v1/hello in 60 s".into());
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
-        };
-        host.fingerprint = fingerprint;
-        if let Err(error) = wait_ready(&host.base, &host.fingerprint, Duration::from_secs(60)).await
-        {
-            host.stop().await.ok();
-            return Err(error);
         }
-        Ok(host)
+    }
+
+    /// The port of the host's address.
+    pub fn port(&self) -> Option<u16> {
+        self.base
+            .rsplit(':')
+            .next()
+            .and_then(|port| port.parse().ok())
+    }
+
+    /// Kill the host this harness spawned at once, as a crash would (`SIGKILL` on Unix,
+    /// `TerminateProcess` on Windows), and reap it; `true` when it was still running. Any other
+    /// host is refused: the harness kills only the child it started, never a process found by
+    /// name, and never signals a child that already ended.
+    pub fn kill_hard(&mut self) -> Result<bool, Error> {
+        match &mut self.process {
+            Process::Spawned { child, .. } => {
+                if child.try_wait()?.is_some() {
+                    return Ok(false);
+                }
+                child.kill()?;
+                child.wait()?;
+                Ok(true)
+            }
+            _ => Err("only a host this harness spawned is killed".into()),
+        }
+    }
+
+    /// Start the binary again on the same data folder and port, appending to the same log, after
+    /// a kill or a stop; the identity (fingerprint) must be the same.
+    pub async fn restart(&mut self, bin: &Path) -> Result<(), Error> {
+        let (Some(data_dir), Some(port)) = (self.data_dir.clone(), self.port()) else {
+            return Err("no data folder or port to restart on".into());
+        };
+        let log = match &mut self.process {
+            Process::Spawned { child, log } => {
+                if child.try_wait()?.is_none() {
+                    return Err("the host still runs: stop or kill it first".into());
+                }
+                log.clone()
+            }
+            _ => return Err("only a host this harness spawned restarts".into()),
+        };
+        let mut fresh = Host::spawned_on(bin, &data_dir, &log, port, true).await?;
+        if fresh.fingerprint != self.fingerprint {
+            fresh.stop().await.ok();
+            return Err("the restarted host has another identity".into());
+        }
+        self.pid = fresh.pid;
+        self.process = std::mem::replace(&mut fresh.process, Process::Attached);
+        Ok(())
     }
 
     /// A host that runs already: `base` is `https://host:port`.
@@ -257,6 +338,30 @@ fn ask_to_stop(_child: &Child) -> bool {
     false
 }
 
+/// The `markiro-host` binary of this build's target folder, built when it is missing (tests).
+#[cfg(test)]
+pub(crate) fn test_host_binary() -> PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let debug_dir = exe.parent().unwrap().parent().unwrap();
+    let name = if cfg!(windows) {
+        "markiro-host.exe"
+    } else {
+        "markiro-host"
+    };
+    let bin = debug_dir.join(name);
+    if !bin.exists() {
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "--offline", "--locked", "-p", "markiro-host"])
+            .arg("--manifest-path")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    assert!(bin.exists(), "no markiro-host at {}", bin.display());
+    bin
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,25 +418,7 @@ mod tests {
     }
 
     fn host_binary() -> PathBuf {
-        let exe = std::env::current_exe().unwrap();
-        let debug_dir = exe.parent().unwrap().parent().unwrap();
-        let name = if cfg!(windows) {
-            "markiro-host.exe"
-        } else {
-            "markiro-host"
-        };
-        let bin = debug_dir.join(name);
-        if !bin.exists() {
-            let status = Command::new(env!("CARGO"))
-                .args(["build", "--offline", "--locked", "-p", "markiro-host"])
-                .arg("--manifest-path")
-                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml"))
-                .status()
-                .unwrap();
-            assert!(status.success());
-        }
-        assert!(bin.exists(), "no markiro-host at {}", bin.display());
-        bin
+        super::test_host_binary()
     }
 
     #[tokio::test]
@@ -388,6 +475,66 @@ mod tests {
         assert!(!host.local);
         assert!(!host.stop().await.unwrap());
         assert_eq!(host.log_scan(), LogScan::default());
+    }
+
+    #[tokio::test]
+    async fn an_in_process_host_is_never_killed_or_restarted_by_the_harness() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = Host::in_process(dir.path()).await.unwrap();
+        assert!(host.kill_hard().is_err());
+        assert!(host.restart(Path::new("no-such-binary")).await.is_err());
+        host.stop().await.unwrap();
+    }
+
+    #[cfg_attr(
+        windows,
+        ignore = "restarting on the same port is unverified on Windows"
+    )]
+    #[tokio::test]
+    async fn a_killed_host_restarts_on_its_port_with_its_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("host.log");
+        let bin = host_binary();
+        let mut host = Host::spawned(&bin, &dir.path().join("data"), &log)
+            .await
+            .unwrap();
+        let (base, fingerprint, pid) = (host.base.clone(), host.fingerprint.clone(), host.pid);
+        assert_eq!(
+            host.port(),
+            base.rsplit(':').next().and_then(|p| p.parse().ok())
+        );
+        let logged = std::fs::metadata(&log).unwrap().len();
+        assert!(host.kill_hard().unwrap(), "it was running");
+        let client = pinned_client(&fingerprint, Duration::from_secs(2));
+        assert!(client.get(format!("{base}/v1/hello")).send().await.is_err());
+        assert!(
+            !host.kill_hard().unwrap(),
+            "an ended child is not signalled"
+        );
+        host.restart(&bin).await.unwrap();
+        assert_eq!(
+            (host.base.clone(), host.fingerprint.clone()),
+            (base.clone(), fingerprint)
+        );
+        assert_ne!(host.pid, pid);
+        assert!(client
+            .get(format!("{base}/v1/hello"))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success());
+        assert!(
+            host.restart(&bin).await.is_err(),
+            "a running host is not restarted"
+        );
+        if logged > 0 {
+            assert!(
+                std::fs::metadata(&log).unwrap().len() > logged,
+                "the log is appended to, not truncated"
+            );
+        }
+        host.stop().await.unwrap();
     }
 
     #[tokio::test]

@@ -274,9 +274,43 @@ impl Api {
                     // A timeout is a latency of the whole limit, or p99 would hide it.
                     self.metrics.record(route, micros);
                 }
-                self.metrics.error(route, net.class());
+                if let Some(class) = error_class(None, &Value::Null, Some(net.class())) {
+                    self.metrics.error(route, &class);
+                }
                 Err(net)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_request_without_an_answer_is_counted_under_its_net_class() {
+        // A loopback port nothing listens on: the connection is refused at once.
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let metrics = Arc::new(Metrics::new());
+        let api = Api::new(&format!("https://127.0.0.1:{port}"), "ab", metrics.clone());
+        let auth = Auth {
+            device_key: Some("k"),
+            session: None,
+        };
+        let sent = api
+            .send(Route::Facts, "POST", "/v1/device/facts", auth, None)
+            .await;
+        assert_eq!(sent.unwrap_err(), NetError::Connect);
+        // The class every reader filters by (`report.rs`, a scenario's finish): `net_…`.
+        assert_eq!(
+            metrics.errors(),
+            BTreeMap::from([("facts:net_connect".to_owned(), 1)])
+        );
     }
 }

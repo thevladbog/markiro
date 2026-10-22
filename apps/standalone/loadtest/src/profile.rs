@@ -39,6 +39,8 @@ pub const SCENARIOS: &[&str] = &[
     "close-races",
     "lines",
     "backup-mid-close",
+    "kill-restart",
+    "outage",
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
