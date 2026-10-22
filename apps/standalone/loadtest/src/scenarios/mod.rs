@@ -478,6 +478,18 @@ impl Ctx {
                 self.observed
                     .insert("hostLogFirstErrors".to_owned(), json!(log.first_errors));
             }
+        } else {
+            let why = if self.kind == HostKind::InProcess {
+                "a host in this process writes no log of its own"
+            } else {
+                "the spawned host's log could not be read"
+            };
+            self.observed
+                .insert("hostLog".to_owned(), json!(format!("unavailable: {why}")));
+            self.note.push_str(&format!(
+                " the host log was not judged ({why}): its ERROR and busy-database lines are \
+                 judged with --host spawn only."
+            ));
         }
         let errors = self.metrics.errors();
         let count = |tail: &str| -> u64 {
@@ -1179,6 +1191,19 @@ mod tests {
         assert!(
             secrets.iter().any(|secret| secret.starts_with("Load-")),
             "the scenario site's password is among its secrets"
+        );
+        // A host in this process has no log: its ERROR and busy lines are not judged, and the
+        // result says so instead of passing silently.
+        assert_eq!(
+            result.observed.get("hostLog"),
+            Some(&json!(
+                "unavailable: a host in this process writes no log of its own"
+            ))
+        );
+        assert!(
+            result.note.contains("host log was not judged"),
+            "{}",
+            result.note
         );
     }
 

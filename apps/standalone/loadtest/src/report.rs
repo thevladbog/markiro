@@ -543,7 +543,15 @@ pub fn render_markdown(report: &Report) -> String {
             } else {
                 format!("FAILED ({} checks, {failed} failed)", scenario.checks.len())
             };
-            let _ = writeln!(out, "- scenario {}: {state}", scenario.name);
+            if scenario.judged && !scenario.note.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "- scenario {}: {state}; note: {}",
+                    scenario.name, scenario.note
+                );
+            } else {
+                let _ = writeln!(out, "- scenario {}: {state}", scenario.name);
+            }
         }
     }
     out
@@ -1289,6 +1297,17 @@ mod tests {
         );
         assert!(
             text.contains("- scenario outage: not judged (needs a spawned host)"),
+            "{text}"
+        );
+        // A judged scenario's note (a path this run did not exercise) is shown with its line.
+        let mut held = scenario("close-races", true, vec![Check::new("x", true, "")]);
+        held.note = "no race ran office-first this run.".to_owned();
+        report.scenarios.push(held);
+        let text = render_markdown(&report);
+        assert!(
+            text.contains(
+                "- scenario close-races: held (1 checks); note: no race ran office-first this run."
+            ),
             "{text}"
         );
         let clean = redact(&report, &["SECRET-KEY-1".to_owned()]);
