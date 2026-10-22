@@ -48,7 +48,7 @@ async fn race_two(
     ctx: &Ctx,
     shift: &str,
     closes: [(DeviceSpec, u32, i64, Option<&'static str>); 2],
-    salt: u64,
+    variant: u64,
 ) -> Res<Vec<Value>> {
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
     let mut tasks = Vec::new();
@@ -58,7 +58,7 @@ async fn race_two(
         let record = close_record(
             shift,
             &device,
-            salt,
+            variant,
             Some(PLANNED),
             actual,
             0,

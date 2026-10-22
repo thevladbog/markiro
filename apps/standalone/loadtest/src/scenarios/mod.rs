@@ -856,18 +856,19 @@ pub async fn scripted_work(
     })
 }
 
-/// One accepted-verdict scan of `code` at `at_ms` into a new box of `shift`; its receipt. `salt`
-/// keeps the record id apart from any other scripted record of the device.
+/// One accepted-verdict scan of `code` at `at_ms` into a new box of `shift`; its receipt.
+/// `variant` keeps the record id apart from any other scripted record of the device (it only
+/// varies a deterministic record id; nothing cryptographic).
 pub async fn scripted_scan(
     ctx: &Ctx,
     device: &DeviceSpec,
     shift: &str,
     code: &gen::Code,
     at_ms: i64,
-    salt: u64,
+    variant: u64,
 ) -> Res<Value> {
     let mut rng = Rng::new(
-        ctx.profile.seed ^ salt.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(device.index),
+        ctx.profile.seed ^ variant.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(device.index),
     );
     let record = gen::record(
         &rng.uuid(),
@@ -880,19 +881,20 @@ pub async fn scripted_scan(
 }
 
 /// A `shift_closed` record of `device` for `shift`; its id is the device's, the shift's and
-/// `salt`'s own, so a second close (another salt) is a new record, not a `payload_mismatch`.
+/// `variant`'s own, so a second close (another variant) is a new record, not a
+/// `payload_mismatch`.
 #[allow(clippy::too_many_arguments)]
 pub fn close_record(
     shift: &str,
     device: &DeviceSpec,
-    salt: u64,
+    variant: u64,
     planned: Option<u32>,
     actual: u32,
     boxes: u32,
     reason: Option<&str>,
     closed_at: &str,
 ) -> Value {
-    let seed = shift.bytes().fold(0xC105E_u64 ^ salt, |seed, byte| {
+    let seed = shift.bytes().fold(0xC105E_u64 ^ variant, |seed, byte| {
         seed.wrapping_mul(131).wrapping_add(u64::from(byte))
     });
     let mut rng = Rng::new(seed ^ u64::from(device.index));
@@ -910,7 +912,7 @@ pub async fn close_fact(
     ctx: &Ctx,
     device: &DeviceSpec,
     shift: &str,
-    salt: u64,
+    variant: u64,
     planned: Option<u32>,
     actual: u32,
     boxes: u32,
@@ -918,7 +920,7 @@ pub async fn close_fact(
     closed_at: Option<String>,
 ) -> Res<Value> {
     let at = closed_at.unwrap_or_else(|| gen::text_of(gen::now_ms()));
-    let record = close_record(shift, device, salt, planned, actual, boxes, reason, &at);
+    let record = close_record(shift, device, variant, planned, actual, boxes, reason, &at);
     let mut receipts = ctx.site.office.api.facts(&device.key, &[record]).await?;
     Ok(receipts.remove(0))
 }
