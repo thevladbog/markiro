@@ -139,6 +139,111 @@ function preservationSources() {
 }
 // Independently pinned complete Task8 fragments; verify each exactly once BEFORE
 // erasing only this extension. Historical restoration and all digests stay below.
+function withoutTransportWitness(current) {
+  const ts = createRequire(new URL("../../../apps/api/package.json", import.meta.url))(
+    "typescript",
+  );
+  const ast = ts.createSourceFile(
+    "fixture.mjs",
+    current,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  let placed = 0;
+  function placement(node) {
+    if (
+      ts.isVariableStatement(node) &&
+      node.declarationList.declarations.some(
+        (decl) =>
+          ts.isObjectBindingPattern(decl.name) &&
+          decl.name.getText(ast) === "{ projectUsRequestPackageTransportWitness }",
+      )
+    ) {
+      const statements = node.parent.statements;
+      const previous = statements?.[statements.indexOf(node) - 1];
+      assert.equal(
+        previous?.getText(ast),
+        `const { projectUsRequestPackageStorageReadFailureCode } = compiled(
+      "modules/traceability/requests/us-request-package-artifacts",
+    );`,
+        "transport witness exact inverse placement",
+      );
+      placed++;
+    }
+    ts.forEachChild(node, placement);
+  }
+  placement(ast);
+  assert.equal(placed, 1, "transport witness exact inverse placement");
+  const inverse = [
+    [
+      `  projectStorageReadFailureCode,
+  projectTransportWitness,
+)`,
+      `  projectStorageReadFailureCode,
+)`,
+    ],
+    [
+      `    projectStorageReadFailureCode,
+    projectTransportWitness,
+    cwd,`,
+      `    projectStorageReadFailureCode,
+    cwd,`,
+    ],
+    [
+      `                    projectStorageReadFailureCode,
+                    projectTransportWitness,
+                  )`,
+      `                    projectStorageReadFailureCode,
+                  )`,
+    ],
+    [
+      `    const { projectUsRequestPackageTransportWitness } = compiled(
+      "modules/traceability/requests/us-request-package-artifacts",
+    );
+`,
+      "",
+    ],
+    ["              projectTransportWitness: projectUsRequestPackageTransportWitness,\n", ""],
+    [
+      `![
+            "code",
+            "unitKey",
+            "stage",
+            "verificationFailure",
+            "verificationStorageCode",
+            "verificationTransportWitness",
+          ].includes(key)`,
+      `!["code", "unitKey", "stage", "verificationFailure", "verificationStorageCode"].includes(
+            key,
+          )`,
+    ],
+    [
+      `    let verificationTransportWitness;
+    if (keys.includes("verificationTransportWitness")) {
+      if (
+        typeof projectTransportWitness !== "function" ||
+        verificationStorageCode !== "us_request_package_storage_transport_failed"
+      )
+        return { status: "unavailable" };
+      verificationTransportWitness = projectTransportWitness(parsed.verificationTransportWitness);
+      if (
+        !verificationTransportWitness ||
+        verificationTransportWitness !== parsed.verificationTransportWitness
+      )
+        return { status: "unavailable" };
+    }
+`,
+      "",
+    ],
+    ["      ...(verificationTransportWitness ? { verificationTransportWitness } : {}),\n", ""],
+  ];
+  for (const [before, after] of inverse) {
+    assert.equal(current.split(before).length, 2, "transport witness exact inverse match");
+    current = current.replace(before, after);
+  }
+  return current;
+}
 function withoutStorageEvidence(current) {
   const ts = createRequire(new URL("../../../apps/api/package.json", import.meta.url))(
     "typescript",
@@ -254,6 +359,7 @@ function withoutStorageEvidence(current) {
   return current;
 }
 function assertFrozenFixture({ current, modules }) {
+  current = withoutTransportWitness(current);
   current = withoutStorageEvidence(current);
   const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
   const ts = require("typescript");
@@ -349,7 +455,47 @@ function assertFrozenFixture({ current, modules }) {
 }
 
 test("only approved root and guard substitutions reconstruct the whole frozen acquisition and command AST", () => {
+  assert.equal(
+    digest(withoutTransportWitness(preservationSources().current)),
+    "194325caca93ec18d68996d342ba98004cc416726c77aa6cc707e44aab851ac2",
+    "whole immutable922 predecessor bytes",
+  );
   assertFrozenFixture(preservationSources());
+});
+
+test("transport witness inverse rejects its bypasses and misplaced load before erasure", () => {
+  const source = preservationSources();
+  for (const [before, after] of [
+    ['typeof projectTransportWitness !== "function" ||', "false ||"],
+    [
+      'verificationStorageCode !== "us_request_package_storage_transport_failed"',
+      'verificationStorageCode !== "us_request_package_storage_timeout"',
+    ],
+    [
+      "verificationTransportWitness = projectTransportWitness(parsed.verificationTransportWitness);",
+      "verificationTransportWitness = parsed.verificationTransportWitness;",
+    ],
+    ["verificationTransportWitness !== parsed.verificationTransportWitness", "false"],
+    ['"verificationTransportWitness",', '"transportWitness",'],
+  ]) {
+    assert.equal(source.current.split(before).length, 2);
+    assert.throws(
+      () => assertFrozenFixture({ ...source, current: source.current.replace(before, after) }),
+      /transport witness exact inverse match/,
+    );
+  }
+  const load = `    const { projectUsRequestPackageTransportWitness } = compiled(
+      "modules/traceability/requests/us-request-package-artifacts",
+    );
+`;
+  assert.equal(source.current.split(load).length, 2);
+  const misplaced = source.current
+    .replace(load, "")
+    .replace("    const invoked = new Set();", load + "    const invoked = new Set();");
+  assert.throws(
+    () => assertFrozenFixture({ ...source, current: misplaced }),
+    /transport witness exact inverse placement/,
+  );
 });
 
 test("preservation rejects semantic cap, query, action and literal mutants", () => {

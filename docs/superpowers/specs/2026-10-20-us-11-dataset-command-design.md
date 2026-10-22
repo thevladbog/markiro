@@ -4,9 +4,11 @@ Status: historical CLI implementation design with a bounded failure-evidence
 amendment. The preceding Request-package gate was reconciled by accepted
 successor `d712098f247cdde5a91b5dbcbe3915ed67e18847`; native and actual compiled
 CLI acceptance subsequently passed on `e5a00d71bf51aedd711269ca1a289749a8d172d8`.
-That evidence remains source-specific. Current `567e13af1` compiled initialize
-failed at Request September/package/private manifest read; its specific cause is
-unknown. The amendment below is evidence-only, not a fix or new acceptance.
+That evidence remains source-specific. Subsequent accepted `1bcf56540` compiled
+initialize/verify does not identify older failures. Current `922ce2450` initialize
+failed at Request September/package/private manifest read with the authentic
+fixed storage transport category; its underlying cause remains unknown.
+The amendments below are evidence-only, not a fix or new acceptance.
 All current exact-source and viewer gates remain required; no release authority.
 
 ## Intent and scope
@@ -373,3 +375,54 @@ disclosed. Evidence-invalid/read-failed may still have multiple causes; a later
 pass does not identify the historical failure. No automatic diagnostic expansion,
 replay, blind CI retry, increased cap or product fix is authorized. Independent
 source review and eventual exact-source CLI/native/viewer gates remain separate.
+
+## Task12 P2: optional private transport witness — 2026-10-22
+
+Only the existing generic canonical Request/package failure with a consumed
+same-error `read_private_object` frame/fixed artifact AND genuine
+`verificationStorageCode: us_request_package_storage_transport_failed` may emit
+optional primitive `verificationTransportWitness`. Its closed vocabulary is
+exactly two stages (`await_send`, `consume_body`) crossed with fourteen existing
+FIRST-positive matcher literals, encoded as `stage:kind:value`:
+
+- code: ECONNRESET, ECONNREFUSED, ETIMEDOUT, EPIPE, ENETUNREACH, EHOSTUNREACH;
+- name: TimeoutError, RequestTimeout;
+- status: 408, 429, 500, 502, 503, 504.
+
+These are 28 hard-coded compound literals, never interpolated provider fields.
+`await_send` precedes settlement of the existing send await; `consume_body`
+starts immediately after fulfillment and includes response inspection/Body/
+hash/close, not proof that bytes began or a precise throw instruction.
+
+Private per-read opaque identity state closes on existing io finalization and
+the destroyed guard; late operations cannot resurrect it. The existing matcher
+still eagerly reads own code, name and metadata/status in the original order,
+then short-circuits code/name/status branches unchanged. Capture selects only
+the first already-true branch from already-read primitives, without any extra
+error/cause/message/prototype read. Classification, StorageError shape/code,
+SDK settings/arguments, awaits, original throw/abort/close order and caps stay
+unchanged. No witness is attached to an error property or raw SDK exception.
+
+A separate private map associates the new primitive with the SAME existing
+factory-produced error. Identity-only take consumes once, even when main's
+diagnostic/frame/code gate rejects output. Existing StorageError passthrough
+deletes stale new witness evidence, preserving the same error. Existing Task8
+seven-code evidence and frame semantics remain unchanged. Unknown/forged/
+cause-wrapped/ambiguous/mismatched/consumed evidence means field omission.
+
+The actual fixture accepts a PRESENT field only with that full conjunction and
+the actual built module's strict primitive projector; missing projector, alias,
+unknown value, wrong tuple/code or extra key makes the whole diagnostic
+unavailable. ABSENT field preserves all legacy results without needing the new
+projector. The scalar remains flat/visible in the actual bounded Node reporter;
+no child decision/measurement/provider/setup/disposal change. New compiled load
+follows the unchanged Task8 load outside pinned regions. New exact inverse runs
+before unchanged historical Task8 inverse/pins/mutants; the normal fixture also
+restores immutable922 predecessor bytes.
+
+This cannot distinguish connection and socket timers sharing TimeoutError or
+identify every ETIMEDOUT/network/Body cause. Synchronous metadata work can
+slightly perturb scheduling; no zero-impact/reliability/cause-fix claim follows.
+No raw error/message/stack/cause/key/URL/header/bytes/timing is disclosed. No
+automatic run, retry or diagnostic expansion is authorized. Root source review
+and separately authorized exact-source real CLI/native/viewer gates remain open.

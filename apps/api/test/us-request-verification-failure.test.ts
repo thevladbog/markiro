@@ -13,7 +13,10 @@ import {
   takeUsRequestVerificationFailure as take,
 } from "../src/modules/traceability/requests/us-request-verification-failure";
 import { usDatasetCommandDiagnostic } from "../src/deployment/us-dataset-command-runtime";
-import { takeUsRequestPackageStorageReadFailure as takeStorage } from "../src/modules/traceability/requests/us-request-package-artifacts";
+import {
+  takeUsRequestPackageStorageReadFailure as takeStorage,
+  takeUsRequestPackageTransportWitness as takeWitness,
+} from "../src/modules/traceability/requests/us-request-package-artifacts";
 import { createUsRequestWorkerStorageFixture } from "./support/us-request-worker-storage-fixture";
 
 const diagnostic = {
@@ -91,15 +94,17 @@ it("emits storage evidence only for the same authentic error and consumed canoni
       "usDatasetCommandDiagnostic",
       "takeUsRequestVerificationFailure",
       "takeUsRequestPackageStorageReadFailure",
-    ])(capture, usDatasetCommandDiagnostic, take, takeStorage);
+      "takeUsRequestPackageTransportWitness",
+    ])(capture, usDatasetCommandDiagnostic, take, takeStorage, takeWitness);
     call(error);
     expect(capture.exitCode).toBe(1);
     expect(output).not.toMatch(/private sentinel/);
     return JSON.parse(output) as Record<string, unknown>;
   };
-  const authentic = async (unitKey = "request_september") => {
+  const authentic = async (unitKey = "request_september", transport = false) => {
     const s = createUsRequestWorkerStorageFixture(() => ({
       async send() {
+        if (transport) throw { code: "ECONNRESET", message: "private sentinel" };
         throw new Error("private sentinel");
       },
     }));
@@ -122,13 +127,62 @@ it("emits storage evidence only for the same authentic error and consumed canoni
       });
       throw new Error("actual read did not fail");
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== "us_request_package_storage_read_failed")
+      if (
+        !(error instanceof Error) ||
+        error.message !==
+          (transport
+            ? "us_request_package_storage_transport_failed"
+            : "us_request_package_storage_read_failed")
+      )
         throw error;
       return Object.assign(error, { unitKey, stage: "package" });
     } finally {
       s.destroy();
     }
   };
+  const transportError = await authentic("request_september", true);
+  finalize(ready("read_private_object", "manifest.json"), transportError);
+  Object.freeze(transportError);
+  const transportDescriptors = Object.getOwnPropertyDescriptors(transportError);
+  expect(invoke(transportError)).toEqual({
+    ...diagnostic,
+    verificationFailure: { operation: "read_private_object", artifact: "manifest.json" },
+    verificationStorageCode: "us_request_package_storage_transport_failed",
+    verificationTransportWitness: "await_send:code:ECONNRESET",
+  });
+  expect(takeWitness(transportError)).toBeUndefined();
+  expect(Object.getOwnPropertyDescriptors(transportError)).toEqual(transportDescriptors);
+  for (const variant of [
+    "no-frame",
+    "consumed",
+    "ambiguous",
+    "wrong-operation",
+    "wrong-stage",
+    "wrong-unit",
+    "specific",
+    "wrong-storage-code",
+  ]) {
+    const error = await authentic(
+      variant === "wrong-unit" ? "chain_0259" : "request_september",
+      true,
+    );
+    if (variant === "wrong-stage") Object.assign(error, { stage: "request" });
+    if (variant === "specific")
+      Object.defineProperty(error, "message", { value: "us_dataset_request_conflict" });
+    if (variant !== "no-frame")
+      finalize(
+        ready(
+          variant === "wrong-operation" ? "run_worker" : "read_private_object",
+          variant === "wrong-operation" ? undefined : "manifest.json",
+        ),
+        error,
+      );
+    if (variant === "consumed") take(error, diagnostic);
+    if (variant === "ambiguous") finalize(ready("read_private_object", "manifest.json"), error);
+    if (variant === "wrong-storage-code") takeStorage(error);
+    expect(invoke(error)).not.toHaveProperty("verificationTransportWitness");
+    expect(takeWitness(error)).toBeUndefined();
+  }
   for (const unit of ["request_scenario_a", "request_april", "request_september"])
     for (const artifact of artifacts) {
       const error = await authentic(unit);
@@ -194,7 +248,7 @@ it("emits storage evidence only for the same authentic error and consumed canoni
     .filter((node) => node.moduleSpecifier.getText(ast).includes("us-request-package-artifacts"));
   expect(imports).toHaveLength(1);
   expect(imports[0]?.importClause?.namedBindings?.getText(ast)).toBe(
-    "{ takeUsRequestPackageStorageReadFailure }",
+    "{\n  takeUsRequestPackageStorageReadFailure,\n  takeUsRequestPackageTransportWitness,\n}",
   );
 });
 function hostile() {
@@ -623,7 +677,9 @@ it("restores every original seed/verification statement and preserves successful
       "process",
       "usDatasetCommandDiagnostic",
       "takeUsRequestVerificationFailure",
-    ])(processCapture, usDatasetCommandDiagnostic, take);
+      "takeUsRequestPackageStorageReadFailure",
+      "takeUsRequestPackageTransportWitness",
+    ])(processCapture, usDatasetCommandDiagnostic, take, takeStorage, takeWitness);
     const error = Object.assign(new Error(code), {
       unitKey: "request_september",
       stage: "package",

@@ -3,7 +3,10 @@ import {
   usDatasetCommandDiagnostic,
 } from "./deployment/us-dataset-command-runtime";
 import { takeUsRequestVerificationFailure } from "./modules/traceability/requests/us-request-verification-failure";
-import { takeUsRequestPackageStorageReadFailure } from "./modules/traceability/requests/us-request-package-artifacts";
+import {
+  takeUsRequestPackageStorageReadFailure,
+  takeUsRequestPackageTransportWitness,
+} from "./modules/traceability/requests/us-request-package-artifacts";
 
 async function main(): Promise<void> {
   const result = await runUsDatasetCommand(process.argv.slice(2), process.env);
@@ -42,8 +45,13 @@ void main().catch((error: unknown) => {
     verificationFailure?.operation === "read_private_object"
       ? takeUsRequestPackageStorageReadFailure(error)
       : undefined;
+  const transportWitness = takeUsRequestPackageTransportWitness(error);
+  const verificationTransportWitness =
+    verificationStorageCode === "us_request_package_storage_transport_failed"
+      ? transportWitness
+      : undefined;
   process.stderr.write(
-    `${JSON.stringify({ ...diagnostic, ...(verificationFailure ? { verificationFailure } : {}), ...(verificationStorageCode ? { verificationStorageCode } : {}) })}\n`,
+    `${JSON.stringify({ ...diagnostic, ...(verificationFailure ? { verificationFailure } : {}), ...(verificationStorageCode ? { verificationStorageCode } : {}), ...(verificationTransportWitness ? { verificationTransportWitness } : {}) })}\n`,
   );
   process.exitCode = 1;
 });

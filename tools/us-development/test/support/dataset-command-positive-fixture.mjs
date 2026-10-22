@@ -72,6 +72,7 @@ function commandDiagnostic(
   diagnose,
   projectVerificationFailure,
   projectStorageReadFailureCode,
+  projectTransportWitness,
 ) {
   try {
     if (
@@ -88,9 +89,14 @@ function commandDiagnostic(
       !keys.includes("code") ||
       keys.some(
         (key) =>
-          !["code", "unitKey", "stage", "verificationFailure", "verificationStorageCode"].includes(
-            key,
-          ),
+          ![
+            "code",
+            "unitKey",
+            "stage",
+            "verificationFailure",
+            "verificationStorageCode",
+            "verificationTransportWitness",
+          ].includes(key),
       ) ||
       keys.some(
         (key) =>
@@ -130,6 +136,20 @@ function commandDiagnostic(
       if (!verificationStorageCode || verificationStorageCode !== parsed.verificationStorageCode)
         return { status: "unavailable" };
     }
+    let verificationTransportWitness;
+    if (keys.includes("verificationTransportWitness")) {
+      if (
+        typeof projectTransportWitness !== "function" ||
+        verificationStorageCode !== "us_request_package_storage_transport_failed"
+      )
+        return { status: "unavailable" };
+      verificationTransportWitness = projectTransportWitness(parsed.verificationTransportWitness);
+      if (
+        !verificationTransportWitness ||
+        verificationTransportWitness !== parsed.verificationTransportWitness
+      )
+        return { status: "unavailable" };
+    }
     return {
       status: "available",
       code: safe.code,
@@ -144,6 +164,7 @@ function commandDiagnostic(
           }
         : {}),
       ...(verificationStorageCode ? { verificationStorageCode } : {}),
+      ...(verificationTransportWitness ? { verificationTransportWitness } : {}),
     };
   } catch {
     return { status: "unavailable" };
@@ -207,6 +228,7 @@ async function child(
     diagnose,
     projectVerificationFailure,
     projectStorageReadFailureCode,
+    projectTransportWitness,
     cwd,
   } = {},
 ) {
@@ -297,6 +319,7 @@ async function child(
                     diagnose,
                     projectVerificationFailure,
                     projectStorageReadFailureCode,
+                    projectTransportWitness,
                   ),
             }
           : {}),
@@ -684,6 +707,9 @@ async function acquireDatasetInstallation() {
     const { projectUsRequestPackageStorageReadFailureCode } = compiled(
       "modules/traceability/requests/us-request-package-artifacts",
     );
+    const { projectUsRequestPackageTransportWitness } = compiled(
+      "modules/traceability/requests/us-request-package-artifacts",
+    );
     return {
       ...connection,
       identity,
@@ -722,6 +748,7 @@ async function acquireDatasetInstallation() {
               diagnose: usDatasetCommandDiagnostic,
               projectVerificationFailure: projectUsRequestVerificationFailure,
               projectStorageReadFailureCode: projectUsRequestPackageStorageReadFailureCode,
+              projectTransportWitness: projectUsRequestPackageTransportWitness,
             },
           );
         } catch (error) {

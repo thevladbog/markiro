@@ -216,6 +216,182 @@ test(
       throw new Error("api_dist_read_forbidden");
     });
     assert.equal(typeof projectStorageReadFailureCode, "function");
+    const witnessDeclarations = storageAst.statements.filter(
+      (node) =>
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === "projectUsRequestPackageTransportWitness",
+    );
+    assert.equal(witnessDeclarations.length, 1);
+    const witnessJs = ts.transpileModule(witnessDeclarations[0].getText(storageAst), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    let witnessLoads = 0;
+    const projectTransportWitness = compileFunction(
+      `${witnessJs};return exports.projectUsRequestPackageTransportWitness;`,
+      ["exports", "require"],
+    )({}, () => {
+      witnessLoads++;
+      throw Error("api_dist_read_forbidden");
+    });
+    const witnessLiterals = [
+      "await_send:code:ECONNRESET",
+      "consume_body:code:ECONNRESET",
+      "await_send:code:ECONNREFUSED",
+      "consume_body:code:ECONNREFUSED",
+      "await_send:code:ETIMEDOUT",
+      "consume_body:code:ETIMEDOUT",
+      "await_send:code:EPIPE",
+      "consume_body:code:EPIPE",
+      "await_send:code:ENETUNREACH",
+      "consume_body:code:ENETUNREACH",
+      "await_send:code:EHOSTUNREACH",
+      "consume_body:code:EHOSTUNREACH",
+      "await_send:name:TimeoutError",
+      "consume_body:name:TimeoutError",
+      "await_send:name:RequestTimeout",
+      "consume_body:name:RequestTimeout",
+      "await_send:status:408",
+      "consume_body:status:408",
+      "await_send:status:429",
+      "consume_body:status:429",
+      "await_send:status:500",
+      "consume_body:status:500",
+      "await_send:status:502",
+      "consume_body:status:502",
+      "await_send:status:503",
+      "consume_body:status:503",
+      "await_send:status:504",
+      "consume_body:status:504",
+    ];
+    const witnessInput = {
+      code: "us_dataset_command_failed",
+      unitKey: "request_september",
+      stage: "package",
+      verificationFailure: { operation: "read_private_object", artifact: "manifest.json" },
+      verificationStorageCode: "us_request_package_storage_transport_failed",
+      verificationTransportWitness: "await_send:code:ECONNRESET",
+    };
+    assert.deepEqual(
+      fixtureSupport.datasetPositiveCommandDiagnostic(
+        JSON.stringify(witnessInput) + "\n",
+        diagnose,
+        projectVerificationFailure,
+        projectStorageReadFailureCode,
+        projectTransportWitness,
+      ),
+      {
+        status: "available",
+        ...witnessInput,
+        verificationOperation: "read_private_object",
+        verificationArtifact: "manifest.json",
+      },
+    );
+    let witnessCombinations = 0;
+    assert.equal(witnessLiterals.length, 28);
+    for (const verificationTransportWitness of witnessLiterals) {
+      assert.equal(
+        projectTransportWitness(verificationTransportWitness),
+        verificationTransportWitness,
+      );
+      for (const unitKey of ["request_scenario_a", "request_april", "request_september"])
+        for (const artifact of [
+          "manifest.json",
+          "package.zip",
+          "plan.pdf",
+          "records.xlsx",
+          "request-report.pdf",
+          "validation.json",
+        ]) {
+          const input = {
+            ...witnessInput,
+            unitKey,
+            verificationFailure: { operation: "read_private_object", artifact },
+            verificationTransportWitness,
+          };
+          assert.deepEqual(
+            fixtureSupport.datasetPositiveCommandDiagnostic(
+              JSON.stringify(input) + "\n",
+              diagnose,
+              projectVerificationFailure,
+              projectStorageReadFailureCode,
+              projectTransportWitness,
+            ),
+            {
+              status: "available",
+              ...input,
+              verificationOperation: "read_private_object",
+              verificationArtifact: artifact,
+            },
+          );
+          witnessCombinations++;
+        }
+    }
+    assert.equal(witnessCombinations, 504);
+    for (const invalid of [
+      null,
+      undefined,
+      1,
+      {},
+      [],
+      Object(witnessLiterals[0]),
+      "await_send:name:private",
+      "consume_body:status:404",
+      ...witnessLiterals.flatMap((value) => [` ${value}`, `${value}\n`, `${value}:private`]),
+    ])
+      assert.equal(projectTransportWitness(invalid), undefined);
+    const invalidWitnessInputs = [
+      { ...witnessInput, verificationTransportWitness: null },
+      { ...witnessInput, verificationTransportWitness: { code: "private" } },
+      { ...witnessInput, verificationTransportWitness: "await_send:name:private" },
+      { ...witnessInput, transportWitness: witnessLiterals[0] },
+      { ...witnessInput, verificationOperation: "read_private_object" },
+      { ...witnessInput, verificationStorageCode: "us_request_package_storage_timeout" },
+      { ...witnessInput, verificationStorageCode: undefined },
+      { ...witnessInput, verificationFailure: undefined },
+      { ...witnessInput, verificationFailure: { operation: "read_plan" } },
+      { ...witnessInput, verificationFailure: { operation: "read_private_object" } },
+      {
+        ...witnessInput,
+        verificationFailure: { operation: "compare_private_object", artifact: "manifest.json" },
+      },
+      { ...witnessInput, unitKey: "chain_0259" },
+      { ...witnessInput, stage: "request" },
+      { ...witnessInput, code: "us_dataset_request_conflict" },
+    ];
+    for (const input of invalidWitnessInputs)
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          JSON.stringify(input) + "\n",
+          diagnose,
+          projectVerificationFailure,
+          projectStorageReadFailureCode,
+          projectTransportWitness,
+        ),
+        { status: "unavailable" },
+      );
+    for (const validator of [
+      undefined,
+      () => undefined,
+      () => "consume_body:name:TimeoutError",
+      () => {
+        throw Error("private sentinel");
+      },
+    ])
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          JSON.stringify(witnessInput) + "\n",
+          diagnose,
+          projectVerificationFailure,
+          projectStorageReadFailureCode,
+          validator,
+        ),
+        { status: "unavailable" },
+      );
+    assert.equal(
+      witnessLoads,
+      0,
+      "actual witness source compilation never reads dist or dependencies",
+    );
     const unavailable = { status: "unavailable" };
     const extension = {
       code: "us_dataset_command_failed",
@@ -501,12 +677,13 @@ test(
         const diagnose = compileFunction(${JSON.stringify(js)} + ';return exports.usDatasetCommandDiagnostic;', ['exports','usSixMonthDefinition'])({}, {units:[{key:'request_april',stages:['request','package']}]});
         const projectVerificationFailure = compileFunction(${JSON.stringify(verificationJs)} + ';return exports.projectUsRequestVerificationFailure;', ['exports','require'])({},createRequire(resolve('apps/api/package.json')));
         const projectStorageReadFailureCode = compileFunction(${JSON.stringify(storageJs)} + ';return exports.projectUsRequestPackageStorageReadFailureCode;', ['exports','require'])({},()=>{throw Error('api_dist_read_forbidden');});
-        for(const tuple of [{operation:'read_private_object',artifact:'records.xlsx'},{operation:'read_plan'}]) {
+        const projectTransportWitness = compileFunction(${JSON.stringify(witnessJs)} + ';return exports.projectUsRequestPackageTransportWitness;', ['exports','require'])({},()=>{throw Error('api_dist_read_forbidden');});
+        for(const [tuple,transport] of [[{operation:'read_private_object',artifact:'records.xlsx'},false],[{operation:'read_plan'},false],[{operation:'read_private_object',artifact:'manifest.json'},true]]) {
           test('projected '+tuple.operation+' remains visible', {timeout:2000}, async()=>{
-            const input = {code:'us_dataset_command_failed',unitKey:'request_april',stage:'package',verificationFailure:tuple,...(tuple.operation==='read_private_object'?{verificationStorageCode:'us_request_package_storage_timeout'}:{})};
+            const input = {code:'us_dataset_command_failed',unitKey:'request_april',stage:'package',verificationFailure:tuple,...(tuple.operation==='read_private_object'?{verificationStorageCode:transport?'us_request_package_storage_transport_failed':'us_request_package_storage_timeout'}:{}),...(transport?{verificationTransportWitness:'consume_body:code:ECONNRESET'}:{})};
             let original;
             try {
-              await runDatasetPositiveChild(process.execPath,['-e','process.stdout.write("hostile-secret");process.stderr.write('+JSON.stringify(JSON.stringify(input)+'\n')+');process.exitCode=1'],{env:{PATH:process.env.PATH},cap:1000,limit:4096,diagnose,projectVerificationFailure,projectStorageReadFailureCode});
+              await runDatasetPositiveChild(process.execPath,['-e','process.stdout.write("hostile-secret");process.stderr.write('+JSON.stringify(JSON.stringify(input)+'\n')+');process.exitCode=1'],{env:{PATH:process.env.PATH},cap:1000,limit:4096,diagnose,projectVerificationFailure,projectStorageReadFailureCode,projectTransportWitness});
             } catch(error) { original = error; }
             assert.equal(original?.message,'us_dataset_positive_child_failed');
             assert.equal(original.evidence.code,1);
@@ -515,8 +692,10 @@ test(
             assert.equal(original.evidence.overflow,false);
             assert.ok(original.evidence.elapsedMs>=0 && original.evidence.elapsedMs<1000);
             assert.deepEqual(original.evidence.diagnostic.verificationFailure,tuple);
-            if(tuple.operation==='read_private_object') assert.equal(original.evidence.diagnostic.verificationStorageCode,'us_request_package_storage_timeout');
+            if(tuple.operation==='read_private_object') assert.equal(original.evidence.diagnostic.verificationStorageCode,transport?'us_request_package_storage_transport_failed':'us_request_package_storage_timeout');
             else assert.equal(Object.hasOwn(original.evidence.diagnostic,'verificationStorageCode'),false);
+            if(transport) assert.equal(original.evidence.diagnostic.verificationTransportWitness,'consume_body:code:ECONNRESET');
+            else assert.equal(Object.hasOwn(original.evidence.diagnostic,'verificationTransportWitness'),false);
             throw original;
           });
         }
@@ -532,12 +711,13 @@ test(
         },
       );
       assert.equal(shown.error, undefined);
-      assert.equal(shown.status, 1, "both real reporter cases must remain failures");
+      assert.equal(shown.status, 1, "all three real reporter cases must remain failures");
       assert.equal(shown.signal, null);
       assert.equal(shown.stderr, "");
-      assert.match(shown.stdout, /fail 2/);
+      assert.match(shown.stdout, /fail 3/);
       assert.match(shown.stdout, /verificationFailure: \[Object\]/);
       assert.match(shown.stdout, /verificationStorageCode: 'us_request_package_storage_timeout'/);
+      assert.match(shown.stdout, /verificationTransportWitness: 'consume_body:code:ECONNRESET'/);
       assert.match(
         shown.stdout,
         /verificationOperation: 'read_private_object'/,

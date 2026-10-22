@@ -629,3 +629,45 @@ Exact scope:
       stages/commits/pushes after prior CI settlement and an explicit publication
       ruling. All actual current-source gates remain mandatory. No cause/fix claim
       and no automatic follow-on evidence expansion.
+
+## Task12 P2 — bounded transport witness (2026-10-22)
+
+Root FULL READ the source-only diagnosis and424-line P2 design; independent
+DESIGN Approved. P1 fake-SDK characterization declined. This source increment
+adds evidence only, not an actual922 cause reproduction or reliability fix.
+The exact same nine Task8 paths are the complete manifest; no new helper,
+runtime/frame/worker/provider/SDK/resource or category-policy path is allowed.
+
+- [ ] Freeze immutable922 source hashes and exact new inverse structures before
+      editing. Preserve concurrent Task11 three named paths and unrelated hosting.
+- [ ] Genuine pure behavioral RED from actual failed adapter read, actual-main
+      catch and actual parser; then minimal GREEN with opaque live-read stage,
+      first-positive14-literal capture from existing eager reads/OR only,
+      closed28-primitive validator, same-error private map/take-once and stale
+      passthrough deletion. Preserve error identity/shape/classification and
+      original io/await/SDK/finally actions/caps.
+- [ ] Main consumes new evidence on every failure catch; emits only with valid
+      consumed canonical Request/package/private-read frame and existing genuine
+      transport scalar. Old seven-code/frame/root12/117/extractor unchanged.
+- [ ] Optional fifth actual parser argument and child option; actual compiled
+      validator loaded after unchanged Task8 load, outside pinned segments.
+      Present malformed field fails unavailable; absent field is legacy-compatible.
+      Independent28 literals/504 valid combinations, all privacy/alias/invalid/
+      missing-projector/overflow negatives; real bounded child/spec reporter
+      visibly retains scalar and original exit1. No reporter/global-inspect change.
+- [ ] New narrow exact inverse BEFORE unchanged Task8 inverse. Validate every
+      introduced fragment/placement before erasure. Normal fixture restores
+      fixed922 whole-byte hash; historical mutants still reach original errors.
+      Keep all old pins/segments/module hashes/substitutions/mutants unchanged.
+      Restore original matcher/read/io/main AST by exact additions, no whole
+      existing function deletion; all outside approved scopes raw-byte identical.
+- [ ] Only root-released focused pure/unchanged117/main/API artifact tests,
+      Node positive ownership+viewer-entry, scoped lint/format/isolation/diff;
+      sequential final API typecheck ONCE and build ONCE for actual compiled
+      primitive validator. NO full tooling glob/ordinary API/native/provider/
+      DB/browser/Vite/listeners/network/actual initialize/verify or CI retry.
+- [ ] Freeze full nine-path diff/hashes/report, forward failures/counts/warnings
+      and explicit unrun gates for root FULL READ and the same independent SOURCE
+      reviewer before publication. Root owns any later whole-tooling/exact-CI
+      decision; no automatic actual-run ladder. TimeoutError timer ambiguity and
+      synchronous capture cost remain, historical/actual922 underlying cause UNKNOWN.

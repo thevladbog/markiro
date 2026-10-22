@@ -1,12 +1,22 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import { Readable } from "node:stream";
+import { compileFunction } from "node:vm";
+import ts from "typescript";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UsWorkerObjectEvidence } from "../src/modules/traceability/requests/us-request-worker-types";
 import { createUsRequestWorkerStorageFixture } from "./support/us-request-worker-storage-fixture";
+import * as artifactConfig from "../src/modules/traceability/requests/us-request-package-artifact-config";
+import * as workerTypes from "../src/modules/traceability/requests/us-request-worker-types";
+import type * as artifactTypes from "../src/modules/traceability/requests/us-request-package-artifacts";
 import {
   projectUsRequestPackageStorageReadFailureCode as projectStorageCode,
   takeUsRequestPackageStorageReadFailure as takeStorageFailure,
+  takeUsRequestPackageTransportWitness as takeWitness,
+  projectUsRequestPackageTransportWitness as projectWitness,
 } from "../src/modules/traceability/requests/us-request-package-artifacts";
 
 const scope = {
@@ -40,6 +50,348 @@ const readFailureCodes = [
   "us_request_package_storage_read_failed",
   "us_request_worker_unknown_failure",
 ];
+
+it("retains a private take-once witness from the actual failed send without changing its error", async () => {
+  const s = createUsRequestWorkerStorageFixture(() => ({
+    async send() {
+      throw { code: "ECONNRESET", name: "TimeoutError", $metadata: { httpStatusCode: 503 } };
+    },
+  }));
+  try {
+    const error: unknown = await s.store.readVerified(scope, evidence()).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "us_request_package_storage_transport_failed" });
+    Object.freeze(error);
+    const descriptors = Object.getOwnPropertyDescriptors(error);
+    expect(takeWitness(error)).toBe("await_send:code:ECONNRESET");
+    expect(takeWitness(error)).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptors(error)).toEqual(descriptors);
+    expect(takeStorageFailure(error)).toBe("us_request_package_storage_transport_failed");
+  } finally {
+    s.destroy();
+  }
+});
+
+const transportCases = [
+  [{ code: "ECONNRESET" }, "await_send:code:ECONNRESET", "consume_body:code:ECONNRESET"],
+  [{ code: "ECONNREFUSED" }, "await_send:code:ECONNREFUSED", "consume_body:code:ECONNREFUSED"],
+  [{ code: "ETIMEDOUT" }, "await_send:code:ETIMEDOUT", "consume_body:code:ETIMEDOUT"],
+  [{ code: "EPIPE" }, "await_send:code:EPIPE", "consume_body:code:EPIPE"],
+  [{ code: "ENETUNREACH" }, "await_send:code:ENETUNREACH", "consume_body:code:ENETUNREACH"],
+  [{ code: "EHOSTUNREACH" }, "await_send:code:EHOSTUNREACH", "consume_body:code:EHOSTUNREACH"],
+  [{ name: "TimeoutError" }, "await_send:name:TimeoutError", "consume_body:name:TimeoutError"],
+  [
+    { name: "RequestTimeout" },
+    "await_send:name:RequestTimeout",
+    "consume_body:name:RequestTimeout",
+  ],
+  [{ $metadata: { httpStatusCode: 408 } }, "await_send:status:408", "consume_body:status:408"],
+  [{ $metadata: { httpStatusCode: 429 } }, "await_send:status:429", "consume_body:status:429"],
+  [{ $metadata: { httpStatusCode: 500 } }, "await_send:status:500", "consume_body:status:500"],
+  [{ $metadata: { httpStatusCode: 502 } }, "await_send:status:502", "consume_body:status:502"],
+  [{ $metadata: { httpStatusCode: 503 } }, "await_send:status:503", "consume_body:status:503"],
+  [{ $metadata: { httpStatusCode: 504 } }, "await_send:status:504", "consume_body:status:504"],
+] as const;
+async function failedRead(raw: unknown, body = false) {
+  const s = createUsRequestWorkerStorageFixture(() => ({
+    async send() {
+      if (!body) throw raw;
+      return {
+        Body: {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                throw raw;
+              },
+            };
+          },
+        },
+        ContentType: "application/json",
+        ContentLength: bytes.length,
+      };
+    },
+  }));
+  try {
+    return await s.store.readVerified(scope, evidence()).catch((error: unknown) => error);
+  } finally {
+    s.destroy();
+  }
+}
+it("captures all 28 independent first-match literals at the actual send or body boundary", async () => {
+  expect(transportCases).toHaveLength(14);
+  for (const [raw, send, body] of transportCases)
+    for (const [postSend, want] of [
+      [false, send],
+      [true, body],
+    ] as const) {
+      const error = await failedRead(Object.freeze(raw), postSend);
+      expect(error).toMatchObject({ code: "us_request_package_storage_transport_failed" });
+      expect(takeWitness(error)).toBe(want);
+      expect(takeWitness(error)).toBeUndefined();
+      expect(projectWitness(want)).toBe(want);
+    }
+});
+
+it("keeps the eager own-descriptor trace and original first-match and fallback decisions", async () => {
+  for (const [fields, want] of [
+    [{ code: "ECONNRESET", name: "TimeoutError", status: 503 }, "await_send:code:ECONNRESET"],
+    [{ code: "private", name: "TimeoutError", status: 503 }, "await_send:name:TimeoutError"],
+    [{ code: "private", name: "RequestTimeout", status: 503 }, "await_send:name:RequestTimeout"],
+    [{ code: "private", name: "private", status: 503 }, "await_send:status:503"],
+    [{ code: 408, name: "private", status: "503" }, undefined],
+  ] as const) {
+    const reads: string[] = [];
+    const metadata = new Proxy(
+      { httpStatusCode: fields.status },
+      {
+        getOwnPropertyDescriptor(target, key) {
+          reads.push(`metadata:${String(key)}`);
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+      },
+    );
+    const raw = new Proxy(
+      { code: fields.code, name: fields.name, $metadata: metadata },
+      {
+        getPrototypeOf(target) {
+          reads.push("prototype");
+          return Reflect.getPrototypeOf(target);
+        },
+        getOwnPropertyDescriptor(target, key) {
+          reads.push(`error:${String(key)}`);
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+        get() {
+          throw new Error("unexpected raw get");
+        },
+      },
+    );
+    const error = await failedRead(raw);
+    expect(takeWitness(error)).toBe(want);
+    expect(error).toMatchObject({
+      code: want
+        ? "us_request_package_storage_transport_failed"
+        : "us_request_package_storage_read_failed",
+    });
+    expect(reads).toEqual([
+      "prototype",
+      "error:code",
+      "error:name",
+      "error:$metadata",
+      "metadata:httpStatusCode",
+    ]);
+  }
+  let getters = 0;
+  const raw = Object.defineProperty(Object.create({ code: "ECONNRESET" }), "name", {
+    get() {
+      getters++;
+      throw Error("private getter");
+    },
+  });
+  expect(takeWitness(await failedRead(raw))).toBeUndefined();
+  expect(getters).toBe(0);
+  for (const [trapAt, expectedReads] of [
+    ["code", ["code"]],
+    ["name", ["code", "name"]],
+    ["$metadata", ["code", "name", "$metadata"]],
+    ["httpStatusCode", ["code", "name", "$metadata", "httpStatusCode"]],
+  ] as const) {
+    const sentinel = new Error("private trap");
+    const reads: string[] = [];
+    const descriptor = (target: object, key: string | symbol) => {
+      reads.push(String(key));
+      if (key === trapAt) throw sentinel;
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    };
+    const metadata = new Proxy({ httpStatusCode: 503 }, { getOwnPropertyDescriptor: descriptor });
+    const trapped = new Proxy(
+      { code: "ECONNRESET", name: "TimeoutError", $metadata: metadata },
+      { getOwnPropertyDescriptor: descriptor },
+    );
+    expect(await failedRead(trapped)).toBe(sentinel);
+    expect(reads).toEqual(expectedReads);
+    expect(takeWitness(sentinel)).toBeUndefined();
+  }
+});
+
+it("never inspects alleged witness errors or primitive candidates and consumes genuine frozen errors once", async () => {
+  let traps = 0;
+  const hit = () => {
+    traps++;
+    throw Error("private sentinel");
+  };
+  const proxy = new Proxy(
+    {},
+    { get: hit, getPrototypeOf: hit, has: hit, ownKeys: hit, getOwnPropertyDescriptor: hit },
+  );
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  const error = await failedRead({ name: "TimeoutError" });
+  if (!(error instanceof Error)) throw new Error("actual mapped error missing");
+  Object.freeze(error);
+  const descriptors = Object.getOwnPropertyDescriptors(error);
+  for (const value of [
+    proxy,
+    revoked.proxy,
+    null,
+    undefined,
+    1,
+    Symbol("private"),
+    () => error,
+    { cause: error },
+    Object.create(error),
+    new Error("us_request_package_storage_transport_failed"),
+  ]) {
+    expect(takeWitness(value)).toBeUndefined();
+    expect(projectWitness(value)).toBeUndefined();
+  }
+  for (const [, send, body] of transportCases)
+    for (const value of [send, body]) {
+      expect(projectWitness(value)).toBe(value);
+      for (const invalid of [
+        Object(value),
+        ` ${value}`,
+        `${value}\n`,
+        `${value}:private`,
+        { verificationTransportWitness: value },
+      ])
+        expect(projectWitness(invalid)).toBeUndefined();
+    }
+  expect(takeWitness(error)).toBe("await_send:name:TimeoutError");
+  expect(takeWitness(error)).toBeUndefined();
+  expect(Object.getOwnPropertyDescriptors(error)).toEqual(descriptors);
+  expect(traps).toBe(0);
+});
+
+it("closes read stages on deadlines and ignores late send and body failures without resurrecting witnesses", async () => {
+  vi.useFakeTimers();
+  for (const bodyPhase of [false, true]) {
+    let rejectLate: ((error: unknown) => void) | undefined;
+    const pendingIO = new Promise<never>((_resolve, reject) => {
+      rejectLate = reject;
+    });
+    const s = createUsRequestWorkerStorageFixture(() => ({
+      async send() {
+        if (!bodyPhase) return pendingIO;
+        return {
+          Body: {
+            [Symbol.asyncIterator]() {
+              return { next: () => pendingIO };
+            },
+          },
+          ContentType: "application/json",
+          ContentLength: bytes.length,
+        };
+      },
+    }));
+    try {
+      const pending = s.store.readVerified(scope, evidence()).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const error = await pending;
+      expect(error).toMatchObject({ code: "us_request_package_storage_timeout" });
+      expect(takeWitness(error)).toBeUndefined();
+      rejectLate?.({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(takeWitness(error)).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      s.destroy();
+    }
+  }
+});
+
+it("does not attach witnesses to nonread operations and clears stale witness on same-error passthrough", async () => {
+  const original = await failedRead({ code: "ECONNRESET" });
+  const s = createUsRequestWorkerStorageFixture(() => ({
+    async send() {
+      throw original;
+    },
+  }));
+  try {
+    expect(await s.store.readVerified(scope, evidence()).catch((e: unknown) => e)).toBe(original);
+    expect(takeWitness(original)).toBeUndefined();
+  } finally {
+    s.destroy();
+  }
+  const t = createUsRequestWorkerStorageFixture(() => ({
+    async send() {
+      throw { code: "ECONNRESET" };
+    },
+  }));
+  try {
+    for (const call of [
+      () => t.store.putVerified(scope, evidence(), bytes),
+      () => t.store.removeFenced(scope, evidence()),
+    ]) {
+      const error: unknown = await call().catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "us_request_package_storage_transport_failed" });
+      expect(takeWitness(error)).toBeUndefined();
+    }
+    t.store.destroy();
+    expect(
+      takeWitness(await t.store.readVerified(scope, evidence()).catch((e: unknown) => e)),
+    ).toBeUndefined();
+  } finally {
+    t.destroy();
+  }
+});
+
+it("the actual adapter rejects phase, first-match and take-consumption semantic mutants", async () => {
+  const current = readFileSync(
+    "src/modules/traceability/requests/us-request-package-artifacts.ts",
+    "utf8",
+  );
+  const require = createRequire(resolve("package.json"));
+  for (const [before, after, repeated] of [
+    [
+      'case "ECONNRESET":\n          capture.witness =\n            capture.phase === "await_send"',
+      'case "ECONNRESET":\n          capture.witness =\n            capture.phase !== "await_send"',
+      false,
+    ],
+    [
+      'captureTransportMatch(capture, "code", code)',
+      'captureTransportMatch(capture, "status", code)',
+      false,
+    ],
+    [
+      "const witness = transportWitnesses.get(error);\n  transportWitnesses.delete(error);",
+      "const witness = transportWitnesses.get(error);",
+      true,
+    ],
+  ] as const) {
+    expect(current.split(before)).toHaveLength(2);
+    const js = ts.transpileModule(current.replace(before, after), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const mutant: typeof artifactTypes = compileFunction(`${js};return exports;`, [
+      "exports",
+      "require",
+    ])({}, (path: string): unknown =>
+      path === "./us-request-package-artifact-config"
+        ? artifactConfig
+        : path === "./us-request-worker-types"
+          ? workerTypes
+          : require(path),
+    );
+    const fixture = createUsRequestWorkerStorageFixture();
+    const store = new mutant.UsRequestPackageArtifactStore(fixture.config, {
+      async send() {
+        throw { code: "ECONNRESET", name: "TimeoutError" };
+      },
+    });
+    try {
+      const error: unknown = await store.readVerified(scope, evidence()).catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "us_request_package_storage_transport_failed" });
+      const first = mutant.takeUsRequestPackageTransportWitness(error);
+      if (repeated) {
+        expect(first).toBe("await_send:code:ECONNRESET");
+        expect(mutant.takeUsRequestPackageTransportWitness(error)).toBe(first);
+      } else expect(first).not.toBe("await_send:code:ECONNRESET");
+    } finally {
+      store.destroy();
+      fixture.destroy();
+    }
+  }
+});
 
 it("takes authentic direct-read factory failures once without changing errors or inspecting impostors", async () => {
   let elapsed = 0;
@@ -108,6 +460,9 @@ it("takes authentic direct-read factory failures once without changing errors or
       expect(Object.getOwnPropertyDescriptors(error)).toEqual(descriptors);
       expect(Object.getPrototypeOf(error)).toBe(prototype);
       expect(error).toMatchObject({ message: code, code });
+      expect(takeWitness(error)).toBe(
+        code.endsWith("transport_failed") ? "await_send:code:ECONNRESET" : undefined,
+      );
     } finally {
       s.destroy();
     }
