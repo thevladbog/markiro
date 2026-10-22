@@ -24,9 +24,7 @@
     "raceRate": 0.2,
     "resendRate": 0.02,
     "totalsPollS": 5.0,
-    "backupAt": [
-      0.5
-    ],
+    "backupAt": [0.5],
     "sampleS": 5,
     "seed": 20261020,
     "closeOrder": "shuffled"
