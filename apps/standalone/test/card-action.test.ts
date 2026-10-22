@@ -95,21 +95,27 @@ describe("a shift card's action on a shift several devices work (plan 2b)", () =
     });
   });
 
-  it("says the line is full when every slot is held by the other devices", () => {
+  it("still offers to join a line that looks full, online only: the host decides the slots (PR #775)", () => {
     const full = figures([
       working(OTHER),
       { row: participant(HANDHELD, "ТСД 1", "active", "handheld"), accepted: 3 },
     ]);
     expect(cardAction(active(), DEVICE, true, null, full)).toEqual({
-      kind: "line_full",
-      active: 2,
-      maxStations: 2,
+      kind: "join",
+      enabled: true,
+      full: { active: 2, maxStations: 2 },
     });
-    // A line of one that another station works: full at 1 of 1 (stage 2a's «занята»).
+    expect(cardAction(active(), DEVICE, false, null, full)).toEqual({
+      kind: "join",
+      enabled: false,
+      full: { active: 2, maxStations: 2 },
+    });
+    // A line of one that another station works — perhaps a revoked one the host no longer counts:
+    // full at 1 of 1 by the cache, and the host's answer decides.
     expect(cardAction(active(), DEVICE, true, null, figures([working(OTHER)], 1))).toEqual({
-      kind: "line_full",
-      active: 1,
-      maxStations: 1,
+      kind: "join",
+      enabled: true,
+      full: { active: 1, maxStations: 1 },
     });
     // A closed or paused participant holds no slot.
     expect(
@@ -147,10 +153,16 @@ describe("a shift card's action on a shift several devices work (plan 2b)", () =
       2,
       "left",
     );
+    // A paused part over a line that looks full: resumed through the host only, never offline.
     expect(cardAction(active({ entered: true }), DEVICE, true, null, pausedFull)).toEqual({
-      kind: "line_full",
-      active: 2,
-      maxStations: 2,
+      kind: "continue",
+      enabled: true,
+      full: { active: 2, maxStations: 2 },
+    });
+    expect(cardAction(active({ entered: true }), DEVICE, false, null, pausedFull)).toEqual({
+      kind: "continue",
+      enabled: false,
+      full: { active: 2, maxStations: 2 },
     });
   });
 

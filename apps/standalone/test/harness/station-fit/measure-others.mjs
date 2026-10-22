@@ -78,6 +78,8 @@ const HUB_CASES = [
   "view=hub&shifts=2&multi=join&photo=png",
   "view=hub&shifts=2&multi=join&offline=1&long=1",
   "view=hub&shifts=1&multi=full&long=1&photo=jpeg",
+  // A line that looks full keeps its join (PR #775): offline, the tallest notes (who, link, full).
+  "view=hub&shifts=2&multi=full&long=1&offline=1",
   "view=hub&shifts=2&multi=mine&long=1&offline=1&photo=transparent",
   "view=hub&shifts=3&multi=closed",
   "view=work&queue=3&rejected=1&printer=error&scanner=off&long=1",

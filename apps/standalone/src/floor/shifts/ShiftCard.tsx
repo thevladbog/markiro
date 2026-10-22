@@ -15,30 +15,40 @@ import { shiftProgress } from "./hub-layout.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
 
 /**
+ * The slots of a line that look all held by the other devices, by the cache (plan 2b): advisory.
+ * The host's list names a revoked device's part `active`, but the host gives a revoked device no
+ * slot (spec §12.5), and only its answer to an entry decides (PR #775).
+ */
+export interface LooksFull {
+  active: number;
+  maxStations: number;
+}
+
+/**
  * What the card offers: open a planned shift, continue this station's own part of an active one,
- * join one another device works while the line has a free slot (plan 2b), finish one the office
- * closed after this station entered it (plan 2a8; no host needed), or nothing — a line whose every
- * slot is held (plan 2b), a part the host says is closed, a shift of a host that names no
- * participants (stage 2a's «занята»), one this station is closing. `enabled` is false where the
- * host is needed and away.
+ * join one another device works (plan 2b), finish one the office closed after this station
+ * entered it (plan 2a8; no host needed), or nothing — a part the host says is closed, a shift of
+ * a host that names no participants (stage 2a's «занята»), one this station is closing.
+ * `enabled` is false where the host is needed and away. `full`: by the cache every slot of the
+ * line is held; the join (or the resume of a paused part) still asks the host, which decides,
+ * and is never made without it (PR #775).
  */
 export type CardAction =
   | { kind: "open"; enabled: boolean }
-  | { kind: "continue"; enabled: boolean }
-  | { kind: "join"; enabled: boolean }
+  | { kind: "continue"; enabled: boolean; full?: LooksFull }
+  | { kind: "join"; enabled: boolean; full?: LooksFull }
   | { kind: "finish" }
   | { kind: "busy" }
-  | { kind: "line_full"; active: number; maxStations: number }
   | { kind: "part_closed" }
   | { kind: "closing" }
   /** A planned shift the site's license does not let open (plan ЛЦ-3): words in place of «Открыть». */
   | { kind: "blocked"; refusal: LicenseRefusal };
 
 /** «Линия занята: N из M» when the other devices hold every slot, by the cache; else `null`. */
-function lineFull(participation: Participation, deviceId: string): CardAction | null {
+function looksFull(participation: Participation, deviceId: string): LooksFull | null {
   const active = activeOthers(participation, deviceId).length;
   return active >= participation.maxStations
-    ? { kind: "line_full", active, maxStations: participation.maxStations }
+    ? { active, maxStations: participation.maxStations }
     : null;
 }
 
@@ -48,8 +58,9 @@ function lineFull(participation: Participation, deviceId: string): CardAction | 
  * planned shift, or a host that names none). Opening a planned shift needs the host (it freezes
  * the snapshot); continuing needs it only when this station keeps no snapshot; joining always
  * needs it (the host gives the slot and the snapshot). The license guards openings only (host D17).
- * The slots are counted from the cache: the host's answer decides (it frees a revoked device's
- * slot, which the cache cannot see).
+ * The slots are counted from the cache, which cannot see a revoked device: a line that looks full
+ * keeps its join online (the host's answer decides, `shift_line_full` with its numbers when it
+ * refuses), and no entry is offered over it without the host (PR #775).
  */
 export function cardAction(
   copy: ShiftCopy,
@@ -65,20 +76,21 @@ export function cardAction(
     if (mine === "closed") return { kind: "part_closed" };
     const resumes = online || copy.entered;
     if (mine === "left") {
-      // A paused part takes a slot again: only while one is free.
-      return (
-        (participation === null ? null : lineFull(participation, deviceId)) ?? {
-          kind: "continue",
-          enabled: resumes,
-        }
-      );
+      // A paused part takes a slot again: over a line that looks full, only through the host.
+      const full = participation === null ? null : looksFull(participation, deviceId);
+      return full === null
+        ? { kind: "continue", enabled: resumes }
+        : { kind: "continue", enabled: online, full };
     }
     // Never closed by the license: the station's own shift goes on (spec §3.3).
     if (mine === "active" || copy.entered || copy.ownerDeviceId === deviceId) {
       return { kind: "continue", enabled: resumes };
     }
     if (participation === null) return { kind: "busy" };
-    return lineFull(participation, deviceId) ?? { kind: "join", enabled: online };
+    const full = looksFull(participation, deviceId);
+    return full === null
+      ? { kind: "join", enabled: online }
+      : { kind: "join", enabled: online, full };
   }
   if (blocked !== null) return { kind: "blocked", refusal: blocked };
   return { kind: "open", enabled: online };
@@ -123,8 +135,9 @@ export interface ShiftCardProps {
  * number, the product's print name, who it is for, the dates and the plan as label and value,
  * the progress where both counters exist locally, and the 84 px action pinned to the bottom.
  * What the standalone adds — a shift that needs the host, one the office closed, a close the
- * host refused, who else works a shared shift and a line whose slots are all held (plan 2b) — is
- * said in the free row above the action; a full line or a closed part has no action.
+ * host refused, who else works a shared shift and a line whose slots look all held (plan 2b) — is
+ * said in the free row above the action; a closed part has no action, a line that looks full
+ * keeps its join (the host decides, PR #775).
  */
 export function ShiftCard({
   copy,
@@ -151,8 +164,8 @@ export function ShiftCard({
     action.kind === "open" || action.kind === "continue" || action.kind === "join";
   const enabled = action.kind === "finish" || (takesAction && action.enabled);
   const needsLink = takesAction && !action.enabled;
-  const hasButton =
-    action.kind !== "blocked" && action.kind !== "line_full" && action.kind !== "part_closed";
+  const hasButton = action.kind !== "blocked" && action.kind !== "part_closed";
+  const full = action.kind === "join" || action.kind === "continue" ? (action.full ?? null) : null;
   const progress = shiftProgress({
     plannedQty: copy.plannedQty,
     accepted,
@@ -293,12 +306,12 @@ export function ShiftCard({
               // In place of «Открыть» (spec §9.6): the host would refuse, and the operator is told why.
               <p className="shift-card__hint">{t(`floor.shifts.refused.${action.refusal}`)}</p>
             )}
-            {action.kind === "line_full" && (
-              // In place of an action (plan 2b): the host would refuse with `shift_line_full`.
+            {full !== null && (
+              // Advisory (PR #775): the host decides, `shift_line_full` with its numbers if it refuses.
               <p className="shift-card__hint">
                 {t("floor.shifts.lineFull", {
-                  active: formatQuantity(action.active),
-                  max: formatQuantity(action.maxStations),
+                  active: formatQuantity(full.active),
+                  max: formatQuantity(full.maxStations),
                 })}
               </p>
             )}

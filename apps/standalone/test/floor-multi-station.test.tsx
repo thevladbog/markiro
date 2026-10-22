@@ -188,7 +188,16 @@ describe("two stations in one shift (plan 2b, spec §9.6)", () => {
     await b.press("Присоединиться");
     await c.readShifts();
     expect(await c.screen().findByText("Линия занята: 2 из 2")).toBeTruthy();
-    expect(c.screen().queryByRole("button", { name: "Присоединиться" })).toBeNull();
+    // The card's count is advisory: C may ask, and the host refuses with its own numbers.
+    await c.press("Присоединиться");
+    expect(
+      await c
+        .screen()
+        .findByText(
+          "Линия занята: 2 из 2. Присоединиться можно, когда одна из станций выйдет из смены или закроет свою часть.",
+        ),
+    ).toBeTruthy();
+    expect(host.state().parts.has(THIRD_STATION)).toBe(false);
 
     // Both scan; the host takes their facts; each band says its own and the whole shift's.
     await a.scanner.listening();
