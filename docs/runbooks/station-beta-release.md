@@ -4,6 +4,12 @@
 станциях не выполняется: оператор сам запускает установщик после проверки окна
 смены и состояния outbox.
 
+> Источник `yandex` в инструментах, workflow, evidence и в updater станции —
+> историческое имя источника `releases.markiro.app`. С 22.10.2026 его бакет
+> лежит в Timeweb S3 (`https://s3.twcstorage.ru`), а домен раздаёт edge
+> платформы; см. [хостинг выпусков](release-hosting.md). Ниже «Yandex» означает
+> этот источник, а не Yandex Cloud.
+
 Принятую beta можно продвинуть в отдельный stable-канал только по процедуре
 [Station stable release](station-stable-release.md). Beta, выпущенная до
 внедрения stable tooling/overlay, для первого stable не подходит.
@@ -120,10 +126,10 @@ Windows.
   содержит точный инвентарь:
   secret `STATION_RELEASE_REPOSITORY_TOKEN`, ограниченный только публичным
   binary-only репозиторием `thevladbog/markiro-station-releases` и правом
-  Contents read/write, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID` и
-  `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
-  `YANDEX_STATION_RELEASE_BUCKET` и `YANDEX_STATION_RELEASE_ENDPOINT` со
-  значением `https://storage.yandexcloud.net`. Не переносите signing secrets в
+  Contents read/write, secrets `RELEASES_S3_ACCESS_KEY_ID` и
+  `RELEASES_S3_SECRET_ACCESS_KEY`, variables
+  `RELEASES_S3_BUCKET` и `RELEASES_S3_ENDPOINT` со
+  значением `https://s3.twcstorage.ru`. Не переносите signing secrets в
   `station-release`, а publisher credentials — в `station-beta`, job-wide env,
   аргументы, логи или artifacts. Обычный `${{ github.token }}` используется
   только для CI и сохранения source tag в `thevladbog/markiro`; он не
@@ -203,6 +209,11 @@ workflow artifact после успешного завершения.
 
 ### Одноразовый beta baseline
 
+Режим остался от первоначального засева Yandex-источника и требует evidence
+Terraform-плана, которого на Timeweb нет, а также отсутствующего GitHub-канала.
+Пустой бакет Timeweb им не засеять; порядок переноса — шаг 8 в
+[хостинге выпусков](release-hosting.md).
+
 `mode=seed-baseline` — отдельный защищённый одноразовый режим только для нового
 strict dual-origin pre-transition beta. Нельзя retrofit или переупаковать старую
 legacy beta с GitHub-only evidence: workflow обязан собрать и подписать новую
@@ -213,7 +224,7 @@ legacy beta с GitHub-only evidence: workflow обязан собрать и п�
 отклоняет. До первой mutable backup или write workflow публично скачивает обе
 immutable trees в новые каталоги, валидирует их и сравнивает common assets.
 Yandex tree в seed читается через фиксированный provider host
-`https://storage.yandexcloud.net`, не через ещё выключенный release DNS.
+`https://s3.twcstorage.ru`, не через ещё выключенный release DNS.
 GitHub public release/channel reads, Yandex provider и canonical public reads,
 а также прямые workflow-downloads immutable и mutable объектов выполняются
 максимум четырьмя попытками с паузами 1, 2 и 4 секунды. Каждая попытка заново

@@ -4,6 +4,12 @@
 dual-origin beta. Workflow не выбирает newest beta, не добавляет более новые
 изменения из `main` и не устанавливает обновление на станции автоматически.
 
+> Источник `yandex` в инструментах, workflow, evidence и в updater станции —
+> историческое имя источника `releases.markiro.app`. С 22.10.2026 его бакет
+> лежит в Timeweb S3 (`https://s3.twcstorage.ru`), а домен раздаёт edge
+> платформы; см. [хостинг выпусков](release-hosting.md). Ниже «Yandex» означает
+> этот источник, а не Yandex Cloud.
+
 ## Защищённые environments и исходные условия
 
 1. GitHub Environment `station-stable` хранит только
@@ -16,9 +22,9 @@ dual-origin beta. Workflow не выбирает newest beta, не добавл�
 2. Environment `station-release` разрешён только для `main` и содержит
    fine-grained secret `STATION_RELEASE_REPOSITORY_TOKEN` с Contents
    read/write только для публичного binary-only repository
-   `thevladbog/markiro-station-releases`, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`,
-   `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
-   `YANDEX_STATION_RELEASE_BUCKET`, `YANDEX_STATION_RELEASE_ENDPOINT`. Signing
+   `thevladbog/markiro-station-releases`, secrets `RELEASES_S3_ACCESS_KEY_ID`,
+   `RELEASES_S3_SECRET_ACCESS_KEY`, variables
+   `RELEASES_S3_BUCKET`, `RELEASES_S3_ENDPOINT`. Signing
    secrets туда не копируются; publisher credentials не попадают в build job,
    аргументы, artifacts или логи.
 3. `station-release` использует тот же required-reviewer и `prevent self-review`

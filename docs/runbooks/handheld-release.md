@@ -13,9 +13,15 @@
    `MARKIRO_HANDHELD_STORE_PASSWORD`, `MARKIRO_HANDHELD_KEY_ALIAS`,
    `MARKIRO_HANDHELD_KEY_PASSWORD`.
 4. Сохранить `.jks` и пароли офлайн, **в двух местах**.
-5. Дать ключу публикатора доступ на запись в префикс `handheld/` того же бакета,
-   откуда раздаётся станция (`infra/yandex/modules/station-releases/`), и
-   применить Terraform.
+5. Дать ключу публикатора доступ на запись в префикс `handheld/` бакета
+   выпусков Timeweb S3 и положить в окружение secrets
+   `RELEASES_S3_ACCESS_KEY_ID`, `RELEASES_S3_SECRET_ACCESS_KEY` и variable
+   `RELEASES_S3_BUCKET` ([хостинг выпусков](release-hosting.md)).
+6. Убедиться, что `handheld/stable/latest.json` отдаётся. Если указателя нет
+   (`404`), workflow считает канал пустым и выпускает `versionCode 1`, а
+   установленные терминалы такое обновление отклонят. После переезда на
+   Timeweb сначала восстановите указатель (шаг 8 в
+   [хостинге выпусков](release-hosting.md)).
 
 ## Каждый выпуск
 

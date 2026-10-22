@@ -292,9 +292,6 @@ function jobsForPath(path) {
   // The platform release (release-platform-images.yml) still runs the
   // deploy/production contract suite, and the API image is built from there.
   if (path.startsWith("deploy/production/")) return ["production_bundle"];
-  // The Yandex runtime is retired (owner decision 2026-10-21): nothing in CI
-  // runs it any more, and yandex-infrastructure.yml keeps its own PR checks.
-  if (path.startsWith("deploy/yandex/") || path.startsWith("infra/yandex/")) return [];
   if (path === "compose.production.yml") return ["production_bundle"];
 
   return null;

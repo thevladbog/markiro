@@ -90,11 +90,10 @@ rules; keep shared policies here and detailed procedures beside their code.
   artifact generation, manifests, and verification.
 - `deploy/production`: production Compose, images, preflight, deployment, smoke,
   and contract tests.
-- `deploy/yandex`: runtime inventory, remote deployment, and diagnostics for the
-  Yandex Cloud host.
-- `infra/yandex`: Terraform for Yandex Cloud — IAM, network, compute, managed
-  Postgres, object storage, and station-release buckets, plus the production
-  stack's variables and outputs.
+- `deploy/platform`: the Timeweb production platform (`SERVER_PROFILE=platform-only`):
+  Compose, the Caddy edge for SaaS admin, landing, retired hosts and
+  `releases.markiro.app` (a read-only proxy onto the Timeweb S3 release bucket),
+  preflight, host executor, backup/recovery and their contract tests.
 - `tools/station-release`: station release artifacts, changelog, promotion, and
   object-storage/GitHub mirror contracts.
 - `tools/evidence-package`: evidence package init, seal, and verification.

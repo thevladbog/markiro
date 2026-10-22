@@ -59,34 +59,29 @@
 
 Загрузки идут path-style на `RELEASES_S3_ENDPOINT`, поэтому это и есть origin для CSP админки.
 На платформе он закреплён: `RELEASES_UPLOAD_ORIGIN` в `deploy/platform/preflight.mjs` =
-`https://storage.yandexcloud.net`, и `saas_admin_csp` в `deploy/platform/Caddyfile` разрешает
-`connect-src` ровно к нему (тест `deploy/platform/test/contracts.test.mjs`). Переезд бакета —
-правка обоих мест одним коммитом.
+`https://s3.twcstorage.ru` (Timeweb S3, регион `ru-1`), и `saas_admin_csp` в
+`deploy/platform/Caddyfile` разрешает `connect-src` ровно к нему (тест
+`deploy/platform/test/contracts.test.mjs`). Переезд бакета — правка обоих мест одним коммитом.
+`RELEASES_S3_BUCKET` равен `MARKIRO_RELEASES_BUCKET`, бакету, который edge раздаёт на
+`releases.markiro.app`; как он устроен — [хостинг выпусков](../runbooks/release-hosting.md).
 
 Диагностика автонома берёт «последнюю опубликованную сборку» из `standalone/stable/latest.json`
 (кеш 60 с; без хранилища или при ошибке — «неизвестно», вердикта «устарела» нет).
 
-## Шаги владельца (вне репозитория или отдельным изменением Terraform)
+## Шаги владельца
 
-1. **Публичное чтение `standalone/*`.** Политика бакета в
-   `infra/yandex/modules/station-releases/main.tf` открывает на чтение только `station/*`,
-   `signer/*`, `handheld/*`. Без `standalone/*` в `AllowPublicReleaseObjects` сайт не скачает
-   ни `latest.json`, ни установщик. Ручная правка в консоли будет откатана следующим
-   `terraform apply` — менять в Terraform.
-2. **Отдельный ключ для API.** Сервисный аккаунт только на префикс `standalone/*`:
-   `s3:GetObject`, `s3:PutObject` (и по желанию `s3:DeleteObject` — уборка отказанных загрузок),
-   `s3:ListBucket` с условием `s3:prefix = standalone/*`. Не давать ключ издателя станции и не
-   давать доступ к приватному бакету. Ключи — в защищённый env платформы как `RELEASES_S3_*`.
-3. **CORS бакета** для загрузки из браузера: `AllowedOrigins` — `SAAS_ADMIN_ORIGIN`
-   (`https://saas-admin.markiro.app`), `AllowedMethods` — `PUT`, `AllowedHeaders` —
-   `content-type`, `MaxAgeSeconds` — например 3600. Без CORS браузер покажет «Хранилище не
-   приняло файл».
-4. Первая публикация: загрузить подписанный пакет в разделе, нажать «Сделать последней» в
-   канале `stable`, проверить `https://releases.markiro.app/standalone/stable/latest.json` и
-   страницу `/skachat/`.
+Бакет, публичное чтение `standalone/*`, CORS для `PUT` из SaaS-админки, отдельный ключ API и
+env платформы описаны в [хостинге выпусков](../runbooks/release-hosting.md), шаги 1–7. После них:
+
+1. В «Выпусках автонома» раздел больше не пишет «не настроено».
+2. Загрузить подписанный пакет. Ошибка «Хранилище не приняло файл» означает, что CORS бакета
+   или права ключа не применились.
+3. Нажать «Сделать последней» в канале `stable`, проверить
+   `https://releases.markiro.app/standalone/stable/latest.json` и страницу `/skachat/`: версия
+   видна, в консоли браузера нет CORS-ошибки.
 
 ## Что не проверено автоматикой
 
-Живая загрузка в бакет, CORS, политика бакета и скачивание с `releases.markiro.app` — только
-вручную на стенде. Тесты API работают с хранилищем в памяти и проверяют форму подписанной ссылки
+Живая загрузка в бакет Timeweb, CORS, политика бакета и скачивание с `releases.markiro.app` —
+только вручную на стенде. Тесты API работают с хранилищем в памяти и проверяют форму подписанной ссылки
 (path-style, подписанный `content-type`, без контрольной суммы SDK).

@@ -159,11 +159,12 @@ errors.
 
 ## Delivery and operations
 
-- `infra/yandex` declares Yandex Cloud IAM, networking, compute, managed
-  PostgreSQL, DNS, KMS and production variables/outputs.
-- `deploy/production` owns immutable Compose deployment, edge routing, preflight,
-  smoke and contract checks.
-- `deploy/yandex` materializes runtime inventory and remote deployment/diagnostics.
+- `deploy/platform` owns the Timeweb production platform: Compose, the Caddy edge
+  (including `releases.markiro.app`, a read-only proxy onto the Timeweb S3
+  release bucket), preflight, the host executor and backup/recovery. Yandex Cloud
+  infrastructure and its runtime were removed on 2026-10-22.
+- `deploy/production` keeps the legacy bundle's API image, contracts and smoke
+  checks that the platform still reuses.
 - CI separates static checks, API/database tests, app tests, production bundle
   contracts, Rust checks, Windows Station builds, image publication and Station
   beta release provenance.
@@ -189,7 +190,7 @@ errors.
 | Station floor/offline behavior                  | station mirror/journal/outbox/sync and WorkScreen         | restart, degraded sync, Rust boundary, Windows/hardware acceptance          |
 | Hardware print/scanner/update                   | Station TypeScript contract and `src-tauri`               | Cargo/host tests plus real Windows/device acceptance                        |
 | Platform SaaS/billing/catalog                   | `apps/saas-admin` and platform API modules                | platform auth/capabilities, tenant lifecycle and billing contracts          |
-| Deployment/infrastructure                       | `deploy` and `infra/yandex`                               | contract tests first; live approval and post-change verification separately |
+| Deployment/infrastructure                       | `deploy`                                                  | contract tests first; live approval and post-change verification separately |
 
 ## Current architectural signals
 

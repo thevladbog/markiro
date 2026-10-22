@@ -19,10 +19,8 @@ import { loadEnv } from "../src/env";
  * repeating it. Hence this file.
  *
  * Deliberately NOT covered: `.env.production.example`. Every value there is
- * blank on purpose, supplied from the secret manager at deploy time, and
- * `deploy/yandex/test/runtime-env.test.mjs` already pins it to exactly that
- * all-blank shape via `environmentKeysFromExample`. Asserting it bootable
- * would contradict that contract, not reinforce it.
+ * blank on purpose, supplied from the secret manager at deploy time.
+ * Asserting it bootable would contradict that contract, not reinforce it.
  */
 const EXAMPLE_PATH = join(__dirname, "../../../.env.example");
 

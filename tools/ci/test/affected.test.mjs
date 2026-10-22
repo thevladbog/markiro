@@ -401,9 +401,6 @@ test("deployment and release tooling selects its consuming jobs", () => {
   const cases = [
     ["deploy/production/preflight.mjs", ["production_bundle", "platform_contracts"]],
     ["deploy/platform/ci-stack.mjs", ["production_bundle", "platform_contracts"]],
-    // The retired Yandex runtime has no CI job; yandex-infrastructure.yml owns it.
-    ["infra/yandex/main.tf", []],
-    ["deploy/yandex/runtime-diagnostics-probe.mjs", []],
     [
       "tools/production-browser/tests/landing-seo.spec.ts",
       ["landing_browser", "landing_lighthouse", "saas_admin_browser", "cabinet_station_galleries"],

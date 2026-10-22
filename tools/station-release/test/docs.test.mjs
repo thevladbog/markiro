@@ -899,10 +899,10 @@ test("station beta docs define dual-origin baseline, repair and restricted-netwo
   assert.match(runbook, /owner_confirmation.*PUBLISH-STATION-BETA/is);
   assert.match(runbook, /владел.*репозитор.*github\.actor.*github\.repository_owner/is);
   for (const name of [
-    "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
-    "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
-    "YANDEX_STATION_RELEASE_BUCKET",
-    "YANDEX_STATION_RELEASE_ENDPOINT",
+    "RELEASES_S3_ACCESS_KEY_ID",
+    "RELEASES_S3_SECRET_ACCESS_KEY",
+    "RELEASES_S3_BUCKET",
+    "RELEASES_S3_ENDPOINT",
   ]) {
     assert.match(runbook, new RegExp(name));
   }
@@ -1285,122 +1285,81 @@ test("beta and stable runbooks define exact post-success acceptance rollback inp
   }
 });
 
-test("Station release origin bootstrap separates protected credentials and approval gates", async () => {
-  const [infrastructure, secrets, bootstrap] = await Promise.all([
-    read("docs/runbooks/yandex-infrastructure.md"),
-    read("docs/runbooks/yandex-infrastructure-secrets.md"),
+test("release hosting runbook inventories the Timeweb bucket, keys and edge", async () => {
+  const [hosting, bootstrap, beta, stable] = await Promise.all([
+    read("docs/runbooks/release-hosting.md"),
     read("docs/runbooks/station-release-origin-bootstrap.md"),
+    read("docs/runbooks/station-beta-release.md"),
+    read("docs/runbooks/station-stable-release.md"),
   ]);
-  const combined = `${infrastructure}\n${secrets}\n${bootstrap}`;
-
-  for (const value of [
-    "YC_STATION_RELEASE_BUCKET_NAME",
-    "MARKIRO_STATION_RELEASE_DOMAIN",
-    "YC_STATION_RELEASE_PUBLISHER_PGP_KEY",
-    "STATION_RELEASE_REPOSITORY_TOKEN",
-    "STATION_SOURCE_REPOSITORY_TOKEN",
-    "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
-    "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
-    "YANDEX_STATION_RELEASE_BUCKET",
-    "YANDEX_STATION_RELEASE_ENDPOINT",
-  ]) {
-    assert.match(combined, new RegExp(value));
+  for (const deleted of [
+    "docs/runbooks/yandex-infrastructure.md",
+    "docs/runbooks/yandex-infrastructure-secrets.md",
+    "docs/runbooks/yandex-infrastructure-apply.md",
+    "docs/runbooks/standalone-release-bucket.md",
+  ])
+    await assert.rejects(read(deleted), /ENOENT/u, deleted);
+  // The Yandex bootstrap stays only as a retired record.
+  assert.match(bootstrap, /Выведено из работы 22\.10\.2026/u);
+  assert.match(bootstrap, /\(release-hosting\.md\)/u);
+  for (const text of [beta, stable]) {
+    assert.match(text, /историческое имя источника `releases\.markiro\.app`/u);
+    assert.match(text, /RELEASES_S3_ENDPOINT/u);
+    assert.doesNotMatch(text, /YANDEX_STATION_RELEASE|storage\.yandexcloud\.net/u);
   }
-  assert.match(secrets, /GitHub Environment `station-release`/);
-  assert.match(secrets, /защит.*environment|environment.*защит/is);
-  assert.match(secrets, /required\s+reviewers/is);
-  assert.match(secrets, /prevent self-review|запрет.*самоодобрен/is);
-  assert.match(secrets, /thevladbog-2/);
-  assert.doesNotMatch(secrets, /private.*required\s+reviewers.*недоступ/is);
-  assert.match(bootstrap, /owner_confirmation.*PUBLISH-STATION-(?:BETA|STABLE)/is);
-  assert.match(secrets, /не созда(?:е|ё|ю)т.*Environment|Environment.*созда(?:е|ё|ю)т/is);
-  const stationReleaseInventory = secrets.match(
-    /## GitHub Environment `station-release`([\s\S]*?)## Ротация/,
-  )?.[1];
-  assert.ok(stationReleaseInventory);
-  assert.deepEqual(
-    [...stationReleaseInventory.matchAll(/- (?:secret|variable) `([^`]+)`/g)].map(
-      (match) => match[1],
-    ),
+
+  assert.match(hosting, /https:\/\/s3\.twcstorage\.ru/u);
+  assert.match(hosting, /`ru-1`/u);
+  const section = (heading) => {
+    const start = hosting.indexOf(heading);
+    assert.notEqual(start, -1, heading);
+    const end = hosting.indexOf("\n### ", start + heading.length);
+    return hosting.slice(start, end === -1 ? undefined : end);
+  };
+  const environments = section("### 5. GitHub environments");
+  const inventory = (name) =>
     [
-      "STATION_RELEASE_REPOSITORY_TOKEN",
-      "STATION_SOURCE_REPOSITORY_TOKEN",
-      "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
-      "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
-      "YANDEX_STATION_RELEASE_BUCKET",
-      "YANDEX_STATION_RELEASE_ENDPOINT",
-    ],
-  );
-
-  const ordered = [
-    "## 1. Подготовить защищённый план без release DNS",
-    "## 2. Остановиться перед первым apply",
-    "## 3. Получить зашифрованные outputs из защищённого state",
-    "## 4. Расшифровать секрет локально",
-    "## 5. Остановиться перед записью GitHub secrets",
-    "## 6. Проверить разрешения только в release prefix",
-    "## 7. Проверить certificate challenge",
-    "## 8. Засеять baseline и проверить provider host",
-    "## 9. Остановиться перед включением release DNS",
-  ];
-  let previous = -1;
-  for (const heading of ordered) {
-    const index = bootstrap.indexOf(heading);
-    assert.ok(index > previous, `missing or unordered ${heading}`);
-    previous = index;
-  }
-
-  assert.match(bootstrap, /enable_station_release_public_dns=false/);
-  assert.match(bootstrap, /enable_station_release_public_dns=true/);
-  assert.match(bootstrap, /umask 077/);
-  assert.match(bootstrap, /mktemp -d/);
-  assert.match(bootstrap, /chmod 600/);
-  assert.match(bootstrap, /trap cleanup/);
+      ...environments
+        .slice(environments.indexOf(`\`${name}\``))
+        .split(/\n\n(?=`)/u)[0]
+        .matchAll(/- (secret|variable) `([^`]+)`/gu),
+    ].map((match) => `${match[1]} ${match[2]}`);
+  assert.deepEqual(inventory("station-release"), [
+    "secret RELEASES_S3_ACCESS_KEY_ID",
+    "secret RELEASES_S3_SECRET_ACCESS_KEY",
+    "variable RELEASES_S3_BUCKET",
+    "variable RELEASES_S3_ENDPOINT",
+  ]);
+  assert.deepEqual(inventory("handheld-release"), [
+    "secret RELEASES_S3_ACCESS_KEY_ID",
+    "secret RELEASES_S3_SECRET_ACCESS_KEY",
+    "variable RELEASES_S3_BUCKET",
+  ]);
   assert.match(
-    bootstrap,
-    /gpg --batch --quiet --decrypt "\$encrypted_packet_file" > "\$secret_key_file"/,
+    environments,
+    /gh secret set RELEASES_S3_ACCESS_KEY_ID --env station-release < "\$access_key_file"/u,
   );
-  assert.doesNotMatch(bootstrap, /gpg[^\n]*--output "\$secret_key_file"/);
-  assert.match(
-    bootstrap,
-    /gh secret set YANDEX_STATION_RELEASE_ACCESS_KEY_ID --env station-release < "\$access_key_file"/,
-  );
-  assert.match(
-    bootstrap,
-    /gh secret set YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY --env station-release < "\$secret_key_file"/,
-  );
-  assert.match(bootstrap, /DELETE-PLAINTEXT/);
-  assert.match(bootstrap, /release_prefix='station\/'/);
-  assert.match(bootstrap, /storage\.yandexcloud\.net/);
-  assert.match(bootstrap, /ISSUED/);
-  assert.match(bootstrap, /baseline/is);
-  assert.match(bootstrap, /отдельн.*одобрен.*apply/is);
-  assert.match(infrastructure, /mode=plan/);
-  assert.match(infrastructure, /mode=apply/);
-  assert.match(infrastructure, /production-infrastructure-apply/);
-  assert.match(infrastructure, /production\/plans\//);
-  assert.match(infrastructure, /plan_key/);
-  assert.match(infrastructure, /plan_sha256/);
-  assert.match(infrastructure, /plan_version_id/);
-  assert.match(infrastructure, /GITHUB_RUN_ATTEMPT/);
-  assert.match(infrastructure, /точн.*key.*VersionId|key.*точн.*VersionId/is);
-  assert.match(infrastructure, /residual|остаточн/is);
-  assert.match(infrastructure, /version-id|VersionId/);
-  assert.ok(
-    bootstrap.indexOf("STOP 1 — APPLY") <
-      bootstrap.indexOf("owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE"),
-  );
-  assert.ok(
-    bootstrap.indexOf("STOP 2 — SECRETS") <
-      bootstrap.indexOf("gh secret set YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
-  );
-  assert.ok(
-    bootstrap.indexOf("STOP 3 — DNS") < bootstrap.indexOf("enable_station_release_public_dns=true"),
-  );
-
   assert.doesNotMatch(
-    bootstrap,
-    /gh secret set YANDEX_STATION_RELEASE_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)[^\n]*(?:--body|--value|=\$)/,
+    hosting,
+    /gh secret set RELEASES_S3_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)[^\n]*(?:--body|--value|=\$)/u,
   );
-  assert.doesNotMatch(combined, /actions\/upload-artifact/);
+  assert.match(environments, /YANDEX_STATION_RELEASE_\*/u);
+
+  const publicRead = section("### 2. Публичное чтение префиксов");
+  for (const prefix of ["station/*", "signer/*", "handheld/*", "standalone/*"])
+    assert.ok(publicRead.includes(`\`${prefix}\``), prefix);
+  assert.match(publicRead, /Листинг давать не нужно/u);
+  const cors = section("### 3. CORS бакета");
+  assert.match(cors, /"AllowedOrigins": \["https:\/\/saas-admin\.markiro\.app"\]/u);
+  assert.match(cors, /"AllowedMethods": \["PUT"\]/u);
+  const platform = section("### 6. Env платформы");
+  for (const key of ["MARKIRO_RELEASES_DOMAIN", "MARKIRO_RELEASES_BUCKET", "RELEASES_S3_REGION"])
+    assert.match(platform, new RegExp(`${key}=`, "u"));
+  // An empty bucket must not silently restart the handheld versionCode or
+  // promise a station publish the tooling refuses.
+  const transfer = section("### 8. Перенос уже выпущенных артефактов");
+  assert.match(transfer, /Не запускайте выпуск ТСД/u);
+  assert.match(transfer, /`versionCode 1`/u);
+  assert.match(transfer, /`seed-baseline`[\s\S]*не подходит/u);
+  assert.match(hosting, /## Что проверено и что нет/u);
 });
