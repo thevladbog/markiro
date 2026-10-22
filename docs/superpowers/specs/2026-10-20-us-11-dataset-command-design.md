@@ -1,11 +1,13 @@
 # US-11: guarded six-month dataset command
 
-Status: implementation design under the owner's standing instruction to continue
-without repeated approval questions. The preceding Request-package gate was
-reconciled by accepted successor `d712098f247cdde5a91b5dbcbe3915ed67e18847`
-(all ten US jobs and Cases passed). Task 2's amended 15-case exact-source native
-CI and Task 3's actual compiled acceptance remain separate open gates. This is
-not a new release authorization.
+Status: historical CLI implementation design with a bounded failure-evidence
+amendment. The preceding Request-package gate was reconciled by accepted
+successor `d712098f247cdde5a91b5dbcbe3915ed67e18847`; native and actual compiled
+CLI acceptance subsequently passed on `e5a00d71bf51aedd711269ca1a289749a8d172d8`.
+That evidence remains source-specific. Current `567e13af1` compiled initialize
+failed at Request September/package/private manifest read; its specific cause is
+unknown. The amendment below is evidence-only, not a fix or new acceptance.
+All current exact-source and viewer gates remain required; no release authority.
 
 ## Intent and scope
 
@@ -326,3 +328,48 @@ selectors; no added cold-command SLA inferred from a five-second assertion
 timer. Assign check-only CI ownership before accepting a new native suite.
 Record actual zero-skip execution and exact owned DB disposal. Broader API,
 source CI, browser, live provider and hosting evidence remain separate.
+
+## Task8: optional factory-owned private-read evidence — 2026-10-22
+
+An actual generic Request/package failure may additionally emit the optional
+primitive `verificationStorageCode`, but only after consuming the existing
+same-error invocation frame with strict `read_private_object` and a valid fixed
+artifact. Root code/location/frame semantics and success JSON remain unchanged.
+No frame, different error, mismatched/non-generic location, other operation or
+invalid artifact means no scalar. A reused error cannot reuse consumed evidence.
+
+Only seven existing fixed codes are admissible:
+
+- `us_request_package_storage_scope_invalid`
+- `us_request_package_storage_evidence_invalid`
+- `us_request_package_storage_timeout`
+- `us_request_package_storage_checksum_mismatch`
+- `us_request_package_storage_transport_failed`
+- `us_request_package_storage_read_failed`
+- `us_request_worker_unknown_failure`
+
+The storage module privately associates these codes with errors at its existing
+factory using WeakMap identity, consumed once by
+`takeUsRequestPackageStorageReadFailure`. It does not inspect alleged error/cause
+properties, prototypes or messages, mutate the error, or confer authority from
+matching public strings. Its separate
+`projectUsRequestPackageStorageReadFailureCode` validates only exact primitive
+strings and grants no provenance. Original storage I/O/errors/class/message/
+prototype, timers, SDK settings and ordering are retained.
+
+The positive fixture accepts the optional field only with the strict canonical
+generic Request/package/private-read tuple and the actual compiled primitive
+validator. That validator is loaded after the existing invoked-set declaration,
+outside both original byte-pinned segments, without constructing a client/store.
+The new argument is optional for legacy callers; old envelopes retain the same
+results. Extra keys, aliases, missing validator, invalid combinations, unknown
+codes, malformed/oversized/split-overflow output fail unavailable. The scalar
+remains visible in the real Node reporter without changing child exit decisions,
+measurement, ownership, provider observation, setup or disposal.
+
+This is not an arbitrary exception classifier or root-category expansion. No raw
+message, stack, cause, key, URL, header, credential, byte content or timing is
+disclosed. Evidence-invalid/read-failed may still have multiple causes; a later
+pass does not identify the historical failure. No automatic diagnostic expansion,
+replay, blind CI retry, increased cap or product fix is authorized. Independent
+source review and eventual exact-source CLI/native/viewer gates remain separate.

@@ -67,7 +67,12 @@ export function assertDatasetPositiveContainer(item, target) {
 // Test-only access to the real bounded child runner; not a fixture/proof override.
 export { child as runDatasetPositiveChild, commandDiagnostic as datasetPositiveCommandDiagnostic };
 
-function commandDiagnostic(text, diagnose, projectVerificationFailure) {
+function commandDiagnostic(
+  text,
+  diagnose,
+  projectVerificationFailure,
+  projectStorageReadFailureCode,
+) {
   try {
     if (
       typeof diagnose !== "function" ||
@@ -81,8 +86,18 @@ function commandDiagnostic(text, diagnose, projectVerificationFailure) {
     const keys = Object.keys(parsed);
     if (
       !keys.includes("code") ||
-      keys.some((key) => !["code", "unitKey", "stage", "verificationFailure"].includes(key)) ||
-      keys.some((key) => key !== "verificationFailure" && typeof parsed[key] !== "string") ||
+      keys.some(
+        (key) =>
+          !["code", "unitKey", "stage", "verificationFailure", "verificationStorageCode"].includes(
+            key,
+          ),
+      ) ||
+      keys.some(
+        (key) =>
+          key !== "verificationFailure" &&
+          key !== "verificationStorageCode" &&
+          typeof parsed[key] !== "string",
+      ) ||
       keys.includes("unitKey") !== keys.includes("stage") ||
       ![JSON.stringify(parsed), `${JSON.stringify(parsed)}\n`].includes(text)
     )
@@ -104,6 +119,17 @@ function commandDiagnostic(text, diagnose, projectVerificationFailure) {
       verificationFailure = projectVerificationFailure(parsed.verificationFailure);
       if (!verificationFailure) return { status: "unavailable" };
     }
+    let verificationStorageCode;
+    if (keys.includes("verificationStorageCode")) {
+      if (
+        typeof projectStorageReadFailureCode !== "function" ||
+        verificationFailure?.operation !== "read_private_object"
+      )
+        return { status: "unavailable" };
+      verificationStorageCode = projectStorageReadFailureCode(parsed.verificationStorageCode);
+      if (!verificationStorageCode || verificationStorageCode !== parsed.verificationStorageCode)
+        return { status: "unavailable" };
+    }
     return {
       status: "available",
       code: safe.code,
@@ -117,6 +143,7 @@ function commandDiagnostic(text, diagnose, projectVerificationFailure) {
               : {}),
           }
         : {}),
+      ...(verificationStorageCode ? { verificationStorageCode } : {}),
     };
   } catch {
     return { status: "unavailable" };
@@ -179,6 +206,7 @@ async function child(
     limit = 256 * 1024,
     diagnose,
     projectVerificationFailure,
+    projectStorageReadFailureCode,
     cwd,
   } = {},
 ) {
@@ -264,7 +292,12 @@ async function child(
           ? {
               diagnostic: overflow
                 ? { status: "unavailable" }
-                : commandDiagnostic(stderr.toString("utf8"), diagnose, projectVerificationFailure),
+                : commandDiagnostic(
+                    stderr.toString("utf8"),
+                    diagnose,
+                    projectVerificationFailure,
+                    projectStorageReadFailureCode,
+                  ),
             }
           : {}),
       },
@@ -648,6 +681,9 @@ async function acquireDatasetInstallation() {
     ];
     assert.ok(performance.now() - setupStarted <= 60_000, "positive setup exceeded 60000ms");
     const invoked = new Set();
+    const { projectUsRequestPackageStorageReadFailureCode } = compiled(
+      "modules/traceability/requests/us-request-package-artifacts",
+    );
     return {
       ...connection,
       identity,
@@ -685,6 +721,7 @@ async function acquireDatasetInstallation() {
               cap: 900_000,
               diagnose: usDatasetCommandDiagnostic,
               projectVerificationFailure: projectUsRequestVerificationFailure,
+              projectStorageReadFailureCode: projectUsRequestPackageStorageReadFailureCode,
             },
           );
         } catch (error) {

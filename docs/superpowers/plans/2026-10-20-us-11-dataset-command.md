@@ -580,3 +580,52 @@ new module/projector separately in the existing ownership cases.
       ownership/disposal gates and all original caps remain mandatory. Pre-Task7
       evidence stays source-specific; a cancelled job is not green. Stop on the
       actual new result for targeted investigation/ruling, not automatic expansion.
+
+## Task8 — same-invocation fixed private-read evidence (2026-10-22)
+
+Evidence-only amendment: actual567 failure identifies September/package/
+read_private_object/manifest.json, not its specific storage cause. Root approved
+the amended nine-path design after the initial eight-path design review found
+that the existing fixture preservation inverse would reject the addition. The
+initial finding remains valid historical evidence; no old digest is re-anchored.
+
+Exact scope:
+
+1. `apps/api/src/modules/traceability/requests/us-request-package-artifacts.ts`
+2. `apps/api/src/main.us-dataset.ts`
+3. `tools/us-development/test/support/dataset-command-positive-fixture.mjs`
+4. `apps/api/test/us-request-package-artifacts.test.ts`
+5. `apps/api/test/us-request-verification-failure.test.ts`
+6. `tools/us-development/test/dataset-command-positive-ownership.test.mjs`
+7. `docs/superpowers/specs/2026-10-20-us-11-dataset-command-design.md`
+8. `docs/superpowers/plans/2026-10-20-us-11-dataset-command.md`
+9. `tools/us-development/test/viewer-entry.test.mjs`
+
+- [ ] Record genuine forward pure RED for factory identity/take-once and optional
+      scalar, then minimal GREEN. Induce actual adapter read failures only through
+      controlled external transport without sockets. Cover all seven codes,
+      authentic frozen error identity/descriptors, impostors/proxies/accessors/
+      wrapped causes and excluded write/delete codes; no successful CLI injection.
+- [ ] Gate main on unchanged canonical diagnostic plus the same consumed strict
+      private-read tuple/error; preserve original frame/root12/extractor/117 and
+      success JSON. Strict parser uses the actual compiled primitive validator;
+      legacy envelopes remain compatible. Real bounded child/spec reporter keeps
+      exit1 while displaying scalar; reject invalid/mismatched/unknown/overflow
+      inputs before any parser/projector runs on incomplete overflow evidence.
+- [ ] Add only the exact Task8 preservation inverse: each new parameter, option,
+      call argument, compiled load, field allowance/type exclusion, complete
+      validation branch and returned scalar is matched once before reversing.
+      Preserve historical AST digest, both ordered unique byte segments, both
+      module hashes, original substitutions and old mutants. Add semantic bypass
+      mutants and prove old guard/resource/cap mutations still fail. New load is
+      immediately after invoked-set declaration, outside pinned segments.
+- [ ] Run focused pure suites, unchanged117, actual current US+CI tooling,
+      API types/lint/build, format/isolation/diff and preservation proofs. Record
+      real counts/skips/warnings; no assumed historical count. Existing loopback
+      EPERM requires root release before escalation. No DB/provider/browser/native/
+      actual initialize/verify, new resource, network or CI retry is authorized.
+- [ ] Freeze full nine-path diff/report/hashes for root full read and independent
+      review. Task7 launcher paths and hosting remain byte-preserved; root alone
+      stages/commits/pushes after prior CI settlement and an explicit publication
+      ruling. All actual current-source gates remain mandatory. No cause/fix claim
+      and no automatic follow-on evidence expansion.

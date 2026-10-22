@@ -4,6 +4,10 @@ import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sd
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UsWorkerObjectEvidence } from "../src/modules/traceability/requests/us-request-worker-types";
 import { createUsRequestWorkerStorageFixture } from "./support/us-request-worker-storage-fixture";
+import {
+  projectUsRequestPackageStorageReadFailureCode as projectStorageCode,
+  takeUsRequestPackageStorageReadFailure as takeStorageFailure,
+} from "../src/modules/traceability/requests/us-request-package-artifacts";
 
 const scope = {
   tenantId: "11111111-1111-4111-8111-111111111111",
@@ -25,6 +29,146 @@ const evidence = (data: Uint8Array = bytes): UsWorkerObjectEvidence => ({
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+const readFailureCodes = [
+  "us_request_package_storage_scope_invalid",
+  "us_request_package_storage_evidence_invalid",
+  "us_request_package_storage_timeout",
+  "us_request_package_storage_checksum_mismatch",
+  "us_request_package_storage_transport_failed",
+  "us_request_package_storage_read_failed",
+  "us_request_worker_unknown_failure",
+];
+
+it("takes authentic direct-read factory failures once without changing errors or inspecting impostors", async () => {
+  let elapsed = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+  let traps = 0;
+  const hit = () => {
+    traps++;
+    throw new Error("private sentinel");
+  };
+  const proxy = new Proxy(
+    {},
+    { get: hit, getPrototypeOf: hit, ownKeys: hit, getOwnPropertyDescriptor: hit, has: hit },
+  );
+  for (const code of readFailureCodes) {
+    elapsed = 0;
+    const s = createUsRequestWorkerStorageFixture(() => ({
+      async send() {
+        if (code.endsWith("transport_failed"))
+          throw { code: "ECONNRESET", message: "private sentinel" };
+        if (code.endsWith("read_failed")) throw new Error("private sentinel");
+        if (code.endsWith("timeout")) elapsed = 15_001;
+        return {
+          Body: code.endsWith("checksum_mismatch") ? Buffer.alloc(bytes.length) : bytes,
+          ContentType: "application/json",
+          ContentLength: bytes.length,
+        };
+      },
+    }));
+    try {
+      if (code === "us_request_worker_unknown_failure") s.store.destroy();
+      const error: unknown = await s.store
+        .readVerified(
+          code.endsWith("scope_invalid")
+            ? { ...scope, tenantId: "55555555-5555-4555-8555-555555555555" }
+            : scope,
+          code.endsWith("evidence_invalid")
+            ? { ...evidence(), mediaType: "text/plain" }
+            : evidence(),
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      expect(error).toBeInstanceOf(Error);
+      if (!(error instanceof Error)) throw new Error("actual read failure missing");
+      Object.freeze(error);
+      const descriptors = Object.getOwnPropertyDescriptors(error);
+      const prototype: unknown = Object.getPrototypeOf(error);
+      for (const forged of [
+        proxy,
+        Object.defineProperty({}, "code", { get: hit }),
+        { code },
+        Object.create(error),
+        new Error(code),
+        { cause: error },
+        undefined,
+        null,
+        code,
+        1,
+        Symbol("private"),
+        () => error,
+      ])
+        expect(takeStorageFailure(forged)).toBeUndefined();
+      expect(takeStorageFailure(error)).toBe(code);
+      expect(takeStorageFailure(error)).toBeUndefined();
+      expect(Object.getOwnPropertyDescriptors(error)).toEqual(descriptors);
+      expect(Object.getPrototypeOf(error)).toBe(prototype);
+      expect(error).toMatchObject({ message: code, code });
+    } finally {
+      s.destroy();
+    }
+  }
+  expect(traps).toBe(0);
+});
+
+it("validates only the seven primitive storage codes and never grants error provenance", () => {
+  for (const code of readFailureCodes) {
+    expect(projectStorageCode(code)).toBe(code);
+    expect(takeStorageFailure(new Error(code))).toBeUndefined();
+  }
+  let traps = 0;
+  const hostile = new Proxy(
+    {},
+    {
+      get() {
+        traps++;
+        throw new Error("private");
+      },
+    },
+  );
+  for (const value of [
+    undefined,
+    null,
+    1,
+    [],
+    hostile,
+    Object(readFailureCodes[0]),
+    { code: readFailureCodes[0] },
+    "us_request_package_storage_collision",
+    "us_request_package_storage_delete_failed",
+    "us_request_package_storage_configuration_invalid",
+    "us_request_package_storage_operational_verification_required",
+    "private sentinel",
+    ...readFailureCodes.flatMap((code) => [` ${code}`, `${code}\n`, `${code}/private`]),
+  ])
+    expect(projectStorageCode(value)).toBeUndefined();
+  expect(traps).toBe(0);
+});
+
+it("never registers authentic excluded collision and deletion failures as read evidence", async () => {
+  const s = createUsRequestWorkerStorageFixture();
+  try {
+    await s.store.putVerified(scope, evidence(), bytes);
+    const collision: unknown = await s.store
+      .putVerified(scope, evidence(), bytes)
+      .catch((error: unknown) => error);
+    expect(collision).toMatchObject({ message: "us_request_package_storage_collision" });
+    expect(takeStorageFailure(collision)).toBeUndefined();
+    s.faults.before = async () => {
+      throw new Error("private sentinel");
+    };
+    const deletion: unknown = await s.store
+      .removeFenced(scope, evidence())
+      .catch((error: unknown) => error);
+    expect(deletion).toMatchObject({ message: "us_request_package_storage_delete_failed" });
+    expect(takeStorageFailure(deletion)).toBeUndefined();
+  } finally {
+    s.destroy();
+  }
 });
 
 describe("bounded private request package storage", () => {

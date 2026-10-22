@@ -168,6 +168,8 @@ test(
       {
         units: [
           { key: "chain_0259", stages: ["shipping"] },
+          { key: "request_scenario_a", stages: ["request", "package"] },
+          { key: "request_april", stages: ["request", "package"] },
           { key: "request_september", stages: ["request", "package"] },
         ],
       },
@@ -183,6 +185,37 @@ test(
       `${verificationJs}; return exports.projectUsRequestVerificationFailure`,
       ["exports", "require"],
     )({}, createRequire(resolve("apps/api/package.json")));
+    // Tooling precedes API build: compile the complete actual primitive function,
+    // not a copied classifier/list, with an explicitly refusing dependency loader.
+    const storageSource = readFileSync(
+      "apps/api/src/modules/traceability/requests/us-request-package-artifacts.ts",
+      "utf8",
+    );
+    const storageAst = ts.createSourceFile(
+      "storage.ts",
+      storageSource,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    assert.equal(storageAst.parseDiagnostics.length, 0);
+    const storageDeclarations = storageAst.statements.filter(
+      (node) =>
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === "projectUsRequestPackageStorageReadFailureCode",
+    );
+    assert.equal(storageDeclarations.length, 1, "one actual complete primitive validator");
+    const storageJs = ts.transpileModule(storageDeclarations[0].getText(storageAst), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    let storageLoads = 0;
+    const projectStorageReadFailureCode = compileFunction(
+      `${storageJs}; return exports.projectUsRequestPackageStorageReadFailureCode`,
+      ["exports", "require"],
+    )({}, () => {
+      storageLoads++;
+      throw new Error("api_dist_read_forbidden");
+    });
+    assert.equal(typeof projectStorageReadFailureCode, "function");
     const unavailable = { status: "unavailable" };
     const extension = {
       code: "us_dataset_command_failed",
@@ -190,6 +223,15 @@ test(
       stage: "package",
       verificationFailure: { operation: "read_private_object", artifact: "records.xlsx" },
     };
+    const storageCodes = [
+      "us_request_package_storage_scope_invalid",
+      "us_request_package_storage_evidence_invalid",
+      "us_request_package_storage_timeout",
+      "us_request_package_storage_checksum_mismatch",
+      "us_request_package_storage_transport_failed",
+      "us_request_package_storage_read_failed",
+      "us_request_worker_unknown_failure",
+    ];
     const diagnosticCases = [
       [
         '{"code":"us_dataset_command_connection_failed","unitKey":"chain_0259","stage":"shipping"}\n',
@@ -271,6 +313,108 @@ test(
         failures.push(error);
       }
     };
+    await check(async () => {
+      for (const verificationStorageCode of storageCodes)
+        for (const unitKey of ["request_scenario_a", "request_april", "request_september"])
+          for (const artifact of [
+            "manifest.json",
+            "package.zip",
+            "plan.pdf",
+            "records.xlsx",
+            "request-report.pdf",
+            "validation.json",
+          ]) {
+            const input = {
+              ...extension,
+              unitKey,
+              verificationFailure: { operation: "read_private_object", artifact },
+              verificationStorageCode,
+            };
+            const line = JSON.stringify(input) + "\n";
+            assert.deepEqual(
+              fixtureSupport.datasetPositiveCommandDiagnostic(
+                line,
+                diagnose,
+                projectVerificationFailure,
+                projectStorageReadFailureCode,
+              ),
+              {
+                status: "available",
+                ...input,
+                verificationOperation: "read_private_object",
+                verificationArtifact: artifact,
+              },
+            );
+            assert.deepEqual(
+              fixtureSupport.datasetPositiveCommandDiagnostic(
+                line,
+                diagnose,
+                projectVerificationFailure,
+              ),
+              unavailable,
+            );
+          }
+      for (const invalid of [
+        { ...extension, verificationStorageCode: "private-secret" },
+        { ...extension, verificationStorageCode: null },
+        { ...extension, verificationStorageCode: { code: storageCodes[0] } },
+        {
+          ...extension,
+          verificationStorageCode: storageCodes[0],
+          code: "us_dataset_request_conflict",
+        },
+        { ...extension, verificationStorageCode: storageCodes[0], unitKey: "chain_0259" },
+        { ...extension, verificationStorageCode: storageCodes[0], stage: "request" },
+        { code: "us_dataset_command_failed", verificationStorageCode: storageCodes[0] },
+        {
+          ...extension,
+          verificationFailure: { operation: "read_plan" },
+          verificationStorageCode: storageCodes[0],
+        },
+        {
+          ...extension,
+          verificationFailure: { operation: "compare_private_object", artifact: "manifest.json" },
+          verificationStorageCode: storageCodes[0],
+        },
+        {
+          ...extension,
+          verificationFailure: { operation: "read_private_object", artifact: "private/key" },
+          verificationStorageCode: storageCodes[0],
+        },
+        { ...extension, verificationStorageCode: storageCodes[0], storageCode: storageCodes[0] },
+      ])
+        assert.deepEqual(
+          fixtureSupport.datasetPositiveCommandDiagnostic(
+            JSON.stringify(invalid) + "\n",
+            diagnose,
+            projectVerificationFailure,
+            projectStorageReadFailureCode,
+          ),
+          unavailable,
+        );
+      const line =
+        JSON.stringify({ ...extension, verificationStorageCode: storageCodes[0] }) + "\n";
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          line,
+          diagnose,
+          projectVerificationFailure,
+          () => {
+            throw Error("private-secret");
+          },
+        ),
+        unavailable,
+      );
+      assert.equal(
+        projectStorageReadFailureCode("us_request_package_storage_collision"),
+        undefined,
+      );
+      assert.equal(
+        storageLoads,
+        0,
+        "primitive source compilation has no dependency or API dist reads",
+      );
+    });
     for (const [stderr, wanted] of diagnosticCases)
       await check(async () => {
         const diagnostic = fixtureSupport.datasetPositiveCommandDiagnostic(
@@ -356,12 +500,13 @@ test(
         const {runDatasetPositiveChild} = await import('./tools/us-development/test/support/dataset-command-positive-fixture.mjs');
         const diagnose = compileFunction(${JSON.stringify(js)} + ';return exports.usDatasetCommandDiagnostic;', ['exports','usSixMonthDefinition'])({}, {units:[{key:'request_april',stages:['request','package']}]});
         const projectVerificationFailure = compileFunction(${JSON.stringify(verificationJs)} + ';return exports.projectUsRequestVerificationFailure;', ['exports','require'])({},createRequire(resolve('apps/api/package.json')));
+        const projectStorageReadFailureCode = compileFunction(${JSON.stringify(storageJs)} + ';return exports.projectUsRequestPackageStorageReadFailureCode;', ['exports','require'])({},()=>{throw Error('api_dist_read_forbidden');});
         for(const tuple of [{operation:'read_private_object',artifact:'records.xlsx'},{operation:'read_plan'}]) {
           test('projected '+tuple.operation+' remains visible', {timeout:2000}, async()=>{
-            const input = {code:'us_dataset_command_failed',unitKey:'request_april',stage:'package',verificationFailure:tuple};
+            const input = {code:'us_dataset_command_failed',unitKey:'request_april',stage:'package',verificationFailure:tuple,...(tuple.operation==='read_private_object'?{verificationStorageCode:'us_request_package_storage_timeout'}:{})};
             let original;
             try {
-              await runDatasetPositiveChild(process.execPath,['-e','process.stdout.write("hostile-secret");process.stderr.write('+JSON.stringify(JSON.stringify(input)+'\n')+');process.exitCode=1'],{env:{PATH:process.env.PATH},cap:1000,limit:4096,diagnose,projectVerificationFailure});
+              await runDatasetPositiveChild(process.execPath,['-e','process.stdout.write("hostile-secret");process.stderr.write('+JSON.stringify(JSON.stringify(input)+'\n')+');process.exitCode=1'],{env:{PATH:process.env.PATH},cap:1000,limit:4096,diagnose,projectVerificationFailure,projectStorageReadFailureCode});
             } catch(error) { original = error; }
             assert.equal(original?.message,'us_dataset_positive_child_failed');
             assert.equal(original.evidence.code,1);
@@ -370,6 +515,8 @@ test(
             assert.equal(original.evidence.overflow,false);
             assert.ok(original.evidence.elapsedMs>=0 && original.evidence.elapsedMs<1000);
             assert.deepEqual(original.evidence.diagnostic.verificationFailure,tuple);
+            if(tuple.operation==='read_private_object') assert.equal(original.evidence.diagnostic.verificationStorageCode,'us_request_package_storage_timeout');
+            else assert.equal(Object.hasOwn(original.evidence.diagnostic,'verificationStorageCode'),false);
             throw original;
           });
         }
@@ -390,6 +537,7 @@ test(
       assert.equal(shown.stderr, "");
       assert.match(shown.stdout, /fail 2/);
       assert.match(shown.stdout, /verificationFailure: \[Object\]/);
+      assert.match(shown.stdout, /verificationStorageCode: 'us_request_package_storage_timeout'/);
       assert.match(
         shown.stdout,
         /verificationOperation: 'read_private_object'/,
@@ -504,7 +652,8 @@ test(
     });
     await check(async () => {
       let parsed = 0,
-        projected = 0;
+        projected = 0,
+        storageProjected = 0;
       await assert.rejects(
         fixtureSupport.runDatasetPositiveChild(
           process.execPath,
@@ -513,6 +662,10 @@ test(
             'process.stderr.write(\'{"code":"us_dataset_command_failed"}\\n\');setTimeout(()=>process.stderr.write("x".repeat(8192)),100)',
           ],
           {
+            projectStorageReadFailureCode: (value) => {
+              storageProjected++;
+              return projectStorageReadFailureCode(value);
+            },
             projectVerificationFailure: (value) => {
               projected++;
               return projectVerificationFailure(value);
@@ -532,6 +685,7 @@ test(
           assert.deepEqual(error.evidence.diagnostic, unavailable);
           assert.equal(parsed, 0, "incomplete retained stderr must not be parsed");
           assert.equal(projected, 0, "overflow must not invoke the new projector either");
+          assert.equal(storageProjected, 0, "overflow must not invoke the storage validator");
           return true;
         },
       );

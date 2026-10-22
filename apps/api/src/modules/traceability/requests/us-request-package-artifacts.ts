@@ -26,12 +26,41 @@ export interface UsRequestPackageArtifactS3Transport {
   destroy?(): void;
 }
 const OPERATION_TIMEOUT_MS = 15_000;
+export function projectUsRequestPackageStorageReadFailureCode(value: unknown) {
+  return (
+    [
+      "us_request_package_storage_scope_invalid",
+      "us_request_package_storage_evidence_invalid",
+      "us_request_package_storage_timeout",
+      "us_request_package_storage_checksum_mismatch",
+      "us_request_package_storage_transport_failed",
+      "us_request_package_storage_read_failed",
+      "us_request_worker_unknown_failure",
+    ] as const
+  ).find((code) => code === value);
+}
+const readFailures = new WeakMap<
+  object,
+  NonNullable<ReturnType<typeof projectUsRequestPackageStorageReadFailureCode>>
+>();
+/** Factory identity only; never inspect an alleged error or its causes. */
+export function takeUsRequestPackageStorageReadFailure(error: unknown) {
+  if ((!error || typeof error !== "object") && typeof error !== "function") return undefined;
+  const code = readFailures.get(error);
+  readFailures.delete(error);
+  return code;
+}
 class StorageError extends Error {
   constructor(readonly code: UsWorkerFailureCode) {
     super(code);
   }
 }
-const failure = (code: UsWorkerFailureCode) => new StorageError(code);
+const failure = (code: UsWorkerFailureCode) => {
+  const error = new StorageError(code);
+  const readCode = projectUsRequestPackageStorageReadFailureCode(code);
+  if (readCode) readFailures.set(error, readCode);
+  return error;
+};
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 /** Internal synthetic adapter. Its scope checks grant no user or deletion authority. */

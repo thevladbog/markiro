@@ -13,6 +13,8 @@ import {
   takeUsRequestVerificationFailure as take,
 } from "../src/modules/traceability/requests/us-request-verification-failure";
 import { usDatasetCommandDiagnostic } from "../src/deployment/us-dataset-command-runtime";
+import { takeUsRequestPackageStorageReadFailure as takeStorage } from "../src/modules/traceability/requests/us-request-package-artifacts";
+import { createUsRequestWorkerStorageFixture } from "./support/us-request-worker-storage-fixture";
 
 const diagnostic = {
   code: "us_dataset_command_failed",
@@ -53,6 +55,148 @@ function ready(operation: unknown = "read_plan", artifact?: unknown) {
   enter(frame, operation, artifact);
   return frame;
 }
+
+it("emits storage evidence only for the same authentic error and consumed canonical private-read frame", async () => {
+  const path = "apps/api/src/main.us-dataset.ts";
+  const ast = ts.createSourceFile(path, source(path), ts.ScriptTarget.Latest, true);
+  let callback: ts.ArrowFunction | undefined;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "catch"
+    ) {
+      const first = node.arguments[0];
+      if (first && ts.isArrowFunction(first)) callback = first;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  if (!callback) throw new Error("actual main catch missing");
+  const js = ts.transpileModule(`const callback = ${callback.getText(ast)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const invoke = (error: unknown) => {
+    let output = "";
+    const capture = {
+      stderr: {
+        write(value: string) {
+          output += value;
+        },
+      },
+      exitCode: 0,
+    };
+    const call = compileFunction(`${js};return callback;`, [
+      "process",
+      "usDatasetCommandDiagnostic",
+      "takeUsRequestVerificationFailure",
+      "takeUsRequestPackageStorageReadFailure",
+    ])(capture, usDatasetCommandDiagnostic, take, takeStorage);
+    call(error);
+    expect(capture.exitCode).toBe(1);
+    expect(output).not.toMatch(/private sentinel/);
+    return JSON.parse(output) as Record<string, unknown>;
+  };
+  const authentic = async (unitKey = "request_september") => {
+    const s = createUsRequestWorkerStorageFixture(() => ({
+      async send() {
+        throw new Error("private sentinel");
+      },
+    }));
+    const scope = {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      runId: "22222222-2222-4222-8222-222222222222",
+    };
+    const attemptId = "33333333-3333-4333-8333-333333333333";
+    try {
+      await s.store.readVerified(scope, {
+        ...scope,
+        attemptId,
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "manifest.json",
+        kind: "manifest",
+        objectKey: `us/requests/${scope.tenantId}/${scope.runId}/${attemptId}/manifest.json`,
+        mediaType: "application/json",
+        byteSize: 1,
+        sha256: "a".repeat(64),
+      });
+      throw new Error("actual read did not fail");
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "us_request_package_storage_read_failed")
+        throw error;
+      return Object.assign(error, { unitKey, stage: "package" });
+    } finally {
+      s.destroy();
+    }
+  };
+  for (const unit of ["request_scenario_a", "request_april", "request_september"])
+    for (const artifact of artifacts) {
+      const error = await authentic(unit);
+      const frame = create(unit);
+      activate(frame);
+      enter(frame, "read_private_object", artifact);
+      finalize(frame, error);
+      const descriptors = Object.getOwnPropertyDescriptors(error);
+      expect(invoke(error)).toEqual({
+        code: "us_dataset_command_failed",
+        unitKey: unit,
+        stage: "package",
+        verificationFailure: { operation: "read_private_object", artifact },
+        verificationStorageCode: "us_request_package_storage_read_failed",
+      });
+      expect(Object.getOwnPropertyDescriptors(error)).toEqual(descriptors);
+      expect(takeStorage(error)).toBeUndefined();
+      expect(take(error, { ...diagnostic, unitKey: unit })).toBeUndefined();
+      finalize(ready("read_private_object", artifact), error);
+      expect(invoke(error)).not.toHaveProperty("verificationStorageCode");
+    }
+  for (const variant of [
+    "no-frame",
+    "consumed",
+    "wrong-operation",
+    "invalid-artifact",
+    "other-error",
+    "ambiguous",
+    "wrong-unit",
+    "wrong-stage",
+    "specific",
+    "forged",
+  ]) {
+    const original = await authentic(variant === "wrong-unit" ? "chain_0259" : "request_september");
+    const error =
+      variant === "forged"
+        ? Object.assign(new Error(original.message), {
+            unitKey: "request_september",
+            stage: "package",
+          })
+        : original;
+    if (variant === "specific")
+      Object.defineProperty(error, "message", { value: "us_dataset_request_conflict" });
+    if (variant === "wrong-stage") Object.assign(error, { stage: "request" });
+    if (variant !== "no-frame") {
+      finalize(
+        ready(
+          variant === "wrong-operation" ? "compare_private_object" : "read_private_object",
+          variant === "invalid-artifact" ? "private/key" : "manifest.json",
+        ),
+        variant === "other-error" ? {} : error,
+      );
+      if (variant === "consumed") take(error, diagnostic);
+      if (variant === "ambiguous") finalize(ready("read_private_object", "manifest.json"), error);
+    }
+    expect(invoke(error)).not.toHaveProperty("verificationStorageCode");
+    expect(takeStorage(error)).toBe(
+      variant === "forged" ? undefined : "us_request_package_storage_read_failed",
+    );
+  }
+  const imports = ast.statements
+    .filter(ts.isImportDeclaration)
+    .filter((node) => node.moduleSpecifier.getText(ast).includes("us-request-package-artifacts"));
+  expect(imports).toHaveLength(1);
+  expect(imports[0]?.importClause?.namedBindings?.getText(ast)).toBe(
+    "{ takeUsRequestPackageStorageReadFailure }",
+  );
+});
 function hostile() {
   let accesses = 0;
   const hit = () => {

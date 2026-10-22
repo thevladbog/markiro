@@ -137,7 +137,124 @@ function preservationSources() {
     ),
   };
 }
+// Independently pinned complete Task8 fragments; verify each exactly once BEFORE
+// erasing only this extension. Historical restoration and all digests stay below.
+function withoutStorageEvidence(current) {
+  const ts = createRequire(new URL("../../../apps/api/package.json", import.meta.url))(
+    "typescript",
+  );
+  const ast = ts.createSourceFile(
+    "fixture.mjs",
+    current,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const printer = ts.createPrinter({ removeComments: true });
+  let placed = 0;
+  function checkPlacement(node) {
+    if (
+      ts.isVariableStatement(node) &&
+      node.declarationList.declarations.some(
+        (decl) =>
+          ts.isObjectBindingPattern(decl.name) &&
+          decl.name.getText(ast) === "{ projectUsRequestPackageStorageReadFailureCode }",
+      )
+    ) {
+      const statements = node.parent.statements;
+      const previous = statements?.[statements.indexOf(node) - 1];
+      assert.ok(previous, "storage evidence exact inverse placement");
+      assert.equal(
+        printer.printNode(ts.EmitHint.Unspecified, previous, ast),
+        "const invoked = new Set();",
+        "storage evidence exact inverse placement",
+      );
+      placed++;
+    }
+    ts.forEachChild(node, checkPlacement);
+  }
+  checkPlacement(ast);
+  assert.equal(placed, 1, "storage evidence exact inverse placement");
+  const inverse = [
+    [
+      `function commandDiagnostic(
+  text,
+  diagnose,
+  projectVerificationFailure,
+  projectStorageReadFailureCode,
+)`,
+      "function commandDiagnostic(text, diagnose, projectVerificationFailure)",
+    ],
+    [
+      `    projectVerificationFailure,
+    projectStorageReadFailureCode,
+    cwd,`,
+      `    projectVerificationFailure,
+    cwd,`,
+    ],
+    [
+      `commandDiagnostic(
+                    stderr.toString("utf8"),
+                    diagnose,
+                    projectVerificationFailure,
+                    projectStorageReadFailureCode,
+                  )`,
+      'commandDiagnostic(stderr.toString("utf8"), diagnose, projectVerificationFailure)',
+    ],
+    [
+      `    const { projectUsRequestPackageStorageReadFailureCode } = compiled(
+      "modules/traceability/requests/us-request-package-artifacts",
+    );
+`,
+      "",
+    ],
+    [
+      "              projectStorageReadFailureCode: projectUsRequestPackageStorageReadFailureCode,\n",
+      "",
+    ],
+    [
+      `keys.some(
+        (key) =>
+          !["code", "unitKey", "stage", "verificationFailure", "verificationStorageCode"].includes(
+            key,
+          ),
+      )`,
+      'keys.some((key) => !["code", "unitKey", "stage", "verificationFailure"].includes(key))',
+    ],
+    [
+      `keys.some(
+        (key) =>
+          key !== "verificationFailure" &&
+          key !== "verificationStorageCode" &&
+          typeof parsed[key] !== "string",
+      )`,
+      'keys.some((key) => key !== "verificationFailure" && typeof parsed[key] !== "string")',
+    ],
+    [
+      `    let verificationStorageCode;
+    if (keys.includes("verificationStorageCode")) {
+      if (
+        typeof projectStorageReadFailureCode !== "function" ||
+        verificationFailure?.operation !== "read_private_object"
+      )
+        return { status: "unavailable" };
+      verificationStorageCode = projectStorageReadFailureCode(parsed.verificationStorageCode);
+      if (!verificationStorageCode || verificationStorageCode !== parsed.verificationStorageCode)
+        return { status: "unavailable" };
+    }
+`,
+      "",
+    ],
+    ["      ...(verificationStorageCode ? { verificationStorageCode } : {}),\n", ""],
+  ];
+  for (const [before, after] of inverse) {
+    assert.equal(current.split(before).length, 2, "storage evidence exact inverse match");
+    current = current.replace(before, after);
+  }
+  return current;
+}
 function assertFrozenFixture({ current, modules }) {
+  current = withoutStorageEvidence(current);
   const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
   const ts = require("typescript");
   const parse = (source) =>
@@ -244,6 +361,53 @@ test("preservation rejects semantic cap, query, action and literal mutants", () 
     ["positive disposal exceeded 60000ms", "positive disposal exceeded 60001ms"],
   ]) {
     assert.equal(source.current.split(before).length, 2, "one semantic mutant target");
+    assert.throws(
+      () => assertFrozenFixture({ ...source, current: source.current.replace(before, after) }),
+      /complete original AST digest/,
+    );
+  }
+});
+
+test("storage evidence inverse refuses semantic bypasses before erasing the extension", () => {
+  const source = preservationSources();
+  for (const [before, after] of [
+    ['typeof projectStorageReadFailureCode !== "function" ||', "false ||"],
+    [
+      'verificationFailure?.operation !== "read_private_object"',
+      'verificationFailure?.operation !== "compare_private_object"',
+    ],
+    [
+      'verificationFailure?.operation !== "read_private_object"',
+      'verificationFailure?.artifact !== "private/key"',
+    ],
+    [
+      "verificationStorageCode = projectStorageReadFailureCode(parsed.verificationStorageCode);",
+      "verificationStorageCode = parsed.verificationStorageCode;",
+    ],
+    [
+      "if (!verificationStorageCode || verificationStorageCode !== parsed.verificationStorageCode)",
+      "if (false)",
+    ],
+    ['key !== "verificationFailure" &&', 'key !== "code" &&'],
+  ]) {
+    assert.equal(source.current.split(before).length, 2, "one new semantic mutant target");
+    assert.throws(
+      () => assertFrozenFixture({ ...source, current: source.current.replace(before, after) }),
+      /storage evidence exact inverse match/,
+    );
+  }
+});
+
+test("old guard and resource mutants still fail with storage evidence present", () => {
+  const source = preservationSources();
+  for (const [before, after] of [
+    ['env.GITHUB_JOB !== "dataset_command_positive"', 'env.GITHUB_JOB !== "other_job"'],
+    [
+      "connection = createDb(DATABASE_URL, {\n      max: 2,",
+      "connection = createDb(DATABASE_URL, {\n      max: 3,",
+    ],
+  ]) {
+    assert.equal(source.current.split(before).length, 2);
     assert.throws(
       () => assertFrozenFixture({ ...source, current: source.current.replace(before, after) }),
       /complete original AST digest/,

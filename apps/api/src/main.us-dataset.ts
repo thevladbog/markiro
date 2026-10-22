@@ -3,6 +3,7 @@ import {
   usDatasetCommandDiagnostic,
 } from "./deployment/us-dataset-command-runtime";
 import { takeUsRequestVerificationFailure } from "./modules/traceability/requests/us-request-verification-failure";
+import { takeUsRequestPackageStorageReadFailure } from "./modules/traceability/requests/us-request-package-artifacts";
 
 async function main(): Promise<void> {
   const result = await runUsDatasetCommand(process.argv.slice(2), process.env);
@@ -32,8 +33,17 @@ async function main(): Promise<void> {
 void main().catch((error: unknown) => {
   const diagnostic = usDatasetCommandDiagnostic(error);
   const verificationFailure = takeUsRequestVerificationFailure(error, diagnostic);
+  const verificationStorageCode =
+    diagnostic.code === "us_dataset_command_failed" &&
+    (diagnostic.unitKey === "request_scenario_a" ||
+      diagnostic.unitKey === "request_april" ||
+      diagnostic.unitKey === "request_september") &&
+    diagnostic.stage === "package" &&
+    verificationFailure?.operation === "read_private_object"
+      ? takeUsRequestPackageStorageReadFailure(error)
+      : undefined;
   process.stderr.write(
-    `${JSON.stringify({ ...diagnostic, ...(verificationFailure ? { verificationFailure } : {}) })}\n`,
+    `${JSON.stringify({ ...diagnostic, ...(verificationFailure ? { verificationFailure } : {}), ...(verificationStorageCode ? { verificationStorageCode } : {}) })}\n`,
   );
   process.exitCode = 1;
 });

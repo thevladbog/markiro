@@ -60,7 +60,7 @@ const block = `
       - name: Verify full-volume read-only viewer in one actual installation
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: pnpm --filter @markiro/api exec vitest run test/us-demo-viewer-browser.e2e.test.ts --maxWorkers=1
+        run: pnpm --filter @markiro/api exec node node_modules/vitest/vitest.mjs run test/us-demo-viewer-browser.e2e.test.ts --maxWorkers=1
 `;
 const expected = load(block)[id];
 const selectors = [
