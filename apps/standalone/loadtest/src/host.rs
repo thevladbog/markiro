@@ -53,12 +53,40 @@ pub fn is_busy_line(line: &str) -> bool {
         || lower.contains("(code: 6)")
 }
 
+/// `text` without its ANSI escape sequences.
+///
+/// The host paints its stdout layer even when stdout is a file, so a spawned host's log reads
+/// `ESC[31mERRORESC[0m`: matching " ERROR " needs the colour gone. CSI sequences are removed
+/// (`ESC [`, parameter and intermediate bytes, one final byte `@`..`~`); a lone or unfinished
+/// `ESC` is dropped, any other text is kept.
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        if chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn scan_log(text: &str) -> LogScan {
     let mut scan = LogScan {
         available: true,
         ..LogScan::default()
     };
-    for line in text.lines() {
+    for raw in text.lines() {
+        let line = strip_ansi(raw);
+        let line = line.as_str();
         if line.contains(" ERROR ") {
             scan.error_lines += 1;
             if scan.first_errors.len() < 5 {
@@ -366,6 +394,7 @@ pub(crate) fn test_host_binary() -> PathBuf {
 mod tests {
     use super::*;
     use crate::api::pinned_client;
+    use std::io::Write;
 
     #[test]
     fn the_log_scan_counts_errors_and_the_lines_that_name_a_busy_database() {
@@ -382,6 +411,59 @@ mod tests {
         assert_eq!(scan.first_errors.len(), 2);
         assert!(!is_busy_line("an ordinary line"));
         assert!(is_busy_line("SQLITE_BUSY: the database file is locked"));
+    }
+
+    /// The host's stdout layer paints (tracing's default `ansi`), also when stdout is a file: a
+    /// spawned host's log holds these shapes (level coloured, timestamp/target/`=` dimmed, field
+    /// names italic).
+    const COLOURED: &str = "\
+\x1b[2m2026-10-20T10:00:00.123456Z\x1b[0m \x1b[32m INFO\x1b[0m \x1b[2mmarkiro_host\x1b[0m\x1b[2m:\x1b[0m markiro-host listening \x1b[3maddr\x1b[0m\x1b[2m=\x1b[0m127.0.0.1:1\n\
+\x1b[2m2026-10-20T10:00:01.123456Z\x1b[0m \x1b[31mERROR\x1b[0m \x1b[2mmarkiro_host::error\x1b[0m\x1b[2m:\x1b[0m request failed \x1b[3merror\x1b[0m\x1b[2m=\x1b[0merror returned from database: (code: 5) database is locked\n\
+\x1b[2m2026-10-20T10:00:02.123456Z\x1b[0m \x1b[31mERROR\x1b[0m \x1b[1;2mroute\x1b[0m\x1b[2m{\x1b[0m\x1b[3mdevice\x1b[0m\x1b[2m=\x1b[0md\x1b[2m}\x1b[0m\x1b[2m:\x1b[0m \x1b[2mmarkiro_host::routes::facts\x1b[0m\x1b[2m:\x1b[0m a fact batch failed\n\
+\x1b[2m2026-10-20T10:00:03.123456Z\x1b[0m \x1b[33m WARN\x1b[0m \x1b[2mmarkiro_host::facts\x1b[0m\x1b[2m:\x1b[0m a fact was rejected\n";
+
+    #[test]
+    fn the_log_scan_sees_through_the_colour_a_spawned_hosts_log_carries() {
+        let scan = scan_log(COLOURED);
+        assert_eq!(
+            (scan.error_lines, scan.busy_lines),
+            (2, 1),
+            "{:?}",
+            scan.first_errors
+        );
+        assert_eq!(scan.first_errors.len(), 2);
+        assert!(
+            scan.first_errors.iter().all(|line| !line.contains('\x1b')),
+            "{:?}",
+            scan.first_errors
+        );
+        assert!(scan.first_errors[0].contains(" ERROR markiro_host::error"));
+        assert!(is_busy_line(
+            "\x1b[2mcode\x1b[0m: \x1b[31mSQLITE_BUSY\x1b[0m"
+        ));
+    }
+
+    #[test]
+    fn a_clean_coloured_log_counts_nothing() {
+        let clean = "\
+\x1b[2m2026-10-20T10:00:00.1Z\x1b[0m \x1b[32m INFO\x1b[0m \x1b[2mmarkiro_host\x1b[0m\x1b[2m:\x1b[0m listening\n\
+\x1b[2m2026-10-20T10:00:01.1Z\x1b[0m \x1b[34m DEBUG\x1b[0m \x1b[2mmarkiro_host\x1b[0m\x1b[2m:\x1b[0m the word ERRORS is not a level\n\
+\x1b[2m2026-10-20T10:00:02.1Z\x1b[0m \x1b[33m WARN\x1b[0m \x1b[2mmarkiro_host\x1b[0m\x1b[2m:\x1b[0m slow request\n";
+        let scan = scan_log(clean);
+        assert_eq!(
+            (scan.available, scan.error_lines, scan.busy_lines),
+            (true, 0, 0)
+        );
+        assert!(scan.first_errors.is_empty());
+    }
+
+    #[test]
+    fn ansi_sequences_are_stripped_and_plain_text_is_kept() {
+        assert_eq!(strip_ansi("\x1b[31mERROR\x1b[0m x"), "ERROR x");
+        assert_eq!(strip_ansi("\x1b[1;2;38;5;9mA\x1b[m"), "A");
+        assert_eq!(strip_ansi("plain [31m text"), "plain [31m text");
+        assert_eq!(strip_ansi("dangling \x1b"), "dangling ");
+        assert_eq!(strip_ansi("Привет \x1b[0mмир"), "Привет мир");
     }
 
     #[tokio::test]
@@ -435,7 +517,24 @@ mod tests {
             .await
             .unwrap();
         assert!(response.status().is_success());
-        assert!(host.log_scan().available);
+        let real = host.log_scan();
+        assert!(real.available);
+        // The real log is painted (the host's stdout layer colours a file too) and, being clean,
+        // counts nothing; an ERROR line of the host's own shape appended to it is then counted.
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            text.contains('\x1b'),
+            "the spawned host's log carries no colour: {text}"
+        );
+        assert_eq!((real.error_lines, real.busy_lines), (0, 0), "{text}");
+        let error_line = "\x1b[2m2026-10-20T10:00:01.123456Z\x1b[0m \x1b[31mERROR\x1b[0m \x1b[2mmarkiro_host::error\x1b[0m\x1b[2m:\x1b[0m request failed\n";
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log)
+            .unwrap()
+            .write_all(error_line.as_bytes())
+            .unwrap();
+        assert_eq!(host.log_scan().error_lines, 1);
         let pid = host.pid.unwrap();
         let graceful = host.stop().await.unwrap();
         assert_eq!(graceful, cfg!(unix));
