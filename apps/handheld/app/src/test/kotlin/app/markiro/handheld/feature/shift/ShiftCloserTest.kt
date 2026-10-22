@@ -294,6 +294,27 @@ class ShiftCloserTest {
         assertEquals(0, p.othersOpen)
     }
 
+    /**
+     * CI run 39718319363: the bound on the refresh is a wall-clock bound. Under `runTest` a virtual-time timeout jumps to its deadline the moment
+     * the test thread waits for a real thread (Room's executors), so a refresh that merely takes real milliseconds was cut before its write and the
+     * preview judged with the old figures -- only on a runner slow enough to lose the race. A refresh that answers in 150 ms of real time is not late.
+     */
+    @Test
+    fun aRefreshThatTakesRealTimeButAnswersWithinTheBoundIsUsed() = runTest {
+        keep(shared(othersOpen = 1, fetchedAt = t0 - 10 * SharedShiftRules.FRESH_MS))
+        val closer = ShiftCloser(
+            db,
+            refresh = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(150) }
+                keep(shared(othersOpen = 0))
+                true
+            },
+        ) { t0 }
+        val p = closer.preview("s1")!!
+        assertTrue(p.reasonRequired)
+        assertEquals(0, p.othersOpen)
+    }
+
     /** Final review M1: a Wi-Fi that answers nothing must not hold the close screen for the transport's whole timeout. */
     @Test
     fun aRefreshThatHangsIsGivenUpAfterAFewSecondsAndThePreviewUsesWhatIsKnown() = runTest {
@@ -307,8 +328,12 @@ class ShiftCloserTest {
                 finished = true
                 true
             },
+            refreshTimeoutMs = 300,
         ) { t0 }
+        val began = System.nanoTime()
         val p = closer.preview("s1")!!
+        val tookMs = (System.nanoTime() - began) / 1_000_000
+        assertTrue("given up after $tookMs ms of real time", tookMs < 10_000)
         assertTrue("given up after ${testScheduler.currentTime} ms", testScheduler.currentTime <= 3_000)
         assertFalse(finished)
         assertEquals(1, p.othersOpen)

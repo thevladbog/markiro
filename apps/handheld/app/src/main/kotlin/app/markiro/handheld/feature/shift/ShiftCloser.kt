@@ -8,6 +8,8 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftCloseEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
@@ -19,6 +21,7 @@ class ShiftCloser(
      * open is as fresh as the link allows. A cloud device and a device that cannot reach the host leave the figures as they are.
      */
     private val refresh: suspend () -> Boolean = { false },
+    private val refreshTimeoutMs: Long = REFRESH_TIMEOUT_MS,
     private val participation: ShiftParticipationStore = ShiftParticipationStore(db),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -57,7 +60,9 @@ class ShiftCloser(
         // Best effort: it decides how the close is worded and whether a reason is asked now, never whether the close can be made. Bounded, so a
         // Wi-Fi that answers nothing does not hold the close screen for the transport's whole timeout (final review M1); what is known is used.
         try {
-            withTimeoutOrNull(REFRESH_TIMEOUT_MS) { refresh() }
+            // The bound is wall-clock time. A caller on a test dispatcher would otherwise count it in virtual time, which jumps to the deadline as
+            // soon as the caller waits for a real thread (a Room write), cutting an answer that was a few real milliseconds away.
+            withContext(Dispatchers.Default) { withTimeoutOrNull(refreshTimeoutMs) { refresh() } }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
