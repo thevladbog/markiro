@@ -80,6 +80,20 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
         let spawn_only = markiro_loadtest::scenarios::SPAWN_ONLY.contains(&scenario.name.as_str());
         assert_eq!(scenario.judged, !spawn_only, "{}", scenario.name);
     }
+    let capability = report
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.name == "capability")
+        .expect("the capability scenario ran");
+    assert!(
+        capability.checks.iter().all(|check| check.ok),
+        "{:#?}",
+        capability.checks
+    );
+    assert!(capability
+        .checks
+        .iter()
+        .any(|check| check.name == "legacy_is_busy_with_no_active_participant" && check.ok));
     // `execute` hands back a report with the run's secrets already removed.
     let text = serde_json::to_string(&report).unwrap();
     assert!(!text.contains("Load-"), "the administrator password leaked");

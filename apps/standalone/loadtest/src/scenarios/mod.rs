@@ -5,6 +5,7 @@
 //! the profile's thresholds. A scenario that needs what the run's host mode lacks says so
 //! (`judged: false`) instead of passing.
 
+pub mod capability;
 pub mod line_full;
 
 use std::collections::BTreeMap;
@@ -880,6 +881,7 @@ async fn run_one(
 ) -> (ScenarioResult, Vec<String>) {
     match name {
         line_full::NAME => line_full::run(kind, work_dir, profile).await,
+        capability::NAME => capability::run(kind, work_dir, profile).await,
         other => (
             broken(other, format!("no scenario is named {other}")),
             Vec::new(),
