@@ -929,13 +929,17 @@ jobs:
           cargo build --manifest-path apps/standalone/Cargo.toml --workspace
           cargo test  --manifest-path apps/standalone/Cargo.toml --workspace --no-fail-fast
 
+  # The installer half of the standalone Windows build; the Windows tests run
+  # beside it in standalone-windows-tests (they shared one serial job of
+  # ~55-60 minutes until the split). The runbooks name this job and its artifact.
   standalone-windows-build:
     needs: classify-changes
     if: needs.classify-changes.outputs.standalone_windows_build == 'true'
     runs-on: windows-latest
-    # The release build of the app and the host, the installer and its smoke
-    # test come on top of the debug test build.
-    timeout-minutes: 75
+    # Measured on the serial job: setup with pnpm install ~5 min, release host
+    # ~6 min, NSIS installer ~6.5 min, smoke ~1.5 min, plus the webview build:
+    # ~20-25 min. The smoke step's own 25-minute bound must fit inside.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -949,30 +953,12 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: pnpm install --frozen-lockfile
+      # The contracts of the installer's own inputs (this workflow, smoke.ps1,
+      # prepare.mjs, the notes draft): checked before anything is built.
       - run: pnpm test:standalone-release:contract
+      # The Tauri bundle embeds `apps/standalone/dist`.
       - name: Build standalone webview + workspace deps
         run: pnpm turbo build --filter '@markiro/standalone...'
-      # The export tool compares its SSCC rules with packages/domain, built
-      # by the step above (the test skips without it).
-      - run: pnpm test:standalone-export
-      # The Windows service entry point and its installer seam only compile on
-      # Windows, so this is the only job that exercises them. `--no-fail-fast`
-      # as in standalone-rust: every Windows-only failure in one run.
-      # The load-test crate (apps/standalone/loadtest, ~170 tests that start real
-      # in-process hosts) is a dev/acceptance tool and added ~5.5 minutes to this
-      # job; standalone-rust runs it on ubuntu, so it is excluded here and only
-      # compiled by the next step. Trade-off: its Windows-only code (procstat
-      # PowerShell vitals, scenario skips) broke on Windows once (two tests failed
-      # only there in PR #778); a regression like that is now caught only when the
-      # load test is run on Windows (runbook docs/runbooks/standalone-load-test.md
-      # section 14, workflow standalone-load.yml), not by this job.
-      - name: cargo test (Windows paths)
-        run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace --exclude markiro-loadtest --no-fail-fast
-      # Compile-only: the host and proto libraries are already built by the step
-      # above (same debug profile), so this adds the loadtest crate and its few
-      # own dependencies, not another test run.
-      - name: load test crate compiles on Windows
-        run: cargo test --no-run -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml
       - name: Build the host for the installer
         run: cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-host
       # The release host trusts the production keys alone (spec 2026-10-13
@@ -1031,6 +1017,53 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # The Windows test half of the standalone build, beside the installer job and
+  # gated by the same classifier output; ci-required needs both.
+  standalone-windows-tests:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.standalone_windows_build == 'true'
+    runs-on: windows-latest
+    # Measured on the serial job: setup with pnpm install ~5 min, the cold
+    # debug build plus ~1900 tests 36-40 min, the load-test compile and the
+    # webview build a few minutes: ~50 min, with headroom for a slow runner.
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - run: pnpm install --frozen-lockfile
+      # `tauri::generate_context!` needs `apps/standalone/dist` at compile time.
+      - name: Build standalone webview + workspace deps
+        run: pnpm turbo build --filter '@markiro/standalone...'
+      # The export tool compares its SSCC rules with packages/domain, built
+      # by the step above (the test skips without it).
+      - run: pnpm test:standalone-export
+      # The Windows service entry point and its installer seam only compile on
+      # Windows, so this job (with the installer job's release build) is the
+      # only one that exercises them. `--no-fail-fast` as in standalone-rust:
+      # every Windows-only failure in one run.
+      # The load-test crate (apps/standalone/loadtest, ~170 tests that start real
+      # in-process hosts) is a dev/acceptance tool and added ~5.5 minutes to this
+      # job; standalone-rust runs it on ubuntu, so it is excluded here and only
+      # compiled by the next step. Trade-off: its Windows-only code (procstat
+      # PowerShell vitals, scenario skips) broke on Windows once (two tests failed
+      # only there in PR #778); a regression like that is now caught only when the
+      # load test is run on Windows (runbook docs/runbooks/standalone-load-test.md
+      # section 14, workflow standalone-load.yml), not by this job.
+      - name: cargo test (Windows paths)
+        run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace --exclude markiro-loadtest --no-fail-fast
+      # Compile-only: the host and proto libraries are already built by the step
+      # above (same debug profile), so this adds the loadtest crate and its few
+      # own dependencies, not another test run.
+      - name: load test crate compiles on Windows
+        run: cargo test --no-run -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml
+
   handheld-android:
     needs: classify-changes
     if: needs.classify-changes.outputs.handheld_android == 'true'
@@ -1071,6 +1104,7 @@ jobs:
       - handheld-android
       - standalone-rust
       - standalone-windows-build
+      - standalone-windows-tests
       - standalone-app-tests
       - landing-browser
       - landing-lighthouse

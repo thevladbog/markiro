@@ -2247,7 +2247,7 @@ codes, and the system's own words go to the shell's stderr only.
   checked only by the probe crate. The order of the GDI calls lives
   in `submit` over `WindowsPrintApi` and is tested on every OS; `mod native` is
   `cfg(windows)` (feature `Win32_Storage_Xps` for `StartDocW`) and compiles only in
-  `standalone-windows-build` — plan ДРВ type-checked it with a probe crate outside the
+  the Windows jobs (`standalone-windows-tests`, `standalone-windows-build`) — plan ДРВ type-checked it with a probe crate outside the
   repository, and it has never been run. `tests/fixtures/hardware-shapes.json` pins the
   answers for both sides (`windowsPrintOutcomeSchema`, `windowsJobObservationSchema`). The
   wrapper (`createTauriWindowsPrinting`, `windowsPrintResult`) never throws: `before_start`
@@ -2846,7 +2846,9 @@ uninstalls that keep the data, one with the host running), then
 `tools/standalone-release/prepare.mjs` writes the installer under its
 release name with `release-evidence.json` (version, commit, roles, hash and
 size, `Get-AuthenticodeSignature`'s status) and `SHA256SUMS`, uploaded as
-`standalone-installer-<sha>` for 30 days. `pnpm test:standalone-release:contract`
+`standalone-installer-<sha>` for 30 days. The workspace's Windows cargo tests
+run beside it in `standalone-windows-tests`; `ci-required` needs both.
+`pnpm test:standalone-release:contract`
 pins the overlay, the hooks, the job's step order and the smoke test's checks.
 The installer is not signed (owner question П12); `sign-overlay.mjs` builds
 the Tauri overlay for a certificate in the build machine's store, and no
@@ -2937,7 +2939,8 @@ runs on Windows in the macOS tests: the administrator prompt, the handle's
 sharing on NTFS, a process started from a held file and the final path
 (Windows-only unit tests in `update/package.rs`), removable drives and the
 passive update with the hooks (`smoke.ps1` runs `/P /UPDATE` without `/R`)
-are checked by the Windows job and by hand.
+are checked by the Windows jobs (`standalone-windows-tests` runs the unit
+tests, `standalone-windows-build` the smoke test) and by hand.
 
 ## Update distribution
 
@@ -7345,19 +7348,20 @@ either; a file log is stage 5.
     through the Windows driver; a crash between `sending` and `sent`;
   - the verification window in WebView2 on the touch panel, and the dead end
     of an unresolved label of a shift on another line (an owner question).
-- The Windows service and DPAPI run only in the `standalone-windows-build`
-  job: it compiles the service and the Tauri app for Windows, and its cargo
-  tests round-trip a key through DPAPI. Since plan УСТ it also builds the
-  installer and runs its smoke test on the runner (see «Installer and
-  service»). A real Windows user profile, two PCs over Wi-Fi, kiosk mode and
+- The Windows service and DPAPI run only in the two Windows jobs:
+  `standalone-windows-tests` compiles the service and the Tauri app for
+  Windows and its cargo tests round-trip a key through DPAPI;
+  `standalone-windows-build`, beside it, builds the installer and runs its
+  smoke test on the runner (see «Installer and service»). They were one
+  serial job until the split. A real Windows user profile, two PCs over Wi-Fi, kiosk mode and
   the installer's windows still need a manual check on Windows
   (`docs/runbooks/standalone-install.md`, «Ручная проверка на Windows»); a run
   on macOS proves none of it.
 - The `windows-sys` features of kiosk mode, the spooler and the power request,
   `serialport`, `base64` for every system and `libudev-dev` in `standalone-rust`
   came with plan 2a4's owner step (its Task 1, which also closed plan 1f2's).
-  The shell's `cfg(windows)` code still compiles only in
-  `standalone-windows-build`, which has not run on this code: plan 2a4
+  The shell's `cfg(windows)` code still compiles only in the Windows jobs
+  (`standalone-windows-tests`, `standalone-windows-build`), which have not run on this code: plan 2a4
   type-checked `printer.rs`, `printer/spooler.rs`, `power.rs`,
   `power/windows.rs`, `scanner.rs`, `scanner/runtime.rs` and `lockdown.rs`, with
   their module tests, for `x86_64-pc-windows-msvc` (`cargo check` and
@@ -7373,8 +7377,8 @@ either; a file log is stage 5.
   cannot reach them: deleting `.on_window_event(...)` in `run`, deleting the
   rollback in `enter_lockdown`'s error path, and the `cfg(windows)` code. The
   last needs the `windows-sys` features `Win32_Graphics_Gdi` and
-  `Win32_UI_WindowsAndMessaging` and compiles only in
-  `standalone-windows-build`, where the one test that touches it
+  `Win32_UI_WindowsAndMessaging` and compiles only in the Windows jobs; in
+  `standalone-windows-tests` the one test that touches it
   (`on_windows_a_refused_enter_leaves_the_flag_off`) also runs.
 - Kiosk mode by hand, on Windows 10 and 11 with a build from that job. None
   of it has been run; check at least:
@@ -7714,7 +7718,7 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
   empty check list does fail. Whether an unavailable probe on a `spawn` host should fail is an open owner decision.
 - Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
   redacted (`redact()` with the run's secrets) before writing; they are still internal results.
-- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and the Windows job, routed by
+- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and `standalone-windows-tests`, routed by
   `tools/ci/affected.mjs`); both must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
   real `markiro-host` (it listens on `0.0.0.0`) or kills and restarts it on its port (`host.rs`, the spawned `kill-restart` and
   `outage` scenarios, the spawned panic test in `scenarios/mod.rs`): run them with `-- --ignored` on a trusted machine. The

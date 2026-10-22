@@ -31,6 +31,8 @@ const heavyJobs = [
   ["handheld-android", "handheld_android"],
   ["standalone-rust", "standalone_rust"],
   ["standalone-windows-build", "standalone_windows_build"],
+  // The Windows tests run beside the installer job, gated by the same output.
+  ["standalone-windows-tests", "standalone_windows_build"],
   ["standalone-app-tests", "standalone_app_tests"],
   ["landing-browser", "landing_browser"],
   ["landing-lighthouse", "landing_lighthouse"],
@@ -41,7 +43,10 @@ const optionalJobs = [
   ["cabinet-galleries", "cabinet_station_galleries"],
   ["station-galleries", "cabinet_station_galleries"],
 ];
-const classifierOutputs = [...heavyJobs.map(([, name]) => name), "cabinet_station_galleries"];
+const classifierOutputs = [
+  ...new Set(heavyJobs.map(([, name]) => name)),
+  "cabinet_station_galleries",
+];
 // Jobs that consume another job's artifact besides the classifier's outputs.
 const extraNeeds = {
   "landing-browser": ["landing-build"],
@@ -285,7 +290,7 @@ test("both standalone cargo test steps report every failing test binary in one r
   // ubuntu only; the Windows job excludes it and just compiles it.
   const expected = {
     "standalone-rust": /--manifest-path apps\/standalone\/Cargo\.toml --workspace --no-fail-fast$/,
-    "standalone-windows-build":
+    "standalone-windows-tests":
       /--manifest-path apps\/standalone\/Cargo\.toml --workspace --exclude markiro-loadtest --no-fail-fast$/,
   };
   for (const [name, pattern] of Object.entries(expected)) {
@@ -298,8 +303,8 @@ test("both standalone cargo test steps report every failing test binary in one r
   }
 });
 
-test("the Windows standalone job still compiles the load-test crate it does not run", () => {
-  const steps = workflow.jobs["standalone-windows-build"].steps;
+test("the Windows standalone tests job still compiles the load-test crate it does not run", () => {
+  const steps = workflow.jobs["standalone-windows-tests"].steps;
   const index = steps.findIndex((step) =>
     step.run?.includes("cargo test --no-run -p markiro-loadtest"),
   );
@@ -309,6 +314,44 @@ test("the Windows standalone job still compiles the load-test crate it does not 
     steps.findIndex((step) => step.run?.includes("--exclude markiro-loadtest")) < index,
     "it follows the excluded workspace run",
   );
+});
+
+test("the standalone installer job and the Windows tests job run side by side, each with its own budget", () => {
+  const installer = workflow.jobs["standalone-windows-build"];
+  const tests = workflow.jobs["standalone-windows-tests"];
+  for (const job of [installer, tests]) {
+    assert.equal(job["runs-on"], "windows-latest");
+    assert.equal(job.needs, "classify-changes", "neither waits for the other");
+    assert.ok(Number.isInteger(job["timeout-minutes"]) && job["timeout-minutes"] > 0);
+  }
+  // The installer half no longer carries the debug test build: it runs no cargo test.
+  const installerCargoTests = installer.steps.filter((step) =>
+    /(^|\n)\s*cargo test\b/u.test(step.run ?? ""),
+  );
+  assert.deepEqual(installerCargoTests, []);
+  // Each budget is below the old serial 75 minutes.
+  assert.ok(installer["timeout-minutes"] < 75 && tests["timeout-minutes"] < 75);
+  // The tests half builds the webview and workspace deps the shell crate compiles against.
+  const runs = tests.steps.map((step) => step.run ?? "");
+  const build = runs.indexOf("pnpm turbo build --filter '@markiro/standalone...'");
+  const cargo = runs.findIndex((run) => run.includes("--exclude markiro-loadtest"));
+  assert.ok(build >= 0 && build < cargo, `${build} < ${cargo}`);
+});
+
+test("every ci-required job is checked by the result evaluator against the output that gates it", async () => {
+  const { REQUIRED_JOBS } = await import("../required-results.mjs");
+  const gate = workflow.jobs["ci-required"];
+  assert.deepEqual(
+    REQUIRED_JOBS.map(([jobId]) => jobId),
+    gate.needs.filter((jobId) => jobId !== "classify-changes"),
+  );
+  for (const [jobId, outputName] of REQUIRED_JOBS) {
+    assert.equal(
+      workflow.jobs[jobId].if,
+      `needs.classify-changes.outputs.${outputName} == 'true'`,
+      jobId,
+    );
+  }
 });
 
 test("Signer Windows verification includes the stable release contract", () => {
