@@ -21,6 +21,8 @@ const jobPairs = [
   ["handheld_android", "handheld-android"],
   ["standalone_rust", "standalone-rust"],
   ["standalone_windows_build", "standalone-windows-build"],
+  // The Windows test half of the standalone build shares the installer half's output.
+  ["standalone_windows_build", "standalone-windows-tests"],
   ["standalone_app_tests", "standalone-app-tests"],
   ["landing_browser", "landing-browser"],
   ["landing_lighthouse", "landing-lighthouse"],
@@ -89,6 +91,51 @@ test("the standalone app's Vitest job is required: cancelled by its budget or mi
   const missing = needsFixture({ selected });
   delete missing["standalone-app-tests"];
   assert.throws(() => assertRequiredResults(missing), /missing result for standalone-app-tests/);
+});
+
+test("the standalone Windows tests job decides the gate exactly like the installer job it shares an output with", () => {
+  const selected = ["standalone_rust", "standalone_windows_build"];
+  assert.doesNotThrow(() => assertRequiredResults(needsFixture({ selected })));
+  for (const result of ["failure", "cancelled", "skipped"]) {
+    assert.throws(
+      () =>
+        assertRequiredResults(
+          needsFixture({ selected, results: { "standalone-windows-tests": result } }),
+        ),
+      new RegExp(`selected job standalone-windows-tests finished with ${result}`),
+    );
+  }
+  // Unselected: both halves skip, and the gate passes.
+  const unselected = needsFixture({ selected: ["verify_static"] });
+  assert.equal(unselected["standalone-windows-tests"].result, "skipped");
+  assert.doesNotThrow(() => assertRequiredResults(unselected));
+  assert.throws(
+    () =>
+      assertRequiredResults(
+        needsFixture({
+          selected: ["verify_static"],
+          results: { "standalone-windows-tests": "failure" },
+        }),
+      ),
+    /unselected job standalone-windows-tests finished with failure/,
+  );
+  assert.throws(
+    () =>
+      assertRequiredResults(
+        needsFixture({
+          full: true,
+          selected: [],
+          results: { "standalone-windows-tests": "skipped" },
+        }),
+      ),
+    /full run requires standalone-windows-tests to succeed, got skipped/,
+  );
+  const missing = needsFixture({ selected });
+  delete missing["standalone-windows-tests"];
+  assert.throws(
+    () => assertRequiredResults(missing),
+    /missing result for standalone-windows-tests/,
+  );
 });
 
 test("a failed landing build fails the gate through the selected browser jobs it skips", () => {

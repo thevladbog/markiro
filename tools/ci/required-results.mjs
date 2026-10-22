@@ -4,6 +4,22 @@ import { pathToFileURL } from "node:url";
 
 import { HEAVY_JOBS } from "./affected.mjs";
 
+// A required job that shares another job's classifier output instead of
+// having its own: the standalone Windows tests run beside the installer job
+// whenever that job is selected (the two were one serial job until the split).
+const SHARED_OUTPUT_JOBS = Object.freeze({
+  standalone_windows_build: ["standalone-windows-tests"],
+});
+
+// Every job ci-required needs besides the classifier, in its `needs:` order,
+// with the classifier output that selects it.
+export const REQUIRED_JOBS = Object.freeze(
+  HEAVY_JOBS.flatMap((outputName) => [
+    [outputName.replaceAll("_", "-"), outputName],
+    ...(SHARED_OUTPUT_JOBS[outputName] ?? []).map((jobId) => [jobId, outputName]),
+  ]),
+);
+
 function readBooleanOutput(outputs, name) {
   const value = outputs?.[name];
   if (value === "true") return true;
@@ -25,9 +41,8 @@ export function assertRequiredResults(needs) {
   }
 
   const full = readBooleanOutput(classifier.outputs, "full");
-  for (const outputName of HEAVY_JOBS) {
+  for (const [jobId, outputName] of REQUIRED_JOBS) {
     const selected = readBooleanOutput(classifier.outputs, outputName);
-    const jobId = outputName.replaceAll("_", "-");
     const job = needs[jobId];
     if (!job || typeof job !== "object" || typeof job.result !== "string") {
       throw new Error(`missing result for ${jobId}`);
