@@ -94,6 +94,29 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
         .checks
         .iter()
         .any(|check| check.name == "legacy_is_busy_with_no_active_participant" && check.ok));
+    let reenter = report
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.name == "leave-reenter")
+        .expect("the leave-reenter scenario ran");
+    assert!(
+        reenter.checks.iter().all(|check| check.ok),
+        "{:#?}",
+        reenter.checks
+    );
+    for name in [
+        "audit_joins",
+        "audit_leaves",
+        "cycle_2_stale_leave_is_a_no_op",
+    ] {
+        assert!(
+            reenter
+                .checks
+                .iter()
+                .any(|check| check.name == name && check.ok),
+            "{name}"
+        );
+    }
     // `execute` hands back a report with the run's secrets already removed.
     let text = serde_json::to_string(&report).unwrap();
     assert!(!text.contains("Load-"), "the administrator password leaked");
