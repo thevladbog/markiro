@@ -14,7 +14,6 @@ use crate::api::{Api, Auth, Reply};
 use crate::host::Host;
 use crate::metrics::{Metrics, Route};
 use crate::profile::Profile;
-use crate::rng::Rng;
 
 pub type Res<T> = Result<T, String>;
 
@@ -143,10 +142,22 @@ async fn device_call(
     }
 }
 
-/// A password only this run knows: the site is a throwaway, but the command
-/// the host runs under listens on the network for the run's length.
-fn throwaway_password(rng: &mut Rng) -> String {
-    format!("Load-{:016x}-{:016x}", rng.next_u64(), rng.next_u64())
+/// A password only this run knows: the site is a throwaway, but a spawned host listens on the
+/// network for the run's length. It comes from the operating system's random source (through
+/// the TLS provider the harness already links), not from `profile.seed`, which the report writes
+/// and which has a default: everything else of a run stays repeatable from its seed.
+fn throwaway_password() -> Res<String> {
+    let mut bytes = [0u8; 16];
+    rustls::crypto::aws_lc_rs::default_provider()
+        .secure_random
+        .fill(&mut bytes)
+        .map_err(|_| "the operating system's random source failed".to_owned())?;
+    let hex = |half: &[u8]| {
+        half.iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    Ok(format!("Load-{}-{}", hex(&bytes[..8]), hex(&bytes[8..])))
 }
 
 /// A site ready for `profile`, with no shift: see the module's text.
@@ -157,7 +168,6 @@ pub async fn provision_site(
     attach: Option<AttachCredentials>,
 ) -> Res<Site> {
     let api = Api::new(&host.base, &host.fingerprint, metrics.clone());
-    let mut rng = Rng::new(profile.seed ^ 0x51_7E);
     let mut devices = Vec::new();
     let mut secrets: Vec<String> = Vec::new();
     // The office station: the first station, which also works the shift when
@@ -182,7 +192,7 @@ pub async fn provision_site(
         }
         None => {
             let paired = pair_local(&api, "Нагрузка станция 1").await?;
-            let password = throwaway_password(&mut rng);
+            let password = throwaway_password()?;
             secrets.push(password.clone());
             let body = json!({
                 "admin": { "login": "admin", "name": "Нагрузка", "password": password },
@@ -537,6 +547,40 @@ mod tests {
             .unwrap();
         assert_eq!(listed.as_array().map(Vec::len), Some(1));
         host.stop().await.unwrap();
+    }
+
+    /// The administrator's password comes from the OS's random source, not from the seed the
+    /// report writes: two sites of one seed get two passwords, and each is among the secrets the
+    /// reports are redacted of.
+    #[tokio::test]
+    async fn two_sites_of_one_seed_get_different_passwords_that_are_redacted() {
+        let mut passwords = Vec::new();
+        for _ in 0..2 {
+            let dir = tempfile::tempdir().unwrap();
+            let mut host = Host::in_process(dir.path()).await.unwrap();
+            let mut profile = Profile::preset("tiny").unwrap();
+            profile.stations = 1;
+            profile.handhelds = 0;
+            let site = provision_site(&host, Arc::new(Metrics::new()), &profile, None)
+                .await
+                .unwrap();
+            host.stop().await.unwrap();
+            let password = site
+                .secrets
+                .iter()
+                .find(|secret| secret.starts_with("Load-"))
+                .expect("the password is among the secrets")
+                .clone();
+            assert_eq!(password.len(), "Load-".len() + 32 + 1, "{password}");
+            let mut report = crate::report::sample_passing();
+            report
+                .checks
+                .push(crate::checks::Check::new("x", false, password.clone()));
+            let clean = crate::report::redact(&report, &site.secrets);
+            assert!(!serde_json::to_string(&clean).unwrap().contains(&password));
+            passwords.push(password);
+        }
+        assert_ne!(passwords[0], passwords[1], "the password followed the seed");
     }
 
     #[test]
