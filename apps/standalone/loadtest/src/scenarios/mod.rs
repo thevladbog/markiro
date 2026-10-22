@@ -113,6 +113,18 @@ pub fn broken(name: &str, error: String) -> ScenarioResult {
 }
 
 /// One scenario's host, site and findings.
+/// A scenario site has the wizard's three lines (`site::LINE_NAMES`); the scenarios index them.
+fn three_lines(line_ids: &[String]) -> Res<()> {
+    if line_ids.len() == 3 {
+        Ok(())
+    } else {
+        Err(format!(
+            "the scenario site has {} of the wizard's 3 lines: {line_ids:?}",
+            line_ids.len()
+        ))
+    }
+}
+
 pub struct Ctx {
     pub name: String,
     pub host: Host,
@@ -158,7 +170,10 @@ impl Ctx {
         profile.stations = stations;
         profile.handhelds = handhelds;
         let metrics = Arc::new(Metrics::new());
-        let site = match provision_site(&host, metrics.clone(), &profile, None).await {
+        let site = match provision_site(&host, metrics.clone(), &profile, None)
+            .await
+            .and_then(|site| three_lines(&site.line_ids).map(|()| site))
+        {
             Ok(site) => site,
             Err(error) => {
                 let mut host = host;
@@ -894,6 +909,24 @@ pub async fn reconcile(
     checks
 }
 
+/// A scenario of the tests only: it makes its host and site, then panics.
+#[cfg(test)]
+pub const PANICS: &str = "panics-on-purpose";
+
+/// The pid of the host the panicking test scenario spawned (`None` in this process).
+#[cfg(test)]
+pub static PANICKED_HOST_PID: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+async fn panics_on_purpose(kind: &HostKind, work_dir: &Path, profile: &Profile) {
+    let ctx = Ctx::new(PANICS, kind, work_dir, profile, 1, 0).await;
+    *PANICKED_HOST_PID.lock().unwrap() = ctx.as_ref().ok().and_then(|ctx| ctx.host.pid);
+    panic!(
+        "a scenario panics on purpose (it made a host: {})",
+        ctx.is_ok()
+    );
+}
+
 /// One scenario by name. Each scenario task adds its arm.
 async fn run_one(
     name: &str,
@@ -911,11 +944,63 @@ async fn run_one(
         backup_mid_close::NAME => backup_mid_close::run(kind, work_dir, profile).await,
         kill_restart::NAME => kill_restart::run(kind, work_dir, profile).await,
         outage::NAME => outage::run(kind, work_dir, profile).await,
+        #[cfg(test)]
+        PANICS => {
+            panics_on_purpose(kind, work_dir, profile).await;
+            unreachable!()
+        }
         other => (
             broken(other, format!("no scenario is named {other}")),
             Vec::new(),
         ),
     }
+}
+
+/// `run_one` behind a panic boundary: a scenario that panics (an index, an `expect`) is a failed
+/// result naming the panic, and the run goes on to the next scenario and writes its report. The
+/// panicking scenario's future is dropped as it unwinds, so its `Host` is dropped and a spawned
+/// host is killed; its site's secrets are lost with it (the result carries only the panic's
+/// message). The boundary is `CatchUnwind`, not `tokio::spawn`: a scenario future is not `Send`
+/// for every lifetime (backup-mid-close awaits the host's restore over borrowed paths).
+async fn run_isolated(
+    name: &str,
+    kind: &HostKind,
+    work_dir: &Path,
+    profile: &Profile,
+) -> (ScenarioResult, Vec<String>) {
+    match CatchUnwind(Box::pin(run_one(name, kind, work_dir, profile))).await {
+        Ok(done) => done,
+        Err(payload) => (broken(name, panic_message(payload.as_ref())), Vec::new()),
+    }
+}
+
+/// A future whose panic while polled is its output's `Err` (the panic's payload).
+struct CatchUnwind<F>(std::pin::Pin<Box<F>>);
+
+impl<F: std::future::Future> std::future::Future for CatchUnwind<F> {
+    type Output = Result<F::Output, Box<dyn std::any::Any + Send>>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let inner = self.0.as_mut();
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.poll(cx))) {
+            Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+            Ok(std::task::Poll::Ready(output)) => std::task::Poll::Ready(Ok(output)),
+            Err(payload) => std::task::Poll::Ready(Err(payload)),
+        }
+    }
+}
+
+/// A panic's message, for a failed check.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "(no message)".to_owned());
+    format!("the scenario panicked: {message}")
 }
 
 /// Every scenario of `profile`, in order, each on a fresh host of `kind`'s mode under
@@ -938,7 +1023,7 @@ pub async fn run_all(
                 Vec::new(),
             )
         } else {
-            run_one(name, kind, work_dir, profile).await
+            run_isolated(name, kind, work_dir, profile).await
         };
         done.duration_ms = started.elapsed().as_millis() as u64;
         let failed = done.checks.iter().filter(|check| !check.ok).count();
@@ -1063,6 +1148,76 @@ mod tests {
             .checks
             .iter()
             .any(|check| !check.ok && check.detail.contains("anything")));
+    }
+
+    #[test]
+    fn a_site_without_the_wizards_three_lines_is_a_failed_check_not_a_panic() {
+        let lines = |n: usize| (0..n).map(|at| format!("line-{at}")).collect::<Vec<_>>();
+        assert_eq!(three_lines(&lines(3)), Ok(()));
+        for n in [0, 1, 2, 4] {
+            let error = three_lines(&lines(n)).unwrap_err();
+            assert!(
+                error.contains("3 lines") && error.contains(&n.to_string()),
+                "{error}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_scenario_that_panics_is_a_failed_result_and_the_next_one_still_runs() {
+        let work = tempfile::tempdir().unwrap();
+        let mut profile = tiny();
+        profile.scenarios = vec![PANICS.to_owned(), "anything".to_owned()];
+        let (results, _) = run_all(&HostKind::InProcess, work.path(), &profile).await;
+        assert_eq!(results.len(), 2, "{results:?}");
+        assert_eq!(results[0].name, PANICS);
+        assert!(results[0].judged);
+        let ran = results[0]
+            .checks
+            .iter()
+            .find(|check| check.name == "scenario_ran")
+            .expect("a scenario_ran check");
+        assert!(!ran.ok);
+        assert!(
+            ran.detail.contains("panicked") && ran.detail.contains("on purpose"),
+            "{}",
+            ran.detail
+        );
+        assert_eq!(results[1].name, "anything");
+        assert!(results[1]
+            .checks
+            .iter()
+            .any(|check| check.detail.contains("anything")));
+    }
+
+    /// A spawned host of a scenario that panics is killed by its `Drop`: no child outlives it.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "spawns markiro-host (it listens on every interface); run with --ignored"]
+    async fn a_scenario_that_panics_leaves_no_spawned_host_behind() {
+        let work = tempfile::tempdir().unwrap();
+        let mut profile = tiny();
+        profile.scenarios = vec![PANICS.to_owned()];
+        let bin = crate::host::test_host_binary();
+        let (results, _) = run_all(&HostKind::Spawn { bin }, work.path(), &profile).await;
+        assert!(results[0]
+            .checks
+            .iter()
+            .any(|check| !check.ok && check.detail.contains("on purpose")));
+        let pid = PANICKED_HOST_PID
+            .lock()
+            .unwrap()
+            .expect("the panicking scenario spawned a host");
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(
+            !alive,
+            "the host {pid} of the panicking scenario still runs"
+        );
     }
 
     #[test]
