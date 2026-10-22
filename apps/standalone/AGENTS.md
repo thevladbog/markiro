@@ -7715,7 +7715,11 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
 - Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
   redacted (`redact()` with the run's secrets) before writing; they are still internal results.
 - Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and the Windows job, routed by
-  `tools/ci/affected.mjs`); `tests/self_run.rs` is `#[ignore]`. The load itself is manual or the opt-in
+  `tools/ci/affected.mjs`); both must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
+  real `markiro-host` (it listens on `0.0.0.0`) or kills and restarts it on its port (`host.rs`, the spawned `kill-restart` and
+  `outage` scenarios, the spawned panic test in `scenarios/mod.rs`): run them with `-- --ignored` on a trusted machine. The
+  process control (stop, kill, `Drop`) is covered in the gate over a fake `sh`/`sleep` child (Unix). The `wal_watch.rs` tests that
+  read a live `-shm` are ignored on Windows ("Windows -shm read unverified"). The load itself is manual or the opt-in
   `.github/workflows/standalone-load.yml` (`workflow_dispatch` only, in-process, never required, never run on GitHub yet). Run a smoke
   after changing a hot write path (facts, SSCC blocks, entry, leave, close, backup, restore) or `db.rs`.
 - Payloads are built from `markiro-proto` types, so a renamed wire field breaks the build. The plan-2b names `maxStations`,

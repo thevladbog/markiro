@@ -551,7 +551,105 @@ mod tests {
         super::test_host_binary()
     }
 
+    /// A `Host` over a child that is not the host (`sh` waiting on a `sleep`, ending with
+    /// status 0 on SIGINT as the host does): the process control of a spawned host, without
+    /// binding a port.
+    #[cfg(unix)]
+    fn fake_spawned(dir: &Path) -> Host {
+        let child = Command::new("sh")
+            .args([
+                "-c",
+                "trap 'kill $! 2>/dev/null; exit 0' INT; sleep 30 & wait",
+            ])
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        // Let the shell set its trap before anything signals it.
+        std::thread::sleep(Duration::from_millis(200));
+        Host {
+            base: "https://127.0.0.1:1".to_owned(),
+            fingerprint: String::new(),
+            data_dir: Some(dir.to_path_buf()),
+            pid: Some(child.id()),
+            local: true,
+            process: Process::Spawned {
+                child,
+                log: dir.join("host.log"),
+            },
+        }
+    }
+
+    #[cfg(unix)]
+    fn alive(pid: u32) -> bool {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    #[cfg(unix)]
+    fn signalled(pid: u32) -> usize {
+        SIGNALLED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| **p == pid)
+            .count()
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
+    async fn a_stopped_child_is_asked_once_and_never_signalled_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = fake_spawned(dir.path());
+        let pid = host.pid.unwrap();
+        assert!(host.stop().await.unwrap(), "it ended by itself on SIGINT");
+        assert!(!alive(pid));
+        assert_eq!(signalled(pid), 1, "one request to stop");
+        let started = Instant::now();
+        assert!(!host.stop().await.unwrap());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!host.kill_hard().unwrap(), "an ended child is not killed");
+        assert_eq!(signalled(pid), 1, "nothing more was signalled");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_killed_child_is_not_signalled_again_and_a_running_one_is_not_restarted() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = fake_spawned(dir.path());
+        let pid = host.pid.unwrap();
+        let refused = host.restart(Path::new("no-such-binary")).await.unwrap_err();
+        assert!(refused.to_string().contains("still runs"), "{refused}");
+        assert!(alive(pid), "a refused restart leaves the child running");
+        assert!(host.kill_hard().unwrap(), "it was running");
+        assert!(!alive(pid));
+        assert!(
+            !host.kill_hard().unwrap(),
+            "an ended child is not signalled"
+        );
+        assert!(!host.stop().await.unwrap());
+        assert_eq!(signalled(pid), 0, "a kill asks nothing first");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_dropped_child_is_killed_and_reaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = fake_spawned(dir.path());
+        let pid = host.pid.unwrap();
+        assert!(alive(pid));
+        drop(host);
+        assert!(
+            !alive(pid),
+            "the dropped host's child still runs (or was not reaped)"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "spawns markiro-host, which listens on 0.0.0.0 (it has no bind flag): not on a shared runner; run with -- --ignored on a trusted machine"]
     async fn a_spawned_host_answers_hello_logs_and_stops_on_sigint() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("host.log");
@@ -602,6 +700,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "spawns markiro-host, which listens on 0.0.0.0 (it has no bind flag): not on a shared runner; run with -- --ignored on a trusted machine"]
     async fn a_dropped_spawned_host_is_killed() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("host.log");
@@ -633,11 +732,8 @@ mod tests {
         host.stop().await.unwrap();
     }
 
-    #[cfg_attr(
-        windows,
-        ignore = "restarting on the same port is unverified on Windows"
-    )]
     #[tokio::test]
+    #[ignore = "kills markiro-host and restarts it on the same port (in the parallel gate another test's bind to port 0 may take the freed port; unverified on Windows) and the host listens on 0.0.0.0: run with -- --ignored on a trusted machine"]
     async fn a_killed_host_restarts_on_its_port_with_its_identity() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("host.log");
@@ -685,6 +781,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "spawns markiro-host, which listens on 0.0.0.0 (it has no bind flag): not on a shared runner; run with -- --ignored on a trusted machine"]
     async fn a_stopped_spawned_host_is_not_signalled_again() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("host.log");

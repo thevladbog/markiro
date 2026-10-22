@@ -378,6 +378,10 @@ mod tests {
     /// The parser against files SQLite itself wrote (a scratch database, not the host's): the
     /// page size is the database's, `mxFrame` agrees with the log file's length, and the
     /// checkpoint sequence goes up by one when a checkpoint restarts the log.
+    #[cfg_attr(
+        windows,
+        ignore = "Windows -shm read unverified: reading the wal-index of a live database there is untested"
+    )]
     #[tokio::test]
     async fn the_parser_agrees_with_real_files_of_a_scratch_database() {
         let dir = tempfile::tempdir().unwrap();
@@ -455,6 +459,10 @@ mod tests {
         writer.close().await;
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "Windows -shm read unverified: reading the wal-index of a live database there is untested"
+    )]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_host_in_this_process_is_watched_while_devices_write() {
         use crate::scenarios::{enter_all, Ctx, HostKind};

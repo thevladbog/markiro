@@ -66,6 +66,17 @@ apps/standalone/target/release/markiro-loadtest run --profile tiny --host in-pro
 Наблюдалось (отладочная сборка, macOS): `PASS`, 78 из 78 проверок, код выхода 0. Предупреждения «журнал хоста недоступен» и
 «число дескрипторов недоступно» ожидаемы для `in-process`.
 
+**Тесты самого инструмента.** `cargo test -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml` идёт в
+обычной проверке PR (`standalone-rust` на ubuntu и задача Windows): условие слияния — обе зелёные. Тесты, которые
+запускают настоящий `markiro-host` (он слушает `0.0.0.0`) или убивают и перезапускают его на том же порту, помечены
+`#[ignore]` и в CI не идут: `host::tests::a_spawned_host_answers_hello_logs_and_stops_on_sigint`,
+`a_dropped_spawned_host_is_killed`, `a_killed_host_restarts_on_its_port_with_its_identity`,
+`a_stopped_spawned_host_is_not_signalled_again`, сценарии `kill-restart` и `outage` против порождённого хоста,
+`scenarios::tests::a_scenario_that_panics_leaves_no_spawned_host_behind` и самопроверка `tests/self_run.rs`. Их
+запускают вручную на доверенной машине: `cargo test -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml --
+--ignored`. Управление процессом хоста (остановка, убийство, `Drop`) в CI проверяется на подставном дочернем процессе
+(`sh` со `sleep`, только Unix).
+
 ## 5. Быстрый прогон (smoke, около 5 минут)
 
 С отдельным процессом хоста (сеть доверенная, см. п. 2):
@@ -320,7 +331,8 @@ markiro-loadtest compare ~/markiro-load/baseline/smoke.json ~/markiro-load/smoke
   0 или 6): тогда середина не упражнена в этом прогоне;
 - сборка `release` измерена только в приёмочных прогонах п. 8 на одной машине; длинный прогон (`soak`) не запускался.
 
-**Только Windows, не проверялось:** чтение `host.db-shm` для очереди WAL; повтор при `os error 32` в восстановлении
+**Только Windows, не проверялось:** чтение `host.db-shm` для очереди WAL (тесты, читающие `-shm`, на Windows помечены
+`ignore` с пометкой «Windows -shm read unverified»); повтор при `os error 32` в восстановлении
 (копия ещё занята процессом); сбор памяти и дескрипторов через PowerShell; на Windows хост завершается принудительно
 (там нет SIGINT); перезапуск хоста на том же порту (сценарии `kill-restart` и `outage` на Windows не судятся: результат «не судилось» с пояснением).
 
@@ -329,6 +341,8 @@ GitHub.
 
 ## 15. Чек-лист приёмки вехи
 
+- [ ] проверка PR зелёная на ubuntu и на Windows (условие слияния); тесты с `#[ignore]` прогнаны с `-- --ignored` на
+      доверенной машине (п. 4)
 - [ ] smoke зелёный (локально или workflow «Standalone load test» на ветке выпуска), отчёт приложен
 - [ ] soak (4 часа, `spawn`) зелёный на ПК с дисками, как на заводе; отчёт сохранён как базовая линия
 - [ ] три копии под нагрузкой открылись, восстановление дало те же числа строк
