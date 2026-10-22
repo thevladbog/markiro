@@ -219,6 +219,9 @@ export function DocumentComposer({
               onPolicyChange={(line, policy) =>
                 dispatch({ type: "line.policyChanged", id: line.id, policy })
               }
+              onTermChange={(line, termStart, termEnd) =>
+                dispatch({ type: "line.termChanged", id: line.id, termStart, termEnd })
+              }
               onMove={(line, direction) => dispatch({ type: "line.moved", id: line.id, direction })}
               onRemove={(line) => dispatch({ type: "line.removed", id: line.id })}
             />

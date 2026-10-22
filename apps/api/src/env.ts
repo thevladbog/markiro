@@ -1,3 +1,8 @@
+import {
+  configureStandaloneReleases,
+  DEFAULT_RELEASES_PUBLIC_ORIGIN,
+  STANDALONE_RELEASES_CONFIG_ERROR,
+} from "./modules/standalone-releases/release-config";
 import { configureGrantSigning } from "./modules/device-grants/grant-keyset";
 import {
   configureStandaloneLicenseSigning,
@@ -263,6 +268,15 @@ const EnvSchema = z
       .optional(),
     // Leads without movement this long, and lost leads, lose their contacts.
     LEAD_RETENTION_MONTHS: z.coerce.number().int().min(1).max(60).default(12),
+    // The public release bucket's own keys, for «Выпуски автонома» (spec 2026-10-20
+    // §5.4). Optional as a set: absent, the section says «не настроено» and
+    // readiness never depends on it. Uploads go there from the admin's browser.
+    RELEASES_S3_ENDPOINT: z.string().optional(),
+    RELEASES_S3_REGION: z.string().optional(),
+    RELEASES_S3_BUCKET: z.string().optional(),
+    RELEASES_S3_ACCESS_KEY_ID: z.string().optional(),
+    RELEASES_S3_SECRET_ACCESS_KEY: z.string().optional(),
+    RELEASES_PUBLIC_ORIGIN: z.string().default(DEFAULT_RELEASES_PUBLIC_ORIGIN),
     S3_ENDPOINT: storageEndpointSchema,
     S3_REGION: z.string().min(1),
     S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),
@@ -356,6 +370,15 @@ const EnvSchema = z
         code: "custom",
         path: ["STANDALONE_LICENSE_KEYSET_JSON"],
         message: STANDALONE_LICENSE_SIGNING_ERROR,
+      });
+    }
+    try {
+      configureStandaloneReleases(env);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        path: ["RELEASES_S3_ENDPOINT"],
+        message: STANDALONE_RELEASES_CONFIG_ERROR,
       });
     }
     try {
@@ -484,6 +507,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "LEAD_TELEGRAM_BOT_TOKEN",
     "LEAD_TELEGRAM_CHAT_ID",
     "LEAD_RETENTION_MONTHS",
+    "RELEASES_S3_ENDPOINT",
+    "RELEASES_S3_REGION",
+    "RELEASES_S3_BUCKET",
+    "RELEASES_S3_ACCESS_KEY_ID",
+    "RELEASES_S3_SECRET_ACCESS_KEY",
+    "RELEASES_PUBLIC_ORIGIN",
     ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
     "DADATA_TOKEN",
     "DADATA_SECRET",

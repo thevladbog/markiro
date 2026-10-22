@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -298,6 +298,55 @@ describe("the shift card", () => {
       expect(view.container.querySelector(".shift-card__photo img.product-photo")).not.toBeNull(),
     );
     expect(view.container.querySelector(".shift-card__photo-monogram")).toBeNull();
+  });
+
+  it("fills the panel with a photo that has its own background: a JPEG stands on no gradient", async () => {
+    const { executor } = await feedProducts([productItem(A, 5, SUM_1)], 5);
+    await syncProductPhotos({ local: executor, fetchPhoto: async () => photo(SUM_1) });
+    const view = card(executor);
+    await waitFor(() =>
+      expect(view.container.querySelector(".shift-card__photo img.product-photo")).not.toBeNull(),
+    );
+    const panel = view.container.querySelector(".shift-card__photo");
+    expect(panel?.getAttribute("data-photo-backing")).toBe("none");
+    // The tags stay on the panel, over the picture.
+    expect(panel?.querySelector(".shift-card__tags")?.textContent).toContain("Агрегация");
+  });
+
+  it("keeps a PNG whose edge is not read yet (a cut-out until proven otherwise) on the brand gradient", async () => {
+    const { executor } = await feedProducts([productItem(A, 5, SUM_1)], 5);
+    await syncProductPhotos({
+      local: executor,
+      fetchPhoto: async () => {
+        const state = photo(SUM_1);
+        return state.photo === null ? state : { photo: { ...state.photo, mediaType: "image/png" } };
+      },
+    });
+    const view = card(executor);
+    await waitFor(() =>
+      expect(view.container.querySelector(".shift-card__photo img.product-photo")).not.toBeNull(),
+    );
+    expect(
+      view.container.querySelector(".shift-card__photo")?.getAttribute("data-photo-backing"),
+    ).toBe("gradient");
+  });
+
+  it("puts the monogram back on the gradient when an opaque photo will not decode", async () => {
+    const { executor } = await feedProducts([productItem(A, 5, SUM_1)], 5);
+    await syncProductPhotos({ local: executor, fetchPhoto: async () => photo(SUM_1) });
+    const view = card(executor);
+    const image = await waitFor(() => {
+      const found = view.container.querySelector(".shift-card__photo img.product-photo");
+      expect(found).not.toBeNull();
+      return found as HTMLImageElement;
+    });
+    fireEvent.error(image);
+    await waitFor(() =>
+      expect(view.container.querySelector(".shift-card__photo-monogram")).not.toBeNull(),
+    );
+    expect(
+      view.container.querySelector(".shift-card__photo")?.getAttribute("data-photo-backing"),
+    ).toBe("gradient");
   });
 
   it("keeps the monogram on the colour panel for a product with no photo, and where no database is given", async () => {

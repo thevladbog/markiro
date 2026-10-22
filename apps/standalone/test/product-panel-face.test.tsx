@@ -1,8 +1,10 @@
-import { render, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { LocalExecutor } from "../src/local/executor.js";
 import { ProductPanel } from "../src/floor/shifts/ProductPhoto.js";
+
+afterEach(cleanup);
 
 /** A local database holding one stored photo of `mediaType` for any product. */
 function holding(mediaType: string): LocalExecutor {
@@ -15,29 +17,40 @@ function holding(mediaType: string): LocalExecutor {
   };
 }
 
-function panel(mediaType: string, faceAlways: boolean) {
+function panel(mediaType: string) {
   const view = render(
     <ProductPanel
       local={holding(mediaType)}
       productId="p"
       className="panel"
-      fallback={null}
-      faceAlways={faceAlways}
+      fallback={<span className="monogram">М</span>}
     />,
   );
   return view.container.querySelector(".panel") as HTMLElement;
 }
 
-describe("a product panel wider than its photo (owner photo, beta 4.5: flat navy behind the bottle)", () => {
-  it("takes the photo's own backing by default: an opaque JPEG fills a square and needs none", async () => {
-    const element = panel("image/jpeg", false);
+describe("a product panel takes its photo's own backing (owner, 2026-10-20)", () => {
+  it("needs none behind an opaque JPEG: the picture fills the panel", async () => {
+    const element = panel("image/jpeg");
     await waitFor(() => expect(element.querySelector("img")).not.toBeNull());
     expect(element.getAttribute("data-photo-backing")).toBe("none");
   });
 
-  it("stands on the brand gradient whatever the photo is, so the bands round a fitted picture are not the card's flat face", async () => {
-    const element = panel("image/jpeg", true);
+  it("stands on the brand gradient while a PNG's edge is not read", async () => {
+    const element = panel("image/png");
     await waitFor(() => expect(element.querySelector("img")).not.toBeNull());
+    expect(element.getAttribute("data-photo-backing")).toBe("gradient");
+  });
+
+  it("puts the monogram back on the gradient when the photo will not decode", async () => {
+    const element = panel("image/jpeg");
+    const image = await waitFor(() => {
+      const found = element.querySelector("img");
+      expect(found).not.toBeNull();
+      return found as HTMLImageElement;
+    });
+    fireEvent.error(image);
+    await waitFor(() => expect(element.querySelector(".monogram")).not.toBeNull());
     expect(element.getAttribute("data-photo-backing")).toBe("gradient");
   });
 });

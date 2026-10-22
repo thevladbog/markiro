@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { Alert, Button, Card, StatusChip, Table, type TableColumn } from "@markiro/ui";
 import type { StandaloneSite } from "@markiro/platform-contracts";
 
@@ -39,6 +40,12 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
       title: t("tenants.detail.standalone.columns.inn"),
       mono: true,
       render: (site) => site.requestInn ?? t("tenants.detail.standalone.noValue"),
+    },
+    {
+      key: "lead",
+      title: t("tenants.detail.standalone.columns.lead"),
+      wrap: true,
+      render: (site) => <SiteLead site={site} />,
     },
     {
       key: "license",
@@ -162,4 +169,28 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
       ) : null}
     </Card>
   );
+}
+
+/**
+ * The landing lead with the site's request INN (spec 2026-10-20 §15.6): linked when
+ * the activation request matched it; several, or one of another tenant, are left to
+ * the operator in «Заявки» — never chosen here.
+ */
+function SiteLead({ site }: { site: StandaloneSite }) {
+  const { t } = useTranslation();
+  const link = site.leadLink;
+  if (link === null || site.requestInn === null) return null;
+  const [leadId] = link.leadIds;
+  if (link.state === "linked" && leadId)
+    return <Link to={`/leads/${leadId}`}>{t("tenants.detail.standalone.lead.linked")}</Link>;
+  if (link.state === "unresolved")
+    return (
+      <span>
+        {t("tenants.detail.standalone.lead.unresolved", { count: link.leadIds.length })}{" "}
+        <Link to={`/leads?search=${encodeURIComponent(site.requestInn)}`}>
+          {t("tenants.detail.standalone.lead.unresolvedLink", { inn: site.requestInn })}
+        </Link>
+      </span>
+    );
+  return <span>{t("tenants.detail.standalone.lead.none")}</span>;
 }

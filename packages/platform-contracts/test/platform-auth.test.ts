@@ -34,6 +34,7 @@ const ADMIN_CAPABILITIES = [
   "reports.identified",
   "leads.read",
   "leads.write",
+  "standaloneReleases.manage",
 ] as const;
 
 describe("platform identity contracts", () => {
@@ -290,5 +291,13 @@ describe("landing lead capabilities (spec 2026-10-20 §15.6)", () => {
     expect(platformCapabilitiesForRole.support).not.toContain("leads.write");
     expect(platformCapabilitiesForRole.accountant).not.toContain("leads.read");
     expect(platformCapabilitiesForRole.accountant).not.toContain("leads.write");
+  });
+});
+
+describe("standalone release capability (spec 2026-10-20 §5.5)", () => {
+  it("lets only administrators publish standalone releases", () => {
+    expect(platformCapabilitiesForRole.platform_admin.at(-1)).toBe("standaloneReleases.manage");
+    expect(platformCapabilitiesForRole.support).not.toContain("standaloneReleases.manage");
+    expect(platformCapabilitiesForRole.accountant).not.toContain("standaloneReleases.manage");
   });
 });

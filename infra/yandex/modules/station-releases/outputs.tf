@@ -10,6 +10,18 @@ output "publisher_encrypted_secret_key" {
   sensitive   = true
 }
 
+output "standalone_api_access_key_id" {
+  description = "SaaS API standalone release access key ID."
+  value       = yandex_iam_service_account_static_access_key.standalone_release_api.access_key
+  sensitive   = true
+}
+
+output "standalone_api_encrypted_secret_key" {
+  description = "PGP-encrypted SaaS API standalone release secret key."
+  value       = yandex_iam_service_account_static_access_key.standalone_release_api.encrypted_secret_key
+  sensitive   = true
+}
+
 output "cdn_provider_cname" {
   description = "Provider-assigned CNAME target for the Station release CDN resource."
   value       = yandex_cdn_resource.releases.provider_cname

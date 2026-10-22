@@ -54,7 +54,7 @@ variable "terraform_service_account_id" {
 }
 
 variable "publisher_pgp_key" {
-  description = "Base64-encoded PGP public key used to encrypt the publisher secret before it reaches Terraform state."
+  description = "Base64-encoded PGP public key used to encrypt the publisher and standalone API secrets before they reach Terraform state."
   type        = string
   nullable    = false
   sensitive   = true
@@ -62,6 +62,28 @@ variable "publisher_pgp_key" {
   validation {
     condition     = length(trimspace(var.publisher_pgp_key)) > 0
     error_message = "publisher_pgp_key must be nonblank."
+  }
+}
+
+variable "standalone_upload_origin" {
+  description = "Exact browser origin allowed to upload standalone releases by presigned PUT (the SaaS admin)."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.standalone_upload_origin))
+    error_message = "standalone_upload_origin must be an https origin without a path, port or wildcard."
+  }
+}
+
+variable "download_origin_domain" {
+  description = "Bare host of the landing whose pages read release pointers cross-origin through the CDN (no scheme)."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.download_origin_domain))
+    error_message = "download_origin_domain must be a lowercase fully-qualified host without scheme, port or wildcard."
   }
 }
 

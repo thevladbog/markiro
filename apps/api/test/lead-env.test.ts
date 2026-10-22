@@ -72,3 +72,42 @@ describe("landing lead environment (spec 2026-10-20 §15.4)", () => {
     }
   });
 });
+
+describe("standalone release storage environment (spec 2026-10-20 §5.4)", () => {
+  const releases = {
+    RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net",
+    RELEASES_S3_REGION: "ru-central1",
+    RELEASES_S3_BUCKET: "releases.markiro.app",
+    RELEASES_S3_ACCESS_KEY_ID: "fixture-access-key",
+    RELEASES_S3_SECRET_ACCESS_KEY: "fixture-secret-key",
+  };
+
+  it("boots without release storage, with blank placeholders, and with the full set", () => {
+    expect(loadEnv(base).RELEASES_PUBLIC_ORIGIN).toBe("https://releases.markiro.app");
+    expect(
+      loadEnv({
+        ...base,
+        ...Object.fromEntries(Object.keys(releases).map((key) => [key, ""])),
+        RELEASES_PUBLIC_ORIGIN: "",
+      }).RELEASES_S3_BUCKET,
+    ).toBeUndefined();
+    expect(loadEnv({ ...base, ...releases }).RELEASES_S3_BUCKET).toBe("releases.markiro.app");
+  });
+
+  it("fails startup on a partial or malformed set, naming no secret", () => {
+    for (const patch of [
+      { RELEASES_S3_SECRET_ACCESS_KEY: undefined },
+      { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net/bucket" },
+      { RELEASES_PUBLIC_ORIGIN: "http://releases.markiro.app" },
+    ]) {
+      let message = "";
+      try {
+        loadEnv({ ...base, ...releases, ...patch });
+      } catch (error) {
+        message = String(error);
+      }
+      expect(message, JSON.stringify(patch)).toContain("RELEASES_S3_ENDPOINT");
+      expect(message).not.toContain("fixture-secret-key");
+    }
+  });
+});

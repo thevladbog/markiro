@@ -35,6 +35,16 @@
 	}
 }
 
+# The SaaS admin also uploads signed standalone releases straight to the public
+# release bucket (presigned path-style PUTs); RELEASES_UPLOAD_ORIGIN in
+# preflight.mjs is that exact origin, and the retired hosts keep the strict policy.
+(saas_admin_csp) {
+	header {
+		defer
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: {$S3_PUBLIC_ORIGIN}; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://storage.yandexcloud.net; worker-src 'self' blob:; manifest-src 'self'"
+	}
+}
+
 (landing_csp) {
 	header {
 		defer
@@ -272,7 +282,7 @@ http://{$MARKIRO_LANDING_DOMAIN}:8080 {
 
 https://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8443 {
 	import common_headers
-	import application_csp
+	import saas_admin_csp
 	import saas_admin_routes
 }
 

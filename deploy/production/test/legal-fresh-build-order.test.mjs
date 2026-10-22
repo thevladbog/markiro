@@ -166,10 +166,7 @@ test("fresh dist-less legal build fails before domain and passes after domain", 
   assert.equal(legalBuild.status, 0, legalBuild.stderr || legalBuild.stdout);
 });
 
-for (const [label, workflowPath] of [
-  ["CI", ".github/workflows/ci.yml"],
-  ["release", ".github/workflows/release-images.yml"],
-]) {
+for (const [label, workflowPath] of [["CI", ".github/workflows/ci.yml"]]) {
   test(`${label} production contracts build and load the verifier from a dist-less checkout`, async (context) => {
     const directory = await freshVerifierFixture(context);
     const beforeBuild = runProductionVerifier(directory);

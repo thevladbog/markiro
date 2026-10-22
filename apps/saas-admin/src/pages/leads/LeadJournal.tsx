@@ -90,14 +90,32 @@ function EventSummary({ event, language }: { event: LeadEvent; language: string 
     <p>{t("leads.journal.nextTouch", { date: formatLeadDate(touch, language) })}</p>
   ) : null;
 
+  // Spec 2026-10-20 §15.6: the link and the status a site's activation request set.
+  const viaActivation =
+    payload.via === "activation_request" ? <p>{t("leads.journal.viaActivation")}</p> : null;
+
   switch (event.kind) {
     case "status_change":
       return (
         <>
           <p>{`${status("from")} → ${status("to")}`}</p>
           {touchLine}
+          {viaActivation}
         </>
       );
+    case "activation_request": {
+      const tenantId = text(payload, "tenantId");
+      return (
+        <p>
+          {payload.intent === "rebind"
+            ? t("leads.journal.activationRebind")
+            : t("leads.journal.activationCreate")}{" "}
+          {tenantId ? (
+            <Link to={`/tenants/${tenantId}`}>{t("leads.journal.openTenant")}</Link>
+          ) : null}
+        </p>
+      );
+    }
     case "touch":
       return touchLine;
     case "note": {
@@ -126,6 +144,7 @@ function EventSummary({ event, language }: { event: LeadEvent; language: string 
             ) : null}
           </p>
           {previous ? <p>{t("leads.journal.previousTenant", { id: previous })}</p> : null}
+          {viaActivation}
         </>
       );
     }
@@ -145,10 +164,11 @@ function EventSummary({ event, language }: { event: LeadEvent; language: string 
 }
 
 const CONSUMED_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
-  status_change: new Set(["from", "to", "nextTouchAt"]),
+  status_change: new Set(["from", "to", "nextTouchAt", "via"]),
+  activation_request: new Set(["tenantId", "siteId", "hostId", "intent"]),
   touch: new Set(["nextTouchAt"]),
   note: new Set(["length"]),
-  linked_tenant: new Set(["tenantId", "created", "previousTenantId"]),
+  linked_tenant: new Set(["tenantId", "created", "previousTenantId", "via"]),
   anonymized: new Set(["reason"]),
 };
 const NOTHING = new Set<string>();

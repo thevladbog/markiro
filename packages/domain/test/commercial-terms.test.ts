@@ -3,6 +3,7 @@ import {
   commercialTaxDefaults,
   isCommercialTaxAllowed,
   resolveCommercialPeriod,
+  resolveExplicitCommercialPeriod,
   type SellerTaxPolicy,
 } from "../src/index.js";
 
@@ -245,5 +246,52 @@ describe("seller tax policy", () => {
         vatIncluded: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveExplicitCommercialPeriod", () => {
+  it("covers an inclusive Moscow civil date range ending at the start of the following day", () => {
+    expect(
+      resolveExplicitCommercialPeriod({ termStart: "2026-11-01", termEnd: "2027-05-27" }),
+    ).toEqual({
+      billingPeriod: "custom",
+      billingTimezone: "Europe/Moscow",
+      calendarPolicyVersion: 1,
+      anchorAt: "2026-10-31T21:00:00.000Z",
+      cycle: 0,
+      startsAt: "2026-10-31T21:00:00.000Z",
+      endsAt: "2027-05-27T21:00:00.000Z",
+    });
+  });
+
+  it("supports a one-day term", () => {
+    expect(
+      resolveExplicitCommercialPeriod({ termStart: "2026-11-01", termEnd: "2026-11-01" }),
+    ).toMatchObject({
+      startsAt: "2026-10-31T21:00:00.000Z",
+      endsAt: "2026-11-01T21:00:00.000Z",
+    });
+  });
+
+  it("rolls the end boundary over month, year and leap-day ends", () => {
+    expect(
+      resolveExplicitCommercialPeriod({ termStart: "2027-12-01", termEnd: "2027-12-31" }).endsAt,
+    ).toBe("2027-12-31T21:00:00.000Z");
+    expect(
+      resolveExplicitCommercialPeriod({ termStart: "2028-02-01", termEnd: "2028-02-29" }).endsAt,
+    ).toBe("2028-02-29T21:00:00.000Z");
+    expect(
+      resolveExplicitCommercialPeriod({ termStart: "2027-02-01", termEnd: "2027-02-28" }).endsAt,
+    ).toBe("2027-02-28T21:00:00.000Z");
+  });
+
+  it.each([
+    ["2026-11-02", "2026-11-01"],
+    ["2026-13-01", "2026-13-02"],
+    ["2027-02-29", "2027-03-01"],
+    ["2026-11-1", "2026-11-02"],
+    ["2026-11-01", "2026-11-02T00:00"],
+  ])("rejects an invalid or reversed range %s..%s", (termStart, termEnd) => {
+    expect(() => resolveExplicitCommercialPeriod({ termStart, termEnd })).toThrow(RangeError);
   });
 });

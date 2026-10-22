@@ -8,6 +8,9 @@ export const HEAVY_JOBS = Object.freeze([
   "verify_app_tests",
   "tenant_team_infrastructure",
   "production_bundle",
+  // The deploy/platform Node contracts, split off production-bundle onto two
+  // sharded runners; every change that selects production_bundle selects them.
+  "platform_contracts",
   "station_rust",
   "station_windows_build",
   "signer_rust",
@@ -16,7 +19,17 @@ export const HEAVY_JOBS = Object.freeze([
   "standalone_rust",
   "standalone_windows_build",
   "standalone_app_tests",
+  "landing_browser",
+  "landing_lighthouse",
+  "saas_admin_browser",
 ]);
+
+// Classified like the jobs above but outside ci-required: the cabinet, kiosk and
+// cloud-station galleries keep regression coverage for code that stays in the
+// repository while those online surfaces are retired (owner decision 2026-10-21).
+export const OPTIONAL_JOBS = Object.freeze(["cabinet_station_galleries"]);
+
+const ALL_JOBS = Object.freeze([...HEAVY_JOBS, ...OPTIONAL_JOBS]);
 
 const signerJobs = ["signer_rust", "signer_windows_build"];
 const stationJobs = ["station_rust", "station_windows_build"];
@@ -24,13 +37,28 @@ const standaloneJobs = ["standalone_rust", "standalone_windows_build"];
 // The standalone webview's Vitest suite has a runner of its own: inside
 // verify-app-tests it pushed that job past its wall-clock budget.
 const standaloneAppTests = "standalone_app_tests";
+const landingJobs = ["landing_browser", "landing_lighthouse"];
+// The landing, SaaS-admin and cabinet/station browser suites, each in its own job.
+const browserJobs = [...landingJobs, "saas_admin_browser"];
+const galleries = "cabinet_station_galleries";
 
+// production_bundle builds what the platform runs: the API image and the
+// platform edge (SaaS admin + landing). The cabinet and the kiosk are no longer
+// served online, so they own only their app suites and the optional galleries.
 const appJobs = Object.freeze({
-  api: ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
-  admin: ["verify_static", "verify_app_tests", "production_bundle"],
-  kiosk: ["verify_static", "verify_app_tests", "production_bundle"],
-  landing: ["verify_static", "verify_app_tests", "production_bundle"],
-  "saas-admin": ["verify_static", "verify_app_tests", "production_bundle"],
+  // The offers suite prints through the API's billing model and type-checks
+  // against its build, so the SaaS-admin browser job follows the API too.
+  api: [
+    "verify_static",
+    "verify_api_tests",
+    "tenant_team_infrastructure",
+    "production_bundle",
+    "saas_admin_browser",
+  ],
+  admin: ["verify_static", "verify_app_tests", galleries],
+  kiosk: ["verify_static", "verify_app_tests", galleries],
+  landing: ["verify_static", "verify_app_tests", "production_bundle", ...landingJobs],
+  "saas-admin": ["verify_static", "verify_app_tests", "production_bundle", "saas_admin_browser"],
 });
 
 const sharedJobs = Object.freeze({
@@ -38,6 +66,8 @@ const sharedJobs = Object.freeze({
     "verify_static",
     "verify_app_tests",
     "production_bundle",
+    ...browserJobs,
+    galleries,
     ...stationJobs,
     ...signerJobs,
     ...standaloneJobs,
@@ -48,6 +78,8 @@ const sharedJobs = Object.freeze({
     "verify_api_tests",
     "verify_app_tests",
     "production_bundle",
+    ...browserJobs,
+    galleries,
     ...stationJobs,
     ...standaloneJobs,
     standaloneAppTests,
@@ -58,15 +90,31 @@ const sharedJobs = Object.freeze({
     "verify_app_tests",
     "tenant_team_infrastructure",
     "production_bundle",
+    "saas_admin_browser",
+    galleries,
     ...stationJobs,
   ],
-  email: ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
-  "legal-documents": ["verify_static", "verify_api_tests", "verify_app_tests", "production_bundle"],
+  email: [
+    "verify_static",
+    "verify_api_tests",
+    "tenant_team_infrastructure",
+    "production_bundle",
+    "saas_admin_browser",
+  ],
+  "legal-documents": [
+    "verify_static",
+    "verify_api_tests",
+    "verify_app_tests",
+    "production_bundle",
+    ...browserJobs,
+  ],
   "platform-contracts": [
     "verify_static",
     "verify_api_tests",
     "verify_app_tests",
     "production_bundle",
+    ...browserJobs,
+    galleries,
   ],
 });
 
@@ -82,7 +130,7 @@ function buildResult(enabledJobs, full = false) {
   const enabled = new Set(enabledJobs);
   return {
     full,
-    jobs: Object.fromEntries(HEAVY_JOBS.map((job) => [job, full || enabled.has(job)])),
+    jobs: Object.fromEntries(ALL_JOBS.map((job) => [job, full || enabled.has(job)])),
   };
 }
 
@@ -115,10 +163,7 @@ function isRootToolchainPath(path) {
 function jobsForPath(path) {
   if (path.startsWith("tools/station-printer-tests/")) return stationJobs;
   if (isDocumentation(path)) return [];
-  // This protected deployment workflow is covered by the bundle's production
-  // and Yandex contract suites. CI policy and other workflows still fail closed.
-  if (path === ".github/workflows/deploy-production.yml") return ["production_bundle"];
-  if (isRootToolchainPath(path)) return HEAVY_JOBS;
+  if (isRootToolchainPath(path)) return ALL_JOBS;
 
   if (
     path === "packages/platform-contracts/src/chz-signer.ts" ||
@@ -178,7 +223,7 @@ function jobsForPath(path) {
 
   if (path.startsWith("apps/station/")) {
     if (path.startsWith("apps/station/src-tauri/")) return stationJobs;
-    return ["verify_static", "verify_app_tests", "production_bundle", ...stationJobs];
+    return ["verify_static", "verify_app_tests", galleries, ...stationJobs];
   }
 
   // Host and shell crates run only the Rust jobs; everything else in the app
@@ -236,13 +281,21 @@ function jobsForPath(path) {
   // round-trip test, which opens a token with it (the app tests).
   if (path.startsWith("tools/standalone-support/")) return ["verify_static", standaloneAppTests];
   if (path.startsWith("tools/production-browser/")) {
-    return ["production_bundle"];
+    // The platform stack's browser smoke (deploy/platform/ci-stack.mjs) runs the
+    // Chromium this package installs; the suites themselves have their own jobs.
+    if (/^tools\/production-browser\/(?:package\.json|pnpm-lock\.yaml)$/u.test(path)) {
+      return ["production_bundle", ...browserJobs, galleries];
+    }
+    return [...browserJobs, galleries];
   }
   // Portable platform preparation owns the same mandatory bundle gate.
   if (path.startsWith("deploy/platform/")) return ["production_bundle"];
-  if (path.startsWith("deploy/") || path.startsWith("infra/")) {
-    return ["production_bundle"];
-  }
+  // The platform release (release-platform-images.yml) still runs the
+  // deploy/production contract suite, and the API image is built from there.
+  if (path.startsWith("deploy/production/")) return ["production_bundle"];
+  // The Yandex runtime is retired (owner decision 2026-10-21): nothing in CI
+  // runs it any more, and yandex-infrastructure.yml keeps its own PR checks.
+  if (path.startsWith("deploy/yandex/") || path.startsWith("infra/yandex/")) return [];
   if (path === "compose.production.yml") return ["production_bundle"];
 
   return null;
@@ -250,22 +303,23 @@ function jobsForPath(path) {
 
 export function classifyChangedFiles(files) {
   if (!Array.isArray(files) || files.length === 0) {
-    return buildResult(HEAVY_JOBS, true);
+    return buildResult(ALL_JOBS, true);
   }
 
   const enabled = new Set();
   for (const originalPath of files) {
     if (typeof originalPath !== "string") {
-      return buildResult(HEAVY_JOBS, true);
+      return buildResult(ALL_JOBS, true);
     }
     const path = originalPath.replaceAll("\\", "/");
-    if (isInvalidPath(path)) return buildResult(HEAVY_JOBS, true);
+    if (isInvalidPath(path)) return buildResult(ALL_JOBS, true);
 
     const jobs = jobsForPath(path);
-    if (jobs === null || jobs === HEAVY_JOBS) {
-      return buildResult(HEAVY_JOBS, true);
+    if (jobs === null || jobs === ALL_JOBS) {
+      return buildResult(ALL_JOBS, true);
     }
     for (const job of jobs) enabled.add(job);
+    if (enabled.has("production_bundle")) enabled.add("platform_contracts");
   }
 
   return buildResult(enabled);
@@ -294,7 +348,7 @@ function parseArguments(argv) {
 function runCli() {
   const options = parseArguments(process.argv.slice(2));
   const result = options.full
-    ? buildResult(HEAVY_JOBS, true)
+    ? buildResult(ALL_JOBS, true)
     : classifyChangedFiles(
         options.stdinZero
           ? readFileSync(0)
@@ -309,7 +363,7 @@ function runCli() {
   if (options.githubOutput) {
     const output = [
       `full=${String(result.full)}`,
-      ...HEAVY_JOBS.map((job) => `${job}=${String(result.jobs[job])}`),
+      ...ALL_JOBS.map((job) => `${job}=${String(result.jobs[job])}`),
       "",
     ].join("\n");
     appendFileSync(options.githubOutput, output, "utf8");

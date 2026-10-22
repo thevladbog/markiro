@@ -13,6 +13,7 @@ const jobPairs = [
   ["verify_app_tests", "verify-app-tests"],
   ["tenant_team_infrastructure", "tenant-team-infrastructure"],
   ["production_bundle", "production-bundle"],
+  ["platform_contracts", "platform-contracts"],
   ["station_rust", "station-rust"],
   ["station_windows_build", "station-windows-build"],
   ["signer_rust", "signer-rust"],
@@ -21,6 +22,9 @@ const jobPairs = [
   ["standalone_rust", "standalone-rust"],
   ["standalone_windows_build", "standalone-windows-build"],
   ["standalone_app_tests", "standalone-app-tests"],
+  ["landing_browser", "landing-browser"],
+  ["landing_lighthouse", "landing-lighthouse"],
+  ["saas_admin_browser", "saas-admin-browser"],
 ];
 
 function needsFixture({
@@ -85,6 +89,33 @@ test("the standalone app's Vitest job is required: cancelled by its budget or mi
   const missing = needsFixture({ selected });
   delete missing["standalone-app-tests"];
   assert.throws(() => assertRequiredResults(missing), /missing result for standalone-app-tests/);
+});
+
+test("a failed landing build fails the gate through the selected browser jobs it skips", () => {
+  // landing-build is not a classifier output of its own: when it fails, GitHub
+  // skips landing-browser and landing-lighthouse, and a skipped selected job fails.
+  const selected = ["landing_browser", "landing_lighthouse"];
+  assert.doesNotThrow(() => assertRequiredResults(needsFixture({ selected })));
+  assert.throws(
+    () =>
+      assertRequiredResults(
+        needsFixture({
+          selected,
+          results: { "landing-browser": "skipped", "landing-lighthouse": "skipped" },
+        }),
+      ),
+    /selected job landing-browser finished with skipped/,
+  );
+});
+
+test("the optional cabinet and station galleries never decide the required result", () => {
+  // ci-required does not need them, so neither their result nor their absence counts.
+  for (const full of [false, true]) {
+    const needs = needsFixture({ full, selected: full ? [] : ["verify_static"] });
+    needs["classify-changes"].outputs.cabinet_station_galleries = "true";
+    assert.equal(needs["cabinet-galleries"], undefined);
+    assert.doesNotThrow(() => assertRequiredResults(needs));
+  }
 });
 
 test("rejects an unselected job with a non-success terminal result", () => {

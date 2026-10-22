@@ -55,6 +55,18 @@ output "station_release_publisher_encrypted_secret_key" {
   sensitive   = true
 }
 
+output "standalone_release_api_access_key_id" {
+  description = "SaaS API standalone release access key ID (RELEASES_S3_ACCESS_KEY_ID)."
+  value       = module.station_releases.standalone_api_access_key_id
+  sensitive   = true
+}
+
+output "standalone_release_api_encrypted_secret_key" {
+  description = "PGP-encrypted SaaS API standalone release secret key (RELEASES_S3_SECRET_ACCESS_KEY)."
+  value       = module.station_releases.standalone_api_encrypted_secret_key
+  sensitive   = true
+}
+
 output "station_release_cdn_provider_cname" {
   description = "Provider-assigned CNAME target for the Station release CDN."
   value       = module.station_releases.cdn_provider_cname

@@ -100,6 +100,8 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
           name: "Цех розлива",
           requestInn: "7707083893",
           warnings: [],
+          // Shared across test files; standalone-lead-link.e2e asserts the outcome exactly.
+          lead: expect.any(Object),
         },
       },
     ]);
@@ -158,6 +160,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
         name: "Склад",
         requestInn: "7736207543",
         warnings: ["request_inn_differs_billing", "request_inn_differs_org"],
+        lead: expect.any(Object),
       },
     ]);
   });
@@ -280,7 +283,13 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
       reason: null,
       requestId: rebind.requestId,
       before: { hostId: first.hostId, requestInn: "7707083893" },
-      after: { siteId: site.id, hostId: second.hostId, requestInn: "7707083893", warnings: [] },
+      after: {
+        siteId: site.id,
+        hostId: second.hostId,
+        requestInn: "7707083893",
+        warnings: [],
+        lead: expect.any(Object),
+      },
     });
   });
 

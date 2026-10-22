@@ -257,7 +257,10 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 val total = state.plan?.let {
                     stringResource(if (state.strip != null) R.string.work_shift_total_of else R.string.work_plan_of, numbers.format(state.total), numbers.format(it))
                 } ?: numbers.format(state.total)
-                Counter(stringResource(if (state.strip != null) R.string.work_shift_total else R.string.work_total), total, modifier = Modifier.weight(1f))
+                // «Всего» against the plan is the widest value by far, so it keeps its
+                // own width and the other three share what is left. Four equal shares
+                // broke «1 427 / 6 000» in two on a 411 dp phone.
+                Counter(stringResource(if (state.strip != null) R.string.work_shift_total else R.string.work_total), total, modifier = Modifier.padding(end = MarkiroSizes.sp2))
                 Counter(
                     stringResource(if (state.strip != null) R.string.work_my_part else R.string.work_this_terminal),
                     numbers.format(state.thisTerminal),
@@ -274,13 +277,27 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                     // An unknown verdict is shown as a plain row rather than taking
                     // the screen down; see `Verdict.fromWireOrNull`.
                     val verdict = Verdict.fromWireOrNull(event.verdict)
-                    Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
-                        Text(feedTail(event.raw), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+                    // Time, code and verdict are columns, not a row spread end to end:
+                    // with SpaceBetween the code sat between the two and a shorter
+                    // word («ДУБЛЬ») moved it. Tabular digits keep the time one width.
+                    Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "",
+                            style = t.caption.copy(fontFeatureSettings = "tnum"),
+                            color = c.fg3,
+                        )
+                        Text(
+                            feedTail(event.raw),
+                            style = t.code.copy(fontSize = 14.sp),
+                            color = c.fg1,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f).padding(horizontal = MarkiroSizes.sp3),
+                        )
                         Text(
                             verdict?.let { stringResource(it.label()) } ?: event.verdict,
                             style = t.caption,
                             color = c.tone(verdict?.verdictTone() ?: Tone.Neutral).fg,
+                            maxLines = 1,
                         )
                     }
                 }

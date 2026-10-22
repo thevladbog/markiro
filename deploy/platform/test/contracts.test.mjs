@@ -8,7 +8,7 @@ import test from "node:test";
 import { CORE_SCHEMA, Schema, defineSequenceTag, load } from "js-yaml";
 import { parseReleaseManifest } from "../../production/release-manifest.mjs";
 import { createPlatformManifest, parsePlatformManifest } from "../release-manifest.mjs";
-import { readProtectedEnv, validateConfig } from "../preflight.mjs";
+import { RELEASES_UPLOAD_ORIGIN, readProtectedEnv, validateConfig } from "../preflight.mjs";
 import { classifyChangedFiles } from "../../../tools/ci/affected.mjs";
 
 const read = (path) => readFileSync(path, "utf8");
@@ -200,24 +200,20 @@ test("CI routes platform files to bundle checks and builds isolated preparation 
     assert.equal(classifyChangedFiles([path]).jobs.production_bundle, true);
   const workflow = load(read(".github/workflows/ci.yml"));
   const steps = workflow.jobs["production-bundle"].steps;
-  assert.ok(steps.some((s) => s.run?.includes("node --test deploy/platform/test/*.test.mjs")));
-  assert.ok(steps.some((s) => s.run?.includes("deploy/platform/edge.Dockerfile")));
-  assert.ok(steps.some((s) => s.run?.includes("node deploy/platform/ci-stack.mjs")));
-  const release = load(read(".github/workflows/release-images.yml"));
-  assert.ok(release.on.push.paths.includes("deploy/platform/**"));
   assert.ok(
-    release.jobs["production-bundle"].steps.some(
-      (s) => s.run === "env -u COMPOSE_PROJECT_NAME node --test deploy/platform/test/*.test.mjs",
+    workflow.jobs["platform-contracts"].steps.some((s) =>
+      s.run?.includes("deploy/platform/test/*.test.mjs"),
     ),
   );
-  assert.doesNotMatch(
-    JSON.stringify(release.jobs.publish),
-    /markiro-platform-edge|deploy\/platform/u,
-  );
-  assert.doesNotMatch(
-    read(".github/workflows/deploy-production.yml"),
-    /markiro-platform-edge|deploy\/platform\/ci-stack/u,
-  );
+  assert.ok(steps.some((s) => s.with?.file === "deploy/platform/edge.Dockerfile"));
+  assert.ok(steps.some((s) => s.run?.includes("node deploy/platform/ci-stack.mjs")));
+  // The platform release re-runs these contracts and builds the platform edge;
+  // the retired Yandex release and deploy workflows are gone (2026-10-21).
+  const release = read(".github/workflows/release-platform-images.yml");
+  assert.match(release, /node --test deploy\/platform\/test\/\*\.test\.mjs/u);
+  assert.match(release, /--file deploy\/platform\/edge\.Dockerfile/u);
+  for (const retired of ["release-images.yml", "deploy-production.yml"])
+    assert.throws(() => read(`.github/workflows/${retired}`), /ENOENT/u, retired);
 });
 
 test("edge entrypoint rejects multiline Caddy injection without relying on preflight", async () => {
@@ -326,6 +322,61 @@ test("optional lead Telegram alerts need a well-formed token and chat only when 
     load(read("deploy/platform/compose.yml")).services.api.environment.LEAD_TELEGRAM_BOT_TOKEN,
     undefined,
   );
+});
+
+test("optional standalone release storage comes as a set on the CSP's upload origin", () => {
+  const releases = {
+    RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net",
+    RELEASES_S3_REGION: "ru-central1",
+    RELEASES_S3_BUCKET: "releases.markiro.app",
+    RELEASES_S3_ACCESS_KEY_ID: "test-releases-access",
+    RELEASES_S3_SECRET_ACCESS_KEY: "test-releases-secret",
+  };
+  assert.doesNotThrow(() => validateConfig(env(), manifest()));
+  assert.doesNotThrow(() => validateConfig({ ...env(), ...releases }, manifest()));
+  assert.doesNotThrow(() =>
+    validateConfig(
+      { ...env(), ...releases, RELEASES_PUBLIC_ORIGIN: "https://releases.markiro.app" },
+      manifest(),
+    ),
+  );
+  for (const patch of [
+    { RELEASES_S3_SECRET_ACCESS_KEY: undefined },
+    { RELEASES_S3_REGION: "" },
+    { RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru" },
+    { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net/" },
+    { RELEASES_S3_BUCKET: "Releases" },
+    // Never the private bucket.
+    { RELEASES_S3_BUCKET: "markiro-private" },
+    { RELEASES_PUBLIC_ORIGIN: "http://releases.markiro.app" },
+    { RELEASES_PUBLIC_ORIGIN: "https://releases.markiro.app/standalone" },
+  ]) {
+    const config = { ...env(), ...releases, ...patch };
+    for (const [key, value] of Object.entries(patch)) if (value === undefined) delete config[key];
+    assert.throws(
+      () => validateConfig(config, manifest()),
+      (error) => !String(error).includes("test-releases-secret"),
+      JSON.stringify(patch),
+    );
+  }
+  // The admin may PUT to exactly that origin; the retired hosts may not.
+  const caddy = read("deploy/platform/Caddyfile");
+  const csp = (name) =>
+    caddy.match(new RegExp(`\\(${name}\\)\\s*\\{[\\s\\S]*?Content-Security-Policy "([^"]+)"`))?.[1];
+  const connect = (policy) =>
+    policy
+      ?.split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("connect-src"));
+  assert.equal(connect(csp("saas_admin_csp")), `connect-src 'self' ${RELEASES_UPLOAD_ORIGIN}`);
+  assert.equal(connect(csp("application_csp")), "connect-src 'self'");
+  assert.equal(
+    csp("saas_admin_csp")?.replace(` ${RELEASES_UPLOAD_ORIGIN}`, ""),
+    csp("application_csp"),
+  );
+  const admin = caddy.slice(caddy.indexOf("https://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8443"));
+  assert.match(admin.slice(0, admin.indexOf("\n}")), /import saas_admin_csp/);
+  assert.equal(caddy.match(/import saas_admin_csp/g)?.length, 1);
 });
 
 test("S3 CSP origin matches the runtime presigner addressing mode", () => {

@@ -11,6 +11,7 @@ import {
   type StandaloneIssuanceSummary,
   type StandaloneLicenseFile,
   type StandaloneSite,
+  type StandaloneSiteLeadLink,
 } from "@markiro/platform-contracts";
 
 export type StandaloneSiteRow = typeof schema.standaloneSites.$inferSelect;
@@ -71,6 +72,7 @@ export function siteView(
   site: StandaloneSiteRow,
   latest: StandaloneIssuanceRow | null,
   now: Date,
+  leadLink: StandaloneSiteLeadLink,
 ): StandaloneSite {
   const request = standaloneActivationRequestSchema.safeParse(site.lastActivationRequest);
   return standaloneSiteSchema.parse({
@@ -90,6 +92,7 @@ export function siteView(
     lastIssuedSequence: site.lastIssuedSequence,
     latestIssuance: latest ? issuanceSummary(latest) : null,
     renewalDue: latest !== null && latest.validUntil.getTime() - now.getTime() <= RENEWAL_NOTICE_MS,
+    leadLink,
     createdAt: site.createdAt.toISOString(),
   });
 }

@@ -3292,6 +3292,19 @@ textarea {
   max-width: 100%;
 }
 
+.document-lines-table__term {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 220px));
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.document-lines-table__term > .document-lines-table__muted {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .document-lines-table__comment-row .mk-textarea__control {
   min-height: 64px;
   resize: vertical;
@@ -5079,4 +5092,89 @@ p.offer-muted {
   .leads-filters {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Standalone releases: an upload card and one ledger per channel. */
+.releases-page {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.releases-upload,
+.releases-progress,
+.releases-channel__alerts {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.releases-channel__alerts:empty {
+  display: none;
+}
+.releases-channel__alerts {
+  padding: 0 20px;
+}
+.releases-muted {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+.releases-alert-line {
+  margin: 0;
+}
+.releases-alert-line + .releases-alert-line {
+  margin-top: 4px;
+}
+.releases-selection .mk-definition-grid__description {
+  overflow-wrap: anywhere;
+}
+.releases-hash {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.releases-hash--full {
+  overflow-wrap: anywhere;
+}
+.releases-sha,
+.releases-files,
+.releases-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.releases-notes,
+.releases-pending {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+.releases-pending li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.releases-progress p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+.releases-progress__row {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr) 5ch;
+  align-items: center;
+  gap: 12px;
+  font: var(--text-body-sm);
+}
+.releases-progress__row progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+.releases-progress__value {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }

@@ -69,6 +69,7 @@ import { StationPalletsModule } from "./modules/station-pallets/station-pallets.
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 import { LandingLeadsModule } from "./modules/landing-leads/landing-leads.module";
 import { PlatformLeadsModule } from "./modules/landing-leads/platform-leads.module";
+import { PlatformStandaloneReleasesModule } from "./modules/standalone-releases/platform-standalone-releases.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
 import { InventoriesModule } from "./modules/inventories/inventories.module";
@@ -130,6 +131,7 @@ export class AppModule {
           PlatformOperationsModule.forRoot(env),
           PlatformServicePeriodsModule,
           PlatformLeadsModule.forRoot(platformTenantsModule),
+          PlatformStandaloneReleasesModule.forRoot(env),
           SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
           TenantBillingModule.forRoot(env.ADMIN_ORIGIN, true),
           supportChatModule,
@@ -168,6 +170,7 @@ export class AppModule {
               PlatformOperationsModule.forRoot(env),
               PlatformServicePeriodsModule,
               PlatformLeadsModule.forRoot(platformTenantsModule),
+              PlatformStandaloneReleasesModule.forRoot(env),
             ]
           : []),
         AuthorizationModule,

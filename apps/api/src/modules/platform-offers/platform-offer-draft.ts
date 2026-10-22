@@ -96,7 +96,10 @@ export async function prepareOfferDraft(
       descriptionRu: line.descriptionRu ?? null,
       descriptionEn: line.descriptionEn ?? null,
       quantity: line.quantity,
-      unit: commercialTerms?.billingPeriod ?? line.unit,
+      unit:
+        commercialTerms?.billingPeriod === "custom"
+          ? "period"
+          : (commercialTerms?.billingPeriod ?? line.unit),
       catalogUnitPrice,
       agreedUnitPrice: line.agreedUnitPrice,
       vatRate:

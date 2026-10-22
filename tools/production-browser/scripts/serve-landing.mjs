@@ -1,14 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const appRoot = path.resolve(import.meta.dirname, "../../../apps/landing");
-const astro = path.join(appRoot, "node_modules/.bin/astro");
-const environment = { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" };
-const distRoot = path.join(appRoot, "dist");
+import { landingDist as distRoot, prepareLandingDist } from "./landing-build.mjs";
 
-execFileSync(astro, ["build"], { cwd: appRoot, env: environment, stdio: "inherit" });
+prepareLandingDist();
 const files = new Map();
 function collect(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {

@@ -200,6 +200,56 @@ describe("standalone sites panel (plan ЛЦ-0)", () => {
   });
 });
 
+describe("the landing lead of a site (spec 2026-10-20 §15.6)", () => {
+  const LEAD_A = "a2222222-2222-4222-8222-222222222222";
+  const LEAD_B = "b2222222-2222-4222-8222-222222222222";
+  const listWith = (leadLink: unknown) => ({
+    ...STANDALONE_SITE_LIST,
+    sites: [{ ...STANDALONE_SITE, leadLink }],
+  });
+  async function leadCell(): Promise<HTMLElement> {
+    const row = (await screen.findByText("Цех розлива")).closest("tr");
+    if (!row) throw new Error("site row");
+    return row;
+  }
+
+  it("links the lead the activation request was matched to", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, listWith({ state: "linked", leadIds: [LEAD_A] }))],
+    });
+    renderPanel();
+    const link = within(await leadCell()).getByRole("link", { name: "Заявка с сайта" });
+    expect(link.getAttribute("href")).toBe(`/leads/${LEAD_A}`);
+  });
+
+  it("leaves several leads of the INN to the operator and links them by the INN", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        () => jsonResponse(200, listWith({ state: "unresolved", leadIds: [LEAD_A, LEAD_B] })),
+      ],
+    });
+    renderPanel();
+    const row = within(await leadCell());
+    expect(row.getByText("Заявок с этим ИНН: 2 — не связаны, выберите вручную")).toBeDefined();
+    expect(
+      row.getByRole("link", { name: "Открыть заявки с ИНН 7707083893" }).getAttribute("href"),
+    ).toBe("/leads?search=7707083893");
+  });
+
+  it("says that no lead has the INN, and nothing when the request had no INN", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, listWith({ state: "none", leadIds: [] }))],
+    });
+    renderPanel();
+    expect(within(await leadCell()).getByText("Заявок с этим ИНН нет")).toBeDefined();
+    cleanup();
+    stubApi({ [`GET ${BASE}`]: [() => jsonResponse(200, listWith(null))] });
+    renderPanel();
+    const row = within(await leadCell());
+    expect(row.queryByText(/Заяв/u)).toBeNull();
+  });
+});
+
 describe("licensePhase", () => {
   const now = new Date("2099-10-20T00:00:00.000Z");
   it("names a site without a file, a valid one, one due for renewal and an expired one", () => {
