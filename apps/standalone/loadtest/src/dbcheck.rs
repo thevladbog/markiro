@@ -188,7 +188,7 @@ pub async fn participants_in(
 /// the CHECKs of migration `0052`: a closed shift has no open part and an active one has one; a
 /// shift its devices closed closes at the latest of their parts' moments (`facts::close_part`);
 /// its close is audited once (`shift.close` or `shift.force_closed`); every accepted close event
-/// is a part its device closed.
+/// is a part its device closed. A shift id the database does not have fails `shift_exists`.
 pub async fn participant_invariants(pool: &SqlitePool, shift: &str) -> Res<Vec<Check>> {
     let zero = |name: &str, found: i64| {
         Check::new(name, found == 0, format!("{found} found, none allowed"))
@@ -242,6 +242,12 @@ pub async fn participant_invariants(pool: &SqlitePool, shift: &str) -> Res<Vec<C
     )
     .await?;
     Ok(vec![
+        // An unknown id makes every count below 0: they would all hold.
+        Check::new(
+            "shift_exists",
+            status.is_some(),
+            format!("shift {shift}: status {status:?}"),
+        ),
         zero("closed_shift_has_no_open_part", closed_with_open_parts),
         zero("active_shift_has_an_open_part", active_without_open_part),
         zero(
@@ -766,6 +772,11 @@ mod tests {
 
     /// The participant invariants of the seeded shift, judged after `sql`.
     async fn invariants_after(sql: &str) -> BTreeSet<String> {
+        invariants_of_after("s1", sql).await
+    }
+
+    /// The participant invariants of `shift`, judged after `sql`.
+    async fn invariants_of_after(shift: &str, sql: &str) -> BTreeSet<String> {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("copy.db");
         markiro_host::db::open(&path).await.unwrap().close().await;
@@ -776,9 +787,9 @@ mod tests {
         sqlx::raw_sql(sql).execute(&mut db).await.unwrap();
         db.close().await.unwrap();
         let pool = open_read_only(&path, true).await.unwrap();
-        let checks = participant_invariants(&pool, "s1").await.unwrap();
+        let checks = participant_invariants(&pool, shift).await.unwrap();
         pool.close().await;
-        assert_eq!(checks.len(), 5);
+        assert_eq!(checks.len(), 6);
         checks
             .into_iter()
             .filter(|check| !check.ok)
@@ -822,6 +833,15 @@ mod tests {
              result, details) VALUES ('t', 'office_user', 'u', 'shift.force_closed', 'shift', \
              's1', 'ok', '{}');";
         assert_eq!(invariants_after(forced).await, names(&[]));
+    }
+
+    #[tokio::test]
+    async fn the_participant_invariants_of_a_shift_that_does_not_exist_fail() {
+        // Every count is 0 for an unknown id: without the existence check they would all hold.
+        assert_eq!(
+            invariants_of_after("no-such-shift", "SELECT 1").await,
+            names(&["shift_exists"])
+        );
     }
 
     #[tokio::test]
