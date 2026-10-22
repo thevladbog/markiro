@@ -104,6 +104,14 @@ fn result(name: &str, judged: bool, note: &str, checks: Vec<Check>) -> ScenarioR
     }
 }
 
+/// `text` after what `note` says, one space between.
+fn add_note(note: &mut String, text: &str) {
+    if !note.is_empty() && !note.ends_with(' ') {
+        note.push(' ');
+    }
+    note.push_str(text);
+}
+
 /// A scenario this run cannot judge, and why.
 pub fn not_judged(name: &str, note: &str) -> ScenarioResult {
     result(name, false, note, Vec::new())
@@ -496,10 +504,13 @@ impl Ctx {
             };
             self.observed
                 .insert("hostLog".to_owned(), json!(format!("unavailable: {why}")));
-            self.note.push_str(&format!(
-                " the host log was not judged ({why}): its ERROR and busy-database lines are \
+            add_note(
+                &mut self.note,
+                &format!(
+                    "the host log was not judged ({why}): its ERROR and busy-database lines are \
                  judged with --host spawn only."
-            ));
+                ),
+            );
         }
         let errors = self.metrics.errors();
         let count = |tail: &str| -> u64 {
@@ -528,8 +539,9 @@ impl Ctx {
                 unanswered_count(&errors).saturating_sub(before),
             ));
         } else {
-            self.note.push_str(
-                " the fault window never ended (the scenario stopped inside it): the host log's \
+            add_note(
+                &mut self.note,
+                "the fault window never ended (the scenario stopped inside it): the host log's \
                  ERROR lines and the requests without an answer were recorded, not judged.",
             );
         }
@@ -1334,6 +1346,18 @@ mod tests {
             "{}",
             result.note
         );
+    }
+
+    #[test]
+    fn notes_are_joined_by_one_space() {
+        let mut note = String::new();
+        add_note(&mut note, "first.");
+        assert_eq!(note, "first.");
+        add_note(&mut note, "second.");
+        assert_eq!(note, "first. second.");
+        let mut ends_with_space = "a run note. ".to_owned();
+        add_note(&mut ends_with_space, "more.");
+        assert_eq!(ends_with_space, "a run note. more.");
     }
 
     #[test]
