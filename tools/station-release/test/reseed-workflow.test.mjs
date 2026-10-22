@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { load } from "js-yaml";
@@ -19,11 +21,14 @@ function step(job, name) {
 async function authorize({ actor = "thevladbog", confirmation, betaTag = "", stableTag = "" }) {
   const workflow = load(await source());
   const script = workflow.jobs.authorize.steps[0].run;
-  const outputFile = `${process.env.TMPDIR ?? "/tmp"}/reseed-authorize-${process.pid}-${Math.random()}`;
+  // A native temp path through env, as the stable workflow tests do: Git Bash
+  // on the Windows runner maps a POSIX /tmp elsewhere than Node does.
+  const runnerTemp = await mkdtemp(join(tmpdir(), "markiro-reseed-authorize-"));
+  const outputFile = join(runnerTemp, "github-output");
   try {
     await execFile("bash", ["-c", script], {
       env: {
-        PATH: process.env.PATH,
+        ...process.env,
         GITHUB_REF: "refs/heads/main",
         GITHUB_OUTPUT: outputFile,
         OWNER_CONFIRMATION: confirmation ?? "RESEED-STATION-RELEASES",
@@ -36,7 +41,7 @@ async function authorize({ actor = "thevladbog", confirmation, betaTag = "", sta
     const output = await readFile(outputFile, "utf8");
     return JSON.parse(output.trim().replace(/^channels=/u, ""));
   } finally {
-    await execFile("rm", ["-f", outputFile]);
+    await rm(runnerTemp, { recursive: true, force: true });
   }
 }
 
