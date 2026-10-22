@@ -19,6 +19,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "signer-download-repair.yml": ["workflow_dispatch"],
     "signer-stable-release.yml": ["workflow_dispatch"],
     "station-beta-release.yml": ["workflow_dispatch"],
+    "station-release-reseed.yml": ["workflow_dispatch"],
     "station-stable-release.yml": ["workflow_dispatch"],
   };
   const workflowFiles = readdirSync(".github/workflows")

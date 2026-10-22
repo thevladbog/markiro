@@ -188,15 +188,68 @@ A-запись на хост платформы (тот же адрес, что 
 - **Станция.** `mode=publish` требует полной пары `station/<channel>/latest.json`
   и `station/<channel>/download` и отказывает до первой записи. `seed-baseline`
   требует отсутствующего GitHub-канала и доказательства Terraform-плана, поэтому
-  для повторного засева не подходит. Если сохранилась копия старого бакета,
-  перенесите префикс `station/` целиком, сохранив `Content-Type`,
-  `Cache-Control`, `Content-Disposition` и пользовательские метаданные. Без
-  копии нужен отдельный инструмент, который собирает дерево `releases.markiro.app`
-  из GitHub-зеркала `thevladbog/markiro-station-releases`. Он ещё не сделан.
+  для повторного засева не подходит. Бакет засевает отдельный workflow
+  `Reseed station release bucket` (`.github/workflows/station-release-reseed.yml`).
+  Он берёт выпуск, который сейчас отдаёт канал GitHub-зеркала
+  `thevladbog/markiro-station-releases`, восстанавливает из него дерево
+  `releases.markiro.app` и записывает его в бакет. Порядок такой:
+  1. Узнайте версии, на которые сейчас указывают каналы зеркала:
+
+     ```bash
+     curl -fsSL https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json | jq -r .version
+     curl -fsSL https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json | jq -r .version
+     ```
+
+  2. Запустите workflow из `main`, подставив теги `station-v<версия>`:
+
+     ```bash
+     gh workflow run station-release-reseed.yml --ref main \
+       -f owner_confirmation=RESEED-STATION-RELEASES \
+       -f beta_tag=station-v<beta> -f stable_tag=station-v<stable>
+     ```
+
+     Пустой тег пропускает канал. Запустить может только владелец репозитория.
+     Запись идёт ключом издателя из environment `station-release`, под той же
+     блокировкой, что и выпуск канала (`station-beta-release` и
+     `station-stable-release`). Workflow проверяет запись чтением через
+     `releases.markiro.app`, поэтому запускайте его после шагов 6 и 7.
+
+  Для каждого канала workflow:
+  1. Проверяет выпуск: он опубликован, не черновик, признак pre-release
+     соответствует каналу, канал GitHub отдаёт ровно его `latest.json`, а тег в
+     этом репозитории указывает на `releaseSha` из evidence.
+  2. Скачивает дерево анонимно и проверяет его валидатором GitHub-источника.
+     Затем пересобирает дерево GitHub из его же evidence и требует побайтового
+     совпадения со скачанным. После этого собирает дерево `releases.markiro.app`
+     и сверяет его с GitHub через `compareStationReleaseOrigins`: отличаются
+     только `latest.json`, поле `distribution` в evidence и `SHA256SUMS`.
+  3. Записывает семь неизменяемых объектов условной записью
+     (`If-None-Match: *`) с их `Content-Type` и годовым `immutable`
+     `Cache-Control`. Объект, который уже лежит под ключом, не перезаписывается:
+     его байты сверяются через `releases.markiro.app` до первой записи.
+  4. Записывает `latest.json` канала и читает его через `releases.markiro.app`.
+     Затем копирует установщик в `/download` с `Content-Disposition` и ключом
+     источника в метаданных. Указатель пишется первым, `/download` последним.
+  5. Читает всё обратно через `releases.markiro.app`. Следующий шаг ещё раз
+     скачивает дерево и пару `curl` и сравнивает их с GitHub.
+
+  Повторный запуск безопасен. Готовый канал workflow только перечитывает, а
+  прерванный дописывает: часть неизменяемых объектов или `latest.json` без
+  `/download`. Если канал уже указывает на другой выпуск или под ключом лежит
+  другой объект, workflow ничего не пишет и завершается ошибкой. Итог с
+  sha256 попадает в summary запуска и в артефакт
+  `station-<channel>-reseed-record-*`, который хранится 90 дней.
+
+  Засевается только голова каждого канала. `mode=publish` стабильного канала
+  читает исходную бету из `station/beta/releases/<beta>/`, поэтому продвигать в
+  stable можно только засеянную бету или бету, выпущенную после засева.
+  Выпуски со старым (legacy) evidence workflow не принимает.
+
   Пока дерева нет, станции с двумя источниками обновлений должны брать их из
   GitHub-зеркала: по коду updater (`apps/station/src-tauri/src/updater.rs`)
   сетевая или HTTP-ошибка основного источника переключает на GitHub. Вживую
   это не проверено.
+
 - **Подписант.** Не переносится: отдельного подписанта больше не будет,
   подпись войдёт в автоном (решение владельца 22.10.2026). Префикс `signer/`
   и workflow подписанта пока остаются в коде; их уберут вместе с
@@ -239,6 +292,13 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X PUT https://releases.markiro.app/st
 `no-store`, CORS только на `GET`) проверено вручную на `caddy:2.11.4-alpine` с
 поддельным upstream.
 
+Засев станции проверяется контрактными тестами с поддельным бакетом
+(`tools/station-release/test/reseed.test.mjs`, `reseed-workflow.test.mjs`).
+Сборка дерева проверена на настоящих выпусках зеркала `2.4.0-beta.5` и `2.3.0`:
+пересборка повторяет дерево GitHub побайтово, засев в бакет в памяти проходит
+до конца.
+
 Не проверены: живой Timeweb S3 (политика, CORS, условная запись `If-None-Match`,
-которой пользуются издатели), DNS и TLS `releases.markiro.app`, публикация
-каждым workflow и обновление установленной станции, подписанта и ТСД.
+которой пользуются издатели, пользовательские метаданные при копировании в
+`/download`), DNS и TLS `releases.markiro.app`, публикация и засев каждым
+workflow и обновление установленной станции, подписанта и ТСД.
