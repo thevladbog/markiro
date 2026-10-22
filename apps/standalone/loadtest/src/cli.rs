@@ -294,10 +294,31 @@ pub async fn run(args: RunArgs) -> Result<bool, String> {
     Ok(report.verdict.pass)
 }
 
+/// A report file this harness can read: its schema is checked first, so a report of a newer
+/// harness is refused by name rather than by its first unknown field.
 fn read_report(path: &Path) -> Result<Report, String> {
     let text =
         std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    match value.get("schema").and_then(serde_json::Value::as_u64) {
+        None => {
+            return Err(format!(
+                "{}: not a load-test report (no schema number)",
+                path.display()
+            ))
+        }
+        Some(schema) if schema > u64::from(crate::report::SCHEMA) => {
+            return Err(format!(
+                "{}: unsupported report schema {schema}: this markiro-loadtest reads schema {} and \
+                 older; use the harness that wrote it",
+                path.display(),
+                crate::report::SCHEMA
+            ))
+        }
+        Some(_) => {}
+    }
+    serde_json::from_value(value).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// The regressions of `new` against `old`, one to a line; empty text: none.
@@ -407,6 +428,26 @@ mod tests {
             .unwrap()
             .starts_with("# Load run `smoke`"));
         assert!(compare_files(&old_path, &dir.path().join("none.json")).is_err());
+    }
+
+    #[test]
+    fn a_report_of_a_newer_schema_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("newer.json");
+        let mut value = serde_json::to_value(crate::report::sample_passing()).unwrap();
+        value["schema"] = serde_json::json!(crate::report::SCHEMA + 1);
+        value["fieldOfTheFuture"] = serde_json::json!(1);
+        std::fs::write(&path, value.to_string()).unwrap();
+        let error = summary_of(&path).unwrap_err();
+        assert!(error.contains("unsupported report schema"), "{error}");
+        assert!(
+            error.contains(&format!("schema {}", crate::report::SCHEMA + 1)),
+            "{error}"
+        );
+        // Not a report at all: said so, not a field-by-field complaint.
+        std::fs::write(&path, "{\"hello\": 1}").unwrap();
+        let error = summary_of(&path).unwrap_err();
+        assert!(error.contains("not a load-test report"), "{error}");
     }
 
     // --- added: network exposure, redaction of the written files, exit codes ---
