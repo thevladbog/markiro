@@ -1,0 +1,69 @@
+name: Standalone load test
+
+# Opt-in: nothing here runs on a push or a pull request, and no ruleset
+# requires it. The ordinary gate (`standalone-rust` in ci.yml) runs this
+# crate's unit tests with the rest of the workspace; this workflow is the load
+# itself (apps/standalone/loadtest, docs/standalone/load-test-runbook.md): a
+# real host, six simulated devices and minutes of scans, which a shared
+# runner's noise would turn into a flaky required check.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "tiny (a 20 s self-test), smoke (3 minutes) or soak (4 hours)"
+        type: choice
+        options:
+          - smoke
+          - tiny
+          - soak
+        default: smoke
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    # A soak is four hours of load, the build before it and the restore after;
+    # GitHub stops a job at 360 minutes.
+    timeout-minutes: 330
+    env:
+      PROFILE: ${{ inputs.profile }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # The runner context is not available in a job-level env.
+      - name: Choose the report folder
+        run: echo "MARKIRO_LOAD_OUT=$RUNNER_TEMP/markiro-load" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      # Only the harness (it embeds the host library): the Tauri shell and its
+      # WebKit packages are not part of this build.
+      - name: Build the harness (release)
+        run: cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-loadtest
+      # The host runs in this process and listens on 127.0.0.1 only. A spawned
+      # host listens on every interface, which a shared runner must not do, so
+      # this workflow never passes --accept-network-exposure.
+      # Exit 1 is a failed verdict, 2 a run that could not be made.
+      - name: Run the load profile
+        run: apps/standalone/target/release/markiro-loadtest run --profile "$PROFILE" --host in-process
+      - name: Show the summary
+        if: always()
+        run: |
+          mkdir -p "$MARKIRO_LOAD_OUT"
+          find "$MARKIRO_LOAD_OUT" -name report.md -exec cat {} + >> "$GITHUB_STEP_SUMMARY"
+      # Reports are redacted by the harness; the data directory is never uploaded.
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: standalone-load-${{ inputs.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/markiro-load/**/report.json
+            ${{ runner.temp }}/markiro-load/**/report.md
+          if-no-files-found: warn
+          retention-days: 30

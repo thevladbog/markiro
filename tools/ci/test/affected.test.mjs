@@ -101,6 +101,7 @@ test("Station native and web changes select different downstream work", () => {
 test("Standalone native and web changes select their jobs; its Vitest suite has its own job", () => {
   for (const path of [
     "apps/standalone/host/src/server.rs",
+    "apps/standalone/loadtest/src/run.rs",
     "apps/standalone/src-tauri/src/lib.rs",
     "apps/standalone/Cargo.lock",
   ]) {
