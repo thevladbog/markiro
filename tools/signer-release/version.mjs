@@ -57,14 +57,14 @@ export function bumpSignerVersion(current, bump) {
   throw new Error(`unsupported signer bump: ${String(bump)}`);
 }
 
-export function reconcileStableVersions({ githubVersion, yandexVersion }) {
+export function reconcileStableVersions({ githubVersion, releasesVersion }) {
   if (githubVersion !== null) parseVersion(githubVersion);
-  if (yandexVersion !== null) parseVersion(yandexVersion);
-  if (githubVersion === null && yandexVersion === null) return { kind: "empty" };
-  if (githubVersion === null && yandexVersion === SIGNER_DISTRIBUTION_BASELINE) {
-    return { kind: "aligned", version: yandexVersion };
+  if (releasesVersion !== null) parseVersion(releasesVersion);
+  if (githubVersion === null && releasesVersion === null) return { kind: "empty" };
+  if (githubVersion === null && releasesVersion === SIGNER_DISTRIBUTION_BASELINE) {
+    return { kind: "aligned", version: releasesVersion };
   }
-  if (githubVersion !== null && githubVersion === yandexVersion) {
+  if (githubVersion !== null && githubVersion === releasesVersion) {
     return { kind: "aligned", version: githubVersion };
   }
   throw new Error("signer stable channels disagree; run repair before publishing");
@@ -90,7 +90,7 @@ export function resolveSignerReleaseAction({
   bump,
   githubPublishedTags,
   githubDraftTags,
-  yandexVersion,
+  releasesVersion,
 }) {
   const githubVersion = latestVersion(githubPublishedTags);
   const drafts = githubDraftTags
@@ -102,7 +102,7 @@ export function resolveSignerReleaseAction({
     if (drafts.length > 0) {
       throw new Error("a signer draft already exists; run repair before publishing");
     }
-    const stable = reconcileStableVersions({ githubVersion, yandexVersion });
+    const stable = reconcileStableVersions({ githubVersion, releasesVersion });
     if (stable.kind === "empty") {
       throw new Error("no signer stable baseline exists");
     }
@@ -118,13 +118,13 @@ export function resolveSignerReleaseAction({
     if (githubVersion !== null && compareVersions(version, githubVersion) <= 0) {
       throw new Error("signer repair draft is not newer than the published release");
     }
-    const acceptedYandexVersions = new Set(
+    const acceptedReleasesVersions = new Set(
       [githubVersion, version, githubVersion === null ? SIGNER_DISTRIBUTION_BASELINE : null].filter(
         (value) => value !== null,
       ),
     );
-    if (!acceptedYandexVersions.has(yandexVersion)) {
-      throw new Error("signer repair state disagrees with the Yandex stable version");
+    if (!acceptedReleasesVersions.has(releasesVersion)) {
+      throw new Error("signer repair state disagrees with the releases.markiro.app stable version");
     }
     return { mode, version, tag: signerReleaseTag(version) };
   }

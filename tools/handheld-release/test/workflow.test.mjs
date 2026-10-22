@@ -126,7 +126,7 @@ test("dependencies are installed before the key or the storage credential exist"
 });
 
 test("the object-storage credential reaches the publish step and nothing else", () => {
-  const credential = "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY";
+  const credential = "RELEASES_S3_SECRET_ACCESS_KEY";
   const carriers = steps.filter((step) => Object.keys(step.env ?? {}).includes(credential));
   assert.deepEqual(
     carriers.map((step) => step.name),
@@ -140,6 +140,11 @@ test("the version is computed, never typed", () => {
   const inputs = workflow.on.workflow_dispatch.inputs;
   assert.equal(inputs.version_name, undefined);
   assert.equal(inputs.version_code, undefined);
+  // The only typed value confirms the reviewed record an empty channel
+  // continues after; it reaches the resolver as data, never as shell text.
+  assert.equal(inputs.empty_channel_confirmation.type, "string");
+  assert.equal(inputs.empty_channel_confirmation.required, false);
+  assert.equal(inputs.empty_channel_confirmation.default, "");
   assert.deepEqual(inputs.bump.options, ["patch", "minor", "major"]);
   assert.deepEqual(Object.keys(workflow.jobs.authorize.outputs), ["version_name", "version_code"]);
   // Resolved in `authorize`, so everything it can refuse is refused before the
@@ -148,6 +153,12 @@ test("the version is computed, never typed", () => {
   const resolve = workflow.jobs.authorize.steps.find((step) => step.id === "version");
   assert.ok(resolve, "authorize must resolve the version");
   assert.match(resolve.run, /tools\/handheld-release\/resolve\.mjs/);
+  assert.equal(resolve.env.EMPTY_CHANNEL_CONFIRMATION, "${{ inputs.empty_channel_confirmation }}");
+  for (const step of [...workflow.jobs.authorize.steps, ...steps])
+    assert.ok(
+      !step.run?.includes("inputs.empty_channel_confirmation"),
+      `${step.name} interpolates the confirmation into shell`,
+    );
   for (const step of steps) {
     assert.ok(
       !JSON.stringify(step).includes("inputs.version_name"),
@@ -192,8 +203,8 @@ test("repairing the download URL uses the owner gate and release concurrency wit
   assert.ok(publish);
   assert.equal(publish.env.CHANNEL, "${{ inputs.channel }}");
   assert.equal(
-    publish.env.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY,
-    "${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}",
+    publish.env.RELEASES_S3_SECRET_ACCESS_KEY,
+    "${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}",
   );
   for (const step of sync.steps) {
     assert.ok(

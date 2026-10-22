@@ -93,23 +93,14 @@ test("stable signing and dual-origin publication use separate protected environm
   assert.doesNotMatch(signing.run, /normalized_key=/);
 
   const credentialSteps = workflow.jobs.release.steps.filter((step) =>
-    JSON.stringify(step.env ?? {}).includes("YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
+    JSON.stringify(step.env ?? {}).includes("RELEASES_S3_ACCESS_KEY_ID"),
   );
   assert.equal(credentialSteps.length, 4);
   for (const step of credentialSteps) {
-    assert.equal(step.env.AWS_ACCESS_KEY_ID, "${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}");
-    assert.equal(
-      step.env.AWS_SECRET_ACCESS_KEY,
-      "${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}",
-    );
-    assert.equal(
-      step.env.YANDEX_STATION_RELEASE_BUCKET,
-      "${{ vars.YANDEX_STATION_RELEASE_BUCKET }}",
-    );
-    assert.equal(
-      step.env.YANDEX_STATION_RELEASE_ENDPOINT,
-      "${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}",
-    );
+    assert.equal(step.env.AWS_ACCESS_KEY_ID, "${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}");
+    assert.equal(step.env.AWS_SECRET_ACCESS_KEY, "${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}");
+    assert.equal(step.env.RELEASES_S3_BUCKET, "${{ vars.RELEASES_S3_BUCKET }}");
+    assert.equal(step.env.RELEASES_S3_ENDPOINT, "${{ vars.RELEASES_S3_ENDPOINT }}");
     assert.match(step.run, /::add-mask::\$AWS_ACCESS_KEY_ID/);
     assert.match(step.run, /::add-mask::\$AWS_SECRET_ACCESS_KEY/);
     assert.match(step.run, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);

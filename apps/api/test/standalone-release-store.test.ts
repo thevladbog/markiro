@@ -18,9 +18,9 @@ import {
 } from "../src/modules/standalone-releases/release-store";
 
 const env = {
-  RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net",
-  RELEASES_S3_REGION: "ru-central1",
-  RELEASES_S3_BUCKET: "releases.markiro.app",
+  RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+  RELEASES_S3_REGION: "ru-1",
+  RELEASES_S3_BUCKET: "markiro-releases",
   RELEASES_S3_ACCESS_KEY_ID: "fixture-access-key",
   RELEASES_S3_SECRET_ACCESS_KEY: "fixture-secret-key",
 };
@@ -30,9 +30,9 @@ describe("release storage configuration (spec 2026-10-20 §5.4)", () => {
     expect(configureStandaloneReleases({})).toBeNull();
     expect(configureStandaloneReleases({ RELEASES_PUBLIC_ORIGIN: "https://x.example" })).toBeNull();
     expect(configureStandaloneReleases(env)).toEqual({
-      endpoint: "https://storage.yandexcloud.net",
-      region: "ru-central1",
-      bucket: "releases.markiro.app",
+      endpoint: "https://s3.twcstorage.ru",
+      region: "ru-1",
+      bucket: "markiro-releases",
       accessKeyId: "fixture-access-key",
       secretAccessKey: "fixture-secret-key",
       publicOrigin: "https://releases.markiro.app",
@@ -43,9 +43,9 @@ describe("release storage configuration (spec 2026-10-20 §5.4)", () => {
     for (const patch of [
       { RELEASES_S3_SECRET_ACCESS_KEY: "" },
       { RELEASES_S3_BUCKET: "Bad_Bucket" },
-      { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net/" },
-      { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net/bucket" },
-      { RELEASES_S3_ENDPOINT: "http://storage.yandexcloud.net" },
+      { RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru/" },
+      { RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru/bucket" },
+      { RELEASES_S3_ENDPOINT: "http://s3.twcstorage.ru" },
       { RELEASES_PUBLIC_ORIGIN: "http://releases.markiro.app" },
       { RELEASES_PUBLIC_ORIGIN: "https://releases.markiro.app/standalone" },
     ]) {
@@ -76,9 +76,9 @@ describe("release bucket adapter", () => {
       ),
     );
     client.destroy();
-    expect(url.origin).toBe("https://storage.yandexcloud.net");
+    expect(url.origin).toBe("https://s3.twcstorage.ru");
     expect(url.pathname).toBe(
-      "/releases.markiro.app/standalone/stable/0.4.0/markiro-standalone-0.4.0.update.jws",
+      "/markiro-releases/standalone/stable/0.4.0/markiro-standalone-0.4.0.update.jws",
     );
     expect(url.searchParams.get("X-Amz-Expires")).toBe("900");
     expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toContain("content-type");
@@ -147,7 +147,7 @@ describe("release bucket adapter", () => {
     );
     expect(sent[0]).toBeInstanceOf(PutObjectCommand);
     expect((sent[0] as PutObjectCommand).input).toMatchObject({
-      Bucket: "releases.markiro.app",
+      Bucket: "markiro-releases",
       Key: "standalone/stable/latest.json",
       ContentType: "application/json",
       CacheControl: "no-cache",

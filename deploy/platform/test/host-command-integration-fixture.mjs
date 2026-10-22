@@ -162,6 +162,8 @@ export async function commandIntegrationFixture(t, failureMode = null) {
             "MARKIRO_SAAS_ADMIN_DOMAIN",
             "MARKIRO_RETIRED_KIOSK_DOMAIN",
             "MARKIRO_LANDING_DOMAIN",
+            "MARKIRO_RELEASES_DOMAIN",
+            "MARKIRO_RELEASES_BUCKET",
             "S3_PUBLIC_ORIGIN",
             "ACME_EMAIL",
           ].map((k) => [k, f.env[k]]),

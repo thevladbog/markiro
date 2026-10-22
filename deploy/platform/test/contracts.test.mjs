@@ -42,6 +42,8 @@ const env = () => ({
   MARKIRO_LANDING_DOMAIN: "markiro.app",
   MARKIRO_RETIRED_ADMIN_DOMAIN: "admin.markiro.app",
   MARKIRO_RETIRED_KIOSK_DOMAIN: "kiosk.markiro.app",
+  MARKIRO_RELEASES_DOMAIN: "releases.markiro.app",
+  MARKIRO_RELEASES_BUCKET: "markiro-releases",
   SAAS_ADMIN_ORIGIN: "https://saas-admin.markiro.app",
   PLATFORM_AUTH_URL: "https://saas-admin.markiro.app",
   LANDING_ORIGIN: "https://markiro.app",
@@ -102,6 +104,11 @@ test("configuration fails closed on profiles, origins, digest, secret and manife
     { MARKIRO_TOOLING_SHA: "c".repeat(40) },
     { MARKIRO_SAAS_ADMIN_DOMAIN: "*.markiro.app" },
     { MARKIRO_RETIRED_ADMIN_DOMAIN: "markiro.app" },
+    { MARKIRO_RELEASES_DOMAIN: "markiro.app" },
+    { MARKIRO_RELEASES_DOMAIN: "releases.markiro.app." },
+    { MARKIRO_RELEASES_BUCKET: "Releases" },
+    // The public release host must never serve the private media bucket.
+    { MARKIRO_RELEASES_BUCKET: "markiro-private" },
     { SAAS_ADMIN_ORIGIN: "https://evil.test" },
     { PLATFORM_AUTH_URL: "https://saas-admin.markiro.app/api" },
     { S3_PUBLIC_ORIGIN: "https://s3.example.org; script-src *" },
@@ -235,6 +242,8 @@ test("edge entrypoint rejects multiline Caddy injection without relying on prefl
       "MARKIRO_LANDING_DOMAIN",
       "MARKIRO_RETIRED_ADMIN_DOMAIN",
       "MARKIRO_RETIRED_KIOSK_DOMAIN",
+      "MARKIRO_RELEASES_DOMAIN",
+      "MARKIRO_RELEASES_BUCKET",
       "S3_PUBLIC_ORIGIN",
       "ACME_EMAIL",
     ]) {
@@ -248,6 +257,11 @@ test("edge entrypoint rejects multiline Caddy injection without relying on prefl
       { SERVER_PROFILE: "legacy" },
       { VITE_SERVER_PROFILE: "" },
       { MARKIRO_RETIRED_ADMIN_DOMAIN: valid.MARKIRO_LANDING_DOMAIN },
+      { MARKIRO_RELEASES_DOMAIN: valid.MARKIRO_LANDING_DOMAIN },
+      { MARKIRO_RELEASES_DOMAIN: "" },
+      { MARKIRO_RELEASES_BUCKET: "" },
+      { MARKIRO_RELEASES_BUCKET: "a/b" },
+      { MARKIRO_RELEASES_BUCKET: "Releases" },
     ])
       assert.equal(run(patch).status, 64);
   } finally {
@@ -325,10 +339,11 @@ test("optional lead Telegram alerts need a well-formed token and chat only when 
 });
 
 test("optional standalone release storage comes as a set on the CSP's upload origin", () => {
+  assert.equal(RELEASES_UPLOAD_ORIGIN, "https://s3.twcstorage.ru");
   const releases = {
-    RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net",
-    RELEASES_S3_REGION: "ru-central1",
-    RELEASES_S3_BUCKET: "releases.markiro.app",
+    RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru",
+    RELEASES_S3_REGION: "ru-1",
+    RELEASES_S3_BUCKET: "markiro-releases",
     RELEASES_S3_ACCESS_KEY_ID: "test-releases-access",
     RELEASES_S3_SECRET_ACCESS_KEY: "test-releases-secret",
   };
@@ -343,13 +358,16 @@ test("optional standalone release storage comes as a set on the CSP's upload ori
   for (const patch of [
     { RELEASES_S3_SECRET_ACCESS_KEY: undefined },
     { RELEASES_S3_REGION: "" },
-    { RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru" },
-    { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net/" },
+    { RELEASES_S3_ENDPOINT: "https://storage.yandexcloud.net" },
+    { RELEASES_S3_ENDPOINT: "https://s3.twcstorage.ru/" },
     { RELEASES_S3_BUCKET: "Releases" },
-    // Never the private bucket.
+    // Never the private bucket, and only the bucket the release host serves.
     { RELEASES_S3_BUCKET: "markiro-private" },
+    { RELEASES_S3_BUCKET: "markiro-other-releases" },
     { RELEASES_PUBLIC_ORIGIN: "http://releases.markiro.app" },
     { RELEASES_PUBLIC_ORIGIN: "https://releases.markiro.app/standalone" },
+    { RELEASES_PUBLIC_ORIGIN: "https://downloads.markiro.app" },
+    { MARKIRO_RELEASES_DOMAIN: "downloads.markiro.app" },
   ]) {
     const config = { ...env(), ...releases, ...patch };
     for (const [key, value] of Object.entries(patch)) if (value === undefined) delete config[key];
@@ -377,6 +395,142 @@ test("optional standalone release storage comes as a set on the CSP's upload ori
   const admin = caddy.slice(caddy.indexOf("https://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8443"));
   assert.match(admin.slice(0, admin.indexOf("\n}")), /import saas_admin_csp/);
   assert.equal(caddy.match(/import saas_admin_csp/g)?.length, 1);
+});
+
+test("the release host is a read-only, deny-by-default window onto the release bucket", () => {
+  const caddy = read("deploy/platform/Caddyfile");
+  const block = (start) => {
+    const from = caddy.indexOf(start);
+    assert.notEqual(from, -1, start);
+    return caddy.slice(from, caddy.indexOf("\n}\n", from) + 2);
+  };
+  const upstream = block("(releases_upstream) {");
+  const routes = block("(releases_routes) {");
+  // Reads go path-style to the upload origin, into the configured bucket, with
+  // the client's query string (?acl, ?versionId, listings) dropped.
+  assert.match(upstream, /^\trewrite \* \/\{\$MARKIRO_RELEASES_BUCKET\}\{path\}\?$/mu);
+  assert.equal(upstream.match(/reverse_proxy (\S+) \{/u)?.[1], RELEASES_UPLOAD_ORIGIN);
+  assert.match(upstream, /header_up Host \{upstream_hostport\}/u);
+  for (const header of ["Authorization", "Cookie", "Origin"])
+    assert.match(upstream, new RegExp(`header_up -${header}\\n`, "u"));
+  assert.match(upstream, /header_down -X-Amz-\*/u);
+  assert.match(upstream, /header_down -Access-Control-\*/u);
+  // The object's own Cache-Control is authoritative (the Station release checks
+  // it through this host); the edge only supplies one that is missing.
+  assert.match(upstream, /^\theader \?Cache-Control "\{args\[0\]\}"$/mu);
+  assert.doesNotMatch(upstream, /header_down \??Cache-Control/u);
+  // A missing or failed object is never cached under an immutable lifetime.
+  assert.match(upstream, /status 403 404[\s\S]*?Cache-Control no-store\s+respond 404/u);
+  assert.match(upstream, /status 5xx[\s\S]*?Cache-Control no-store\s+respond 502/u);
+
+  const matcher = (name) => {
+    const body = routes.match(new RegExp(`@${name} \\{([\\s\\S]*?)\\n\\t\\t\\}`, "u"))?.[1];
+    assert.ok(body, name);
+    assert.match(body, /^\s*method GET HEAD$/mu, name);
+    return new RegExp(body.match(/path_regexp (\S+)/u)?.[1] ?? "^$", "u");
+  };
+  const immutable = matcher("releaseImmutable");
+  const pointer = matcher("releasePointer");
+  for (const path of [
+    "/station/beta/releases/2.1.0-beta.1/markiro-station-2.1.0-beta.1-windows-x86_64-setup.exe",
+    "/station/stable/releases/2.1.0/markiro-station-2.1.0-windows-x86_64.nsis.zip.sig",
+    "/station/stable/releases/2.1.0/SHA256SUMS",
+    "/signer/stable/releases/1.0.0/markiro-signer-1.0.0-windows-x86_64-setup.exe",
+    "/handheld/stable/releases/1.1.1/markiro-tsd-1.1.1.apk",
+    "/handheld/beta/releases/1.2.0-beta.1/manifest.json",
+    "/standalone/stable/1.2.3/markiro-standalone-1.2.3-windows-x86_64-setup.exe",
+    "/standalone/beta/1.3.0/markiro-standalone-1.3.0.update.jws",
+  ])
+    assert.match(path, immutable, path);
+  for (const path of [
+    "/station/beta/latest.json",
+    "/station/stable/latest.json",
+    "/station/download",
+    "/station/beta/download",
+    "/signer/stable/latest.json",
+    "/signer/download",
+    "/handheld/stable/latest.json",
+    "/handheld/download",
+    "/handheld/beta/download",
+    "/standalone/stable/latest.json",
+    "/standalone/beta/latest.json",
+  ])
+    assert.match(path, pointer, path);
+  for (const path of [
+    "/",
+    "/station/",
+    "/station/beta/",
+    "/station/beta/releases/",
+    "/station/beta/releases/2.1.0",
+    "/station/nightly/latest.json",
+    "/station/beta/releases/2.1.0/sub/file",
+    "/station/beta/releases/.hidden/x",
+    "/signer/beta/latest.json",
+    "/standalone/stable/latest.json/x",
+    "/media/tenant/file.png",
+    "/STATION/download",
+  ]) {
+    assert.doesNotMatch(path, immutable, path);
+    assert.doesNotMatch(path, pointer, path);
+  }
+  assert.match(routes, /import releases_upstream "public, max-age=31536000, immutable"/u);
+  assert.match(routes, /import releases_upstream "public, max-age=60, must-revalidate"/u);
+  // CORS for the landing's download page only, on GET only; everything else 404.
+  assert.match(
+    routes,
+    /@releaseLanding method GET\n\t\theader @releaseLanding \{\n\t\t\tdefer\n\t\t\tAccess-Control-Allow-Origin "https:\/\/\{\$MARKIRO_LANDING_DOMAIN\}"\n/u,
+  );
+  assert.equal(caddy.match(/Access-Control-Allow-Origin/gu)?.length, 1);
+  assert.match(routes, /\n\t\theader Cache-Control no-store\n\t\trespond 404\n\t\}\n\}$/u);
+  assert.match(
+    caddy,
+    /https:\/\/\{\$MARKIRO_RELEASES_DOMAIN\}:8443 \{\n\timport releases_headers\n\timport releases_routes\n\}/u,
+  );
+  const plain = block("http://{$MARKIRO_RELEASES_DOMAIN}:8080 {");
+  assert.match(plain, /redir @safe https:\/\/\{\$MARKIRO_RELEASES_DOMAIN\}\{uri\} 308/u);
+  assert.doesNotMatch(plain, /reverse_proxy/u);
+  const edge = load(read("deploy/platform/compose.yml")).services.edge.environment;
+  for (const key of ["MARKIRO_RELEASES_DOMAIN", "MARKIRO_RELEASES_BUCKET"])
+    assert.equal(edge[key], `\${${key}:?${key} is required}`);
+  // The edge reads anonymously and never receives a bucket key.
+  assert.doesNotMatch(JSON.stringify(edge), /ACCESS_KEY|SECRET/u);
+});
+
+test("the release host serves every path the handheld updater and publisher use", async () => {
+  const { handheldArtifactUrl, HANDHELD_PUBLIC_BASE_URL } =
+    await import("../../../tools/handheld-release/manifest.mjs");
+  const { handheldDownloadKey, handheldManifestKey, handheldObjectKey } =
+    await import("../../../tools/handheld-release/object-storage.mjs");
+  const caddy = read("deploy/platform/Caddyfile");
+  const pattern = (name) =>
+    new RegExp(
+      caddy.match(new RegExp(`@${name} \\{[\\s\\S]*?path_regexp (\\S+)`, "u"))?.[1] ?? "^$",
+      "u",
+    );
+  const served = (path) =>
+    pattern("releaseImmutable").test(path) || pattern("releasePointer").test(path);
+  // The terminal polls this channel and installs exactly this artifact URL.
+  const kotlin = read(
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/update/UpdateCheck.kt",
+  );
+  const base = kotlin.match(/const val UPDATE_CHANNEL_BASE_URL = "([^"]+)"/u)?.[1];
+  assert.equal(base, "https://releases.markiro.app/handheld/stable");
+  assert.equal(new URL(HANDHELD_PUBLIC_BASE_URL).hostname, "releases.markiro.app");
+  for (const versionName of ["1.7.0", "1.6.2"]) {
+    const apk = new URL(`${base}/releases/${versionName}/markiro-tsd-${versionName}.apk`);
+    assert.equal(apk.href, handheldArtifactUrl({ channel: "stable", versionName }));
+    assert.ok(served(apk.pathname), apk.pathname);
+  }
+  assert.ok(served(new URL(`${base}/latest.json`).pathname));
+  for (const channel of ["stable", "beta"]) {
+    for (const key of [
+      handheldManifestKey(channel),
+      handheldDownloadKey(channel),
+      handheldObjectKey({ channel, versionName: "1.7.0", filename: "markiro-tsd-1.7.0.apk" }),
+      handheldObjectKey({ channel, versionName: "1.7.0", filename: "manifest.json" }),
+    ])
+      assert.ok(served(`/${key}`), key);
+  }
 });
 
 test("S3 CSP origin matches the runtime presigner addressing mode", () => {

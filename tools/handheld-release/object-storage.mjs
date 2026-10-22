@@ -12,7 +12,9 @@ import { assertHandheldChannel, HANDHELD_PUBLIC_BASE_URL } from "./manifest.mjs"
 /** The handheld shares the Station's bucket, so every key passes this guard first. */
 export const HANDHELD_PREFIX = "handheld/";
 
-const YANDEX_S3_ENDPOINT = "https://storage.yandexcloud.net";
+/** Timeweb S3, path-style; the bucket's public prefixes are served at releases.markiro.app. */
+const RELEASES_S3_ENDPOINT = "https://s3.twcstorage.ru";
+const RELEASES_S3_REGION = "ru-1";
 const APK_CONTENT_TYPE = "application/vnd.android.package-archive";
 const MUTABLE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -56,19 +58,25 @@ export function contentTypeFor(filename) {
 }
 
 export function createHandheldObjectStore({ env = process.env, Client = S3Client } = {}) {
-  if (env.YANDEX_STATION_RELEASE_ENDPOINT !== YANDEX_S3_ENDPOINT) {
-    throw new Error(`unexpected object storage endpoint; expected ${YANDEX_S3_ENDPOINT}`);
+  if (env.RELEASES_S3_ENDPOINT !== RELEASES_S3_ENDPOINT) {
+    throw new Error(`unexpected object storage endpoint; expected ${RELEASES_S3_ENDPOINT}`);
   }
-  const bucket = env.YANDEX_STATION_RELEASE_BUCKET;
+  const bucket = env.RELEASES_S3_BUCKET;
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket ?? "") || bucket.includes("..")) {
-    throw new Error("YANDEX_STATION_RELEASE_BUCKET is not a usable bucket name");
+    throw new Error("RELEASES_S3_BUCKET is not a usable bucket name");
   }
-  const accessKeyId = env.YANDEX_STATION_RELEASE_ACCESS_KEY_ID;
-  const secretAccessKey = env.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY;
+  const accessKeyId = env.RELEASES_S3_ACCESS_KEY_ID;
+  const secretAccessKey = env.RELEASES_S3_SECRET_ACCESS_KEY;
   if (!accessKeyId || !secretAccessKey) throw new Error("object storage credential is missing");
   const client = new Client({
-    endpoint: YANDEX_S3_ENDPOINT,
-    region: "ru-central1",
+    endpoint: RELEASES_S3_ENDPOINT,
+    region: RELEASES_S3_REGION,
+    // Path-style keeps the request host equal to the endpoint; a dotted bucket
+    // name would also break virtual-host TLS.
+    forcePathStyle: true,
+    // Only the checksums an operation requires; Timeweb S3 is not AWS.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
     credentials: { accessKeyId, secretAccessKey },
   });
   return {

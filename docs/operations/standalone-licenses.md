@@ -17,8 +17,9 @@
 | `STANDALONE_LICENSE_PRIVATE_KEY_PEM` | закрытый ключ P-256 PKCS#8; переводы строк можно записать как `\n` (одна строка Lockbox)                    |
 | `STANDALONE_LICENSE_KEYSET_JSON`     | `{protocol:"standalone-license-v1",origin,revision,keys:[{kid,jwk}],retiredKids:[]}`, только открытые ключи |
 
-В Yandex Lockbox четыре ключа — одна необязательная группа (`deploy/yandex/runtime-env.mjs`): все
-четыре есть или ни одного; частичная группа останавливает обновление окружения.
+Четыре ключа — одна необязательная группа: все четыре есть или ни одного. На платформе Timeweb они
+лежат в защищённом `runtime.env` (инвентарь — `deploy/platform/env.example`), и
+`deploy/platform/preflight.mjs` проверяет группу до выкатки.
 
 Порядок включения: (1) владелец создаёт пару ключей на своей машине; (2) открытый JWK с `kid` и
 `origin` попадает в `apps/standalone/proto/fixtures/trust-keys.json` и выходит в сборке автонома;
@@ -26,6 +27,10 @@
 ключом, которого нет в сборке площадки, хост отвергает (`license_unknown_key`).
 
 ## Включение ключа в продакшене (опыт 2026-10-15)
+
+Этот порядок записан для контура Yandex (Lockbox, `deploy-production.yml`), выведенного из работы
+21–22.10.2026. На Timeweb группа вносится в `runtime.env` и выкатывается обычным путём из
+[подготовки платформы](../runbooks/timeweb-platform-preparation.md).
 
 1. Сборка автонома с открытым ключом (`trust-keys.json`) уже вышла.
 2. В Lockbox, секрет `markiro-production-runtime`, новая версия: сохранить все существующие

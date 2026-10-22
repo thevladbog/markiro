@@ -8,8 +8,12 @@ const fail = (key) => {
   throw new Error(`invalid platform configuration: ${key}`);
 };
 const domain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/;
-/** The release bucket's upload origin; `saas_admin_csp` in the Caddyfile allows exactly it. */
-export const RELEASES_UPLOAD_ORIGIN = "https://storage.yandexcloud.net";
+/**
+ * Timeweb S3, path-style: the release bucket's upload origin, which `saas_admin_csp`
+ * in the Caddyfile allows exactly, and the upstream `releases_upstream` reads from.
+ */
+export const RELEASES_UPLOAD_ORIGIN = "https://s3.twcstorage.ru";
+const bucketName = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u;
 const RELEASES_STORAGE_KEYS = [
   "RELEASES_S3_ENDPOINT",
   "RELEASES_S3_REGION",
@@ -28,6 +32,8 @@ const required = [
   "MARKIRO_LANDING_DOMAIN",
   "MARKIRO_RETIRED_ADMIN_DOMAIN",
   "MARKIRO_RETIRED_KIOSK_DOMAIN",
+  "MARKIRO_RELEASES_DOMAIN",
+  "MARKIRO_RELEASES_BUCKET",
   "SAAS_ADMIN_ORIGIN",
   "PLATFORM_AUTH_URL",
   "LANDING_ORIGIN",
@@ -128,6 +134,7 @@ export function validateConfig(env, manifest) {
     "MARKIRO_LANDING_DOMAIN",
     "MARKIRO_RETIRED_ADMIN_DOMAIN",
     "MARKIRO_RETIRED_KIOSK_DOMAIN",
+    "MARKIRO_RELEASES_DOMAIN",
   ];
   for (const key of domains) if (!domain.test(env[key])) fail(key);
   if (new Set(domains.map((key) => env[key])).size !== domains.length) fail("distinct domains");
@@ -159,7 +166,14 @@ export function validateConfig(env, manifest) {
   const mailKey = Buffer.from(env.MAIL_PAYLOAD_ENCRYPTION_KEY, "base64");
   if (mailKey.length !== 32 || mailKey.toString("base64") !== env.MAIL_PAYLOAD_ENCRYPTION_KEY)
     fail("MAIL_PAYLOAD_ENCRYPTION_KEY");
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(env.S3_BUCKET)) fail("S3_BUCKET");
+  if (!bucketName.test(env.S3_BUCKET)) fail("S3_BUCKET");
+  // The edge reads release objects anonymously from this bucket; private media
+  // must never become reachable through the public release host.
+  if (
+    !bucketName.test(env.MARKIRO_RELEASES_BUCKET) ||
+    env.MARKIRO_RELEASES_BUCKET === env.S3_BUCKET
+  )
+    fail("MARKIRO_RELEASES_BUCKET");
   for (const key of ["SMTP_SECURE", "S3_FORCE_PATH_STYLE", "LANDING_DEMO_SUBMISSION_ENABLED"])
     if (!["true", "false"].includes(env[key])) fail(key);
   if (
@@ -201,17 +215,25 @@ export function validateConfig(env, manifest) {
     fail("LEAD_RETENTION_MONTHS");
   // «Выпуски автонома» are optional and never gate readiness. The bucket's keys
   // come as a set; the endpoint must be the upload origin the admin CSP allows,
-  // since the browser PUTs path-style to it. Keys are never echoed.
+  // since the browser PUTs path-style to it, and the bucket the one the edge
+  // serves, or a published release would never reach the download page. Keys
+  // are never echoed.
   const releaseStorage = RELEASES_STORAGE_KEYS.filter((key) => env[key]);
   if (releaseStorage.length > 0) {
     for (const key of RELEASES_STORAGE_KEYS) if (!env[key]) fail(key);
     if (env.RELEASES_S3_ENDPOINT !== RELEASES_UPLOAD_ORIGIN) fail("RELEASES_S3_ENDPOINT");
-    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(env.RELEASES_S3_BUCKET))
-      fail("RELEASES_S3_BUCKET");
-    if (env.RELEASES_S3_BUCKET === env.S3_BUCKET) fail("RELEASES_S3_BUCKET");
+    if (env.RELEASES_S3_BUCKET !== env.MARKIRO_RELEASES_BUCKET) fail("RELEASES_S3_BUCKET");
   }
   if (env.RELEASES_PUBLIC_ORIGIN !== undefined)
     exactHttpsOrigin(env.RELEASES_PUBLIC_ORIGIN, "RELEASES_PUBLIC_ORIGIN");
+  // The API links installers under this origin (its default is the production
+  // host); they must resolve on the site the edge serves.
+  if (
+    releaseStorage.length > 0 &&
+    (env.RELEASES_PUBLIC_ORIGIN || "https://releases.markiro.app") !==
+      `https://${env.MARKIRO_RELEASES_DOMAIN}`
+  )
+    fail("RELEASES_PUBLIC_ORIGIN");
   // Disabled product surfaces must not accidentally inherit legacy credentials,
   // workers or deferred CRM configuration from a shared env file.
   for (const key of [

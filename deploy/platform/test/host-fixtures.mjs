@@ -20,6 +20,8 @@ export function hostEnv(manifest, root) {
     MARKIRO_LANDING_DOMAIN: "markiro.app",
     MARKIRO_RETIRED_ADMIN_DOMAIN: "admin.markiro.app",
     MARKIRO_RETIRED_KIOSK_DOMAIN: "kiosk.markiro.app",
+    MARKIRO_RELEASES_DOMAIN: "releases.markiro.app",
+    MARKIRO_RELEASES_BUCKET: "markiro-releases",
     SAAS_ADMIN_ORIGIN: "https://saas-admin.markiro.app",
     PLATFORM_AUTH_URL: "https://saas-admin.markiro.app",
     LANDING_ORIGIN: "https://markiro.app",
