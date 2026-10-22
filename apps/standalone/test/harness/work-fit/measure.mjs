@@ -168,8 +168,9 @@ function inspectPhoto(selectors) {
   };
 }
 const EXPECT = { transparent: "gradient", opaque: "none", jpeg: "none", none: "gradient" };
-// The hub card's photo panel paints the brand gradient behind every kind of photo (station-fit-2).
-const expected = (view, kind) => (view === "hub" ? "gradient" : EXPECT[kind]);
+// The hub card's panel follows the same rule as the band: a photo with its own background fills it
+// (backing none), a cut-out and the monogram stand on the brand gradient (owner, 2026-10-20, #771).
+const expected = (_view, kind) => EXPECT[kind];
 for (const [width, height] of [
   [1280, 1024],
   [1024, 800],

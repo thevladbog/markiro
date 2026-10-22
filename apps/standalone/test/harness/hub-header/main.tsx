@@ -499,7 +499,8 @@ createRoot(document.getElementById("root")!).render(<Page />);
       // A photo with its own background fills the panel; a cut-out and the monogram stand on the
       // brand gradient (owner, 2026-10-20).
       const face = getComputedStyle(photo);
-      const fills = photoKind === "opaque" || photoKind === "jpeg";
+      // `png` is the harness's opaque white PNG (only `transparent` is a cut-out).
+      const fills = photoKind === "opaque" || photoKind === "png" || photoKind === "jpeg";
       const backing = photo.getAttribute("data-photo-backing");
       if (backing !== (fills ? "none" : "gradient"))
         problems.push(`the product panel's backing is ${backing}`);
