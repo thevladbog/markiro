@@ -6,7 +6,10 @@ import { createDb } from "@markiro/db";
 import * as bootstrap from "../src/deployment/us-bootstrap";
 import * as processes from "./support/us-request-worker-process-fixture";
 import { startRequestCabinetBrowserFixture } from "./support/us-request-cabinet-browser-fixture";
-import { readActionResponseBody } from "./support/us-browser-response-body";
+import {
+  createResponseObservation,
+  readActionResponseBody,
+} from "./support/us-browser-response-body";
 import { barrier } from "./support/us-transformation-lock-fixture";
 
 const url = process.env.US_TEST_DATABASE_URL;
@@ -86,6 +89,330 @@ describe("Requests browser response body ownership", () => {
       }),
     ).rejects.toBe(actionFailure);
     await nextTurn();
+  });
+});
+
+describe("Requests finite response observation", () => {
+  const response = {
+    status: 201,
+    sameOrigin: true,
+    fromServiceWorker: false,
+    resourceType: "fetch",
+  };
+  const output = (observation: ReturnType<typeof createResponseObservation>) => {
+    const line = observation.failureLine();
+    if (line === undefined) throw new Error("Missing finite observation line");
+    expect(line.startsWith("US_REQUEST_CREATE_OBSERVATION ")).toBe(true);
+    return JSON.parse(line.slice("US_REQUEST_CREATE_OBSERVATION ".length));
+  };
+
+  it("records only finite permitted lifecycle and response fields in order", () => {
+    const observation = createResponseObservation();
+    observation.record("request-started", 0);
+    observation.record("response", 1.5, response);
+    observation.record("body-started", 2);
+    observation.record("body-failed", 3);
+    expect(output(observation)).toEqual({
+      records: [
+        { event: "request-started", elapsedMs: 0 },
+        { event: "response", elapsedMs: 1.5, ...response },
+        { event: "body-started", elapsedMs: 2 },
+        { event: "body-failed", elapsedMs: 3 },
+      ],
+      overflow: false,
+      invalid: false,
+    });
+  });
+
+  it("drops extra private fields without invoking their getters or serialization", () => {
+    const sentinel = "PRIVATE_CREDENTIAL_SENTINEL";
+    const observation = createResponseObservation();
+    const hostile = {
+      ...response,
+      get secret() {
+        throw new Error(sentinel);
+      },
+      toJSON() {
+        throw new Error(sentinel);
+      },
+      url: sentinel,
+      headers: { authorization: sentinel },
+      body: sentinel,
+      cause: new Error(sentinel),
+    };
+    observation.record("response", 0, hostile);
+    const line = observation.failureLine();
+    expect(line).not.toContain(sentinel);
+    expect(line).toBe(
+      'US_REQUEST_CREATE_OBSERVATION {"records":[{"event":"response","elapsedMs":0,"status":201,"sameOrigin":true,"fromServiceWorker":false,"resourceType":"fetch"}],"overflow":false,"invalid":false}',
+    );
+  });
+
+  it("rejects unknown events, hostile values and response fields without serializing them", () => {
+    const sentinel = "PRIVATE_VALUE_SENTINEL";
+    const hostile = {
+      toString() {
+        throw new Error(sentinel);
+      },
+      toJSON() {
+        throw new Error(sentinel);
+      },
+    };
+    const observation = createResponseObservation();
+    for (const event of [sentinel, hostile, null, undefined, Symbol(sentinel)])
+      observation.record(event, 0);
+    for (const value of [
+      null,
+      undefined,
+      hostile,
+      { ...response, status: -1 },
+      { ...response, status: 600 },
+      { ...response, status: 200.5 },
+      { ...response, status: Infinity },
+      { ...response, sameOrigin: sentinel },
+      { ...response, fromServiceWorker: hostile },
+      { ...response, resourceType: sentinel },
+      { ...response, resourceType: hostile },
+      new Proxy(
+        {},
+        {
+          get: () => {
+            throw new Error(sentinel);
+          },
+        },
+      ),
+    ])
+      observation.record("response", 0, value);
+    observation.record("body-failed", 0, { secret: sentinel });
+    expect(output(observation)).toEqual({ records: [], overflow: false, invalid: true });
+  });
+
+  it("rejects nonfinite, negative, nonnumeric and backwards elapsed values", () => {
+    const observation = createResponseObservation();
+    observation.record("body-started", 4);
+    for (const elapsed of [NaN, Infinity, -Infinity, -1, 3, "5", null, {}])
+      observation.record("body-failed", elapsed);
+    observation.record("body-failed", 4);
+    expect(output(observation)).toEqual({
+      records: [
+        { event: "body-started", elapsedMs: 4 },
+        { event: "body-failed", elapsedMs: 4 },
+      ],
+      overflow: false,
+      invalid: true,
+    });
+  });
+
+  it("bounds records, reports overflow and freezes a stopped failure line exactly once", () => {
+    const observation = createResponseObservation();
+    for (let elapsed = 0; elapsed < 100; elapsed++) observation.record("request-finished", elapsed);
+    observation.stop();
+    observation.record("page-close", 101);
+    observation.record("private", NaN);
+    const result = output(observation);
+    expect(result.records).toHaveLength(32);
+    expect(result.records[31]).toEqual({ event: "request-finished", elapsedMs: 31 });
+    expect(result.overflow).toBe(true);
+    expect(result.invalid).toBe(false);
+    expect(observation.failureLine()).toBeUndefined();
+  });
+
+  it("supports every pinned resource type and only closed lifecycle events", () => {
+    const observation = createResponseObservation();
+    for (const resourceType of [
+      "document",
+      "stylesheet",
+      "image",
+      "media",
+      "font",
+      "script",
+      "texttrack",
+      "xhr",
+      "fetch",
+      "eventsource",
+      "websocket",
+      "manifest",
+      "other",
+    ])
+      observation.record("response", 0, { ...response, resourceType });
+    for (const event of [
+      "action-started",
+      "action-settled",
+      "action-failed",
+      "body-settled",
+      "request-failed",
+      "main-frame-navigation",
+      "child-frame-navigation",
+      "page-close",
+      "page-crash",
+    ])
+      observation.record(event, 0);
+    const result = output(observation);
+    expect(result.records).toHaveLength(22);
+    expect(result.invalid).toBe(false);
+    expect(result.overflow).toBe(false);
+  });
+
+  it("accepts boundary statuses, copies primitive fields and does not report overflow at exactly 32 records", () => {
+    const observation = createResponseObservation();
+    const input = { ...response, status: 0 };
+    observation.record("response", 0, input);
+    input.status = 599;
+    observation.record("response", 0, input);
+    input.resourceType = "PRIVATE_AFTER_RECORD";
+    for (let index = 0; index < 30; index++) observation.record("request-finished", 0);
+    const result = output(observation);
+    expect(result.records).toHaveLength(32);
+    expect(result.records.slice(0, 2)).toEqual([
+      {
+        event: "response",
+        elapsedMs: 0,
+        status: 0,
+        sameOrigin: true,
+        fromServiceWorker: false,
+        resourceType: "fetch",
+      },
+      {
+        event: "response",
+        elapsedMs: 0,
+        status: 599,
+        sameOrigin: true,
+        fromServiceWorker: false,
+        resourceType: "fetch",
+      },
+    ]);
+    expect(result.overflow).toBe(false);
+    expect(result.invalid).toBe(false);
+  });
+
+  it("observes the one real operation without changing this-binding, payload or completion", async () => {
+    const observation = createResponseObservation();
+    const gate = barrier();
+    const payload = { receipt: "real-operation-result" };
+    let calls = 0,
+      elapsed = 0;
+    const actual = {
+      async json() {
+        expect(this).toBe(actual);
+        calls++;
+        await gate.promise;
+        return payload;
+      },
+    };
+    const pending = observation.observe(
+      "body",
+      () => elapsed,
+      () => actual.json(),
+    );
+    try {
+      expect(calls).toBe(1);
+      elapsed = 2;
+      gate.release();
+      await expect(pending).resolves.toBe(payload);
+    } finally {
+      gate.release();
+      await pending;
+    }
+    expect(output(observation)).toEqual({
+      records: [
+        { event: "body-started", elapsedMs: 0 },
+        { event: "body-settled", elapsedMs: 2 },
+      ],
+      overflow: false,
+      invalid: false,
+    });
+  });
+
+  it.each([new Error("PRIVATE_OPERATION_FAILURE"), undefined])(
+    "never masks the original operation failure with invalid clock data",
+    async (failure) => {
+      const observation = createResponseObservation();
+      await expect(
+        observation.observe(
+          "action",
+          () => {
+            throw new Error("PRIVATE_CLOCK");
+          },
+          async () => {
+            throw failure;
+          },
+        ),
+      ).rejects.toBe(failure);
+      expect(output(observation)).toEqual({ records: [], overflow: false, invalid: true });
+    },
+  );
+
+  it("records synchronous action failure and blocks late observation after stop", async () => {
+    const observation = createResponseObservation();
+    const failure = new Error("PRIVATE_ACTION_FAILURE");
+    await expect(
+      observation.observe(
+        "action",
+        () => 0,
+        () => {
+          throw failure;
+        },
+      ),
+    ).rejects.toBe(failure);
+    observation.stop();
+    await observation.observe(
+      "body",
+      () => {
+        throw new Error("PRIVATE_LATE_CLOCK");
+      },
+      async () => "late",
+    );
+    expect(output(observation)).toEqual({
+      records: [
+        { event: "action-started", elapsedMs: 0 },
+        { event: "action-failed", elapsedMs: 0 },
+      ],
+      overflow: false,
+      invalid: false,
+    });
+  });
+
+  it("characterizes delayed protocol loss after JSON entry as the exact original failure, with work drained", async () => {
+    const entered = barrier(),
+      finished = barrier(),
+      action = barrier();
+    const failure = new Error("unavailable-body");
+    let available = true,
+      drained = false;
+    const pending = readActionResponseBody(
+      Promise.resolve({
+        async json() {
+          entered.release();
+          await finished.promise;
+          if (!available) throw failure;
+          return "unused";
+        },
+      }),
+      async () => {
+        await entered.promise;
+        available = false;
+        finished.release();
+        await action.promise;
+        drained = true;
+      },
+    );
+    const observed = pending.then(
+      () => ({ resolved: true }),
+      (error: unknown) => ({ error }),
+    );
+    try {
+      await entered.promise;
+      action.release();
+      const result = await observed;
+      if (!("error" in result)) throw new Error("Expected the original unavailable-body failure");
+      expect(result.error).toBe(failure);
+      expect(drained).toBe(true);
+    } finally {
+      entered.release();
+      finished.release();
+      action.release();
+      await observed;
+    }
   });
 });
 

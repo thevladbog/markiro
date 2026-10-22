@@ -12,7 +12,10 @@ import {
 } from "@markiro/platform-contracts";
 import * as processes from "./support/us-request-worker-process-fixture";
 import { startRequestCabinetBrowserFixture } from "./support/us-request-cabinet-browser-fixture";
-import { readActionResponseBody } from "./support/us-browser-response-body";
+import {
+  createResponseObservation,
+  readActionResponseBody,
+} from "./support/us-browser-response-body";
 
 const browserRequire = createRequire(resolve("../../tools/production-browser/package.json"));
 const apiRequire = createRequire(resolve("package.json"));
@@ -35,10 +38,20 @@ type Locator = {
   evaluate<T>(callback: (element: HTMLElement) => T | Promise<T>): Promise<T>;
   count(): Promise<number>;
 };
+type BrowserRequest = { url(): string; method(): string; resourceType(): string };
+type ObservationEvents = {
+  request: (request: BrowserRequest) => void;
+  requestfinished: (request: BrowserRequest) => void;
+  requestfailed: (request: BrowserRequest) => void;
+  framenavigated: (frame: object) => void;
+  close: () => void;
+  crash: () => void;
+};
 type BrowserResponse = {
   url(): string;
-  request(): { method(): string };
+  request(): BrowserRequest;
   status(): number;
+  fromServiceWorker(): boolean;
   json(): Promise<unknown>;
 };
 type BrowserDownload = { suggestedFilename(): string; saveAs(path: string): Promise<void> };
@@ -52,6 +65,9 @@ type BrowserPage = {
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   screenshot(options: { path: string; fullPage: boolean }): Promise<unknown>;
   on(event: "pageerror", callback: () => void): void;
+  on<K extends keyof ObservationEvents>(event: K, callback: ObservationEvents[K]): void;
+  off<K extends keyof ObservationEvents>(event: K, callback: ObservationEvents[K]): void;
+  mainFrame(): object;
   route(
     pattern: string,
     callback: (route: {
@@ -182,14 +198,93 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
           String((Date.parse(`${receiptWall}:00Z`) - received.getTime()) / 1000),
         );
       }
-      const created = page.waitForResponse(
-        (r) => r.url().endsWith("/traceability/requests") && r.request().method() === "POST",
-      );
-      const command = usRequestCommandResponseSchema.parse(
-        await readActionResponseBody(created, () =>
-          page.getByRole("button", { name: "Save request", exact: true }).click(),
-        ),
-      );
+      const command = await (async () => {
+        // Post-auth, first create only. No request/response objects enter the ledger.
+        const observation = createResponseObservation();
+        const started = performance.now();
+        const elapsed = () => performance.now() - started;
+        let matched: BrowserRequest | undefined;
+        const invalid = () => observation.record(undefined, elapsed());
+        const requestStarted = (request: BrowserRequest) => {
+          try {
+            if (!request.url().endsWith("/traceability/requests") || request.method() !== "POST")
+              return;
+            if (matched) {
+              invalid();
+              return;
+            }
+            matched = request;
+            observation.record("request-started", elapsed());
+          } catch {
+            invalid();
+          }
+        };
+        const requestFinished = (request: BrowserRequest) => {
+          if (request === matched) observation.record("request-finished", elapsed());
+        };
+        const requestFailed = (request: BrowserRequest) => {
+          if (request === matched) observation.record("request-failed", elapsed());
+        };
+        const navigated = (frame: object) =>
+          observation.record(
+            frame === page.mainFrame() ? "main-frame-navigation" : "child-frame-navigation",
+            elapsed(),
+          );
+        const closed = () => observation.record("page-close", elapsed());
+        const crashed = () => observation.record("page-crash", elapsed());
+        page.on("request", requestStarted);
+        page.on("requestfinished", requestFinished);
+        page.on("requestfailed", requestFailed);
+        page.on("framenavigated", navigated);
+        page.on("close", closed);
+        page.on("crash", crashed);
+        try {
+          const created = page
+            .waitForResponse(
+              (r) => r.url().endsWith("/traceability/requests") && r.request().method() === "POST",
+            )
+            .then((response) => {
+              try {
+                if (response.request() !== matched) invalid();
+                else
+                  observation.record("response", elapsed(), {
+                    status: response.status(),
+                    sameOrigin: new URL(response.url()).origin === fixture.origin,
+                    fromServiceWorker: response.fromServiceWorker(),
+                    resourceType: response.request().resourceType(),
+                  });
+              } catch {
+                invalid();
+              }
+              // Delegates the original single body read, retaining its receiver and exact result.
+              return { json: () => observation.observe("body", elapsed, () => response.json()) };
+            });
+          return usRequestCommandResponseSchema.parse(
+            await readActionResponseBody(created, () =>
+              observation.observe("action", elapsed, () =>
+                page.getByRole("button", { name: "Save request", exact: true }).click(),
+              ),
+            ),
+          );
+        } catch (error) {
+          // Diagnostic output must never replace the original action/body/schema failure.
+          try {
+            const line = observation.failureLine();
+            if (line !== undefined) console.error(line);
+          } catch {
+            /* No raw diagnostic errors. */
+          }
+          throw error;
+        } finally {
+          observation.stop();
+          page.off("request", requestStarted);
+          page.off("requestfinished", requestFinished);
+          page.off("requestfailed", requestFailed);
+          page.off("framenavigated", navigated);
+          page.off("close", closed);
+          page.off("crash", crashed);
+        }
+      })();
       const request = { id: command.requestId };
       await webExpect(page.getByRole("tab", { name: "Scope", exact: true })).toBeVisible();
       await page.getByRole("tab", { name: "Scope", exact: true }).click();
