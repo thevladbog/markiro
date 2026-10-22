@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { buildHandheldManifest, handheldArtifactUrl } from "../manifest.mjs";
 import {
   bumpHandheldVersion,
-  HANDHELD_DISTRIBUTION_BASELINE,
+  HANDHELD_EMPTY_CHANNEL_CONFIRMATION,
+  HANDHELD_LAST_DISTRIBUTED,
   nextHandheldRelease,
 } from "../version.mjs";
 
@@ -38,28 +40,74 @@ test("a bump moves exactly one component and zeroes the ones below it", () => {
  * is visible on a factory floor and nowhere else.
  */
 test("the versionCode is taken from the channel and always grows by one", () => {
-  assert.deepEqual(nextHandheldRelease({ publishedText: published("0.4.7", 12), bump: "patch" }), {
-    versionName: "0.4.8",
-    versionCode: 13,
-    first: false,
+  assert.deepEqual(nextHandheldRelease({ publishedText: published("1.6.1", 15), bump: "patch" }), {
+    versionName: "1.6.2",
+    versionCode: 16,
   });
-  assert.deepEqual(nextHandheldRelease({ publishedText: published("0.4.7", 12), bump: "major" }), {
-    versionName: "1.0.0",
-    versionCode: 13,
-    first: false,
+  assert.deepEqual(nextHandheldRelease({ publishedText: published("1.6.1", 15), bump: "major" }), {
+    versionName: "2.0.0",
+    versionCode: 16,
   });
 });
 
-test("an empty channel publishes the baseline, and says so", () => {
-  const first = nextHandheldRelease({ publishedText: null, bump: "patch" });
-  assert.deepEqual(first, {
-    versionName: HANDHELD_DISTRIBUTION_BASELINE,
-    versionCode: 1,
-    first: true,
-  });
-  // `bump` has nothing to apply to on an empty channel, and must not silently
-  // look as though it did.
-  assert.deepEqual(nextHandheldRelease({ publishedText: null, bump: "major" }), first);
+test("the recorded last build is the one terminals in the field may run", () => {
+  // Stable 1.6.0 (14) was the last published build; the pilot artifact 1.6.1
+  // (15) is newer and may have been installed by hand.
+  assert.deepEqual(HANDHELD_LAST_DISTRIBUTED, { versionName: "1.6.1", versionCode: 15 });
+  assert.equal(HANDHELD_EMPTY_CHANNEL_CONFIRMATION, "1.6.1 (15)");
+});
+
+test("an empty channel continues after the recorded build, never from versionCode 1", () => {
+  for (const confirmation of [undefined, "", "1.6.0 (14)", "1.6.1", " 1.6.1 (15)"]) {
+    assert.throws(
+      () =>
+        nextHandheldRelease({
+          publishedText: null,
+          bump: "minor",
+          ...(confirmation === undefined ? {} : { emptyChannelConfirmation: confirmation }),
+        }),
+      /serves no latest\.json/,
+      String(confirmation),
+    );
+  }
+  assert.deepEqual(
+    nextHandheldRelease({
+      publishedText: null,
+      bump: "minor",
+      emptyChannelConfirmation: "1.6.1 (15)",
+    }),
+    { versionName: "1.7.0", versionCode: 16 },
+  );
+  assert.deepEqual(
+    nextHandheldRelease({
+      publishedText: null,
+      bump: "patch",
+      channel: "beta",
+      emptyChannelConfirmation: "1.6.1 (15)",
+    }),
+    { versionName: "1.6.2", versionCode: 16 },
+  );
+});
+
+test("a channel that serves a pointer refuses the empty-channel confirmation", () => {
+  assert.throws(
+    () =>
+      nextHandheldRelease({
+        publishedText: published("1.7.0", 16),
+        bump: "patch",
+        emptyChannelConfirmation: "1.6.1 (15)",
+      }),
+    /already serves a pointer/,
+  );
+});
+
+test("a pointer older than the recorded build cannot step under it", () => {
+  // A restored stale pointer (1.6.0, 14) would otherwise publish versionCode
+  // 15, which terminals running the pilot build refuse.
+  assert.throws(
+    () => nextHandheldRelease({ publishedText: published("1.6.0", 14), bump: "patch" }),
+    /would not upgrade terminals running 1\.6\.1 \(15\)/,
+  );
 });
 
 test("a published manifest this build cannot read stops the release", () => {
@@ -75,4 +123,26 @@ test("a versionCode at the Android ceiling refuses rather than wrapping", () => 
     () => nextHandheldRelease({ publishedText: published("0.4.7", 2 ** 31 - 1), bump: "patch" }),
     /run out of Android int/,
   );
+});
+
+test("the release runbook types the same confirmation the resolver expects", () => {
+  const runbook = readFileSync(
+    new URL("../../../docs/runbooks/handheld-release.md", import.meta.url),
+    "utf8",
+  );
+  const section = runbook.slice(
+    runbook.indexOf("## Первый выпуск в пустой канал"),
+    runbook.indexOf("## Подписанный APK для пилота"),
+  );
+  assert.ok(
+    section.includes(
+      `\`empty_channel_confirmation\` — ровно\n   \`${HANDHELD_EMPTY_CHANNEL_CONFIRMATION}\``,
+    ),
+  );
+  const next = nextHandheldRelease({
+    publishedText: null,
+    bump: "minor",
+    emptyChannelConfirmation: HANDHELD_EMPTY_CHANNEL_CONFIRMATION,
+  });
+  assert.ok(section.includes(`\`${next.versionName}\` с \`versionCode ${next.versionCode}\``));
 });

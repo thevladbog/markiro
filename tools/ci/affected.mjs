@@ -258,6 +258,9 @@ function jobsForPath(path) {
     return ["verify_static", ...standaloneJobs, standaloneAppTests];
   }
 
+  // The release host's contracts check that it serves the URL the terminal polls.
+  if (path === "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/update/UpdateCheck.kt")
+    return ["handheld_android", "platform_contracts"];
   // The Android app is a Gradle project outside the pnpm workspace: only its own job runs.
   if (path.startsWith("apps/handheld/")) return ["handheld_android"];
 
@@ -273,6 +276,9 @@ function jobsForPath(path) {
   if (path.startsWith("tools/standalone-release/")) return standaloneJobs;
   // Node contracts for the Android release, so they run in the Node job -- the
   // handheld job is Gradle-only and has no pnpm.
+  // Its key and URL layout are checked against the release host's routes too.
+  if (/^tools\/handheld-release\/(?:manifest|object-storage)\.mjs$/u.test(path))
+    return ["verify_static", "platform_contracts"];
   if (path.startsWith("tools/handheld-release/")) return ["verify_static"];
   // The cloud → standalone export (plan IMP): its pure tests run in the Node
   // job, its SQL against the migrated cloud schema in the API job.

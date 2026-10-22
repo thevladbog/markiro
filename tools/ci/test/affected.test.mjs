@@ -418,6 +418,14 @@ test("deployment and release tooling selects its consuming jobs", () => {
         "cabinet_station_galleries",
       ],
     ],
+    // The release host's contracts check the handheld updater URL and key layout.
+    [
+      "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/update/UpdateCheck.kt",
+      ["platform_contracts", "handheld_android"],
+    ],
+    ["tools/handheld-release/object-storage.mjs", ["verify_static", "platform_contracts"]],
+    ["tools/handheld-release/manifest.mjs", ["verify_static", "platform_contracts"]],
+    ["tools/handheld-release/version.mjs", ["verify_static"]],
     ["tools/station-release/build-manifest.mjs", ["station_rust", "station_windows_build"]],
     ["tools/signer-release/build-manifest.mjs", ["signer_rust", "signer_windows_build"]],
     ["tools/standalone-release/smoke.ps1", ["standalone_rust", "standalone_windows_build"]],

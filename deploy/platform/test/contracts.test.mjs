@@ -496,6 +496,43 @@ test("the release host is a read-only, deny-by-default window onto the release b
   assert.doesNotMatch(JSON.stringify(edge), /ACCESS_KEY|SECRET/u);
 });
 
+test("the release host serves every path the handheld updater and publisher use", async () => {
+  const { handheldArtifactUrl, HANDHELD_PUBLIC_BASE_URL } =
+    await import("../../../tools/handheld-release/manifest.mjs");
+  const { handheldDownloadKey, handheldManifestKey, handheldObjectKey } =
+    await import("../../../tools/handheld-release/object-storage.mjs");
+  const caddy = read("deploy/platform/Caddyfile");
+  const pattern = (name) =>
+    new RegExp(
+      caddy.match(new RegExp(`@${name} \\{[\\s\\S]*?path_regexp (\\S+)`, "u"))?.[1] ?? "^$",
+      "u",
+    );
+  const served = (path) =>
+    pattern("releaseImmutable").test(path) || pattern("releasePointer").test(path);
+  // The terminal polls this channel and installs exactly this artifact URL.
+  const kotlin = read(
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/update/UpdateCheck.kt",
+  );
+  const base = kotlin.match(/const val UPDATE_CHANNEL_BASE_URL = "([^"]+)"/u)?.[1];
+  assert.equal(base, "https://releases.markiro.app/handheld/stable");
+  assert.equal(new URL(HANDHELD_PUBLIC_BASE_URL).hostname, "releases.markiro.app");
+  for (const versionName of ["1.7.0", "1.6.2"]) {
+    const apk = new URL(`${base}/releases/${versionName}/markiro-tsd-${versionName}.apk`);
+    assert.equal(apk.href, handheldArtifactUrl({ channel: "stable", versionName }));
+    assert.ok(served(apk.pathname), apk.pathname);
+  }
+  assert.ok(served(new URL(`${base}/latest.json`).pathname));
+  for (const channel of ["stable", "beta"]) {
+    for (const key of [
+      handheldManifestKey(channel),
+      handheldDownloadKey(channel),
+      handheldObjectKey({ channel, versionName: "1.7.0", filename: "markiro-tsd-1.7.0.apk" }),
+      handheldObjectKey({ channel, versionName: "1.7.0", filename: "manifest.json" }),
+    ])
+      assert.ok(served(`/${key}`), key);
+  }
+});
+
 test("S3 CSP origin matches the runtime presigner addressing mode", () => {
   assert.throws(() =>
     validateConfig({ ...env(), S3_PUBLIC_ORIGIN: "https://different.example.org" }, manifest()),

@@ -186,7 +186,7 @@ bucket served read-only by the platform edge. The release workflows publish
 there with `RELEASES_S3_*` credentials. Bucket creation, public read, CORS,
 keys, platform env, DNS and the transfer of already published artifacts are
 owner steps in [release hosting](release-hosting.md). The new bucket starts
-empty: restore `station/` and `handheld/` before the next release of those
-products, otherwise the station workflow refuses and the handheld one restarts
-its `versionCode`. The separate signer is not carried over: signing moves into
+empty: restore `station/` before the next Station release, otherwise its
+workflow refuses. The handheld workflow continues an empty channel after the
+recorded last build `1.6.1 (15)` once the dispatch confirms it. The separate signer is not carried over: signing moves into
 the standalone product.
