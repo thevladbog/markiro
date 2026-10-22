@@ -134,7 +134,6 @@ test("Station native and web changes select different downstream work", () => {
 test("Standalone native and web changes select their jobs; its Vitest suite has its own job", () => {
   for (const path of [
     "apps/standalone/host/src/server.rs",
-    "apps/standalone/loadtest/src/run.rs",
     "apps/standalone/src-tauri/src/lib.rs",
     "apps/standalone/Cargo.lock",
   ]) {
@@ -155,6 +154,35 @@ test("Standalone native and web changes select their jobs; its Vitest suite has 
       path,
     );
   }
+});
+
+test("a load-test-only change runs the Rust job, not the Windows installer pipeline", () => {
+  for (const path of [
+    "apps/standalone/loadtest/src/run.rs",
+    "apps/standalone/loadtest/Cargo.toml",
+    "apps/standalone/loadtest/tests/scenarios.rs",
+  ]) {
+    assert.deepEqual(enabledJobs(classifyChangedFiles([path])), ["standalone_rust"], path);
+  }
+  // With any other standalone path the union is what each path selected alone.
+  assert.deepEqual(
+    enabledJobs(
+      classifyChangedFiles([
+        "apps/standalone/loadtest/src/run.rs",
+        "apps/standalone/host/src/server.rs",
+      ]),
+    ),
+    ["standalone_rust", "standalone_windows_build"],
+  );
+  assert.deepEqual(
+    enabledJobs(
+      classifyChangedFiles([
+        "apps/standalone/loadtest/src/run.rs",
+        "apps/standalone/src/app/App.tsx",
+      ]),
+    ),
+    ["verify_static", "standalone_rust", "standalone_windows_build", "standalone_app_tests"],
+  );
 });
 
 test("a changed wire fixture of the standalone protocol also runs the Android job that reads it", () => {

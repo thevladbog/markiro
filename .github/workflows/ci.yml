@@ -958,8 +958,21 @@ jobs:
       # The Windows service entry point and its installer seam only compile on
       # Windows, so this is the only job that exercises them. `--no-fail-fast`
       # as in standalone-rust: every Windows-only failure in one run.
+      # The load-test crate (apps/standalone/loadtest, ~170 tests that start real
+      # in-process hosts) is a dev/acceptance tool and added ~5.5 minutes to this
+      # job; standalone-rust runs it on ubuntu, so it is excluded here and only
+      # compiled by the next step. Trade-off: its Windows-only code (procstat
+      # PowerShell vitals, scenario skips) broke on Windows once (two tests failed
+      # only there in PR #778); a regression like that is now caught only when the
+      # load test is run on Windows (runbook docs/runbooks/standalone-load-test.md
+      # section 14, workflow standalone-load.yml), not by this job.
       - name: cargo test (Windows paths)
-        run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace --no-fail-fast
+        run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace --exclude markiro-loadtest --no-fail-fast
+      # Compile-only: the host and proto libraries are already built by the step
+      # above (same debug profile), so this adds the loadtest crate and its few
+      # own dependencies, not another test run.
+      - name: load test crate compiles on Windows
+        run: cargo test --no-run -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml
       - name: Build the host for the installer
         run: cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-host
       # The release host trusts the production keys alone (spec 2026-10-13
