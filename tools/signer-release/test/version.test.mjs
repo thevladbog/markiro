@@ -70,24 +70,24 @@ test("bumps the agreed stable version", () => {
 
 test("refuses split-brain stable channels", () => {
   assert.throws(
-    () => reconcileStableVersions({ githubVersion: "0.1.4", yandexVersion: "0.1.5" }),
+    () => reconcileStableVersions({ githubVersion: "0.1.4", releasesVersion: "0.1.5" }),
     /repair/,
   );
   assert.throws(
-    () => reconcileStableVersions({ githubVersion: "0.1.5", yandexVersion: null }),
+    () => reconcileStableVersions({ githubVersion: "0.1.5", releasesVersion: null }),
     /repair/,
   );
 });
 
 test("accepts empty, aligned, and one-time migration channel state", () => {
-  assert.deepEqual(reconcileStableVersions({ githubVersion: null, yandexVersion: null }), {
+  assert.deepEqual(reconcileStableVersions({ githubVersion: null, releasesVersion: null }), {
     kind: "empty",
   });
-  assert.deepEqual(reconcileStableVersions({ githubVersion: "0.1.5", yandexVersion: "0.1.5" }), {
+  assert.deepEqual(reconcileStableVersions({ githubVersion: "0.1.5", releasesVersion: "0.1.5" }), {
     kind: "aligned",
     version: "0.1.5",
   });
-  assert.deepEqual(reconcileStableVersions({ githubVersion: null, yandexVersion: "0.1.4" }), {
+  assert.deepEqual(reconcileStableVersions({ githubVersion: null, releasesVersion: "0.1.4" }), {
     kind: "aligned",
     version: "0.1.4",
   });
@@ -105,7 +105,7 @@ test("resolves a publish from the migration baseline", () => {
       bump: "patch",
       githubPublishedTags: [],
       githubDraftTags: [],
-      yandexVersion: "0.1.4",
+      releasesVersion: "0.1.4",
     }),
     { mode: "publish", version: "0.1.5", tag: "signer-v0.1.5" },
   );
@@ -119,7 +119,7 @@ test("requires repair while a signer draft exists", () => {
         bump: "patch",
         githubPublishedTags: ["signer-v0.1.5"],
         githubDraftTags: ["signer-v0.1.6"],
-        yandexVersion: "0.1.5",
+        releasesVersion: "0.1.5",
       }),
     /repair/,
   );
@@ -132,7 +132,7 @@ test("repairs the one pending draft without calculating a new version", () => {
       bump: "patch",
       githubPublishedTags: ["signer-v0.1.5"],
       githubDraftTags: ["signer-v0.1.6"],
-      yandexVersion: "0.1.5",
+      releasesVersion: "0.1.5",
     }),
     { mode: "repair", version: "0.1.6", tag: "signer-v0.1.6" },
   );
@@ -143,7 +143,7 @@ test("repairs the one pending draft without calculating a new version", () => {
         bump: "patch",
         githubPublishedTags: ["signer-v0.1.5"],
         githubDraftTags: [],
-        yandexVersion: "0.1.5",
+        releasesVersion: "0.1.5",
       }),
     /exactly one signer draft/,
   );

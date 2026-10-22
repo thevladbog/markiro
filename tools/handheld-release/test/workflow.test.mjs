@@ -126,7 +126,7 @@ test("dependencies are installed before the key or the storage credential exist"
 });
 
 test("the object-storage credential reaches the publish step and nothing else", () => {
-  const credential = "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY";
+  const credential = "RELEASES_S3_SECRET_ACCESS_KEY";
   const carriers = steps.filter((step) => Object.keys(step.env ?? {}).includes(credential));
   assert.deepEqual(
     carriers.map((step) => step.name),
@@ -192,8 +192,8 @@ test("repairing the download URL uses the owner gate and release concurrency wit
   assert.ok(publish);
   assert.equal(publish.env.CHANNEL, "${{ inputs.channel }}");
   assert.equal(
-    publish.env.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY,
-    "${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}",
+    publish.env.RELEASES_S3_SECRET_ACCESS_KEY,
+    "${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}",
   );
   for (const step of sync.steps) {
     assert.ok(

@@ -18,8 +18,12 @@ import { createStationObjectStore, validateStationImmutableObject } from "./obje
 import { stationReleaseLocation } from "./origins.mjs";
 import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
+// "yandex" is the historical name of the releases.markiro.app origin (the
+// Station updater's own name for it); the bucket now lives on Timeweb S3, read
+// path-style and served publicly through the platform edge.
 const PUBLIC_BASE_URL = "https://releases.markiro.app";
-const YANDEX_S3_ENDPOINT = "https://storage.yandexcloud.net";
+const RELEASES_S3_ENDPOINT = "https://s3.twcstorage.ru";
+const RELEASES_S3_REGION = "ru-1";
 const MAX_BACKUP_INDEX_BYTES = 256 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_INSTALLER_BYTES = 512 * 1024 * 1024;
@@ -178,7 +182,7 @@ export function createYandexProviderReader({ bucket, fetchImpl = fetch, waitImpl
       ) {
         bootstrapInvalid();
       }
-      const url = `${YANDEX_S3_ENDPOINT}/${bucket}/${key}`;
+      const url = `${RELEASES_S3_ENDPOINT}/${bucket}/${key}`;
       for (let attempt = 0; ; attempt += 1) {
         let response;
         try {
@@ -1305,13 +1309,13 @@ function boundedPrintable(value, minBytes, maxBytes) {
 }
 
 export function createYandexPublisherClientConfig(env) {
-  const endpoint = env?.YANDEX_STATION_RELEASE_ENDPOINT;
-  const bucket = env?.YANDEX_STATION_RELEASE_BUCKET;
+  const endpoint = env?.RELEASES_S3_ENDPOINT;
+  const bucket = env?.RELEASES_S3_BUCKET;
   const accessKeyId = env?.AWS_ACCESS_KEY_ID;
   const secretAccessKey = env?.AWS_SECRET_ACCESS_KEY;
   const sessionToken = env?.AWS_SESSION_TOKEN;
   if (
-    endpoint !== YANDEX_S3_ENDPOINT ||
+    endpoint !== RELEASES_S3_ENDPOINT ||
     !validBucket(bucket) ||
     typeof accessKeyId !== "string" ||
     !/^[A-Za-z0-9_-]{16,128}$/.test(accessKeyId) ||
@@ -1324,7 +1328,13 @@ export function createYandexPublisherClientConfig(env) {
     bucket,
     client: {
       endpoint,
-      region: "ru-central1",
+      region: RELEASES_S3_REGION,
+      // Path-style keeps the request host equal to the endpoint; a dotted
+      // bucket name would also break virtual-host TLS.
+      forcePathStyle: true,
+      // Only the checksums an operation requires; Timeweb S3 is not AWS.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       maxAttempts: 3,
       credentials: {
         accessKeyId,
