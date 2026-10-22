@@ -1,8 +1,10 @@
 import type { TFunction } from "i18next";
 import { describe, expect, it } from "vitest";
 
+import type { OfficeShift } from "../src/host/protocol.js";
 import { officeKeys } from "../src/office/office-query.js";
 import {
+  beyondPeriod,
   civilDateLabel,
   findShifts,
   MAX_PERIOD_DAYS,
@@ -346,5 +348,37 @@ describe("how the list names a shift's product", () => {
 
   it("leaves a line's name alone", () => {
     expect(recordLabel("line", [LINE_10], LINE_10.id, t)).toBe(LINE_10.name);
+  });
+});
+
+describe("beyondPeriod: a shift the host lists only because it owes a close reason", () => {
+  const owing = (productionDate: string, plannedDate = productionDate): OfficeShift => ({
+    ...CLOSED,
+    productionDate,
+    plannedDate,
+    closeReasonMissing: true,
+  });
+
+  it("is a shift owing a reason produced before the default list's 31 days, by the host's UTC day", () => {
+    // 2026-10-09 less 31 days is 2026-09-08: the host keeps the closed shifts from that day.
+    expect(beyondPeriod(owing("2026-09-07"), null, "2026-10-09")).toBe(true);
+    expect(beyondPeriod(owing("2026-09-08"), null, "2026-10-09")).toBe(false);
+    expect(
+      beyondPeriod({ ...owing("2026-01-10"), closeReasonMissing: undefined }, null, "2026-10-09"),
+    ).toBe(false);
+  });
+
+  it("is a shift owing a reason outside either period asked, both ends included", () => {
+    const period = { from: "2026-10-01", to: "2026-10-08" };
+    expect(beyondPeriod(owing("2026-10-01"), period, "2026-10-09")).toBe(false);
+    expect(beyondPeriod(owing("2026-10-08"), period, "2026-10-09")).toBe(false);
+    expect(beyondPeriod(owing("2026-09-30"), period, "2026-10-09")).toBe(true);
+    expect(beyondPeriod(owing("2026-10-09"), period, "2026-10-09")).toBe(true);
+    const both = { ...period, plannedFrom: "2026-10-05", plannedTo: "2026-10-06" };
+    expect(beyondPeriod(owing("2026-10-05"), both, "2026-10-09")).toBe(false);
+    expect(beyondPeriod(owing("2026-10-05", "2026-10-07"), both, "2026-10-09")).toBe(true);
+    expect(
+      beyondPeriod({ ...owing("2026-01-10"), closeReasonMissing: undefined }, period, "2026-10-09"),
+    ).toBe(false);
   });
 });

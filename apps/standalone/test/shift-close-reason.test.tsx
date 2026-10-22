@@ -1,16 +1,19 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
 import type { OfficeShift } from "../src/host/protocol.js";
 import type { FakeOfficeSession } from "./support/office.js";
 import { hasRowAction, pressRowAction } from "./support/row-menu.js";
-import { chooseValue, optionTexts } from "./support/select.js";
+import { chooseText, chooseValue, optionTexts } from "./support/select.js";
 import {
   ACTIVE,
   CLOSED,
   expectFocusedNotice,
+  freezeToday,
   openShifts,
+  pickDate,
+  PLANNED,
   SHARED,
   SHARED_NO_REASON,
   shiftsSession,
@@ -147,5 +150,64 @@ describe("the shift closed without its reason (plan 2b, spec §12.9)", () => {
   it("is not offered for an active shift", async () => {
     await openShifts(shiftsSession([ACTIVE]));
     expect(hasRowAction(screen, ACTION)).toBe(false);
+  });
+});
+
+/**
+ * `SHARED_NO_REASON` made in January: out of the default list's 31 days and of any period around
+ * October. A host of this build adds it to every list while the reason is owed (spec §12.9).
+ */
+const OLD_NO_REASON: OfficeShift = {
+  ...SHARED_NO_REASON,
+  productionDate: "2026-01-10",
+  plannedDate: "2026-01-10",
+  closedAt: "2026-01-10T14:10:00Z",
+};
+const BEYOND =
+  "Смены, закрытые без причины, показаны и вне периода, пока причина не указана (таких: 1). В итог они не входят.";
+const totalsText = () => screen.getByText(/^Итого по выбранным сменам/).textContent;
+
+describe("a shift closed without its reason outside the period the list shows", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is listed with its mark and its action, says why it is there, and stays out of the totals", async () => {
+    freezeToday();
+    await openShifts(shiftsSession([PLANNED, OLD_NO_REASON]));
+    expect(screen.getByText("Причина не указана")).toBeTruthy();
+    expect(hasRowAction(screen, ACTION)).toBe(true);
+    expect(screen.getByText(BEYOND)).toBeTruthy();
+    expect(totalsText()).toBe(
+      "Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · паллет 0",
+    );
+  });
+
+  it("follows the status filter like any shift", async () => {
+    freezeToday();
+    await openShifts(shiftsSession([PLANNED, OLD_NO_REASON]));
+    chooseText("Статус", "Запланирована");
+    expect(screen.queryByText("Причина не указана")).toBeNull();
+    expect(screen.queryByText(BEYOND)).toBeNull();
+  });
+
+  it("is told apart from the shifts of a chosen period", async () => {
+    freezeToday();
+    const session = shiftsSession([PLANNED, OLD_NO_REASON]);
+    await openShifts(session);
+    session.api.listShifts.mockResolvedValue([CLOSED, OLD_NO_REASON]);
+    pickDate("Дата производства с", "1 октября 2026");
+    pickDate("Дата производства по", "8 октября 2026");
+    await screen.findByText("Показаны смены с датой производства с 01.10.2026 по 08.10.2026.");
+    await waitFor(() => expect(screen.getByText(BEYOND)).toBeTruthy());
+    expect(totalsText()).toMatch(/^Итого по выбранным сменам: смен 1 · /);
+  });
+
+  it("says nothing more of a shift owing a reason that is inside the list's own window", async () => {
+    freezeToday();
+    await openShifts(shiftsSession([PLANNED, SHARED_NO_REASON]));
+    expect(screen.getByText("Причина не указана")).toBeTruthy();
+    expect(screen.queryByText(BEYOND)).toBeNull();
+    expect(totalsText()).toMatch(/^Итого по выбранным сменам: смен 2 · /);
   });
 });

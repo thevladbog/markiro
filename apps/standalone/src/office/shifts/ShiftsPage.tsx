@@ -35,7 +35,9 @@ import { SortToggle } from "../list/SortToggle.js";
 import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { activeFirstByName } from "../records.js";
+import { civilToday } from "../../lib/civil-date.js";
 import {
+  beyondPeriod,
   civilDateLabel,
   findShifts,
   openBlocker,
@@ -99,7 +101,8 @@ type ShiftsDialog =
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
  * the planned and active shifts and the closed ones of the last 31 days, or
- * every shift of a chosen period; the filters, the search and the pages work
+ * every shift of a chosen period, and with either every shift closed without
+ * its reason (`beyondPeriod`); the filters, the search and the pages work
  * here. A shift names its product, line and counterparty by id, and the page
  * names them from its own lists; a list that does not load leaves the shifts
  * in place, named by the first characters of their ids.
@@ -246,7 +249,11 @@ export function ShiftsPage() {
           product: (shift) =>
             shiftProductTitle(products.data?.find((each) => each.id === shift.productId)),
         });
-  const totals = totalShifts(filtered);
+  // The host adds every shift owing a close reason whatever the period (spec §12.9): it is listed
+  // and filtered like any, but the totals stay the period's and a note says why it is there.
+  const hostToday = civilToday("UTC");
+  const beyond = filtered.filter((shift) => beyondPeriod(shift, asked, hostToday));
+  const totals = totalShifts(filtered.filter((shift) => !beyond.includes(shift)));
   const onSort = (key: string) => {
     setSort((previous) => ({
       key: key as ShiftSortKey,
@@ -672,6 +679,11 @@ export function ShiftsPage() {
           <p className="office-list-note" aria-live="polite">
             {periodNote}
           </p>
+          {beyond.length > 0 && (
+            <p className="office-list-note" aria-live="polite">
+              {t("office.shifts.period.reasonMissingBeyond", { number: beyond.length })}
+            </p>
+          )}
           {shifts.isSuccess && (
             // What the filters keep, however many pages: the figures of the period.
             <p className="office-list-note shift-totals" aria-live="polite">
