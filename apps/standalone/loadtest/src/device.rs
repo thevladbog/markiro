@@ -48,6 +48,10 @@ pub struct Pools {
     pub dup: VecDeque<(u32, Code)>,
     /// Scans an offline device made that an online one may scan first.
     pub offers: Vec<Arc<Offer>>,
+    /// Keys of every code ever offered: two devices scanned it and the host
+    /// decides which was first, so it is not drawn as a duplicate (the owner
+    /// of such a code may be the device that is told to scan it again).
+    pub raced: std::collections::HashSet<u64>,
 }
 
 impl Shared {
@@ -345,17 +349,9 @@ impl SimDevice {
                         taken: AtomicBool::new(false),
                         acked: AtomicBool::new(false),
                     });
-                    self.own_offers
-                        .lock()
-                        .expect("offers")
-                        .push(offered.clone());
-                    self.shared
-                        .pools
-                        .lock()
-                        .expect("pools")
-                        .offers
-                        .push(offered);
-                    self.with_stats(|stats| stats.races_offered += 1);
+                    if self.publish_offer(offered) {
+                        self.with_stats(|stats| stats.races_offered += 1);
+                    }
                 }
             }
             Plan::Race(offer) => {
@@ -398,6 +394,24 @@ impl SimDevice {
                     .unwrap_or(0),
             );
         });
+    }
+
+    /// Offer a scan made offline to the other devices: only while the link is
+    /// still down, decided under the pools' lock the link takes when it comes
+    /// back. A scan that straddled the link coming up is a scan like any other
+    /// (its record may already be on the host, and no one can race it).
+    fn publish_offer(&self, offered: Arc<Offer>) -> bool {
+        let mut pools = self.shared.pools.lock().expect("pools");
+        if self.is_online() {
+            return false;
+        }
+        self.own_offers
+            .lock()
+            .expect("offers")
+            .push(offered.clone());
+        pools.raced.insert(offered.code.key);
+        pools.offers.push(offered);
+        true
     }
 
     async fn check_fresh(&self, code: &Code) {
@@ -591,7 +605,7 @@ impl SimDevice {
                         .get(&self.spec.index)
                         .copied()
                         .unwrap_or(0);
-                    if accepted_scans % 8 == 0 {
+                    if accepted_scans % 8 == 0 && !pools.raced.contains(&code.key) {
                         pools.dup.push_back((self.spec.index, code.clone()));
                         if pools.dup.len() > DUP_POOL_CAP {
                             pools.dup.pop_front();
@@ -709,7 +723,6 @@ impl SimDevice {
             let began = Instant::now();
             let stopped = self.sleep_unless_stopped(offline_for).await;
             self.wait_offers_resolved(OFFER_WAIT).await;
-            self.online.store(true, Ordering::SeqCst);
             self.with_stats(|stats| {
                 stats.offline_periods += 1;
                 stats.offline_s += began.elapsed().as_secs_f64();
@@ -747,9 +760,11 @@ impl SimDevice {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         // What nobody took before the link came back is a scan like any other.
+        // The link comes up in the same critical section: see `scan_once`.
         let mut pools = self.shared.pools.lock().expect("pools");
         pools.offers.retain(|offer| offer.from != self.spec.index);
         self.own_offers.lock().expect("offers").clear();
+        self.online.store(true, Ordering::SeqCst);
     }
 
     // ---- the stream ----
@@ -1008,6 +1023,34 @@ mod tests {
         profile.race_rate = 0.0;
         profile.resend_rate = 0.0;
         profile
+    }
+
+    #[tokio::test]
+    async fn a_scan_that_straddles_the_link_coming_up_is_not_offered_and_raced_codes_are_no_duplicates(
+    ) {
+        let profile = quiet(Profile::preset("tiny").unwrap());
+        let (_dir, mut host, device, shared) = one_device_site(&profile).await;
+        // down: offered, and remembered as raced
+        device.online.store(false, Ordering::SeqCst);
+        let first = offer(0, 1);
+        assert!(device.publish_offer(first.clone()));
+        {
+            let pools = shared.pools.lock().unwrap();
+            assert_eq!(pools.offers.len(), 1);
+            assert!(pools.raced.contains(&first.code.key));
+        }
+        // the link comes back: its offers are gone and it is up in one step
+        device.wait_offers_resolved(Duration::from_millis(10)).await;
+        assert!(device.is_online());
+        assert!(shared.pools.lock().unwrap().offers.is_empty());
+        // a scan decided while down but published after the link came up is not offered
+        let late = offer(0, 2);
+        assert!(!device.publish_offer(late.clone()));
+        let pools = shared.pools.lock().unwrap();
+        assert!(pools.offers.is_empty());
+        assert!(!pools.raced.contains(&late.code.key));
+        drop(pools);
+        host.stop().await.unwrap();
     }
 
     #[tokio::test]

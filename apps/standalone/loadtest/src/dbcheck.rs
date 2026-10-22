@@ -113,6 +113,40 @@ async fn per_device(pool: &SqlitePool, sql: &str, shift: &str) -> Res<BTreeMap<S
     Ok(rows.into_iter().collect())
 }
 
+/// Every device's row in `shift_participants` is in `expected_state` (`active`
+/// while the devices work, `closed` after their closes, as the ledger of the
+/// run says), and no row is for a device the harness did not make.
+pub async fn participants(
+    pool: &SqlitePool,
+    shift: &str,
+    devices: &[(u32, String)],
+    expected_state: &str,
+) -> Res<Vec<Check>> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT device_id, state FROM shift_participants WHERE shift_id = ?")
+            .bind(shift)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("shift_participants: {error}"))?;
+    let states: BTreeMap<String, String> = rows.into_iter().collect();
+    let mut checks: Vec<Check> = devices
+        .iter()
+        .map(|(index, id)| {
+            Check::same(
+                &format!("participant_state_device_{index}"),
+                Some(expected_state.to_owned()),
+                states.get(id).cloned(),
+            )
+        })
+        .collect();
+    let foreign = states
+        .keys()
+        .filter(|id| !devices.iter().any(|(_, mine)| mine == *id))
+        .count();
+    checks.push(Check::same("participants_only_the_devices", 0, foreign));
+    Ok(checks)
+}
+
 /// Holds for the live database of a quiet shift: every figure is the
 /// ledger's. `devices` maps the harness's device index to the host's id.
 pub async fn reconcile(
@@ -550,5 +584,69 @@ mod tests {
         let checks = structural(&pool).await.unwrap();
         let integrity = checks.iter().find(|c| c.name == "db_integrity").unwrap();
         assert!(!integrity.ok, "{integrity:?}");
+    }
+
+    /// The participants' states of the seeded shift, judged after `sql`.
+    async fn participants_after(sql: &str, expected: &str) -> BTreeSet<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copy.db");
+        markiro_host::db::open(&path).await.unwrap().close().await;
+        seed(&path).await;
+        let mut db = SqliteConnection::connect(&format!("sqlite://{}", path.display()))
+            .await
+            .unwrap();
+        sqlx::raw_sql(sql).execute(&mut db).await.unwrap();
+        db.close().await.unwrap();
+        let pool = open_read_only(&path, true).await.unwrap();
+        let checks = participants(&pool, "s1", &devices(), expected)
+            .await
+            .unwrap();
+        pool.close().await;
+        checks
+            .into_iter()
+            .filter(|check| !check.ok)
+            .map(|check| check.name)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn participants_match_the_ledger_state_they_are_expected_in() {
+        assert_eq!(participants_after("SELECT 1", "active").await, names(&[]));
+        // every part closed, as after the closes of a run
+        let closed = "UPDATE shift_participants SET state = 'closed', closed_at = 't', closed_by_kind = 'device'";
+        assert_eq!(participants_after(closed, "closed").await, names(&[]));
+    }
+
+    #[tokio::test]
+    async fn a_participant_in_the_wrong_state_is_reported_by_device() {
+        // one device still active after the closes
+        let one = "UPDATE shift_participants SET state = 'closed', closed_at = 't', closed_by_kind = 'device' WHERE device_id = 'd0'";
+        assert_eq!(
+            participants_after(one, "closed").await,
+            names(&["participant_state_device_1"])
+        );
+        // a part closed before the run said so
+        assert_eq!(
+            participants_after(one, "active").await,
+            names(&["participant_state_device_0"])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_or_extra_participant_row_is_reported() {
+        let got = participants_after(
+            "DELETE FROM shift_participants WHERE device_id = 'd1'",
+            "active",
+        )
+        .await;
+        assert_eq!(got, names(&["participant_state_device_1"]));
+        let extra = "INSERT INTO devices (id, kind, name, line_id, key_hash, app_version, protocol, paired_at)
+               VALUES ('d2', 'station', 'S2', 'l1', 'k2', '1', 1, 't');
+             INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at)
+               VALUES ('s1', 'd2', 't', 't')";
+        assert_eq!(
+            participants_after(extra, "active").await,
+            names(&["participants_only_the_devices"])
+        );
     }
 }

@@ -1,5 +1,6 @@
 pub mod api;
 pub mod checks;
+pub mod cli;
 pub mod dbcheck;
 pub mod device;
 pub mod drills;
@@ -14,6 +15,7 @@ pub mod procstat;
 pub mod profile;
 pub mod report;
 pub mod rng;
+pub mod run;
 pub mod sampler;
 pub mod site;
 pub mod wal;

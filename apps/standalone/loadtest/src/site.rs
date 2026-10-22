@@ -95,6 +95,10 @@ pub struct Site {
     pub product_id: String,
     pub box_template_id: String,
     pub pallet_template_id: Option<String>,
+    /// What the run made or was given that must never reach a file it
+    /// writes: the administrator's password, pairing codes, device keys and
+    /// the session token.
+    pub secrets: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,10 +154,13 @@ pub async fn provision(
     let api = Api::new(&host.base, &host.fingerprint, metrics.clone());
     let mut rng = Rng::new(profile.seed ^ 0x51_7E);
     let mut devices = Vec::new();
+    let mut secrets: Vec<String> = Vec::new();
     // The office station: the first station, which also works the shift when
     // the host is the harness's own.
     let (office_key, token) = match attach {
         Some(credentials) => {
+            secrets.push(credentials.office_device_key.clone());
+            secrets.push(credentials.password.clone());
             let session = device_call(
                 &api,
                 Route::Other,
@@ -171,6 +178,7 @@ pub async fn provision(
         None => {
             let paired = pair_local(&api, "Нагрузка станция 1").await?;
             let password = throwaway_password(&mut rng);
+            secrets.push(password.clone());
             let body = json!({
                 "admin": { "login": "admin", "name": "Нагрузка", "password": password },
                 "org": {
@@ -280,13 +288,29 @@ pub async fn provision(
         let spec = if host.local {
             pair_local(&api, &name).await?
         } else {
-            claim(&office, DeviceKind::Station, &name, &mut claims).await?
+            claim(
+                &office,
+                DeviceKind::Station,
+                &name,
+                &mut claims,
+                &mut secrets,
+            )
+            .await?
         };
         devices.push(spec);
     }
     for at in 1..=profile.handhelds {
         let name = format!("Нагрузка ТСД {at}");
-        devices.push(claim(&office, DeviceKind::Handheld, &name, &mut claims).await?);
+        devices.push(
+            claim(
+                &office,
+                DeviceKind::Handheld,
+                &name,
+                &mut claims,
+                &mut secrets,
+            )
+            .await?,
+        );
     }
     for (index, device) in devices.iter_mut().enumerate() {
         device.index = index as u32;
@@ -310,6 +334,9 @@ pub async fn provision(
             .await?;
         }
     }
+    secrets.push(office.token.clone());
+    secrets.push(office.key.clone());
+    secrets.extend(devices.iter().map(|device| device.key.clone()));
     let site = Site {
         office,
         devices,
@@ -317,6 +344,7 @@ pub async fn provision(
         product_id: str_of(&product, "/id")?.to_owned(),
         box_template_id: str_of(&box_template, "/id")?.to_owned(),
         pallet_template_id,
+        secrets,
     };
     let shift = plan_and_enter(&site, profile, None).await?;
     Ok((site, shift))
@@ -346,12 +374,21 @@ async fn pair_local(api: &Api, name: &str) -> Res<DeviceSpec> {
 }
 
 /// A device paired with a code from the office, as a handheld always is.
-async fn claim(office: &Office, kind: DeviceKind, name: &str, claims: &mut u32) -> Res<DeviceSpec> {
+async fn claim(
+    office: &Office,
+    kind: DeviceKind,
+    name: &str,
+    claims: &mut u32,
+    secrets: &mut Vec<String>,
+) -> Res<DeviceSpec> {
     if *claims > 0 && *claims % CLAIMS_PER_MINUTE == 0 {
         tokio::time::sleep(Duration::from_secs(61)).await;
     }
     *claims += 1;
     let code = office.ok("POST", "/v1/office/pairing-codes", None).await?;
+    if let Some(pairing) = code.pointer("/code").and_then(Value::as_str) {
+        secrets.push(pairing.to_owned());
+    }
     let (version, capabilities) = match kind {
         DeviceKind::Handheld => (HANDHELD_VERSION, json!(["handheld-host-v1"])),
         _ => (STATION_VERSION, json!([])),
