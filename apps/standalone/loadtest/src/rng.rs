@@ -98,7 +98,10 @@ mod tests {
             let id = rng.uuid();
             assert_eq!(id.len(), 36);
             assert_eq!(&id[14..15], "4");
-            assert!(matches!(&id[19..20], "8" | "9" | "a" | "b"), "{id}");
+            assert!(
+                matches!(&id[19..20], "8" | "9" | "a" | "b"),
+                "the variant nibble of a v4 uuid"
+            );
             assert_eq!(id, id.to_lowercase());
             assert!(seen.insert(id));
         }

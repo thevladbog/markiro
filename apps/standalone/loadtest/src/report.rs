@@ -1069,15 +1069,16 @@ mod tests {
         report.verdict = evaluate(&report);
         let raw = serde_json::to_string(&report).unwrap();
         for secret in &secrets {
+            // The messages name no secret: a failing assertion's text is a log of its own.
             assert!(
                 raw.contains(secret.as_str()),
-                "the probe must be able to see {secret}"
+                "the probe must be able to see every planted secret"
             );
         }
         let clean = redact(&report, &secrets);
         let text = serde_json::to_string_pretty(&clean).unwrap() + &render_markdown(&clean);
         for secret in &secrets {
-            assert!(!text.contains(secret.as_str()), "leaked {secret}");
+            assert!(!text.contains(secret.as_str()), "a planted secret leaked");
         }
         assert!(text.contains("[redacted]"));
         // The redaction changes nothing else.

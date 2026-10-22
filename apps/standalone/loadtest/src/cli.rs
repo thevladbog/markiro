@@ -492,11 +492,11 @@ mod tests {
         let (json, markdown) = write_reports(&report, dir.path(), &secrets).unwrap();
         for path in [json, markdown] {
             let text = std::fs::read_to_string(&path).unwrap();
+            // The messages name no secret: a failing assertion's text is a log of its own.
             for secret in &secrets {
                 assert!(
                     !text.contains(secret.as_str()),
-                    "{} in {}",
-                    secret,
+                    "a planted secret is in {}",
                     path.display()
                 );
             }

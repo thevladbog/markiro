@@ -94,7 +94,9 @@ async fn the_written_files_carry_none_of_the_runs_secrets() {
     .await
     .unwrap();
     // The run really made secrets: a password, three device keys, a token.
-    assert!(secrets.len() >= 5, "{}", secrets.len());
+    // The messages name no secret, nor anything counted from them: a failing
+    // assertion's text is a log of its own.
+    assert!(secrets.len() >= 5, "the run made fewer than five secrets");
     assert!(secrets.iter().any(|secret| secret.starts_with("Load-")));
     // A clean run leaks nothing by itself, so plant every real secret of this run
     // where a host's log line or an error text would carry one: the scan below
@@ -111,8 +113,7 @@ async fn the_written_files_carry_none_of_the_runs_secrets() {
         for secret in &secrets {
             assert!(
                 !text.contains(secret.as_str()),
-                "a secret of {} characters is in {}",
-                secret.len(),
+                "a secret of the run is in {}",
                 path.display()
             );
         }
