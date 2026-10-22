@@ -249,6 +249,7 @@ function jobsForPath(path) {
     }
     if (
       path.startsWith("apps/standalone/host/") ||
+      path.startsWith("apps/standalone/loadtest/") ||
       path.startsWith("apps/standalone/src-tauri/") ||
       /^apps\/standalone\/Cargo\.(?:toml|lock)$/u.test(path)
     ) {

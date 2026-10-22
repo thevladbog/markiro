@@ -31,7 +31,11 @@ import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
+import app.markiro.handheld.core.host.ShiftParticipationStore
 import app.markiro.handheld.core.network.NetworkModule
+import app.markiro.handheld.core.network.host.DeviceShiftsDto
+import app.markiro.handheld.core.storage.ConflictEntity
+import kotlinx.serialization.json.Json
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanRecorder
@@ -194,6 +198,91 @@ class WorkViewModelTest {
         assertEquals(1, s.duplicates)
         assertEquals(listOf(SignalKind.OK, SignalKind.DUPLICATE, SignalKind.ERROR, SignalKind.ERROR), played)
         assertNotNull(db.outboxDao().head(1).firstOrNull())
+    }
+
+    /** The host's shared-shift fixture, as shift `s1` of this test, read as its first participant would read it. */
+    private suspend fun storeSharedShift(plan: Int? = 100) {
+        val shift = Json { ignoreUnknownKeys = true }.decodeFromString(
+            DeviceShiftsDto.serializer(),
+            checkNotNull(javaClass.classLoader?.getResource("device-shifts-participants.json")).readText(),
+        ).shifts.first { it.status == "active" }.copy(id = "s1", plannedQty = plan)
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = plan))
+        ShiftParticipationStore(db, myDeviceId = { "7c9e6679-7425-40de-944b-e07fc1f90ae7" }).save(shift)
+    }
+
+    @Test
+    fun aSharedShiftShowsTheShiftWideTotalAndTheDevicesOwnCount() = runTest {
+        storeSharedShift()
+        val vm = vm()
+        advanceUntilIdle()
+        // The host holds 547 of which 427 are this device's: the others' 120, and nothing of this device's own yet.
+        val first = vm.state.first { it.strip != null }
+        assertEquals(120, first.total)
+        assertEquals(0, first.strip!!.mine)
+        assertEquals(2, first.strip!!.maxStations)
+        scans.tryEmit(ScanEvent("010460068200001321abc${gs}93AAAA", null, "debug", 0))
+        advanceUntilIdle()
+        val after = vm.state.first { it.thisTerminal == 1 }
+        assertEquals(121, after.total)
+        assertEquals(1, after.strip!!.mine)
+    }
+
+    @Test
+    fun aCodeTheHostGaveToAnotherDeviceIsNotCountedTwice() = runTest {
+        storeSharedShift()
+        val vm = vm()
+        advanceUntilIdle()
+        vm.state.first { it.strip != null }
+        for (tail in listOf("c1", "c2")) {
+            scans.tryEmit(ScanEvent("010460068200001321$tail${gs}93AAAA", null, "debug", 0))
+            advanceUntilIdle()
+        }
+        assertEquals(122, vm.state.first { it.thisTerminal == 2 }.total)
+        // The host answered `conflict` for one of them: it is inside the others' 120 already.
+        val hash = checkNotNull(db.scanEventDao().observeRecent("s1", 4).first().firstNotNullOf { it.codeHash })
+        db.conflictDao().insertIgnore(listOf(ConflictEntity(hash, null, "2026-10-08T09:00:00.000Z", "2026-10-08T09:30:00.000Z")))
+        val s = vm.state.first { it.strip?.mine == 1 }
+        assertEquals(121, s.total)
+        assertEquals(121, s.strip!!.total)
+        // The «this device» figure of the screen is the corrected part too.
+        assertEquals(1, s.strip!!.mine)
+    }
+
+    @Test
+    fun aShiftOfALineThatAllowsOneDeviceKeepsTheScreenOfToday() = runTest {
+        val vm = vm()
+        advanceUntilIdle()
+        assertNull(vm.state.value.strip)
+        scans.tryEmit(ScanEvent("010460068200001321abc${gs}93AAAA", null, "debug", 0))
+        advanceUntilIdle()
+        assertNull(vm.state.first { it.thisTerminal == 1 }.strip)
+    }
+
+    @Test
+    fun theStripGoesStaleWhenTheHeartbeatSaysTheHostDidNotAnswer() = runTest {
+        storeSharedShift()
+        val vm = vm()
+        advanceUntilIdle()
+        assertNull(vm.state.first { it.strip != null }.strip!!.staleAtMillis)
+        ShiftParticipationStore(db).markStale("s1")
+        assertNotNull(vm.state.first { it.strip?.staleAtMillis != null }.strip!!.staleAtMillis)
+    }
+
+    @Test
+    fun thePlanPromptJudgesTheShiftWideTotal() = runTest {
+        // Plan 130: the others already delivered 120; this device's tenth unit crosses it.
+        storeSharedShift(plan = 130)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.state.first { it.strip != null }
+        assertFalse(vm.planPrompt.value)
+        repeat(10) { n ->
+            scans.tryEmit(ScanEvent("010460068200001321unit${"abcdefghij"[n]}${gs}93AAAA", null, "debug", 0))
+            advanceUntilIdle()
+            // The scan is handled off the test scheduler: wait for it before the next, or the buffer drops the rest.
+            vm.state.first { it.strip?.mine == n + 1 }
+        }
+        assertTrue(vm.planPrompt.first { it })
     }
 
     @Test

@@ -2,7 +2,15 @@ import { deviceLink } from "./device-link.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Badge, Button, PageHeader, StatusChip, type TableColumn } from "@markiro/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  PageHeader,
+  StatusChip,
+  type TableColumn,
+  type TagPhase,
+} from "@markiro/ui";
 
 import { listViewState } from "../list/list-state.js";
 import { ListCard } from "../list/ListCard.js";
@@ -10,6 +18,12 @@ import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
 import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
+import {
+  openShiftNumbers,
+  presenceOf,
+  revokedDeviceIds,
+  type Presence,
+} from "../shifts/participation.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type { DeviceRecord, PairingCode } from "../../host/protocol.js";
 import { pairingCodeRequest } from "../../host/requests.js";
@@ -21,6 +35,13 @@ import { deviceVersionText } from "./device-version.js";
 import { lineLabel } from "./line-label.js";
 import { codeLifetimeMs, PairingCodeDialog } from "./PairingCodeDialog.js";
 import { RevokeDeviceDialog } from "./RevokeDeviceDialog.js";
+
+/** A device's participation as a phase: at work ▸, paused ·, its part closed ✓. */
+const PRESENCE_PHASE = {
+  active: "active",
+  left: "none",
+  closed: "done",
+} as const satisfies Record<Presence["state"], TagPhase>;
 
 const DATE_TIME = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
@@ -55,6 +76,9 @@ export function DevicesPage() {
   const thisDevice = useThisDeviceId();
   const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
+  // Who works which shift (plan 2b): read for the «Линия» column; a list that does not load claims
+  // nothing, and the page lists the devices as it always did.
+  const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token));
   const storeDevice = useStoreRecord<DeviceRecord>(officeKeys.devices);
   const create = useOfficeMutation(
     (api, token, ask: { replaces: string | null; device: string | null }) =>
@@ -153,6 +177,8 @@ export function DevicesPage() {
 
   // One reading of the clock for the whole table.
   const now = Date.now();
+  // A revoked device holds no slot of a shift (the host frees it): it is «в смене» nowhere here.
+  const revoked = revokedDeviceIds(devices.data);
   const columns: TableColumn<DeviceRecord>[] = [
     {
       key: "name",
@@ -177,7 +203,25 @@ export function DevicesPage() {
     {
       key: "line",
       title: t("office.devices.table.line"),
-      render: (device) => lineLabel(lines.data ?? [], device.lineId, t),
+      wrap: true,
+      minWidth: 140,
+      // The line, and under it the shift the device works, in a word and a glyph (plan 2b): one
+      // column, not two, so the table's other columns keep their room at 1280 px.
+      render: (device) => {
+        const presence = presenceOf(shifts.data, device.id, revoked);
+        return (
+          <span className="shift-cell">
+            <span>{lineLabel(lines.data ?? [], device.lineId, t)}</span>
+            {presence !== null && (
+              <StatusChip
+                phase={PRESENCE_PHASE[presence.state]}
+                wrap
+                label={t(`office.devices.presence.${presence.state}`, { number: presence.number })}
+              />
+            )}
+          </span>
+        );
+      },
     },
     {
       // What the device reports on every request since plan ОБН-1.
@@ -363,6 +407,7 @@ export function DevicesPage() {
         <RevokeDeviceDialog
           device={dialog.device}
           own={dialog.device.id === thisDevice}
+          openShifts={openShiftNumbers(shifts.data, dialog.device.id)}
           onClose={() => setDialog(null)}
           onRevoked={(device) => {
             // The record the revoke returned goes in first: the row is dead

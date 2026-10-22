@@ -603,8 +603,9 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
       handheldHost: "handheld-host-v1",
       multiStation: "multi-station-v1",
     });
-    // The station of part A works validation, and says so on every entry.
-    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter.json"));
+    // The station works validation, prints its duplicate and, since plan 2b, joins a shift
+    // another device works (`multi-station-v1`), and says so on every entry.
+    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter-multi.json"));
     expect(shiftEnterSchema.parse(STATION_SHIFT_ENTER)).toStrictEqual(STATION_SHIFT_ENTER);
   });
 

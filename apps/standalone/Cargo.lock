@@ -2533,6 +2533,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "markiro-loadtest"
+version = "0.0.0"
+dependencies = [
+ "markiro-host",
+ "markiro-proto",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "time",
+ "tokio",
+]
+
+[[package]]
 name = "markiro-proto"
 version = "1.1.0"
 dependencies = [

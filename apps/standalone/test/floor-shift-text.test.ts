@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { addCivilDays, formatCivilDate, formatQuantity } from "../src/floor/shifts/shift-text.js";
+import {
+  addCivilDays,
+  formatCivilDate,
+  formatClock,
+  formatQuantity,
+} from "../src/floor/shifts/shift-text.js";
 
 describe("the floor's words for dates and counts", () => {
   it("shows a civil date day first, as written, never through a clock", () => {
@@ -23,4 +28,12 @@ describe("the floor's words for dates and counts", () => {
     expect(formatQuantity(1200)).toBe("1\u00a0200");
     expect(formatQuantity(12)).toBe("12");
   });
+});
+
+it("says an instant as «ЧЧ:ММ» on this computer's clock, and an unreadable one as it is (plan 2b)", () => {
+  const at = "2026-10-08T09:41:07Z";
+  const local = new Date(at);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  expect(formatClock(at)).toBe(`${pad(local.getHours())}:${pad(local.getMinutes())}`);
+  expect(formatClock("вчера")).toBe("вчера");
 });

@@ -166,6 +166,17 @@ function CardView({
           </p>
         )
       )}
+      {card.stations !== null && (
+        <p className="ov-line__stations">
+          <Glyph name="users" size={16} />
+          <span>
+            {t("office.overview.lines.stations", {
+              active: card.stations.active,
+              max: card.stations.max,
+            })}
+          </span>
+        </p>
+      )}
     </article>
   );
 }

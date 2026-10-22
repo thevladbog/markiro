@@ -510,3 +510,87 @@ describe("the duplicate's steps on the work screen", () => {
     expect(rule(unit, ".work-unit-label__tag")["height"]).toBe("40px");
   });
 });
+
+describe("the shared shift's card (plan 2b)", () => {
+  const hub = rulesOf("src/floor/shifts/shift-hub.css");
+
+  it("keeps who works the shift on one line, cut with an ellipsis, the full list in its title", () => {
+    const line = rule(hub, ".shift-hub .shift-card__participants");
+    expect([line["white-space"], line["text-overflow"], line["overflow"]]).toEqual([
+      "nowrap",
+      "ellipsis",
+      "hidden",
+    ]);
+    expect(textOf("src/floor/shifts/ShiftCard.tsx")).toContain(
+      'className="shift-card__participants" title={participantsLine}',
+    );
+  });
+
+  it("measures the shared cards on the hub's whole matrix", () => {
+    const cases = textOf("test/harness/station-fit/measure-others.mjs");
+    for (const multi of ["join", "full", "mine", "closed"]) {
+      expect(cases).toContain(`multi=${multi}`);
+    }
+  });
+});
+
+describe("the shared shift's strip (plan 2b)", () => {
+  const work = rulesOf("src/floor/work/work-screen.css");
+
+  it("keeps the age of the host's figures on a short window, where the plan's bar and percent go", () => {
+    expect(rule(work, ".work-shift-band__stale")["white-space"]).toBe("nowrap");
+    expect(
+      rule(work, ".work-shift-band__stale", "@media (max-height: 780px)")["display"],
+    ).toBeUndefined();
+    expect(rule(work, ".work-shift-band__meta", "@media (max-height: 780px)")["display"]).toBe(
+      "none",
+    );
+  });
+
+  it("measures the shared strip on the whole matrix, stale and big", () => {
+    const cases = textOf("test/harness/station-fit/measure-others.mjs");
+    expect(cases).toContain("shared=1");
+    expect(cases).toContain("shared=1&stale=1");
+  });
+});
+
+describe("the close of a part (plan 2b)", () => {
+  const close = rulesOf("src/floor/close/shift-close.css");
+
+  it("sets the part's line in the floor's body face, smaller on a short window", () => {
+    expect(rule(close, ".shift-close__part")["font"]).toBe("var(--floor-body)");
+    expect(rule(close, ".shift-close__part", "@media (max-height: 860px)")["font"]).toBe(
+      "400 15px/20px var(--font-ui)",
+    );
+  });
+
+  it("gives the last closer's line up to the reasons, and keeps a part's six tiles in one row", () => {
+    const short = "@media (max-height: 860px)";
+    expect(
+      rule(close, ".shift-close__body:has(> .shift-close__reasons) > .shift-close__part", short)[
+        "display"
+      ],
+    ).toBe("none");
+    expect(rule(close, ".shift-close__facts:has(> :nth-child(7))")["grid-template-columns"]).toBe(
+      "repeat(auto-fit, minmax(112px, 1fr))",
+    );
+  });
+
+  it("measures every part panel on the whole matrix", () => {
+    const cases = textOf("test/harness/station-fit/measure-screens.mjs");
+    for (const variant of [
+      "part",
+      "part-last",
+      "part-offline",
+      "part-pallet",
+      "queued",
+      "waiting",
+      "shift_closed",
+      "reason_missing",
+      "refused",
+      "unknown",
+    ]) {
+      expect(cases).toContain(`variant=${variant}"`);
+    }
+  });
+});

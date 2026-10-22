@@ -994,7 +994,9 @@ describe("printing a unit's label again", () => {
   it("of a shift this station closed is refused in its own words, nothing written", async () => {
     const at = await station({ verification: "none" });
     const done = await sendUnitLabel(at.print, await accept(at), OPERATOR_ID);
-    await expect(closeShift(closeContext(at), "material_shortage")).resolves.toMatchObject({
+    await expect(
+      closeShift(closeContext(at), "material_shortage", [], false),
+    ).resolves.toMatchObject({
       kind: "closed",
     });
     const before = counts(at.db);
@@ -1024,10 +1026,12 @@ describe("the close of a shift with its unit labels", () => {
       it(`${policy}: is blocked while a label is ${state}, by its summary`, async () => {
         const at = await station({ verification: policy });
         await reach(at, state);
-        await expect(closeShift(closeContext(at), "material_shortage")).resolves.toEqual({
-          kind: "blocked",
-          blocker: { kind: "label_unresolved" },
-        });
+        await expect(closeShift(closeContext(at), "material_shortage", [], false)).resolves.toEqual(
+          {
+            kind: "blocked",
+            blocker: { kind: "label_unresolved" },
+          },
+        );
         expect(rows(at.db, "SELECT local_state FROM floor_shifts")).toEqual([
           { local_state: null },
         ]);
@@ -1059,7 +1063,9 @@ describe("the close of a shift with its unit labels", () => {
             return at.local.transaction(statements);
           },
         };
-        await expect(closeShift(closeContext(at, local), "material_shortage")).resolves.toEqual({
+        await expect(
+          closeShift(closeContext(at, local), "material_shortage", [], false),
+        ).resolves.toEqual({
           kind: "stale",
         });
         expect(injected).toBe(true);
@@ -1080,7 +1086,7 @@ describe("the close of a shift with its unit labels", () => {
       const at = await station({ verification: policy });
       await reach(at, state);
       await expect(
-        closeShift(closeContext(at), "material_shortage"),
+        closeShift(closeContext(at), "material_shortage", [], false),
         `${policy}/${state}`,
       ).resolves.toMatchObject({ kind: "closed" });
     }

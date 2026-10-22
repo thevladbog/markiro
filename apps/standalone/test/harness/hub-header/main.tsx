@@ -10,6 +10,8 @@ import { Alert } from "@markiro/ui";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { HostStatus } from "../../../src/host/protocol.js";
+import type { ShiftParticipant } from "../../../src/host/protocol.js";
+import type { Participation } from "../../../src/floor/shifts/shift-participation.js";
 import type { LocalExecutor } from "../../../src/local/executor.js";
 import { FloorStatusBar } from "../../../src/floor/FloorStatusBar.js";
 import { ShiftHubView } from "../../../src/floor/shifts/ShiftHub.js";
@@ -23,7 +25,8 @@ import { UNSENT_COUNT_SQL } from "../../../src/floor/outbox-status.js";
  * the floor frame's real wrapper markup, with a fake local database and fixed fixtures, for the
  * measurement in `measure.mjs` and for screenshots. Query: `view` (hub | work | signin), `shifts`
  * (0..4), `page`, `offline`, `long` (long names), `queue`, `rejected`, `printer`
- * (ok | error | none), `scanner` (ok | partial | off), `photo`, `theme`.
+ * (ok | error | none), `scanner` (ok | partial | off), `photo`, `theme`, `multi` (join | full | mine | closed: the first card as a shift several
+ * devices work, plan 2b).
  */
 const query = new URLSearchParams(window.location.search);
 const view = query.get("view") ?? "hub";
@@ -35,6 +38,7 @@ const rejected = Number(query.get("rejected") ?? "0");
 const printer = query.get("printer") ?? "ok";
 const scanner = query.get("scanner") ?? "ok";
 const photoKind = query.get("photo") ?? "none";
+const multi = query.get("multi") ?? "";
 
 function drawPhoto(kind: string): { media: string; base64: string } | null {
   if (kind === "none") return null;
@@ -193,9 +197,78 @@ const ALL: ShiftCopy[] = [
 ];
 const LONG_NAME =
   "Напиток безалкогольный сильногазированный «Байкал» со вкусом хвои и лимона в стеклянной бутылке 0,5 л";
-const shown = ALL.slice(0, shiftCount).map((c, i) =>
-  long && i === 0 ? { ...c, productName: LONG_NAME } : c,
-);
+/** A participant row of the shared first card. */
+function row(
+  deviceId: string,
+  deviceName: string,
+  state: ShiftParticipant["state"],
+  deviceKind: ShiftParticipant["deviceKind"] = "station",
+): ShiftParticipant {
+  return {
+    deviceId,
+    deviceKind,
+    deviceName,
+    state,
+    firstEnteredAt: "2026-10-08T06:02:00Z",
+    joinedAt: "2026-10-08T06:02:00Z",
+    leftAt: null,
+    closedAt: state === "closed" ? "2026-10-08T09:00:00Z" : null,
+    closedBy: state === "closed" ? "device" : null,
+    closedActualQty: null,
+    closedReasonCode: null,
+    lateDataAt: null,
+    lastSeenAt: "2026-10-08T09:41:00Z",
+  };
+}
+
+/** The first card's participants for `multi`, or `null` (stage 2a's card). */
+function sharedFirst(kind: string): Participation | null {
+  const other = row(
+    "other",
+    long ? "Станция упаковки № 3 · Линия розлива сидра (цех 2)" : "Станция 2",
+    "active",
+  );
+  const handheld = row(
+    "tsd",
+    long ? "ТСД Urovo DT50 у паллетной зоны склада" : "ТСД 1",
+    "active",
+    "handheld",
+  );
+  const rows =
+    kind === "join"
+      ? [other]
+      : kind === "full"
+        ? [other, handheld]
+        : kind === "mine"
+          ? [row("dev", "Станция 1", "active"), other, handheld]
+          : kind === "closed"
+            ? [row("dev", "Станция 1", "closed"), other]
+            : null;
+  if (rows === null) return null;
+  return {
+    shiftId: "ОКТ26-004",
+    maxStations: kind === "mine" ? 3 : 2,
+    myState: kind === "mine" ? "active" : kind === "closed" ? "closed" : null,
+    participants: rows,
+    totals: { accepted: 840, boxesClosed: 70, pallets: 0, asOf: "2026-10-08T09:41:07Z" },
+    byDevice: rows.map((one) => ({
+      deviceId: one.deviceId,
+      accepted: 280,
+      boxesClosed: 23,
+      pallets: 0,
+    })),
+    asOf: "2026-10-08T09:41:07Z",
+    leaveRequestedAt: null,
+    joinedRev: kind === "mine" || kind === "closed" ? 12 : null,
+  };
+}
+const first = sharedFirst(multi);
+// Joining or a full line: the first card is another station's shift this station never entered.
+const foreign = multi === "join" || multi === "full" || multi === "closed";
+const shown = ALL.slice(0, shiftCount).map((c, i) => {
+  const named = long && i === 0 ? { ...c, productName: LONG_NAME } : c;
+  return foreign && i === 0 ? { ...named, ownerDeviceId: "other", entered: false } : named;
+});
 const accepted = new Map<string, number>([
   ["ОКТ26-004", 840],
   ["ОКТ26-003", 2400],
@@ -205,6 +278,7 @@ const copies: HubCopies = {
   copies: shown,
   refused: new Map(),
   accepted,
+  participation: first === null ? new Map() : new Map([["ОКТ26-004", first]]),
 };
 
 const LINK: HostStatus = {
@@ -425,7 +499,8 @@ createRoot(document.getElementById("root")!).render(<Page />);
       // A photo with its own background fills the panel; a cut-out and the monogram stand on the
       // brand gradient (owner, 2026-10-20).
       const face = getComputedStyle(photo);
-      const fills = photoKind === "opaque" || photoKind === "jpeg";
+      // `png` is the harness's opaque white PNG (only `transparent` is a cut-out).
+      const fills = photoKind === "opaque" || photoKind === "png" || photoKind === "jpeg";
       const backing = photo.getAttribute("data-photo-backing");
       if (backing !== (fills ? "none" : "gradient"))
         problems.push(`the product panel's backing is ${backing}`);

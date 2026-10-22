@@ -726,8 +726,9 @@ describe("the work screen never lets a full box take another code", () => {
     // operator closes the message nothing holds the full box any more.
     let reads = 0;
     const local: LocalExecutor = {
+      // The shared-shift figures' cache read (plan 2b) is not the entry's first read.
       query: (sql, params, row) =>
-        (reads += 1) === 1
+        !sql.includes("floor_shift_participation") && (reads += 1) === 1
           ? Promise.reject(new LocalDbError("statement_failed", "disk busy"))
           : at.local.query(sql, params, row),
       transaction: (statements) => at.local.transaction(statements),
@@ -791,8 +792,9 @@ describe("the work screen never lets a full box take another code", () => {
     let reads = 0;
     let failing = true;
     const local: LocalExecutor = {
+      // The shared-shift figures' cache read (plan 2b) is not the entry's first read.
       query: (sql, params, row) =>
-        (reads += 1) === 1
+        !sql.includes("floor_shift_participation") && (reads += 1) === 1
           ? Promise.reject(new LocalDbError("statement_failed", "disk busy"))
           : at.local.query(sql, params, row),
       transaction: (statements) =>

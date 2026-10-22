@@ -86,11 +86,18 @@ async function finished(
   const job = await readPrintJob(at.local, PAIRING, `job-${serial}`);
   if (job === null) throw new Error("no job");
   await sendLabelJob(resolveContext(at.local, manualRuntime(fakeHardware().hardware).runtime), job);
-  const result = await closeShift(context, "production_defect");
+  const result = await closeShift(context, "production_defect", [], false);
   if (result.kind !== "closed") throw new Error(result.kind);
   at.db
     .prepare("UPDATE outbox SET outcome = ?, acked_at = ? WHERE shift_id = ?")
     .run(outcome, ackedAt, shift.id);
+  // The cache of the shift's shared figures (plan 2b) goes with the shift's copy.
+  at.db
+    .prepare(
+      "INSERT INTO floor_shift_participation (host_id, device_id, shift_id, max_stations, " +
+        "participants, totals, by_device, as_of, seen_at) VALUES (?, ?, ?, 1, '[]', '{}', '[]', ?, 0)",
+    )
+    .run(PAIRING.hostId, PAIRING.deviceId, shift.id, ackedAt);
   if (outcome === "accepted") {
     at.db.prepare("UPDATE floor_shifts SET local_state = 'closed' WHERE id = ?").run(shift.id);
   }
@@ -185,6 +192,7 @@ const NONE = {
   floor_boxes: 0,
   floor_pallets: 0,
   floor_unit_labels: 0,
+  floor_shift_participation: 0,
   outbox: 0,
 };
 const WHOLE = {
@@ -197,6 +205,7 @@ const WHOLE = {
   floor_boxes: 1,
   floor_pallets: 0,
   floor_unit_labels: 0,
+  floor_shift_participation: 1,
   outbox: 5,
 };
 
@@ -659,9 +668,12 @@ describe("the retention of a shift's records on the station", () => {
     const [pallet] = rows(at.db, "SELECT id FROM floor_pallets");
     const context = palletContext(at);
     await disassemblePallet(context, String(pallet?.["id"]), { code: "wrong_product", text: null });
-    const result = await closeShift(context, "production_defect", [
-      openPalletGuard(PAIRING, at.shift.copy.id),
-    ]);
+    const result = await closeShift(
+      context,
+      "production_defect",
+      [openPalletGuard(PAIRING, at.shift.copy.id)],
+      false,
+    );
     if (result.kind !== "closed") throw new Error(result.kind);
     at.db.prepare("UPDATE outbox SET outcome = 'accepted', acked_at = ?").run(CUTOFF);
     at.db.prepare("UPDATE floor_shifts SET local_state = 'closed'").run();

@@ -14,6 +14,8 @@ export interface RevokeDeviceDialogProps {
    * which then has to be paired again. Nothing stops it; the dialog says so.
    */
   own: boolean;
+  /** The active shifts in which the device has an open part; empty claims nothing. */
+  openShifts?: readonly string[];
   onClose: () => void;
   onRevoked: (device: DeviceRecord) => void;
 }
@@ -23,7 +25,13 @@ export interface RevokeDeviceDialogProps {
  * office sessions end. There is no way back; the device pairs again as a
  * new one.
  */
-export function RevokeDeviceDialog({ device, own, onClose, onRevoked }: RevokeDeviceDialogProps) {
+export function RevokeDeviceDialog({
+  device,
+  own,
+  openShifts = [],
+  onClose,
+  onRevoked,
+}: RevokeDeviceDialogProps) {
   const { t } = useTranslation();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   const revoke = useOfficeMutation((api, token, _variables: void) =>
@@ -56,6 +64,9 @@ export function RevokeDeviceDialog({ device, own, onClose, onRevoked }: RevokeDe
           name: device.name,
         })}
       </p>
+      {openShifts.length > 0 && (
+        <p>{t("office.devices.revokeOpenShifts", { shifts: openShifts.join(", ") })}</p>
+      )}
     </FormDialog>
   );
 }

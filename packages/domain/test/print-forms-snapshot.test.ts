@@ -178,4 +178,16 @@ describe("printable forms characterisation lock", () => {
       "fixtures/print-forms/shift-task-form-validation.html",
     );
   });
+
+  it("freezes the shift blank of the autonomous product, where each device closes its part (aggregation)", async () => {
+    await expect(
+      renderShiftTaskFormHtml({ ...TASK, closingRule: "each_part" }),
+    ).toMatchFileSnapshot("fixtures/print-forms/shift-task-form-aggregation-each-part.html");
+  });
+
+  it("freezes the shift blank of the autonomous product, where each device closes its part (validation)", async () => {
+    await expect(
+      renderShiftTaskFormHtml({ ...VALIDATION_TASK, closingRule: "each_part" }),
+    ).toMatchFileSnapshot("fixtures/print-forms/shift-task-form-validation-each-part.html");
+  });
 });

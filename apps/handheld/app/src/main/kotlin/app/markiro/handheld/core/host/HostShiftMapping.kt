@@ -21,7 +21,8 @@ private fun JsonObject.number(key: String): Int? = (this[key] as? JsonPrimitive)
 fun DeviceShiftDto.toShiftDto(lineName: String?) = ShiftDto(
     id = id,
     number = number,
-    status = status,
+    // This device closed its part: for it the shift is closed (it must not be worked, and the list and the hub card drop it), whatever the others do.
+    status = if (myState == "closed") "closed" else status,
     mode = mode,
     validationPrint = ValidationPrintDto("none"),
     productId = productId,

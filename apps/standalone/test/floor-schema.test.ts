@@ -278,10 +278,18 @@ describe("the station's own production tables (migration 0006)", () => {
       z.object({ tableName: z.string(), columnName: z.string(), required: z.number() }),
     );
     // `floor_restore_epochs` (migration `0009`) is a pairing's own
-    // bookkeeping that a forget empties, tagged the same way.
-    // Installation generation metadata is retained per host, independently of pairing.
+    // bookkeeping that a forget empties, tagged the same way; so is the cache of
+    // a shared shift's participants and totals (`floor_shift_participation`,
+    // migration `0022`, plan 2b). Installation generation metadata is retained
+    // per host, independently of pairing.
     expect(columns).toEqual(
-      [...DEVICE_TABLES, ...WAREHOUSE_TABLES, "floor_restore_epochs", "installation_dataset_epochs"]
+      [
+        ...DEVICE_TABLES,
+        ...WAREHOUSE_TABLES,
+        "floor_restore_epochs",
+        "floor_shift_participation",
+        "installation_dataset_epochs",
+      ]
         .sort()
         .flatMap((tableName) =>
           tableName === "installation_dataset_epochs"
@@ -1356,6 +1364,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       ],
       ["outbox", "outbox_shift (shift_id=? AND host_id=? AND device_id=?"],
       ["floor_unit_labels", "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?"],
+      // The primary key (host, device, shift) is the table's only index and covers the delete.
+      [
+        "floor_shift_participation",
+        "sqlite_autoindex_floor_shift_participation_1 (host_id=? AND device_id=? AND shift_id=?",
+      ],
     ]);
     for (const table of RETAINED_TABLES) {
       const steps = plan(purgeTableSql(table)).split("\n");
@@ -1417,7 +1430,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       REFUSED_CLOSES_SQL,
       ...RETAINED_TABLES.map(purgeTableSql),
     ];
-    expect(new Set(retention).size).toBe(12);
+    expect(new Set(retention).size).toBe(13);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
   });
 

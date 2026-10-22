@@ -20,6 +20,9 @@ import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import java.io.IOException
 
+private const val LINE_FULL_CODE = "shift_line_full"
+private const val BUSY_CODE = "shift_busy"
+
 /** Which call the server refused: entering the shift, or downloading its bundle. */
 enum class EnterStep { ENTER, BUNDLE }
 
@@ -28,6 +31,15 @@ sealed interface EnterResult {
     data object UpdateRequired : EnterResult
     data object Closed : EnterResult
     data object Unavailable : EnterResult
+
+    /** Every slot of the line is held by another device (`409 shift_line_full`): the two numbers are the host's. */
+    data class LineFull(val active: Int, val maxStations: Int) : EnterResult
+
+    /** An older host (before several devices in one shift) says another device works this shift (`409 shift_busy`). */
+    data object Busy : EnterResult
+
+    /** This device closed its part of the shift: the host reads it back, nothing is entered and no bundle is fetched. */
+    data object PartClosed : EnterResult
 
     /**
      * The server refused for a reason this build cannot name. It carries the
@@ -131,6 +143,8 @@ class ShiftRepository(
     private val json: Json,
     private val pool: SsccPool,
     private val blocks: SsccBlockApplier = SsccBlockApplier(pool),
+    /** The leaves still owed to a host live here (plan 2b); a cloud device never writes one. */
+    private val participation: app.markiro.handheld.core.host.ShiftParticipationStore = app.markiro.handheld.core.host.ShiftParticipationStore(db),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     constructor(
@@ -140,7 +154,7 @@ class ShiftRepository(
         pool: SsccPool,
         blocks: SsccBlockApplier = SsccBlockApplier(pool),
         clock: () -> Long = System::currentTimeMillis,
-    ) : this(CloudBackend(api), db, json, pool, blocks, clock)
+    ) : this(CloudBackend(api), db, json, pool, blocks, app.markiro.handheld.core.host.ShiftParticipationStore(db), clock)
 
     fun boxSerialTopUp(
         shiftId: String,
@@ -210,9 +224,20 @@ class ShiftRepository(
         val entered = try {
             backend.enter(shiftId, ShiftEntryRequest(entryMethod))
         } catch (e: HttpException) {
-            return refusal(EnterStep.ENTER, e)
+            val refused = refusal(EnterStep.ENTER, e)
+            if (refused is EnterResult.LineFull && cached != null && continuesOwnWork(cached)) return continueOnFullLine(cached)
+            return refused
         } catch (_: IOException) {
             return offline(cached)
+        }
+        // A host that read a closed part back answers the shift as closed for this device: working it again would only make late facts,
+        // and asking for the bundle would enter it a second time. Nothing that starts work is written.
+        if (entered.status == "closed") {
+            db.recovery.commit {
+                db.shiftDao().setStatus(shiftId, "closed")
+                db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
+            }
+            return EnterResult.PartClosed
         }
         val bundle = try {
             backend.bundle(shiftId)
@@ -266,13 +291,40 @@ class ShiftRepository(
      * stands in front of a shift the screen insists is closed.
      */
     private fun refusal(step: EnterStep, e: HttpException): EnterResult {
-        val code = errorCode(e)
+        val body = errorBody(e)
+        val code = body?.code
         return when {
             e.code() == 409 && code == UPDATE_REQUIRED_CODE -> EnterResult.UpdateRequired
+            e.code() == 409 && code == LINE_FULL_CODE -> {
+                val active = body?.active
+                val max = body?.maxStations
+                // A host that names the refusal but not its numbers still says the shift cannot be joined now.
+                if (active != null && max != null) EnterResult.LineFull(active, max) else EnterResult.Busy
+            }
+            e.code() == 409 && code == BUSY_CODE -> EnterResult.Busy
             e.code() == 409 && code == null -> EnterResult.Closed
             e.code() in 400..499 -> EnterResult.Refused(step, e.code(), code)
             else -> EnterResult.Unavailable
         }
+    }
+
+    /**
+     * A full line never stops local production (final review I4, as on the station): the shift this device is already working, with its bundle
+     * here, goes on as offline work does. That happens when the device re-entered offline while its host part was left and another device took
+     * the slot. A fresh entry still gets the refusal.
+     */
+    private suspend fun continuesOwnWork(cached: ShiftEntity): Boolean =
+        cached.bundleFetchedAt != null && db.deviceConfigDao().get()?.activeShiftId == cached.id
+
+    /**
+     * Enters offline, then reads the list once (the host just answered, so it is there) so the host's own numbers are kept for the notice
+     * «Линия занята: N из M» (`SharedShiftRules.lineFull`) when the work screen opens; the heartbeat retries the rejoin on every beat and the
+     * notice goes when it gets the slot back. A failed read changes nothing: the next beat brings the numbers.
+     */
+    private suspend fun continueOnFullLine(cached: ShiftEntity): EnterResult {
+        enterOffline(cached)
+        refreshListOwned()
+        return EnterResult.Ok
     }
 
     /** No route to the server: a shift whose bundle is already on the device can still be worked. */
@@ -314,7 +366,36 @@ class ShiftRepository(
         }
     }
 
-    suspend fun leave(shiftId: String) = db.recovery.commit { leaveOwned(shiftId) }
+    suspend fun leave(shiftId: String) {
+        // A cloud backend answers `cloudApi()`; the host does not. Only a host has a slot to free.
+        val owesHost = backend.cloudApi() == null
+        val marker = db.recovery.commit {
+            leaveOwned(shiftId)
+            // Written with the local mark: a crash or a blocked recovery between the two never loses a leave the host is owed.
+            if (owesHost) participation.markLeavePending(shiftId) else null
+        }
+        if (marker != null) releaseSlot(shiftId, marker)
+    }
+
+    /**
+     * Best effort and after the local mark, which is what the operator sees; production data is never touched. Only what the host SETTLED clears the
+     * marker (compare-and-clear on the one written above, so a pause asked again meanwhile stays owed): an answer whose part is `left` or `closed`,
+     * or a definite refusal (`shift_not_entered`, `not_found`, `validation_failed`). An answer that still says `active` means the host no-oped a stale
+     * token (an automatic rejoin re-entered the part): the leave stays owed and the heartbeat sends it again with the fresh token. An answer that names
+     * no state (`null`: no host call was made) settles nothing either (final review C1). Anything else (unreachable, a timeout, a 5xx) stays owed too.
+     */
+    private suspend fun releaseSlot(shiftId: String, marker: String) {
+        try {
+            val state = db.recovery.work { backend.leave(shiftId) }
+            if (state == "left" || state == "closed") participation.clearLeavePending(shiftId, marker)
+        } catch (e: HttpException) {
+            if (app.markiro.handheld.core.host.OwedLeaveRefusals.settles(e)) participation.clearLeavePending(shiftId, marker)
+        } catch (e: IOException) {
+            if (app.markiro.handheld.core.host.OwedLeaveRefusals.settles(e)) participation.clearLeavePending(shiftId, marker)
+        } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) {
+            // The device is being paired again: the marker goes with the dataset if that replaces it, and stays owed otherwise.
+        }
+    }
 
     /**
      * A local mark only. The hub card and the list's «Продолжить» follow
@@ -327,6 +408,7 @@ class ShiftRepository(
         db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
     }
 
-    private fun errorCode(e: HttpException): String? =
-        runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code }.getOrNull()
+    /** The body is read once (a response body can be consumed only once): the code and, for a full line, its two numbers. */
+    private fun errorBody(e: HttpException): ErrorBody? =
+        runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()) }.getOrNull()
 }
