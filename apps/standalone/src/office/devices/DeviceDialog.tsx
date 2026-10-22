@@ -15,6 +15,7 @@ import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
+import { isSharedShift } from "../shifts/participation.js";
 import { lineLabel } from "./line-label.js";
 import { stationShift } from "./station-shift.js";
 
@@ -42,7 +43,8 @@ export interface DeviceDialogProps {
  * active ones; a station's current line stays on the list even when it has
  * been archived since, and keeping it sends nothing for the line. A station
  * with an active shift may move (owner question В9, option А): the dialog
- * says what happens to the shift once another line is chosen, by the host's
+ * says what happens to the shift once another line is chosen (a shift several devices work is
+ * said apart: the moved station's part stays open and the shift closes only whole), by the host's
  * list of shifts, read when the dialog opens.
  */
 export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogProps) {
@@ -140,9 +142,11 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
         {running !== undefined && moving && (
           <p className="office-note">
             {t(
-              watch("lineId") === ""
-                ? "office.devices.shiftOnStationNoLine"
-                : "office.devices.shiftOnStation",
+              isSharedShift(running)
+                ? "office.devices.shiftOnStationShared"
+                : watch("lineId") === ""
+                  ? "office.devices.shiftOnStationNoLine"
+                  : "office.devices.shiftOnStation",
               { number: running.number },
             )}
           </p>

@@ -13,6 +13,8 @@ import app.markiro.handheld.core.km.feedTail
 import app.markiro.handheld.core.network.ParticipantDto
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.sync.SyncState
+import app.markiro.handheld.core.util.TimeText
+import app.markiro.handheld.feature.shift.SharedStrip
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -76,6 +78,72 @@ class WorkScreenTest {
         compose.onNodeWithContentDescription("Ещё").performClick()
         compose.onNodeWithText("Закрыть смену").performClick()
         assertEquals(true, closed)
+    }
+
+    @Test
+    fun aSharedShiftShowsTheShiftTotalOutOfThePlanAndTheDevicesOwnPart() {
+        val numbers = NumberFormat.getIntegerInstance()
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(total = 547, plan = 1200, thisTerminal = 427, strip = SharedStrip(mine = 427, total = 547, plan = 1200, active = 2, maxStations = 3, staleAtMillis = null)),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Всего в смене").assertIsDisplayed()
+        compose.onNodeWithText("${numbers.format(547)} из ${numbers.format(1200)}").assertIsDisplayed()
+        compose.onNodeWithText("Моя смена").assertIsDisplayed()
+        compose.onNodeWithText("427").assertIsDisplayed()
+        compose.onNodeWithText("Работают: 2 из 3").assertIsDisplayed()
+        compose.onNodeWithText("данные на", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun anOfflineStripCarriesTheTimeOfItsLastFigures() {
+        val at = java.time.Instant.parse("2026-10-08T09:41:07Z").toEpochMilli()
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(strip = SharedStrip(mine = 427, total = 547, plan = null, active = 1, maxStations = 2, staleAtMillis = at)),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("данные на ${TimeText.hhmm(at)}").assertIsDisplayed()
+    }
+
+    @Test
+    fun aFullLineIsSaidOnTheWorkScreenAndWorkGoesOn() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(strip = SharedStrip(mine = 4, total = 50, plan = null, active = 2, maxStations = 2, staleAtMillis = null, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2))),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Линия занята: 2 из 2 — продолжите работу, место вернётся, когда освободится").assertIsDisplayed()
+    }
+
+    @Test
+    fun aSharedShiftsMenuClosesOnlyThePart() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(ui.copy(strip = SharedStrip(1, 2, null, 2, 3, staleAtMillis = null)), WorkCallbacks())
+            }
+        }
+        compose.onNodeWithContentDescription("Ещё").performClick()
+        compose.onNodeWithText("Закрыть свою часть").assertIsDisplayed()
+        compose.onNodeWithText("Закрыть смену").assertDoesNotExist()
+    }
+
+    @Test
+    fun aNonSharedShiftKeepsItsOwnLabels() {
+        compose.setContent { MarkiroTheme { WorkScreen(ui, WorkCallbacks()) } }
+        compose.onNodeWithText("Этот ТСД").assertIsDisplayed()
+        compose.onNodeWithText("Всего в смене").assertDoesNotExist()
+        compose.onNodeWithText("Моя смена").assertDoesNotExist()
     }
 
     @Test

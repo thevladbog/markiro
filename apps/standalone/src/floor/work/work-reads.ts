@@ -55,6 +55,33 @@ export const SHIFT_CODES_SQL =
 const countRow = z.object({ n: z.number().int().nonnegative() });
 const ssccRow = z.object({ sscc: z.string() });
 
+/**
+ * The codes this station holds in a shift that the host does not count for it (plan 2b, final
+ * review I2): the scan's record was answered `conflict` (an earlier scan of another device owns
+ * the code) or `rejected`, or the host displaced it since (`floor_displacements`, learned at the
+ * next notice read). The code stays in `floor_codes` (its box, its digest), so the whole shift's
+ * count (`sharedCount`) takes these off this station's own. The codes of the shift through
+ * `floor_codes_shift`, each record by its own key. Parameters: host id, device id, shift id.
+ */
+export const SHIFT_LOST_CODES_SQL =
+  "SELECT count(*) AS n FROM floor_codes c WHERE c.host_id = ? AND c.device_id = ? " +
+  "AND c.shift_id = ? AND (EXISTS (SELECT 1 FROM outbox o WHERE o.id = c.scan_id " +
+  "AND o.outcome IN ('conflict', 'rejected')) OR EXISTS (SELECT 1 FROM floor_displacements d " +
+  "WHERE d.host_id = c.host_id AND d.device_id = c.device_id AND d.record_id = c.scan_id))";
+
+export async function readLostCodes(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+): Promise<number> {
+  const [row] = await local.query(
+    SHIFT_LOST_CODES_SQL,
+    [pairing.hostId, pairing.deviceId, shiftId],
+    countRow,
+  );
+  return row?.n ?? 0;
+}
+
 export async function readWorkTotals(
   local: LocalExecutor,
   pairing: Pairing,

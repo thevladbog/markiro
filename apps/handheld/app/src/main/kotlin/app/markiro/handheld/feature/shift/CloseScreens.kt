@@ -62,11 +62,11 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
         when (step) {
             CloseStep.Loading -> FullScreenState(Icons.Outlined.Sync, "", "", tone = Tone.Info)
             is CloseStep.Confirm -> {
-                AppBar(stringResource(R.string.work_close), cb.onCancel)
+                AppBar(stringResource(if (step.preview.shared) R.string.work_close_part else R.string.work_close), cb.onCancel)
                 // An unresolved duplicate is said out loud and closes anyway.
                 // Blocking a shift close on a printer would stop a line over a
                 // sticker; the events still sync afterwards.
-                val text = stringResource(R.string.close_confirm_text, step.preview.accepted, step.preview.errors, step.preview.duplicates) +
+                val text = confirmText(step.preview) +
                     if (step.preview.outstandingDuplicates > 0) {
                         "\n\n" + stringResource(R.string.work_close_duplicates_outstanding, step.preview.outstandingDuplicates)
                     } else {
@@ -74,7 +74,7 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
                     }
                 FullScreenState(
                     Icons.Outlined.Factory,
-                    stringResource(R.string.close_confirm_title),
+                    stringResource(if (step.preview.shared) R.string.close_part_confirm_title else R.string.close_confirm_title),
                     text,
                     primary = StateAction(stringResource(R.string.close_action), cb.onConfirm),
                     secondary = StateAction(stringResource(R.string.common_cancel), cb.onCancel),
@@ -83,7 +83,7 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
             is CloseStep.Reason -> {
                 AppBar(stringResource(R.string.close_reason_title), cb.onCancel)
                 Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                    Text(stringResource(R.string.close_reason_text, step.preview.plan ?: 0, step.preview.accepted), style = t.caption, color = c.fg3)
+                    Text(stringResource(R.string.close_reason_text, step.preview.plan ?: 0, step.preview.reasonBasis ?: step.preview.accepted), style = t.caption, color = c.fg3)
                     ShiftCloser.REASONS.forEach { code ->
                         ReasonRow(stringResource(reasonLabel(code)), selected = step.selected == code) { cb.onSelectReason(code) }
                     }
@@ -97,7 +97,9 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
                 tone = Tone.Info,
             )
             is CloseStep.Summary -> {
-                AppBar(stringResource(R.string.close_summary_title))
+                // A shared shift's close queued or answered «part closed» never claims the SHIFT is closed: this device's part is (locally, a fact), the shift is the host's to close.
+                val partTitle = step.outcome == CloseOutcome.PART_CLOSED || (step.part && step.outcome == CloseOutcome.PENDING)
+                AppBar(stringResource(if (partTitle) R.string.close_summary_part_title else R.string.close_summary_title))
                 Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
                     SummaryRow(stringResource(R.string.close_summary_accepted), step.accepted.toString())
                     SummaryRow(stringResource(R.string.close_summary_errors), step.errors.toString())
@@ -113,6 +115,8 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
                         CloseOutcome.ACCEPTED -> R.string.close_summary_title to Tone.Ok
                         CloseOutcome.CONFLICT -> R.string.close_summary_conflict to Tone.Warn
                         CloseOutcome.PENDING -> R.string.close_summary_pending to Tone.Info
+                        CloseOutcome.PART_CLOSED -> R.string.close_summary_part_closed to Tone.Ok
+                        CloseOutcome.REASON_MISSING -> R.string.close_summary_reason_missing to Tone.Warn
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
                         Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = c.tone(noteTone).fg)
@@ -151,5 +155,16 @@ private fun SummaryRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MarkiroTheme.type.body, color = c.fg1)
         Text(value, style = MarkiroTheme.type.code.copy(fontSize = 18.sp), color = c.fg1)
+    }
+}
+
+@Composable
+private fun confirmText(p: ShiftCloser.Preview): String {
+    val others = p.othersOpen
+    return when {
+        !p.shared -> stringResource(R.string.close_confirm_text, p.accepted, p.errors, p.duplicates)
+        others == null -> stringResource(R.string.close_part_confirm_text_unknown, p.accepted, p.errors, p.duplicates)
+        others > 0 -> stringResource(R.string.close_part_confirm_text_others, p.accepted, p.errors, p.duplicates, others)
+        else -> stringResource(R.string.close_part_confirm_text_last, p.accepted, p.errors, p.duplicates)
     }
 }

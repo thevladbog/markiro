@@ -217,8 +217,10 @@ import {
   type ProductGroup,
   type ProductUpdate,
   type ShiftClose,
+  type ShiftCloseReasonSet,
   type ShiftCreate,
   type ShiftEnter,
+  type ShiftLeave,
   type ShiftExportRecord,
   type ShiftExportRows,
   type BoxReportRows,
@@ -457,6 +459,15 @@ export interface HostApi {
   deleteShift: (token: string, id: string) => Promise<void>;
   closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
   /**
+   * `PUT …/close-reason` (plan 2b): the reason of a shared shift its devices closed without one;
+   * `conflict` on `close_reason_not_missing` once it is set. Administrators and technologists.
+   */
+  setShiftCloseReason: (
+    token: string,
+    id: string,
+    set: ShiftCloseReasonSet,
+  ) => Promise<OfficeShift>;
+  /**
    * What the shift's exports are built from, in one snapshot of the host
    * (plan ЧЗ); every office role. A planned shift answers with empty lists.
    */
@@ -652,6 +663,15 @@ export interface HostApi {
    * validation shift to a station that does not name `validation-v1`.
    */
   enterShift: (id: string, enter: ShiftEnter) => Promise<EnteredShift>;
+  /**
+   * Pauses this station's part of a shift it works (plan 2b, protocol 7): the host frees its slot
+   * of the line (`left`) and answers the shift as this station sees it, without the snapshot.
+   * `leave` is this station's own `joinedRev` (`ShiftLeave`, `shift-leave.json`) from its last
+   * entry answer; a token that is no longer the host's (a later entry stamped a new one) changes
+   * nothing and the answer's `myState` stays `active`. `null` sends no body (no token known).
+   * Repeating it changes nothing; `conflict` `shift_not_entered` for a shift it never entered.
+   */
+  leaveShift: (id: string, leave: ShiftLeave | null) => Promise<DeviceShift>;
   /**
    * A block of SSCC serials for this station; the same `requestId` answers the
    * same block, and the same id with another prefix is `validation_failed` on
@@ -1200,6 +1220,13 @@ export function createHostApi(client: HostClient): HostApi {
         body: enter,
         schema: enteredShiftSchema,
       }),
+    leaveShift: (id, leave) =>
+      leave === null
+        ? client.request("POST", `/v1/device/shifts/${id}/leave`, { schema: deviceShiftSchema })
+        : client.request("POST", `/v1/device/shifts/${id}/leave`, {
+            body: leave,
+            schema: deviceShiftSchema,
+          }),
     requestSsccBlock: (request) =>
       client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
     checkCode: (codeHash) =>
@@ -1246,6 +1273,12 @@ export function createHostApi(client: HostClient): HostApi {
     closeShift: (token, id, close) =>
       client.request("POST", `/v1/office/shifts/${id}/close`, {
         body: close,
+        officeToken: token,
+        schema: officeShiftSchema,
+      }),
+    setShiftCloseReason: (token, id, set) =>
+      client.request("PUT", `/v1/office/shifts/${id}/close-reason`, {
+        body: set,
         officeToken: token,
         schema: officeShiftSchema,
       }),

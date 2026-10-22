@@ -52,8 +52,14 @@ function plans(db: DatabaseSync): Record<string, string> {
     PURGE_COPY_SQL,
     ...RETAINED_TABLES.map(purgeTableSql),
   ]
-    // The unit labels' table comes with migration `0015` (plan РЕЖ part B), after this one.
-    .filter((sql) => !sql.includes("resolved_at") && !sql.includes("floor_unit_labels"));
+    // The unit labels' table comes with migration `0015` (plan РЕЖ part B), the participation
+    // cache's with `0022` (the shared shift), after this one.
+    .filter(
+      (sql) =>
+        !sql.includes("resolved_at") &&
+        !sql.includes("floor_unit_labels") &&
+        !sql.includes("floor_shift_participation"),
+    );
   return Object.fromEntries(
     statements.map((sql) => [
       sql,

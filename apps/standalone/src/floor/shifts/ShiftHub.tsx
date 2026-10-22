@@ -9,6 +9,7 @@ import type { LicenseRefusal } from "../license.js";
 import { FloorFooter, FloorScreen } from "./FloorScreen.js";
 import { hubLayout, hubPage, type QueueBadge } from "./hub-layout.js";
 import type { ShiftCopy } from "./shift-copies.js";
+import type { Participation } from "./shift-participation.js";
 import { cardAction, ShiftCard } from "./ShiftCard.js";
 import { ShiftPager } from "./ShiftPager.js";
 
@@ -22,6 +23,8 @@ export type HubCopies =
       refused: Map<string, string | null>;
       /** The codes this station holds in the shifts that have a plan (the progress rows). */
       accepted: Map<string, number>;
+      /** What the host's last read said of each shift's participants (plan 2b), by shift id. */
+      participation?: ReadonlyMap<string, Participation>;
     };
 
 export interface ShiftHubViewProps {
@@ -135,7 +138,15 @@ export function ShiftHubView({
                 ? { code: copies.refused.get(copy.id) ?? null }
                 : null
             }
-            action={cardAction(copy, deviceId, online, blocked)}
+            deviceId={deviceId}
+            participation={copies.participation?.get(copy.id) ?? null}
+            action={cardAction(
+              copy,
+              deviceId,
+              online,
+              blocked,
+              copies.participation?.get(copy.id) ?? null,
+            )}
             busy={busy}
             onAction={() => onChoose(copy)}
           />

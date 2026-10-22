@@ -51,11 +51,14 @@ import {
 import { shiftCardPath } from "./shift-card.js";
 import { ShiftDrawer } from "./ShiftDrawer.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
+import { CloseReasonDialog } from "./CloseReasonDialog.js";
 import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftCreateDrawer } from "./ShiftEditor.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { ShiftSourceLinks } from "./CloudShifts.js";
+import { ShiftMarks } from "./ShiftMarks.js";
+import { isSharedShift } from "./participation.js";
 import { shiftOutput } from "./shift-text.js";
 
 /**
@@ -89,6 +92,7 @@ type ShiftsDialog =
   | { kind: "plan"; shift: OfficeShift }
   | { kind: "delete"; shift: OfficeShift }
   | { kind: "close"; shift: OfficeShift }
+  | { kind: "reason"; shift: OfficeShift }
   | { kind: "totals"; shift: OfficeShift }
   | { kind: "export"; shift: OfficeShift };
 
@@ -395,6 +399,7 @@ export function ShiftsPage() {
             {shift.lateDataAt !== null && (
               <StatusChip phase="attention" label={t("office.shifts.lateData")} />
             )}
+            <ShiftMarks shift={shift} />
             {shift.closeReasonText !== null && (
               <span className="shift-cell__quiet">
                 {t("office.shifts.closedByOffice", { reason: shift.closeReasonText })}
@@ -474,13 +479,25 @@ export function ShiftsPage() {
           });
         }
         if (canPlan && shift.status === "active") {
+          // A shift several devices entered is closed whole: the office says so.
+          const whole = isSharedShift(shift);
           items.push({
             key: "close",
-            label: t("office.shifts.close"),
-            ariaLabel: t("office.shifts.closeNamed", named),
+            label: t(whole ? "office.shifts.closeAll" : "office.shifts.close"),
+            ariaLabel: t(whole ? "office.shifts.closeAllNamed" : "office.shifts.closeNamed", named),
             icon: "stop",
             destructive: true,
             onSelect: () => open({ kind: "close", shift }),
+          });
+        }
+        // A shared shift its devices closed without the reason the plan's gap needed (spec §12.9).
+        if (canPlan && shift.status === "closed" && shift.closeReasonMissing === true) {
+          items.push({
+            key: "reason",
+            label: t("office.shifts.supplyReason"),
+            ariaLabel: t("office.shifts.supplyReasonNamed", named),
+            icon: "pencil",
+            onSelect: () => open({ kind: "reason", shift }),
           });
         }
         if (canPlan && shift.status === "planned") {
@@ -748,6 +765,15 @@ export function ShiftsPage() {
           shift={dialog.shift}
           onClose={() => setDialog(null)}
           onClosed={(shift) => saved(t("office.shifts.closed", { number: shift.number }))}
+          onReload={reload}
+          onOutdated={readAgain}
+        />
+      )}
+      {canPlan && dialog?.kind === "reason" && (
+        <CloseReasonDialog
+          shift={dialog.shift}
+          onClose={() => setDialog(null)}
+          onSaved={(shift) => saved(t("office.shifts.reasonSaved", { number: shift.number }))}
           onReload={reload}
           onOutdated={readAgain}
         />

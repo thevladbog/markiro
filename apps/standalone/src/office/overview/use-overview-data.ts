@@ -28,6 +28,23 @@ export function blockState(...queries: readonly UseQueryResult<unknown, Error>[]
   return "ready";
 }
 
+/**
+ * The host's clock, read with its copies' state (`now`) and again every `OVERVIEW_POLL_MS`: what the
+ * overview and a shift's card measure a device's silence by, never this PC's own clock.
+ */
+export function useHostClock(): UseQueryResult<BackupState, Error> {
+  return useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token), {
+    refetchInterval: OVERVIEW_POLL_MS,
+  });
+}
+
+/** The host's time in ms as of its last answer; `null` while it has not answered, or its last read failed. */
+export function hostNowMs(clock: UseQueryResult<BackupState, Error>): number | null {
+  if (!clock.isSuccess) return null;
+  const ms = Date.parse(clock.data.now);
+  return Number.isNaN(ms) ? null : ms;
+}
+
 export interface OverviewData {
   admin: boolean;
   org: UseQueryResult<OrgProfile, Error>;
@@ -84,9 +101,7 @@ export function useOverviewData(): OverviewData {
     refetchInterval: OVERVIEW_POLL_MS,
     enabled: admin,
   });
-  const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token), {
-    refetchInterval: OVERVIEW_POLL_MS,
-  });
+  const backups = useHostClock();
   const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token));
 
   const staleRead = [shifts, conflicts, backups].some(

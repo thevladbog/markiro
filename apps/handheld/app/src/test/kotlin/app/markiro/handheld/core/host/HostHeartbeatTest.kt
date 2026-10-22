@@ -136,4 +136,24 @@ class HostHeartbeatTest {
         HostHeartbeat(db, monitor, { api }, db.deviceConfigDao(), HostBlockSupplier(db, meta, api, pool, SsccBlockApplier(pool)), meta) { reference.refreshDevice() }.beat()
         assertEquals("line-7", db.deviceConfigDao().get()!!.lineId)
     }
+
+    @Test
+    fun aBeatThatReachedTheHostReadsParticipationAndOneThatDidNotMarksItStale() = runTest {
+        var read = 0
+        var stale = 0
+        fun beat(transport: HostPalletFixtures.Routes) {
+            val api = HostApi(transport)
+            val pool = SsccPool(db)
+            runBlocking {
+                HostHeartbeat(
+                    db, monitor, { api }, db.deviceConfigDao(), HostBlockSupplier(db, meta, api, pool, SsccBlockApplier(pool)), meta,
+                    participation = { read++ }, participationStale = { stale++ },
+                ).beat()
+            }
+        }
+        beat(routes("/v1/hello" to listOf(hello("e1"))))
+        assertEquals(1 to 0, read to stale)
+        beat(routes("/v1/hello" to listOf(HostResult.Failed(TransportFailure.UNREACHABLE))))
+        assertEquals(1 to 1, read to stale)
+    }
 }

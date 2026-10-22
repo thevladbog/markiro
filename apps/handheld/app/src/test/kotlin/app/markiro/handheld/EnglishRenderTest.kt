@@ -4,6 +4,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
@@ -28,6 +30,8 @@ import app.markiro.handheld.feature.inventory.InventoryListUi
 import app.markiro.handheld.feature.inventory.InventoryProgress
 import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
 import app.markiro.handheld.feature.inventory.InventoryWorkScreen
+import app.markiro.handheld.feature.shift.ShiftDialog
+import app.markiro.handheld.feature.shift.ShiftDialogScreen
 import app.markiro.handheld.feature.inventory.InventoryWorkUi
 import app.markiro.handheld.feature.inventory.LeaveStep
 import app.markiro.handheld.core.label.PrinterLanguage
@@ -414,5 +418,86 @@ class EnglishRenderTest {
             }
         }
         assertNoCyrillic()
+    }
+
+    @Test
+    fun theSharedShiftEntryDialogsRenderInEnglish() {
+        // One setContent per test: the dialog is swapped through state.
+        val shown = androidx.compose.runtime.mutableStateOf<ShiftDialog>(ShiftDialog.LineFull(active = 2, maxStations = 2))
+        compose.setContent { MarkiroTheme { ShiftDialogScreen(shown.value, "Line 2", onDismiss = {}, onRetry = {}) } }
+        // Each dialog's own English title and text (final review M6: the old check was true of any screen).
+        val expected = listOf(
+            ShiftDialog.LineFull(active = 2, maxStations = 2) to listOf(
+                "The line is full",
+                "2 of 2 devices are already working on this line. You can join when one of them leaves the shift.",
+            ),
+            ShiftDialog.Busy to listOf("The shift is taken", "Another device works this shift", "Update the server on the site"),
+            ShiftDialog.PartClosed to listOf("Your part is closed", "This device has already closed its part of the shift"),
+        )
+        for ((dialog, texts) in expected) {
+            shown.value = dialog
+            compose.waitForIdle()
+            assertNoCyrillic()
+            for (text in texts) compose.onNodeWithText(text, substring = true).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun aSharedShiftsHubCardRendersInEnglish() {
+        val at = 1_760_000_000_000L
+        val shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1").copy(productName = "Water 0.5 l", lineName = "Line 2", number = "14")
+        compose.setContent {
+            MarkiroTheme {
+                app.markiro.handheld.feature.hub.ActiveShiftCard(
+                    app.markiro.handheld.feature.hub.HubActiveShift(
+                        shift, 547, shared = true, staleAtMillis = at, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2),
+                    ),
+                    onContinue = {},
+                )
+            }
+        }
+        compose.onNodeWithText("In the shift total").assertIsDisplayed()
+        compose.onNodeWithText("data as of ${app.markiro.handheld.core.util.TimeText.hhmm(at)}").assertIsDisplayed()
+        compose.onNodeWithText("On this handheld").assertDoesNotExist()
+        compose.onNodeWithText("The line is full: 2 of 2 — keep working, your place comes back when one frees up").assertIsDisplayed()
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun theSharedShiftStripRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                app.markiro.handheld.feature.work.WorkScreen(
+                    app.markiro.handheld.feature.work.WorkUi(
+                        shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1").copy(productName = "Water 0.5 l", lineName = "Line 2"),
+                        last = null, total = 547, plan = 1200, thisTerminal = 427,
+                        errors = 0, duplicates = 0, feed = emptyList(), sync = app.markiro.handheld.core.sync.SyncState(), reachable = false, team = null,
+                        strip = app.markiro.handheld.feature.shift.SharedStrip(427, 547, 1200, 2, 3, staleAtMillis = 1_760_000_000_000L, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(3, 3)),
+                    ),
+                    app.markiro.handheld.feature.work.WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("The line is full: 3 of 3 — keep working, your place comes back when one frees up").assertIsDisplayed()
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun theSharedCloseRendersInEnglish() {
+        val preview = app.markiro.handheld.feature.shift.ShiftCloser.Preview(120, 1, 0, 1200, reasonRequired = false, alreadyClosed = false, shared = true, othersOpen = 2)
+        val steps = listOf(
+            app.markiro.handheld.feature.shift.CloseStep.Confirm(preview),
+            app.markiro.handheld.feature.shift.CloseStep.Confirm(preview.copy(othersOpen = 0)),
+            app.markiro.handheld.feature.shift.CloseStep.Confirm(preview.copy(othersOpen = null)),
+            app.markiro.handheld.feature.shift.CloseStep.Summary(120, 1, 0, 0, app.markiro.handheld.feature.shift.CloseOutcome.PART_CLOSED, part = true),
+            app.markiro.handheld.feature.shift.CloseStep.Summary(120, 1, 0, 0, app.markiro.handheld.feature.shift.CloseOutcome.REASON_MISSING, part = true),
+        )
+        val shown = androidx.compose.runtime.mutableStateOf<app.markiro.handheld.feature.shift.CloseStep>(steps.first())
+        compose.setContent { MarkiroTheme { app.markiro.handheld.feature.shift.CloseScreen(shown.value, app.markiro.handheld.feature.shift.CloseCallbacks()) } }
+        for (step in steps) {
+            shown.value = step
+            compose.waitForIdle()
+            assertNoCyrillic()
+        }
     }
 }

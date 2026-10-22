@@ -133,6 +133,25 @@ function requestOf(parityCase: ParityCase): FormRequest {
   }
 }
 
+/**
+ * The one difference between the cloud's blank and the office's (plan 2b): the rule on closing a shift.
+ * The cloud's golden says «Смену закрывает станция, которая её открыла…»; the autonomous product, where
+ * several devices work one shift, says each device closes its part. Every other byte is the cloud's.
+ */
+const CLOUD_RULE =
+  "<li>Смену закрывает станция, которая её открыла. Вторая станция — только через админку.</li>";
+const AUTONOMOUS_RULE =
+  "<li>Каждая станция закрывает свою часть; смена закрывается, когда закрыли все, или из офиса.</li>";
+
+/** The bytes the office draws for a case whose cloud bytes are `html`: only a blank differs, by that one sentence. */
+function officeBytes(form: ParityCase["form"], html: string): string {
+  if (form !== "task") return html;
+  expect(html.split(CLOUD_RULE)).toHaveLength(2);
+  return html.replace(CLOUD_RULE, AUTONOMOUS_RULE);
+}
+
+const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
+
 describe("printed forms parity with the cloud (plan О-Ф)", () => {
   it("covers every case the cloud's golden has", () => {
     expect(cases.map((parityCase) => parityCase.name)).toEqual(Object.keys(golden));
@@ -144,14 +163,21 @@ describe("printed forms parity with the cloud (plan О-Ф)", () => {
       const drawn = renderForm(requestOf(parityCase));
       const expected = golden[name];
       expect(drawn?.kind).toBe(parityCase.form);
-      expect(drawn?.html).toBe(expected?.html);
-      expect(
-        createHash("sha256")
-          .update(drawn?.html ?? "", "utf8")
-          .digest("hex"),
-      ).toBe(expected?.sha256);
+      const bytes = officeBytes(parityCase.form, expected?.html ?? "");
+      expect(drawn?.html).toBe(bytes);
+      expect(sha256(drawn?.html ?? "")).toBe(
+        parityCase.form === "task" ? sha256(bytes) : expected?.sha256,
+      );
     },
   );
+
+  it("leaves the cloud's own golden alone: every blank in it still says the cloud's rule, once", () => {
+    for (const [name, entry] of Object.entries(golden)) {
+      if (cases.find((each) => each.name === name)?.form !== "task") continue;
+      expect(entry.html.split(CLOUD_RULE), name).toHaveLength(2);
+      expect(entry.html, name).not.toContain("Каждая станция закрывает свою часть");
+    }
+  });
 });
 
 // The cloud loader's input of a task case (`ShiftsService.taskFormData`), as
@@ -234,7 +260,7 @@ describe("«Бланк смены» of a validation shift, the office's and the 
       inputs: host,
       generatedAt: new Date(parityCase.generatedAt),
     });
-    const expected = renderShiftTaskFormHtml(cloudData);
+    const expected = renderShiftTaskFormHtml({ ...cloudData, closingRule: "each_part" });
     expect(expected).toContain(`<p class="subtitle">Проверка · `);
     expect(expected).toContain("Без печати");
     expect(drawn?.kind).toBe("task");
@@ -283,7 +309,7 @@ describe("«Бланк смены» of a validation shift, the office's and the 
         inputs: host,
         generatedAt: new Date(parityCase.generatedAt),
       });
-      const expected = renderShiftTaskFormHtml(cloudData);
+      const expected = renderShiftTaskFormHtml({ ...cloudData, closingRule: "each_part" });
       expect(expected).toContain("Дубликат Data Matrix");
       expect(drawn?.html).toBe(expected);
     },

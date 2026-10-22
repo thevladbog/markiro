@@ -336,6 +336,7 @@ describe("the blank's data (plan О-Ф)", () => {
       validationPrintMode: "none",
       validationPrintVerification: "none",
       allowPreviouslyAcceptedCodes: false,
+      closingRule: "each_part",
       generatedAt: at,
     });
   });

@@ -1315,6 +1315,14 @@
   color: var(--err-fg);
 }
 
+/* «По устройствам» under a shift's figures (plan 2b): a quiet title over the devices' own definition list. */
+.shift-breakdown__title {
+  margin: 16px 0 8px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  font-weight: 600;
+}
+
 /*
  * The parts of an office page that is not one card (the card of a shift, the
  * code search): one under another. It had been `.shift-card`, a name the

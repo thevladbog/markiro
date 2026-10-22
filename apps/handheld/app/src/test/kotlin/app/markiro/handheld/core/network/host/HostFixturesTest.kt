@@ -36,6 +36,71 @@ class HostFixturesTest {
         assertEquals("8b134f46-5501-4ba2-931e-fde1e7251951", replaced.datasetEpoch)
     }
 
+    @Test
+    fun aSharedShiftsParticipantsTotalsAndEachDevicesPartAreReadAndAddUp() {
+        val json = Json { ignoreUnknownKeys = true }
+        val shifts = json.decodeFromJsonElement(DeviceShiftsDto.serializer(), fixture("device-shifts-participants.json")).shifts
+        // An active shift with its figures and a closed one without them (the list carries totals for active shifts only).
+        assertEquals(listOf("active", "closed"), shifts.map { it.status })
+        val shift = shifts.first { it.status == "active" }
+        assertEquals(2, shift.maxStations)
+        assertEquals("active", shift.myState)
+        val participants = checkNotNull(shift.participants)
+        val byDevice = checkNotNull(shift.byDevice)
+        val totals = checkNotNull(shift.totals)
+        assertEquals(listOf("active", "closed"), participants.map { it.state })
+        assertEquals(listOf("station", "handheld"), participants.map { it.deviceKind })
+        assertEquals("device", participants[1].closedBy)
+        assertEquals(120, participants[1].closedActualQty)
+        assertEquals("2026-10-08T09:05:00Z", participants[1].lateDataAt)
+        // byDevice lists every participant in participants order and adds up to the shift's total.
+        assertEquals(participants.map { it.deviceId }, byDevice.map { it.deviceId })
+        assertEquals(totals.accepted, byDevice.sumOf { it.accepted })
+        assertEquals(45, totals.boxesClosed)
+        assertEquals("2026-10-08T09:41:07Z", totals.asOf)
+        // Each participant's leave token (`joinedRev`), the revision of the write that took its slot.
+        assertEquals(listOf(12L, 15L), participants.map { it.joinedRev })
+    }
+
+    @Test
+    fun aClosedShiftInTheListKeepsItsParticipantsAndStateButCarriesNoFigures() {
+        val json = Json { ignoreUnknownKeys = true }
+        val closed = json.decodeFromJsonElement(DeviceShiftsDto.serializer(), fixture("device-shifts-participants.json"))
+            .shifts.first { it.status == "closed" }
+        assertEquals(2, closed.maxStations)
+        assertEquals("closed", closed.myState)
+        assertEquals(listOf("closed"), checkNotNull(closed.participants).map { it.state })
+        assertNull(closed.totals)
+        assertNull(closed.byDevice)
+        // A host row without the token (an older host) reads as `null`, never as 0.
+        assertNull(closed.participants!!.single().joinedRev)
+    }
+
+    @Test
+    fun aHostBeforeProtocolSevenNamesNoParticipantsAndItsListStillReads() {
+        val json = Json { ignoreUnknownKeys = true }
+        val shifts = json.decodeFromJsonElement(DeviceShiftsDto.serializer(), fixture("device-shifts.json")).shifts
+        assertTrue(shifts.isNotEmpty())
+        assertTrue(
+            shifts.all { it.participants == null && it.totals == null && it.byDevice == null && it.myState == null && it.maxStations == null },
+        )
+    }
+
+    @Test
+    fun theReceiptOfAPartCloseCarriesItsFlagsAndTheOtherFlagIsAbsent() {
+        val json = Json { ignoreUnknownKeys = true }
+        val receipts = json.decodeFromJsonElement(FactReceiptsDto.serializer(), fixture("facts-response-part-close.json")).receipts
+        assertEquals(listOf("accepted", "accepted"), receipts.map { it.outcome })
+        assertTrue(receipts[0].details.flag("partClosed"))
+        assertFalse(receipts[0].details.flag("reasonMissing"))
+        assertTrue(receipts[1].details.flag("reasonMissing"))
+        // A flag that is not a JSON boolean, or a missing detail object, is `false`, never a crash.
+        assertFalse(null.flag("partClosed"))
+        assertFalse(Json.parseToJsonElement("""{"partClosed":"true"}""").jsonObject.flag("partClosed"))
+        assertEquals(2, Json.parseToJsonElement("""{"active":2}""").jsonObject.int("active"))
+        assertNull(Json.parseToJsonElement("""{"active":"2"}""").jsonObject.int("active"))
+    }
+
     private fun fixture(name: String): JsonObject = Json.parseToJsonElement(
         checkNotNull(javaClass.classLoader?.getResource(name)) { "$name is not in the test resources: see build.gradle.kts" }
             .readText(),
@@ -179,5 +244,15 @@ class HostFixturesTest {
         assertEquals("km", ScanRawKind.classify("0104600682000013" + "21A1\u001d93dGVz"))
         assertEquals("unknown", ScanRawKind.classify("не код"))
         assertEquals("unknown", ScanRawKind.classify(""))
+    }
+
+    @Test
+    fun theEntryNamesWhatTheHostsHandheldFixtureAsksAndTheMultiStationCapability() {
+        val named = fixture("shift-enter-handheld-multi.json").getValue("supports").jsonArray.map { it.jsonPrimitive.content }
+        assertTrue(named.contains(HostApi.CAPABILITY_MULTI_STATION))
+        // The host checks that what a shift needs is a subset of what the device names, so more names are harmless;
+        // fewer are not: every name of the host's fixture must be one of this app's.
+        assertTrue(HostApi.ENTER_SUPPORTS.toString(), HostApi.ENTER_SUPPORTS.containsAll(named))
+        assertEquals("multi-station-v1", HostApi.CAPABILITY_MULTI_STATION)
     }
 }

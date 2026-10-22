@@ -21,7 +21,10 @@ export const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
  * of a shift's records joins this list, or a test that reads every table of
  * the database fails; the pallets' plan (ПЛ-Ц) added `floor_pallets` and
  * `floor_pallet_exceptions`, plan РЕЖ part B `floor_unit_labels` (whose
- * fields and bytes hold the full code: the whole row goes).
+ * fields and bytes hold the full code: the whole row goes), plan 2b
+ * `floor_shift_participation` (the cache of a shared shift's figures, migration
+ * `0022`: the list reads prune it too, but a pending pause kept in a row must
+ * not outlive the shift's copy).
  */
 export const RETAINED_TABLES = [
   "floor_scans",
@@ -32,6 +35,7 @@ export const RETAINED_TABLES = [
   "floor_boxes",
   "floor_pallets",
   "floor_unit_labels",
+  "floor_shift_participation",
   "outbox",
 ] as const;
 

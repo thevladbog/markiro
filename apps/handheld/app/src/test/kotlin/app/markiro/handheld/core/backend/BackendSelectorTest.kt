@@ -31,6 +31,7 @@ class BackendSelectorTest {
         val calls = mutableListOf<String>()
         override suspend fun kindNow() = type
         override suspend fun operators() = RosterResponse(emptyList()).also { calls += name }
+        override suspend fun leave(shiftId: String): String = "left".also { calls += "$name leave $shiftId" }
     }
 
     @Test
@@ -56,5 +57,17 @@ class BackendSelectorTest {
         assertEquals(listOf("host"), host.calls)
         assertEquals(emptyList<String>(), cloud.calls)
         assertSame(null, selector.cloudApi())
+    }
+
+    @Test
+    fun aLeaveOfADevicePairedWithAHostReachesTheHost() = runTest {
+        val cloud = Marker(BackendKind.CLOUD, "cloud")
+        val host = Marker(BackendKind.HOST, "host")
+        db.deviceConfigDao().upsert(syntheticDeviceConfig().copy(backend = "host", pinSha256 = "ab".repeat(32), hostId = "h"))
+        val selector = BackendSelector(db.deviceConfigDao(), cloud, host)
+        // Final review C1: the selector used to inherit a default that answered `null` without asking anyone.
+        assertEquals("left", selector.leave("s1"))
+        assertEquals(listOf("host leave s1"), host.calls)
+        assertEquals(emptyList<String>(), cloud.calls)
     }
 }

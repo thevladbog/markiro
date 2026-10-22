@@ -321,7 +321,7 @@ describe("the queue screen", () => {
         "VALUES ('close', ?, ?, 'shift_closed', ?, '{}', '2026-10-08T06:20:00.000Z', 'rejected', 'box_state', '2026-10-08T06:30:00.000Z')",
     ).run(PAIRING.hostId, PAIRING.deviceId, SHIFT_ID);
     view(local);
-    expect(await screen.findByText(/^Закрытие смены · /)).toBeTruthy();
+    expect(await screen.findByText(/^Закрытие смены станцией · /)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Отправить снова" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Снять с очереди" })).toBeNull();
   });
@@ -640,7 +640,7 @@ describe("the queue screen", () => {
     const confirm = await confirmation();
     expect(within(confirm).getByText(/записи смены \(3\)/)).toBeTruthy();
     expect(
-      within(confirm).getByText(`Смена ${ENTERED.number}: Скан — 2, Закрытие смены — 1.`),
+      within(confirm).getByText(`Смена ${ENTERED.number}: Скан — 2, Закрытие смены станцией — 1.`),
     ).toBeTruthy();
   });
 
@@ -791,7 +791,7 @@ describe("the queue screen after a restore: a shift refused whole", () => {
     const confirm = await confirmation();
     expect(within(confirm).getByText(/записи смены \(26\)/)).toBeTruthy();
     expect(
-      within(confirm).getByText(`Смена ${ENTERED.number}: Скан — 25, Закрытие смены — 1.`),
+      within(confirm).getByText(`Смена ${ENTERED.number}: Скан — 25, Закрытие смены станцией — 1.`),
     ).toBeTruthy();
   });
 
@@ -833,7 +833,7 @@ describe("the queue screen after a restore: a shift refused whole", () => {
       { kind: "shift_closed", resolution: null, resolved_by: null, resolved_at: null, n: 1 },
     ]);
     // The close is what stays, to be sent again.
-    expect(screen.getByText(/^Закрытие смены · /)).toBeTruthy();
+    expect(screen.getByText(/^Закрытие смены станцией · /)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Отправить снова" })).toBeTruthy();
     expect(screen.queryByText(/и ещё/)).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(notice));
@@ -851,7 +851,7 @@ describe("the queue screen after a restore: a shift refused whole", () => {
   it("offers no taking off at once for a shift whose only refusal is its close", async () => {
     const { local } = await refusedWhole(0);
     view(local);
-    expect(await screen.findByText(/^Закрытие смены · /)).toBeTruthy();
+    expect(await screen.findByText(/^Закрытие смены станцией · /)).toBeTruthy();
     expect(screen.queryByRole("button", { name: BULK })).toBeNull();
   });
 
@@ -916,7 +916,7 @@ describe("the queue screen after a restore: a shift refused whole", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Подтверждение" })).toBeNull();
     // The close stays.
-    expect(screen.getByText(/^Закрытие смены · /)).toBeTruthy();
+    expect(screen.getByText(/^Закрытие смены станцией · /)).toBeTruthy();
   });
 
   it("never counts a shift below what it lists, though its count was read before a refusal landed", async () => {

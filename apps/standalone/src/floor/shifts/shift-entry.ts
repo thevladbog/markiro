@@ -11,6 +11,7 @@ import {
   type ShiftCopy,
   type WorkShift,
 } from "./shift-copies.js";
+import { clearLeaveStatement, participationStatement } from "./shift-participation.js";
 import { checkShiftSnapshot } from "./shift-snapshot.js";
 
 /**
@@ -20,7 +21,8 @@ import { checkShiftSnapshot } from "./shift-snapshot.js";
  * deleted, `product_inactive`, `template_not_fit`, `pallet_template_not_fit`:
  * the pallet template, plan ПЛ-Х; `duplicate_template_not_fit`: the template
  * of a validation shift's duplicate, plan РЕЖ part B; `station_update`: the shift's mode needs
- * what this build does not name in its entry, plan РЕЖ); its layout is one this
+ * what this build does not name in its entry, plan РЕЖ; `line_full`: every slot of the line is
+ * held, plan 2b; `part_closed`: this station's part of the shift is closed on the host, plan 2b); its layout is one this
  * build does not read (`unreadable`); this computer could not keep it
  * (`local`); or anything else (`failed`).
  */
@@ -35,17 +37,33 @@ export type EntryRefusal =
   | "pallet_template_not_fit"
   | "duplicate_template_not_fit"
   | "station_update"
+  | "line_full"
+  | "part_closed"
   | "unreadable"
   | "local"
   | "failed"
   /** The site's license opens no new shift (plan ЛЦ-3), by the state the host names. */
   | LicenseRefusal;
 
+/** The line's limit and the devices that hold its slots, as `shift_line_full` names them (plan 2b). */
+export interface LineSlots {
+  active: number;
+  maxStations: number;
+}
+
 export type EntryResult =
   | { kind: "entered"; shift: WorkShift; offline: boolean }
-  | { kind: "refused"; reason: EntryRefusal }
+  | { kind: "refused"; reason: EntryRefusal; line?: LineSlots }
   /** The host refused this device's key or showed another certificate: the shell's to handle. */
   | { kind: "rejected"; error: unknown };
+
+/** The numbers of a `shift_line_full` refusal, or `null` when it names none. */
+function lineSlotsOf(details: Readonly<Record<string, unknown>>): LineSlots | null {
+  const { active, maxStations } = details;
+  return typeof active === "number" && typeof maxStations === "number"
+    ? { active, maxStations }
+    : null;
+}
 
 export interface EntryContext {
   local: LocalExecutor;
@@ -85,6 +103,12 @@ async function storedWork(context: EntryContext, shiftId: string): Promise<Entry
       ) {
         return { kind: "refused", reason: "closed" };
       }
+      // Plan 2b (host D5): an entry drops the pause this station asked for and the host has not
+      // heard, so a late pause never undoes it. A failed write keeps the entry going: the line
+      // does not stop for it, and the host takes the facts of a paused part all the same.
+      await context.local
+        .transaction([clearLeaveStatement(context.pairing, shiftId)])
+        .catch(() => undefined);
       return { kind: "entered", shift: stored.shift, offline: true };
     case "missing":
       return { kind: "refused", reason: "no_link" };
@@ -103,6 +127,8 @@ async function storedWork(context: EntryContext, shiftId: string): Promise<Entry
  * shift this station entered before is entered, from its stored snapshot;
  * so is a shift the office closed after this station entered it, to finish
  * it (plan 2a8).
+ * Since plan 2b the host gives a slot of the line (`shift_line_full` when every slot is held, with
+ * its numbers), and an entry — online or not — drops a pause this station asked for.
  * Opening a planned shift and freezing its snapshot are the host's, so a
  * station on a PC away from the host enters its planned shifts while the
  * link is up and works them later without it.
@@ -125,6 +151,12 @@ export async function enterShift(context: EntryContext, copy: ShiftCopy): Promis
       return { kind: "refused", reason: licenseRefusalOf(error.details) };
     }
     const constraint = error.details["constraint"];
+    if (error.code === "conflict" && constraint === "shift_line_full") {
+      const line = lineSlotsOf(error.details);
+      return line === null
+        ? { kind: "refused", reason: "line_full" }
+        : { kind: "refused", reason: "line_full", line };
+    }
     const refusal =
       error.code === "conflict" && typeof constraint === "string"
         ? CONFLICTS[constraint]
@@ -133,6 +165,16 @@ export async function enterShift(context: EntryContext, copy: ShiftCopy): Promis
   }
   if (!checkShiftSnapshot(answer.snapshot, answer.palletsEnabled).ok) {
     return { kind: "refused", reason: "unreadable" };
+  }
+  // A device whose part is closed reads the shift back (plan 2b, host D2: a station that lost
+  // its database): there is nothing to work and no copy is entered. The answer of one shift
+  // carries the totals for a closed part too (host D14 as amended), so its figures go into the
+  // cache for the card; a failed write changes nothing of the refusal.
+  if (answer.myState === "closed") {
+    await context.local
+      .transaction([participationStatement(context.pairing, [answer], context.now().getTime())])
+      .catch(() => undefined);
+    return { kind: "refused", reason: "part_closed" };
   }
   try {
     const at = context.now();

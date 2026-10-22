@@ -49,7 +49,8 @@ function plans(db: DatabaseSync): Record<string, string> {
     QUEUE_SETTLED_SQL,
     QUEUE_TALLY_SQL,
     DISMISS_SQL,
-    ...RETAINED_TABLES.map(purgeTableSql),
+    // The participation cache's table comes with migration `0022` (plan of the shared shift), after this one.
+    ...RETAINED_TABLES.filter((table) => table !== "floor_shift_participation").map(purgeTableSql),
   ];
   return Object.fromEntries(
     statements.map((sql) => [

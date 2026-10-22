@@ -88,3 +88,50 @@ Android tests must also verify its interpretation.
 - Off in host mode: grants, replacement, inventory, write-offs, update checks, duplicate
   DataMatrix print (`STATION_UPDATE_REQUIRED`). Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
+- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6 and Room stays at 22):
+  every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
+  `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
+  (`EnterResult.LineFull`); `HostCalls` carries the two numbers to the loaders. The host's `maxStations`,
+  `participants`, `myState`, `totals` and `byDevice` are reduced to one JSON value per shift in `meta`
+  (`shift_participation:<id>`, `ShiftParticipationStore`; also `shift_close_note:` for the receipts and
+  `shift_leave_pending:` for owed leaves) and refreshed by the host heartbeat (`HostParticipation`, 15 s) while a
+  shift is active. An answer older than the stored one (`as_of` guard) is refused unless the stored value is more
+  than 60 s old; a beat that does not reach the host marks the value stale and the strip says «данные на ЧЧ:ММ».
+- `SharedShiftRules` is the only place of the shift-wide total and of the reason rule, pinned by
+  `proto/fixtures/shift-close-reason-shared.json`; never re-derive it. This device's own part is its count less
+  `lost` (the shift's own conflicted/rejected codes, `CodeDao.lostForShift`; required in `SharedShiftRules`) and
+  less `ShiftParticipation.displaced`: the handheld reads no displacement notices, so when an answer with this
+  device's `byDevice` share is kept, the codes the host acknowledged as accepted (count − lost − scans still
+  waiting for a receipt, `CodeDao.pendingForShift`) beyond that share are the ones another device's earlier scan
+  displaced on the host (PR #775). The heartbeat reads the list and drains the queue one after the other, so no
+  receipt lands between the two counts; a screen's list read during a drain may over-correct until the next beat.
+  All of it reaches the strip, the hub card and `ShiftCloser` through `SharedShiftRules`. The hub card captions a shared
+  shift's figure «Всего в смене» and adds «данные на ЧЧ:ММ» while the figures are stale; a single-device shift
+  keeps «На этом ТСД». The 90 s freshness applies only to
+  the close reason, not to the strip.
+- Leaving writes the local mark and an owed-leave marker in one commit, then asks the host. An owed leave is
+  compare-and-cleared and settles only when the answer's `myState` is `left` or `closed` (in `ShiftRepository`; a
+  `null` answer settles nothing) or not `active` (in the heartbeat's `flushLeaves`, whose answer always names a
+  state), or on a definite refusal (`not_found`, `shift_not_entered`, `validation_failed`). An `active` answer
+  while the row says the device is out keeps it owed; the answer's token is kept and the next beat resends with it.
+  Each owed leave is sent independently, so one stuck leave never blocks the rest. A re-entry before it was sent
+  (`leftAt = null`) makes `flushLeaves` drop it (`stillOut` is false); `rejoinLeftPart` only skips while a leave is
+  owed. A leave tapped while that automatic rejoin is in flight is owed again after the entry (`oweLeaveIfOut` re-reads
+  the row in the commit that keeps the answer), so the slot the rejoin took is freed on the next beat with the new
+  token. `StationBackend.leave` has no default: every backend, the production `BackendSelector` included, answers it.
+- A closed part reads back as `myState: closed` and `toShiftDto` maps it to `status = "closed"`; it never opens
+  work again. A full line never stops local production: a fresh entry gets `EnterResult.LineFull`, but «Продолжить»
+  of the shift this device already works (its bundle here) enters offline and reads the list once
+  (`ShiftRepository.continueOnFullLine`); the strip and the hub card say «Линия занята: N из M — …»
+  (`SharedShiftRules.lineFull`: part `left` and `active >= maxStations`) until a beat's rejoin gets the slot back. Receipts `partClosed`/`reasonMissing` are noted by
+  `HostAckMapper`. Closing a shared part offline sends no reason (the host marks `close_reason_missing`, the
+  office supplies it); a single-device shift keeps the hard refusal and the reason.
+- Known gaps: no layout/short-screen tests for the strip (only Robolectric at `w360dp`); nothing was run on a device
+  or emulator; the vendor scanner path is untouched; the token race of the owed-leave sender is untested; a null
+  `asOf` is taken from the incoming answer where the station refuses it within 60 s; a non-closed answer without
+  totals and nothing stored creates a row with null figures; the hub card shows the corrected total only for shared
+  shifts; a shift the office closes while the device works it is learnt only on re-entry (`409` → «Смена уже
+  закрыта»): the beat drops its figures (the host lists open shifts only) but never touches the local row, and the
+  `Closed` result leaves the row and `activeShiftId` as they are. A displacement is seen only with the next kept
+  answer that carries this device's share (offline, the last one stands); the part close's `actualQty` stays the
+  device's own count, uncorrected for lost or displaced codes.

@@ -9,10 +9,17 @@ import type { Pairing } from "../../local/reference-sync.js";
 import { readRefusedCloses } from "../close/shift-close.js";
 import { readOutboxStatus, type OutboxStatus } from "../outbox-status.js";
 import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.js";
-import { enterShift, type EntryRefusal } from "./shift-entry.js";
+import { enterShift, type EntryRefusal, type LineSlots } from "./shift-entry.js";
+import {
+  readParticipations,
+  sharedCount,
+  sharedParticipation,
+  type Participation,
+} from "./shift-participation.js";
 import { opensBlocked } from "../license.js";
 import { queueBadge } from "./hub-layout.js";
 import { readAcceptedCounts } from "./shift-accepted.js";
+import { readLostCodes } from "../work/work-reads.js";
 import { ShiftHubView, type HubCopies } from "./ShiftHub.js";
 
 export interface ShiftListProps {
@@ -84,7 +91,9 @@ export function ShiftList({
   const [copies, setCopies] = useState<HubCopies>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [entering, setEntering] = useState<string | null>(null);
-  const [refusal, setRefusal] = useState<EntryRefusal | null>(null);
+  const [refusal, setRefusal] = useState<{ reason: EntryRefusal; line: LineSlots | null } | null>(
+    null,
+  );
   const [requestedPage, setRequestedPage] = useState(1);
   const [outbox, setOutbox] = useState<OutboxStatus | null>(null);
   const alive = useRef(true);
@@ -110,8 +119,13 @@ export function ShiftList({
   useEffect(() => {
     let cancelled = false;
     const pairing = { hostId, deviceId };
-    Promise.all([readShiftCopies(local, pairing, lineId), readRefusedCloses(local, pairing)])
-      .then(async ([read, refused]) => {
+    Promise.all([
+      readShiftCopies(local, pairing, lineId),
+      readRefusedCloses(local, pairing),
+      // Plan 2b: an unreadable cache leaves the cards as in stage 2a, never the list unread.
+      readParticipations(local, pairing).catch(() => new Map<string, Participation>()),
+    ])
+      .then(async ([read, refused, participation]) => {
         // Only a shift this station entered and that has a plan can show «Принято N из M».
         const counted = read.filter((copy) => copy.entered && (copy.plannedQty ?? 0) > 0);
         const accepted = await readAcceptedCounts(
@@ -119,11 +133,22 @@ export function ShiftList({
           pairing,
           counted.map((copy) => copy.id),
         );
-        return { read, refused, accepted };
+        // A shared shift's progress is the whole shift's: the others' part by the host and this
+        // station's own codes, less those the host counts for no one here (plan 2b, the plan is
+        // reached by the shift-wide total; final review I2). An unreadable loss counts none.
+        for (const [id, own] of accepted) {
+          const shared = sharedParticipation(participation.get(id) ?? null);
+          if (shared === null) continue;
+          const lost = await readLostCodes(local, pairing, id).catch(() => 0);
+          accepted.set(id, sharedCount(shared, deviceId, own, lost).total);
+        }
+        return { read, refused, accepted, participation };
       })
       .then(
-        ({ read, refused, accepted }) => {
-          if (!cancelled) setCopies({ kind: "ready", copies: read, refused, accepted });
+        ({ read, refused, accepted, participation }) => {
+          if (!cancelled) {
+            setCopies({ kind: "ready", copies: read, refused, accepted, participation });
+          }
         },
         () => {
           if (!cancelled) setCopies({ kind: "failed" });
@@ -175,7 +200,7 @@ export function ShiftList({
         current.current.onHostError(result.error);
         return;
       }
-      setRefusal(result.reason);
+      setRefusal({ reason: result.reason, line: result.line ?? null });
       // The host may have changed the shift (closed, opened elsewhere): read again.
       setAttempt((value) => value + 1);
     } finally {
@@ -190,7 +215,12 @@ export function ShiftList({
   const standing =
     refusal !== null ? (
       <Alert tone="error" role="presentation">
-        {t(`floor.shifts.refused.${refusal}`)}
+        {refusal.line === null
+          ? t(`floor.shifts.refused.${refusal.reason}`)
+          : t("floor.shifts.lineFullRefused", {
+              active: refusal.line.active,
+              max: refusal.line.maxStations,
+            })}
       </Alert>
     ) : null;
   // Without the host, the list that did not update says nothing more.

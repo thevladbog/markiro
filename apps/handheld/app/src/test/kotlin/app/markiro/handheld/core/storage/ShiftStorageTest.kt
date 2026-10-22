@@ -123,4 +123,69 @@ class ShiftStorageTest {
         boxCapacity = null, palletBoxCapacity = null, palletsEnabled = false, validationPrintMode = "none",
         closePolicyKind = null, closeOwnerDeviceId = null, openedAt = null, listFetchedAt = 1L,
     )
+
+    private val at = "2026-09-10T10:00:00.000Z"
+
+    private suspend fun accept(hash: String, shiftId: String) =
+        db.codeDao().insert(CodeEntity(hash, shiftId, "04600682000013", hash, at))
+
+    /** The scan of [hash] as the host sync freezes it: an `outbox` row and its `host_outbox` record in [state] (`queued` or `quarantined`). */
+    private suspend fun frozenScan(hash: String, shiftId: String, state: String) {
+        val id = db.outboxDao().insert(
+            OutboxEntity(shiftId = shiftId, raw = hash, verdict = "ok", scannedAt = at, operatorId = null, codeHash = hash, gtin14 = "04600682000013", serial = hash),
+        )
+        db.hostOutboxDao().insert(
+            HostOutboxEntity(
+                recordId = "rec-$hash", target = "facts", kind = "scan", sourceKind = "scan", sourceKey = id.toString(), body = "{}",
+                state = state, reason = if (state == "quarantined") "validation_failed" else null, createdAt = at,
+            ),
+        )
+    }
+
+    @Test
+    fun theCodesTheHostGaveToAnotherTerminalAreCountedAsLostOfTheirOwnShiftOnly() = runTest {
+        val codes = db.codeDao()
+        listOf("h1", "h2", "h3").forEach { accept(it, "s1") }
+        accept("h4", "s2")
+        // h1 is lost in s1; h4 in s2; h9 is a conflict this device holds no code for.
+        db.conflictDao().insertIgnore(listOf("h1", "h4", "h9").map { ConflictEntity(it, null, "2026-09-10T09:00:00.000Z", "2026-09-10T10:00:00.000Z") })
+        assertEquals(3, codes.countForShift("s1"))
+        assertEquals(1, codes.lostForShift("s1"))
+        assertEquals(1, codes.lostForShift("s2"))
+        assertEquals(0, codes.lostForShift("s3"))
+    }
+
+    @Test
+    fun aCodeTheHostRefusedAndHoldsQuarantinedIsLostOfItsOwnShift() = runTest {
+        accept("r1", "s1")
+        accept("r2", "s1")
+        accept("r3", "s1")
+        accept("r4", "s2")
+        // r1: rejected (quarantined); r2: still queued (the host has not answered); r4: rejected, but in another shift.
+        frozenScan("r1", "s1", "quarantined")
+        frozenScan("r2", "s1", "queued")
+        frozenScan("r4", "s2", "quarantined")
+        assertEquals(1, db.codeDao().lostForShift("s1"))
+        assertEquals(1, db.codeDao().lostForShift("s2"))
+        // The conflict kind and the rejected kind add up; one code in both is counted once.
+        db.conflictDao().insertIgnore(listOf(ConflictEntity("r3", null, at, at), ConflictEntity("r1", null, at, at)))
+        assertEquals(2, db.codeDao().lostForShift("s1"))
+    }
+
+    @Test
+    fun aHashAcceptedInAnotherShiftIsNeverLostHere() = runTest {
+        // The code belongs to s2 (its scan conflicted there); s1 only holds a reprocessed occurrence of the same hash, which is no scan of s1's own.
+        accept("x1", "s2")
+        db.conflictDao().insertIgnore(listOf(ConflictEntity("x1", null, at, at)))
+        db.validationDao().insert(ValidationOccurrenceEntity("s1", "x1", at, "raw", "04600682000013", "x1", "op", "d1", "s2", "OLD-001", "reprocessed"))
+        assertEquals(1, db.codeDao().countForShift("s1"))
+        assertEquals(0, db.codeDao().lostForShift("s1"))
+        assertEquals(1, db.codeDao().lostForShift("s2"))
+        // The same for a rejected scan of another shift.
+        accept("x2", "s2")
+        frozenScan("x2", "s2", "quarantined")
+        db.validationDao().insert(ValidationOccurrenceEntity("s1", "x2", at, "raw", "04600682000013", "x2", "op", "d1", "s2", "OLD-001", "reprocessed"))
+        assertEquals(0, db.codeDao().lostForShift("s1"))
+        assertEquals(2, db.codeDao().lostForShift("s2"))
+    }
 }

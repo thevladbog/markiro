@@ -3,6 +3,8 @@ package app.markiro.handheld.core.host
 import app.markiro.handheld.core.network.host.HostApiError
 import app.markiro.handheld.core.network.host.HostFailure
 import app.markiro.handheld.core.storage.GenerationToken
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import retrofit2.HttpException
@@ -38,6 +40,7 @@ class HostCalls(
                     "shift_status" -> null // the cloud's closed shift is a `409` with no code
                     else -> failure.name
                 },
+                mapOf("maxStations" to failure.maxStations, "active" to failure.active),
             )
             HostFailure.LicenseRestricted -> http(409, "license_restricted")
             HostFailure.FeatureDisabled -> http(409, "feature_disabled")
@@ -51,8 +54,15 @@ class HostCalls(
         }
     }
 
-    private fun http(status: Int, code: String?): HttpException {
-        val body = (if (code == null) "{}" else """{"code":"$code"}""").toResponseBody("application/json".toMediaType())
-        return HttpException(Response.error<Any>(status, body))
+    private fun http(status: Int, code: String?, numbers: Map<String, Int?> = emptyMap()): HttpException {
+        val json = if (code == null) {
+            "{}"
+        } else {
+            buildJsonObject {
+                put("code", code)
+                for ((key, value) in numbers) if (value != null) put(key, value)
+            }.toString()
+        }
+        return HttpException(Response.error<Any>(status, json.toResponseBody("application/json".toMediaType())))
     }
 }

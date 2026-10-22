@@ -40,6 +40,9 @@ sealed interface ShiftDialog {
     data object UpdateRequired : ShiftDialog
     data object Closed : ShiftDialog
     data object Unavailable : ShiftDialog
+    data class LineFull(val active: Int, val maxStations: Int) : ShiftDialog
+    data object Busy : ShiftDialog
+    data object PartClosed : ShiftDialog
     data class Refused(val step: EnterStep, val status: Int, val code: String?) : ShiftDialog
     /** The scanned form's barcode matched no shift already mirrored on this device. */
     data object BarcodeUnknown : ShiftDialog
@@ -297,6 +300,19 @@ class ShiftListViewModel(
                     repository.refreshList()
                 }
                 EnterResult.Unavailable -> dialog.value = ShiftDialog.Unavailable
+                // The three below also refresh the list: the host's answer says it is behind (a slot taken, a part closed elsewhere).
+                is EnterResult.LineFull -> {
+                    dialog.value = ShiftDialog.LineFull(result.active, result.maxStations)
+                    repository.refreshList()
+                }
+                EnterResult.Busy -> {
+                    dialog.value = ShiftDialog.Busy
+                    repository.refreshList()
+                }
+                EnterResult.PartClosed -> {
+                    dialog.value = ShiftDialog.PartClosed
+                    repository.refreshList()
+                }
                 // Also refreshed: a 404 can simply mean the cached list is behind.
                 is EnterResult.Refused -> {
                     dialog.value = ShiftDialog.Refused(result.step, result.status, result.code)

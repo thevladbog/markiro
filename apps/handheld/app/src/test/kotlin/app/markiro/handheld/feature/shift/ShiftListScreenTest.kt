@@ -196,4 +196,30 @@ class ShiftListScreenTest {
         compose.onNodeWithText("Смен нет").assertIsDisplayed()
         compose.onNodeWithText("данные на", substring = true).assertIsDisplayed()
     }
+
+    private fun dialogUi(dialog: ShiftDialog) = ShiftListUi(false, null, emptyList(), emptyList(), false, false, 0L, true, "Линия 2", dialog)
+
+    @Test
+    fun aFullLineSaysHowManyDevicesWorkItAndOffersNoWayIn() {
+        var dismissed = false
+        compose.setContent { MarkiroTheme { ShiftListScreen(dialogUi(ShiftDialog.LineFull(active = 2, maxStations = 2)), ShiftListCallbacks(onDismiss = { dismissed = true })) } }
+        compose.onNodeWithText("Линия занята").assertIsDisplayed()
+        compose.onNodeWithText("На линии уже работают 2 из 2 устройств", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Войти").assertDoesNotExist()
+        compose.onNodeWithText("Понятно").performClick()
+        assertEquals(true, dismissed)
+    }
+
+    @Test
+    fun anOldHostsBusyIsSaidInWords() {
+        compose.setContent { MarkiroTheme { ShiftListScreen(dialogUi(ShiftDialog.Busy), ShiftListCallbacks()) } }
+        compose.onNodeWithText("Смена занята").assertIsDisplayed()
+        compose.onNodeWithText("Сервер отказал").assertDoesNotExist()
+    }
+
+    @Test
+    fun aClosedPartSaysYouAlreadyClosedIt() {
+        compose.setContent { MarkiroTheme { ShiftListScreen(dialogUi(ShiftDialog.PartClosed), ShiftListCallbacks()) } }
+        compose.onNodeWithText("Ваша часть закрыта").assertIsDisplayed()
+    }
 }

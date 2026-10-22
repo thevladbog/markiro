@@ -1,0 +1,28 @@
+[package]
+name = "markiro-loadtest"
+version = "0.0.0"
+description = "Load and soak harness of the standalone host: several devices in one shift (spec 2026-10-20 section 8)"
+edition = "2021"
+license-file = "../../../LICENSE"
+publish = false
+
+[lib]
+name = "markiro_loadtest"
+path = "src/lib.rs"
+
+[[bin]]
+name = "markiro-loadtest"
+path = "src/main.rs"
+
+[dependencies]
+markiro-host = { path = "../host" }
+markiro-proto = { path = "../proto" }
+reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tempfile = "3"
+time = { version = "=0.3.55", features = ["formatting", "parsing"] }
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }

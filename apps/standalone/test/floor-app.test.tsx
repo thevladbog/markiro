@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { z } from "zod";
 import { useEffect, type ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -47,9 +48,12 @@ import { DEVICE_ID, DEVICE_STATUS, HOST_ID } from "./support/fixtures.js";
 import { enteredShift } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
+import { SHARED_ENTERED } from "./support/multi-station.js";
 
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
-const STATION_ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
+const STATION_ENTRY = {
+  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"],
+};
 
 // The tones are the work screen's; the floor only gives them a level.
 vi.mock("../src/floor/work/signal-sound.js", async (importOriginal) => ({
@@ -161,6 +165,7 @@ function floorOf(
         checkCode={handlers.checkCode}
         requestBlock={handlers.requestBlock}
         requestFacts={handlers.requestFacts}
+        requestLeaves={handlers.requestLeaves}
         {...(options.warehouseLookup === undefined
           ? {}
           : { warehouseLookup: options.warehouseLookup })}
@@ -197,6 +202,7 @@ function handlersOf(
       toSerial: 3499,
     })),
     requestFacts: vi.fn(),
+    requestLeaves: vi.fn(),
     printing: createPrintRuntime(fakeHardware().hardware.printBytes),
     hardware: fakeHardware().hardware,
     awake: createSystemAwake(vi.fn(async () => undefined)),
@@ -2195,5 +2201,61 @@ describe("the leave button and the wait of the work screen", () => {
     fireEvent.click(waiting);
     expect(onLeave).toHaveBeenCalledTimes(1);
     await settle();
+  });
+});
+
+describe("leaving a shared shift (plan 2b)", () => {
+  const pauseRow = z.object({ leave_requested_at: z.string().nullable() });
+
+  it("pauses this station's part on «Выйти из смены» and asks the link to tell the host", async () => {
+    const local = await floorCopies();
+    await keepEnteredShift(local, PAIRING, SHARED_ENTERED, "2026-10-08T06:02:00.000Z", SEEN);
+    const handlers = handlersOf({ enter: async () => SHARED_ENTERED });
+    render(floorOf(local, handlers, { workScreen: IdleWork }));
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти из смены" }));
+    await waitFor(() => expect(handlers.requestLeaves).toHaveBeenCalledTimes(1));
+    const [row] = await local.query(
+      "SELECT leave_requested_at FROM floor_shift_participation",
+      [],
+      pauseRow,
+    );
+    expect(row?.leave_requested_at).not.toBeNull();
+  });
+
+  it("pauses this station's part when the work leaves for another line (line_changed)", async () => {
+    const local = await floorCopies();
+    await keepEnteredShift(local, PAIRING, SHARED_ENTERED, "2026-10-08T06:02:00.000Z", SEEN);
+    const handlers = handlersOf({ enter: async () => SHARED_ENTERED });
+    const view = render(floorOf(local, handlers, { workScreen: IdleWork }));
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    await screen.findByText(`Смена ${SHARED_ENTERED.number}`);
+    view.rerender(floorOf(local, handlers, { workScreen: IdleWork, lineChangePending: true }));
+    await waitFor(() => expect(handlers.requestLeaves).toHaveBeenCalledTimes(1));
+    const [row] = await local.query(
+      "SELECT leave_requested_at FROM floor_shift_participation",
+      [],
+      pauseRow,
+    );
+    expect(row?.leave_requested_at).not.toBeNull();
+  });
+
+  it("does not pause the part on a change of operator: the next one goes on at this station", async () => {
+    const local = await floorCopies();
+    await keepEnteredShift(local, PAIRING, SHARED_ENTERED, "2026-10-08T06:02:00.000Z", SEEN);
+    const handlers = handlersOf({ enter: async () => SHARED_ENTERED });
+    render(floorOf(local, handlers, { workScreen: IdleWork }));
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    await screen.findByText(`Смена ${SHARED_ENTERED.number}`);
+    act(() => handlers.switchOperator.current?.());
+    await waitFor(() => expect(handlers.onSignOut).toHaveBeenCalledWith(null));
+    await settle();
+    expect(handlers.requestLeaves).not.toHaveBeenCalled();
+    const [row] = await local.query(
+      "SELECT leave_requested_at FROM floor_shift_participation",
+      [],
+      pauseRow,
+    );
+    expect(row?.leave_requested_at).toBeNull();
   });
 });

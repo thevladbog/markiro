@@ -5,6 +5,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.box.BoxPrinter
+import app.markiro.handheld.core.host.ShiftParticipation
+import app.markiro.handheld.core.host.ShiftParticipationStore
+import app.markiro.handheld.feature.shift.SharedShiftRules
+import app.markiro.handheld.feature.shift.SharedStrip
 import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.exceptions.ExceptionEngine
@@ -199,6 +203,12 @@ data class WorkUi(
      * dismissed, and until a close succeeds. Null while nothing is refused.
      */
     val boxRefusal: CloseResult? = null,
+    /**
+     * Present only while the line allows several devices (or several have worked this shift): the shift-wide figures of plan 2b. While it is set,
+     * [total] is the shift-wide total, [thisTerminal] is this device's own part (less the codes the host gave to another device), and the two
+     * counters read «Всего в смене» and «Моя смена».
+     */
+    val strip: SharedStrip? = null,
 )
 
 data class ValidationUi(val pending: Int = 0, val conflicts: Int = 0, val fetchedAt: String? = null)
@@ -349,14 +359,19 @@ class WorkViewModel(
     val planPrompt: StateFlow<Boolean> = _planPrompt
     private var belowPlanSeen = false
 
-    private data class Counters(val mine: Int, val errors: Int, val duplicates: Int)
+    /** [lost]: this shift's own codes the host answered `conflict` or `rejected` (`CodeDao.lostForShift`), which `SharedShiftRules` must not count twice. */
+    private data class Counters(val mine: Int, val errors: Int, val duplicates: Int, val lost: Int)
+
+    /** The host's last figures of this shift (plan 2b): refreshed by the heartbeat while the shift is worked, kept for the strip's offline stamp. */
+    private val participation: Flow<ShiftParticipation?> = ShiftParticipationStore(db).observe(shiftId)
 
     private val counters = combine(
         db.codeDao().observeCountForShift(shiftId),
         db.scanEventDao().observeCount(shiftId, Verdict.INVALID.wire),
         db.scanEventDao().observeCount(shiftId, Verdict.WRONG_GTIN.wire),
         db.scanEventDao().observeCount(shiftId, Verdict.DUPLICATE.wire),
-    ) { mine, invalid, wrong, dup -> Counters(mine, invalid + wrong, dup) }
+        db.codeDao().observeLostForShift(shiftId),
+    ) { mine, invalid, wrong, dup, lost -> Counters(mine, invalid + wrong, dup, lost) }
 
     private val validationUi = combine(
         db.validationDao().observeCount(shiftId, "pending"),
@@ -381,19 +396,21 @@ class WorkViewModel(
         validationUi,
         boxRefusal,
         db.deviceConfigDao().observe(),
+        participation,
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
         val teamNow = values[6] as TeamState?
         val lastOk = values[5] as Long?
         val operator = (values[7] as SessionState).operator
+        val strip = SharedShiftRules.strip(values[16] as ShiftParticipation?, c.mine, shift?.plannedQty, c.lost)
         @Suppress("UNCHECKED_CAST")
         WorkUi(
             shift = shift,
             last = values[1] as LastScan?,
-            total = maxOf(teamNow?.acceptedUnits ?: 0, c.mine),
+            total = strip?.total ?: maxOf(teamNow?.acceptedUnits ?: 0, c.mine),
             plan = shift?.plannedQty,
-            thisTerminal = c.mine,
+            thisTerminal = strip?.mine ?: c.mine,
             errors = c.errors,
             duplicates = c.duplicates,
             feed = values[3] as List<ScanEventEntity>,
@@ -410,6 +427,7 @@ class WorkViewModel(
             scannerLabel = scannerLabel(),
             boxRefusal = values[14] as CloseResult?,
             hostMode = (values[15] as app.markiro.handheld.core.storage.DeviceConfigEntity?)?.backend == "host",
+            strip = strip,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 

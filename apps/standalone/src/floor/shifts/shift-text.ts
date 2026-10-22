@@ -26,3 +26,14 @@ export function addCivilDays(date: string, days: number): string {
   const pad = (value: number, width: number) => String(value).padStart(width, "0");
   return `${pad(moment.getUTCFullYear(), 4)}-${pad(moment.getUTCMonth() + 1, 2)}-${pad(moment.getUTCDate(), 2)}`;
 }
+
+const CLOCK = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * An instant as the floor's «ЧЧ:ММ» on this computer's clock (plan 2b: «данные от ЧЧ:ММ», the
+ * host's time of a shared shift's figures); text that is no instant is said as it is.
+ */
+export function formatClock(instant: string): string {
+  const at = new Date(instant);
+  return Number.isNaN(at.getTime()) ? instant : CLOCK.format(at);
+}
