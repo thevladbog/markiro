@@ -5,6 +5,7 @@
 //! the profile's thresholds. A scenario that needs what the run's host mode lacks says so
 //! (`judged: false`) instead of passing.
 
+pub mod backup_mid_close;
 pub mod capability;
 pub mod close_races;
 pub mod closed_part;
@@ -890,6 +891,7 @@ async fn run_one(
         closed_part::NAME => closed_part::run(kind, work_dir, profile).await,
         close_races::NAME => close_races::run(kind, work_dir, profile).await,
         lines::NAME => lines::run(kind, work_dir, profile).await,
+        backup_mid_close::NAME => backup_mid_close::run(kind, work_dir, profile).await,
         other => (
             broken(other, format!("no scenario is named {other}")),
             Vec::new(),
