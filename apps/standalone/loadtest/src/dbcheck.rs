@@ -147,6 +147,120 @@ pub async fn participants(
     Ok(checks)
 }
 
+/// The state of every participant of `shift`, by the host's device id.
+pub async fn participant_states(pool: &SqlitePool, shift: &str) -> Res<BTreeMap<String, String>> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT device_id, state FROM shift_participants WHERE shift_id = ?")
+            .bind(shift)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("shift_participants: {error}"))?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Each named device (`(index, host id, state)`) is in the state given, and no other device took
+/// part in the shift.
+pub async fn participants_in(
+    pool: &SqlitePool,
+    shift: &str,
+    expected: &[(u32, String, &str)],
+) -> Res<Vec<Check>> {
+    let states = participant_states(pool, shift).await?;
+    let mut checks: Vec<Check> = expected
+        .iter()
+        .map(|(index, id, state)| {
+            Check::same(
+                &format!("participant_state_device_{index}"),
+                Some((*state).to_owned()),
+                states.get(id).cloned(),
+            )
+        })
+        .collect();
+    let foreign = states
+        .keys()
+        .filter(|id| !expected.iter().any(|(_, mine, _)| mine == *id))
+        .count();
+    checks.push(Check::same("participants_only_the_devices", 0, foreign));
+    Ok(checks)
+}
+
+/// What holds for a shift in any copy of the database, in the middle of its closes too, beyond
+/// the CHECKs of migration `0052`: a closed shift has no open part and an active one has one; a
+/// shift its devices closed closes at the latest of their parts' moments (`facts::close_part`);
+/// its close is audited once (`shift.close` or `shift.force_closed`); every accepted close event
+/// is a part its device closed.
+pub async fn participant_invariants(pool: &SqlitePool, shift: &str) -> Res<Vec<Check>> {
+    let zero = |name: &str, found: i64| {
+        Check::new(name, found == 0, format!("{found} found, none allowed"))
+    };
+    let closed_with_open_parts = count_bind(
+        pool,
+        "SELECT COUNT(*) FROM shifts s JOIN shift_participants p ON p.shift_id = s.id \
+         WHERE s.id = ? AND s.status = 'closed' AND p.state IN ('active', 'left')",
+        shift,
+    )
+    .await?;
+    let active_without_open_part = count_bind(
+        pool,
+        "SELECT COUNT(*) FROM shifts s WHERE s.id = ? AND s.status = 'active' \
+         AND NOT EXISTS (SELECT 1 FROM shift_participants p \
+                         WHERE p.shift_id = s.id AND p.state IN ('active', 'left'))",
+        shift,
+    )
+    .await?;
+    let wrong_moment = count_bind(
+        pool,
+        "SELECT COUNT(*) FROM shifts s WHERE s.id = ? AND s.status = 'closed' \
+         AND s.closed_by_kind = 'device' AND s.closed_at IS NOT \
+         (SELECT MAX(p.closed_at) FROM shift_participants p \
+          WHERE p.shift_id = s.id AND p.closed_by_kind = 'device')",
+        shift,
+    )
+    .await?;
+    let status: Option<String> = sqlx::query_scalar("SELECT status FROM shifts WHERE id = ?")
+        .bind(shift)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("shifts: {error}"))?;
+    let closes = count_bind(
+        pool,
+        "SELECT COUNT(*) FROM audit_log WHERE target_type = 'shift' AND target_id = ? \
+         AND action IN ('shift.close', 'shift.force_closed')",
+        shift,
+    )
+    .await?;
+    let accepted_events = count_bind(
+        pool,
+        "SELECT COUNT(*) FROM shift_close_events WHERE shift_id = ? AND outcome = 'accepted'",
+        shift,
+    )
+    .await?;
+    let device_closed_parts = count_bind(
+        pool,
+        "SELECT COUNT(*) FROM shift_participants WHERE shift_id = ? AND closed_by_kind = 'device'",
+        shift,
+    )
+    .await?;
+    Ok(vec![
+        zero("closed_shift_has_no_open_part", closed_with_open_parts),
+        zero("active_shift_has_an_open_part", active_without_open_part),
+        zero(
+            "device_closed_shift_closes_at_its_latest_part",
+            wrong_moment,
+        ),
+        Check::same(
+            "shift_closed_once",
+            i64::from(status.as_deref() == Some("closed")),
+            closes,
+        ),
+        Check::same(
+            "close_events_match_device_closed_parts",
+            device_closed_parts,
+            accepted_events,
+        ),
+    ])
+}
+
 /// Holds for the live database of a quiet shift: every figure is the
 /// ledger's. `devices` maps the harness's device index to the host's id.
 pub async fn reconcile(
@@ -648,5 +762,152 @@ mod tests {
             participants_after(extra, "active").await,
             names(&["participants_only_the_devices"])
         );
+    }
+
+    /// The participant invariants of the seeded shift, judged after `sql`.
+    async fn invariants_after(sql: &str) -> BTreeSet<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copy.db");
+        markiro_host::db::open(&path).await.unwrap().close().await;
+        seed(&path).await;
+        let mut db = SqliteConnection::connect(&format!("sqlite://{}", path.display()))
+            .await
+            .unwrap();
+        sqlx::raw_sql(sql).execute(&mut db).await.unwrap();
+        db.close().await.unwrap();
+        let pool = open_read_only(&path, true).await.unwrap();
+        let checks = participant_invariants(&pool, "s1").await.unwrap();
+        pool.close().await;
+        assert_eq!(checks.len(), 5);
+        checks
+            .into_iter()
+            .filter(|check| !check.ok)
+            .map(|check| check.name)
+            .collect()
+    }
+
+    /// Both parts closed by their devices (d1 the later), with their close events.
+    const PARTS_CLOSED_BY_DEVICES: &str = "UPDATE shift_participants SET state = 'closed', \
+         closed_by_kind = 'device', closed_at = CASE device_id WHEN 'd0' \
+         THEN '2026-10-22T10:00:00Z' ELSE '2026-10-22T10:00:05Z' END;
+         INSERT INTO shift_close_events (id, record_id, shift_id, device_id, actual_qty, \
+         closed_box_count, closed_at, outcome, received_at) VALUES \
+         ('e0', 'r-e0', 's1', 'd0', 3, 1, 't', 'accepted', 't'), \
+         ('e1', 'r-e1', 's1', 'd1', 3, 1, 't', 'accepted', 't');";
+
+    /// The shift closed by its last device at `at`, audited once.
+    fn shift_closed_by_d1(at: &str) -> String {
+        format!(
+            "UPDATE shifts SET status = 'closed', closed_at = '{at}', closed_by_kind = 'device', \
+             closed_by = 'd1' WHERE id = 's1';
+             INSERT INTO audit_log (at, actor_kind, actor_id, action, target_type, target_id, \
+             result, details) VALUES ('t', 'device', 'd1', 'shift.close', 'shift', 's1', 'ok', '{{}}');"
+        )
+    }
+
+    #[tokio::test]
+    async fn the_participant_invariants_hold_for_an_open_and_a_cleanly_closed_shift() {
+        assert_eq!(invariants_after("SELECT 1").await, names(&[]));
+        let closed = format!(
+            "{PARTS_CLOSED_BY_DEVICES}{}",
+            shift_closed_by_d1("2026-10-22T10:00:05Z")
+        );
+        assert_eq!(invariants_after(&closed).await, names(&[]));
+        // The office's force close: parts closed by the office, audited as `shift.force_closed`.
+        let forced = "UPDATE shift_participants SET state = 'closed', \
+             closed_by_kind = 'office_user', closed_at = '2026-10-22T10:00:00Z';
+             UPDATE shifts SET status = 'closed', closed_at = '2026-10-22T10:00:00Z', \
+             closed_by_kind = 'office_user', closed_by = 'u' WHERE id = 's1';
+             INSERT INTO audit_log (at, actor_kind, actor_id, action, target_type, target_id, \
+             result, details) VALUES ('t', 'office_user', 'u', 'shift.force_closed', 'shift', \
+             's1', 'ok', '{}');";
+        assert_eq!(invariants_after(forced).await, names(&[]));
+    }
+
+    #[tokio::test]
+    async fn each_broken_participant_invariant_is_named() {
+        // The shift closed while its parts are open, and its close was never audited.
+        let open_parts =
+            "UPDATE shifts SET status = 'closed', closed_at = '2026-10-22T10:00:00Z', \
+             closed_by_kind = 'office_user', closed_by = 'u' WHERE id = 's1';";
+        assert_eq!(
+            invariants_after(open_parts).await,
+            names(&["closed_shift_has_no_open_part", "shift_closed_once"])
+        );
+        // Every part closed, the shift still active, and no close event behind the parts.
+        let no_close = "UPDATE shift_participants SET state = 'closed', \
+             closed_by_kind = 'device', closed_at = '2026-10-22T10:00:00Z';";
+        assert_eq!(
+            invariants_after(no_close).await,
+            names(&[
+                "active_shift_has_an_open_part",
+                "close_events_match_device_closed_parts"
+            ])
+        );
+        // Closed at the earlier part's moment, not the later one.
+        let early = format!(
+            "{PARTS_CLOSED_BY_DEVICES}{}",
+            shift_closed_by_d1("2026-10-22T10:00:00Z")
+        );
+        assert_eq!(
+            invariants_after(&early).await,
+            names(&["device_closed_shift_closes_at_its_latest_part"])
+        );
+        // The close audited twice.
+        let twice = format!(
+            "{PARTS_CLOSED_BY_DEVICES}{}INSERT INTO audit_log (at, actor_kind, actor_id, action, \
+             target_type, target_id, result, details) VALUES ('t', 'device', 'd1', 'shift.close', \
+             'shift', 's1', 'ok', '{{}}');",
+            shift_closed_by_d1("2026-10-22T10:00:05Z")
+        );
+        assert_eq!(
+            invariants_after(&twice).await,
+            names(&["shift_closed_once"])
+        );
+    }
+
+    #[tokio::test]
+    async fn participants_in_names_each_device_its_own_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copy.db");
+        markiro_host::db::open(&path).await.unwrap().close().await;
+        seed(&path).await;
+        let mut db = SqliteConnection::connect(&format!("sqlite://{}", path.display()))
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "UPDATE shift_participants SET state = 'left', left_at = 't' WHERE device_id = 'd1'",
+        )
+        .execute(&mut db)
+        .await
+        .unwrap();
+        db.close().await.unwrap();
+        let pool = open_read_only(&path, true).await.unwrap();
+        let states = participant_states(&pool, "s1").await.unwrap();
+        assert_eq!(states.get("d1").map(String::as_str), Some("left"));
+        let good = participants_in(
+            &pool,
+            "s1",
+            &[(0, "d0".to_owned(), "active"), (1, "d1".to_owned(), "left")],
+        )
+        .await
+        .unwrap();
+        assert!(good.iter().all(|check| check.ok), "{good:?}");
+        let bad = participants_in(&pool, "s1", &[(0, "d0".to_owned(), "left")])
+            .await
+            .unwrap();
+        let failed: BTreeSet<String> = bad
+            .into_iter()
+            .filter(|check| !check.ok)
+            .map(|check| check.name)
+            .collect();
+        assert_eq!(
+            failed,
+            names(&[
+                "participant_state_device_0",
+                "participants_only_the_devices"
+            ])
+        );
+        pool.close().await;
     }
 }

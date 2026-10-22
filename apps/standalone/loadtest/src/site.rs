@@ -22,6 +22,8 @@ const STATION_VERSION: &str = "1.1.0";
 const HANDHELD_VERSION: &str = "1.2.0";
 /// A pairing claim is limited to 10 a minute from one address.
 const CLAIMS_PER_MINUTE: u32 = 9;
+/// The lines the wizard makes, in the order `Site.line_ids` keeps them.
+const LINE_NAMES: [&str; 3] = ["Линия 1", "Линия 2", "Линия 3"];
 
 #[derive(Debug, Clone)]
 pub struct DeviceSpec {
@@ -92,6 +94,9 @@ pub struct Site {
     pub office: Office,
     pub devices: Vec<DeviceSpec>,
     pub line_id: String,
+    /// Every line of `LINE_NAMES` the host has, in that order; `line_ids[0] == line_id`. A fresh
+    /// site has all three (an attached host may have only the first).
+    pub line_ids: Vec<String>,
     pub product_id: String,
     pub box_template_id: String,
     pub pallet_template_id: Option<String>,
@@ -144,13 +149,13 @@ fn throwaway_password(rng: &mut Rng) -> String {
     format!("Load-{:016x}-{:016x}", rng.next_u64(), rng.next_u64())
 }
 
-/// A site ready for `profile`: see the module's text.
-pub async fn provision(
+/// A site ready for `profile`, with no shift: see the module's text.
+pub async fn provision_site(
     host: &Host,
     metrics: Arc<Metrics>,
     profile: &Profile,
     attach: Option<AttachCredentials>,
-) -> Res<(Site, ShiftInfo)> {
+) -> Res<Site> {
     let api = Api::new(&host.base, &host.fingerprint, metrics.clone());
     let mut rng = Rng::new(profile.seed ^ 0x51_7E);
     let mut devices = Vec::new();
@@ -186,7 +191,7 @@ pub async fn provision(
                     "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow"
                 },
                 "sscc": { "boxNextSerial": 1500, "palletNextSerial": 40 },
-                "lines": ["Линия 1", "Линия 2"]
+                "lines": LINE_NAMES
             });
             let done = device_call(
                 &api,
@@ -337,15 +342,37 @@ pub async fn provision(
     secrets.push(office.token.clone());
     secrets.push(office.key.clone());
     secrets.extend(devices.iter().map(|device| device.key.clone()));
-    let site = Site {
+    let line_ids: Vec<String> = LINE_NAMES
+        .iter()
+        .filter_map(|name| {
+            lines.as_array().and_then(|all| {
+                all.iter()
+                    .find(|line| line["name"] == *name)
+                    .and_then(|line| line["id"].as_str())
+                    .map(str::to_owned)
+            })
+        })
+        .collect();
+    Ok(Site {
         office,
         devices,
         line_id,
+        line_ids,
         product_id: str_of(&product, "/id")?.to_owned(),
         box_template_id: str_of(&box_template, "/id")?.to_owned(),
         pallet_template_id,
         secrets,
-    };
+    })
+}
+
+/// A site ready for `profile` and a shift every device entered: see the module's text.
+pub async fn provision(
+    host: &Host,
+    metrics: Arc<Metrics>,
+    profile: &Profile,
+    attach: Option<AttachCredentials>,
+) -> Res<(Site, ShiftInfo)> {
+    let site = provision_site(host, metrics, profile, attach).await?;
     let shift = plan_and_enter(&site, profile, None).await?;
     Ok((site, shift))
 }
@@ -419,15 +446,16 @@ async fn claim(
     })
 }
 
-/// Plan a shift on the site's line and have every device enter it: the first
-/// entry opens it. Used for the run's shift and for each drill's.
-pub async fn plan_and_enter(
+/// A planned shift on `line_id` of the site's product and templates, pallets when the site has a
+/// pallet template, and a plan when `planned_qty` is given: its id and number. Nobody enters it.
+pub async fn plan_shift(
     site: &Site,
     profile: &Profile,
+    line_id: &str,
     planned_qty: Option<u32>,
-) -> Res<ShiftInfo> {
+) -> Res<(String, String)> {
     let mut body = json!({
-        "productId": site.product_id, "lineId": site.line_id,
+        "productId": site.product_id, "lineId": line_id,
         "productionDate": "2026-10-08", "boxTemplateId": site.box_template_id,
         "boxCapacity": profile.box_capacity
     });
@@ -443,8 +471,20 @@ pub async fn plan_and_enter(
         .office
         .ok("POST", "/v1/office/shifts", Some(body))
         .await?;
-    let id = str_of(&shift, "/id")?.to_owned();
-    let number = str_of(&shift, "/number")?.to_owned();
+    Ok((
+        str_of(&shift, "/id")?.to_owned(),
+        str_of(&shift, "/number")?.to_owned(),
+    ))
+}
+
+/// Plan a shift on the site's line and have every device enter it: the first
+/// entry opens it. Used for the run's shift and for each drill's.
+pub async fn plan_and_enter(
+    site: &Site,
+    profile: &Profile,
+    planned_qty: Option<u32>,
+) -> Res<ShiftInfo> {
+    let (id, number) = plan_shift(site, profile, &site.line_id, planned_qty).await?;
     let mut issuer_prefix = None;
     for device in &site.devices {
         let entered = device_call(
@@ -486,6 +526,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(site.devices.len(), 1);
+        assert_eq!(site.line_ids.len(), 3, "the wizard makes three lines");
+        assert_eq!(site.line_ids[0], site.line_id);
         assert_eq!(shift.issuer_prefix, "460068200");
         assert_eq!(shift.number, "OCT26-001");
         let listed = site
@@ -514,5 +556,45 @@ mod tests {
             spec(DeviceKind::Handheld).supports(),
             vec!["handheld-host-v1", "multi-station-v1"]
         );
+    }
+
+    #[tokio::test]
+    async fn a_site_without_a_shift_is_made_by_provision_site() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = Host::in_process(dir.path()).await.unwrap();
+        let mut profile = Profile::preset("tiny").unwrap();
+        profile.stations = 2;
+        profile.handhelds = 1;
+        let site = provision_site(&host, Arc::new(Metrics::new()), &profile, None)
+            .await
+            .unwrap();
+        assert_eq!(site.devices.len(), 3);
+        let listed = site
+            .office
+            .ok("GET", "/v1/office/shifts", None)
+            .await
+            .unwrap();
+        assert_eq!(listed.as_array().map(Vec::len), Some(0), "no shift yet");
+        let (id, number) = plan_shift(&site, &profile, &site.line_ids[1], Some(40))
+            .await
+            .unwrap();
+        let planned = site
+            .office
+            .ok("GET", &format!("/v1/office/shifts/{id}"), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                planned["status"].as_str(),
+                planned["lineId"].as_str(),
+                planned["number"].as_str()
+            ),
+            (
+                Some("planned"),
+                Some(site.line_ids[1].as_str()),
+                Some(number.as_str())
+            )
+        );
+        host.stop().await.unwrap();
     }
 }

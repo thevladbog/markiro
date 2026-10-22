@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use crate::api::{Api, Auth};
 use crate::engine::{Block, Engine, EngineCfg, Offer, Queued};
 use crate::gen::Code;
-use crate::ledger::Ledger;
+use crate::ledger::{FactMeta, Ledger};
 use crate::metrics::{Metrics, Route};
 use crate::profile::Profile;
 use crate::rng::Rng;
@@ -169,6 +169,10 @@ pub struct SimDevice {
     engine: Mutex<Engine>,
     online: AtomicBool,
     quiesce: AtomicBool,
+    /// Set by `pause`: the scanner makes nothing until `resume`.
+    paused: AtomicBool,
+    /// Set while the scanner is inside one scan, so `pause` can wait for it.
+    scanning: AtomicBool,
     own_offers: Mutex<Vec<Arc<Offer>>>,
     last_total: AtomicU64,
     stats: Mutex<DeviceStats>,
@@ -200,6 +204,8 @@ impl SimDevice {
             shared,
             online: AtomicBool::new(true),
             quiesce: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
+            scanning: AtomicBool::new(false),
             own_offers: Mutex::new(Vec::new()),
             last_total: AtomicU64::new(0),
             stats: Mutex::new(stats),
@@ -291,6 +297,111 @@ impl SimDevice {
         self.online.load(Ordering::SeqCst)
     }
 
+    /// Stop scanning, and wait until a scan in progress is queued. The syncer goes on.
+    pub async fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+        while self.scanning.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    /// The link, set by a scenario (a profile that never drops leaves it to the scenario):
+    /// offline, the scanner goes on and the syncer sends nothing.
+    pub fn set_online(&self, online: bool) {
+        self.online.store(online, Ordering::SeqCst);
+    }
+
+    pub fn queue_len(&self) -> usize {
+        self.engine.lock().expect("engine").queue_len()
+    }
+
+    /// Wait until the syncer has every queued record acknowledged.
+    pub async fn wait_drained(&self, limit: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + limit;
+        while self.queue_len() > 0 {
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "device {}: {} records still queued after {} s",
+                    self.spec.index,
+                    self.queue_len(),
+                    limit.as_secs()
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(())
+    }
+
+    /// What a station does before it closes its part: pause, close the open box and pallet, and
+    /// wait until the syncer has sent everything. The device must be online.
+    pub async fn seal(&self, limit: Duration) -> Result<(), String> {
+        self.pause().await;
+        let deadline = Instant::now() + limit;
+        loop {
+            let sealed = self.engine.lock().expect("engine").close_open();
+            if sealed {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "device {}: no SSCC serial to close the open box or pallet",
+                    self.spec.index
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.wait_drained(deadline.saturating_duration_since(Instant::now()))
+            .await
+    }
+
+    /// A receipt of a record this device sent outside its outbox, applied once to the ledger.
+    pub fn apply_receipt(&self, kind: markiro_proto::FactKind, receipt: &Value) {
+        self.shared.ledger.lock().expect("ledger").apply(
+            self.spec.index,
+            &FactMeta { kind, claims: None },
+            receipt,
+        );
+    }
+
+    /// `close_part`, with the moment given (else the device's clock), and its receipt applied
+    /// to the ledger, so the per-device receipt counts stay exact. Call it after `seal`, never
+    /// while a flush of this device may run (the syncer only flushes a non-empty outbox).
+    pub async fn close_part_ledgered(
+        &self,
+        planned: Option<u32>,
+        reason: Option<&str>,
+        closed_at: Option<String>,
+    ) -> Result<Value, String> {
+        let actual = {
+            let ledger = self.shared.ledger.lock().expect("ledger");
+            ledger
+                .accepted_scans
+                .get(&self.spec.index)
+                .copied()
+                .unwrap_or(0)
+        };
+        let (id, tick, boxes) = {
+            let mut engine = self.engine.lock().expect("engine");
+            (engine.fresh_id(), engine.tick(), engine.boxes_closed)
+        };
+        let at = closed_at.unwrap_or(tick);
+        let data = crate::gen::shift_closed(planned, actual as u32, boxes as u32, reason, &at);
+        let record = crate::gen::record(
+            &id,
+            markiro_proto::FactKind::ShiftClosed,
+            &self.shared.shift_id,
+            data,
+        );
+        let mut receipts = self.api.facts(&self.spec.key, &[record]).await?;
+        let receipt = receipts.remove(0);
+        self.apply_receipt(markiro_proto::FactKind::ShiftClosed, &receipt);
+        Ok(receipt)
+    }
+
     fn stopped(&self) -> bool {
         self.shared.stop.load(Ordering::SeqCst)
     }
@@ -303,6 +414,11 @@ impl SimDevice {
         let interval = Duration::from_secs_f64(1.0 / profile.scan_rate);
         let mut next = Instant::now();
         while !self.stopped() {
+            if self.paused.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                next = Instant::now();
+                continue;
+            }
             let now = Instant::now();
             if now < next {
                 tokio::time::sleep((next - now).min(Duration::from_millis(50))).await;
@@ -319,7 +435,14 @@ impl SimDevice {
                 self.with_stats(|stats| stats.stalls += 1);
                 continue;
             }
+            // A pause that came after the check above waits for this scan, or stops it here.
+            self.scanning.store(true, Ordering::SeqCst);
+            if self.paused.load(Ordering::SeqCst) {
+                self.scanning.store(false, Ordering::SeqCst);
+                continue;
+            }
             self.scan_once(&mut rng).await;
+            self.scanning.store(false, Ordering::SeqCst);
         }
     }
 
@@ -1316,5 +1439,59 @@ mod tests {
         assert_eq!(seen.expected.pallets_closed, 0);
         assert!(seen.expected.boxes_closed >= 6);
         assert_reconciled(&seen);
+    }
+
+    #[tokio::test]
+    async fn a_paused_device_scans_nothing_and_a_sealed_one_has_sent_everything() {
+        let profile = quiet(Profile::preset("tiny").unwrap());
+        let (_dir, mut host, device, shared) = one_device_site(&profile).await;
+        let scanner = tokio::spawn(device.clone().scanner());
+        let syncer = tokio::spawn(device.clone().syncer());
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        device.seal(Duration::from_secs(30)).await.unwrap();
+        let made = device.records_made();
+        assert!(made > 0, "the device scanned before the seal");
+        assert_eq!(device.queue_len(), 0, "sealed: everything was sent");
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert_eq!(device.records_made(), made, "a paused device makes nothing");
+        device.resume();
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(device.records_made() > made, "a resumed device scans again");
+        shared.stop.store(true, Ordering::SeqCst);
+        scanner.await.unwrap();
+        device.quiesce();
+        syncer.await.unwrap().unwrap();
+        assert_eq!(
+            shared.ledger.lock().unwrap().expected().records,
+            device.records_made()
+        );
+        host.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_ledgered_close_counts_its_receipt_once() {
+        let profile = quiet(Profile::preset("tiny").unwrap());
+        let (dir, mut host, device, shared) = one_device_site(&profile).await;
+        device.topup(0).await;
+        device.topup(1).await;
+        {
+            let mut engine = device.engine.lock().unwrap();
+            for _ in 0..3 {
+                let code = engine.next_code();
+                engine.scan_ok(&code, None);
+            }
+            assert!(engine.close_open());
+        }
+        assert!(matches!(device.flush_once().await, Flush::Sent));
+        let made = device.records_made();
+        let at = crate::gen::text_of(crate::gen::now_ms() + 5_000);
+        let receipt = device
+            .close_part_ledgered(None, None, Some(at))
+            .await
+            .unwrap();
+        assert_eq!(receipt["outcome"], "accepted", "{receipt}");
+        assert_eq!(shared.ledger.lock().unwrap().expected().records, made + 1);
+        assert_eq!(host_counts(dir.path()).await.receipts as u64, made + 1);
+        host.stop().await.unwrap();
     }
 }
