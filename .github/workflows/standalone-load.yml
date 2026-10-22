@@ -3,7 +3,7 @@ name: Standalone load test
 # Opt-in: nothing here runs on a push or a pull request, and no ruleset
 # requires it. The ordinary gate (`standalone-rust` in ci.yml) runs this
 # crate's unit tests with the rest of the workspace; this workflow is the load
-# itself (apps/standalone/loadtest, docs/standalone/load-test-runbook.md): a
+# itself (apps/standalone/loadtest, docs/runbooks/standalone-load-test.md): a
 # real host, six simulated devices and minutes of scans, which a shared
 # runner's noise would turn into a flaky required check.
 on:

@@ -7684,3 +7684,47 @@ device's. «Устройства и версии» shows each device's version n
 against the host's window (`compatible`, `incompatible`, `host_older`, `unknown`). The only
 version rules left are the update offer's (a newer host with a signed package, `minUpgradeFrom`)
 and the protocol window (`app_too_old` / `host_too_old`).
+
+## Load and soak harness
+
+`apps/standalone/loadtest` (crate `markiro-loadtest`, a dev and acceptance tool, never shipped; its version stays `0.0.0`) is the
+harness of spec 2026-10-20 §8. It drives the real `markiro-host` over HTTPS with simulated devices (one per station or handheld:
+`engine.rs` is a pure state machine, `device.rs` its network tasks) in one shared shift. A ledger of receipts is the oracle: at
+the end the host's totals and its database (read-only, from outside) must equal it exactly. Six drills (`drills.rs`) are the ways a
+shared shift ends: close in three orders, force-close from the office, close with no reason, and a stale `leave` that must not undo
+a re-entry. They are **not** fault injection. A backup is taken under load and at the end; the last is restored into a folder of its own
+(`probes.rs`). The owner's runbook is `docs/runbooks/standalone-load-test.md` (Russian).
+
+- Commands: `markiro-loadtest run --profile tiny|smoke|soak [--set field=value]… [--out DIR] [--keep-data] [--host spawn|in-process|attach]`,
+  `compare OLD.json NEW.json`, `summary REPORT.json`. Exit 0 pass, 1 failed verdict or regression, 2 the run could not be made.
+  Profiles and thresholds live in `profile.rs` (`Thresholds::for_profile`): tiny is a 20 s self-test (2 stations + 1 handheld,
+  latencies four times looser), smoke 4 stations + 2 handhelds × 5 scans/s for 3 minutes, soak the same × 10 scans/s for 4 hours with
+  three backups. Spec §8 gives no numbers; they are starting values, to be calibrated.
+- Host modes: `in-process` listens on 127.0.0.1 only; `spawn` (the default) starts `markiro-host` as a child, which has no bind option
+  and listens on `0.0.0.0`, so it refuses to start without `--accept-network-exposure` (trusted or isolated network only; the CI
+  workflow never passes it); `attach` uses a running throwaway host (credentials from `MARKIRO_LOAD_OFFICE_DEVICE_KEY`,
+  `MARKIRO_LOAD_ADMIN_LOGIN`, `MARKIRO_LOAD_ADMIN_PASSWORD`, never the command line) and has not been exercised.
+- Unavailable probes are warnings, not failures: an `in-process` run does not judge host memory, descriptors or the host log; an
+  empty check list does fail. Whether an unavailable probe on a `spawn` host should fail is an open owner decision.
+- Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
+  redacted (`redact()` with the run's secrets) before writing; they are still internal results.
+- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and the Windows job, routed by
+  `tools/ci/affected.mjs`); `tests/self_run.rs` is `#[ignore]`. The load itself is manual or the opt-in
+  `.github/workflows/standalone-load.yml` (`workflow_dispatch` only, in-process, never required, never run on GitHub yet). Run a smoke
+  after changing a hot write path (facts, SSCC blocks, entry, leave, close, backup, restore) or `db.rs`.
+- Payloads are built from `markiro-proto` types, so a renamed wire field breaks the build. The plan-2b names `maxStations`,
+  `participants`, `totals`, `byDevice`, `closeReasonMissing`, `partClosed`, `reasonMissing`, `multi-station-v1` appear as strings in
+  `engine.rs`, `device.rs`, `drills.rs`, `run.rs` and `site.rs`; change them together with the fixtures.
+- `tests/write_review.rs` is spec §8's write review: hot write paths (`receive_facts`, `issue_block`, `enter_shift`) call
+  `begin_write`, no function reads on a deferred `pool.begin()` and then writes (a textual scan that recognises only `pool.begin()`),
+  the code check holds no transaction, a facts batch is one transaction of at most 100 records, a backup is one `VACUUM INTO`. A new
+  write route takes `begin_write`.
+- Observed (one macOS debug build, in-process host): smoke 180 s, 5403 scans, facts p99 about 34 ms, `sscc_block` p99 112 ms, WAL
+  backlog about 997 frames, 168 of 168 checks. The backlog sits just under SQLite's 1000-frame auto-checkpoint: it is the ceiling of
+  the checkpoint sawtooth, not a load measure. This is not a performance validation.
+- Not simulated: label checks, box exceptions, validation shifts, disaggregation, warehouse pallets, the handheld's warehouse and
+  pallet-event routes, printers, scanners, a real LAN, the Windows service. Not exercised by the load: `shift_line_full`, a device without
+  `multi-station-v1` (`protocol_unsupported`), leave and re-entry under load, a closed part receiving live facts and last-closer races,
+  concurrent closes, several lines or shifts, backup or restore in the middle of a close, process-level faults (kill and restart
+  mid-write, WAL crash recovery, 5xx backoff). Windows-only and unverified: reading `host.db-shm`, retry of the restore's `os error 32`,
+  PowerShell vitals. `soak`, `attach`, Linux and the workflow have never run.
