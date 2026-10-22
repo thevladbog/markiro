@@ -628,7 +628,8 @@ SHA-256 установщика). Пока владелец не внёс в сб
 ## Что проверяет CI и чего он не проверяет
 
 Задание `standalone-windows-build` (раннер `windows-latest`, Windows Server) собирает хост и установщик и
-запускает `tools/standalone-release/smoke.ps1`. Скрипт проверяет:
+запускает `tools/standalone-release/smoke.ps1`. Тесты cargo для Windows идут параллельно в отдельном
+задании `standalone-windows-tests`. Скрипт проверяет:
 
 - тихую установку трёх ролей и отказ без роли, точный текст `installation.json`, `/ROLE=HOST`;
 - службу: учётную запись, автозапуск, действия при сбое и их сброс через сутки, перезапуск в новом
