@@ -122,6 +122,9 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
         format!("{restarted:?}"),
     ));
     restarted?;
+    // The outage's window ends here: the host answers again, and its log and the requests from
+    // now on are judged.
+    ctx.end_faults().await;
     tokio::time::sleep(Duration::from_secs(LOAD_S)).await;
     let (shared, devices, drained) = work.stop("").await;
     ctx.checks(drained);
@@ -176,6 +179,8 @@ mod tests {
             "no_device_gave_up",
             "the_host_came_back",
             "db_scans_device_0",
+            "host_log_error_lines_after_the_faults",
+            "no_request_without_an_answer_after_the_faults",
         ] {
             assert!(
                 result.checks.iter().any(|check| check.name == name),

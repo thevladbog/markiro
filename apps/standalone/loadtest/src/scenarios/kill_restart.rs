@@ -1,10 +1,13 @@
 //! `kill-restart`: a spawned host killed (`SIGKILL`) while devices write, restarted on the same
-//! data folder and port. SQLite recovers its log; no acknowledged record is lost; the devices'
-//! resends of batches they never had answered get the stored receipts and write nothing twice.
+//! data folder and port. SQLite recovers its log; no acknowledged record is lost (by record id);
+//! the devices' resends of batches they never had answered get the stored receipts and write
+//! nothing twice (when the kill swallowed such an answer: the note says when it did not). The
+//! fault relaxes the log's ERROR lines and the requests without an answer only until the host
+//! answers again (`Ctx::end_faults`).
 //! A kill is a process crash, not a power cut (`synchronous=FULL` keeps what was committed
 //! either way); a power cut is not simulated.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Duration;
 
@@ -48,7 +51,7 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
     let shift = ctx.plan(&line, None).await?;
     let all = [0usize, 1, 2, 3];
     let prefix = enter_all(ctx, &shift, &all).await?;
-    let work = ctx.load(1, &shift, &prefix, &all);
+    let work = ctx.load_tracking_ids(1, &shift, &prefix, &all);
     tokio::time::sleep(Duration::from_secs(LOAD_S)).await;
     let data_dir = ctx
         .host
@@ -65,7 +68,14 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
     }
     // The requests in flight at the kill fail now; nothing more can be acknowledged.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let acked: BTreeMap<u32, u64> = work.shared.ledger.lock().expect("ledger").records.clone();
+    let acked: BTreeMap<u32, BTreeSet<String>> = work
+        .shared
+        .ledger
+        .lock()
+        .expect("ledger")
+        .acked_ids()
+        .cloned()
+        .unwrap_or_default();
     let before = ctx.host.pid;
     ctx.host
         .restart(bin)
@@ -76,29 +86,31 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
         ctx.host.pid != before,
         format!("pid {before:?} then {:?}", ctx.host.pid),
     ));
+    // The kill's window ends here: the host answers again, and its log and the requests from now
+    // on are judged.
+    ctx.end_faults().await;
     // Before any device returns: the recovered database, read-only.
     let pool = ctx.db().await?;
-    let rows: Result<Vec<(String, i64)>, String> = sqlx::query_as(
-        "SELECT device_id, COUNT(*) FROM fact_receipts WHERE shift_id = ? GROUP BY device_id",
-    )
-    .bind(&shift)
-    .fetch_all(&pool)
-    .await
-    .map_err(|error| error.to_string());
+    let rows: Result<Vec<(String, String)>, String> =
+        sqlx::query_as("SELECT device_id, record_id FROM fact_receipts WHERE shift_id = ?")
+            .bind(&shift)
+            .fetch_all(&pool)
+            .await
+            .map_err(|error| error.to_string());
     let structural = crate::dbcheck::structural(&pool).await;
     pool.close().await;
-    let kept: BTreeMap<String, i64> = rows?.into_iter().collect();
+    let mut kept: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (device_id, record_id) in rows? {
+        kept.entry(device_id).or_default().insert(record_id);
+    }
     let mut swallowed = 0u64;
+    let none = BTreeSet::new();
     for device in &work.devices {
         let index = device.spec.index;
-        let acknowledged = acked.get(&index).copied().unwrap_or(0);
-        let in_db = kept.get(&device.spec.id).copied().unwrap_or(0) as u64;
-        ctx.check(Check::new(
-            &format!("no_acknowledged_record_lost_device_{index}"),
-            in_db >= acknowledged,
-            format!("{acknowledged} acknowledged, {in_db} in the database after the restart"),
-        ));
-        swallowed += in_db.saturating_sub(acknowledged);
+        let acknowledged = acked.get(&index).unwrap_or(&none);
+        let in_db = kept.get(&device.spec.id).unwrap_or(&none);
+        ctx.check(acknowledged_kept(index, acknowledged, in_db));
+        swallowed += in_db.difference(acknowledged).count() as u64;
     }
     match structural {
         Ok(checks) => ctx.checks(prefixed("after_the_crash_", checks)),
@@ -144,9 +156,72 @@ async fn body(ctx: &mut Ctx, bin: &Path) -> Res<()> {
     Ok(())
 }
 
+/// Whether every record `index` had acknowledged before the kill is in the recovered database:
+/// sets of record ids, not counts (one lost record and one kept but unanswered would cancel out).
+/// Nothing acknowledged is a failure too: the check would hold vacuously.
+pub fn acknowledged_kept(
+    index: u32,
+    acknowledged: &BTreeSet<String>,
+    in_db: &BTreeSet<String>,
+) -> Check {
+    let name = format!("no_acknowledged_record_lost_device_{index}");
+    if acknowledged.is_empty() {
+        return Check::new(
+            &name,
+            false,
+            format!(
+                "nothing was acknowledged before the kill ({} records of the device in the \
+                 database): the check would hold vacuously",
+                in_db.len()
+            ),
+        );
+    }
+    let lost: Vec<&String> = acknowledged.difference(in_db).collect();
+    Check::new(
+        &name,
+        lost.is_empty(),
+        format!(
+            "{} acknowledged, {} in the database after the restart, {} acknowledged ids missing{}",
+            acknowledged.len(),
+            in_db.len(),
+            lost.len(),
+            if lost.is_empty() {
+                String::new()
+            } else {
+                format!(": {:?}", lost.iter().take(5).collect::<Vec<_>>())
+            }
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ids(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn an_acknowledged_record_missing_after_the_crash_is_named_even_when_counts_match() {
+        let held = acknowledged_kept(2, &ids(&["a", "b"]), &ids(&["a", "b", "c"]));
+        assert_eq!(held.name, "no_acknowledged_record_lost_device_2");
+        assert!(held.ok, "{}", held.detail);
+        // b lost, c committed but never answered: the counts match, the sets do not.
+        let lost = acknowledged_kept(2, &ids(&["a", "b"]), &ids(&["a", "c"]));
+        assert!(!lost.ok);
+        assert!(lost.detail.contains("\"b\""), "{}", lost.detail);
+        assert!(!lost.detail.contains("\"a\""), "{}", lost.detail);
+        let vacuous = acknowledged_kept(2, &ids(&[]), &ids(&["a"]));
+        assert!(!vacuous.ok);
+        assert!(
+            vacuous
+                .detail
+                .contains("nothing was acknowledged before the kill"),
+            "{}",
+            vacuous.detail
+        );
+    }
 
     #[tokio::test]
     async fn the_kill_restart_scenario_is_not_judged_in_this_process() {
@@ -182,6 +257,8 @@ mod tests {
             "no_acknowledged_record_lost_device_0",
             "db_receipts_device_3",
             "the_last_part_closes_the_shift_after_the_restart",
+            "host_log_error_lines_after_the_faults",
+            "no_request_without_an_answer_after_the_faults",
         ] {
             assert!(
                 result.checks.iter().any(|check| check.name == name),

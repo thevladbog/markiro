@@ -3,7 +3,7 @@
 //! record counts (a resend gets the same one); a code is kept by the first
 //! eight bytes of its hash, which keeps a four-hour run small.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use markiro_proto::FactKind;
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,9 @@ pub struct Ledger {
     pub boxes_closed: BTreeMap<u32, u64>,
     pub pallets_closed: BTreeMap<u32, u64>,
     pub rejected: BTreeMap<String, u64>,
+    /// The ids of the records each device had acknowledged, when asked for (`track_ids`): a
+    /// scenario that kills the host checks every one of them is still there afterwards.
+    acked_ids: Option<BTreeMap<u32, BTreeSet<String>>>,
 }
 
 /// The oracle's figures, as a report keeps them.
@@ -58,9 +61,26 @@ fn bump<K: Ord>(map: &mut BTreeMap<K, u64>, key: K) {
 }
 
 impl Ledger {
+    /// Keep the id of every record acknowledged from now on (off by default: a long run's ids
+    /// would only cost memory).
+    pub fn track_ids(&mut self) {
+        self.acked_ids.get_or_insert_with(BTreeMap::new);
+    }
+
+    /// The acknowledged record ids by device, when tracked.
+    pub fn acked_ids(&self) -> Option<&BTreeMap<u32, BTreeSet<String>>> {
+        self.acked_ids.as_ref()
+    }
+
     /// The receipt of one of `device`'s records, the first time it is seen.
     pub fn apply(&mut self, device: u32, meta: &FactMeta, receipt: &Value) {
         bump(&mut self.records, device);
+        if let (Some(ids), Some(id)) = (
+            self.acked_ids.as_mut(),
+            receipt.get("id").and_then(Value::as_str),
+        ) {
+            ids.entry(device).or_default().insert(id.to_owned());
+        }
         let outcome = receipt.get("outcome").and_then(Value::as_str).unwrap_or("");
         if outcome == "rejected" {
             let code = receipt
@@ -137,6 +157,42 @@ mod tests {
 
     fn kind(kind: FactKind) -> FactMeta {
         FactMeta { kind, claims: None }
+    }
+
+    #[test]
+    fn acknowledged_record_ids_are_kept_by_device_only_when_asked_for() {
+        let mut ledger = Ledger::default();
+        ledger.apply(
+            0,
+            &scan(Some(1)),
+            &json!({"id": "r0", "outcome": "accepted"}),
+        );
+        assert!(ledger.acked_ids().is_none());
+        ledger.track_ids();
+        ledger.apply(
+            0,
+            &scan(Some(2)),
+            &json!({"id": "r1", "outcome": "accepted"}),
+        );
+        ledger.apply(
+            1,
+            &scan(Some(2)),
+            &json!({"id": "r2", "outcome": "conflict"}),
+        );
+        ledger.apply(
+            1,
+            &scan(Some(3)),
+            &json!({"id": "r3", "outcome": "rejected", "code": "gtin_mismatch"}),
+        );
+        let ids = ledger.acked_ids().expect("tracked");
+        let set = |items: &[&str]| {
+            items
+                .iter()
+                .map(|id| (*id).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(ids.get(&0), Some(&set(&["r1"])));
+        assert_eq!(ids.get(&1), Some(&set(&["r2", "r3"])));
     }
 
     #[test]

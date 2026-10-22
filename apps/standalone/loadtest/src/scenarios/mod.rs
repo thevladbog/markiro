@@ -48,6 +48,18 @@ pub const SPAWN_ONLY: &[&str] = &["kill-restart", "outage"];
 /// How long a scenario's devices scan between its steps, in seconds.
 pub const LOAD_S: u64 = 3;
 
+/// How long after the end of an injected fault (the host answers again) its window still lasts.
+pub const FAULT_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Requests that got no answer, of a metrics' error classes (`<route>:net_<kind>`).
+fn unanswered_count(errors: &BTreeMap<String, u64>) -> u64 {
+    errors
+        .iter()
+        .filter(|(class, _)| class.contains(":net_"))
+        .map(|(_, count)| *count)
+        .sum()
+}
+
 /// The host mode the run uses, and so every scenario's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostKind {
@@ -136,8 +148,12 @@ pub struct Ctx {
     pub dir: PathBuf,
     pub kind: HostKind,
     /// A scenario that injects faults: requests without an answer and ERROR lines of the host's
-    /// log are expected, and recorded instead of checked.
+    /// log are expected inside the fault's window, and recorded instead of checked. The window
+    /// ends at `end_faults`; what comes after is judged again.
     pub faults: bool,
+    /// Where the fault's window ended: the host log's length then and the requests without an
+    /// answer so far.
+    faults_ended: Option<(u64, u64)>,
     /// Paths a judged run did not exercise this time, said in the report.
     pub note: String,
     checks: Vec<Check>,
@@ -190,10 +206,19 @@ impl Ctx {
             dir,
             kind: kind.clone(),
             faults: false,
+            faults_ended: None,
             note: String::new(),
             checks: Vec::new(),
             observed: BTreeMap::new(),
         })
+    }
+
+    /// The injected fault is over: what comes after it is judged again.
+    /// A short settle first lets a request that was failing at the restart end inside the window.
+    pub async fn end_faults(&mut self) {
+        tokio::time::sleep(FAULT_SETTLE).await;
+        let log_len = self.host.log_len().unwrap_or(0);
+        self.faults_ended = Some((log_len, unanswered_count(&self.metrics.errors())));
     }
 
     pub fn check(&mut self, check: Check) {
@@ -348,6 +373,28 @@ impl Ctx {
     /// Simulated devices `indices` scanning into `shift` (run number `run` keeps their codes and
     /// record ids apart from any other load of this host).
     pub fn load(&self, run: u32, shift: &str, issuer_prefix: &str, indices: &[usize]) -> Load {
+        self.load_inner(run, shift, issuer_prefix, indices, false)
+    }
+
+    /// `load`, its ledger keeping the id of every acknowledged record from the first one.
+    pub fn load_tracking_ids(
+        &self,
+        run: u32,
+        shift: &str,
+        issuer_prefix: &str,
+        indices: &[usize],
+    ) -> Load {
+        self.load_inner(run, shift, issuer_prefix, indices, true)
+    }
+
+    fn load_inner(
+        &self,
+        run: u32,
+        shift: &str,
+        issuer_prefix: &str,
+        indices: &[usize],
+        track_ids: bool,
+    ) -> Load {
         let mut profile = self.profile.clone();
         profile.seed ^= u64::from(run).wrapping_mul(0x1_0000_0001);
         let shared = Arc::new(Shared::new(
@@ -357,6 +404,9 @@ impl Ctx {
             issuer_prefix,
             self.metrics.clone(),
         ));
+        if track_ids {
+            shared.ledger.lock().expect("ledger").track_ids();
+        }
         let devices: Vec<Arc<SimDevice>> = indices
             .iter()
             .map(|at| {
@@ -406,6 +456,20 @@ impl Ctx {
             if self.faults {
                 self.observed
                     .insert("hostLogErrorLines".to_owned(), json!(log.error_lines));
+                if let Some((offset, _)) = self.faults_ended {
+                    let after = self.host.log_scan_from(offset);
+                    self.checks.push(Check::at_most(
+                        "host_log_error_lines_after_the_faults",
+                        0,
+                        after.error_lines,
+                    ));
+                    if !after.first_errors.is_empty() {
+                        self.observed.insert(
+                            "hostLogFirstErrorsAfterTheFaults".to_owned(),
+                            json!(after.first_errors),
+                        );
+                    }
+                }
             } else {
                 self.checks
                     .push(Check::at_most("host_log_error_lines", 0, log.error_lines));
@@ -431,6 +495,21 @@ impl Ctx {
                 0,
                 count(":net_"),
             ));
+        } else if let Some((_, before)) = self.faults_ended {
+            self.observed.insert(
+                "requestsWithoutAnAnswerInTheFaultWindow".to_owned(),
+                json!(before),
+            );
+            self.checks.push(Check::at_most(
+                "no_request_without_an_answer_after_the_faults",
+                0,
+                unanswered_count(&errors).saturating_sub(before),
+            ));
+        } else {
+            self.note.push_str(
+                " the fault window never ended (the scenario stopped inside it): the host log's \
+                 ERROR lines and the requests without an answer were recorded, not judged.",
+            );
         }
         let latency = self
             .metrics
@@ -1148,6 +1227,66 @@ mod tests {
             .checks
             .iter()
             .any(|check| !check.ok && check.detail.contains("anything")));
+    }
+
+    /// One request of the scenario's metrics that gets no answer (nothing listens on port 1).
+    async fn unanswered(ctx: &Ctx) {
+        let api = Api::new(
+            "https://127.0.0.1:1",
+            &ctx.host.fingerprint,
+            ctx.metrics.clone(),
+        );
+        let sent = send_raw(&api, "key", Route::Other, "GET", "/v1/hello", None).await;
+        assert!(sent.is_err(), "{sent:?}");
+    }
+
+    fn named<'a>(result: &'a ScenarioResult, name: &str) -> Option<&'a Check> {
+        result.checks.iter().find(|check| check.name == name)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_fault_window_relaxes_the_unanswered_requests_only_until_it_ends() {
+        let work = tempfile::tempdir().unwrap();
+        let after = "no_request_without_an_answer_after_the_faults";
+        // Inside the window: recorded, not judged.
+        let mut ctx = Ctx::new("inside", &HostKind::InProcess, work.path(), &tiny(), 1, 0)
+            .await
+            .unwrap();
+        ctx.faults = true;
+        unanswered(&ctx).await;
+        ctx.end_faults().await;
+        let (result, _) = ctx.finish(Ok(())).await;
+        assert!(
+            named(&result, after).is_some_and(|check| check.ok),
+            "{:?}",
+            result.checks
+        );
+        assert!(named(&result, "no_request_without_an_answer").is_none());
+        // After it ended: a failure.
+        let mut ctx = Ctx::new("after", &HostKind::InProcess, work.path(), &tiny(), 1, 0)
+            .await
+            .unwrap();
+        ctx.faults = true;
+        ctx.end_faults().await;
+        unanswered(&ctx).await;
+        let (result, _) = ctx.finish(Ok(())).await;
+        let check = named(&result, after).expect("judged after the window");
+        assert!(!check.ok, "{}", check.detail);
+        // A window that never ended (the scenario stopped inside it): recorded, and said.
+        let mut ctx = Ctx::new("never", &HostKind::InProcess, work.path(), &tiny(), 1, 0)
+            .await
+            .unwrap();
+        ctx.faults = true;
+        unanswered(&ctx).await;
+        let (result, _) = ctx
+            .finish(Err("stopped inside the window".to_owned()))
+            .await;
+        assert!(named(&result, after).is_none());
+        assert!(
+            result.note.contains("fault window never ended"),
+            "{}",
+            result.note
+        );
     }
 
     #[test]

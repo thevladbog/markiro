@@ -100,6 +100,14 @@ pub fn scan_log(text: &str) -> LogScan {
     scan
 }
 
+/// The scan of what a log file holds past its first `offset` bytes.
+pub fn scan_log_from(bytes: &[u8], offset: u64) -> LogScan {
+    let start = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(bytes.len());
+    scan_log(&String::from_utf8_lossy(&bytes[start..]))
+}
+
 async fn wait_ready(base: &str, fingerprint: &str, limit: Duration) -> Result<(), Error> {
     let client = pinned_client(fingerprint, Duration::from_secs(2));
     let started = Instant::now();
@@ -295,6 +303,24 @@ impl Host {
         }
     }
 
+    /// The length in bytes of the host's log so far (a spawned host only).
+    pub fn log_len(&self) -> Option<u64> {
+        match &self.process {
+            Process::Spawned { log, .. } => std::fs::metadata(log).ok().map(|meta| meta.len()),
+            _ => None,
+        }
+    }
+
+    /// What the host's log holds past its first `offset` bytes (a spawned host only).
+    pub fn log_scan_from(&self, offset: u64) -> LogScan {
+        match &self.process {
+            Process::Spawned { log, .. } => std::fs::read(log)
+                .map(|bytes| scan_log_from(&bytes, offset))
+                .unwrap_or_default(),
+            _ => LogScan::default(),
+        }
+    }
+
     /// Stop what this harness started; `true` when it ended by itself on a
     /// request to stop (SIGINT on Unix; Windows has none: the process is
     /// killed and the database recovers its log on the next start).
@@ -395,6 +421,28 @@ mod tests {
     use super::*;
     use crate::api::pinned_client;
     use std::io::Write;
+
+    #[test]
+    fn a_log_is_scanned_past_an_offset_only() {
+        let before = "2026-10-22T10:00:00Z ERROR before the restart: database is locked\n";
+        let after =
+            "2026-10-22T10:00:05Z  INFO up\n2026-10-22T10:00:06Z \x1b[31mERROR\x1b[0m after\n";
+        let bytes = format!("{before}{after}").into_bytes();
+        let whole = scan_log_from(&bytes, 0);
+        assert_eq!((whole.error_lines, whole.busy_lines), (2, 1));
+        let tail = scan_log_from(&bytes, before.len() as u64);
+        assert!(tail.available);
+        assert_eq!((tail.error_lines, tail.busy_lines), (1, 0));
+        assert!(
+            tail.first_errors[0].contains("after"),
+            "{:?}",
+            tail.first_errors
+        );
+        // An offset past the end (the log was replaced) scans nothing, and says it scanned.
+        let none = scan_log_from(&bytes, bytes.len() as u64 + 10);
+        assert!(none.available);
+        assert_eq!(none.error_lines, 0);
+    }
 
     #[test]
     fn the_log_scan_counts_errors_and_the_lines_that_name_a_busy_database() {
