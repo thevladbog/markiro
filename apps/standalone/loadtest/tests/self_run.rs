@@ -140,6 +140,30 @@ async fn the_tiny_profile_passes_every_check_against_a_host_in_this_process() {
             "{name}"
         );
     }
+    let races = report
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.name == "close-races")
+        .expect("the close-races scenario ran");
+    assert!(
+        races.checks.iter().all(|check| check.ok),
+        "{:#?}",
+        races.checks
+    );
+    for name in [
+        "n_closes_at_once_exactly_one_closes_the_shift",
+        "race_0_one_of_the_two_orders",
+        "race_3_close_events_match_device_closed_parts",
+    ] {
+        assert!(
+            races
+                .checks
+                .iter()
+                .any(|check| check.name == name && check.ok),
+            "{name}"
+        );
+    }
+    assert!(races.observed.contains_key("orders"));
     // `execute` hands back a report with the run's secrets already removed.
     let text = serde_json::to_string(&report).unwrap();
     assert!(!text.contains("Load-"), "the administrator password leaked");

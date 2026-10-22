@@ -6,6 +6,7 @@
 //! (`judged: false`) instead of passing.
 
 pub mod capability;
+pub mod close_races;
 pub mod closed_part;
 pub mod leave_reenter;
 pub mod line_full;
@@ -886,6 +887,7 @@ async fn run_one(
         capability::NAME => capability::run(kind, work_dir, profile).await,
         leave_reenter::NAME => leave_reenter::run(kind, work_dir, profile).await,
         closed_part::NAME => closed_part::run(kind, work_dir, profile).await,
+        close_races::NAME => close_races::run(kind, work_dir, profile).await,
         other => (
             broken(other, format!("no scenario is named {other}")),
             Vec::new(),
