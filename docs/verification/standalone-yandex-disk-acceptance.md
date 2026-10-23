@@ -1,6 +1,6 @@
 # Автоном / Яндекс Диск: матрица приёмки
 
-Дата: 2026-10-23. Код в `codex/autonom-yandex-disk`, подготовлен для PR; промышленный выпуск не выполнен. Windows-проверки
+Дата: 2026-10-23. Код в `codex/autonom-yandex-disk`, [PR #786](https://github.com/thevladbog/markiro/pull/786); промышленный выпуск не выполнен. Windows-проверки
 отложены пользователем. Все строки ниже разделяют автоматические доказательства на macOS
 и фактическое выполнение Windows/provider сценария. Mock не закрывает внешний gate.
 
@@ -23,6 +23,32 @@
 | A8   | redacted secrets, separate store, generic JS auth denial, public-only profile                   | OPEN: настоящий DPAPI CurrentUser/ACL/LocalService и support bundle inspection |
 | A9   | generation/tombstone/cancel, marker-first rotation, чужой host и clock rollback, durable retry  | OPEN: live transfer cancellation, смена аккаунта и process outbound trace      |
 | A10  | штатный restore/hold/license, interrupted intent + receipt без второго применения               | OPEN: power-cut/SCM и повтор helper в Windows                                  |
+
+## Исправления по CI и review PR #786
+
+`standalone-windows-build` остановился на release-контракте до компиляции:
+регулярное выражение `cookie.*` ошибочно считало `cookie-factory` сетевой библиотекой.
+Это сериализатор, используемый `age`/`age-core`. Проверка распознаёт HTTP cookie crates
+отдельно, точный список сетевых зависимостей и запрет HTTP/updater plugins сохранены.
+Runbook установки теперь явно описывает необязательные прямые обращения к Яндексу.
+
+- PUT отменяется guard-сигналом и при зависшем ответе сервера; тест использует локальный TCP server.
+- Коды delivery ошибок сохраняются полностью; постоянные credential ошибки не запускают новую доставку.
+- Refresh и delivery получают независимые уведомления при подключении, отключении и retry.
+- Завершённый recovery job отклоняется до SCM и смены pairing. Кнопка продолжения видна
+  только при доступном незавершённом задании; helper повторно проверяет его состояние.
+  После завершённого восстановления обычный запуск приложения выполняет стандартное подключение к хосту.
+- Перед recovery/re-pair выполняется read-only проверка outbox и disposable кешей.
+  Если старые копии остались, восстановление отказывается продолжать: сначала требуется
+  штатное отключение прежнего хоста. Автоматического удаления локальных данных нет.
+
+После исправлений на macOS: Rust workspace **2739 passed / 12 ignored**;
+frontend **8649 passed / 3 skipped** (два browser-fit без Playwright и PostgreSQL seam).
+Typecheck/lint/build, strict cloud Clippy, Cargo fmt и root format PASS.
+Release contracts **103/103**, CI policy **76/76** PASS. Live provider smoke повторно
+не запускался: этот этап проверял исправления локальными и синтетическими тестами.
+
+Windows runtime/ACL/DPAPI/SCM/UAC по-прежнему требуют отдельной приёмки.
 
 ## Процедура Windows
 

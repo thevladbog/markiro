@@ -23,5 +23,6 @@ export const yandexNative = {
   download: (hostId: string, snapshotId: string) =>
     invoke<void>("yandex_recovery_download", { hostId, snapshotId }),
   restore: () => invoke<void>("yandex_recovery_restore", { oldHostStopped: true }),
+  recoveryAvailable: () => invoke<boolean>("yandex_recovery_available"),
   resume: () => invoke<void>("yandex_recovery_resume"),
 };

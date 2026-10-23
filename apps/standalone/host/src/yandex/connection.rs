@@ -117,6 +117,7 @@ pub struct YandexService {
     pub tokens: Arc<ServiceTokens>,
     pub queue: Arc<super::queue::CloudQueue>,
     pub wake: Notify,
+    pub wake_refresh: Notify,
     pub private_dir: PathBuf,
     pub host_id: Uuid,
     oauth: OAuthClient<Arc<dyn Transport>>,
@@ -164,6 +165,7 @@ impl YandexService {
             tokens,
             queue,
             wake: Notify::new(),
+            wake_refresh: Notify::new(),
             private_dir,
             host_id,
             oauth: OAuthClient::new(transport),
@@ -171,6 +173,10 @@ impl YandexService {
             attempts: Mutex::new(Attempts::default()),
             control: Mutex::new(()),
         }))
+    }
+    pub fn wake_workers(&self) {
+        self.wake.notify_one();
+        self.wake_refresh.notify_one();
     }
     pub async fn begin(
         &self,
@@ -325,7 +331,7 @@ impl YandexService {
         self.attempts.lock().await.inflight.remove(&prepared.id);
         if result.is_ok() {
             self.cancel_all().await;
-            self.wake.notify_one();
+            self.wake_workers();
         }
         result
     }
@@ -382,7 +388,7 @@ impl YandexService {
             .transition(self.tokens.disconnect_with_event(generation, Some(event)))
             .await?;
         self.cancel_all().await;
-        self.wake.notify_one();
+        self.wake_workers();
         Ok(())
     }
     pub async fn status(&self, now: i64) -> Result<YandexBackupStatus> {
@@ -476,7 +482,26 @@ fn timestamp(now: i64) -> Result<String> {
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(|_| Error::InvalidFormat)
 }
-fn safe_internal_code(code: &str) -> &'static str {
+pub(super) fn internal_code(code: ErrorCode) -> &'static str {
+    match code {
+        ErrorCode::Network => "network",
+        ErrorCode::RateLimited => "rate_limited",
+        ErrorCode::QuotaExceeded => "quota",
+        ErrorCode::AccessDenied => "access_denied",
+        ErrorCode::ReauthRequired => "reauth",
+        ErrorCode::IdentityMissing => "identity_missing",
+        ErrorCode::IntegrityFailed => "integrity",
+        ErrorCode::UnsupportedFormat => "unsupported_format",
+        ErrorCode::IncompatibleVersion => "incompatible_version",
+        ErrorCode::LocalSpace => "local_space",
+        ErrorCode::RemoteConflict => "remote_conflict",
+        ErrorCode::Cancelled => "cancelled",
+        ErrorCode::ClientCredentialsInvalid => "client_credentials_invalid",
+        ErrorCode::SecretUnavailable => "secret_unavailable",
+        ErrorCode::ClientSecretRequired => "client_secret_required",
+    }
+}
+pub(super) fn safe_internal_code(code: &str) -> &'static str {
     match code {
         "rate_limited" => "rate_limited",
         "quota" => "quota",
@@ -523,5 +548,33 @@ pub fn error_code(error: &Error) -> ErrorCode {
             _ => ErrorCode::Network,
         },
         _ => ErrorCode::Network,
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    #[test]
+    fn delivery_codes_preserve_every_public_error() {
+        use ErrorCode::*;
+        for code in [
+            Network,
+            RateLimited,
+            QuotaExceeded,
+            AccessDenied,
+            ReauthRequired,
+            IdentityMissing,
+            IntegrityFailed,
+            UnsupportedFormat,
+            IncompatibleVersion,
+            LocalSpace,
+            RemoteConflict,
+            Cancelled,
+            ClientCredentialsInvalid,
+            SecretUnavailable,
+            ClientSecretRequired,
+        ] {
+            assert_eq!(error_code(&Error::Provider(internal_code(code))), code);
+        }
     }
 }

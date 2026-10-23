@@ -569,6 +569,28 @@ impl LocalDb {
     pub async fn clear_copies(&self, guard: UnsentGuard<'_>) -> Result<(), LocalDbError> {
         self.clear_classed(TABLE_CLASSES, guard).await
     }
+    /// Refuse recovery re-pairing while old reference data or credentials remain.
+    /// Read-only: cleanup requires the ordinary explicit device-forget flow.
+    pub async fn has_recovery_copies(&self) -> Result<bool, LocalDbError> {
+        let mut conn = self
+            .readers
+            .acquire()
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        for (table, class) in TABLE_CLASSES {
+            if *class == TableClass::Disposable {
+                let exists: bool =
+                    sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM {table} LIMIT 1)"))
+                        .fetch_one(&mut *conn)
+                        .await
+                        .map_err(|_| LocalDbError::StatementFailed)?;
+                if exists {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
     /// Recovery preflight only: no rows, files or pairing keys are removed.
     pub async fn require_settled_outbox(&self) -> Result<(), LocalDbError> {
         let mut conn = self
@@ -1443,6 +1465,29 @@ mod tests {
 
     /// The class filter itself is pinned here too, on probe tables of all
     /// three classes, whatever `TABLE_CLASSES` holds.
+    #[tokio::test]
+    async fn recovery_refuses_cached_credentials_without_erasing_them() {
+        use sqlx::ConnectOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open(dir.path()).await.unwrap();
+        assert!(!db.has_recovery_copies().await.unwrap());
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sync_state (key, value) VALUES ('review-cache', 'old-pairing')")
+            .execute(&mut raw)
+            .await
+            .unwrap();
+        assert!(db.has_recovery_copies().await.unwrap());
+        let value: String =
+            sqlx::query_scalar("SELECT value FROM sync_state WHERE key='review-cache'")
+                .fetch_one(&mut raw)
+                .await
+                .unwrap();
+        assert_eq!(value, "old-pairing");
+    }
     #[tokio::test]
     async fn recovery_preflight_preserves_unsent_and_settled_records() {
         use sqlx::ConnectOptions;

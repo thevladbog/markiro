@@ -243,6 +243,15 @@ pub async fn yandex_recovery_restore(
             .require_settled_outbox()
             .await
             .map_err(|_| Error::Provider("unsent_facts"))?;
+        if local
+            .get()
+            .map_err(|_| Error::SecretUnavailable)?
+            .has_recovery_copies()
+            .await
+            .map_err(|_| Error::SecretUnavailable)?
+        {
+            return Err(Error::Provider("local_copies_present"));
+        }
         let stage = s.root.clone();
         tokio::task::spawn_blocking(move || launch_helper(Some(&stage)))
             .await
@@ -297,6 +306,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resume_is_available_only_for_a_bounded_unfinished_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("job.json");
+        assert!(!unfinished_job(&path));
+        for bytes in [b"{}".as_slice(), br#"{"complete":true}"#, b"bad json"] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(!unfinished_job(&path));
+        }
+        std::fs::write(&path, br#"{"complete":false}"#).unwrap();
+        assert!(unfinished_job(&path));
+        std::fs::write(&path, vec![b' '; 65537]).unwrap();
+        assert!(!unfinished_job(&path));
+    }
     #[tokio::test]
     async fn waits_for_a_slow_service_instead_of_failing_after_start() {
         let count = std::sync::atomic::AtomicUsize::new(0);
@@ -313,6 +336,30 @@ mod tests {
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 }
+#[cfg(any(windows, test))]
+fn unfinished_job(path: &std::path::Path) -> bool {
+    markiro_backup_cloud::envelope::read_bounded(path, 65536)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|job| job.get("complete").and_then(serde_json::Value::as_bool))
+        == Some(false)
+}
+#[tauri::command]
+pub fn yandex_recovery_available() -> bool {
+    if host_only().is_err() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        return std::env::var_os("ProgramData").is_some_and(|root| {
+            unfinished_job(
+                &std::path::PathBuf::from(root).join("Markiro/Host/yandex-recovery-job.json"),
+            )
+        });
+    }
+    #[cfg(not(windows))]
+    false
+}
 #[tauri::command]
 pub async fn yandex_recovery_resume(
     device: tauri::State<'_, crate::device::DeviceState>,
@@ -320,6 +367,9 @@ pub async fn yandex_recovery_resume(
     state: tauri::State<'_, YandexNativeState>,
 ) -> std::result::Result<(), String> {
     host_only().map_err(safe_error)?;
+    if !yandex_recovery_available() {
+        return Err("restore_failed".into());
+    }
     let _cancel = state.begin().await.map_err(safe_error)?;
     let result = async {
         local
@@ -328,6 +378,15 @@ pub async fn yandex_recovery_resume(
             .require_settled_outbox()
             .await
             .map_err(|_| Error::Provider("unsent_facts"))?;
+        if local
+            .get()
+            .map_err(|_| Error::SecretUnavailable)?
+            .has_recovery_copies()
+            .await
+            .map_err(|_| Error::SecretUnavailable)?
+        {
+            return Err(Error::Provider("local_copies_present"));
+        }
         tokio::task::spawn_blocking(|| launch_helper(None))
             .await
             .map_err(|_| Error::SecretUnavailable)??;

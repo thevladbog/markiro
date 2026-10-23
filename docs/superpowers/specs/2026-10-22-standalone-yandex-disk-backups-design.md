@@ -464,3 +464,15 @@ Windows installer/DPAPI/LocalService/SCM/UAC, закрытый Office/logout, ч
 power-cut, реальная станция/печать и системный outbound trace остаются OPEN отдельным этапом
 по указанию пользователя. Provider quota/revoke, большие файлы/каталог и live retention DELETE
 также не закрыты. Задача внешних условий частично выполнена; macOS smoke не заменяет A1–A10.
+
+### Уточнения после review PR #786
+
+Delivery PUT прерывается при отмене generation/shutdown даже во время streaming.
+Refresh и delivery имеют отдельные wake permits. Полный код ошибки сохраняется в
+журнале; постоянные credential ошибки требуют повторного подключения.
+
+Повтор helper разрешён только для незавершённого recovery job. Завершённое задание
+не запускает SCM и не меняет pairing; native UI скрывает кнопку продолжения.
+Recovery preflight сохраняет outbox и disposable кеши: если есть неотправленные
+записи или старые копии подключения, операция останавливается до helper/forget.
+Очистка старых копий выполняется только существующим явным отключением хоста.

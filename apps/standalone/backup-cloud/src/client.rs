@@ -481,23 +481,29 @@ impl DiskClient {
         }
         for attempt in 0..2 {
             let url = self.transfer(object, true).await?;
-            let file = tokio::fs::File::open(source).await?;
-            let stream = tokio_util::io::ReaderStream::with_capacity(file, 64 * 1024);
-            self.check().await?;
-            let response = self
-                .client
-                .put(url.0)
-                .header("Content-Length", expected.size_bytes)
-                .body(reqwest::Body::wrap_stream(stream))
-                .send()
-                .await
-                .map_err(|_| Error::Network)?;
+            let response = self.upload_file(url, source, expected.size_bytes).await?;
             if attempt == 0 && matches!(response.status().as_u16(), 401 | 403 | 404) {
                 continue;
             }
             return self.finish_mutation(response).await;
         }
         Err(Error::Network)
+    }
+
+    async fn upload_file(&self, url: TransferUrl, source: &Path, size: u64) -> Result<Response> {
+        let file = tokio::fs::File::open(source).await?;
+        let stream = tokio_util::io::ReaderStream::with_capacity(file, 64 * 1024);
+        self.check().await?;
+        cancel_on(self.guard.as_deref(), async {
+            self.client
+                .put(url.0)
+                .header("Content-Length", size)
+                .body(reqwest::Body::wrap_stream(stream))
+                .send()
+                .await
+                .map_err(|_| Error::Network)
+        })
+        .await
     }
 
     pub async fn delete_owned(&self, object: &RemoteObject, owned_host: Uuid) -> Result<()> {
@@ -716,6 +722,52 @@ mod tests {
         .await;
         assert!(matches!(result, Err(Error::OriginDenied)));
         assert_eq!(calls, 4);
+    }
+    #[tokio::test]
+    async fn disconnect_cancels_an_upload_while_the_server_stalls() {
+        struct Guard(tokio::sync::watch::Receiver<bool>);
+        impl RequestGuard for Guard {
+            fn check(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn cancelled(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+                let mut receiver = self.0.clone();
+                Box::pin(async move {
+                    let _ = receiver.wait_for(|value| *value).await;
+                })
+            }
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let mut disk = DiskClient::new(Secret::new("synthetic".into()).unwrap())
+            .unwrap()
+            .with_guard(Arc::new(Guard(receiver)));
+        // Exercise cancellation with a local server, bypassing only the
+        // production resolver that correctly refuses loopback transfer hosts.
+        disk.client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("database.age");
+        std::fs::write(&source, vec![0; 1024 * 1024]).unwrap();
+        // Only this unit test constructs a loopback transfer URL; provider URLs
+        // still go through TransferUrl::parse and the public-address resolver.
+        let url = TransferUrl(reqwest::Url::parse(&format!("http://{address}/upload")).unwrap());
+        let server = async {
+            let (_socket, _) = listener.accept().await.unwrap();
+            cancel.send(true).unwrap();
+            std::future::pending::<()>().await;
+        };
+        let upload = disk.upload_file(url, &source, 1024 * 1024);
+        let result = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! { result = upload => result, _ = server => unreachable!() }
+        })
+        .await
+        .expect("disconnect must drop an in-flight upload");
+        assert!(matches!(result, Err(Error::InvalidAttempt)));
     }
     #[tokio::test]
     async fn cancellation_interrupts_a_hung_network_future() {

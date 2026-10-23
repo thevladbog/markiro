@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-// «Исходящих соединений в интернет нет» (spec §1.1, §10.10): the update comes
-// as a file and is checked locally, so nothing the standalone product links
-// may reach out. These contracts fail on a new network crate, an updater or
-// an HTTP plugin until a person has checked it reaches nothing but the
-// site's own host and named it here.
+// Updates remain local files. Optional Yandex backups use direct, guarded
+// provider calls; there are no product-server or telemetry requests. Fail on
+// every new network crate until its use has been reviewed and named here.
 
 const text = async (path) => (await readFile(path, "utf8")).replaceAll("\r\n", "\n");
 
@@ -17,12 +15,13 @@ function lockedCrates(lock) {
 
 /** Crates that speak a network protocol, resolve names or wrap sockets and TLS. */
 const NETWORK =
-  /^(?:reqwest|ureq|curl.*|isahc|surf|attohttpc|hyper.*|h2|h3.*|quinn.*|tungstenite|tokio-tungstenite|async-tungstenite|.*websocket.*|native-tls|openssl.*|hickory.*|trust-dns.*|axum.*|tower-http|tokio-rustls|rustls.*|webpki.*|socket2|mio|if-addrs|url|cookie.*|ipnet|tauri-plugin-.*|tokio-native-tls|async-native-tls|sentry.*|opentelemetry.*|tonic.*|lettre|minreq|tiny_http|actix.*|warp|ssh2|git2|ws)$/u;
+  /^(?:reqwest|ureq|curl.*|isahc|surf|attohttpc|hyper.*|h2|h3.*|quinn.*|tungstenite|tokio-tungstenite|async-tungstenite|.*websocket.*|native-tls|openssl.*|hickory.*|trust-dns.*|axum.*|tower-http|tokio-rustls|rustls.*|webpki.*|socket2|mio|if-addrs|url|cookie(?!-factory$).*|ipnet|tauri-plugin-.*|tokio-native-tls|async-native-tls|sentry.*|opentelemetry.*|tonic.*|lettre|minreq|tiny_http|actix.*|warp|ssh2|git2|ws)$/u;
 
 // What the workspace links today: the host's own HTTPS server (axum, hyper,
 // tokio-rustls), the shell's client pinned to that host (reqwest with
 // rustls; quinn and the platform verifier come with reqwest and are never
 // used: the client speaks HTTP/1.1 and HTTP/2 over a pinned certificate),
+// the optional Yandex backup client's HTTPS requests (the same reqwest stack),
 // the host's listing of its own addresses (if-addrs) and the single-instance
 // plugin (a local pipe, no network).
 const KNOWN = [
@@ -53,6 +52,13 @@ const KNOWN = [
   "url",
   "webpki-root-certs",
 ];
+
+test("cookie-factory is a binary serializer, not an HTTP cookie crate", () => {
+  assert.equal(NETWORK.test("cookie-factory"), false);
+  assert.equal(NETWORK.test("cookie"), true);
+  assert.equal(NETWORK.test("cookie_store"), true);
+  assert.equal(NETWORK.test("cookie-factory-network"), true);
+});
 
 test("the standalone workspace links no network crate beyond the ones it has", async () => {
   const crates = lockedCrates(await text("apps/standalone/Cargo.lock"));

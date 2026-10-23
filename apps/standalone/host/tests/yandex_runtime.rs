@@ -256,3 +256,63 @@ async fn restored_source_pauses_cloud_before_any_new_yandex_request() {
         Some(ErrorCode::ClientSecretRequired)
     );
 }
+
+#[tokio::test]
+async fn worker_wake_preserves_one_permit_for_each_independent_loop() {
+    let (_admin, service, _) = configured().await;
+    // Drain permits from connection commit before simulating an explicit retry.
+    service.wake.notified().await;
+    service.wake_refresh.notified().await;
+    service.wake_workers();
+    tokio::time::timeout(std::time::Duration::from_millis(100), async {
+        service.wake_refresh.notified().await;
+        service.wake.notified().await;
+    })
+    .await
+    .expect("refresh must not consume delivery's retry signal");
+}
+
+#[tokio::test]
+async fn delivery_preserves_and_does_not_retry_permanent_credential_errors() {
+    let (admin, service, provider) = configured().await;
+    let generation = service
+        .journal
+        .status()
+        .await
+        .unwrap()
+        .binding
+        .unwrap()
+        .generation;
+    service
+        .queue
+        .offer("markiro-host-missing.db")
+        .await
+        .unwrap();
+    let (job, _) = service.queue.claim(generation).await.unwrap().unwrap();
+    service
+        .journal
+        .fail(generation, job.snapshot_id, "secret_unavailable", 0)
+        .await
+        .unwrap();
+    let calls = provider.calls.load(Ordering::SeqCst);
+    markiro_host::yandex::delivery::tick(&admin.app.state, &service)
+        .await
+        .unwrap();
+    let status = service
+        .status(admin.app.state.now().unix_timestamp())
+        .await
+        .unwrap();
+    assert_eq!(status.error_code, Some(ErrorCode::SecretUnavailable));
+    assert_eq!(
+        service
+            .journal
+            .status()
+            .await
+            .unwrap()
+            .active
+            .unwrap()
+            .failures,
+        1
+    );
+    assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
+}

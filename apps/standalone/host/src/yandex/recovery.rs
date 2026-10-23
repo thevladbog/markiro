@@ -1,7 +1,7 @@
 //! Elevated helper: fixed installed target, full re-verification, empty-only swap.
 use crate::{config::HostPaths, BoxError};
 use std::path::Path;
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Job {
@@ -112,10 +112,7 @@ pub fn resume() -> Result<(), BoxError> {
         &paths.data_dir.join("yandex-recovery-job.json"),
         65536,
     )?)?;
-    if job.complete {
-        use crate::install::Services;
-        return Ok(crate::install_windows::WindowsServices::connect()?.start()?);
-    }
+    require_unfinished(&job)?;
     execute(&paths, job)
 }
 #[cfg(not(windows))]
@@ -215,4 +212,33 @@ pub fn run(stage: &Path) -> Result<(), BoxError> {
 pub fn run(_stage: &Path) -> Result<(), BoxError> {
     let _ = HostPaths::default_data_dir();
     Err("unsupported".into())
+}
+
+#[cfg(any(windows, test))]
+fn require_unfinished(job: &Job) -> Result<(), BoxError> {
+    if job.complete {
+        return Err("recovery_already_complete".into());
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn completed_jobs_cannot_restart_services_or_trigger_repairing() {
+        let mut job = Job {
+            workspace: uuid::Uuid::new_v4(),
+            file: String::new(),
+            sha: String::new(),
+            at: String::new(),
+            complete: false,
+            snapshot: uuid::Uuid::new_v4(),
+        };
+        assert!(require_unfinished(&job).is_ok());
+        job.complete = true;
+        assert_eq!(
+            require_unfinished(&job).unwrap_err().to_string(),
+            "recovery_already_complete"
+        );
+    }
 }

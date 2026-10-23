@@ -373,6 +373,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         yandex::recovery::yandex_recovery_download,
         yandex::recovery::yandex_recovery_restore,
         yandex::recovery::yandex_recovery_resume,
+        yandex::recovery::yandex_recovery_available,
         yandex::recovery::yandex_profile_import,
         yandex::recovery::yandex_profile_export,
         host_hello,

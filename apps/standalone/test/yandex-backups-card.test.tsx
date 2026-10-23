@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, render } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
+import { YandexResume } from "../src/wizard/YandexResume.js";
 import { YandexRestoreWizard } from "../src/wizard/YandexRestoreWizard.js";
 import { yandexNative } from "../src/host/yandex-native.js";
 import { renderOffice, fakeOfficeSession, TECHNOLOGIST } from "./support/office.js";
@@ -12,6 +13,7 @@ vi.mock("../src/host/yandex-native.js", () => ({
     download: vi.fn(),
     restore: vi.fn(),
     resume: vi.fn(),
+    recoveryAvailable: vi.fn(),
     cancel: vi.fn(),
     connect: vi.fn(),
     registration: vi.fn(),
@@ -20,6 +22,22 @@ vi.mock("../src/host/yandex-native.js", () => ({
   },
 }));
 describe("Yandex connection and recovery", () => {
+  it("hides recovery resume after a completed job or an ordinary service outage", async () => {
+    vi.mocked(yandexNative.recoveryAvailable).mockResolvedValue(false);
+    render(<YandexResume />);
+    await waitFor(() => expect(yandexNative.recoveryAvailable).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("button", { name: /Продолжить прерванное восстановление/ }),
+    ).toBeNull();
+    expect(yandexNative.resume).not.toHaveBeenCalled();
+  });
+  it("offers resume only when native code finds an unfinished recovery job", async () => {
+    vi.mocked(yandexNative.recoveryAvailable).mockResolvedValue(true);
+    render(<YandexResume />);
+    expect(
+      await screen.findByRole("button", { name: /Продолжить прерванное восстановление/ }),
+    ).toBeTruthy();
+  });
   it("requires admin consent and passes only ClientID and Office session to the native bridge", async () => {
     const session = fakeOfficeSession();
     session.api.getBackups.mockResolvedValue(HEALTHY_BACKUPS);

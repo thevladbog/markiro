@@ -290,7 +290,7 @@ pub async fn retry(
         .await
         .map_err(cloud_error)?;
     tx.commit().await.map_err(ApiError::internal)?;
-    service.wake.notify_one();
+    service.wake_workers();
     let status = service
         .status(state.now().unix_timestamp())
         .await

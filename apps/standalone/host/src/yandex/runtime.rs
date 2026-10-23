@@ -122,7 +122,7 @@ pub fn spawn(
                 }
                 tokio::select! {
                     _=tokio::time::sleep(std::time::Duration::from_secs(30))=>{},
-                    _=service.wake.notified()=>{},
+                    _=service.wake_refresh.notified()=>{},
                     _=stopping.wait_for(|s|*s)=>break,
                 }
             }

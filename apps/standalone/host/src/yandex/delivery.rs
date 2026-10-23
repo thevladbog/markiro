@@ -265,6 +265,12 @@ pub async fn tick(state: &AppState, service: &Arc<YandexService>) -> Result<()> 
     let now = state.now().unix_timestamp();
     if status.paused
         || super::runtime::require_refresh_allowed(status.connection_error).is_err()
+        || super::runtime::require_refresh_allowed(status.error.as_deref().map(|code| {
+            super::connection::error_code(&Error::Provider(super::connection::safe_internal_code(
+                code,
+            )))
+        }))
+        .is_err()
         || status.refresh_retry_at > now
     {
         return Ok(());
@@ -425,17 +431,7 @@ pub async fn tick(state: &AppState, service: &Arc<YandexService>) -> Result<()> 
             .unix_timestamp()
             .saturating_add(i64::try_from(seconds).unwrap_or(i64::MAX))
             .min(253402300799);
-        let code = match code {
-            markiro_proto::yandex_backups::ErrorCode::RateLimited => "rate_limited",
-            markiro_proto::yandex_backups::ErrorCode::IntegrityFailed => "integrity",
-            markiro_proto::yandex_backups::ErrorCode::IdentityMissing => "identity_missing",
-            markiro_proto::yandex_backups::ErrorCode::AccessDenied => "access_denied",
-            markiro_proto::yandex_backups::ErrorCode::QuotaExceeded => "quota",
-            markiro_proto::yandex_backups::ErrorCode::ReauthRequired => "reauth",
-            markiro_proto::yandex_backups::ErrorCode::RemoteConflict => "remote_conflict",
-            markiro_proto::yandex_backups::ErrorCode::LocalSpace => "local_space",
-            _ => "network",
-        };
+        let code = super::connection::internal_code(code);
         match service
             .journal
             .fail(generation, job.snapshot_id, code, retry_at)
