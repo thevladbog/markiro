@@ -328,9 +328,14 @@ const startPrice = formatRoubles(findTariff("start").priceFrom);
   />
 
   <script>
-    import { browserDemoFormRuntime, initDemoForm } from "../../scripts/demo-form";
+    import { loadDemoFormWhenNeeded } from "../../scripts/demo-form-loader";
 
     const demoForm = document.querySelector<HTMLFormElement>("[data-demo-form]");
-    if (demoForm !== null) initDemoForm(demoForm, browserDemoFormRuntime(window));
+    if (demoForm !== null) {
+      loadDemoFormWhenNeeded(demoForm, window, async () => {
+        const { browserDemoFormRuntime, initDemoForm } = await import("../../scripts/demo-form");
+        return (form) => initDemoForm(form, browserDemoFormRuntime(window));
+      });
+    }
   </script>
 </AutonomPage>
