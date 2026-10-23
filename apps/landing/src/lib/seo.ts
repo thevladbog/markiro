@@ -32,10 +32,9 @@ const SOFTWARE_FACTS = {
       "Проверка кодов маркировки Data Matrix на линии",
       "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
-      "Офлайн-работа станции с локальным журналом",
-      "Сборка паллет и инвентаризация на ТСД с Android",
-      "Обмен с 1С по CommerceML",
-      "Выгрузки отчётов смены для ГИС МТ",
+      "Работа без интернета: программа и база на ПК завода",
+      "Сборка паллет на ТСД с Android",
+      "Выгрузки смены в TXT, CSV и XML для ГИС МТ и 1С",
     ],
   },
   en: {
@@ -44,10 +43,9 @@ const SOFTWARE_FACTS = {
       "Data Matrix code verification on the line",
       "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
-      "Offline station with a local journal",
-      "Pallet building and inventory on an Android handheld",
-      "1C exchange over CommerceML",
-      "Shift report exports for GIS MT",
+      "No internet needed: the software and the database run on the plant's PCs",
+      "Pallet building on an Android handheld",
+      "Shift exports in TXT, CSV and XML for GIS MT and 1C",
     ],
   },
 } as const;
@@ -191,7 +189,7 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
       name: "Markiro",
       url: `${SITE_URL}/`,
       applicationCategory: "BusinessApplication",
-      operatingSystem: "Windows, Android, Web",
+      operatingSystem: "Windows, Android",
       description: homePage?.description,
       inLanguage: page.locale,
       featureList: [...facts.features],
@@ -565,8 +563,9 @@ export function renderLlmsTxt(): string {
 - Станция: проверяет каждый код Data Matrix при сканировании (структура GS1, GTIN товара смены, дубли, неполное чтение), собирает короба и паллеты с SSCC, печатает этикетки ZPL или TSPL.
 - Товарные группы: любая маркируемая продукция, например соки и вода, молочная продукция, пиво, косметика. Правила конкретной товарной группы сверяются до запуска.
 - Уровни агрегации: единица → короб → паллета. Паллеты собирают на станции и на ТСД.
-- ТСД: терминал на Android собирает и разбирает паллеты и проводит инвентаризацию в той же смене.
-- Офис: смены, товары, шаблоны этикеток, расхождения, резервные копии и выгрузки для ГИС МТ на том же ПК.
+- ТСД: терминал на Android собирает и разбирает паллеты и печатает их этикетки в той же смене.
+- Офис: смены, товары, шаблоны этикеток, конфликты, резервные копии и выгрузки смены в TXT, CSV и XML для ГИС МТ на том же ПК.
+- 1С: данные смены передаются в 1С файлами выгрузки. Прямой обмен с 1С и загрузка каталога из файла в планах.
 - Без облака: во время смены программа не обращается к серверам Маркиро, обновления ставятся из файла, лицензия загружается файлом.
 - Пробный период: 14 дней со всеми функциями, без оплаты. Установщик для Windows 10 и 11: ${absoluteUrl("/skachat/")}
 - Цены за площадку в год, без НДС: ${TARIFFS.map((tariff) => `«${tariff.name}» ${tariff.pricePerYear === null ? "по запросу" : `${formatRoubles(tariff.pricePerYear)} ₽`}`).join(", ")}. Подробно: ${absoluteUrl("/stoimost/")}

@@ -3,7 +3,8 @@ import type { Locale } from "./pages";
 const RU = {
   common: {
     breadcrumbsLabel: "Хлебные крошки",
-    discussTask: "Обсудить задачу",
+    callLink: "Разобрать линию за 30 минут",
+    download: "Скачать пробную версию",
     homeLabel: "Маркиро, на главную страницу",
     menuClose: "Закрыть меню",
     menuOpen: "Открыть меню",
@@ -16,10 +17,14 @@ const RU = {
     summaryKicker: "Коротко",
     relatedHeading: "Связанные производственные сценарии",
     relatedKicker: "Следующий шаг",
+    pricing: "Цены",
     requestDemo: "Запросить демонстрацию",
+    ruPagesNote: "",
     seoCtaHeading: "Проверим сценарий на данных вашей линии.",
     seoCtaKicker: "Демонстрация на вашем процессе",
     skipLink: "Перейти к содержанию",
+    trialHeading: "Проверьте Маркиро на своей линии.",
+    trialKicker: "14 дней бесплатно, все функции",
   },
   home: {
     demo: {
@@ -55,7 +60,8 @@ const RU = {
 const EN = {
   common: {
     breadcrumbsLabel: "Breadcrumbs",
-    discussTask: "Discuss your workflow",
+    callLink: "Walk through your line in 30 minutes",
+    download: "Download the trial",
     homeLabel: "Markiro home page",
     menuClose: "Close menu",
     menuOpen: "Open menu",
@@ -68,10 +74,14 @@ const EN = {
     summaryKicker: "Summary",
     relatedHeading: "Related production workflows",
     relatedKicker: "Next step",
+    pricing: "Pricing",
     requestDemo: "Request a demonstration",
+    ruPagesNote: "The download and pricing pages are in Russian.",
     seoCtaHeading: "Test the workflow with data from your line.",
     seoCtaKicker: "A demonstration using your process",
     skipLink: "Skip to content",
+    trialHeading: "Try Markiro on your own line.",
+    trialKicker: "14 days free, every feature",
   },
   home: {
     demo: {

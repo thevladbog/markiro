@@ -997,30 +997,6 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("publishes the stable Windows Station download on the localized workstation pages", () => {
-    for (const [route, labels] of [
-      [
-        "/rabochee-mesto-upakovki/",
-        ["Station для Windows", "Скачать стабильную версию", "Windows x64 · установщик .exe"],
-      ],
-      [
-        "/en/packing-workstation/",
-        ["Station for Windows", "Download the stable release", "Windows x64 · .exe installer"],
-      ],
-    ] as const) {
-      const download = documents.get(route)?.querySelector("[data-station-download]");
-      const link = download?.querySelector<HTMLAnchorElement>(
-        'a[data-analytics="station_download_click"]',
-      );
-
-      expect(download?.querySelector("h2")?.textContent?.trim()).toBe(labels[0]);
-      expect(link?.textContent?.replace(/\s+/g, " ").trim()).toContain(labels[1]);
-      expect(link?.getAttribute("href")).toBe("https://releases.markiro.app/station/download");
-      expect(link?.getAttribute("data-placement")).toBe("workstation-page");
-      expect(download?.textContent).toContain(labels[2]);
-    }
-  });
-
   it("links the localized footer to the Station product page instead of the binary", () => {
     const ruLink = documents
       .get("/sscc-i-agregatsiya/")
@@ -1029,7 +1005,7 @@ describe("rendered landing page", () => {
       .get("/en/sscc-and-aggregation/")
       ?.querySelector<HTMLAnchorElement>('footer a[href="/en/packing-workstation/"]');
 
-    expect(ruLink?.textContent?.trim()).toBe("Station для Windows");
+    expect(ruLink?.textContent?.trim()).toBe("Станция для Windows");
     expect(enLink?.textContent?.trim()).toBe("Station for Windows");
   });
 
@@ -1210,11 +1186,11 @@ describe("rendered landing page", () => {
     for (const [route, running, check] of [
       [
         "/markirovka-chestny-znak/",
-        "Markiro работает на линиях пива и сидра",
+        "Маркиро работает на линиях пива и сидра",
         "сверяем до запуска",
       ],
-      ["/sscc-i-agregatsiya/", "Markiro работает на линиях пива и сидра", "сверяем до запуска"],
-      ["/faq/", "Markiro работает на линиях пива и сидра", "сверяем до запуска"],
+      ["/sscc-i-agregatsiya/", "Маркиро работает на линиях пива и сидра", "сверяем до запуска"],
+      ["/faq/", "Маркиро работает на линиях пива и сидра", "сверяем до запуска"],
       ["/en/chestny-znak-serialization/", "Markiro runs on beer and cider lines", "before launch"],
       ["/en/sscc-and-aggregation/", "Markiro runs on beer and cider lines", "before launch"],
       ["/en/faq/", "Markiro runs on beer and cider lines", "before launch"],
@@ -1288,7 +1264,9 @@ describe("rendered landing page", () => {
     expect(enFaq).not.toContain("after pallet aggregation");
 
     const ru1c = documents.get("/integratsiya-1c/")?.body.textContent ?? "";
-    expect(ru1c).toContain("Выгрузка отгрузок по CommerceML запланирована следующим этапом.");
+    expect(ru1c).toContain("Прямого обмена с 1С сейчас нет.");
+    expect(ru1c).toContain("XML «Отчёт об агрегации»");
+    expect(ru1c).not.toContain("CommerceML");
     expect(ru1c).not.toContain("после паллетной агрегации");
 
     const en1c = documents.get("/en/1c-integration/")?.body.textContent ?? "";
@@ -1765,10 +1743,27 @@ describe("rendered landing page", () => {
     expect(existsSync(path.join(outputDirectory, "en/articles/rss.xml"))).toBe(true);
   });
 
-  it("offers the public phone next to the demo call to action on topic pages", () => {
-    const routeDocument = documents.get("/markirovka-chestny-znak/") as Document;
-    expect(routeDocument.querySelector('.seo-cta a[href$="#demo"]')).not.toBeNull();
-    expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]')).toBeNull();
+  it("leads topic pages to the installer, the prices and the call request", () => {
+    for (const [route, home, hreflang] of [
+      ["/markirovka-chestny-znak/", "/", null],
+      ["/en/chestny-znak-serialization/", "/en/", "ru"],
+    ] as const) {
+      const routeDocument = documents.get(route) as Document;
+      for (const block of [".seo-hero", ".seo-cta"]) {
+        for (const target of ["/skachat/", "/stoimost/"]) {
+          const link = routeDocument.querySelector(`${block} a[href="${target}"]`);
+          expect(link, `${route} ${block} ${target}`).not.toBeNull();
+          expect(link?.getAttribute("hreflang") ?? null, `${route} ${target}`).toBe(hreflang);
+        }
+      }
+      expect(routeDocument.querySelector(`.seo-cta a[href="${home}#demo"]`), route).not.toBeNull();
+      // The build of this suite has no public phone.
+      expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]'), route).toBeNull();
+    }
+    const note = "The download and pricing pages are in Russian.";
+    const english = documents.get("/en/chestny-znak-serialization/") as Document;
+    expect(english.querySelector(".seo-hero__note")?.textContent).toBe(note);
+    expect(documents.get("/markirovka-chestny-znak/")?.querySelector(".seo-hero__note")).toBeNull();
   });
 
   it("preloads the above-the-fold font subsets that the stylesheet actually uses", () => {

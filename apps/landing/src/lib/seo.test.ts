@@ -490,7 +490,7 @@ describe("SEO generators", () => {
     const graph = buildPageGraph(findSeoPage("/oflayn-rabota/"));
     const webPage = graph["@graph"].find((entry) => entry["@type"] === "WebPage");
 
-    expect(webPage).toMatchObject({ dateModified: "2026-09-06" });
+    expect(webPage).toMatchObject({ dateModified: "2026-10-23" });
   });
 
   it("describes the software with visible facts only", () => {
@@ -503,17 +503,16 @@ describe("SEO generators", () => {
 
     expect(ru).toMatchObject({
       url: "https://markiro.app/",
-      operatingSystem: "Windows, Android, Web",
+      operatingSystem: "Windows, Android",
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
     });
     expect(ru?.featureList).toEqual([
       "Проверка кодов маркировки Data Matrix на линии",
       "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
-      "Офлайн-работа станции с локальным журналом",
-      "Сборка паллет и инвентаризация на ТСД с Android",
-      "Обмен с 1С по CommerceML",
-      "Выгрузки отчётов смены для ГИС МТ",
+      "Работа без интернета: программа и база на ПК завода",
+      "Сборка паллет на ТСД с Android",
+      "Выгрузки смены в TXT, CSV и XML для ГИС МТ и 1С",
     ]);
     expect(en).toMatchObject({
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/en/instructions/" },
@@ -522,10 +521,9 @@ describe("SEO generators", () => {
       "Data Matrix code verification on the line",
       "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
-      "Offline station with a local journal",
-      "Pallet building and inventory on an Android handheld",
-      "1C exchange over CommerceML",
-      "Shift report exports for GIS MT",
+      "No internet needed: the software and the database run on the plant's PCs",
+      "Pallet building on an Android handheld",
+      "Shift exports in TXT, CSV and XML for GIS MT and 1C",
     ]);
     expect(ru).not.toHaveProperty("offers");
     expect(ru).not.toHaveProperty("aggregateRating");
