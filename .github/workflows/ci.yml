@@ -478,6 +478,12 @@ jobs:
     # were tuned there, so the landing jobs stay on the same image.
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # "Re-run failed jobs" keeps a successful landing-build and this output, so
+    # a re-run gate downloads the build an earlier attempt uploaded by its ID.
+    # A name built from github.run_attempt would point at an attempt that never
+    # uploaded (run 39923100899: landing-dist-<sha>-2 not found).
+    outputs:
+      artifact-id: ${{ steps.landing-dist.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -493,6 +499,8 @@ jobs:
       - name: Build the landing once for both gates
         run: node tools/production-browser/scripts/landing-build.mjs
       - name: Hand the build to the browser and Lighthouse jobs
+        id: landing-dist
+        # Attempt-unique so a re-run landing-build uploads anew, never overwrites.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: landing-dist-${{ github.sha }}-${{ github.run_attempt }}
@@ -531,8 +539,9 @@ jobs:
           pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: landing-dist-${{ github.sha }}-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.landing-build.outputs.artifact-id }}
           path: apps/landing/dist
+          digest-mismatch: error
       - name: Verify the landing browser release gate
         env:
           MARKIRO_LANDING_PREBUILT: "1"
@@ -565,8 +574,9 @@ jobs:
         run: pnpm --dir tools/production-browser --ignore-workspace test:lighthouse-parser
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: landing-dist-${{ github.sha }}-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.landing-build.outputs.artifact-id }}
           path: apps/landing/dist
+          digest-mismatch: error
       - name: Verify the landing Lighthouse release gate
         env:
           MARKIRO_LANDING_PREBUILT: "1"

@@ -758,6 +758,14 @@ test("the landing is built once and both landing gates judge that build", () => 
   const upload = build.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
   assert.equal(upload.with.path, "apps/landing/dist");
   assert.equal(upload.with["if-no-files-found"], "error");
+  // Each attempt of landing-build uploads under its own name and never
+  // overwrites, and its job output names that exact artifact.
+  assert.equal(upload.with.name, "landing-dist-${{ github.sha }}-${{ github.run_attempt }}");
+  assert.equal(upload.with.overwrite, undefined);
+  assert.equal(upload.id, "landing-dist");
+  assert.deepEqual(build.outputs, {
+    "artifact-id": "${{ steps.landing-dist.outputs.artifact-id }}",
+  });
 
   for (const [jobId, command] of [
     ["landing-browser", "pnpm test:landing:browser"],
@@ -766,8 +774,19 @@ test("the landing is built once and both landing gates judge that build", () => 
     const job = workflow.jobs[jobId];
     assert.equal(job["runs-on"], build["runs-on"], jobId);
     const download = job.steps.find((step) => step.uses?.startsWith("actions/download-artifact@"));
-    assert.equal(download.with.name, upload.with.name, jobId);
-    assert.equal(download.with.path, "apps/landing/dist", jobId);
+    // By ID, not by an attempt-derived name: "Re-run failed jobs" keeps the
+    // successful landing-build and its output, so the gate fetches the build
+    // that attempt actually uploaded (run 39923100899 looked for
+    // landing-dist-<sha>-2, which no attempt had uploaded).
+    assert.deepEqual(
+      download.with,
+      {
+        "artifact-ids": "${{ needs.landing-build.outputs.artifact-id }}",
+        path: "apps/landing/dist",
+        "digest-mismatch": "error",
+      },
+      jobId,
+    );
     const gate = job.steps.find((step) => step.run === command);
     assert.ok(gate, `${jobId} runs ${command}`);
     assert.equal(gate.env.MARKIRO_LANDING_PREBUILT, "1", jobId);
@@ -784,6 +803,18 @@ test("the landing is built once and both landing gates judge that build", () => 
     if (["landing-build", "landing-browser", "landing-lighthouse"].includes(jobId)) continue;
     for (const step of job.steps ?? [])
       assert.doesNotMatch(step.run ?? "", /test:landing|landing-build\.mjs/u, jobId);
+  }
+});
+
+test("no CI job downloads an artifact by a name derived from its own run attempt", () => {
+  // A job re-run alone has a higher run_attempt than the job that uploaded
+  // the artifact it needs; pass the producer's artifact-id output instead.
+  for (const [jobId, job] of Object.entries(workflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      if (!step.uses?.startsWith("actions/download-artifact@")) continue;
+      assert.doesNotMatch(step.with?.name ?? "", /run_attempt/u, jobId);
+      assert.doesNotMatch(step.with?.pattern ?? "", /run_attempt/u, jobId);
+    }
   }
 });
 
