@@ -5,6 +5,7 @@ import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "
 import { articlesForLocale } from "../content/articles";
 import { AUTONOM_SEARCH_PAGES, type AutonomPageDefinition } from "../content/autonom-pages";
 import { formatRoubles, TARIFFS } from "../content/pricing";
+import { TARIFFS_EN } from "../content/autonom-en";
 import { mirrorPathFor } from "./mirror-path.ts";
 
 export { mirrorPathFor };
@@ -575,18 +576,22 @@ ${links("ru", "/")}
 
 ## English
 
-> Production serialization, aggregation, and traceability with offline-capable line stations.
+> Markiro Autonom: serialization and aggregation software for Windows. The software, the database and the backups run on the plant's own PCs; a shift needs no internet.
 
 ## About the product
 
-- What it is: a Chestny ZNAK production serialization system. Data Matrix codes are validated on the station at scan time, items are aggregated into cases and pallets with SSCC, labels print in ZPL or TSPL, and every action stays in the log.
+- What it is: Chestny ZNAK production serialization software. The main PC in the office holds the database; stations on the lines and handhelds in the warehouse connect to it over the plant's local network.
+- Station: validates every Data Matrix code at scan time (GS1 structure, the shift's GTIN, duplicates, partial reads), builds cases and pallets with SSCC and prints labels in ZPL or TSPL.
 - Product groups: any marked goods, for example juice and water, dairy, beer and cosmetics. The rules of a specific product group are checked before launch.
 - Aggregation levels: item → case → pallet. Pallets are built on the station and on the handheld.
-- Handheld: an Android terminal builds pallets, removes cases from them and runs inventory at the rack.
-- Workstation: a Windows x64 station, a scanner as keyboard input or over a COM port, a ZPL or TSPL printer over the network, COM port or USB.
-- Offline: the station works without a network with a local SQLite journal and submits its queue after reconnecting with an idempotency key.
-- Integrations: 1C exchange over CommerceML, a public REST API with OpenAPI, shift report exports as TXT, CSV and aggregation XML for GIS MT, code status reads through the Chestny ZNAK True API.
-- Contact: ${ORGANIZATION_EMAIL}. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
+- Handheld: an Android terminal builds pallets, adds and removes cases and prints pallet labels in the same shift.
+- Office: shifts, products, label templates, conflicts, backups and shift exports in TXT, CSV and XML for GIS MT on the same PC.
+- 1C: shift data reaches 1C as export files. A direct 1C exchange and a catalogue import from a file are planned.
+- No cloud: during a shift the software contacts no Markiro servers; updates and the licence are loaded from a file.
+- Interface language: Russian.
+- Trial: 14 days with every feature, no payment. The download page is in Russian: ${absoluteUrl("/skachat/")}
+- Prices per site per year in roubles, VAT not applicable: ${TARIFFS.map((tariff) => `${TARIFFS_EN[tariff.code].name} ${tariff.pricePerYear === null ? "on request" : `${formatRoubles(tariff.pricePerYear)} RUB`}`).join(", ")}. The pricing page is in Russian: ${absoluteUrl("/stoimost/")}
+- Contact: ${ORGANIZATION_EMAIL}. A 30-minute video call about your line: ${absoluteUrl("/en/#demo")}
 
 ${links("en", "/en/")}
 

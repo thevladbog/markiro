@@ -1270,7 +1270,9 @@ describe("rendered landing page", () => {
     expect(ru1c).not.toContain("после паллетной агрегации");
 
     const en1c = documents.get("/en/1c-integration/")?.body.textContent ?? "";
-    expect(en1c).toContain("Shipment export over CommerceML is planned as the next stage.");
+    expect(en1c).toContain("There is no direct exchange with 1C today.");
+    expect(en1c).toContain("the aggregation report XML");
+    expect(en1c).not.toContain("CommerceML");
     expect(en1c).not.toContain("after pallet aggregation");
   });
 

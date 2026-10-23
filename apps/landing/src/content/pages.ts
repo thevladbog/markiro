@@ -65,7 +65,6 @@ export interface SeoPageDefinition {
 const SHARED_IMAGE = "/og-markiro.jpg";
 const SHARED_IMAGE_ALT = "Markiro — маркировка, агрегация и прослеживаемость производства";
 const SHARED_IMAGE_ALT_EN = "Markiro — production serialization, aggregation, and traceability";
-const REVIEWED = "2026-09-06" as const;
 /** Pages rewritten for «Маркиро Автоном» after the cloud product was retired. */
 const REVIEWED_AUTONOM = "2026-10-23" as const;
 const START_PRICE = formatRoubles(findTariff("start").priceFrom);
@@ -813,23 +812,23 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/chestny-znak-serialization/",
     alternatePath: "/markirovka-chestny-znak/",
     locale: "en",
-    title: "Chestny ZNAK production serialization — Markiro",
+    title: "Chestny ZNAK production serialization — Markiro Autonom",
     description:
-      "See how Markiro connects code verification, label printing, packing, and event history into a controlled Chestny ZNAK production workflow.",
+      "The Markiro station checks every Data Matrix code on the line, builds cases and pallets with SSCC and prepares GIS MT exports. It runs on the plant's PCs with no internet.",
     heading: "Chestny ZNAK serialization as a production workflow",
     navigationLabel: "Chestny ZNAK serialization",
-    eyebrow: "Control from serialized code to pack",
+    eyebrow: "From code to case and export",
     introduction:
-      "Markiro turns serialization operations into one production flow: codes are verified, applied, connected to packs, and retained in the traceability log.",
+      "Markiro Autonom checks serialized codes on the line, builds cases and pallets from them and prepares files for GIS MT. The software and the database run on the plant's own computers, so a shift needs no internet.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-10-05",
+    reviewedAt: REVIEWED_AUTONOM,
     summary: [
-      "A serialized code is validated at the station the moment it is scanned: GS1 structure, GTIN check digit, GS separator, membership in the shift's product, and duplicates.",
-      "Markiro does not order codes. The manufacturer obtains them from Chestny ZNAK; Markiro records their verification, application and packing.",
-      "Case labels print from one layout for preview and printer alike: ZPL or TSPL, with Cyrillic rasterized on the station.",
-      "Every shift leaves a log: who accepted a code, closed a case, reprinted a label or disassembled a pack, on which terminal and when.",
-      "Shift results export as TXT, CSV and GIS MT aggregation XML. Markiro runs on beer and cider lines, and we check the rules of any other product group before launch.",
+      "The station validates a Data Matrix code at the moment of the scan: GS1 structure, GTIN check digit, GS separator, the shift's product and duplicates.",
+      "Markiro does not order codes. The manufacturer obtains them from Chestny ZNAK; Markiro checks the applied codes and builds cases and pallets from them.",
+      "A case label prints from the same template as its preview: ZPL or TSPL, with Cyrillic rasterized on the computer.",
+      "The office produces shift exports: TXT, CSV and aggregation XML for GIS MT. A responsible employee submits the file to Chestny ZNAK.",
+      "Markiro runs on beer and cider lines, and we check the rules of any other product group before launch.",
     ],
     relatedPaths: ["/en/packing-workstation/", "/en/sscc-and-aggregation/", "/en/1c-integration/"],
     relatedArticlePaths: [
@@ -841,70 +840,71 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "What Markiro does with a serialized code",
         paragraphs: [
-          "Markiro does not issue serialized codes. The manufacturer orders them from Chestny ZNAK, and on the line they are already applied to a label, can or bottle. Markiro's work starts at the scan: the station parses the Data Matrix, checks the GS1 structure, the GTIN check digit and the GS separator, matches the GTIN against the current shift's product, and rejects a code already accepted by this or another terminal.",
-          "Validation runs locally and never waits for the server. The line keeps moving through a connectivity loss, and the operator sees the result immediately: accepted, duplicate, foreign product or damaged symbol.",
+          "Markiro does not issue serialized codes. The manufacturer orders them from Chestny ZNAK, and on the line they are already applied to a label, can or bottle. Markiro's work starts at the scan: the station parses the Data Matrix, checks the GS1 structure, the GTIN check digit and the GS separator, matches the GTIN against the shift's product, and rejects a code already accepted in this shift.",
+          "Validation runs on the station itself and never waits for the main PC. The operator sees the result at once: accepted, duplicate, foreign product or damaged symbol.",
         ],
         bullets: [
           "code structure and GTIN check digit;",
-          "GTIN membership in the product and the shift;",
-          "duplicates within a terminal and across terminals of one shift;",
+          "GTIN membership in the shift's product;",
+          "duplicates within a case and within the shift;",
           "foreign GTINs and symbols the scanner read only partially.",
         ],
       },
       {
-        heading: "Where control begins",
+        heading: "Two shift modes",
         paragraphs: [
-          "The system receives a production order and product data, while the workstation validates each scanned value before recording the operation.",
-          "Validation at the operation boundary reduces the risk of carrying an invalid code into the next packing stage.",
+          "A shift opens in one of two modes. In aggregation mode the station builds accepted codes into cases and pallets with SSCC. In verification mode it only checks codes, without building cases, and can print a duplicate Data Matrix code on a label when needed.",
+          "The mode is chosen when the shift is created and does not change once it is open, so the shift's exports always match what happened on the line.",
         ],
       },
       {
         heading: "What the line records",
         paragraphs: [
-          "Printing, application, packing, and aggregation events are stored as an ordered history tied to the shift, workstation, and operator.",
+          "Scans, rejections and exceptions are stored against the shift, the station and the operator. In the office every shift has tabs for scans, rejections and exceptions, and the code search finds which case and pallet a unit sits in.",
         ],
         bullets: [
-          "code validation results;",
+          "the validation result of every code;",
           "the relationship between an item and its case, and between a case and its pallet;",
-          "errors and recovery actions;",
-          "the synchronization state of local operations.",
+          "undo, reprint and disassembly actions with their reasons;",
+          "conflicts when two stations accepted the same code.",
         ],
       },
       {
-        heading: "Label printing and layouts",
+        heading: "Label printing and templates",
         paragraphs: [
-          "A case label is built from the same data that passed validation: SSCC, GTIN, item count and the product's print name. The layout is designed in the cabinet's visual editor, and the station prints it on the line printer in ZPL or TSPL depending on the printer model. Preview and print share one model, so Cyrillic text and barcodes never diverge between screen and paper.",
+          "A case label is built from the same data that passed validation: SSCC, GTIN, item count and the product's print name. The template is designed in the office editor, and the station prints it on the line printer in ZPL or TSPL. Preview and print share one model, so Cyrillic text and barcodes match between screen and paper.",
         ],
         bullets: [
-          "a default layout is assigned per organization or per product category;",
-          "printing targets a network printer, a COM port, or a USB printer on Windows;",
+          "stock case templates of 58×40, 75×120, 100×100 and 100×150 mm, plus pallet templates;",
+          "a default template is set per product;",
+          "the printer connects over the network, through a COM port or as a Windows printer;",
           "reprinting a closed case's label is logged with a reason.",
         ],
       },
       {
-        heading: "Shifts, operators and terminals",
+        heading: "Shifts, operators and stations",
         paragraphs: [
-          "Production runs in shifts. A manager plans the shift in the cabinet: line, product, stations on the line, operating mode and aggregation. The operator signs in on the station with a badge or PIN that was synchronized in advance and works offline. Several terminals can work in one shift: Markiro tells them apart, resolves duplicate-scan conflicts, and shows the manager the shift's progress in the cabinet.",
-          "The shift is closed by the operator on the station or by the manager from the cabinet. Data that arrives after closing is not lost: it is accepted as late and stays visible in the cabinet.",
+          "A technologist plans the shift in the office: line, product, mode and plan. A station can also open a shift while it has a link to the main PC. The operator signs in on the station with a PIN, a personnel number or a badge. Copies of the credentials are kept on the station, so sign-in works without the link too.",
+          "Several stations and handhelds can work on one line in one shift. When two stations accept the same code, the main PC keeps it with the first scan and records a conflict, which the office resolves without stopping the line.",
         ],
       },
       {
-        heading: "Reports and transfer to GIS MT",
+        heading: "Exports for GIS MT",
         paragraphs: [
-          "At the end of a shift Markiro produces export files: a shift report in TXT and CSV with or without cases, and an aggregation XML in the format GIS MT accepts. The file is downloaded from the cabinet and submitted to the marking system by the plant's established process.",
-          "The Chestny ZNAK True API is currently used for reading: a signing agent on the machine with the qualified signature keeps the token alive, and the cabinet reads code statuses and orders exports for inventories. Submitting documents through the API remains a separate stage.",
+          "After the shift the office produces the files: a shift report in TXT and CSV with or without cases, an aggregation XML for GIS MT and, when the line built pallets, pallet exports and a pallet aggregation XML. The files are kept on the main PC and can be downloaded again. A responsible employee submits them to Chestny ZNAK by the plant's process.",
+          "During work Markiro does not contact the Chestny ZNAK servers and does not sign documents. The connection to GIS MT and the qualified electronic signature stay with the plant.",
         ],
         bullets: [
           "the manufacturer submits the application report no later than the next calendar day after applying the identification means;",
-          "code statuses refresh from GIS MT on a schedule and are visible in the cabinet;",
-          "inventory accepts Chestny ZNAK exports and produces the final documents.",
+          "for disassembled cases and pallets of closed shifts the office prepares a disaggregation XML and an act;",
+          "before an export the office warns about unresolved conflicts and open pallets.",
         ],
       },
       {
         heading: "Clear responsibility boundaries",
         paragraphs: [
-          "Markiro controls the production workflow and its traceability. External exchanges follow an agreed contract, and the exact integration scope depends on the plant's operating process.",
-          "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. The supported aggregation levels are item → case → pallet.",
+          "Markiro is responsible for the production workflow: code validation, aggregation, labels, the shift journal and the export files. Ordering codes, submitting documents to GIS MT and accounting in 1C stay in the plant's own systems.",
+          "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. The aggregation levels are item → case → pallet.",
         ],
       },
     ],
@@ -912,27 +912,32 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Does Markiro order serialized codes from Chestny ZNAK?",
         answer:
-          "No. The manufacturer orders codes from Chestny ZNAK by its own process. Markiro works with codes that are already applied: it validates them on the line, links them to cases and produces reports.",
+          "No. The manufacturer orders codes from Chestny ZNAK by its own process. Markiro works with codes that are already applied: it validates them on the line, builds cases and pallets and prepares the exports.",
       },
       {
         question: "What happens when a scanner reads a code with an error?",
         answer:
-          "The station rejects a code with an invalid structure or check digit and shows the operator the reason. The code never enters a case or a report; the item is rescanned or set aside.",
+          "The station rejects a code with an invalid structure or check digit and shows the operator the reason. The code never enters a case or an export; the item is rescanned or set aside.",
       },
       {
         question: "How does Markiro tell a repeated scan from a duplicate code?",
         answer:
-          "A repeat on the same terminal is blocked immediately. A code already accepted by another terminal in the shift is rejected as claimed, and a synchronization conflict becomes visible to the manager in the cabinet.",
+          "A repeat on the same station is rejected at once. When another station of the shift accepted the same code, the main PC keeps it with the first scan and records the second as a conflict, which the office sees in its conflicts section.",
       },
       {
         question: "Which printers and labels are supported?",
         answer:
-          "Thermal printers that speak ZPL or TSPL: network, COM-port or USB on Windows. The layout is designed in the cabinet, and the print language is chosen on the station for the specific printer.",
+          "Thermal printers that speak ZPL or TSPL, such as Zebra or TSC: network printers, COM-port printers or printers connected to Windows over USB. The template is designed in the office, and the print language is chosen for the printer.",
       },
       {
         question: "In what form do shift results reach GIS MT?",
         answer:
-          "As export files from the cabinet: a shift report in TXT and CSV, and an aggregation XML in the GIS MT format. The responsible employee submits them by the plant's process.",
+          "As export files from the office: a shift report in TXT and CSV, and an aggregation XML in the GIS MT format. The responsible employee submits them by the plant's process.",
+      },
+      {
+        question: "Does serialization on the line need the internet?",
+        answer:
+          "No. Stations work with the main PC over the plant's local network. Only the employee who submits the exports to Chestny ZNAK needs internet access.",
       },
     ],
   },
@@ -940,23 +945,23 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/sscc-and-aggregation/",
     alternatePath: "/sscc-i-agregatsiya/",
     locale: "en",
-    title: "SSCC case and pallet aggregation — Markiro",
+    title: "SSCC case and pallet aggregation — Markiro Autonom",
     description:
-      "Markiro aggregates serialized goods into cases and pallets, validates SSCC relationships, and retains recovery history.",
+      "Markiro aggregates serialized goods into cases and pallets with SSCC at the line station and on the handheld, checks contents before closing and keeps disassembly history.",
     heading: "SSCC case and pallet aggregation",
     navigationLabel: "SSCC and aggregation",
     eyebrow: "Item → case → pallet",
     introduction:
-      "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes and the actual line process.",
+      "Markiro Autonom assigns SSCCs to cases and pallets, checks contents before closing and prints labels. The plant's main PC issues the numbers, and stations and handhelds receive them in blocks in advance, so cases still close when the link drops.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-10-05",
+    reviewedAt: REVIEWED_AUTONOM,
     summary: [
       "An SSCC is the 18-digit number of a logistics unit. Markiro assigns it to cases and pallets, while a serialized code identifies the consumer unit inside a case.",
-      "The station receives an SSCC range in advance and consumes numbers sequentially; after a case is disassembled its number is never reused.",
-      "Case contents are validated before closing: code format, order membership, duplicates, expected quantity and print confirmation.",
-      "Aggregation continues offline and the queue is submitted idempotently; a cross-terminal conflict stays visible instead of being hidden.",
-      "The supported levels are item → case → pallet.",
+      "The SSCC prefix comes from the organization's GLN, and the starting numbers are set during installation. The main PC issues number blocks to stations and handhelds in advance.",
+      "Case contents are checked before closing: code format, the shift's product, duplicates and the expected quantity.",
+      "The number of a disassembled case or pallet is never issued again: the rebuilt pack receives a new SSCC.",
+      "The supported levels are item → case → pallet. Pallets are built at the line station and on the handheld.",
     ],
     relatedPaths: [
       "/en/chestny-znak-serialization/",
@@ -972,69 +977,67 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "What an SSCC means in aggregation",
         paragraphs: [
-          "An SSCC is the 18-digit identifier of a logistics unit such as a case or pallet. Markiro assigns SSCCs to cases and pallets. In a barcode and external exchange the SSCC can be represented with the GS1 Application Identifier (00), so the operator may see 20 digits while the system stores the normalized 18-digit value.",
+          "An SSCC is the 18-digit identifier of a logistics unit such as a case or pallet. Markiro assigns SSCCs to cases and pallets. In a barcode and in exchange files the SSCC can carry the GS1 Application Identifier (00), so the operator may see 20 digits while the software stores the normalized 18-digit value.",
           "A serialized product code and an SSCC serve different purposes. The serialized code identifies an individual consumer unit; the SSCC connects a transport pack to its contents and its level in the packaging hierarchy.",
         ],
       },
       {
         heading: "How items become cases",
         paragraphs: [
-          "The operator opens a case at the workstation and scans the serialized codes on bottles, cans, or other consumer packs. Markiro connects accepted codes to that open case and displays its fill state. After validating the contents, the operator closes the case and prints its label.",
-          "The item → case → pallet chain is supported. Closed cases become items inside a pallet, and the pallet gets its own SSCC and label. Pallets are built on the packing workstation and on the handheld.",
+          "The operator opens a case at the station and scans the serialized codes on bottles, cans or other consumer packs. Markiro links accepted codes to the open case and shows its fill state. When the case is full, the operator closes it and the station prints a label with the SSCC.",
+          "The item → case → pallet chain is supported. Closed cases become items inside a pallet, and the pallet gets its own SSCC and label. Pallets are built at the line station and on the handheld in the warehouse.",
         ],
         bullets: [
-          "the workstation receives an available SSCC range and consumes numbers sequentially;",
-          "each code is associated with a specific open pack and production shift;",
-          "contents and item count remain visible before the case is closed;",
+          "the station receives an SSCC block from the main PC and consumes numbers in order;",
+          "each code is linked to the open case and the shift;",
+          "contents and item count are visible before the case is closed;",
           "the label uses the same data that passed validation.",
         ],
       },
       {
-        heading: "What Markiro validates before closing a pack",
+        heading: "What Markiro checks before closing a pack",
         paragraphs: [
-          "Validation happens at each operation boundary. A problematic code must not silently enter a completed logistics unit, while one rejected scan must not prevent the operator from continuing unrelated permitted work.",
+          "Checks happen at the boundary of each operation. A problematic code must not slip into a finished logistics unit, while one rejected scan does not stop the operator from carrying on.",
         ],
         bullets: [
-          "whether the code format is recognized and belongs to the active order;",
-          "whether the code was already accepted or associated with another pack;",
-          "whether the expected number of items has been reached;",
-          "which case, workstation, shift, and operator produced the event;",
-          "whether label printing was confirmed or needs a separate action.",
+          "whether the code format is recognized and belongs to the shift's product;",
+          "whether the code was already accepted into another case;",
+          "whether the expected number of items is reached;",
+          "which case, station, shift and operator produced the event.",
         ],
       },
       {
-        heading: "Why the event log matters more than a final snapshot",
+        heading: "Why the journal matters more than a final snapshot",
         paragraphs: [
-          "The final relationship shows which items currently belong to a case. The event log explains how that state was created: who scanned a code, when the pack was closed, what was sent to print, and where an exception appeared.",
-          "This ordered history supports discrepancy analysis and recovery after a failure. A closed pack is not edited silently: changing its contents, releasing a code, or disaggregating the pack remains a separate controlled action.",
+          "The final relationship shows which items sit in a case now. The shift journal explains how that happened: who scanned a code, when the case was closed, what was reprinted and where a rejection occurred.",
+          "A closed pack never changes silently: taking a code out or disassembling a case or pallet is recorded as a separate action with a reason. For disassembled cases and pallets of closed shifts the office prepares a disaggregation XML for GIS MT and a disaggregation act.",
         ],
       },
       {
-        heading: "How aggregation continues through unstable connectivity",
+        heading: "Aggregation when the link drops",
         paragraphs: [
-          "The workstation retains the local order, SSCC range, open packs, and scan journal. Permitted operations therefore do not depend on a server response at every step and can continue through a temporary connection loss.",
-          "When connectivity returns, the local queue is submitted idempotently. Server-accepted events leave the queue, while a cross-device conflict is retained and made visible to the responsible user. Markiro does not hide the conflict behind an automatic choice that cannot be audited.",
+          "The station keeps the open shift, its SSCC block, the open cases and the scan journal in its own database. When the link to the main PC drops, the shift continues: cases close while the issued numbers last.",
+          "When the link returns, the station sends its records to the main PC. When two stations accepted the same code, the code stays with the first scan and the second becomes a conflict. The office sees conflicts on its overview and in a section of their own and resolves them without stopping the line.",
         ],
       },
       {
-        heading: "The boundary between Markiro and external systems",
+        heading: "What Markiro hands on",
         paragraphs: [
-          "Markiro creates and retains the production fact of aggregation: the SSCC, pack contents, parent-child relationships, and operation history. Submission to Chestny ZNAK, 1C, or another external system follows the plant's agreed integration contract.",
-          "A demonstration begins by checking the active production order, packing rules, SSCC source, and required output document. This prevents a generic integration promise where the data contract and ownership have not yet been defined.",
+          "Markiro keeps the production fact of aggregation: the SSCC, the contents, the nesting and the operation history. For GIS MT the office produces case and pallet aggregation XML; for accounting it produces TXT and CSV files with codes and SSCCs. Chestny ZNAK and 1C receive these as files by the plant's process.",
         ],
       },
       {
-        heading: "What to prepare for an aggregation demonstration",
+        heading: "What to prepare for a trial shift",
         paragraphs: [
-          "One real line workflow is enough for a focused review. We will compare it with current Markiro capabilities and identify any configuration or integration work separately.",
+          "One line is enough to try it. During the 14-day trial you can run a shift on demo data without a scanner or printer, and then connect your own equipment.",
+          "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes.",
         ],
         bullets: [
-          "product type and its TN VED EAEU and OKPD 2 codes;",
-          "consumer and transport packaging formats;",
-          "items per case and the number of cases per pallet;",
-          "scanner and printer models;",
-          "the source of production orders and SSCC ranges;",
-          "the required exchange with 1C and the serialization system.",
+          "a product with its GTIN and product group;",
+          "the organization's GLN and the starting SSCC numbers;",
+          "items per case and cases per pallet;",
+          "a scanner and a label printer with ZPL or TSPL;",
+          "a main PC with a fixed address on the plant network.",
         ],
       },
     ],
@@ -1047,17 +1050,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Where does the station get SSCC numbers?",
         answer:
-          "From a range issued to the organization and the station in advance. Numbers are consumed sequentially, and after a case is disassembled its SSCC is never reused: a rebuilt case receives a new number.",
+          "From a number block issued by the main PC. The prefix comes from the organization's GLN; the starting numbers are set during installation and edited in the office. The number of a disassembled case is never issued again.",
       },
       {
         question: "Can the contents of a closed case be changed?",
         answer:
-          "Only through an explicit action. Disassembly with a stated reason releases the codes and permanently retires the case's SSCC; the rebuilt case gets a new number and the action stays in the log.",
+          "Only through an explicit action. Disassembly with a stated reason releases the codes, the case's number is never issued again and the rebuilt case receives a new SSCC. The action stays in the shift journal.",
       },
       {
         question: "Is pallet aggregation supported?",
         answer:
-          "Yes. Closed cases are aggregated into a pallet with its own SSCC and label, on the packing workstation or on the handheld. The aggregation chain is item → case → pallet.",
+          "Yes. Closed cases are aggregated into a pallet with its own SSCC and label, at the line station or on the handheld. The aggregation chain is item → case → pallet.",
       },
     ],
   },
@@ -1067,21 +1070,21 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Production packing and serialization workstation — Markiro",
     description:
-      "The local Markiro station connects scanners, printers, production orders, and an operation log so packing continues through unstable connectivity.",
+      "The Markiro station for Windows links the scanner, the label printer and the shift. The operator builds cases with SSCC, and records stay on the line PC and the plant's main PC.",
     heading: "A packing workstation designed for continuous production",
     navigationLabel: "Packing workstation",
-    eyebrow: "Scanner / printer / local journal",
+    eyebrow: "Scanner / printer / station",
     introduction:
-      "The Markiro station is both the operator interface and the local execution layer: it accepts scans, validates each step, prepares printing, and retains operations until synchronization.",
+      "The Markiro station is a Windows program on a computer next to the line. It accepts scans, validates every code, prints labels and keeps the shift's records in its own database until the main PC accepts them.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: REVIEWED_AUTONOM,
     summary: [
-      "The Markiro station is a Windows x64 application paired with the organization's cabinet by a pairing code; it works offline.",
-      "A scanner connects as keyboard input or through a COM port that preserves the GS separator; a printer connects over the network, a COM port or USB.",
-      "The operator signs in with a badge or PIN, picks the shift and works on one screen: scan result, case state, next step.",
+      "The station installs from the same installer as the main PC, with the station role chosen during setup. It is paired with the main PC by a code from the office.",
+      "A scanner connects as a keyboard (USB) or through a COM port that preserves the GS separator; a printer connects over the network, a COM port or as a Windows printer.",
+      "The operator signs in with a PIN, a personnel number or a badge and works on one screen: scan result, case state, pallet, next step.",
       "Exceptions are handled on the spot: undo the last scan, clear the case, reprint a label, disassemble with a reason.",
-      "Every action stays in the log and synchronizes to the cabinet whenever connectivity is available.",
+      "When the link to the main PC drops, the open shift continues, and the records reach the main PC once the link returns.",
     ],
     relatedPaths: [
       "/en/offline-production/",
@@ -1097,63 +1100,60 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "What the Markiro station is",
         paragraphs: [
-          "The station is the operator's workplace on the production line. It ships as a Windows x64 installer for an industrial computer or an ordinary PC next to the line. After installation a technician pairs the station with the organization's cabinet using a pairing code, and the device receives its own identity, order and reference data.",
+          "The station is the operator's workplace on the line. It is a role of the Markiro Autonom program for Windows, installed on an industrial computer or an ordinary PC next to the line. After installation the station is paired with the main PC by a code from the office and receives the line, products, label templates and the operator list.",
+          "Once set up, the station fills the screen above other windows: the operator cannot close it by accident, and an administrator can switch this mode off.",
         ],
         bullets: [
-          "a Windows x64 installer with signature-verified updates;",
-          "pairing with the cabinet by code, with no operator account on the device;",
-          "a local SQLite database with the journal, the queue and the cases.",
+          "one installer for the main PC, the station and the office, with the role chosen during setup;",
+          "pairing with the main PC by a code from the office;",
+          "its own database with the journal, the record queue and the cases;",
+          "updates are loaded in the office from a file, and stations take them from the main PC.",
         ],
       },
       {
         heading: "Scanner and printer",
         paragraphs: [
-          "A scanner connects in one of two ways: as keyboard input, which needs no configuration, or through a COM port, where the station receives raw bytes and preserves the GS separator inside the Data Matrix. The scanner status is reported honestly: connected, disconnected or keyboard mode.",
-          "A label printer connects over the network on TCP 9100, through a COM port, or as a USB printer on Windows. The ZPL or TSPL print language is chosen on the station for the specific model, so one layout from the cabinet prints on a mixed printer fleet. A test print goes through the same path as production printing.",
+          "A scanner connects in one of two ways: as a keyboard, with no configuration, or through a COM port, where the station receives raw bytes and preserves the GS separator inside the Data Matrix.",
+          "A label printer connects over the network (TCP 9100), through a COM port, or as a Windows printer over USB. The ZPL or TSPL print language is chosen for the model, so one template from the office prints on different printers. The station prints A4 pallet sheets through the Windows driver.",
         ],
       },
       {
-        heading: "The operator sees the next valid step",
+        heading: "The operator sees the next step",
         paragraphs: [
-          "The interface shows the active shift, order, current pack, and latest scan result. An error is explained at the same workstation where it can be resolved.",
-          "Sign-in uses a badge or PIN synchronized in advance, so a shift can start without connectivity. Sound signals distinguish an accepted code, a duplicate and an error, so the operator does not have to look at the screen after every scan.",
+          "The screen shows the active shift, the product, the open case, the pallet and the latest scan result. An error is explained at the same workstation where it can be fixed.",
+          "Sign-in uses a PIN, a personnel number or a badge. Copies of the credentials are kept on the station, so sign-in works without the main PC, and after several wrong attempts sign-in is paused for a while.",
         ],
       },
       {
         heading: "The scanning and aggregation cycle",
         paragraphs: [
-          "The operator opens a case, scans items, watches the fill state, closes the case when the quantity is reached, and receives a label with the SSCC. The station consumes SSCC numbers sequentially from a range issued in advance. The sequence is documented in a printable operator instruction that can hang next to the workstation.",
+          "The operator opens a case, scans items, watches the fill state, closes the case and receives a label with the SSCC. The station takes SSCC numbers from a block issued in advance by the main PC. Closed cases are built into a pallet with its own label.",
         ],
       },
       {
         heading: "Exceptions are handled on the spot",
         paragraphs: [
-          "An operator mistake needs neither a manager nor connectivity. Four actions are available on the station and recorded in the log.",
+          "An operator mistake needs neither a technologist nor a network link. Four actions are available on the station and recorded in the shift journal.",
         ],
         bullets: [
-          "undo the last scan with one tap while the case is open;",
+          "undo the last scan while the case is open;",
           "clear an open case without closing it;",
-          "reprint the label of a closed case with a stated reason;",
-          "disassemble a closed case: codes are released, the SSCC is retired forever, a new case receives a new number;",
-          "a code claimed by another terminal is rejected with a clear explanation.",
+          "reprint the label of a closed case or pallet with a stated reason;",
+          "disassemble a closed case or pallet with a reason: codes are released and the pack's number is never issued again;",
+          "a code already accepted in this shift is rejected with a clear reason.",
         ],
       },
       {
-        heading: "Hardware stays inside the local production layer",
+        heading: "Everything the shift needs is on the station",
         paragraphs: [
-          "Scanners, printers, fonts, and layouts must not depend on a CDN or an available browser service. Preview and print use the same label model.",
+          "Fonts, label templates and the shift's reference data ship with the program or come from the main PC. The station downloads nothing from the internet, and preview and print use the same label model.",
         ],
       },
       {
-        heading: "Recovery matters more than hidden retries",
+        heading: "When the link to the main PC drops",
         paragraphs: [
-          "The system exposes pending, rejected, and conflicting operations. Retries must be safe, with a clear continuation point after restart for the operator or engineer.",
-        ],
-      },
-      {
-        heading: "Inventory on the terminal",
-        paragraphs: [
-          "The same station runs inventory tasks: the operator opens a task, scans items, receives a verdict for every code and, when needed, repacks items into new cases with label printing. The result flows to the cabinet, where the manager closes the inventory and generates the documents.",
+          "The station keeps the open shift, its SSCC block and the scan journal in its own database. Cases are built and closed while the issued numbers last; records queue up and reach the main PC once the link returns.",
+          "A new shift cannot open without the link: the main PC issues its number, plan and SSCC blocks.",
         ],
       },
     ],
@@ -1161,27 +1161,27 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "What computer does the station need?",
         answer:
-          "A Windows x64 computer next to the line, industrial or an ordinary PC. The station installs from an .exe installer; updates are signature-verified and never install without confirmation.",
+          "A Windows 10 or 11 PC next to the line, industrial or ordinary. On the Start plan the main PC itself can be the station.",
       },
       {
         question: "Which scanners work?",
         answer:
-          "Any scanner that acts as keyboard input, and scanners with a COM port. For Data Matrix the scanner must pass the GS separator through; in COM mode the station receives raw bytes without loss.",
+          "Any scanner that acts as a keyboard, and scanners with a COM port. For Data Matrix the scanner must pass the GS separator through; in COM-port mode the station receives raw bytes without loss.",
       },
       {
         question: "Which printers work?",
         answer:
-          "Thermal printers that speak ZPL or TSPL: network printers on TCP 9100, COM-port printers, or USB printers on Windows. The print language is chosen on the station for the specific model.",
+          "Thermal printers that speak ZPL or TSPL: network printers on TCP 9100, COM-port printers, or printers connected to Windows over USB. The print language is chosen for the specific model.",
       },
       {
-        question: "Can an operator fix a mistake without a manager?",
+        question: "Can an operator fix a mistake without a technologist?",
         answer:
-          "Yes. Undo of the last scan, clearing an open case, reprinting and disassembly are performed on the station. Reprinting and disassembly require a reason that goes into the log.",
+          "Yes. Undo of the last scan, clearing an open case, reprinting and disassembly are performed on the station. Reprinting and disassembly require a reason that goes into the journal.",
       },
       {
         question: "How does an operator sign in on the station?",
         answer:
-          "With a badge or PIN. Credentials are synchronized in advance as hashes, so sign-in works offline and a revoked access takes effect after the next synchronization.",
+          "With a PIN, a personnel number or a badge. Copies of the credentials are kept on the station, so sign-in works without the main PC. The station receives changes to the operator list on its next link.",
       },
     ],
   },
@@ -1189,23 +1189,23 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/1c-integration/",
     alternatePath: "/integratsiya-1c/",
     locale: "en",
-    title: "Production serialization integration with 1C — Markiro",
+    title: "Serialization integration with 1C through files — Markiro",
     description:
-      "Markiro separates production execution from 1C exchange, validating orders and products while keeping failures observable, repeatable, and recoverable.",
-    heading: "Connect Markiro and 1C without silently losing operations",
+      "Markiro Autonom produces shift exports in TXT, CSV and XML that 1C and GIS MT receive as files. A direct 1C exchange and a catalogue import from a file are planned.",
+    heading: "Connect Markiro and 1C through export files",
     navigationLabel: "1C integration",
-    eyebrow: "Data exchange with explicit status",
+    eyebrow: "Exchange through files",
     introduction:
-      "A 1C integration is a controlled exchange boundary, not direct access from the accounting system to a workstation. Markiro validates incoming data and returns an explicit processing result.",
+      "Markiro Autonom runs on the plant's computers with no server on the internet, so it exchanges data with 1C through files. The office produces shift exports, and 1C or an employee picks them up from a folder on the computer.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-09-27",
+    reviewedAt: REVIEWED_AUTONOM,
     summary: [
-      "1C connects to Markiro through the standard “site exchange” protocol over CommerceML; a typical configuration needs no customization.",
-      "Prices, GTIN barcodes and product photos arrive from 1C; cards link automatically by GTIN, unknown items wait for a human decision.",
-      "Disposal requests go to 1C as a “Product order” document, and statuses come back.",
-      "Every exchange session is recorded in the integration journal: what arrived, what was applied, where it failed.",
-      "Shift results are transferred as export files or through the public REST API with access keys.",
+      "The office produces shift exports: TXT and CSV without cases, with cases and with pallets, and aggregation XML for GIS MT.",
+      "The files are saved to an exports folder under Documents and to the main PC, and can be downloaded again.",
+      "Loading a file into 1C is set up by the plant's 1C specialist: the format is simple, one code or an SSCC and code pair per line.",
+      "There is no direct exchange with 1C today. An exchange with 1C without intermediate files and a product catalogue import from a file are planned.",
+      "Products are entered in the office: GTIN, name, product group, case and pallet quantities.",
     ],
     relatedPaths: ["/en/chestny-znak-serialization/", "/en/sscc-and-aggregation/", "/en/faq/"],
     relatedArticlePaths: [
@@ -1215,86 +1215,78 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
     sections: [
       {
-        heading: "How the exchange works",
+        heading: "How the exchange with 1C works",
         paragraphs: [
-          "Markiro accepts the “site exchange” protocol that typical 1C configurations support out of the box. 1C is the initiator: it calls the organization's exchange address, passes credential verification and transfers CommerceML files. Other accounting systems, such as SBIS, speak the same protocol; no separate channel is needed for them.",
+          "Markiro Autonom runs on the plant's computers and opens no access from the internet. The accounting system receives production data as files: the office produces a shift export, saves it to a folder on the computer and passes a copy to the main PC.",
+          "Such a file can be loaded into 1C with a loading routine or handed to the employee who keeps the books. Every line holds one serialized code or a pair of a case SSCC and a code, so reading the file needs no complex setup.",
+        ],
+      },
+      {
+        heading: "Which exports the office produces",
+        paragraphs: [
+          "The set of formats depends on the shift mode: a verification shift offers exports without cases, and an aggregation shift offers all the others. A long export can be split into parts by line count.",
         ],
         bullets: [
-          "one connection per organization;",
-          "machine credentials are issued in the cabinet and shown once;",
-          "the exchange runs only over TLS, and password guessing is rate-limited.",
+          "TXT without cases: the shift's codes, one per line;",
+          "TXT with cases: the case SSCC followed by its codes, and a reversed variant with the codes first and the SSCC after them;",
+          "CSV without cases and with cases, separated by semicolons;",
+          "TXT and CSV of pallets, and a TXT of pallets and their cases;",
+          "the aggregation report XML, the pallet aggregation XML and the pallet aggregation XML without codes for GIS MT;",
+          "a disaggregation XML for disassembled cases and pallets of closed shifts.",
         ],
       },
       {
-        heading: "What arrives from 1C",
+        heading: "Where the files are kept",
         paragraphs: [
-          "The catalogue stays with Markiro: the exchange never creates product cards on its own. For already linked products the price of the chosen type is updated in roubles. A barcode from the file is normalized to a GTIN, and an item whose GTIN matches is linked to the card automatically, receiving its price and photo. Unknown items enter a candidate queue, where an employee links them to a card or hides them.",
-        ],
-        bullets: [
-          "the price of the chosen type;",
-          "an EAN-13 or GTIN-14 barcode with automatic linking;",
-          "a product photo replaced on change;",
-          "candidates for items without a match.",
+          "The office saves every export to a Markiro exports folder under Documents on that computer, in a folder of its own named after the shift and the time. At the same time the file goes to the main PC, which keeps it in the database, so it is included in the backups.",
+          "The shift card lists the export history: format, number of codes, cases and pallets, and who exported. The download button returns the file unchanged and checks its checksum, even when the copy in the folder is gone.",
         ],
       },
       {
-        heading: "What goes to 1C",
+        heading: "What goes to GIS MT",
         paragraphs: [
-          "Disposal-kiosk requests are exported as a “Product order” document as soon as they are created, with the reason in the comment. Statuses move in both directions through a mapping table, so a request processed in 1C changes its status in the cabinet as well.",
+          "For Chestny ZNAK the office produces aggregation XML in the format GIS MT accepts. A responsible employee uploads the file by the plant's process: Markiro does not connect to GIS MT and does not sign documents. Before an export the office warns about unresolved conflicts, late data and open pallets.",
         ],
       },
       {
-        heading: "A contract instead of manual transfer",
+        heading: "The product catalogue",
         paragraphs: [
-          "The exchange scope follows plant data: catalogues, orders, statuses, and identifiers. Incoming values are validated before storage, and each error is tied to a specific record or batch.",
+          "Products are entered in the office by hand: GTIN, name and print name, product group, case and pallet quantities, shelf life, label templates and a photo. One product is enough for the first launch, and with demo data a shift can run without your own catalogue.",
         ],
       },
       {
-        heading: "Retries must not create duplicates",
+        heading: "What is planned",
         paragraphs: [
-          "A network failure does not prove that an operation was rejected. Requests and status processing are therefore designed to be idempotent and to provide explicit confirmation.",
-          "An exchange file arrives in chunks and is assembled on the server; an unfinished session is removed when it expires instead of lingering in the database.",
+          "An exchange with 1C without intermediate files and a product catalogue import from a file are planned. There are no dates yet. If an exchange with 1C is essential for you, tell us which configuration you use: it helps us decide which exchange comes first.",
         ],
       },
       {
-        heading: "The integration journal",
+        heading: "How to check it on your data",
         paragraphs: [
-          "Every exchange session is recorded in the journal: time, direction, the number of received and applied records, and errors per item. The journal lists events chronologically with outcome filters, so old errors never hide today's work.",
-        ],
-      },
-      {
-        heading: "What the exchange does not cover today",
-        paragraphs: [
-          "Production shift results are transferred as export files: a shift report in TXT and CSV, and an aggregation XML for GIS MT. For other plant systems there is a public REST API with OpenAPI documentation and access keys with read or write scopes. Shipment export over CommerceML is planned as the next stage.",
-        ],
-      },
-      {
-        heading: "Each configuration is agreed separately",
-        paragraphs: [
-          "1C versions, extensions, catalogues, and exchange rules vary. The demonstration identifies data sources, field owners, exchange frequency, and the error-recovery process.",
+          "During the 14-day trial you can run a shift on demo data or on your own product and get every export. You can try loading the files into your 1C and into GIS MT straight away.",
         ],
       },
     ],
     faq: [
       {
+        question: "Is there a direct exchange with 1C?",
+        answer:
+          "Not yet. Today data moves as files: TXT, CSV and XML from the office. An exchange with 1C without intermediate files is planned.",
+      },
+      {
         question: "Does the 1C configuration need customization?",
         answer:
-          "For typical configurations with the “site exchange” module, no. On the 1C side you configure the exchange address, credentials and price type; on the Markiro side the connection is created in the cabinet.",
+          "Loading TXT or CSV into 1C needs a loading routine, which the plant's 1C specialist sets up. Markiro changes nothing in the 1C database.",
       },
       {
-        question: "Does the exchange create new products in Markiro?",
+        question: "Can products be loaded from 1C into Markiro?",
         answer:
-          "No. Unknown items enter the candidate queue, and an employee creates or links the card. An item whose GTIN matches an existing card is linked automatically.",
+          "For now products are entered in the office by hand. A catalogue import from a file is planned.",
       },
       {
-        question: "How do I know an exchange failed?",
+        question: "Where are the files after a shift?",
         answer:
-          "In the integration journal: every session shows its outcome and per-item errors, and the channel card shows the current state. Old errors are never promoted above newer sessions.",
-      },
-      {
-        question: "Can shift data be transferred to 1C?",
-        answer:
-          "Today as export files from the cabinet or through the public REST API. Shipment export over CommerceML is planned as the next stage.",
+          "In the shift card in the office. The files are saved to a folder on the computer and to the main PC, and can be downloaded again.",
       },
     ],
   },
@@ -1304,21 +1296,21 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Offline production serialization and packing — Markiro",
     description:
-      "Markiro keeps serialization and packing operations locally, survives workstation restarts, and synchronizes the durable queue after connectivity returns.",
+      "Markiro Autonom runs on the plant's PCs with no internet: the main PC holds the database, stations and handhelds link to it over the plant network, and shifts survive a lost link.",
     heading: "Offline production: the line does not wait for the network",
     navigationLabel: "Offline production",
-    eyebrow: "Local execution and controlled synchronization",
+    eyebrow: "Software and database on the plant's PCs",
     introduction:
-      "Markiro offline mode is a separate operating layer, not a hidden network error: permitted actions run locally, enter a durable journal, and synchronize after connectivity returns.",
+      "Markiro Autonom needs no internet, neither for work nor for its licence. The main PC in the office holds the database, and stations on the lines and handhelds in the warehouse work with it over the plant's local network.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: REVIEWED_AUTONOM,
     summary: [
-      "The station keeps the shift order, reference data, the SSCC range and the scan journal locally in SQLite and continues permitted operations without a network.",
-      "The outgoing queue is submitted in batches with retries and an idempotency key: the server never accepts the same batch twice.",
-      "The server distinguishes accepted, rejected, conflicting and late records; a conflict is visible to the manager and never stops the line.",
-      "Operator sign-in by badge or PIN works offline because credential hashes are synchronized to the device in advance.",
-      "Operations that need fresh permissions or server data show a limitation instead of pretending to succeed.",
+      "During a shift the software contacts neither Markiro servers nor Chestny ZNAK. The licence and updates are loaded from a file.",
+      "The main PC holds the database, makes scheduled backups and issues SSCC numbers to the stations.",
+      "The station keeps the open shift, its SSCC block and the journal in its own database: when the link to the main PC drops, the shift continues.",
+      "The station's records reach the main PC once the link returns; when two stations accepted the same code, the office sees a conflict.",
+      "Operator sign-in by PIN, personnel number or badge works on the station without the link.",
     ],
     relatedPaths: [
       "/en/packing-workstation/",
@@ -1332,77 +1324,79 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
     sections: [
       {
-        heading: "What remains on the device",
+        heading: "Where the data lives",
         paragraphs: [
-          "Orders and reference data required for an approved workflow are synchronized in advance. The local journal and outgoing queue persist across restarts.",
-          "The Markiro station is a Windows application with a local SQLite database. It stores the shift order, products with GTINs, label layouts, the SSCC range, open cases, the scan journal and the outgoing queue. All of it survives a restart of the application and of the computer.",
+          "The software, the database and the backups sit on the plant's own computers. The main PC in the office holds the shared database: products, templates, shifts, codes, cases, pallets and exports. Stations and handhelds connect to it over the local network, and the exchange runs over HTTPS inside the plant network.",
         ],
         bullets: [
-          "the shift order and the product with its GTIN;",
-          "the SSCC range issued to the station in advance;",
-          "open and closed cases together with their exception history;",
-          "the scan journal and the queue awaiting submission.",
+          "main PC: the database, backups, the licence and the exports;",
+          "station: copies of the shift, products, templates and operators, an SSCC block and the scan journal;",
+          "handheld: connects to the main PC over the same network and receives its own SSCC block.",
         ],
       },
       {
-        heading: "How the line works without a network",
+        heading: "No internet needed",
         paragraphs: [
-          "Scanning, code validation, filling and closing a case, label printing, reprinting and disassembly all run locally. The operator sees only a counter of pending operations that grows during an outage and shrinks after recovery.",
-          "No modal dialog appears and scanning never stops when the network is lost: for the station, offline is a normal operating mode, not an alarm.",
+          "Neither the station nor the main PC contacts external servers during work. The licence is loaded from a file, an update is loaded from a file in the office too, and stations take it from the main PC.",
+          "Internet access is needed only by the employee who submits exports to Chestny ZNAK from their own computer.",
         ],
       },
       {
-        heading: "How connectivity returns",
+        heading: "How the line works without the main PC",
         paragraphs: [
-          "The queue is submitted safely with device identity and operation sequence. The server distinguishes accepted, rejected, conflicting, and temporarily unprocessed records.",
-          "Batches carry up to one hundred scans; on failure the retry interval doubles up to a minute and resets after success. Every batch carries an idempotency key, so resubmitting the same batch never creates duplicates.",
+          "When the network between a station and the main PC drops, the open shift continues. Scanning, code validation, filling and closing a case, label printing, reprinting and disassembly all run on the station.",
+          "Records queue up in the station's database and survive a restart of the program and of the computer. When the link returns, the station sends them to the main PC from where it stopped.",
         ],
       },
       {
-        heading: "What happens to conflicts",
+        heading: "What needs the main PC",
         paragraphs: [
-          "Two terminals in one shift may have accepted the same code while offline. During synchronization the server keeps the code with the first accepted scan and marks the second as displaced. The station shows this to the operator, the manager sees the conflict in the cabinet, and resolving it does not require stopping the line.",
-          "Data that arrives after the shift is closed is accepted as late and stays visible in the cabinet instead of being lost.",
-        ],
-      },
-      {
-        heading: "Offline does not mean unrestricted",
-        paragraphs: [
-          "An operation that needs current permissions or server data must not pretend to succeed. The interface shows the limitation and preserves a clear recovery path.",
+          "Operations that need data from the main PC do not run without the link, and the station tells the operator so plainly.",
         ],
         bullets: [
-          "a new shift is assigned by the cabinet and reaches the station on synchronization;",
-          "a new SSCC range is issued by the server, so the station requests it in advance;",
-          "a change in operator permissions takes effect after the next roster synchronization.",
+          "the station does not open a new shift without the link: the main PC issues the shift number, plan and SSCC blocks;",
+          "cases close while the issued number block lasts;",
+          "changes to products, templates and operators reach the station on its next link.",
         ],
       },
       {
-        heading: "The disposal kiosk works offline too",
+        heading: "Conflicts between stations",
         paragraphs: [
-          "The kiosk keeps a snapshot of reference data, badge hashes and the request queue in IndexedDB. An employee's request is stored locally, marked as pending, and confirmed only after the server responds. Unsafe records go to quarantine rather than being lost.",
+          "Two stations of one shift may have accepted the same code while they had no link. The main PC keeps the code with the earliest scan and records the second as a conflict. The office shows conflicts on its overview and in a section of their own, and resolving them does not require stopping the line.",
+        ],
+      },
+      {
+        heading: "Backups",
+        paragraphs: [
+          "The main PC backs up the database by itself: every hour in which data changed, and at least once a day. A backup can also be made on demand, and a second copy can go to another folder, such as a network drive. Restoring a backup, including on a new computer, is done by Markiro support, and the stations keep their pairing.",
         ],
       },
     ],
     faq: [
       {
-        question: "How long can the station work without the internet?",
+        question: "Does the software need the internet?",
         answer:
-          "Until the local order and the SSCC range run out. Scanning, cases, printing and exceptions do not depend on the server; the queue accumulates and is submitted after connectivity returns.",
+          "No. Stations and handhelds connect to the main PC over the plant's local network. The licence and updates are loaded from a file.",
       },
       {
-        question: "Are operations lost if the station is restarted during an outage?",
+        question: "How long can a station work without the main PC?",
         answer:
-          "No. The journal and the queue are written to the local database before the server confirms them and survive a restart of the application and of the computer; submission resumes from the same point.",
+          "As long as the open shift runs and the issued SSCC block lasts. Scanning, cases, printing and exceptions run on the station, and the records reach the main PC once the link returns.",
       },
       {
-        question: "What does the operator see when the network is lost?",
+        question: "Are records lost if the station restarts without the link?",
         answer:
-          "A counter of pending operations and a warning if the queue has not moved for a long time. There are no modal dialogs and scanning does not stop: the line keeps running as usual.",
+          "No. The journal and the queue are written to the station's database and survive a restart of the program and of the computer; sending resumes after start-up.",
       },
       {
-        question: "How are cross-terminal conflicts resolved?",
+        question: "What happens if the main PC breaks?",
         answer:
-          "The server keeps the code with the first accepted scan and marks the second as displaced. The conflict is visible on the station and in the cabinet and is resolved by the responsible employee without stopping the line.",
+          "The stations finish the open shift. The database is restored from a backup on a new computer by Markiro support, and the stations keep their pairing.",
+      },
+      {
+        question: "How are conflicts between stations resolved?",
+        answer:
+          "The main PC keeps the code with the first scan and records the second as a conflict. The conflict is visible in the office and is resolved by the responsible employee without stopping the line.",
       },
     ],
   },
@@ -1410,21 +1404,21 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/faq/",
     alternatePath: "/faq/",
     locale: "en",
-    title: "Questions about Markiro serialization and aggregation",
+    title: "Questions about Markiro Autonom serialization and aggregation",
     description:
-      "Direct answers about Markiro, SSCC aggregation, offline production stations, the disposal kiosk, equipment compatibility, product groups, and 1C integration.",
+      "Direct answers about Markiro Autonom: work without the internet, the main PC and stations, SSCC aggregation, equipment, exports for GIS MT and 1C, the trial and the licence.",
     heading: "Questions about Markiro in production",
     navigationLabel: "Questions and answers",
     eyebrow: "Direct answers without vague promises",
     introduction:
-      "These answers define the product boundaries and core production workflows. Implementation details are validated against each plant's data and equipment.",
+      "These answers set out the product boundaries and the core workflows on the line. Launch details are checked against each plant's data and equipment.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-10-05",
+    reviewedAt: REVIEWED_AUTONOM,
     summary: [
-      "Markiro is a production serialization system: code validation on the line, case and pallet aggregation with SSCC, label printing, a journal and exports for GIS MT.",
-      "Markiro runs on beer and cider lines, and we check the rules of any other product group before launch. The supported aggregation levels are item → case → pallet.",
-      "The station runs on Windows without a network, the cabinet runs in a browser, and the disposal kiosk runs on a tablet or an all-in-one.",
+      "Markiro Autonom is serialization software for Windows: code validation on the line, case and pallet aggregation with SSCC, label printing and exports for GIS MT.",
+      "The software and the database run on the plant's PCs: the main PC in the office, stations at the lines, handhelds in the warehouse. Work needs no internet.",
+      "Markiro runs on beer and cider lines, and we check the rules of any other product group before launch. The aggregation levels are item → case → pallet.",
     ],
     relatedPaths: [
       "/en/chestny-znak-serialization/",
@@ -1441,7 +1435,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "What does Markiro do?",
         answer:
-          "Markiro controls production serialization operations: code verification, label printing, packing, aggregation, and the traceability event log.",
+          "Markiro Autonom runs serialization in production: it validates codes on the line, builds cases and pallets with SSCC, prints labels, keeps the shift journal and prepares exports for GIS MT.",
       },
       {
         question: "Which product groups are supported?",
@@ -1449,14 +1443,19 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
           "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. Applicability is checked against the product's TN VED EAEU and OKPD 2 codes.",
       },
       {
-        question: "Will the station keep working without the internet?",
+        question: "Is internet access needed?",
         answer:
-          "Permitted offline operations run locally and stay in a durable queue. When connectivity returns, the station synchronizes them and exposes any rejection or conflict.",
+          "No. The main PC, the stations and the handhelds work over the plant's local network. The licence and updates are loaded from a file.",
+      },
+      {
+        question: "Will a station keep working without the main PC?",
+        answer:
+          "Yes, the open shift continues: the station validates codes, closes cases and prints labels while the issued SSCC block lasts. The records reach the main PC once the link returns.",
       },
       {
         question: "What is an SSCC in Markiro?",
         answer:
-          "An SSCC identifies a logistics unit such as a case or pallet and connects it to its contents and aggregation history.",
+          "An SSCC identifies a transport pack, a case or a pallet, and connects it to its contents and its aggregation history.",
       },
       {
         question: "Is pallet aggregation supported?",
@@ -1464,54 +1463,53 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
           "Yes. Items are aggregated into a case with an SSCC, and cases into a pallet with its own SSCC, on the packing workstation or on the handheld.",
       },
       {
-        question: "Does Markiro work with scanners and printers?",
+        question: "What equipment is needed?",
         answer:
-          "The workstation is designed for a local production layer with scanners and printers. Compatibility with specific models is validated before rollout.",
+          "A Windows 10 or 11 main PC with a fixed address on the plant network, a PC at the line for the station, a Data Matrix scanner with USB or a COM port, and a thermal printer with ZPL or TSPL. For the warehouse, a handheld on Android 9 or later.",
       },
       {
-        question: "What equipment does a workstation need?",
+        question: "Is the interface in English?",
         answer:
-          "A Windows x64 computer, a Data Matrix scanner with keyboard input or a COM port, and a thermal printer that speaks ZPL or TSPL: network, COM port or USB.",
+          "No. The software, its screens and the documents it prints are in Russian, for production lines in Russia.",
       },
       {
         question: "Can Markiro integrate with 1C?",
         answer:
-          "Markiro provides an integration layer for production-data exchange. The exact scope and exchange format are agreed for each plant configuration.",
+          "Shift data reaches 1C as files: TXT, CSV and XML from the office. A direct exchange with 1C and a catalogue import from a file are planned.",
       },
       {
         question: "How do shift results reach GIS MT?",
         answer:
-          "As export files from the cabinet: a shift report in TXT and CSV, and an aggregation XML in the GIS MT format. The responsible employee submits them by the plant's process.",
+          "As files from the office: an aggregation XML in the GIS MT format and shift reports in TXT and CSV. The responsible employee submits them to Chestny ZNAK by the plant's process.",
       },
       {
-        question: "Can the kiosk support self-service?",
+        question: "Can several stations work in one shift?",
         answer:
-          "Yes. Markiro includes a separate disposal-kiosk flow: an employee scans a badge and product codes, and the request is processed in the cabinet through the register or as a write-off.",
-      },
-      {
-        question: "Can several terminals work in one shift?",
-        answer:
-          "Yes. Several stations can work in one shift: the server tells the terminals apart, resolves duplicate-scan conflicts, and shows the manager the shift's progress per workstation.",
+          "Yes. Several stations and handhelds can work on one line in one shift, with the number of workstations set by the plan. When two stations accept the same code, the main PC shows a conflict in the office.",
       },
       {
         question: "Can we start with a single line?",
         answer:
-          "Yes, rollout starts with one workflow: a product, a case and a station on one line. The disposal kiosk, 1C exchange and other layers are connected when ready without replacing an already working process.",
+          "Yes. On the Start plan the main PC and the station can be one computer. Lines and workstations are added by moving to another plan or bought separately.",
       },
       {
         question: "Where is the data stored?",
         answer:
-          "The server side runs in Yandex Cloud, with organizations isolated at the server level. The station keeps operations locally in SQLite until synchronization, and the kiosk keeps them in IndexedDB.",
+          "On your computers: the database on the main PC and a copy of the shift on the stations. The main PC makes backups by itself, on a schedule and on demand.",
       },
       {
-        question: "Are there instructions for operators and managers?",
-        answer:
-          "Yes. Printable instructions for operators, technicians and managers are published as revisions with a code, a date and an immutable PDF/A in the instructions section.",
+        question: "How much does it cost and how do I try it?",
+        answer: `14 days free with every feature. A site licence costs from ${START_PRICE} RUB a year; the pricing page is in Russian.`,
       },
       {
-        question: "How do I request a demonstration?",
+        question: "What happens after the trial?",
         answer:
-          "Through the form on the home page or by e-mail to hello@markiro.app. The demonstration walks through a real scenario of your line: product, packaging, equipment and data exchange.",
+          "The open shift finishes, and data and exports stay available. New shifts will not open until a licence file is loaded.",
+      },
+      {
+        question: "How do I contact Markiro?",
+        answer:
+          "By email to hello@markiro.app or in Telegram. We can walk through your line in a 30-minute video call: the request form closes the home page.",
       },
     ],
   },

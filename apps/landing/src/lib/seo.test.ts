@@ -155,7 +155,7 @@ describe("SEO generators", () => {
     expect(llms).toContain("https://markiro.app/en/articles/beer-code-application-report-russia/");
     expect(llms).toContain("## English");
     expect(llms).toContain(
-      "> Production serialization, aggregation, and traceability with offline-capable line stations.",
+      "> Markiro Autonom: serialization and aggregation software for Windows. The software, the database and the backups run on the plant's own PCs; a shift needs no internet.",
     );
     expect(llms).toContain("https://markiro.app/en/sscc-and-aggregation/");
     expect(llms).not.toMatch(/ranking|ранжир/i);
