@@ -181,138 +181,25 @@ test("GTM stays offline until analytics consent and loads only once after permis
   await expect.poll(() => gtmRequests).toHaveLength(1);
 });
 
-test("a successful demo request emits one submit attempt and one lead event", async ({ page }) => {
-  await page.route("https://www.googletagmanager.com/**", async (route) => {
-    await route.fulfill({ body: "", contentType: "application/javascript", status: 200 });
-  });
-  await page.route("**/api/demo-requests", async (route) => {
-    const request = route.request().postDataJSON() as { requestId?: string };
-    await route.fulfill({
-      body: JSON.stringify({ accepted: true, requestId: request.requestId }),
-      contentType: "application/json",
-      status: 202,
-    });
-  });
-
-  // The Russian demo form closes the home page (2026-10-23).
-  await page.goto("/");
-  await page.locator("[data-consent-accept]").click();
-  const form = page.locator("[data-demo-form]");
-  await form.evaluate((element) => {
-    const token = document.createElement("input");
-    token.name = "smart-token";
-    token.type = "hidden";
-    element.append(token);
-  });
-  await form.locator('input[name="name"]').fill("Анна");
-  await form.locator('input[name="company"]').fill("Завод Север");
-  await form.locator('input[name="email"]').fill("anna@example.test");
-  await form.locator('input[name="consent"]').check();
-  await form.locator('input[name="smart-token"]').evaluate((input) => {
-    (input as HTMLInputElement).value = "captcha-token";
-  });
-  await form.locator('button[type="submit"]').click();
-  await expect(page.locator("[data-demo-success]")).toBeVisible();
-
-  expect(
-    await page.evaluate(() => {
-      const layer = (window as Window & { dataLayer?: unknown[] }).dataLayer ?? [];
-      return layer
-        .filter(
-          (item): item is Record<string, unknown> =>
-            typeof item === "object" && item !== null && "event" in item,
-        )
-        .map((item) => item.event)
-        .filter((event) => event === "landing_form_submit" || event === "landing_form_success");
-    }),
-  ).toEqual(["landing_form_submit", "landing_form_success"]);
-});
-
-const demoCases = [
-  {
-    company: "Завод Север",
-    consent:
-      "Даю согласие на обработку персональных данных на условиях согласия и подтверждаю, что ознакомился с политикой обработки персональных данных.",
-    emailInput: " ANNA@EXAMPLE.TEST ",
-    expectedPayload: {
-      captchaToken: "ru-captcha-token",
-      company: "Завод Север",
-      consentVersion: "MKR-PD-02/2026.08/01",
-      email: "anna@example.test",
-      locale: "ru",
-      name: "Анна",
-      phone: "+79991234567",
-      requestId: "11111111-1111-4111-8111-111111111111",
-      sourcePath: "/",
-      website: "",
-    },
-    name: "Анна",
-    path: "/",
-    phone: "8 (999) 123-45-67",
-    success: "Запрос получили",
-    token: "ru-captcha-token",
-  },
-  {
-    company: "Factory",
-    consent:
-      "I consent to the processing of my personal data under the personal-data consent and confirm that I have read the personal-data processing policy.",
-    emailInput: " ADA@EXAMPLE.TEST ",
-    expectedPayload: {
-      captchaToken: "en-captcha-token",
-      company: "Factory",
-      consentVersion: "MKR-PD-02/2026.08/01",
-      email: "ada@example.test",
-      locale: "en",
-      name: "Ada",
-      requestId: "22222222-2222-4222-8222-222222222222",
-      sourcePath: "/en/",
-      website: "",
-    },
-    name: "Ada",
-    path: "/en/",
-    phone: "",
-    success: "Request received",
-    token: "en-captcha-token",
-  },
-] as const;
-
-for (const demoCase of demoCases) {
-  test(`${demoCase.path} submits the exact localized demo request`, async ({ page }) => {
-    await page.addInitScript((requestId) => {
-      Object.defineProperty(window.crypto, "randomUUID", { value: () => requestId });
-    }, demoCase.expectedPayload.requestId);
-
-    let requestPayload: unknown;
-    await page.route("**/api/demo-requests", async (route) => {
-      requestPayload = route.request().postDataJSON();
-      await route.fulfill({
-        body: JSON.stringify({ accepted: true, requestId: demoCase.expectedPayload.requestId }),
-        contentType: "application/json",
-        status: 202,
-      });
-    });
-
-    await page.goto(demoCase.path);
-    const form = page.locator("form[data-demo-form]");
-    await expect(form.locator('label[for="consent"]')).toHaveText(demoCase.consent);
-    await form.locator('input[name="name"]').fill(demoCase.name);
-    await form.locator('input[name="company"]').fill(demoCase.company);
-    await form.locator('input[name="email"]').fill(demoCase.emailInput);
-    if (demoCase.phone.length > 0) {
-      await form.locator('input[name="phone"]').fill(demoCase.phone);
+// The owner's decision (#787): the home pages carry no call form. Leads come through
+// /skachat/ and /stoimost/, and «Разобрать линию» leads to the contacts of the home page.
+for (const [route, label] of [
+  ["/", "Разобрать линию за 30 минут"],
+  ["/en/", "Walk through your line in 30 minutes"],
+] as const) {
+  test(`${route} has no call form and leads the line review to its contacts`, async ({ page }) => {
+    await page.goto(route);
+    await expect(page.locator("[data-demo-form]")).toHaveCount(0);
+    const call = page.locator("#demo").getByRole("link", { name: label, exact: true });
+    await expect(call).toHaveAttribute("href", "mailto:hello@markiro.app");
+    await expect(
+      page.locator("#demo").getByRole("link", { name: "hello@markiro.app", exact: true }),
+    ).toBeVisible();
+    for (const href of await page
+      .locator('main a[data-analytics="landing_demo_click"]')
+      .evaluateAll((links) => links.map((link) => link.getAttribute("href") ?? ""))) {
+      expect(href === `${route}#demo` || href.startsWith("mailto:"), href).toBe(true);
     }
-    await form.locator('input[name="consent"]').check();
-    await form.evaluate((element, token) => {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "smart-token";
-      input.value = token;
-      element.append(input);
-    }, demoCase.token);
-    await form.locator('button[type="submit"]').click();
-
-    await expect(page.locator("[data-demo-success]")).toContainText(demoCase.success);
-    expect(requestPayload).toEqual(demoCase.expectedPayload);
   });
 }
 
@@ -525,7 +412,9 @@ for (const route of routes) {
   });
 }
 
-test("the captcha runtime loads only once the visitor reaches the demo form", async ({ page }) => {
+test("the captcha runtime loads only once the visitor reaches the download form", async ({
+  page,
+}) => {
   let captchaRequests = 0;
   await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
     captchaRequests += 1;
@@ -536,15 +425,15 @@ test("the captcha runtime loads only once the visitor reaches the demo form", as
     });
   });
 
-  await page.goto("/", { waitUntil: "networkidle" });
+  await page.goto("/skachat/", { waitUntil: "networkidle" });
   expect(captchaRequests).toBe(0);
   await expect(
     page.locator('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
   ).toHaveCount(0);
 
-  await page.locator('[data-demo-form] input[name="name"]').focus();
+  await page.locator('[data-lead-form] input[name="email"]').focus();
   await expect.poll(() => captchaRequests).toBe(1);
-  await page.locator('[data-demo-form] input[name="company"]').focus();
+  await page.locator('[data-lead-form] input[name="company"]').focus();
   await page.waitForTimeout(200);
   expect(captchaRequests).toBe(1);
 });
@@ -631,10 +520,10 @@ test("/ renders the public contact phone", async ({ page }) => {
     await page
       .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
       .evaluateAll((links) => links.map((link) => (link as HTMLElement).dataset.placement).sort()),
-  ).toEqual(["demo", "final", "header", "header_mobile", "menu"]);
-  const demo = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
-  await expect(demo).toBeVisible();
-  await expect(demo).toHaveAttribute("href", expectedHref);
+  ).toEqual(["final", "header", "header_mobile", "menu"]);
+  const final = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
+  await expect(final).toBeVisible();
+  await expect(final).toHaveAttribute("href", expectedHref);
 });
 
 test("/en/ renders the public contact phone", async ({ page }) => {
@@ -644,10 +533,10 @@ test("/en/ renders the public contact phone", async ({ page }) => {
     await page
       .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
       .evaluateAll((links) => links.map((link) => (link as HTMLElement).dataset.placement).sort()),
-  ).toEqual(["demo", "final", "header", "header_mobile", "menu"]);
-  const demo = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
-  await expect(demo).toBeVisible();
-  await expect(demo).toHaveAttribute("href", expectedHref);
+  ).toEqual(["final", "header", "header_mobile", "menu"]);
+  const final = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
+  await expect(final).toBeVisible();
+  await expect(final).toHaveAttribute("href", expectedHref);
 });
 
 test("language switch connects exact page counterparts", async ({ page }) => {

@@ -1,12 +1,13 @@
 ---
-import { CALL_HREF, DOWNLOAD_PATH, HOME_COPY } from "../../content/autonom";
-import { CALL_HREF_EN, HOME_COPY_EN, RU_PAGES_NOTE } from "../../content/autonom-en";
+import { DOWNLOAD_PATH, HOME_COPY } from "../../content/autonom";
+import { HOME_COPY_EN, RU_PAGES_NOTE } from "../../content/autonom-en";
 import { SITE_CONTACTS } from "../../content/contacts";
 import type { PublicPhone } from "../../lib/site-config";
 import Icon from "./Icon.astro";
 
 interface Props {
   phone: PublicPhone | null;
+  /** The old site linked «/#demo» from every article; the final block keeps that anchor. */
   id?: string;
   locale?: "ru" | "en";
 }
@@ -17,6 +18,8 @@ const copy = en ? HOME_COPY_EN.final : HOME_COPY.final;
 const labels = en
   ? { download: "Download the trial", phone: "Phone", email: "Email" }
   : { download: "Скачать пробную версию", phone: "Телефон", email: "Почта" };
+// «Разобрать линию» is a call or a letter: the button opens a letter, the list beside it has the phone.
+const callHref = `mailto:${SITE_CONTACTS.email}`;
 ---
 
 <section class="ax-section ax-final" id={id} data-theme="dark" aria-labelledby="final-title">
@@ -29,7 +32,7 @@ const labels = en
           <span>{labels.download}</span>
           <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
         </a>
-        <a class="ax-btn ax-btn--outline ax-btn--lg" href={en ? CALL_HREF_EN : CALL_HREF} data-analytics="landing_demo_click" data-placement="final">{copy.call}</a>
+        <a class="ax-btn ax-btn--outline ax-btn--lg" href={callHref} data-analytics="landing_demo_click" data-placement="final">{copy.call}</a>
       </div>
       {en && <p class="ax-note ax-final__note">{RU_PAGES_NOTE}</p>}
     </div>

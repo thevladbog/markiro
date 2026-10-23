@@ -779,7 +779,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Как связаться с Маркиро?",
         answer:
-          "Письмом на hello@markiro.app или в Telegram. Разберём вашу линию за 30 минут по видеосвязи: заявка — в конце главной страницы.",
+          "Письмом на hello@markiro.app или в Telegram. Разберём вашу линию за 30 минут по видеосвязи: телефон и почта — в конце главной страницы.",
       },
     ],
   },
@@ -1509,7 +1509,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "How do I contact Markiro?",
         answer:
-          "By email to hello@markiro.app or in Telegram. We can walk through your line in a 30-minute video call: the request form closes the home page.",
+          "By email to hello@markiro.app or in Telegram. We can walk through your line in a 30-minute video call: the phone and email close the home page.",
       },
     ],
   },

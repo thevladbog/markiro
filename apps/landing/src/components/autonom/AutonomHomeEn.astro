@@ -22,7 +22,6 @@ import type { SeoPageDefinition } from "../../content/pages";
 import { findTariff, formatRoubles, TARIFFS } from "../../content/pricing";
 import { buildPageGraph } from "../../lib/seo";
 import { readPublicSiteConfig } from "../../lib/site-config";
-import DemoSection from "../DemoSection.astro";
 import AutonomPage from "./AutonomPage.astro";
 import ClientStrip from "./ClientStrip.astro";
 import FaqSection from "./FaqSection.astro";
@@ -34,15 +33,7 @@ interface Props {
 }
 
 const { page } = Astro.props;
-const config = readPublicSiteConfig(
-  {
-    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
-    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
-    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
-  },
-  "en",
-);
-const phone = config.phone;
+const phone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone;
 const copy = HOME_COPY_EN;
 const covers = [homeCover("en", "mkr-ins-01"), homeCover("en", "mkr-ins-02"), homeCover("en", "mkr-ins-09")];
 const startPrice = formatRoubles(findTariff("start").priceFrom);
@@ -332,27 +323,6 @@ const startPrice = formatRoubles(findTariff("start").priceFrom);
     <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>.
   </FaqSection>
 
-  <FinalCta phone={phone} locale="en" />
+  <FinalCta phone={phone} id="demo" locale="en" />
 
-  <DemoSection
-    locale="en"
-    phone={phone}
-    demoEndpoint={config.demoEndpoint}
-    legalLinks={config.legalLinks}
-    captchaClientKey={config.captchaClientKey}
-    consentVersion={config.consentVersion}
-    sourcePath={page.path}
-  />
-
-  <script>
-    import { loadDemoFormWhenNeeded } from "../../scripts/demo-form-loader";
-
-    const demoForm = document.querySelector<HTMLFormElement>("[data-demo-form]");
-    if (demoForm !== null) {
-      loadDemoFormWhenNeeded(demoForm, window, async () => {
-        const { browserDemoFormRuntime, initDemoForm } = await import("../../scripts/demo-form");
-        return (form) => initDemoForm(form, browserDemoFormRuntime(window));
-      });
-    }
-  </script>
 </AutonomPage>

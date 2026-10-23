@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { DEMO_SOURCE_PATHS } from "../../api/src/modules/demo-requests/demo-request-routes";
 import { LANDING_LEAD_SOURCE_PATHS } from "../../../packages/platform-contracts/src/landing-leads";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -39,15 +38,6 @@ const SAMPLE_CLUSTER_ROUTES = [
   "/instruktsii/stantsiya-vkhod-i-start-smeny/",
 ] as const;
 const AUTONOM_ROUTES = ["/skachat/", "/stoimost/"] as const;
-
-/** The Russian demo form closes the home page (the film page that carried it is retired). */
-function homeRu(): Document {
-  return documents.get("/") as Document;
-}
-
-function isDemoSourcePath(route: string): boolean {
-  return DEMO_SOURCE_PATHS.some((sourcePath) => sourcePath === route);
-}
 
 beforeAll(() => {
   execFileSync(
@@ -1303,134 +1293,40 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("renders the four visible fields in the accessible order with optional phone copy", () => {
-    const form = homeRu().querySelector<HTMLFormElement>("form[data-demo-form]");
-    expect(form).not.toBeNull();
-
-    for (const fieldId of ["name", "company", "email", "phone"]) {
-      expect(form?.querySelector(`label[for=${fieldId}]`)).not.toBeNull();
-      expect(form?.querySelector(`#${fieldId}[name=${fieldId}]`)).not.toBeNull();
-    }
-    expect(
-      [...(form?.querySelectorAll(".form-field > input") ?? [])].map((input) => input.id),
-    ).toEqual(["name", "company", "email", "phone"]);
-    expect(form?.querySelector('input[name="email"]')?.getAttribute("autocomplete")).toBe("email");
-    expect(form?.querySelector('input[name="phone"]')?.getAttribute("autocomplete")).toBe("tel");
-    expect(form?.querySelector('label[for="phone"]')?.textContent).toContain("необязательно");
-  });
-
-  it("keeps captcha, consent, and public submission data out of disabled builds", () => {
-    const document = homeRu();
-    const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
-    const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
-    expect(form?.hasAttribute("data-endpoint")).toBe(false);
-    expect(form?.hasAttribute("data-consent-version")).toBe(false);
-    expect(fieldset?.disabled).toBe(true);
-    expect(fieldset?.querySelectorAll("[name]")).toHaveLength(4);
-    expect(form?.querySelectorAll("[name]")).toHaveLength(4);
-    expect(
-      [...(form?.querySelectorAll<HTMLElement>("[name]") ?? [])].every((control) =>
-        fieldset?.contains(control),
-      ),
-    ).toBe(true);
-    const WindowFormData = form?.ownerDocument.defaultView?.FormData;
-    expect(
-      WindowFormData && form ? [...new WindowFormData(form).keys()] : ["missing-form"],
-    ).toEqual([]);
-    expect(fieldset?.querySelector('button[type="submit"]')).not.toBeNull();
-    expect(form?.querySelector('input[name="consent"]')).toBeNull();
-    expect(form?.querySelector(".smart-captcha")).toBeNull();
-    expect(
-      document.querySelector('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
-    ).toBeNull();
-    expect(document.documentElement.outerHTML).not.toContain("stray-consent-version");
-    expect(document.documentElement.outerHTML).not.toContain("ysc1_stray-client-key");
-    expect(document.documentElement.outerHTML).not.toContain("/stray-consent/");
-    expect(document.documentElement.outerHTML).not.toContain("/stray-privacy/");
-  });
-
-  it("renders enabled consent, honeypot, captcha, and localized source contracts", () => {
-    for (const [route, expectedLocale] of [
-      ["/", "ru"],
-      ["/en/", "en"],
-    ] as const) {
-      const enabledDocument = enabledDocuments.get(route) as Document;
-      const form = enabledDocument.querySelector<HTMLFormElement>("form[data-demo-form]");
-      const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
-      expect(form?.dataset.endpoint).toBe("/api/demo-requests");
-      expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.08/01");
-      expect(form?.dataset.locale).toBe(expectedLocale);
-      expect(form?.dataset.sourcePath).toBe(route);
-      expect(fieldset?.disabled).toBe(false);
-
-      const honeypot = form?.querySelector<HTMLElement>(".demo-form__honeypot");
-      expect(honeypot?.getAttribute("aria-hidden")).toBe("true");
-      expect(honeypot?.querySelector('input[name="website"]')?.getAttribute("tabindex")).toBe("-1");
-
-      const consent = form?.querySelector<HTMLInputElement>('input[name="consent"]');
-      expect(consent?.checked).toBe(false);
-      expect(consent?.required).toBe(true);
-      expect(form?.querySelector("[data-consent-error]")).not.toBeNull();
-      const legalPrefix = expectedLocale === "en" ? "/en" : "";
-      expect(form?.querySelector(`a[href="${legalPrefix}/personal-data-consent/"]`)).not.toBeNull();
-      expect(form?.querySelector(`a[href="${legalPrefix}/privacy/"]`)).not.toBeNull();
-      const consentText = form
-        ?.querySelector("label[for=consent]")
-        ?.textContent?.replace(/\s+/g, " ")
-        .trim();
-      expect(consentText).toBe(
-        expectedLocale === "ru"
-          ? "Даю согласие на обработку персональных данных на условиях согласия и подтверждаю, что ознакомился с политикой обработки персональных данных."
-          : "I consent to the processing of my personal data under the personal-data consent and confirm that I have read the personal-data processing policy.",
+  // The owner's decision (#787): the home pages carry no call form; leads come through
+  // /skachat/ and /stoimost/, and «Разобрать линию» leads to the contacts of the home page.
+  it("closes both home pages with the contacts block that every call link targets", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const home = documents.get(route) as Document;
+      const contacts = home.querySelector("section#demo.ax-final[aria-labelledby]");
+      expect(contacts, route).not.toBeNull();
+      expect(contacts?.querySelector('a[href="mailto:hello@markiro.app"]'), route).not.toBeNull();
+      expect(contacts?.querySelector('a[href^="https://t.me/"]'), route).not.toBeNull();
+      const call = contacts?.querySelector<HTMLAnchorElement>(
+        'a[data-placement="final"][href^="mailto:"]',
       );
-
-      expect(form?.querySelector(".smart-captcha")?.getAttribute("data-sitekey")).toBe(
-        "ysc1_render-test-key",
-      );
-      expect(form?.querySelector(".smart-captcha")?.getAttribute("data-hl")).toBe(expectedLocale);
-      expect(form?.querySelector("[data-captcha-error]")).not.toBeNull();
-      // The captcha runtime is injected lazily by the form script, never as a
-      // render-blocking tag: PageSpeed attributed most blocking time to it.
-      expect(
-        enabledDocument.querySelector(
-          'script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]',
-        ),
-      ).toBeNull();
+      expect(call?.getAttribute("href"), route).toBe("mailto:hello@markiro.app");
+      for (const link of home.querySelectorAll('main a[data-analytics="landing_demo_click"]')) {
+        const href = link.getAttribute("href") ?? "";
+        expect(href === `${route}#demo` || href.startsWith("mailto:"), `${route} ${href}`).toBe(
+          true,
+        );
+      }
     }
   });
 
-  // The form posts `location.pathname`, and the API rejects any path outside its
-  // allow-list with 400. Browser specs stub the endpoint, so this is the only
-  // check that a page carrying the form can actually submit it.
-  it("renders the demo form only on pages whose path the API accepts", () => {
+  it("renders no demo request form on any page", () => {
     const formRoutes = readdirSync(enabledOutputDirectory, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith(".html"))
-      .map((entry) => path.join(entry.parentPath, entry.name))
-      .flatMap((file) => {
-        const html = readFileSync(file, "utf8");
-        if (!html.includes("data-demo-form")) return [];
-        const relative = path.relative(enabledOutputDirectory, file).split(path.sep).join("/");
-        const route = relative === "index.html" ? "/" : `/${relative.replace(/index\.html$/, "")}`;
-        const form = new JSDOM(html).window.document.querySelector<HTMLFormElement>(
-          "form[data-demo-form]",
-        );
-        expect(form?.dataset.sourcePath, file).toBe(route);
-        return [route];
-      });
-
-    expect(formRoutes.sort()).toEqual(["/", "/en/"]);
-    expect(formRoutes.filter((route) => !isDemoSourcePath(route))).toEqual([]);
-  });
-
-  it("does not mention CRM or internal rollout dependencies in disabled builds", () => {
-    for (const route of ["/", "/en/"] as const) {
-      const body = documents.get(route)?.body.textContent ?? "";
-      expect(body).not.toMatch(/CRM|подключени[ея] CRM|connection to the CRM/i);
-      expect(body).toContain(
-        route === "/"
-          ? "Онлайн-отправка временно недоступна. Напишите нам на hello@markiro.app."
-          : "Online submission is temporarily unavailable. Email us at hello@markiro.app.",
-      );
+      .filter((entry) =>
+        readFileSync(path.join(entry.parentPath, entry.name), "utf8").includes("data-demo-form"),
+      )
+      .map((entry) => entry.name);
+    expect(formRoutes).toEqual([]);
+    for (const route of ["/", "/en/"]) {
+      const home = enabledDocuments.get(route) as Document;
+      expect(home.querySelector(".smart-captcha"), route).toBeNull();
+      expect(home.documentElement.outerHTML, route).not.toContain("ysc1_render-test-key");
     }
   });
 

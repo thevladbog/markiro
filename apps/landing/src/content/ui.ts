@@ -26,26 +26,6 @@ const RU = {
     trialHeading: "Проверьте Маркиро на своей линии.",
     trialKicker: "14 дней бесплатно, все функции",
   },
-  home: {
-    demo: {
-      company: "Компания",
-      contactNote: "Контактный телефон появится после подключения публичной линии.",
-      email: "Email",
-      heading: "Разберём вашу линию за 30 минут.",
-      kicker: "Созвон по видеосвязи",
-      lead: "Расскажите о продукте, упаковке и оборудовании. За 30 минут покажем, как идёт смена в Маркиро Автоном, и сверим правила вашей товарной группы.",
-      legal: {
-        consent: "согласия",
-        prefix: "Даю согласие на обработку персональных данных на условиях",
-        privacy: "политикой обработки персональных данных",
-        separator: "и подтверждаю, что ознакомился с",
-      },
-      name: "Как к вам обращаться",
-      phone: "Телефон для связи (необязательно)",
-      unavailable: "Онлайн-отправка временно недоступна.",
-      unavailableContact: "Напишите нам на",
-    },
-  },
   hub: {
     articlesHeading: "Все статьи",
     articlesKicker: "01 / Практика",
@@ -82,26 +62,6 @@ const EN = {
     skipLink: "Skip to content",
     trialHeading: "Try Markiro on your own line.",
     trialKicker: "14 days free, every feature",
-  },
-  home: {
-    demo: {
-      company: "Company",
-      contactNote: "A contact number will appear when the public phone line is connected.",
-      email: "Email",
-      heading: "Walk through your line with us in 30 minutes.",
-      kicker: "Video call",
-      lead: "Tell us about your product, packaging and equipment. In 30 minutes we will show how a shift runs in Markiro Autonom and check the rules of your product group.",
-      legal: {
-        consent: "personal-data consent",
-        prefix: "I consent to the processing of my personal data under the",
-        privacy: "personal-data processing policy",
-        separator: "and confirm that I have read the",
-      },
-      name: "Your name",
-      phone: "Contact phone (optional)",
-      unavailable: "Online submission is temporarily unavailable.",
-      unavailableContact: "Email us at",
-    },
   },
   hub: {
     articlesHeading: "All articles",

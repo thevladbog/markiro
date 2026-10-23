@@ -7,7 +7,7 @@
 
 import type { FaqEntry } from "./pages";
 
-/** The demo-request form closes the home page; «разобрать линию» and «созвон» lead there. */
+/** The contacts that close the home page (phone, Telegram, mail); «разобрать линию» and «созвон» lead there. */
 export const CALL_HREF = "/#demo";
 export const DOWNLOAD_PATH = "/skachat/";
 export const PRICING_PATH = "/stoimost/";
@@ -70,11 +70,11 @@ export const HOME_COPY = {
       },
       {
         value: "Каждый час",
-        text: "главный ПК сам копирует базу, если данные менялись, и не реже раза в день. Восстановить копию, в том числе на новом ПК, поможет поддержка.",
+        text: "главный ПК копирует базу, если данные менялись. Восстановить копию на новом ПК поможет поддержка.",
       },
       {
         value: "1 ПК",
-        text: "держит базу всех линий завода. Станции и ТСД подключаются к нему по сети, число линий и мест задаёт тариф.",
+        text: "держит базу всех линий. Станции и ТСД подключаются к нему по сети завода.",
       },
     ],
   },

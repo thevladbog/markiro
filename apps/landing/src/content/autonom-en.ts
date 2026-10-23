@@ -12,7 +12,7 @@ import type { TariffCode } from "./pricing";
 
 export const RU_PAGES_NOTE = "The download and pricing pages are in Russian.";
 
-/** The video-call request form at the bottom of the English home page. */
+/** The contacts that close the English home page; «walk through your line» leads there. */
 export const CALL_HREF_EN = "/en/#demo";
 
 export const SITE_NAV_EN = [
