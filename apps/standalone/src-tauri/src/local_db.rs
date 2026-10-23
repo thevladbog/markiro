@@ -569,6 +569,41 @@ impl LocalDb {
     pub async fn clear_copies(&self, guard: UnsentGuard<'_>) -> Result<(), LocalDbError> {
         self.clear_classed(TABLE_CLASSES, guard).await
     }
+    /// Refuse recovery re-pairing while old reference data or credentials remain.
+    /// Read-only: cleanup requires the ordinary explicit device-forget flow.
+    pub async fn has_recovery_copies(&self) -> Result<bool, LocalDbError> {
+        let mut conn = self
+            .readers
+            .acquire()
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        for (table, class) in TABLE_CLASSES {
+            if *class == TableClass::Disposable {
+                let exists: bool =
+                    sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM {table} LIMIT 1)"))
+                        .fetch_one(&mut *conn)
+                        .await
+                        .map_err(|_| LocalDbError::StatementFailed)?;
+                if exists {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+    /// Recovery preflight only: no rows, files or pairing keys are removed.
+    pub async fn require_settled_outbox(&self) -> Result<(), LocalDbError> {
+        let mut conn = self
+            .readers
+            .acquire()
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        let count = count_unsent(&mut conn, UnsentGuard::AnyPairing, false).await?;
+        if count > 0 {
+            return Err(LocalDbError::UnsentRecords { count });
+        }
+        Ok(())
+    }
 
     /// [`LocalDb::clear_copies`] over `classes`, so a unit test can give it
     /// tables of every class while [`TABLE_CLASSES`] holds only disposable ones.
@@ -1430,6 +1465,60 @@ mod tests {
 
     /// The class filter itself is pinned here too, on probe tables of all
     /// three classes, whatever `TABLE_CLASSES` holds.
+    #[tokio::test]
+    async fn recovery_refuses_cached_credentials_without_erasing_them() {
+        use sqlx::ConnectOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open(dir.path()).await.unwrap();
+        assert!(!db.has_recovery_copies().await.unwrap());
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sync_state (key, value) VALUES ('review-cache', 'old-pairing')")
+            .execute(&mut raw)
+            .await
+            .unwrap();
+        assert!(db.has_recovery_copies().await.unwrap());
+        let value: String =
+            sqlx::query_scalar("SELECT value FROM sync_state WHERE key='review-cache'")
+                .fetch_one(&mut raw)
+                .await
+                .unwrap();
+        assert_eq!(value, "old-pairing");
+    }
+    #[tokio::test]
+    async fn recovery_preflight_preserves_unsent_and_settled_records() {
+        use sqlx::ConnectOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open(dir.path()).await.unwrap();
+        db.require_settled_outbox().await.unwrap();
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) VALUES ('pending', 'host', 'device', 'scan', 'shift', '{}', '2026-10-23T00:00:00Z')").execute(&mut raw).await.unwrap();
+        assert_eq!(
+            db.require_settled_outbox().await,
+            Err(LocalDbError::UnsentRecords { count: 1 })
+        );
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE id='pending' AND acked_at IS NULL",
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+        sqlx::query("UPDATE outbox SET acked_at='2026-10-23T00:01:00Z', outcome='accepted' WHERE id='pending'").execute(&mut raw).await.unwrap();
+        db.require_settled_outbox().await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE id='pending'")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
     #[tokio::test]
     async fn a_forget_empties_the_disposable_tables_and_keeps_the_other_classes() {
         use sqlx::{ConnectOptions, Connection};

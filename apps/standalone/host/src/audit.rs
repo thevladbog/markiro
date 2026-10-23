@@ -165,6 +165,10 @@ pub mod actions {
     /// A copy of the database, scheduled (the host's) or asked for in the
     /// office (plan РК); `failed` when a folder did not get it.
     pub const BACKUP_CREATE: &str = "backup.create";
+    pub const BACKUP_YANDEX_CONNECT: &str = "backup.yandex.connect";
+    pub const BACKUP_YANDEX_DISCONNECT: &str = "backup.yandex.disconnect";
+    pub const BACKUP_YANDEX_UPLOAD: &str = "backup.yandex.upload";
+    pub const BACKUP_YANDEX_PURGE: &str = "backup.yandex.purge";
     /// An administrator set or cleared the second folder of copies.
     pub const BACKUP_SETTINGS_UPDATE: &str = "backup.settings.update";
     /// An administrator loaded a license file (plan ЛЦ-2); `denied` for a

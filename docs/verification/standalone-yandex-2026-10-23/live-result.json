@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "appFolder": true,
+    "catalog": true,
+    "emptyTargetRestore": true,
+    "independentDownload": true,
+    "pkce": true,
+    "publicationFullReadback": true,
+    "sqliteIdentityVerification": true,
+    "threeNativeFilesByteEqual": true,
+    "upload": true
+  },
+  "clientId": "dacd86d869664a09847d6a54e6f26fac",
+  "clientSecretUsed": false,
+  "date": "2026-10-23",
+  "encryptedBytes": 1067748,
+  "hostId": "48b718db-90f6-4013-9cb2-163f40713870",
+  "markiroBrokerUsed": false,
+  "nativeDatabaseBytes": 1064960,
+  "originPolicy": "Fixed Yandex OAuth/API; public DNS; signed download destinations validated at each hop, maximum 3 redirects; no proxy or automatic redirects",
+  "platform": "macOS, not Windows service",
+  "remoteCopyRetained": true,
+  "remotePath": "app:/backups/v1/48b718db-90f6-4013-9cb2-163f40713870/11f4dd05-b7b0-44c4-a294-13e1c4c1a0a9",
+  "snapshotId": "11f4dd05-b7b0-44c4-a294-13e1c4c1a0a9",
+  "syntheticOnly": true,
+  "tokensPersisted": false,
+  "windowsValidated": false
+}

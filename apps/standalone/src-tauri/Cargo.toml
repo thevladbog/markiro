@@ -16,6 +16,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64 = "=0.22.1"
 markiro-proto = { path = "../proto" }
+markiro-backup-cloud = { path = "../backup-cloud" }
+zeroize = "=1.9.0"
+uuid = {version="1",features=["v4"]}
+time = "=0.3.55"
 # `stream`: the installer goes to the host as a stream of the file (plan ОБН-3).
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
 rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
@@ -51,6 +55,8 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Printing",
   "Win32_Security",
+  "Win32_Security_Credentials",
+  "Win32_UI_Controls_Dialogs",
   "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",
   "Win32_Storage_Xps",

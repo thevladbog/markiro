@@ -1836,7 +1836,7 @@ pub async fn restore(
         without_manifest,
         identity: IdentityChoice::Auto,
     };
-    restore_until(paths, source, options, now, None).await
+    restore_until(paths, source, options, now, None, false).await
 }
 
 /// [`restore`] with `--keep-identity` or `--take-identity` (plan I1).
@@ -1846,10 +1846,69 @@ pub async fn restore_with(
     options: RestoreOptions,
     now: OffsetDateTime,
 ) -> Result<RestoreReport, BoxError> {
-    restore_until(paths, source, options, now, None).await
+    restore_until(paths, source, options, now, None, false).await
 }
 
 /// [`restore_with`] at the present moment: `markiro-host restore`'s own call.
+pub async fn require_empty_target(paths: &HostPaths) -> Result<(), BoxError> {
+    if !paths.database_file().exists() {
+        return Ok(());
+    }
+    let mut conn = open_read_only(&paths.database_file(), false)
+        .connect()
+        .await?;
+    let initialized: Option<String> =
+        sqlx::query_scalar("SELECT initialized_at FROM site WHERE id=1")
+            .fetch_optional(&mut conn)
+            .await?
+            .flatten();
+    conn.close().await?;
+    if initialized.is_some() {
+        return Err("target_initialized".into());
+    }
+    Ok(())
+}
+pub async fn restore_empty_with(
+    paths: &HostPaths,
+    source: &Path,
+    now: OffsetDateTime,
+) -> Result<RestoreReport, BoxError> {
+    restore_until(
+        paths,
+        source,
+        RestoreOptions {
+            without_manifest: false,
+            identity: IdentityChoice::Auto,
+        },
+        now,
+        None,
+        true,
+    )
+    .await
+}
+/// Used only with an administrator-owned recovery journal. Reconcile the
+/// original swap, then recognize its exact receipt instead of applying twice.
+pub async fn resume_empty_with_receipt(
+    paths: &HostPaths,
+    sha: &str,
+    at: &str,
+) -> Result<bool, BoxError> {
+    let _lock = paths.lock()?;
+    let db = paths.database_file();
+    finish_interrupted(paths, &db, &partial_path(&db), None).await?;
+    if !db.exists() {
+        return Ok(false);
+    }
+    let mut conn = open_read_only(&db, false).connect().await?;
+    let applied:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM audit_log WHERE action='host.restore' AND at=? AND json_extract(details,'$.sha256')=?)").bind(at).bind(sha).fetch_one(&mut conn).await?;
+    conn.close().await?;
+    if applied {
+        return Ok(true);
+    }
+    require_empty_target(paths).await?;
+    Ok(false)
+}
+
 pub async fn restore_now(
     paths: &HostPaths,
     source: &Path,
@@ -1872,7 +1931,7 @@ pub async fn restore_crashing(
         without_manifest,
         identity: IdentityChoice::Auto,
     };
-    match restore_until(paths, source, options, now, Some(crash)).await {
+    match restore_until(paths, source, options, now, Some(crash), false).await {
         Err(error) if error.is::<Crashed>() => Ok(()),
         Err(error) => Err(error),
         Ok(_) => Err("the restore ended before it was cut off".into()),
@@ -1885,6 +1944,7 @@ async fn restore_until(
     options: RestoreOptions,
     now: OffsetDateTime,
     crash: Option<CrashPoint>,
+    empty_only: bool,
 ) -> Result<RestoreReport, BoxError> {
     if is_own_database(source, paths) {
         return Err(untouched(format!(
@@ -1918,6 +1978,9 @@ async fn restore_until(
     // read: a cut while the copy's identity went into place leaves
     // `host.json` for last (plan I1).
     made.interrupted = finish_interrupted(paths, &db, &staging, crash).await?;
+    if empty_only {
+        require_empty_target(paths).await?;
+    }
     // What an earlier restore that was interrupted before its marker left.
     remove_staging(&staging);
     remove_identity_staging(paths);

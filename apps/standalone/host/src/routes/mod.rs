@@ -55,3 +55,4 @@ pub mod update_status;
 pub mod usage_stats;
 pub mod user_avatars;
 pub mod warehouse;
+pub mod yandex_backups;

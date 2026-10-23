@@ -59,6 +59,7 @@ export const officeKeys = {
   templateDefaults: ["office", "template-defaults"],
   /** The copies of the database in both folders (plan РК). */
   backups: ["office", "backups"],
+  yandexBackups: ["office", "yandex-backups"],
   /** The host's update package and the devices' versions (plan ОБН-3). */
   updateStatus: ["office", "update-status"],
   hostNetwork: ["office", "host-network"],

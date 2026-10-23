@@ -29,6 +29,13 @@ use markiro_host::{BoxError, StartOptions};
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
+    VerifyYandex {
+        copy: PathBuf,
+    },
+    ResumeYandex,
+    RecoverYandex {
+        stage: PathBuf,
+    },
     Run {
         data_dir: PathBuf,
         port: Option<u16>,
@@ -92,6 +99,29 @@ fn parse(args: &[String]) -> Result<Command, String> {
     }
     // `restore` and `verify-copy` take the copy first.
     let (copy, rest) = match command.as_str() {
+        "verify-yandex-copy" => {
+            return match rest {
+                [copy] => Ok(Command::VerifyYandex {
+                    copy: PathBuf::from(copy),
+                }),
+                _ => Err(USAGE.to_owned()),
+            }
+        }
+        "recover-yandex-resume" => {
+            return if rest.is_empty() {
+                Ok(Command::ResumeYandex)
+            } else {
+                Err(USAGE.to_owned())
+            }
+        }
+        "recover-yandex" => {
+            return match rest {
+                [stage] => Ok(Command::RecoverYandex {
+                    stage: PathBuf::from(stage),
+                }),
+                _ => Err(USAGE.to_owned()),
+            }
+        }
         "restore" | "verify-copy" => match rest.split_first() {
             Some((copy, rest)) if !copy.starts_with("--") => (Some(PathBuf::from(copy)), rest),
             _ => return Err(USAGE.to_owned()),
@@ -179,6 +209,22 @@ fn main() -> ExitCode {
         }
     };
     let result = match command {
+        Command::VerifyYandex { copy } => {
+            let runtime = tokio::runtime::Runtime::new().expect("runtime");
+            let checked = runtime.block_on(markiro_host::yandex::delivery::verify_native(
+                markiro_backup_cloud::model::NativeCopyPaths::beside(copy),
+            ));
+            markiro_host::shutdown_runtime(runtime);
+            return match checked {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(markiro_backup_cloud::Error::Provider("incompatible_version")) => {
+                    ExitCode::from(6)
+                }
+                Err(_) => ExitCode::from(7),
+            };
+        }
+        Command::ResumeYandex => markiro_host::yandex::recovery::resume(),
+        Command::RecoverYandex { stage } => markiro_host::yandex::recovery::run(&stage),
         Command::Run { data_dir, port } => run_foreground(data_dir, port),
         Command::Service => run_service(),
         Command::PrintFingerprint { data_dir } => print_fingerprint(data_dir),

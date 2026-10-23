@@ -295,6 +295,7 @@ pub mod review;
 pub mod trust;
 pub mod update;
 pub mod usage_stats;
+pub mod yandex_backups;
 
 pub use handheld::*;
 

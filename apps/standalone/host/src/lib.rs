@@ -43,6 +43,7 @@ pub mod tls;
 pub mod updates;
 pub mod upgrade;
 pub mod validate;
+pub mod yandex;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -103,6 +104,7 @@ pub struct RunningHost {
     license: tokio::task::JoinHandle<()>,
     /// The hourly pass over the update packages (plan ОБН-3).
     updates: tokio::task::JoinHandle<()>,
+    yandex: Option<tokio::task::JoinHandle<()>>,
     pool: SqlitePool,
     _lock: std::fs::File,
 }
@@ -144,6 +146,15 @@ impl RunningHost {
         {
             tracing::warn!("the update package pass did not stop in time; aborting it");
             updates.abort();
+        }
+        if let Some(mut yandex) = self.yandex {
+            if tokio::time::timeout(SHUTDOWN_DEADLINE, &mut yandex)
+                .await
+                .is_err()
+            {
+                yandex.abort();
+                tracing::warn!("Yandex backup worker did not stop in time");
+            }
         }
         self.pool.close().await;
         tracing::info!("markiro-host stopped");
@@ -204,7 +215,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
             Err(_) => finishing.fail_verifying(),
         }
     });
-    let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
+    let mut state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
         .with_endpoint(identity.fingerprint.clone(), addr.port())
         .with_backups(backups.clone())
         .with_updates(packages.clone())
@@ -213,7 +224,26 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
             markiro_proto::trust::license_keyset(),
             license::trial_mark::system(),
         )));
+    // A cloud-only failure must not prevent local production or local backups.
+    match uuid::Uuid::parse_str(&config.host_id) {
+        Ok(host_id) => match yandex::connection::YandexService::new(&paths.data_dir, host_id).await
+        {
+            Ok(service) => state = state.with_yandex(service),
+            Err(_) => {
+                state.yandex_init_failed = true;
+                tracing::warn!("Yandex backup storage could not be opened");
+            }
+        },
+        Err(_) => state.yandex_init_failed = true,
+    }
     let stopping = state.stopping.clone();
+    if let Some(service) = &state.yandex {
+        backups.attach_cloud(&service.queue);
+    }
+    let yandex_worker = state
+        .yandex
+        .clone()
+        .map(|service| yandex::runtime::spawn(state.clone(), service, stopping.subscribe()));
     let backup_worker = backup::worker::spawn(backups, clock.clone(), stopping.subscribe());
     let update_worker = updates::worker::spawn(packages, pool.clone(), clock, stopping.subscribe());
     // The license (plan ЛЦ-2): the trial of a site from before it, the state
@@ -240,6 +270,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         backups: backup_worker,
         license: license_ticker,
         updates: update_worker,
+        yandex: yandex_worker,
         pool,
         _lock: lock,
     })

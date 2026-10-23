@@ -1,0 +1,32 @@
+{
+  "clientId": "dacd86d869664a09847d6a54e6f26fac",
+  "platform": "macOS diagnostic, not Windows service",
+  "pkceMethod": "S256",
+  "redirectUri": "http://127.0.0.1:45711/oauth/yandex/callback",
+  "clientSecretSent": false,
+  "basicAuthorizationSent": false,
+  "tokensPersisted": false,
+  "checks": {
+    "authorizationCode": {
+      "httpStatus": 200,
+      "hasAccessToken": true,
+      "hasRefreshToken": true,
+      "expiresInSeconds": 31536000
+    },
+    "appFolderBeforeRefresh": {
+      "httpStatus": 200,
+      "isDirectory": true
+    },
+    "accountBeforeRefresh": {
+      "httpStatus": 200
+    },
+    "refreshToken": {
+      "httpStatus": 400,
+      "errorCode": "invalid_client",
+      "hasAccessToken": false,
+      "hasRefreshToken": false
+    }
+  },
+  "outcome": "refresh_failed",
+  "finishedAtUtc": "2026-10-22T20:20:07Z"
+}
