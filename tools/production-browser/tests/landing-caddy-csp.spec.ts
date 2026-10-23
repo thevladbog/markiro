@@ -122,8 +122,8 @@ test("production Caddy serves markdown mirrors and the full text as noindex agen
   expect(await feed.text()).toContain('<rss version="2.0"');
 });
 
-// Retired pages: the film (2026-10-23) moves permanently to the home page of its
-// language and keeps the query string.
+// Retired pages: the film and the disposal kiosk (2026-10-23) move permanently to the
+// home page of their language and keep the query string.
 const retiredRedirects = new Map([
   ["/kak-rabotaet/", "/"],
   ["/kak-rabotaet", "/"],
@@ -133,6 +133,11 @@ const retiredRedirects = new Map([
   ["/en/how-it-works/", "/en/"],
   ["/en/how-it-works", "/en/"],
   ["/en/how-it-works.md", "/en/"],
+  ["/kiosk-samovydachi/", "/"],
+  ["/kiosk-samovydachi", "/"],
+  ["/kiosk-samovydachi.md", "/"],
+  ["/en/self-service-pickup-kiosk/", "/en/"],
+  ["/en/self-service-pickup-kiosk/?utm_source=test", "/en/?utm_source=test"],
 ]);
 
 test("production Caddy moves retired pages permanently to their home page", async ({ request }) => {

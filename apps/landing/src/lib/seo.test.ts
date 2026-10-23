@@ -112,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(72);
+    expect(sitemap.match(/<url>/g)).toHaveLength(70);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -222,7 +222,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(72);
+    expect(sitemap.match(/<url>/g)).toHaveLength(70);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -538,10 +538,15 @@ describe("SEO generators", () => {
   });
 });
 
-// The film (/kak-rabotaet/, /en/how-it-works/) was retired with a 301 to the home page of
-// its language; search surfaces must not advertise it any more.
+// The film and the disposal kiosk were retired with a 301 to the home page of their
+// language; search surfaces must not advertise them any more.
 describe("retired pages", () => {
-  const retired = ["/kak-rabotaet/", "/en/how-it-works/"];
+  const retired = [
+    "/kak-rabotaet/",
+    "/en/how-it-works/",
+    "/kiosk-samovydachi/",
+    "/en/self-service-pickup-kiosk/",
+  ];
 
   it("are absent from the sitemap and llms.txt", () => {
     const sitemap = renderSitemapXml();

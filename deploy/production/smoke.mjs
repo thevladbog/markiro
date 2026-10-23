@@ -174,7 +174,6 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/en/chestny-znak-serialization/", "landing-page"]),
   Object.freeze(["GET", "/en/sscc-and-aggregation/", "landing-page"]),
   Object.freeze(["GET", "/en/packing-workstation/", "landing-page"]),
-  Object.freeze(["GET", "/en/self-service-pickup-kiosk/", "landing-page"]),
   Object.freeze(["GET", "/en/1c-integration/", "landing-page"]),
   Object.freeze(["GET", "/en/offline-production/", "landing-page"]),
   Object.freeze(["GET", "/en/faq/", "landing-page"]),

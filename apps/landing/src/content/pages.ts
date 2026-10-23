@@ -6,7 +6,6 @@ export type CanonicalPath =
   | "/markirovka-chestny-znak/"
   | "/sscc-i-agregatsiya/"
   | "/rabochee-mesto-upakovki/"
-  | "/kiosk-samovydachi/"
   | "/integratsiya-1c/"
   | "/oflayn-rabota/"
   | "/faq/"
@@ -14,7 +13,6 @@ export type CanonicalPath =
   | "/en/chestny-znak-serialization/"
   | "/en/sscc-and-aggregation/"
   | "/en/packing-workstation/"
-  | "/en/self-service-pickup-kiosk/"
   | "/en/1c-integration/"
   | "/en/offline-production/"
   | "/en/faq/";
@@ -476,109 +474,6 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
   },
   {
-    path: "/kiosk-samovydachi/",
-    alternatePath: "/en/self-service-pickup-kiosk/",
-    locale: "ru",
-    title: "Киоск выбытия продукции для сотрудников — Markiro",
-    description:
-      "Киоск Markiro оформляет выбытие маркированной продукции: сотрудник сканирует бейдж и коды, заявка попадает в кабинет, где её проводят через кассу или списанием.",
-    heading: "Киоск выбытия: продукция уходит по нестандартным каналам под контролем",
-    navigationLabel: "Киоск выбытия",
-    eyebrow: "Самообслуживание с контролем выбытия",
-    introduction:
-      "Часть продукции уходит с производства не через отгрузку: покупка сотрудником, подарок, выставка, бой. Киоск Markiro фиксирует такое выбытие в момент события: сотрудник сканирует бейдж и коды маркировки, а кабинет получает заявку с точным составом.",
-    socialImage: SHARED_IMAGE,
-    socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: REVIEWED,
-    summary: [
-      "Киоск — отдельное сенсорное устройство, привязанное к организации кодом сопряжения; права кабинета на нём не действуют.",
-      "Сотрудник входит по QR-бейджу, сканирует Data Matrix единиц или SSCC коробов и подтверждает заявку.",
-      "Заявка получает номер и проводится администратором в кабинете: «Пробита на кассе» или «Списана актом» с причиной.",
-      "Лимиты на сотрудника задаются политикой организации, а право оформлять списание выдаётся отдельно.",
-      "Киоск работает офлайн: заявка сохраняется локально и подтверждается после связи с сервером.",
-    ],
-    relatedPaths: ["/oflayn-rabota/", "/markirovka-chestny-znak/", "/faq/"],
-    relatedArticlePaths: [
-      "/stati/markirovka-piva-bez-interneta/",
-      "/stati/dubl-koda-markirovki-pivo/",
-    ],
-    sections: [
-      {
-        heading: "Для чего нужен киоск",
-        paragraphs: [
-          "Продукция может покидать производство, минуя отгрузку: сотрудник покупает её для себя, партия уходит на выставку или в подарок, часть списывается из-за боя. Такое выбытие обычно оформляют вручную и с опозданием. Киоск Markiro переносит фиксацию в момент события: сотрудник сам сканирует то, что забирает, а администратор получает готовую заявку с кодами.",
-        ],
-      },
-      {
-        heading: "Как проходит оформление",
-        paragraphs: [
-          "Крупные элементы управления и понятные состояния рассчитаны на сенсорный экран: планшет, прайс-чекер или моноблок со сканером. Заявка получает сквозной номер вида ORD-ГГ-НННН.",
-        ],
-        bullets: [
-          "сотрудник сканирует QR-код своего бейджа;",
-          "сканирует коды маркировки единиц или SSCC коробов, короб добавляется целиком;",
-          "выбирает способ: через кассу или, при наличии права, списание;",
-          "проверяет итог и подтверждает; экран показывает честный результат: подтверждено сервером, сохранено офлайн или отказ.",
-        ],
-      },
-      {
-        heading: "Что делает кабинет",
-        paragraphs: [
-          "Администратор видит заявки в разделе «Выбытие», открывает карточку с составом и проводит её: «Пробита на кассе» с номером чека или «Списана актом» с подпричиной из настраиваемого списка. Печатная ведомость формируется как постраничный документ A4.",
-          "Сам вывод кодов из оборота выполняется во внешних системах предприятия: касса и ОФД или акт в ГИС МТ. Markiro фиксирует факт, состав и статус, чтобы учёт не зависел от памяти сотрудников.",
-        ],
-      },
-      {
-        heading: "Устройство сначала связывается с организацией",
-        paragraphs: [
-          "Киоск получает собственную идентичность через контролируемое сопряжение. Пользовательский ввод не определяет организацию или права доступа сам по себе.",
-          "Код сопряжения состоит из восьми цифр, вводится на экране или сканером и имеет ограниченный срок действия. На устройство передаются только хэши бейджей, а не их значения.",
-        ],
-      },
-      {
-        heading: "Лимиты и права",
-        paragraphs: [
-          "Лимит на сотрудника задаётся политикой организации в единицах продукции; короб учитывается по количеству бутылок в нём. Организация может выключить лимиты полностью. Право оформлять списание выдаётся сотруднику отдельно и не зависит от лимита.",
-        ],
-      },
-      {
-        heading: "Что происходит без связи",
-        paragraphs: [
-          "Локально доступный сценарий и очередь операций переживают перезапуск. Действия, для которых нужны свежие серверные данные или авторизация, явно показывают ограничение вместо ложного успеха.",
-          "Заявка, сохранённая офлайн, показывается жёлтым как ожидающая отправки; зелёный результат появляется только после подтверждения сервера. Небезопасные записи уходят в карантин и разбираются администратором.",
-        ],
-      },
-      {
-        heading: "Обмен с 1С",
-        paragraphs: [
-          "Заявки выбытия выгружаются в 1С по CommerceML как документ «Заказ товара» сразу при создании, а статусы возвращаются обратно по таблице сопоставления. Подробнее об обмене рассказано на странице интеграции с 1С.",
-        ],
-      },
-    ],
-    faq: [
-      {
-        question: "Кто пользуется киоском выбытия?",
-        answer:
-          "Сотрудники предприятия с QR-бейджем: они оформляют покупку для себя, подарок, выставку или списание. Покупатели и внешние получатели в текущем сценарии не предусмотрены.",
-      },
-      {
-        question: "Выводит ли киоск коды из оборота в «Честном знаке»?",
-        answer:
-          "Нет. Киоск фиксирует состав и статус заявки. Вывод из оборота оформляется кассой с ОФД или актом в ГИС МТ по процессу предприятия, а Markiro хранит подтверждённый факт.",
-      },
-      {
-        question: "Можно ли добавить в заявку целый короб?",
-        answer:
-          "Да, по SSCC. Короб добавляется как одна позиция, его состав и количество берутся с сервера. Частичное выбытие короба на киоске невозможно, чтобы состав не расходился с учётом.",
-      },
-      {
-        question: "На каком устройстве работает киоск?",
-        answer:
-          "Это веб-приложение для планшетов и сенсорных моноблоков со сканером; минимальные экраны 480×800 и 800×480. Сканер работает как клавиатурный ввод или через Web Serial там, где он доступен.",
-      },
-    ],
-  },
-  {
     path: "/integratsiya-1c/",
     alternatePath: "/en/1c-integration/",
     locale: "ru",
@@ -713,7 +608,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Вход оператора по бейджу или PIN работает офлайн, потому что хэши учётных данных синхронизируются на устройство заранее.",
       "Операции, которым нужны свежие права или данные сервера, показывают ограничение, а не изображают успех.",
     ],
-    relatedPaths: ["/rabochee-mesto-upakovki/", "/sscc-i-agregatsiya/", "/kiosk-samovydachi/"],
+    relatedPaths: [
+      "/rabochee-mesto-upakovki/",
+      "/sscc-i-agregatsiya/",
+      "/markirovka-chestny-znak/",
+    ],
     relatedArticlePaths: [
       "/stati/markirovka-piva-bez-interneta/",
       "/stati/agregatsiya-piva-v-koroba/",
@@ -1310,109 +1209,6 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
   },
   {
-    path: "/en/self-service-pickup-kiosk/",
-    alternatePath: "/kiosk-samovydachi/",
-    locale: "en",
-    title: "Self-service disposal kiosk for serialized goods — Markiro",
-    description:
-      "The Markiro kiosk records product disposal: an employee scans a badge and codes, the request reaches the cabinet, and staff process it through the register or a write-off.",
-    heading: "Disposal kiosk: controlled product exit outside regular shipments",
-    navigationLabel: "Disposal kiosk",
-    eyebrow: "Self-service with controlled disposal",
-    introduction:
-      "Some product leaves the plant without a shipment: an employee purchase, a gift, an exhibition, breakage. The Markiro kiosk records such disposal at the moment it happens: the employee scans a badge and serialized codes, and the cabinet receives a request with the exact contents.",
-    socialImage: SHARED_IMAGE,
-    socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
-    summary: [
-      "The kiosk is a separate touch device paired with the organization by a pairing code; cabinet permissions never apply on it.",
-      "An employee signs in with a QR badge, scans Data Matrix codes of items or SSCCs of cases, and confirms the request.",
-      "The request receives a number and is processed by an administrator in the cabinet: “Sold at the register” or “Written off by act” with a reason.",
-      "Per-employee limits are set by organization policy, and the right to write off is granted separately.",
-      "The kiosk works offline: a request is stored locally and confirmed once the server responds.",
-    ],
-    relatedPaths: ["/en/offline-production/", "/en/chestny-znak-serialization/", "/en/faq/"],
-    relatedArticlePaths: [
-      "/en/articles/offline-beer-marking-russia/",
-      "/en/articles/duplicate-beer-marking-code-russia/",
-    ],
-    sections: [
-      {
-        heading: "What the kiosk is for",
-        paragraphs: [
-          "Product can leave the plant without a shipment: an employee buys it for personal use, a batch goes to an exhibition or as a gift, part is written off after breakage. Such disposal is usually documented by hand and late. The Markiro kiosk moves the record to the moment of the event: the employee scans what they take, and the administrator receives a ready request with the codes.",
-        ],
-      },
-      {
-        heading: "How a request is made",
-        paragraphs: [
-          "Large controls and explicit states are designed for a touch screen: a tablet, a price checker or an all-in-one with a scanner. Each request receives a sequential number of the form ORD-YY-NNNN.",
-        ],
-        bullets: [
-          "the employee scans the QR code on their badge;",
-          "scans serialized codes of items or SSCCs of cases; a case is added whole;",
-          "chooses the channel: through the register or, when permitted, a write-off;",
-          "reviews the total and confirms; the screen shows an honest result: confirmed by the server, saved offline, or rejected.",
-        ],
-      },
-      {
-        heading: "What the cabinet does",
-        paragraphs: [
-          "An administrator sees requests in the Disposal section, opens a card with the contents and processes it: “Sold at the register” with the receipt number, or “Written off by act” with a sub-reason from a configurable list. A printable slip is generated as a paginated A4 document.",
-          "Retiring the codes from circulation happens in the plant's external systems: the cash register with its fiscal operator, or an act in GIS MT. Markiro records the fact, the contents and the status so that accounting does not depend on memory.",
-        ],
-      },
-      {
-        heading: "The device is paired before it serves anyone",
-        paragraphs: [
-          "The kiosk receives its own identity through controlled pairing. Customer input alone never chooses an organization or grants permissions.",
-          "The pairing code has eight digits, is entered on screen or by scanner, and expires. Only badge hashes are transferred to the device, never the badge values.",
-        ],
-      },
-      {
-        heading: "Limits and permissions",
-        paragraphs: [
-          "A per-employee limit is set by organization policy in product units; a case counts as the number of bottles inside it. The organization can switch limits off entirely. The right to write off is granted to an employee separately and does not depend on the limit.",
-        ],
-      },
-      {
-        heading: "What happens without connectivity",
-        paragraphs: [
-          "Locally available steps and the operation queue survive a restart. Actions requiring current server data or authorization show a clear limitation instead of a false success.",
-          "A request saved offline is shown in amber as pending; the green result appears only after the server confirms. Unsafe records go to quarantine for the administrator to review.",
-        ],
-      },
-      {
-        heading: "Exchange with 1C",
-        paragraphs: [
-          "Disposal requests are exported to 1C over CommerceML as a “Product order” document as soon as they are created, and statuses come back through a mapping table. The 1C integration page describes the exchange in detail.",
-        ],
-      },
-    ],
-    faq: [
-      {
-        question: "Who uses the disposal kiosk?",
-        answer:
-          "Plant employees with a QR badge: they record a personal purchase, a gift, an exhibition or a write-off. Customers and external recipients are not part of the current workflow.",
-      },
-      {
-        question: "Does the kiosk retire codes in Chestny ZNAK?",
-        answer:
-          "No. The kiosk records the contents and status of a request. Retirement is performed by the cash register with its fiscal operator or by an act in GIS MT, and Markiro keeps the confirmed fact.",
-      },
-      {
-        question: "Can a whole case be added to a request?",
-        answer:
-          "Yes, by SSCC. The case is added as one line, and its contents and quantity come from the server. Partial disposal of a case is not possible on the kiosk so that contents never diverge from accounting.",
-      },
-      {
-        question: "Which devices run the kiosk?",
-        answer:
-          "It is a web application for tablets and touch all-in-ones with a scanner; the minimum screens are 480×800 and 800×480. The scanner works as keyboard input or over Web Serial where available.",
-      },
-    ],
-  },
-  {
     path: "/en/1c-integration/",
     alternatePath: "/integratsiya-1c/",
     locale: "en",
@@ -1550,7 +1346,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     relatedPaths: [
       "/en/packing-workstation/",
       "/en/sscc-and-aggregation/",
-      "/en/self-service-pickup-kiosk/",
+      "/en/chestny-znak-serialization/",
     ],
     relatedArticlePaths: [
       "/en/articles/offline-beer-marking-russia/",

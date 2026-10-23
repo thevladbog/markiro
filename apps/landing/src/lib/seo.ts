@@ -587,7 +587,6 @@ ${links("ru", "/")}
 - Workstation: a Windows x64 station, a scanner as keyboard input or over a COM port, a ZPL or TSPL printer over the network, COM port or USB.
 - Offline: the station works without a network with a local SQLite journal and submits its queue after reconnecting with an idempotency key.
 - Integrations: 1C exchange over CommerceML, a public REST API with OpenAPI, shift report exports as TXT, CSV and aggregation XML for GIS MT, code status reads through the Chestny ZNAK True API.
-- Disposal kiosk: an employee scans a badge and codes, and the request is processed in the cabinet through the register or as a write-off.
 - Contact: ${ORGANIZATION_EMAIL}. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
 
 ${links("en", "/en/")}

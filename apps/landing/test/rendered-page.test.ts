@@ -22,7 +22,6 @@ const EXPECTED_ROUTES = [
   "/markirovka-chestny-znak/",
   "/sscc-i-agregatsiya/",
   "/rabochee-mesto-upakovki/",
-  "/kiosk-samovydachi/",
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
@@ -30,7 +29,6 @@ const EXPECTED_ROUTES = [
   "/en/chestny-znak-serialization/",
   "/en/sscc-and-aggregation/",
   "/en/packing-workstation/",
-  "/en/self-service-pickup-kiosk/",
   "/en/1c-integration/",
   "/en/offline-production/",
   "/en/faq/",
@@ -1089,7 +1087,6 @@ describe("rendered landing page", () => {
           "/sscc-i-agregatsiya/",
           "/rabochee-mesto-upakovki/",
           "/oflayn-rabota/",
-          "/kiosk-samovydachi/",
           "/integratsiya-1c/",
         ],
       },
@@ -1104,7 +1101,6 @@ describe("rendered landing page", () => {
           "/en/sscc-and-aggregation/",
           "/en/packing-workstation/",
           "/en/offline-production/",
-          "/en/self-service-pickup-kiosk/",
           "/en/1c-integration/",
         ],
       },
@@ -1838,14 +1834,27 @@ describe("rendered landing page", () => {
     expect(article.querySelector('picture source[type="image/avif"]')).not.toBeNull();
   });
 
-  it("describes the kiosk as a disposal flow for employees, not a customer pickup point", () => {
-    const ru = documents.get("/kiosk-samovydachi/")?.body.textContent ?? "";
-    expect(ru).toContain("выбыти");
-    expect(ru).toContain("бейдж");
-    expect(ru).not.toContain("покупатель получает подготовленный заказ");
-    const en = documents.get("/en/self-service-pickup-kiosk/")?.body.textContent ?? "";
-    expect(en.toLowerCase()).toContain("disposal");
-    expect(en.toLowerCase()).toContain("badge");
+  it("retires the kiosk and the film from every built page and search surface", () => {
+    // Both moved permanently to the home page of their language (Caddy 301, 2026-10-23).
+    const retired = [
+      "/kiosk-samovydachi/",
+      "/en/self-service-pickup-kiosk/",
+      "/kak-rabotaet/",
+      "/en/how-it-works/",
+    ];
+    const builtFiles = readdirSync(outputDirectory, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(?:html|txt|xml|md)$/u.test(entry.name))
+      .map((entry) => path.join(entry.parentPath, entry.name));
+    expect(builtFiles.length).toBeGreaterThan(50);
+    for (const file of builtFiles) {
+      const text = readFileSync(file, "utf8");
+      for (const route of retired) expect(text, `${file}: ${route}`).not.toContain(route);
+    }
+    for (const route of retired) {
+      expect(existsSync(path.join(outputDirectory, route.slice(1), "index.html")), route).toBe(
+        false,
+      );
+    }
   });
 
   it("links every specialist page to at least two canonical related pages", () => {
