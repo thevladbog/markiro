@@ -906,11 +906,19 @@ test.describe("home page", () => {
       .toBe("rgb(107, 229, 153)");
   });
 
-  test("loads no 3D code", async ({ page }) => {
+  test("loads no 3D code", async ({ page, baseURL }) => {
+    // Three.js could only ship in our own bundles. Third-party scripts such as the
+    // captcha the call form loads near the bottom are out of scope. A lazily loaded
+    // chunk can also arrive twice (modulepreload, then import), and CDP keeps the body
+    // of only one copy, so every script URL the page loaded is fetched again here.
+    expect(baseURL).toBeDefined();
+    const origin = new URL(baseURL ?? "").origin;
     for (const route of ["/", "/en/"]) {
-      const scripts: Promise<string>[] = [];
+      const scripts = new Set<string>();
       const collect = (response: Response) => {
-        if (response.request().resourceType() === "script") scripts.push(response.text());
+        if (response.request().resourceType() !== "script") return;
+        if (new URL(response.url()).origin !== origin) return;
+        scripts.add(response.url());
       };
       page.on("response", collect);
       await page.goto(route, { waitUntil: "networkidle" });
@@ -919,9 +927,12 @@ test.describe("home page", () => {
       );
       await page.waitForLoadState("networkidle");
       page.off("response", collect);
-      const bodies = await Promise.all(scripts);
-      expect(bodies.length, route).toBeGreaterThan(0);
-      for (const body of bodies) expect(body, route).not.toContain("WebGLRenderer");
+      expect(scripts.size, route).toBeGreaterThan(0);
+      for (const url of scripts) {
+        const response = await page.request.get(url);
+        expect(response.ok(), url).toBe(true);
+        expect(await response.text(), `${route} ${url}`).not.toContain("WebGLRenderer");
+      }
     }
   });
 
