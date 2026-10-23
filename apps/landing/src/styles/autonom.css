@@ -1147,6 +1147,12 @@
   gap: 1.75rem;
 }
 
+/* The English home lists all four plans in one row. */
+.ax-prices__grid--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
 .ax-plan {
   display: flex;
   flex-direction: column;
@@ -1327,6 +1333,15 @@
 
 .ax-price-notes .ax-kicker {
   margin-bottom: 1.25rem;
+}
+
+.ax-price-notes--single {
+  grid-template-columns: minmax(0, 40rem);
+}
+
+.ax-price-notes--single .ax-note,
+.ax-hero__note {
+  margin-top: 1rem;
 }
 
 .ax-price-list {
@@ -1524,6 +1539,10 @@
   margin-top: 2rem;
 }
 
+.ax-final .ax-final__note {
+  margin-top: 1rem;
+}
+
 .ax-contacts {
   margin: 0;
 }
@@ -1630,6 +1649,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0 1.5rem;
+}
+
+.ax-footer__languages {
+  display: inline-flex;
+  gap: 0 0.75rem;
+}
+
+.ax-footer__languages a[aria-current="page"] {
+  color: var(--fg-1);
+  font-weight: 600;
 }
 
 .ax-footer button {
@@ -2569,7 +2598,8 @@ li.ax-compare__ours {
   }
 
   .ax-figures,
-  .ax-requirements ul {
+  .ax-requirements ul,
+  .ax-prices__grid--four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

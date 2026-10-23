@@ -18,11 +18,11 @@ const { metadata, graph, phone, footer = "full" } = Astro.props;
 
 <BaseLayout metadata={metadata} graph={graph} theme="auto">
   <div class="ax-page">
-    <SiteHeader path={metadata.path} phone={phone} />
+    <SiteHeader path={metadata.path} phone={phone} locale={metadata.locale} />
     <main id="main" class="ax-main">
       <slot />
     </main>
-    <SiteFooter variant={footer} />
+    <SiteFooter variant={footer} locale={metadata.locale} />
   </div>
 
   <script>

@@ -202,6 +202,40 @@ test("edge excludes legacy API from SPA and retirement returns machine 410 witho
   assert.doesNotMatch(retired, /redir/);
 });
 
+test("landing moves the retired film and kiosk pages permanently to the home page of their language", () => {
+  const caddy = read("deploy/platform/Caddyfile");
+  const landing = caddy.slice(
+    caddy.indexOf("(landing_routes) {"),
+    caddy.indexOf("(releases_headers)"),
+  );
+  const variants = (page) =>
+    [page, `${page}/`, `${page}/*`, `${page}.md`]
+      .join(" ")
+      .replace(/[.*/]/gu, (character) => `\\${character}`);
+  assert.match(
+    landing,
+    new RegExp(
+      `@retiredRu \\{\\n\\t\\t\\tmethod GET HEAD\\n\\t\\t\\tpath ${variants("/kak-rabotaet")} ${variants("/kiosk-samovydachi")}\\n\\t\\t\\}\\n\\t\\thandle @retiredRu \\{\\n\\t\\t\\tredir \\* /\\{http\\.request\\.uri\\.prefixed_query\\} 301\\n`,
+      "u",
+    ),
+  );
+  assert.match(
+    landing,
+    new RegExp(
+      `@retiredEn \\{\\n\\t\\t\\tmethod GET HEAD\\n\\t\\t\\tpath ${variants("/en/how-it-works")} ${variants("/en/self-service-pickup-kiosk")}\\n\\t\\t\\}\\n\\t\\thandle @retiredEn \\{\\n\\t\\t\\tredir \\* /en/\\{http\\.request\\.uri\\.prefixed_query\\} 301\\n`,
+      "u",
+    ),
+  );
+  // The redirects come before the static, canonical-form and document handlers.
+  for (const later of [
+    "@landingAssets",
+    "@landingIndexFile",
+    "@landingDirectory",
+    "@landingDocument",
+  ])
+    assert.ok(landing.indexOf("handle @retiredEn") < landing.indexOf(later), later);
+});
+
 test("CI routes platform files to bundle checks and builds isolated preparation without publishing", () => {
   for (const path of ["deploy/platform/Caddyfile", "deploy/platform/preflight.mjs"])
     assert.equal(classifyChangedFiles([path]).jobs.production_bundle, true);

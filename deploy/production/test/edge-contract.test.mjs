@@ -516,7 +516,9 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET"], ["OPTIONS"], ["POST"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
-          : [["POST"], ...Array.from({ length: 14 }, () => ["GET", "HEAD"])],
+          : // Landing: the demo/lead POST, then GET/HEAD only, including the two
+            // permanent redirects of the retired film and kiosk pages.
+            [["POST"], ...Array.from({ length: 16 }, () => ["GET", "HEAD"])],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -1468,6 +1470,45 @@ test("direct Caddy adapter exposes only the four exact legacy legal redirects pl
       redirects.some((route) => adaptedRouteMatches(route, { method: "GET", path: malformed })),
       false,
       `${malformed} must not match a legacy redirect`,
+    );
+  }
+});
+
+test("direct Caddy adapter moves the retired film and kiosk pages permanently to their home page", async () => {
+  const adapted = await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8"));
+  const routeTable = applicationOrderedRouteTable(applicationRoute(adapted, landingHost));
+  const permanent = routeTable.filter((route) =>
+    nestedObjects(route).some(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 301,
+    ),
+  );
+  const expected = new Map([
+    ["/kak-rabotaet/", "/{http.request.uri.prefixed_query}"],
+    ["/kak-rabotaet", "/{http.request.uri.prefixed_query}"],
+    ["/kak-rabotaet/index.html", "/{http.request.uri.prefixed_query}"],
+    ["/kak-rabotaet.md", "/{http.request.uri.prefixed_query}"],
+    ["/kiosk-samovydachi/", "/{http.request.uri.prefixed_query}"],
+    ["/kiosk-samovydachi.md", "/{http.request.uri.prefixed_query}"],
+    ["/en/how-it-works/", "/en/{http.request.uri.prefixed_query}"],
+    ["/en/how-it-works.md", "/en/{http.request.uri.prefixed_query}"],
+    ["/en/self-service-pickup-kiosk/", "/en/{http.request.uri.prefixed_query}"],
+    ["/en/self-service-pickup-kiosk", "/en/{http.request.uri.prefixed_query}"],
+  ]);
+  for (const [retired, location] of expected) {
+    const matching = permanent.filter((route) =>
+      adaptedRouteMatches(route, { method: "GET", path: retired }),
+    );
+    assert.equal(matching.length, 1, `${retired} must select one permanent redirect`);
+    const response = nestedObjects(matching[0]).find(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 301,
+    );
+    assert.deepEqual(response.headers?.Location, [location], retired);
+  }
+  for (const live of ["/", "/en/", "/faq/", "/kak-rabotaet-x/", "/en/how-it-works-x/"]) {
+    assert.equal(
+      permanent.some((route) => adaptedRouteMatches(route, { method: "GET", path: live })),
+      false,
+      `${live} must not be redirected`,
     );
   }
 });

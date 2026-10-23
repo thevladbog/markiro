@@ -8,13 +8,20 @@ import rebelAppleWhite from "../../assets/standalone/clients/rebel-apple-logo-wh
 
 interface Props {
   kicker: string;
+  locale?: "ru" | "en";
 }
 
-const { kicker } = Astro.props;
+const { kicker, locale = "ru" } = Astro.props;
 // Logos of customers who agreed to be shown (ООО «АТОЛЛ» for «Михайловский перевал», Rebel Apple).
 const clients = [
   { name: "Rebel Apple", light: rebelApple, dark: rebelAppleWhite, width: 168, wordmark: false },
-  { name: "Михайловский перевал", light: pereval, dark: perevalWhite, width: 72, wordmark: true },
+  {
+    name: locale === "en" ? "Mikhaylovsky Pereval" : "Михайловский перевал",
+    light: pereval,
+    dark: perevalWhite,
+    width: 72,
+    wordmark: true,
+  },
 ] as const;
 const loops = [0, 1, 2] as const;
 ---
