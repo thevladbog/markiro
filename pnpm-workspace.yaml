@@ -12,8 +12,13 @@ settings:
 overrides:
   # React Email's preview CLI pulls Next.js as tooling. 16.3.3 fixed
   # GHSA-2xp9-vwfh-vxw4 (AVIF) and GHSA-p293-qw3h-jr36 (Windows RCE); 16.3.6
-  # is the first release patched for GHSA-vcvr-r3jv-pc5j.
-  next: "16.3.6"
+  # is the first release patched for GHSA-vcvr-r3jv-pc5j. 16.3.8 fixed the
+  # image-optimizer SSRF and the cache-poisoning/leak batch (GHSA-cjq9-62q9-8jv4
+  # and others); 16.4.1 is the first release patched for the two critical
+  # unauthenticated RCEs GHSA-2464-fhr4-w9xw and GHSA-673q-mjm6-r5xr plus the
+  # Server Action DoS GHSA-p3m5-59mp-jv5r. 16.4.2 is the latest 16.4 patch
+  # older than the 7-day release-age window.
+  next: "16.4.2"
   # GHSA-rgj7-g3m4-5g8c and GHSA-wq5f-xc86-pv6w: patched libheif/libvips for
   # every image-processing consumer.
   sharp: "0.35.5"
