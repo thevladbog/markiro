@@ -13,9 +13,9 @@ use markiro_host::config::HostPaths;
 use markiro_host::restore::{restore, SHIFT_NUMBER_MARGIN};
 use markiro_proto::backup::BackupTrigger;
 use serde_json::json;
-use sqlx::{ConnectOptions, Connection, SqlitePool};
+use sqlx::{Connection, SqlitePool};
 use support::app::{admin, Admin, TestApp};
-use support::backup::{at, worker_conn};
+use support::backup::{at, stop, worker_conn};
 
 const NOW: &str = "2026-10-09T15:00:00Z";
 
@@ -35,47 +35,6 @@ async fn copy(app: &TestApp) -> (PathBuf, Manifest) {
     .unwrap();
     conn.close().await.unwrap();
     (folder.join(&manifest.file), manifest)
-}
-
-/// Stop using the app's database as a service that stopped cleanly has:
-/// every connection closed and the WAL folded into the file. A pool's
-/// `close` can return while a connection is still on its way out, so one
-/// more connection folds the WAL in and closes, until the WAL is gone or
-/// empty after a checkpoint that was not busy: in that case everything is in
-/// the main file, and an empty `-wal` that a lingering connection keeps open
-/// (seen about once in 150 stops on a busy machine) holds nothing. The data
-/// folder gets what a host's has: `host.json`, the folders and the lock
-/// file, released.
-async fn stop(app: &TestApp) -> HostPaths {
-    app.state.pool.close().await;
-    let db = app.dir().join("host.db");
-    let wal = app.dir().join("host.db-wal");
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let mut conn = markiro_host::db::options(&db).connect().await.unwrap();
-            let (busy, _, _): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
-                .fetch_one(&mut conn)
-                .await
-                .unwrap();
-            conn.close().await.unwrap();
-            let emptied = std::fs::metadata(&wal).map_or(true, |meta| meta.len() == 0);
-            if busy == 0 && emptied {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the database closed");
-    std::fs::write(
-        app.dir().join("host.json"),
-        json!({ "hostId": app.state.host_id, "port": 45710 }).to_string(),
-    )
-    .unwrap();
-    let paths = HostPaths::new(app.dir());
-    paths.ensure().unwrap();
-    drop(paths.lock().unwrap());
-    paths
 }
 
 async fn reopen(paths: &HostPaths) -> SqlitePool {

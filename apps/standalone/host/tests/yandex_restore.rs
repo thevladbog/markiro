@@ -16,7 +16,7 @@ async fn copy(
 ) -> markiro_host::backup::copy::Manifest {
     let identity = support::backup::write_identity(admin.app.dir(), &admin.app.state.host_id);
     let mut conn = support::backup::worker_conn(&admin.app).await;
-    markiro_host::backup::copy::make_copy_with_identity(
+    let manifest = markiro_host::backup::copy::make_copy_with_identity(
         &mut conn,
         dir,
         admin.app.state.now(),
@@ -26,7 +26,11 @@ async fn copy(
         std::sync::Arc::new(markiro_host::backup::identity::OwnerOnly),
     )
     .await
-    .unwrap()
+    .unwrap();
+    // Closed, not dropped: a dropped connection closes later, on its own
+    // thread, and on Windows would hold `host.db` against the restore.
+    sqlx::Connection::close(conn).await.unwrap();
+    manifest
 }
 #[tokio::test]
 async fn empty_gate_checks_after_reconciling_an_interrupted_working_database() {
@@ -38,7 +42,7 @@ async fn empty_gate_checks_after_reconciling_an_interrupted_working_database() {
         .execute(&admin.app.state.pool)
         .await
         .unwrap();
-    admin.app.state.pool.close().await;
+    support::backup::close_pool(&admin.app.state.pool).await;
     let paths = markiro_host::config::HostPaths::new(admin.app.dir());
     markiro_host::restore::restore_crashing(
         &paths,
@@ -79,7 +83,7 @@ async fn recovery_receipt_finishes_identity_once_without_applying_snapshot_again
     let pool = markiro_host::db::open(&paths.database_file())
         .await
         .unwrap();
-    pool.close().await;
+    support::backup::close_pool(&pool).await;
     markiro_host::restore::restore_crashing(
         &paths,
         &source,

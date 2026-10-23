@@ -4,6 +4,7 @@
 
 mod support;
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ use support::app::{
     add_operator, admin, json as json_request, login, pair_device, plan_shift, request,
     seed_office_user, shift_body, shift_setup, with_device, Admin, TestApp,
 };
-use support::backup::{at, latest_migration, names, worker_conn, write_identity};
+use support::backup::{at, close_pool, latest_migration, names, stop, worker_conn, write_identity};
 
 const PREFIX: &str = "460068200";
 const NOW: &str = "2026-10-09T15:00:00Z";
@@ -88,47 +89,6 @@ async fn copy_with_identity(app: &TestApp) -> (PathBuf, Manifest, HostIdentity) 
     (folder.join(&manifest.file), manifest, identity)
 }
 
-/// Stop using the app's database as a service that stopped cleanly has:
-/// every connection closed and the WAL folded into the file (a WAL left
-/// behind is `the_commits_a_crashed_host_left_in_its_wal_count_too`). A
-/// pool's `close` can return while a connection is still on its way out,
-/// so one more connection folds the WAL in and closes, until no WAL is
-/// left. The data folder gets what a host's has: `host.json`, the folders
-/// and the lock file, released.
-async fn stop(app: &TestApp) -> HostPaths {
-    app.state.pool.close().await;
-    let db = app.dir().join("host.db");
-    let wal = app.dir().join("host.db-wal");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let mut conn = markiro_host::db::options(&db).connect().await.unwrap();
-            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-                .execute(&mut conn)
-                .await
-                .unwrap();
-            conn.close().await.unwrap();
-            // A lingering connection may keep an EMPTY `-wal` open after a
-            // clean checkpoint (the database is closed all the same; CI hit
-            // this on Linux): only a non-empty `-wal` means unfinished work.
-            if std::fs::metadata(&wal).map_or(true, |meta| meta.len() == 0) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the database closed");
-    std::fs::write(
-        app.dir().join("host.json"),
-        json!({ "hostId": app.state.host_id, "port": 45710 }).to_string(),
-    )
-    .unwrap();
-    let paths = HostPaths::new(app.dir());
-    paths.ensure().unwrap();
-    drop(paths.lock().unwrap());
-    paths
-}
-
 async fn reopen(paths: &HostPaths) -> SqlitePool {
     markiro_host::db::open(&paths.database_file())
         .await
@@ -165,6 +125,43 @@ fn restore_dirs(dir: &Path) -> Vec<String> {
         .into_iter()
         .filter(|name| name.starts_with("restore-"))
         .collect()
+}
+
+/// `close_pool` closes the connection `Pool::close` alone leaves open: one
+/// dropped just before the close, whose way back to the pool (a ping, then
+/// the idle queue) the close overtook. Left open, it held `host.db` for the
+/// rest of a test, and on Windows the restore's rename then failed with
+/// ERROR_SHARING_VIOLATION (os error 32) on every try.
+#[tokio::test]
+async fn close_pool_closes_a_connection_on_its_way_back_to_the_pool() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("host.db");
+    let wal = dir.path().join("host.db-wal");
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(markiro_host::db::options(&db).create_if_missing(true))
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    // What dropping a pooled connection spawns, polled once here: the
+    // pool is still open, so it pings the connection before it goes back.
+    let mut back = std::pin::pin!(conn.return_to_pool());
+    let returned =
+        std::future::poll_fn(|cx| std::task::Poll::Ready(back.as_mut().poll(cx).is_ready())).await;
+    assert!(!returned, "the ping is under way");
+    drop(conn);
+
+    tokio::join!(close_pool(&pool), back);
+
+    assert_eq!(pool.size(), 0);
+    // SQLite removes the WAL when the last connection to the file closes.
+    let mut last = markiro_host::db::options(&db).connect().await.unwrap();
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(&mut last)
+        .await
+        .unwrap();
+    last.close().await.unwrap();
+    assert!(!wal.exists(), "another connection holds {}", db.display());
 }
 
 #[tokio::test]
@@ -2082,11 +2079,10 @@ async fn installed(paths: &HostPaths) -> HostIdentity {
     drop(paths.lock().unwrap());
     let config = markiro_host::config::HostConfig::load_or_create(paths, None).unwrap();
     markiro_host::tls::TlsIdentity::load_or_create(&paths.tls_dir(), &config.host_id).unwrap();
-    markiro_host::db::open(&paths.database_file())
+    let pool = markiro_host::db::open(&paths.database_file())
         .await
-        .unwrap()
-        .close()
-        .await;
+        .unwrap();
+    close_pool(&pool).await;
     HostIdentity::read(paths).unwrap()
 }
 

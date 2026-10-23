@@ -1133,10 +1133,9 @@ async fn the_retention_keeps_always_by_default_and_purges_what_it_is_set_below()
 #[tokio::test]
 async fn a_restore_keeps_the_files_the_copy_held_and_sets_aside_the_later_ones() {
     use markiro_host::backup::copy::make_copy;
-    use markiro_host::config::HostPaths;
     use markiro_host::restore::restore;
     use markiro_proto::backup::BackupTrigger;
-    use sqlx::{ConnectOptions, Connection};
+    use sqlx::Connection;
 
     let admin = admin().await;
     let shift = planned_shift(&admin).await;
@@ -1177,29 +1176,7 @@ async fn a_restore_keeps_the_files_the_copy_held_and_sets_aside_the_later_ones()
         StatusCode::OK
     );
     // Stop the host (the database closes clean) and restore the copy.
-    admin.app.state.pool.close().await;
-    let db = admin.app.dir().join("host.db");
-    loop {
-        let mut conn = markiro_host::db::options(&db).connect().await.unwrap();
-        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        conn.close().await.unwrap();
-        let wal = admin.app.dir().join("host.db-wal");
-        if std::fs::metadata(&wal).map_or(true, |meta| meta.len() == 0) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    std::fs::write(
-        admin.app.dir().join("host.json"),
-        json!({ "hostId": admin.app.state.host_id, "port": 45710 }).to_string(),
-    )
-    .unwrap();
-    let paths = HostPaths::new(admin.app.dir());
-    paths.ensure().unwrap();
-    drop(paths.lock().unwrap());
+    let paths = support::backup::stop(&admin.app).await;
     let report = restore(
         &paths,
         &folder.join(&manifest.file),
