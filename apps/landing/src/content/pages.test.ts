@@ -31,9 +31,10 @@ describe("SEO page registry", () => {
 
     for (const page of SEO_PAGES) {
       expect(page.title.length).toBeGreaterThanOrEqual(30);
-      expect(page.title.length).toBeLessThanOrEqual(70);
-      expect(page.description.length).toBeGreaterThanOrEqual(100);
-      expect(page.description.length).toBeLessThanOrEqual(180);
+      // Search snippets show about 60-65 title and 155-160 description characters.
+      expect(page.title.length, page.path).toBeLessThanOrEqual(65);
+      expect(page.description.length, page.path).toBeGreaterThanOrEqual(110);
+      expect(page.description.length, page.path).toBeLessThanOrEqual(160);
       expect(page.heading.length).toBeGreaterThan(0);
       expect(page.socialImageAlt.length).toBeGreaterThan(0);
       expect(page.reviewedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);

@@ -502,6 +502,8 @@ describe("SEO generators", () => {
     );
 
     expect(ru).toMatchObject({
+      name: "Маркиро Автоном",
+      alternateName: ["Markiro Autonom", "Markiro"],
       url: "https://markiro.app/",
       operatingSystem: "Windows, Android",
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
@@ -515,6 +517,8 @@ describe("SEO generators", () => {
       "Выгрузки смены в TXT, CSV и XML для ГИС МТ и 1С",
     ]);
     expect(en).toMatchObject({
+      name: "Markiro Autonom",
+      alternateName: ["Маркиро Автоном", "Markiro"],
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/en/instructions/" },
     });
     expect(en?.featureList).toEqual([

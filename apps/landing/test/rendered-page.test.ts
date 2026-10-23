@@ -1089,6 +1089,18 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("keeps the words of the home headings apart for crawlers", () => {
+    for (const [route, heading] of [
+      ["/", "Маркировка и агрегация. Всё на вашем ПК."],
+      ["/en/", "Serialization and aggregation. All on your PC."],
+    ] as const) {
+      const h1 = documents.get(route)?.querySelector("h1");
+      // <br> is not text: crawlers read the line break, the spans need a real space.
+      h1?.querySelectorAll("br").forEach((br) => br.replaceWith(" "));
+      expect(h1?.textContent?.replace(/\s+/g, " ").trim(), route).toBe(heading);
+    }
+  });
+
   it("keeps topic pages on the dark theme", () => {
     const html = documents.get("/sscc-i-agregatsiya/")?.documentElement;
     expect(html?.getAttribute("data-theme")).toBe("dark");

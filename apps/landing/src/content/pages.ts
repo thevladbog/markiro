@@ -76,7 +76,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "ru",
     title: "Маркиро Автоном: маркировка и агрегация на вашем ПК",
     description:
-      "Станция на линии проверяет каждый код и собирает короба и паллеты с SSCC. Программа и база на вашем ПК, интернет для смены не нужен. 14 дней бесплатно, от 60 000 ₽ в год.",
+      "Маркировка и агрегация на вашем ПК: станция проверяет каждый код и собирает короба и паллеты с SSCC без интернета. 14 дней бесплатно, от 60 000 ₽ в год.",
     heading: "Маркировка и агрегация. Всё на вашем ПК.",
     navigationLabel: "Markiro",
     eyebrow: "Маркиро Автоном · для Windows",
@@ -349,7 +349,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "ru",
     title: "Рабочее место упаковщика и маркировки — Маркиро Автоном",
     description:
-      "Станция Маркиро для Windows связывает сканер, принтер этикеток и смену. Оператор собирает короба с SSCC, а записи хранятся на ПК у линии и на главном компьютере завода.",
+      "Станция Маркиро для Windows связывает сканер, принтер этикеток и смену. Оператор собирает короба с SSCC, записи хранятся на ПК у линии и на главном ПК.",
     heading: "Рабочее место упаковщика, рассчитанное на непрерывную линию",
     navigationLabel: "Рабочее место упаковки",
     eyebrow: "Сканер / принтер / станция",
@@ -570,7 +570,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "ru",
     title: "Офлайн-работа маркировки на производстве — Маркиро Автоном",
     description:
-      "Маркиро Автоном работает на ПК завода без интернета: главный ПК хранит базу, станции и ТСД связаны с ним по локальной сети, а при обрыве связи смена продолжается.",
+      "Маркиро Автоном работает на ПК завода без интернета: главный ПК хранит базу, станции и ТСД связаны с ним по сети завода, при обрыве связи смена идёт.",
     heading: "Офлайн-работа производства: линия не ждёт сеть",
     navigationLabel: "Офлайн-работа производства",
     eyebrow: "Программа и база на ПК завода",
@@ -680,7 +680,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "ru",
     title: "Вопросы о Маркиро Автоном, маркировке и агрегации",
     description:
-      "Короткие ответы о Маркиро Автоном: работа без интернета, главный ПК и станции, SSCC и агрегация, оборудование, выгрузки для ГИС МТ и 1С, пробный период и лицензия.",
+      "Ответы о Маркиро Автоном: работа без интернета, главный ПК и станции, SSCC и агрегация, оборудование, выгрузки для ГИС МТ и 1С, пробный период и лицензия.",
     heading: "Вопросы о Маркиро и работе на производстве",
     navigationLabel: "Вопросы и ответы",
     eyebrow: "Прямые ответы без общих обещаний",
@@ -787,9 +787,9 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/",
     alternatePath: "/",
     locale: "en",
-    title: "Markiro Autonom: Chestny ZNAK serialization and aggregation on your PC",
+    title: "Markiro Autonom: Chestny ZNAK serialization on your own PC",
     description:
-      "A station on the line checks every code and builds cases and pallets with SSCC. The software and the database run on your own PCs with no internet. 14-day free trial.",
+      "A line station checks every code and builds cases and pallets with SSCC. Software and database run on your own PCs, no internet needed. 14-day free trial.",
     heading: "Serialization and aggregation. All on your PC.",
     navigationLabel: "Markiro",
     eyebrow: "Markiro Autonom · for Windows",
@@ -814,7 +814,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Chestny ZNAK production serialization — Markiro Autonom",
     description:
-      "The Markiro station checks every Data Matrix code on the line, builds cases and pallets with SSCC and prepares GIS MT exports. It runs on the plant's PCs with no internet.",
+      "The Markiro station checks every Data Matrix code on the line, builds cases and pallets with SSCC and prepares GIS MT exports, on plant PCs with no internet.",
     heading: "Chestny ZNAK serialization as a production workflow",
     navigationLabel: "Chestny ZNAK serialization",
     eyebrow: "From code to case and export",
@@ -947,7 +947,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "SSCC case and pallet aggregation — Markiro Autonom",
     description:
-      "Markiro aggregates serialized goods into cases and pallets with SSCC at the line station and on the handheld, checks contents before closing and keeps disassembly history.",
+      "Markiro aggregates serialized goods into cases and pallets with SSCC at the line station and on the handheld, checks contents before closing, keeps history.",
     heading: "SSCC case and pallet aggregation",
     navigationLabel: "SSCC and aggregation",
     eyebrow: "Item → case → pallet",
@@ -1070,7 +1070,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Production packing and serialization workstation — Markiro",
     description:
-      "The Markiro station for Windows links the scanner, the label printer and the shift. The operator builds cases with SSCC, and records stay on the line PC and the plant's main PC.",
+      "The Markiro station for Windows links the scanner, the label printer and the shift. Operators build cases with SSCC; records stay on the line PC and main PC.",
     heading: "A packing workstation designed for continuous production",
     navigationLabel: "Packing workstation",
     eyebrow: "Scanner / printer / station",
@@ -1191,7 +1191,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Serialization integration with 1C through files — Markiro",
     description:
-      "Markiro Autonom produces shift exports in TXT, CSV and XML that 1C and GIS MT receive as files. A direct 1C exchange and a catalogue import from a file are planned.",
+      "Markiro Autonom produces shift exports in TXT, CSV and XML that 1C and GIS MT receive as files. A direct 1C exchange and a catalogue file import are planned.",
     heading: "Connect Markiro and 1C through export files",
     navigationLabel: "1C integration",
     eyebrow: "Exchange through files",
@@ -1296,7 +1296,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Offline production serialization and packing — Markiro",
     description:
-      "Markiro Autonom runs on the plant's PCs with no internet: the main PC holds the database, stations and handhelds link to it over the plant network, and shifts survive a lost link.",
+      "Markiro Autonom runs on plant PCs with no internet: the main PC keeps the database, stations and handhelds use the plant network, a shift survives a lost link.",
     heading: "Offline production: the line does not wait for the network",
     navigationLabel: "Offline production",
     eyebrow: "Software and database on the plant's PCs",
@@ -1406,7 +1406,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     locale: "en",
     title: "Questions about Markiro Autonom serialization and aggregation",
     description:
-      "Direct answers about Markiro Autonom: work without the internet, the main PC and stations, SSCC aggregation, equipment, exports for GIS MT and 1C, the trial and the licence.",
+      "Answers about Markiro Autonom: working offline, the main PC and stations, SSCC aggregation, equipment, GIS MT and 1C exports, the trial and the licence.",
     heading: "Questions about Markiro in production",
     navigationLabel: "Questions and answers",
     eyebrow: "Direct answers without vague promises",

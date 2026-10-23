@@ -7,9 +7,9 @@ import { findTariff, TARIFFS } from "./pricing";
 describe("standalone page registry", () => {
   it("keeps the same metadata limits as the topic pages", () => {
     for (const page of AUTONOM_PAGES) {
-      expect(page.title.length).toBeLessThanOrEqual(70);
-      expect(page.description.length).toBeGreaterThanOrEqual(100);
-      expect(page.description.length).toBeLessThanOrEqual(180);
+      expect(page.title.length, page.path).toBeLessThanOrEqual(65);
+      expect(page.description.length, page.path).toBeGreaterThanOrEqual(110);
+      expect(page.description.length, page.path).toBeLessThanOrEqual(160);
     }
     expect(AUTONOM_SEARCH_PAGES.map((page) => page.path)).toEqual(["/skachat/", "/stoimost/"]);
   });
