@@ -516,7 +516,9 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET"], ["OPTIONS"], ["POST"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
-          : [["POST"], ...Array.from({ length: 14 }, () => ["GET", "HEAD"])],
+          : // Landing: the demo/lead POST, then GET/HEAD only, including the two
+            // permanent redirects of the retired film and kiosk pages.
+            [["POST"], ...Array.from({ length: 16 }, () => ["GET", "HEAD"])],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
