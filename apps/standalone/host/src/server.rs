@@ -67,6 +67,8 @@ pub struct AppState {
     /// The copies of the database (plan РК); `None` answers the office's
     /// backup routes `not_found`. `crate::start` always sets it.
     pub backups: Option<Arc<crate::backup::Backups>>,
+    pub yandex: Option<Arc<crate::yandex::connection::YandexService>>,
+    pub yandex_init_failed: bool,
     /// The update packages (plan ОБН-3); `None` answers the office's upload
     /// routes `not_found` and a device's offer `missing`. `crate::start`
     /// always sets it.
@@ -121,6 +123,8 @@ impl AppState {
             revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
             backups: None,
+            yandex: None,
+            yandex_init_failed: false,
             updates: None,
             update_limits: Arc::new(crate::updates::limits::DownloadLimits::new(clock.clone())),
             download_stall: crate::updates::stream::STALL_LIMIT,
@@ -176,6 +180,10 @@ impl AppState {
     /// The copies of the database the office's backup routes read.
     pub fn with_backups(mut self, backups: Arc<crate::backup::Backups>) -> Self {
         self.backups = Some(backups);
+        self
+    }
+    pub fn with_yandex(mut self, yandex: Arc<crate::yandex::connection::YandexService>) -> Self {
+        self.yandex = Some(yandex);
         self
     }
 
@@ -717,6 +725,30 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/backups/settings",
             put(crate::routes::backups::put_settings),
+        )
+        .route(
+            "/v1/office/backups/yandex",
+            get(crate::routes::yandex_backups::get),
+        )
+        .route(
+            "/v1/office/backups/yandex/auth/begin",
+            post(crate::routes::yandex_backups::begin),
+        )
+        .route(
+            "/v1/office/backups/yandex/auth/complete",
+            post(crate::routes::yandex_backups::complete),
+        )
+        .route(
+            "/v1/office/backups/yandex/auth/attempt/{id}",
+            delete(crate::routes::yandex_backups::cancel),
+        )
+        .route(
+            "/v1/office/backups/yandex/connection",
+            delete(crate::routes::yandex_backups::disconnect),
+        )
+        .route(
+            "/v1/office/backups/yandex/retry",
+            post(crate::routes::yandex_backups::retry),
         )
         .route(
             "/v1/office/backups/resume",

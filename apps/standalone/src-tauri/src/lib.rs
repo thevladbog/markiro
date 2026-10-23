@@ -20,6 +20,7 @@ pub mod secret_store;
 pub mod tls;
 pub mod update;
 pub mod window_policy;
+pub mod yandex;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -364,6 +365,16 @@ fn connection_status(state: tauri::State<'_, ConnectionState>) -> HostStatus {
 pub fn invoke_handler<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        yandex::yandex_connect,
+        yandex::yandex_cancel,
+        yandex::yandex_registration,
+        yandex::recovery::yandex_recovery_auth,
+        yandex::recovery::yandex_recovery_list,
+        yandex::recovery::yandex_recovery_download,
+        yandex::recovery::yandex_recovery_restore,
+        yandex::recovery::yandex_recovery_resume,
+        yandex::recovery::yandex_profile_import,
+        yandex::recovery::yandex_profile_export,
         host_hello,
         device_status,
         host_local_pair,
@@ -443,6 +454,7 @@ where
         .with_dataset(dataset);
     let link = device.watch_link();
     app.manage(device);
+    app.manage(yandex::YandexNativeState::default());
     app.manage(local);
     app.manage(ConnectionState::default());
     app.manage(scanner::manager(app.clone()));

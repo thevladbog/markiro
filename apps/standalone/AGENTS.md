@@ -6592,6 +6592,27 @@ and the XML «Расформирование упаковки» are plan ДЗГ-
 
 ## Backups and restore
 
+Yandex Disk integration is under development (plan
+`docs/superpowers/plans/2026-10-22-standalone-yandex-disk-backups.md`). The
+`backup-cloud` workspace crate owns strict profiles, bounded age envelopes,
+direct OAuth and Disk transport and loopback callback parsing. `host/src/yandex`
+owns a separate delivery journal, service-account DPAPI credentials and the token
+coordinator. Host startup, admin routes, audit, native source pins and separate
+refresh/delivery loops are wired. Tauri native connection/profile import/export,
+Office status UI, marker-first remote retention and empty-host recovery are implemented.
+Recovery verifies before elevation and again in the fixed-target elevated helper,
+then uses the existing restore lock/intent. Its protected journal and exact restore
+receipt support resume without applying the snapshot twice. Unsent local facts
+block recovery; the preflight never deletes them. After restore, cloud stays
+disconnected until an Office administrator reconnects with ClientSecret.
+Host tests do not establish Windows or live-provider end-user acceptance; see
+`docs/verification/standalone-yandex-disk-acceptance.md`.
+Never substitute the shell's per-user secret store (which permits plaintext off
+Windows) for service credentials: this store fails closed off Windows. Every
+credential mutation must use one shared `TokenSupervisor`, with the generation
+captured when authorization began; direct raw-store writes are for its boundary
+and tests only. The native Windows DPAPI/ACL/LocalService checks remain separate.
+
 Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
 pilot spec's §11 and §22; the procedure is
 `docs/runbooks/standalone-backup-restore.md`). One worker task

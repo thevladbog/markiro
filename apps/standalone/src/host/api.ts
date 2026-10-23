@@ -105,6 +105,7 @@ import {
   type OfficePalletPage,
   type PalletListQuery,
 } from "./pack-cards.js";
+import { yandexBackupStatusSchema, type YandexBackupStatus } from "./yandex-backups.js";
 import {
   badgeInfoSchema,
   badgeSaltSchema,
@@ -719,6 +720,9 @@ export interface HostApi {
   registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   /** The copies in both folders (plan РК); every office role reads them. */
   getBackups: (token: string) => Promise<BackupState>;
+  getYandexBackups: (token: string) => Promise<YandexBackupStatus>;
+  retryYandexBackup: (token: string, generation: string) => Promise<YandexBackupStatus>;
+  disconnectYandex: (token: string, generation: string) => Promise<YandexBackupStatus>;
   /**
    * The counts by month for the support bundle (beta 3 feedback); administrators
    * only, `forbidden` for another role.
@@ -1526,6 +1530,23 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", "/v1/office/backups", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getYandexBackups: (token) =>
+      client.request("GET", "/v1/office/backups/yandex", {
+        officeToken: token,
+        schema: yandexBackupStatusSchema,
+      }),
+    retryYandexBackup: (token, generation) =>
+      client.request("POST", "/v1/office/backups/yandex/retry", {
+        officeToken: token,
+        body: { expectedGeneration: generation },
+        schema: yandexBackupStatusSchema,
+      }),
+    disconnectYandex: (token, generation) =>
+      client.request("DELETE", "/v1/office/backups/yandex/connection", {
+        officeToken: token,
+        body: { expectedGeneration: generation },
+        schema: yandexBackupStatusSchema,
       }),
     getUsageStats: (token) =>
       client.request("GET", "/v1/office/usage-stats", {
