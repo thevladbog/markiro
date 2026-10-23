@@ -132,6 +132,14 @@ pub fn clean(dir: &Path) -> std::io::Result<usize> {
 /// anchors the 14 days of a copy before an upgrade (plan ОБН-1,
 /// [`retention::keep_anchored`]). Returns the copies that stay, newest first.
 pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manifest>> {
+    rotate_pinned(dir, keep_also, &[])
+}
+
+pub fn rotate_pinned(
+    dir: &Path,
+    keep_also: Option<&str>,
+    pins: &[String],
+) -> std::io::Result<Vec<Manifest>> {
     let copies = list(dir)?;
     let dated: Vec<(String, time::OffsetDateTime)> = copies
         .iter()
@@ -151,6 +159,7 @@ pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manife
     });
     let mut kept = retention::keep_anchored(&dated, anchor);
     kept.extend(keep_also.map(str::to_owned));
+    kept.extend(pins.iter().cloned());
     let mut staying = Vec::new();
     for copy in copies {
         if kept.contains(&copy.file) {

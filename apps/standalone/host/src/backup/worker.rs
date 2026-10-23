@@ -99,6 +99,7 @@ pub struct Backups {
     pub guard: Arc<dyn KeyFileGuard>,
     status: Mutex<Status>,
     wake: Notify,
+    cloud: std::sync::OnceLock<std::sync::Weak<crate::yandex::queue::CloudQueue>>,
 }
 
 fn listed(copies: &[Manifest]) -> Vec<BackupCopy> {
@@ -138,6 +139,7 @@ impl Backups {
                 second: None,
             }),
             wake: Notify::new(),
+            cloud: std::sync::OnceLock::new(),
         })
     }
 
@@ -149,6 +151,10 @@ impl Backups {
             paths.database_file(),
             host_id,
         )
+    }
+
+    pub fn attach_cloud(&self, queue: &Arc<crate::yandex::queue::CloudQueue>) {
+        let _ = self.cloud.set(Arc::downgrade(queue));
     }
 
     fn status(&self) -> std::sync::MutexGuard<'_, Status> {
@@ -490,6 +496,7 @@ async fn run_once(
             }
         };
     let local_dir = backups.local_dir.clone();
+    let cloud = backups.cloud.get().and_then(std::sync::Weak::upgrade);
     let cleaned = tokio::task::spawn_blocking(move || folder::clean(&local_dir)).await;
     if let Ok(Err(error)) = cleaned {
         tracing::warn!(%error, "cleaning the local backup folder failed");
@@ -535,6 +542,11 @@ async fn run_once(
         ),
     }
     let local_dir = backups.local_dir.clone();
+    if let (Some(queue), Ok(manifest)) = (&cloud, &local) {
+        if queue.offer(&manifest.file).await.is_err() {
+            tracing::warn!("local backup could not enter the Yandex queue");
+        }
+    }
     let made = local.clone().ok();
     let second = second_dir.clone();
     let guard = backups.guard.clone();
@@ -544,7 +556,13 @@ async fn run_once(
         // The copy just made stays whatever the rule says (a clock set back).
         let fresh = made.as_ref().map(|manifest| manifest.file.as_str());
         let local_copies = if made.is_some() {
-            folder::rotate(&local_dir, fresh)
+            if let Some(queue) = &cloud {
+                queue
+                    .pins
+                    .while_pinned(|pins| folder::rotate_pinned(&local_dir, fresh, pins))
+            } else {
+                folder::rotate(&local_dir, fresh)
+            }
         } else {
             folder::list(&local_dir)
         }

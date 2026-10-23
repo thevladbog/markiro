@@ -36,6 +36,24 @@ function unexpected(name: keyof HostApi): Promise<never> {
  */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
   return {
+    getYandexBackups: vi.fn<HostApi["getYandexBackups"]>(async () => ({
+      connectionGeneration: null,
+      state: "disconnected",
+      clientId: null,
+      accountId: null,
+      accountLabel: null,
+      deliveryState: "idle",
+      pendingSince: null,
+      lastAttemptAt: null,
+      lastConfirmedSnapshotId: null,
+      lastConfirmedAt: null,
+      lastConfirmedCopyCreatedAt: null,
+      errorCode: null,
+      progressBytes: 0,
+      nextAttemptAt: null,
+    })),
+    retryYandexBackup: vi.fn<HostApi["retryYandexBackup"]>(() => unexpected("retryYandexBackup")),
+    disconnectYandex: vi.fn<HostApi["disconnectYandex"]>(() => unexpected("disconnectYandex")),
     bootstrap: vi.fn<HostApi["bootstrap"]>(() => unexpected("bootstrap")),
     officeLogin: vi.fn<HostApi["officeLogin"]>(() => unexpected("officeLogin")),
     officeLogout: vi.fn<HostApi["officeLogout"]>(async () => undefined),

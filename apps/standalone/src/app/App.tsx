@@ -67,7 +67,8 @@ import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
 import type { WindowMode } from "../office/window-mode.js";
-import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
+import { BootstrapEntry } from "../wizard/BootstrapEntry.js";
+import { YandexResume } from "../wizard/YandexResume.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
 import { createFullscreenController, type FullscreenController } from "./fullscreen.js";
@@ -968,7 +969,10 @@ function AppScreens({
           }
         />
       )}
-      {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
+      {view.kind === "host_missing" && role === "host" && <YandexResume />}
+      {view.kind === "bootstrap" && (
+        <BootstrapEntry onSubmit={bootstrap} recoveryAllowed={role === "host"} />
+      )}
       {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
       {view.kind === "network_pairing" && scannerSetup && (
         <WorkstationSetup

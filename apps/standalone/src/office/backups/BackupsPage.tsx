@@ -31,6 +31,7 @@ import { useBackupTime, type BackupTime } from "./backup-time.js";
 import { failureReason } from "./backup-warnings.js";
 import { BackupWarnings } from "./BackupWarnings.js";
 import { SecondDirForm } from "./SecondDirForm.js";
+import { YandexBackupCard } from "./YandexBackupCard.js";
 
 /**
  * «Резервные копии» (plan РК): the stations' facts a restore holds, both
@@ -45,6 +46,7 @@ export function BackupsPage() {
     <>
       <PageHeader title={t("office.backups.title")} description={t("office.backups.subtitle")} />
       <BackupsContent />
+      <YandexBackupCard />
     </>
   );
 }

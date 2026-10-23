@@ -669,7 +669,7 @@ describe("Резервные копии", () => {
         within(card("Приём данных станций остановлен")).getByRole("button", { name: RESUME }),
       );
     open();
-    fireEvent.click(await screen.findByRole("checkbox"));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     open();

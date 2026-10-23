@@ -18,7 +18,8 @@ const smoke = await text("tools/standalone-release/smoke.ps1");
 
 test("the Windows job builds, smoke-tests and keeps the installer, in that order", () => {
   // The smoke step alone may take 25 minutes before its own timeout stops it.
-  assert.ok(job["timeout-minutes"] >= 40);
+  // The load-test type-check (cold debug profile, ~8-15 min) runs after it.
+  assert.ok(job["timeout-minutes"] >= 55);
   const order = [
     "pnpm test:standalone-release:contract",
     "pnpm turbo build --filter '@markiro/standalone...'",
@@ -28,6 +29,8 @@ test("the Windows job builds, smoke-tests and keeps the installer, in that order
     "./tools/standalone-release/smoke.ps1 -BundleDir apps/standalone/target/release/bundle/nsis",
     "node tools/standalone-release/prepare.mjs",
     "actions/upload-artifact@",
+    // Compile-only, last: the artifact steps above stay as they were.
+    "cargo check --locked --tests -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml",
   ].map((needle) => runs.findIndex((run) => run.includes(needle)));
   assert.ok(
     order.every((index) => index >= 0),

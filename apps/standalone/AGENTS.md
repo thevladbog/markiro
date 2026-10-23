@@ -6609,6 +6609,27 @@ and the XML «Расформирование упаковки» are plan ДЗГ-
 
 ## Backups and restore
 
+Yandex Disk integration is under development (plan
+`docs/superpowers/plans/2026-10-22-standalone-yandex-disk-backups.md`). The
+`backup-cloud` workspace crate owns strict profiles, bounded age envelopes,
+direct OAuth and Disk transport and loopback callback parsing. `host/src/yandex`
+owns a separate delivery journal, service-account DPAPI credentials and the token
+coordinator. Host startup, admin routes, audit, native source pins and separate
+refresh/delivery loops are wired. Tauri native connection/profile import/export,
+Office status UI, marker-first remote retention and empty-host recovery are implemented.
+Recovery verifies before elevation and again in the fixed-target elevated helper,
+then uses the existing restore lock/intent. Its protected journal and exact restore
+receipt support resume without applying the snapshot twice. Unsent local facts
+block recovery; the preflight never deletes them. After restore, cloud stays
+disconnected until an Office administrator reconnects with ClientSecret.
+Host tests do not establish Windows or live-provider end-user acceptance; see
+`docs/verification/standalone-yandex-disk-acceptance.md`.
+Never substitute the shell's per-user secret store (which permits plaintext off
+Windows) for service credentials: this store fails closed off Windows. Every
+credential mutation must use one shared `TokenSupervisor`, with the generation
+captured when authorization began; direct raw-store writes are for its boundary
+and tests only. The native Windows DPAPI/ACL/LocalService checks remain separate.
+
 Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
 pilot spec's §11 and §22; the procedure is
 `docs/runbooks/standalone-backup-restore.md`). One worker task
@@ -7732,8 +7753,9 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
   empty check list does fail. Whether an unavailable probe on a `spawn` host should fail is an open owner decision.
 - Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
   redacted (`redact()` with the run's secrets) before writing; they are still internal results.
-- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and `standalone-windows-tests`, routed by
-  `tools/ci/affected.mjs`); both must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
+- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust`; `standalone-windows-tests` excludes this crate, and the last step of `standalone-windows-build` only
+  type-checks it with `cargo check --locked --tests`, so a Windows-only regression in its tests is caught by that compile step or the
+  opt-in `standalone-load.yml`, never by running them; routed by `tools/ci/affected.mjs`); both Windows jobs must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
   real `markiro-host` (it listens on `0.0.0.0`) or kills and restarts it on its port (`host.rs`, the spawned `kill-restart` and
   `outage` scenarios, the spawned panic test in `scenarios/mod.rs`): run them with `-- --ignored` on a trusted machine. The
   process control (stop, kill, `Drop`) is covered in the gate over a fake `sh`/`sleep` child (Unix). The `wal_watch.rs` tests that

@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-23",
+  "adapter": "Synthetic Host/native boundary with production BackupsPage and YandexRestoreWizard",
+  "browser": "Chromium via Playwright connector",
+  "checks": {
+    "adminConsent": true,
+    "readerReadOnly": true,
+    "connectedWithoutCopyWarning": true,
+    "staleWarning": true,
+    "quotaWarning": true,
+    "reauthWarning": true,
+    "explicitSnapshotSelection": true,
+    "oldHostConfirmation": true,
+    "recoveryCompleteHint": true,
+    "lightDarkThemes": true,
+    "fullHostIdAfterSelection": true
+  },
+  "viewportWidths": [1366, 1024, 480],
+  "horizontalOverflow": false,
+  "observedHarnessRequestHosts": ["127.0.0.1"],
+  "pageErrorsInFinalRun": [],
+  "windowsNativeBridgeExercised": false
+}
