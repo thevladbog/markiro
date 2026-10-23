@@ -3831,15 +3831,19 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   shift with `closeReasonMissing`: a select of the six
   `SHIFT_CLOSE_REASON_CODES` and `PUT …/close-reason`; a reason set meanwhile
   (`close_reason_not_missing`) is an alert in words of its own and a re-read of
-  the list. «Обзор» lists such a shift under «Требует внимания»; it reads
-  `listShifts` for the planned dates from today minus 6 days to tomorrow
-  (`use-overview-data.ts`: `plannedFrom`/`plannedTo`), not «31 days of closed
-  ones». A shift closed without its reason therefore leaves the «Обзор» about
-  seven days after its planned date, and the default «Смены» list (its own
-  31-day window of closed shifts) about 31 days after it; after that it is
-  reachable only by widening the period. Follow-up: the host's `list_shifts`
-  should also return `close_reason_missing = 1` shifts whatever their date, or
-  a dedicated query should list them.
+  the list. The host adds every shift with `closeReasonMissing` to every
+  `listShifts` answer whatever its period (host section «Shifts», up to 100),
+  so the request stays until the reason is given. «Обзор» lists such a shift
+  under «Требует внимания» whatever its date; its other blocks read only its
+  own days (`inOverviewPeriod`: the planned dates from today minus 6 days to
+  tomorrow, `overviewPeriod`), so an old shift owing a reason is no line
+  card's «Последняя». «Смены» lists it with the tag and the action even outside
+  the chosen period or the default 31 days (`beyondPeriod`), filtered by
+  status, line and search like any row; such rows stay out of the totals line,
+  and a note says how many are shown beyond the period. For the list without
+  a period the office tells them apart by this PC's UTC day against the host's
+  31 days, so at the window's edge one may be told apart a day early or late
+  (it affects the note and the totals only).
 - «Устройства»: the «Линия» cell carries a participation tag under the line's
   name (working, paused, part closed; `presenceOf`); the page reads the shifts
   for it and claims nothing when they do not load. No column was added. The
@@ -4028,7 +4032,17 @@ administrators and technologists write them (`planShifts`, «Writes»). The
 list without a period holds every planned and active shift and the closed
 ones produced in the last 31 days of the host's clock (UTC); `?from=&to=`
 (either may be left out) every shift produced in the period, both ends
-included; newest production date first. A shift is no feed record, but every
+included; newest production date first. Either way the list also holds
+every shift marked `close_reason_missing` (plan 2b, spec §12.9: the office's
+request for the reason must stay visible), once and in the same order, up to
+`REASON_MISSING_CAP` (100) of them, the newest by that order; past the cap
+the older ones wait for the newer ones' reasons or a period that holds them.
+The host filters by period only (`ShiftListQuery` refuses any other key):
+status, line and search are the office's filters over these rows, so an
+explicit status or line that does not match still hides such a shift there.
+The rule changes no field and no `PROTOCOL_VERSION`: the route is
+office-only, an older office just shows the extra rows as rows, and a newer
+office against an older host just lacks them. A shift is no feed record, but every
 change of one takes a host revision, stamped on its `rev`, with no feed item,
 so open streams wake and stations read their shifts again. `OfficeShift`
 carries ids, not names: the office names products, lines and counterparties

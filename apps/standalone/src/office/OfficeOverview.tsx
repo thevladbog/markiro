@@ -36,7 +36,7 @@ import { OfficeIcon } from "./OfficeIcon.js";
 import { civilHeading, zoneClock } from "./overview/overview-time.js";
 import { ShiftsPanel } from "./overview/ShiftsPanel.js";
 import { SystemPanel } from "./overview/SystemPanel.js";
-import { blockState, useOverviewData } from "./overview/use-overview-data.js";
+import { blockState, inOverviewPeriod, useOverviewData } from "./overview/use-overview-data.js";
 import { officeKeys, useOfficeQuery } from "./office-query.js";
 import { revokedDeviceIds } from "./shifts/participation.js";
 import { useViewportWidth } from "./use-viewport-width.js";
@@ -64,12 +64,22 @@ export function OfficeOverview() {
   );
   const { admin, zone, today, nowMs } = data;
 
-  const allShifts = data.shifts.data ?? NO_SHIFTS;
+  const answer = data.shifts.data ?? NO_SHIFTS;
+  // The host adds every shift closed without its reason whatever its date (spec §12.9): only the
+  // attention row reads those; every other block reads the overview's own days.
+  const allShifts = useMemo(
+    () => answer.filter((shift) => inOverviewPeriod(shift, today)),
+    [answer, today],
+  );
   // The demo shifts (spec 2026-10-21) are no production: the day's figures, the chart, the line
   // cards and the first steps leave them out; the shifts panel lists them, marked.
   const shifts = useMemo(
     () => withoutDemo(allShifts, data.products.data),
     [allShifts, data.products.data],
+  );
+  const owingReason = useMemo(
+    () => reasonMissingShifts(withoutDemo(answer, data.products.data)),
+    [answer, data.products.data],
   );
   const shiftsState = blockState(data.shifts);
   const linesState = blockState(data.shifts, data.lines);
@@ -120,7 +130,7 @@ export function OfficeOverview() {
       })),
     silentParticipants: silentParticipants(shifts, data.lines.data ?? [], nowMs, revoked),
     waitingShifts: waitingOnAbsentDevices(shifts, revoked),
-    reasonMissing: reasonMissingShifts(shifts),
+    reasonMissing: owingReason,
     nowMs,
     pcNowMs: Date.now(),
     format: (instant) => zoneClock(new Date(instant), zone).hm,

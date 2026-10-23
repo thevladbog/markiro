@@ -134,6 +134,48 @@ describe("«Обзор» with several devices on a line (plan 2b)", () => {
   });
 });
 
+describe("a shift closed without its reason long ago (spec §12.9: the request stays visible)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    window.innerWidth = 1440;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    window.innerWidth = 1024;
+  });
+
+  /** Made on 1 September, weeks before the Overview's days: the host lists it while the reason is owed. */
+  const OLD: OfficeShift = {
+    ...NO_REASON,
+    productionDate: "2026-09-01",
+    plannedDate: "2026-09-01",
+    closedAt: "2026-09-01T14:10:00Z",
+  };
+
+  it("still asks for the reason, and asks the host for the same days as before", async () => {
+    const session = overviewSession();
+    session.api.listShifts.mockResolvedValue([OLD]);
+    renderOffice(session);
+    const attention = await screen.findByRole("region", { name: "Требует внимания" });
+    expect(await within(attention).findByText("Смена OCT26-003 закрыта без причины")).toBeTruthy();
+    expect(session.api.listShifts).toHaveBeenCalledWith(expect.any(String), {
+      plannedFrom: "2026-10-04",
+      plannedTo: "2026-10-11",
+    });
+  });
+
+  it("leaves it out of the line cards: it is no shift of the Overview's days", async () => {
+    const session = overviewSession();
+    session.api.listShifts.mockResolvedValue([OLD]);
+    renderOffice(session);
+    const lines = await screen.findByRole("region", { name: "Линии" });
+    await within(lines).findByRole("article", { name: "Линия 2" });
+    await screen.findByText("Смена OCT26-003 закрыта без причины");
+    expect(within(lines).queryByText(/Последняя: OCT26-003/)).toBeNull();
+  });
+});
+
 describe("the silent mark follows the Overview's own clock (the host's time, read every 30 seconds)", () => {
   afterEach(() => {
     vi.useRealTimers();

@@ -74,6 +74,20 @@ export interface OverviewData {
   refetchAll: () => void;
 }
 
+/** The shift dates the overview asks the host for: the last seven days and tomorrow. */
+export function overviewPeriod(today: string): { plannedFrom: string; plannedTo: string } {
+  return { plannedFrom: addCivilDays(today, -6), plannedTo: addCivilDays(today, 1) };
+}
+
+/**
+ * Whether a shift of the host's answer is one of the overview's days: the host adds every shift
+ * closed without its reason whatever its date (spec §12.9), which only «Требует внимания» reads.
+ */
+export function inOverviewPeriod(shift: OfficeShift, today: string): boolean {
+  const { plannedFrom, plannedTo } = overviewPeriod(today);
+  return shift.plannedDate >= plannedFrom && shift.plannedDate <= plannedTo;
+}
+
 /** Every read behind «Обзор», each its own query, so one failing leaves the others. */
 export function useOverviewData(): OverviewData {
   const { user } = useOfficeSession();
@@ -84,7 +98,7 @@ export function useOverviewData(): OverviewData {
   const today = civilToday(zone);
   const yesterday = addCivilDays(today, -1);
   const tomorrow = addCivilDays(today, 1);
-  const period = { plannedFrom: addCivilDays(today, -6), plannedTo: tomorrow };
+  const period = overviewPeriod(today);
   const shifts = useOfficeQuery(
     officeKeys.shiftList(period),
     (api, token) => api.listShifts(token, period),
