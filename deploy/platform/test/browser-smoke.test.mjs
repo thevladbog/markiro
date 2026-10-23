@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,21 +11,23 @@ for (const screenshotFails of [false, true]) {
     const directory = await mkdtemp(join(tmpdir(), "platform-browser-test-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const original = new Error("email input did not appear");
-    const listeners = {};
+    const listeners = new EventEmitter();
     let closed = false;
     let screenshots = 0;
     const page = {
       on: (name, callback) => {
-        listeners[name] = callback;
+        listeners.on(name, callback);
       },
+      off: (name, callback) => listeners.off(name, callback),
       goto: async () => {
-        listeners.pageerror(new Error("module initialization failed"));
-        listeners.response({
+        listeners.emit("pageerror", new Error("module initialization failed"));
+        listeners.emit("response", {
           url: () => "https://saas-admin.localhost:1234/assets/chunk.js?secret=omit",
           status: () => 404,
         });
-        listeners.requestfailed({
+        listeners.emit("requestfailed", {
           url: () => "https://saas-admin.localhost:1234/assets/app.js?token=never-record",
+          method: () => "GET",
           resourceType: () => "script",
           failure: () => ({ errorText: "net::ERR_CONNECTION_RESET" }),
         });
@@ -124,3 +127,94 @@ test("HTTP failure responses are returned unchanged and never retried", async ()
   );
   assert.equal(calls, 1);
 });
+
+test("initial render reloads only when local static modules hit a network change", async () => {
+  const listeners = new Map();
+  let calls = 0;
+  let waits = 0;
+  const page = {
+    on: (event, listener) => listeners.set(event, listener),
+    off: (event) => listeners.delete(event),
+    goto: async () => {
+      calls++;
+      if (calls === 1)
+        listeners.get("requestfailed")?.({
+          url: () => "https://saas-admin.localhost:1234/assets/Login.js",
+          method: () => "GET",
+          resourceType: () => "script",
+          failure: () => ({ errorText: "net::ERR_NETWORK_CHANGED" }),
+        });
+      return { status: () => 200 };
+    },
+  };
+  await navigateLocalPage(
+    page,
+    "https://saas-admin.localhost:1234/login",
+    async () => {
+      waits++;
+    },
+    async () => {
+      if (calls === 1) {
+        const error = new Error("email input did not appear");
+        error.name = "TimeoutError";
+        throw error;
+      }
+    },
+  );
+  assert.equal(calls, 2);
+  assert.equal(waits, 1);
+  assert.equal(listeners.size, 0);
+});
+
+for (const scenario of [
+  { name: "plain render timeout", emitFailure: false },
+  { name: "different transport error", errorText: "net::ERR_CONNECTION_RESET" },
+  { name: "foreign origin", url: "https://api.markiro.ru/assets/Login.js" },
+  { name: "different local port", url: "https://saas-admin.localhost:4321/assets/Login.js" },
+  { name: "non-asset path", url: "https://saas-admin.localhost:1234/api/module.js" },
+  { name: "POST", method: "POST" },
+  { name: "XHR", resourceType: "xhr" },
+  { name: "HTTP error", httpError: true },
+  { name: "application error", pageError: true },
+  { name: "readiness assertion", assertion: true },
+  { name: "persistent network changes", expectedCalls: 3 },
+]) {
+  test(`initial render preserves failure: ${scenario.name}`, async () => {
+    const events = new EventEmitter();
+    let calls = 0;
+    const original = new Error(
+      scenario.assertion ? "assertion: net::ERR_NETWORK_CHANGED" : "render did not finish",
+    );
+    original.name = scenario.assertion ? "AssertionError" : "TimeoutError";
+    const page = {
+      on: (...args) => events.on(...args),
+      off: (...args) => events.off(...args),
+      goto: async () => {
+        calls++;
+        if (scenario.emitFailure !== false)
+          events.emit("requestfailed", {
+            url: () => scenario.url ?? "https://saas-admin.localhost:1234/assets/Login.js",
+            method: () => scenario.method ?? "GET",
+            resourceType: () => scenario.resourceType ?? "script",
+            failure: () => ({ errorText: scenario.errorText ?? "net::ERR_NETWORK_CHANGED" }),
+          });
+        if (scenario.pageError) events.emit("pageerror", new Error("broken application"));
+        if (scenario.httpError) events.emit("response", { status: () => 503 });
+        return { status: () => 200 };
+      },
+    };
+    await assert.rejects(
+      navigateLocalPage(
+        page,
+        "https://saas-admin.localhost:1234/login",
+        async () => {},
+        async () => {
+          throw original;
+        },
+      ),
+      (error) => error === original,
+    );
+    assert.equal(calls, scenario.expectedCalls ?? 1);
+    assert.equal(events.eventNames().length, 0, "scoped render listeners are always removed");
+  });
+}
