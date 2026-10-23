@@ -611,7 +611,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "Интернет не нужен",
         paragraphs: [
-          "Ни станция, ни главный ПК не обращаются к внешним серверам во время работы. Лицензия загружается файлом, обновление тоже загружается файлом в офисе, а станции получают его с главного ПК.",
+          "Станциям и главному ПК не нужны внешние серверы: смена идёт целиком в сети завода. Лицензия загружается файлом, обновление тоже загружается файлом в офисе, а станции получают его с главного ПК.",
           "Интернет понадобится только сотруднику, который отправляет выгрузки в «Честный знак» со своего компьютера.",
         ],
       },
@@ -1337,7 +1337,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "No internet needed",
         paragraphs: [
-          "Neither the station nor the main PC contacts external servers during work. The licence is loaded from a file, an update is loaded from a file in the office too, and stations take it from the main PC.",
+          "Stations and the main PC need no external servers: the shift runs entirely inside the plant network. The licence is loaded from a file, an update is loaded from a file in the office too, and stations take it from the main PC.",
           "Internet access is needed only by the employee who submits exports to Chestny ZNAK from their own computer.",
         ],
       },
