@@ -158,7 +158,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
           "Этикетка короба строится из тех же данных, которые прошли проверку: SSCC, GTIN, количество единиц и печатное название товара. Шаблон настраивается в офисе в редакторе, а станция печатает его на принтере линии на языке ZPL или TSPL. Предпросмотр и печать используют одну модель, поэтому кириллица и штрихкод на экране и на бумаге совпадают.",
         ],
         bullets: [
-          "готовые шаблоны коробов 58×40, 75×120, 100×100 и 100×150 мм и шаблоны паллет;",
+          "готовые шаблоны коробов 58×40, 75×120, 100×100 и 100×150 мм и паллет 58×40, 75×120 и 100×150 мм;",
           "шаблон по умолчанию задаётся для товара;",
           "принтер подключается по сети, через COM-порт или как принтер Windows;",
           "перепечатка этикетки закрытого короба записывается в журнал с причиной.",
@@ -875,7 +875,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
           "A case label is built from the same data that passed validation: SSCC, GTIN, item count and the product's print name. The template is designed in the office editor, and the station prints it on the line printer in ZPL or TSPL. Preview and print share one model, so Cyrillic text and barcodes match between screen and paper.",
         ],
         bullets: [
-          "stock case templates of 58×40, 75×120, 100×100 and 100×150 mm, plus pallet templates;",
+          "stock case templates of 58×40, 75×120, 100×100 and 100×150 mm and pallet templates of 58×40, 75×120 and 100×150 mm;",
           "a default template is set per product;",
           "the printer connects over the network, through a COM port or as a Windows printer;",
           "reprinting a closed case's label is logged with a reason.",

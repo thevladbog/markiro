@@ -71,8 +71,8 @@ export const HOME_COPY_EN = {
         text: "automatic backups of the database on the main PC while data changes, at least one a day, and one on demand.",
       },
       {
-        value: "16",
-        text: "stations and handhelds at most on one line in one shift, all reporting to the same main PC.",
+        value: "1 PC",
+        text: "holds the database of every line at the plant. Stations and handhelds connect to it over the network; the plan sets the number of lines and workstations.",
       },
     ],
   },
@@ -99,7 +99,7 @@ export const HOME_COPY_EN = {
     },
     labels: {
       title: "Labels",
-      text: "Stock case and pallet templates in sizes from 58×40 to 100×150 mm. Preview and print are built from one layout.",
+      text: "Stock case templates of 58×40, 75×120, 100×100 and 100×150 mm and pallet templates of 58×40, 75×120 and 100×150 mm. Preview and print are built from one layout.",
       boxAlt: "100×150 case label: 16 units per pack, production date, SSCC.",
       palletAlt: "100×150 pallet label: 8 cases, 128 units, GTIN, SSCC.",
     },
