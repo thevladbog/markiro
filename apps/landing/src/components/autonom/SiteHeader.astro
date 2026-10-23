@@ -1,5 +1,6 @@
 ---
 import { DOWNLOAD_PATH, SITE_NAV } from "../../content/autonom";
+import { SITE_NAV_EN } from "../../content/autonom-en";
 import { SITE_CONTACTS } from "../../content/contacts";
 import type { PublicPhone } from "../../lib/site-config";
 import BrandMark from "../BrandMark.astro";
@@ -8,24 +9,58 @@ import Icon from "./Icon.astro";
 interface Props {
   path: string;
   phone: PublicPhone | null;
+  locale?: "ru" | "en";
 }
 
-const { path, phone } = Astro.props;
+const { path, phone, locale = "ru" } = Astro.props;
+const COPY = {
+  ru: {
+    home: "/",
+    homeLabel: "Маркиро, на главную страницу",
+    sections: "Разделы сайта",
+    theme: "Тема оформления",
+    themeShort: "Тема",
+    themes: ["Системная", "Светлая", "Тёмная"],
+    download: "Скачать пробную версию",
+    call: "Позвонить",
+    menuOpen: "Открыть меню",
+    menuClose: "Закрыть меню",
+    mailLink: "Прислать ссылку на почту",
+  },
+  en: {
+    home: "/en/",
+    homeLabel: "Markiro home page",
+    sections: "Site sections",
+    theme: "Colour theme",
+    themeShort: "Theme",
+    themes: ["System", "Light", "Dark"],
+    download: "Download the trial",
+    call: "Call",
+    menuOpen: "Open menu",
+    menuClose: "Close menu",
+    mailLink: "Get the link by email",
+  },
+} as const;
+const copy = COPY[locale];
+const nav: readonly { readonly href: string; readonly label: string }[] =
+  locale === "en" ? SITE_NAV_EN : SITE_NAV;
+// The download page is Russian only, so English links to it say so with hreflang.
+const downloadLang = locale === "en" ? "ru" : undefined;
 const themes = [
-  { choice: "system", label: "Системная", icon: "monitor" },
-  { choice: "light", label: "Светлая", icon: "sun" },
-  { choice: "dark", label: "Тёмная", icon: "moon" },
+  { choice: "system", label: copy.themes[0], icon: "monitor" },
+  { choice: "light", label: copy.themes[1], icon: "sun" },
+  { choice: "dark", label: copy.themes[2], icon: "moon" },
 ] as const;
 ---
 
 <header class="ax-header" data-header>
   <div class="ax-header__bar">
-    <a class="ax-header__brand" href="/" aria-label="Маркиро, на главную страницу">
-      <BrandMark locale="ru" />
+    <a class="ax-header__brand" href={copy.home} aria-label={copy.homeLabel}>
+      <BrandMark locale={locale} />
     </a>
 
-    <nav class="ax-nav" aria-label="Разделы сайта">
-      {SITE_NAV.map((item) => (
+    <nav class="ax-nav" aria-label={copy.sections}>
+      {nav.map((item) => (
         <a href={item.href} aria-current={item.href === path ? "page" : undefined}>{item.label}</a>
       ))}
     </nav>
@@ -37,13 +72,13 @@ const themes = [
           type="button"
           aria-controls="ax-theme-menu"
           aria-expanded="false"
-          aria-label="Тема оформления"
+          aria-label={copy.theme}
           data-theme-toggle
         >
           <Icon name="moon" class="ax-theme__icon ax-theme__icon--moon" />
           <Icon name="sun" class="ax-theme__icon ax-theme__icon--sun" />
         </button>
-        <div class="ax-theme__menu" id="ax-theme-menu" role="group" aria-label="Тема оформления" hidden>
+        <div class="ax-theme__menu" id="ax-theme-menu" role="group" aria-label={copy.theme} hidden>
           {themes.map((theme) => (
             <button type="button" class="ax-theme__option" data-theme-option={theme.choice} aria-pressed="false">
               <Icon name={theme.icon} size={16} />
@@ -57,12 +92,12 @@ const themes = [
           {phone.display}
         </a>
       )}
-      <a class="ax-btn ax-btn--accent ax-btn--sm ax-header__cta" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="header">
-        <span>Скачать пробную версию</span>
+      <a class="ax-btn ax-btn--accent ax-btn--sm ax-header__cta" href={DOWNLOAD_PATH} hreflang={downloadLang} data-analytics="landing_download_click" data-placement="header">
+        <span>{copy.download}</span>
         <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
       </a>
       {phone && (
-        <a class="ax-icon-button ax-header__call" href={phone.href} aria-label={`Позвонить: ${phone.display}`} data-analytics="landing_phone_click" data-placement="header_mobile">
+        <a class="ax-icon-button ax-header__call" href={phone.href} aria-label={`${copy.call}: ${phone.display}`} data-analytics="landing_phone_click" data-placement="header_mobile">
           <Icon name="phone" />
         </a>
       )}
@@ -71,9 +106,9 @@ const themes = [
         type="button"
         aria-controls="ax-menu"
         aria-expanded="false"
-        aria-label="Открыть меню"
-        data-menu-open-label="Открыть меню"
-        data-menu-close-label="Закрыть меню"
+        aria-label={copy.menuOpen}
+        data-menu-open-label={copy.menuOpen}
+        data-menu-close-label={copy.menuClose}
         data-menu-trigger
       >
         <Icon name="menu" class="ax-menu-icon ax-menu-icon--open" />
@@ -83,8 +118,8 @@ const themes = [
   </div>
 
   <div class="ax-menu" id="ax-menu" data-menu>
-    <nav class="ax-menu__nav" aria-label="Разделы сайта">
-      {SITE_NAV.map((item) => (
+    <nav class="ax-menu__nav" aria-label={copy.sections}>
+      {nav.map((item) => (
         <a href={item.href} aria-current={item.href === path ? "page" : undefined}>
           {item.label}
           <Icon name="arrow-right" />
@@ -92,7 +127,7 @@ const themes = [
       ))}
     </nav>
     <div class="ax-menu__theme">
-      <span class="ax-menu__theme-label" id="ax-menu-theme-label">Тема</span>
+      <span class="ax-menu__theme-label" id="ax-menu-theme-label">{copy.themeShort}</span>
       <div class="ax-segmented" role="group" aria-labelledby="ax-menu-theme-label">
         {themes.map((theme) => (
           <button type="button" data-theme-option={theme.choice} aria-pressed="false">
@@ -107,7 +142,7 @@ const themes = [
         {phone && (
           <a class="ax-btn ax-btn--outline" href={phone.href} data-analytics="landing_phone_click" data-placement="menu">
             <Icon name="phone" size={18} />
-            <span>Позвонить</span>
+            <span>{copy.call}</span>
           </a>
         )}
         <a class="ax-btn ax-btn--outline" href={SITE_CONTACTS.telegram.href}>
@@ -115,8 +150,8 @@ const themes = [
           <span>Telegram</span>
         </a>
       </div>
-      <a class="ax-btn ax-btn--accent ax-btn--block" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="menu">
-        <span>Прислать ссылку на почту</span>
+      <a class="ax-btn ax-btn--accent ax-btn--block" href={DOWNLOAD_PATH} hreflang={downloadLang} data-analytics="landing_download_click" data-placement="menu">
+        <span>{copy.mailLink}</span>
         <span class="ax-btn__icon"><Icon name="mail" size={18} /></span>
       </a>
     </div>

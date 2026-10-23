@@ -114,6 +114,25 @@
 			respond 404
 		}
 
+		# Retired pages answer with a permanent redirect to the home page of
+		# their language, before any file or canonical-form rule sees them: the
+		# film (2026-10-23).
+		@retiredRu {
+			method GET HEAD
+			path /kak-rabotaet /kak-rabotaet/ /kak-rabotaet/* /kak-rabotaet.md
+		}
+		handle @retiredRu {
+			redir * /{http.request.uri.prefixed_query} 301
+		}
+
+		@retiredEn {
+			method GET HEAD
+			path /en/how-it-works /en/how-it-works/ /en/how-it-works/* /en/how-it-works.md
+		}
+		handle @retiredEn {
+			redir * /en/{http.request.uri.prefixed_query} 301
+		}
+
 		@landingAssets {
 			path /assets/*
 			method GET HEAD

@@ -1,4 +1,5 @@
 import { HOME_FAQ } from "./autonom";
+import { HOME_FAQ_EN } from "./autonom-en";
 
 export type CanonicalPath =
   | "/"
@@ -903,17 +904,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/",
     alternatePath: "/",
     locale: "en",
-    title: "Serialization and aggregation software for Chestny ZNAK — Markiro",
+    title: "Markiro Autonom: Chestny ZNAK serialization and aggregation on your PC",
     description:
-      "Code verification on the line, case and pallet aggregation, label printing and offline work. For juice, dairy, beer, cosmetics and other marked goods.",
-    heading: "Serialization and aggregation. Keep the line moving.",
+      "A station on the line checks every code and builds cases and pallets with SSCC. The software and the database run on your own PCs with no internet. 14-day free trial.",
+    heading: "Serialization and aggregation. All on your PC.",
     navigationLabel: "Markiro",
-    eyebrow: "Serialization / aggregation / traceability",
+    eyebrow: "Markiro Autonom · for Windows",
     introduction:
-      "A production system for any marked goods: code verification, case and pallet aggregation, label printing, and station work without a network.",
+      "A station on the line checks every code before it goes into a case and builds cases and pallets with SSCC. The software, the database and the backups run on your own computers: a shift needs no internet.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-09-26",
+    reviewedAt: "2026-10-23",
     summary: [],
     relatedPaths: [
       "/en/chestny-znak-serialization/",
@@ -922,6 +923,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
     relatedArticlePaths: [],
     sections: [],
+    faq: HOME_FAQ_EN,
   },
   {
     path: "/en/chestny-znak-serialization/",

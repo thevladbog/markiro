@@ -27,6 +27,7 @@ import {
 } from "../../content/pricing";
 import { buildPageGraph } from "../../lib/seo";
 import { readPublicSiteConfig } from "../../lib/site-config";
+import DemoSection from "../DemoSection.astro";
 import AutonomPage from "./AutonomPage.astro";
 import ClientStrip from "./ClientStrip.astro";
 import FaqSection from "./FaqSection.astro";
@@ -39,7 +40,15 @@ interface Props {
 }
 
 const { page } = Astro.props;
-const phone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone;
+const config = readPublicSiteConfig(
+  {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
+  },
+  "ru",
+);
+const phone = config.phone;
 const copy = HOME_COPY;
 const covers = [homeCover("ru", "mkr-ins-01"), homeCover("ru", "mkr-ins-02"), homeCover("ru", "mkr-ins-09")];
 const startPrice = formatRoubles(findTariff("start").priceFrom);
@@ -306,5 +315,22 @@ const startPrice = formatRoubles(findTariff("start").priceFrom);
     <a href="mailto:hello@markiro.app">hello@markiro.app</a>.
   </FaqSection>
 
-  <FinalCta phone={phone} id="demo" />
+  <FinalCta phone={phone} />
+
+  <DemoSection
+    locale="ru"
+    phone={phone}
+    demoEndpoint={config.demoEndpoint}
+    legalLinks={config.legalLinks}
+    captchaClientKey={config.captchaClientKey}
+    consentVersion={config.consentVersion}
+    sourcePath={page.path}
+  />
+
+  <script>
+    import { browserDemoFormRuntime, initDemoForm } from "../../scripts/demo-form";
+
+    const demoForm = document.querySelector<HTMLFormElement>("[data-demo-form]");
+    if (demoForm !== null) initDemoForm(demoForm, browserDemoFormRuntime(window));
+  </script>
 </AutonomPage>

@@ -11,8 +11,8 @@ import { landingBuildEnvironment, landingRoot, prepareLandingDist } from "./land
 const execFileAsync = promisify(execFile);
 export const LIGHTHOUSE_RUN_COUNT = 3;
 /**
- * The home page, the download and pricing pages, one commercial topic page, one article
- * and the film: the page templates that carry leads.
+ * Both home pages, the download and pricing pages, one commercial topic page and one
+ * article: the page templates that carry leads.
  */
 export const LIGHTHOUSE_ROUTES = Object.freeze([
   "/",
@@ -20,7 +20,7 @@ export const LIGHTHOUSE_ROUTES = Object.freeze([
   "/stoimost/",
   "/markirovka-chestny-znak/",
   "/stati/markirovka-piva-2026/",
-  "/kak-rabotaet/",
+  "/en/",
 ]);
 export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   seo: 1,

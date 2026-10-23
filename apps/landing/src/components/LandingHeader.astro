@@ -3,34 +3,27 @@ import type { PublicPhone } from "../lib/site-config";
 import { getUiCopy } from "../content/ui";
 import type { PageMetadata } from "../lib/seo";
 import { DOWNLOAD_PATH, SITE_NAV } from "../content/autonom";
-import { hubPath } from "../content/hubs";
+import { SITE_NAV_EN } from "../content/autonom-en";
 import BrandMark from "./BrandMark.astro";
 
 interface Props {
   page: Pick<PageMetadata, "locale" | "path" | "alternatePath">;
   phone: PublicPhone | null;
-  /** English pages: overrides the demo button's target for a page with its own #demo section, such as the film. */
-  demoHref?: string;
 }
 
-const { page, phone, demoHref } = Astro.props;
+const { page, phone } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
 const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
 const enPath = page.locale === "en" ? page.path : (page.alternatePath ?? "/en/");
-// Russian pages share the standalone navigation; the English site keeps the cloud-era set.
-const links = page.locale === "ru"
-  ? SITE_NAV.map((item) => [item.href, item.label] as const)
-  : ([
-      ["/en/#product", copy.nav.product],
-      ["/en/how-it-works/", copy.nav.howItWorks],
-      [hubPath("en", "instructions"), copy.nav.instructions],
-      [hubPath("en", "articles"), copy.nav.articles],
-      ["/en/faq/", copy.nav.faq],
-    ] as const);
+// Both languages share the standalone navigation of their home page.
+const links = (page.locale === "ru" ? SITE_NAV : SITE_NAV_EN).map(
+  (item) => [item.href, item.label] as const,
+);
+// The download page is Russian only; an English link to it says so with hreflang.
 const cta = page.locale === "ru"
-  ? { href: DOWNLOAD_PATH, label: "Скачать пробную версию", analytics: "landing_download_click" }
-  : { href: demoHref ?? `${homePath}#demo`, label: copy.requestDemoShort, analytics: "landing_demo_click" };
+  ? { label: "Скачать пробную версию", hreflang: undefined }
+  : { label: "Download the trial", hreflang: "ru" };
 ---
 
 <header class="landing-header" data-header>
@@ -57,7 +50,7 @@ const cta = page.locale === "ru"
     </span>
   </nav>
 
-  <a class="button button--compact landing-header__cta" href={cta.href} data-analytics={cta.analytics} data-placement="header">
+  <a class="button button--compact landing-header__cta" href={DOWNLOAD_PATH} hreflang={cta.hreflang} data-analytics="landing_download_click" data-placement="header">
     {cta.label}
   </a>
   <button

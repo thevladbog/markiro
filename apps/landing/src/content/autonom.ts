@@ -7,8 +7,8 @@
 
 import type { FaqEntry } from "./pages";
 
-/** The demo-request form lives on the film page; «разобрать линию» and «созвон» lead there. */
-export const CALL_HREF = "/kak-rabotaet/#demo";
+/** The demo-request form closes the home page; «разобрать линию» and «созвон» lead there. */
+export const CALL_HREF = "/#demo";
 export const DOWNLOAD_PATH = "/skachat/";
 export const PRICING_PATH = "/stoimost/";
 export const INVOICE_ANCHOR = "schet";
@@ -20,7 +20,7 @@ export function invoiceHref(tariffCode?: string): string {
 }
 
 export const SITE_NAV = [
-  { href: "/kak-rabotaet/", label: "Как работает" },
+  { href: "/#produkt", label: "Продукт" },
   { href: PRICING_PATH, label: "Цены" },
   { href: DOWNLOAD_PATH, label: "Скачать" },
   { href: "/instruktsii/", label: "Инструкции" },

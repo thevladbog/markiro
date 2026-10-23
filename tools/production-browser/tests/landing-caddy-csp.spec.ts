@@ -1,11 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-// Headless Chromium has no GPU; SwiftShader provides WebGL 2 for the film test below.
-// This config caps workers at 1, so a describe-scoped override would need a second
-// worker and Playwright refuses; the flags are harmless for the file's other, non-WebGL
-// routes, so they are declared once for the whole file instead.
-test.use({ launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } });
-
 const routes = [
   { path: "/legal/", copiedLabel: "Скопировано" },
   {
@@ -128,18 +122,27 @@ test("production Caddy serves markdown mirrors and the full text as noindex agen
   expect(await feed.text()).toContain('<rss version="2.0"');
 });
 
-test.describe("film page under the production CSP", () => {
-  test("runs its 3D stage without CSP violations", async ({ page }) => {
-    const errors: string[] = [];
-    page.on("console", (message) => {
-      if (message.type() === "error") errors.push(message.text());
-    });
-    page.on("pageerror", (error) => errors.push(error.message));
-    const response = await page.goto("/kak-rabotaet/", { waitUntil: "networkidle" });
-    expect(response?.status()).toBe(200);
-    expect(response?.headers()["content-security-policy"]).toContain("script-src 'self'");
-    await page.evaluate(() => window.scrollBy({ top: 400, behavior: "instant" }));
-    await expect(page.locator("[data-film]")).toHaveClass(/film--live/, { timeout: 20_000 });
-    expect(errors).toEqual([]);
-  });
+// Retired pages: the film (2026-10-23) moves permanently to the home page of its
+// language and keeps the query string.
+const retiredRedirects = new Map([
+  ["/kak-rabotaet/", "/"],
+  ["/kak-rabotaet", "/"],
+  ["/kak-rabotaet/index.html", "/"],
+  ["/kak-rabotaet.md", "/"],
+  ["/kak-rabotaet/?utm_source=test", "/?utm_source=test"],
+  ["/en/how-it-works/", "/en/"],
+  ["/en/how-it-works", "/en/"],
+  ["/en/how-it-works.md", "/en/"],
+]);
+
+test("production Caddy moves retired pages permanently to their home page", async ({ request }) => {
+  for (const [retired, target] of retiredRedirects) {
+    const response = await request.get(retired, { maxRedirects: 0 });
+    expect(response.status(), retired).toBe(301);
+    expect(response.headers().location, retired).toBe(target);
+  }
+  for (const live of ["/", "/en/", "/skachat/"]) {
+    const response = await request.get(live, { maxRedirects: 0 });
+    expect(response.status(), live).toBe(200);
+  }
 });

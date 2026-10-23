@@ -1,13 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-// Headless Chromium has no GPU; SwiftShader provides WebGL 2 for the film tests below.
-// This config caps workers at 1, so a describe-scoped override would need a second
-// worker and Playwright refuses; the flags are harmless for the file's other, non-WebGL
-// pages, so they are declared once for the whole file instead.
-test.use({ launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } });
 
 interface LegalArtifactManifestEntry {
   readonly fileName: string;
@@ -85,7 +79,6 @@ const routes = [
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
-  "/kak-rabotaet/",
   "/en/",
   "/en/chestny-znak-serialization/",
   "/en/sscc-and-aggregation/",
@@ -103,7 +96,6 @@ const routes = [
   "/en/1c-integration/",
   "/en/offline-production/",
   "/en/faq/",
-  "/en/how-it-works/",
   "/legal/",
   "/privacy/",
   "/personal-data-consent/",
@@ -204,8 +196,8 @@ test("a successful demo request emits one submit attempt and one lead event", as
     });
   });
 
-  // The Russian demo form lives on the film page since the standalone home (2026-10-21).
-  await page.goto("/kak-rabotaet/");
+  // The Russian demo form closes the home page (2026-10-23).
+  await page.goto("/");
   await page.locator("[data-consent-accept]").click();
   const form = page.locator("[data-demo-form]");
   await form.evaluate((element) => {
@@ -253,11 +245,11 @@ const demoCases = [
       name: "Анна",
       phone: "+79991234567",
       requestId: "11111111-1111-4111-8111-111111111111",
-      sourcePath: "/kak-rabotaet/",
+      sourcePath: "/",
       website: "",
     },
     name: "Анна",
-    path: "/kak-rabotaet/",
+    path: "/",
     phone: "8 (999) 123-45-67",
     success: "Запрос получили",
     token: "ru-captcha-token",
@@ -546,7 +538,7 @@ test("the captcha runtime loads only once the visitor reaches the demo form", as
     });
   });
 
-  await page.goto("/kak-rabotaet/", { waitUntil: "networkidle" });
+  await page.goto("/", { waitUntil: "networkidle" });
   expect(captchaRequests).toBe(0);
   await expect(
     page.locator('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
@@ -589,7 +581,7 @@ test("article hero keeps a clear heading hierarchy", async ({ page }) => {
 
 for (const [route, wordmark, headerTheme, footerTheme] of [
   ["/", "маркиро", "light", "dark"],
-  ["/en/", "MARKIRO", "light", "light"],
+  ["/en/", "MARKIRO", "light", "dark"],
   ["/sscc-i-agregatsiya/", "маркиро", "dark", "dark"],
   ["/en/sscc-and-aggregation/", "MARKIRO", "dark", "dark"],
 ] as const) {
@@ -641,44 +633,38 @@ test("/ renders the public contact phone", async ({ page }) => {
     await page
       .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
       .evaluateAll((links) => links.map((link) => (link as HTMLElement).dataset.placement).sort()),
-  ).toEqual(["final", "header", "header_mobile", "menu"]);
-  const final = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
-  await expect(final).toBeVisible();
-  await expect(final).toHaveAttribute("href", expectedHref);
+  ).toEqual(["demo", "final", "header", "header_mobile", "menu"]);
+  const demo = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
+  await expect(demo).toBeVisible();
+  await expect(demo).toHaveAttribute("href", expectedHref);
 });
 
-for (const route of ["/en/"] as const) {
-  test(`${route} renders the public contact phone`, async ({ page }) => {
-    await page.goto(route);
-    const expectedPhone = "+7 960 495-46-10";
-    const expectedHref = "tel:+79604954610";
-
-    await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(4);
-    expect(
-      await page
-        .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
-        .evaluateAll((links) =>
-          links.map((link) => (link as HTMLElement).dataset.placement).sort(),
-        ),
-    ).toEqual(["demo", "footer", "header", "hero"]);
-    for (const phone of [
-      page.locator("#hero").getByRole("link", { name: expectedPhone, exact: true }),
-      page.locator("#demo").getByRole("link", { name: expectedPhone, exact: true }),
-    ]) {
-      await expect(phone).toBeVisible();
-      await expect(phone).toHaveAttribute("href", expectedHref);
-    }
-  });
-}
+test("/en/ renders the public contact phone", async ({ page }) => {
+  await page.goto("/en/");
+  const expectedHref = "tel:+79604954610";
+  expect(
+    await page
+      .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
+      .evaluateAll((links) => links.map((link) => (link as HTMLElement).dataset.placement).sort()),
+  ).toEqual(["demo", "final", "header", "header_mobile", "menu"]);
+  const demo = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
+  await expect(demo).toBeVisible();
+  await expect(demo).toHaveAttribute("href", expectedHref);
+});
 
 test("language switch connects exact page counterparts", async ({ page }) => {
   await page.goto("/en/offline-production/");
   const menuTrigger = page.locator("[data-menu-trigger]");
   if (await menuTrigger.isVisible()) await menuTrigger.click();
 
-  await expect(page.locator('a[hreflang="ru"]')).toHaveAttribute("href", "/oflayn-rabota/");
-  await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("href", "/en/offline-production/");
-  await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("aria-current", "page");
+  // English pages also mark their links to the Russian-only download page with hreflang.
+  const languages = page.locator(".language-switch");
+  await expect(languages.locator('a[hreflang="ru"]')).toHaveAttribute("href", "/oflayn-rabota/");
+  await expect(languages.locator('a[hreflang="en"]')).toHaveAttribute(
+    "href",
+    "/en/offline-production/",
+  );
+  await expect(languages.locator('a[hreflang="en"]')).toHaveAttribute("aria-current", "page");
 });
 
 for (const [route, counterpart, registry] of [
@@ -897,47 +883,6 @@ for (const route of ["/d/mkr-pd-01/2026.08/01/15.08.2026", "/d/MKR-PD-01/2026.08
   });
 }
 
-test.describe("film page", () => {
-  test("starts the 3D stage only after the first scroll", async ({ page }) => {
-    await page.goto("/kak-rabotaet/", { waitUntil: "networkidle" });
-    const film = page.locator("[data-film]");
-    await expect(film).not.toHaveClass(/film--live/);
-    await page.evaluate(() => window.scrollBy({ top: 400, behavior: "instant" }));
-    await expect(film).toHaveClass(/film--live/, { timeout: 20_000 });
-    await expect
-      .poll(async () => Number(await film.getAttribute("data-film-time")), { timeout: 10_000 })
-      .toBeGreaterThan(0);
-  });
-
-  test("marks the chapter the rail links to", async ({ page, isMobile }) => {
-    test.skip(isMobile, "the rail is hidden on phones");
-    // The rail follows the scroll position, not the 3D stage. With motion allowed, the first
-    // scroll starts the stage, and on a CI browser without a GPU its build and first
-    // software-rendered frames hold the main thread past this test's timeout.
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/kak-rabotaet/");
-    await page.evaluate(() => window.scrollBy({ top: 2000, behavior: "instant" }));
-    const link = page.locator('[data-film-rail] a[href="#warehouse"]');
-    await expect(link).toBeVisible();
-    await link.click();
-    await expect(link).toHaveAttribute("aria-current", "step");
-  });
-
-  test("keeps the posters and never goes live with reduced motion", async ({ browser }) => {
-    const context = await browser.newContext({
-      baseURL: "http://127.0.0.1:5473",
-      reducedMotion: "reduce",
-    });
-    const page = await context.newPage();
-    await page.goto("/kak-rabotaet/");
-    await page.evaluate(() => window.scrollBy({ top: 1400, behavior: "instant" }));
-    await page.waitForTimeout(1_000);
-    await expect(page.locator("[data-film]")).not.toHaveClass(/film--live/);
-    await expect(page.locator("#line .film-chapter__poster img")).toBeVisible();
-    await context.close();
-  });
-});
-
 test.describe("home page", () => {
   test("cookie panel buttons keep readable hover colors on the light home", async ({ page }) => {
     await page.goto("/");
@@ -963,76 +908,23 @@ test.describe("home page", () => {
       .toBe("rgb(107, 229, 153)");
   });
 
-  test("hotspots show their screen on hover and focus, and Escape hides it", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "phones get the card strip instead of hotspots");
-    // The map hero stays on the English home; the Russian home is the standalone page.
-    await page.goto("/en/");
-    await page.locator("[data-consent-reject]").click();
-    const spot = page.locator("[data-map-spot]").filter({ hasText: "Warehouse" });
-    const tip = spot.locator('[role="tooltip"]');
-    await expect(tip).toBeHidden();
-    await spot.locator("a").hover();
-    await expect(tip).toBeVisible();
-    await expect(tip.locator("img")).toHaveAttribute("alt", /Handheld/u);
-    await page.mouse.move(1, 1);
-    await expect(tip).toBeHidden();
-    await spot.locator("a").focus();
-    await expect(tip).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(tip).toBeHidden();
-  });
-
-  test("the warehouse hotspot or card leads to the handheld row", async ({ page, isMobile }) => {
-    await page.goto("/en/");
-    await page.locator("[data-consent-reject]").click();
-    const link = isMobile
-      ? page.locator(".home-hero__strip a").filter({ hasText: "Warehouse" })
-      : page.locator("[data-map-spot]").filter({ hasText: "Warehouse" }).locator("a");
-    await link.click();
-    await expect(page).toHaveURL(/#product-handheld$/u);
-    await expect(page.locator("#product-handheld")).toBeInViewport();
-  });
-
-  test("the kiosk and integrations cards line up their frames and links", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "the cards stack on phones");
-    const box = (selector: string) =>
-      page.locator(selector).evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
-      });
-    for (const width of [1440, 1024]) {
-      await page.setViewportSize({ width, height: 900 });
-      await page.goto("/en/");
-      expect(await box("#product-integrations"), `${width} card`).toEqual(
-        await box("#product-kiosk"),
-      );
-      for (const part of [".screen-frame", ".text-link"]) {
-        const kiosk = await box(`#product-kiosk ${part}`);
-        const integrations = await box(`#product-integrations ${part}`);
-        expect(integrations.top, `${width} ${part}`).toBe(kiosk.top);
-      }
-    }
-  });
-
   test("loads no 3D code", async ({ page }) => {
-    const scripts: Promise<string>[] = [];
-    page.on("response", (response) => {
-      if (response.request().resourceType() === "script") scripts.push(response.text());
-    });
-    await page.goto("/", { waitUntil: "networkidle" });
-    await page.evaluate(() =>
-      window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }),
-    );
-    await page.waitForLoadState("networkidle");
-    const bodies = await Promise.all(scripts);
-    expect(bodies.length).toBeGreaterThan(0);
-    for (const body of bodies) expect(body).not.toContain("WebGLRenderer");
+    for (const route of ["/", "/en/"]) {
+      const scripts: Promise<string>[] = [];
+      const collect = (response: Response) => {
+        if (response.request().resourceType() === "script") scripts.push(response.text());
+      };
+      page.on("response", collect);
+      await page.goto(route, { waitUntil: "networkidle" });
+      await page.evaluate(() =>
+        window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }),
+      );
+      await page.waitForLoadState("networkidle");
+      page.off("response", collect);
+      const bodies = await Promise.all(scripts);
+      expect(bodies.length, route).toBeGreaterThan(0);
+      for (const body of bodies) expect(body, route).not.toContain("WebGLRenderer");
+    }
   });
 
   for (const viewport of [

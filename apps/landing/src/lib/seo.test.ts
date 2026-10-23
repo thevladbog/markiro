@@ -4,12 +4,10 @@ import { describe, expect, it } from "vitest";
 import { BEER_MARKING_2026_ARTICLE, BEER_MARKING_2026_ARTICLE_EN } from "../content/articles";
 import { findHubPage } from "../content/hubs";
 import { findSeoPage } from "../content/pages";
-import { findFilmPage } from "../content/film";
 import { getLegalDocumentPage } from "../content/legal-pages";
 import {
   attachOrganizationContact,
   buildArticlePageGraph,
-  buildFilmPageGraph,
   buildHubPageGraph,
   buildPageGraph,
   buildLegalPageGraph,
@@ -114,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(74);
+    expect(sitemap.match(/<url>/g)).toHaveLength(72);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -169,7 +167,7 @@ describe("SEO generators", () => {
     expect(llms).toContain("## Коротко о продукте");
     expect(llms).toContain("единица → короб");
     expect(llms).toContain("hello@markiro.app");
-    expect(llms).toContain("https://markiro.app/kak-rabotaet/#demo");
+    expect(llms).toContain("https://markiro.app/#demo");
     expect(llms).toContain("## Полные тексты");
     expect(llms).toContain("https://markiro.app/llms-full.txt");
     expect(llms).toContain("https://markiro.app/faq.md");
@@ -224,7 +222,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(74);
+    expect(sitemap.match(/<url>/g)).toHaveLength(72);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -540,32 +538,17 @@ describe("SEO generators", () => {
   });
 });
 
-describe("film page search surfaces", () => {
-  it("lists both locales in the sitemap with reciprocal hreflang", () => {
+// The film (/kak-rabotaet/, /en/how-it-works/) was retired with a 301 to the home page of
+// its language; search surfaces must not advertise it any more.
+describe("retired pages", () => {
+  const retired = ["/kak-rabotaet/", "/en/how-it-works/"];
+
+  it("are absent from the sitemap and llms.txt", () => {
     const sitemap = renderSitemapXml();
-    expect(sitemap).toContain("<loc>https://markiro.app/kak-rabotaet/</loc>");
-    expect(sitemap).toContain("<loc>https://markiro.app/en/how-it-works/</loc>");
-    expect(sitemap).toContain(
-      '<xhtml:link rel="alternate" hreflang="en" href="https://markiro.app/en/how-it-works/" />',
-    );
-    expect(sitemap).toContain(
-      '<xhtml:link rel="alternate" hreflang="ru" href="https://markiro.app/kak-rabotaet/" />',
-    );
-  });
-
-  it("describes the film in llms.txt for both languages", () => {
     const llms = renderLlmsTxt();
-    expect(llms).toContain("- [Как работает](https://markiro.app/kak-rabotaet/): ");
-    expect(llms).toContain("- [How it works](https://markiro.app/en/how-it-works/): ");
-  });
-
-  it("builds a web page graph without breadcrumbs, like the home page", () => {
-    const nodes = buildFilmPageGraph(findFilmPage("ru"))["@graph"];
-    expect(nodes.find((node) => node["@type"] === "WebPage")).toMatchObject({
-      url: "https://markiro.app/kak-rabotaet/",
-      inLanguage: "ru",
-      dateModified: "2026-09-26",
-    });
-    expect(nodes.some((node) => node["@type"] === "BreadcrumbList")).toBe(false);
+    for (const path of retired) {
+      expect(sitemap, path).not.toContain(`https://markiro.app${path}`);
+      expect(llms, path).not.toContain(`https://markiro.app${path}`);
+    }
   });
 });

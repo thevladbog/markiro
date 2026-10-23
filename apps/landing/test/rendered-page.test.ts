@@ -9,8 +9,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { DEMO_SOURCE_PATHS } from "../../api/src/modules/demo-requests/demo-request-routes";
 import { LANDING_LEAD_SOURCE_PATHS } from "../../../packages/platform-contracts/src/landing-leads";
-import { findFilmPage } from "../src/content/film";
-import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
@@ -42,17 +40,11 @@ const SAMPLE_CLUSTER_ROUTES = [
   "/stati/markirovka-piva-2026/",
   "/instruktsii/stantsiya-vkhod-i-start-smeny/",
 ] as const;
-const FILM_ROUTES = ["/kak-rabotaet/", "/en/how-it-works/"] as const;
 const AUTONOM_ROUTES = ["/skachat/", "/stoimost/"] as const;
 
-/** The English home keeps the cloud-era layout; its section tests live on there. */
-function legacyHome(): Document {
-  return documents.get("/en/") as Document;
-}
-
-/** The Russian demo form now lives on the film page only. */
-function filmRu(): Document {
-  return documents.get("/kak-rabotaet/") as Document;
+/** The Russian demo form closes the home page (the film page that carried it is retired). */
+function homeRu(): Document {
+  return documents.get("/") as Document;
 }
 
 function isDemoSourcePath(route: string): boolean {
@@ -103,7 +95,6 @@ beforeAll(() => {
     ...EXPECTED_ROUTES,
     ...HUB_ROUTES,
     ...SAMPLE_CLUSTER_ROUTES,
-    ...FILM_ROUTES,
     ...AUTONOM_ROUTES,
   ]) {
     const outputPath =
@@ -989,9 +980,12 @@ describe("rendered landing page", () => {
       ruTopic?.querySelector("header .landing-header__brand"),
       ruTopic?.querySelector("footer .landing-footer__meta > a"),
     ];
+    const enTopic = documents.get("/en/sscc-and-aggregation/");
     const enBrandLinks = [
-      enDocument?.querySelector("header .landing-header__brand"),
-      enDocument?.querySelector("footer .landing-footer__meta > a"),
+      enDocument?.querySelector("header .ax-header__brand"),
+      enDocument?.querySelector("footer .ax-footer__top > a"),
+      enTopic?.querySelector("header .landing-header__brand"),
+      enTopic?.querySelector("footer .landing-footer__meta > a"),
     ];
 
     for (const brandLink of ruBrandLinks) {
@@ -1034,7 +1028,7 @@ describe("rendered landing page", () => {
       .get("/sscc-i-agregatsiya/")
       ?.querySelector<HTMLAnchorElement>('footer a[href="/rabochee-mesto-upakovki/"]');
     const enLink = documents
-      .get("/en/")
+      .get("/en/sscc-and-aggregation/")
       ?.querySelector<HTMLAnchorElement>('footer a[href="/en/packing-workstation/"]');
 
     expect(ruLink?.textContent?.trim()).toBe("Station для Windows");
@@ -1042,9 +1036,9 @@ describe("rendered landing page", () => {
   });
 
   it("links the shared header navigation on every page", () => {
-    // Russian pages share the standalone navigation of the HN mockup; English keeps its own.
+    // Every page of a language shares the standalone navigation of its home page.
     const ru = [
-      ["/kak-rabotaet/", "Как работает"],
+      ["/#produkt", "Продукт"],
       ["/stoimost/", "Цены"],
       ["/skachat/", "Скачать"],
       ["/instruktsii/", "Инструкции"],
@@ -1052,7 +1046,7 @@ describe("rendered landing page", () => {
     ];
     const en = [
       ["/en/#product", "Product"],
-      ["/en/how-it-works/", "How it works"],
+      ["/en/offline-production/", "Offline work"],
       ["/en/instructions/", "Instructions"],
       ["/en/articles/", "Articles"],
       ["/en/faq/", "Questions"],
@@ -1099,10 +1093,10 @@ describe("rendered landing page", () => {
           "/integratsiya-1c/",
         ],
       },
-      { heading: "Материалы", links: ["/kak-rabotaet/", "/stati/", "/instruktsii/", "/faq/"] },
+      { heading: "Материалы", links: ["/stati/", "/instruktsii/", "/faq/"] },
       { heading: "Компания", links: ["/legal/", "/privacy/", "/personal-data-consent/"] },
     ]);
-    expect(columns("/en/")).toEqual([
+    expect(columns("/en/sscc-and-aggregation/")).toEqual([
       {
         heading: "Product",
         links: [
@@ -1116,7 +1110,7 @@ describe("rendered landing page", () => {
       },
       {
         heading: "Materials",
-        links: ["/en/how-it-works/", "/en/articles/", "/en/instructions/", "/en/faq/"],
+        links: ["/en/articles/", "/en/instructions/", "/en/faq/"],
       },
       { heading: "Company", links: ["/en/legal/", "/en/privacy/", "/en/personal-data-consent/"] },
     ]);
@@ -1125,7 +1119,7 @@ describe("rendered landing page", () => {
         .get("/sscc-i-agregatsiya/")
         ?.querySelector("footer [data-footer-column] [data-consent-settings]"),
     ).not.toBeNull();
-    for (const route of ["/", "/skachat/", "/stoimost/"]) {
+    for (const route of ["/", "/skachat/", "/stoimost/", "/en/"]) {
       expect(
         documents.get(route)?.querySelector("footer [data-consent-settings]"),
         route,
@@ -1187,46 +1181,20 @@ describe("rendered landing page", () => {
   });
 
   it("renders the approved semantic section hierarchy", () => {
-    expect(document.querySelectorAll("h1")).toHaveLength(1);
-    expect(document.querySelector("nav[aria-label]")).not.toBeNull();
-    expect(document.querySelector("main#main")).not.toBeNull();
-    for (const sectionId of ["bez-oblaka", "produkt", "start", "tseny", "kto", "voprosy", "demo"]) {
-      expect(
-        document.querySelector(`section#${sectionId}[aria-labelledby]`),
-        sectionId,
-      ).not.toBeNull();
-    }
-
-    // The English home keeps the cloud-era layout until its own redesign.
-    for (const sectionId of [
-      "hero",
-      "product",
-      "offline",
-      "traceability",
-      "film",
-      "implementation",
-      "documents",
-      "materials",
-      "demo",
-    ]) {
-      expect(legacyHome().querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
-    }
-  });
-
-  it("links the office row to the admin panel group of the instructions hub", () => {
-    for (const [route, hub, prefix] of [["/en/", "/en/instructions/", "Cabinet:"]] as const) {
-      const href =
-        documents.get(route)?.querySelector("#product-office a.text-link")?.getAttribute("href") ??
-        "";
-      const [target, fragment = ""] = href.split("#");
-      expect(target, route).toBe(hub);
-      const group = documents.get(hub)?.getElementById(fragment);
-      expect(group, `${route} -> ${href}`).not.toBeNull();
-      const titles = [...(group?.querySelectorAll(".legal-registry__title") ?? [])].map(
-        (title) => title.textContent ?? "",
-      );
-      expect(titles.length, href).toBeGreaterThan(0);
-      for (const title of titles) expect(title.startsWith(prefix), title).toBe(true);
+    for (const [route, sectionIds] of [
+      ["/", ["bez-oblaka", "produkt", "start", "tseny", "kto", "voprosy", "demo"]],
+      ["/en/", ["no-cloud", "product", "start", "pricing", "people", "faq", "demo"]],
+    ] as const) {
+      const home = documents.get(route) as Document;
+      expect(home.querySelectorAll("h1"), route).toHaveLength(1);
+      expect(home.querySelector("nav[aria-label]"), route).not.toBeNull();
+      expect(home.querySelector("main#main"), route).not.toBeNull();
+      for (const sectionId of sectionIds) {
+        expect(
+          home.querySelector(`section#${sectionId}[aria-labelledby]`),
+          `${route} ${sectionId}`,
+        ).not.toBeNull();
+      }
     }
   });
 
@@ -1242,101 +1210,7 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("shows every product part on a framed screen and links it to its page", () => {
-    for (const [route, links] of [
-      [
-        "/en/",
-        [
-          "/en/chestny-znak-serialization/",
-          "/en/how-it-works/#warehouse",
-          "/en/instructions/#hub-group-cabinet",
-          "/en/self-service-pickup-kiosk/",
-          "/en/1c-integration/",
-        ],
-      ],
-    ] as const) {
-      const section = documents.get(route)?.querySelector("section#product");
-      const parts = [...(section?.querySelectorAll("article[id^='product-']") ?? [])];
-      expect(
-        parts.map((part) => part.id),
-        route,
-      ).toEqual([
-        "product-line",
-        "product-handheld",
-        "product-office",
-        "product-kiosk",
-        "product-integrations",
-      ]);
-      expect(parts.map((part) => part.querySelector("a.text-link")?.getAttribute("href"))).toEqual(
-        links,
-      );
-      expect(section?.querySelectorAll("figure.screen-frame img[alt]")).toHaveLength(4);
-      expect(section?.querySelectorAll("figure.handheld-frame img[alt]")).toHaveLength(1);
-      for (const image of section?.querySelectorAll("img") ?? []) {
-        expect(image.getAttribute("loading")).toBe("lazy");
-      }
-      expect(section?.textContent ?? "").not.toMatch(/НАСТОЯЩИЙ ЭКРАН|REAL SCREEN/u);
-    }
-  });
-
-  it("opens the film page with a title of its own, different from the home hero", () => {
-    // The home title is two spans, so compare the letters without any whitespace.
-    const heading = (route: string) =>
-      documents.get(route)?.querySelector("h1")?.textContent?.replace(/\s+/gu, "") ?? "";
-    for (const [home, film] of [
-      ["/", "/kak-rabotaet/"],
-      ["/en/", "/en/how-it-works/"],
-    ] as const) {
-      expect(heading(film), film).not.toBe("");
-      expect(heading(film), film).not.toBe(heading(home));
-    }
-  });
-
-  it("renders the offline, traceability and film sections", () => {
-    for (const [route, filmPath] of [["/en/", "/en/how-it-works/"]] as const) {
-      const page = documents.get(route);
-      const offline = page?.querySelector("section#offline");
-      expect(offline?.getAttribute("data-theme"), route).toBe("dark");
-      expect(offline?.querySelectorAll(".home-offline__points li")).toHaveLength(3);
-      // One close-up of the offline station screen; each point of the list has a numbered mark on it.
-      expect(offline?.querySelectorAll("img[alt]")).toHaveLength(1);
-      const numbers = [...(offline?.querySelectorAll(".home-offline__number") ?? [])].map(
-        (element) => element.textContent?.trim(),
-      );
-      const marks = [...(offline?.querySelectorAll(".home-offline__marks li") ?? [])];
-      expect(
-        marks.map((mark) => mark.textContent?.trim()),
-        route,
-      ).toEqual(numbers);
-      for (const mark of marks) {
-        expect(["left", "below"], route).toContain(mark.getAttribute("data-side"));
-        const style = mark.getAttribute("style") ?? "";
-        for (const axis of ["x", "y"]) {
-          const value = Number(new RegExp(`--${axis}:\\s*([\\d.]+)%`, "u").exec(style)?.[1]);
-          expect(value, `${route} ${style}`).toBeGreaterThan(0);
-          expect(value, `${route} ${style}`).toBeLessThan(100);
-        }
-      }
-      expect(
-        page?.querySelector("section#traceability figure.screen-frame img[alt]"),
-      ).not.toBeNull();
-      const panel = page?.querySelector("section#film [data-theme='dark']");
-      expect(panel?.querySelector("a.button")?.getAttribute("href")).toBe(filmPath);
-      expect(panel?.querySelector("img[alt]")).not.toBeNull();
-    }
-  });
-
   it("states one product-group boundary: running on beer and cider, other groups checked before launch", () => {
-    for (const [route, groups, check] of [
-      ["/en/", "any marked goods", "We check the rules of your product group before launch"],
-    ] as const) {
-      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
-      expect(text, route).toContain(groups);
-      expect(text, route).toContain(check);
-      expect(text, route).not.toContain("Сейчас — пиво, сидр");
-      expect(text, route).not.toContain("Currently focused on beer");
-    }
-
     for (const [route, running, check] of [
       [
         "/markirovka-chestny-znak/",
@@ -1437,7 +1311,7 @@ describe("rendered landing page", () => {
       ],
       [
         "/en/",
-        "Station and admin panel instructions, the personal data policy and the data processing agreement are published on the site.",
+        "Open before you buy: you can read the documents and the terms before installing anything.",
         "Legal documents",
         "the agreement and the regulations are published",
       ],
@@ -1453,35 +1327,8 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("renders the rollout, documents, articles and demo sections", () => {
-    for (const [route, instructionsPath, legalPath, articlesHeading] of [
-      ["/en/", "/en/instructions/", "/en/legal/", "Field notes from the line."],
-    ] as const) {
-      const page = documents.get(route);
-      const rollout = page?.querySelector("section#implementation");
-      expect(rollout?.querySelectorAll(".home-rollout__steps li"), route).toHaveLength(4);
-      expect(rollout?.querySelectorAll(".home-rollout__label img[alt]")).toHaveLength(2);
-      const docs = page?.querySelector("section#documents");
-      expect(docs?.querySelectorAll(".home-documents__covers img[alt]")).toHaveLength(3);
-      expect(
-        [...(docs?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href")),
-      ).toEqual([instructionsPath, legalPath]);
-      expect(page?.querySelector("section#materials h2")?.textContent).toBe(articlesHeading);
-      expect(page?.querySelector("section#demo")?.getAttribute("data-theme")).toBe("dark");
-    }
-  });
-
-  it("numbers the home sections in page order", () => {
-    for (const route of ["/en/"] as const) {
-      const kickers = [
-        ...(documents.get(route)?.querySelectorAll("main section:not(#hero) .section-index") ?? []),
-      ].map((kicker) => kicker.textContent?.trim().slice(0, 2));
-      expect(kickers, route).toEqual(["01", "02", "03", "04", "05", "06", "07", "08"]);
-    }
-  });
-
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
-    const form = filmRu().querySelector<HTMLFormElement>("form[data-demo-form]");
+    const form = homeRu().querySelector<HTMLFormElement>("form[data-demo-form]");
     expect(form).not.toBeNull();
 
     for (const fieldId of ["name", "company", "email", "phone"]) {
@@ -1497,7 +1344,7 @@ describe("rendered landing page", () => {
   });
 
   it("keeps captcha, consent, and public submission data out of disabled builds", () => {
-    const document = filmRu();
+    const document = homeRu();
     const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
     const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
     expect(form?.hasAttribute("data-endpoint")).toBe(false);
@@ -1528,7 +1375,7 @@ describe("rendered landing page", () => {
 
   it("renders enabled consent, honeypot, captcha, and localized source contracts", () => {
     for (const [route, expectedLocale] of [
-      ["/kak-rabotaet/", "ru"],
+      ["/", "ru"],
       ["/en/", "en"],
     ] as const) {
       const enabledDocument = enabledDocuments.get(route) as Document;
@@ -1595,16 +1442,16 @@ describe("rendered landing page", () => {
         return [route];
       });
 
-    expect(formRoutes).toEqual(expect.arrayContaining(["/en/", ...FILM_ROUTES]));
+    expect(formRoutes.sort()).toEqual(["/", "/en/"]);
     expect(formRoutes.filter((route) => !isDemoSourcePath(route))).toEqual([]);
   });
 
   it("does not mention CRM or internal rollout dependencies in disabled builds", () => {
-    for (const route of ["/kak-rabotaet/", "/en/"] as const) {
+    for (const route of ["/", "/en/"] as const) {
       const body = documents.get(route)?.body.textContent ?? "";
       expect(body).not.toMatch(/CRM|подключени[ея] CRM|connection to the CRM/i);
       expect(body).toContain(
-        route === "/kak-rabotaet/"
+        route === "/"
           ? "Онлайн-отправка временно недоступна. Напишите нам на hello@markiro.app."
           : "Online submission is temporarily unavailable. Email us at hello@markiro.app.",
       );
@@ -1656,67 +1503,7 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("renders the map hero with five hotspots and a card strip for phones", () => {
-    const targets = [
-      "#product-line",
-      "#product-line",
-      "#product-handheld",
-      "#product-kiosk",
-      "#product-office",
-    ];
-    const points = projectHomeMap();
-    for (const [route, heading, alt, labels] of [
-      [
-        "/en/",
-        "Keep the line moving.",
-        "Scale model of a plant",
-        ["Line", "Packing", "Warehouse", "Kiosk", "Office"],
-      ],
-    ] as const) {
-      const hero = documents.get(route)?.querySelector("section#hero");
-      expect(hero?.querySelector("h1")?.textContent, route).toContain(heading);
-      const spots = [...(hero?.querySelectorAll("[data-map-spot]") ?? [])];
-      expect(spots.map((spot) => spot.querySelector(".map-spot__label")?.textContent)).toEqual(
-        labels,
-      );
-      expect(spots.map((spot) => spot.querySelector("a")?.getAttribute("href"))).toEqual(targets);
-      for (const [index, spot] of spots.entries()) {
-        const [, left, top] =
-          /left: ([\d.]+)%; top: ([\d.]+)%/u.exec(spot.getAttribute("style") ?? "") ?? [];
-        expect(Number(left)).toBeGreaterThan(42);
-        expect(Number(top)).toBeGreaterThan(8);
-        const point = points[index];
-        expect(point, `${route} spot ${index}`).toBeDefined();
-        if (point === undefined) continue;
-        expect(Number(left)).toBeCloseTo(point.x * 100, 1);
-        expect(Number(top)).toBeCloseTo(point.y * 100, 1);
-        const tipId = spot.querySelector("a")?.getAttribute("aria-describedby") ?? "";
-        expect(hero?.querySelector(`#${tipId}[role="tooltip"] img[alt]`), tipId).not.toBeNull();
-      }
-      expect(
-        [...(hero?.querySelectorAll(".home-hero__strip a") ?? [])].map((link) =>
-          link.getAttribute("href"),
-        ),
-      ).toEqual(targets);
-      const image = hero?.querySelector("img[data-hero-image]");
-      expect(image?.getAttribute("loading")).toBe("eager");
-      expect(image?.getAttribute("fetchpriority")).toBe("high");
-      expect(image?.getAttribute("alt")).toContain(alt);
-      expect(hero?.querySelectorAll('picture source[media="(max-width: 1023px)"]')).toHaveLength(2);
-      for (const other of hero?.querySelectorAll("img:not([data-hero-image])") ?? []) {
-        expect(other.getAttribute("loading")).toBe("lazy");
-      }
-    }
-  });
-
-  it("keeps card links short so the anchor text is the title alone", () => {
-    const cards = [...legacyHome().querySelectorAll("#materials [data-materials-card]")];
-    expect(cards).toHaveLength(3);
-    for (const card of cards) {
-      const link = card.querySelector("a[href]");
-      expect(link?.textContent?.trim()).toBe(card.querySelector("h3")?.textContent?.trim());
-      expect(card.querySelector("p")?.closest("a")).toBeNull();
-    }
+  it("keeps hub links short so the anchor text is the title alone", () => {
     for (const route of HUB_ROUTES) {
       const hub = documents.get(route) as Document;
       for (const item of hub.querySelectorAll("[data-hub-item]")) {
@@ -1725,31 +1512,6 @@ describe("rendered landing page", () => {
         expect(description, route).not.toBeNull();
         expect(description?.closest("a"), route).toBeNull();
         expect(link?.textContent?.length ?? 999, route).toBeLessThan(160);
-      }
-    }
-  });
-
-  it("gives the above-the-fold factory image stable dimensions", () => {
-    const heroImage = legacyHome().querySelector<HTMLImageElement>("[data-hero-image]");
-    expect(Number(heroImage?.getAttribute("width"))).toBeGreaterThan(0);
-    expect(Number(heroImage?.getAttribute("height"))).toBeGreaterThan(0);
-    expect(heroImage?.getAttribute("fetchpriority")).toBe("high");
-  });
-
-  it("gives every home image alt text and loads only the map eagerly", () => {
-    for (const route of ["/en/"] as const) {
-      const images = [...(documents.get(route)?.querySelectorAll("main img") ?? [])];
-      expect(images.length, route).toBeGreaterThan(15);
-      expect(
-        images.filter((image) => image.hasAttribute("data-hero-image")),
-        route,
-      ).toHaveLength(1);
-      for (const image of images) {
-        const name = image.getAttribute("src") ?? route;
-        expect(image.hasAttribute("alt"), name).toBe(true);
-        expect(image.getAttribute("loading"), name).toBe(
-          image.hasAttribute("data-hero-image") ? "eager" : "lazy",
-        );
       }
     }
   });
@@ -1840,24 +1602,22 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("links the cluster from the header, footer and a home materials section", () => {
-    // The standalone home links instructions from its header and documents block and
-    // articles from the footer; the English home keeps its materials section.
-    expect(document.querySelector('#kto a[href="/instruktsii/"]')).not.toBeNull();
-    expect(document.querySelector('header nav a[href="/instruktsii/"]')).not.toBeNull();
-    expect(document.querySelector('footer nav a[href="/stati/"]')).not.toBeNull();
-    expect(document.querySelector('footer nav a[href="/instruktsii/"]')).not.toBeNull();
-
-    const english = documents.get("/en/") as Document;
-    expect(english.querySelector("section#materials[aria-labelledby]")).not.toBeNull();
-    const materialLinks = [...english.querySelectorAll("#materials a[href]")].map((a) =>
-      a.getAttribute("href"),
-    );
-    expect(
-      materialLinks.filter((href) => href?.startsWith("/en/articles/") && href !== "/en/articles/"),
-    ).toHaveLength(3);
-    expect(english.querySelector('header nav a[href="/en/articles/"]')).not.toBeNull();
-    expect(english.querySelector('footer nav a[href="/en/instructions/"]')).not.toBeNull();
+  it("links the cluster from the header, the footer and the documents card", () => {
+    // Both home pages link instructions from their header and documents card and
+    // articles from the footer.
+    for (const [route, instructions, articles, documentsCard] of [
+      ["/", "/instruktsii/", "/stati/", "#kto"],
+      ["/en/", "/en/instructions/", "/en/articles/", "#people"],
+    ] as const) {
+      const home = documents.get(route) as Document;
+      expect(
+        home.querySelector(`${documentsCard} a[href="${instructions}"]`),
+        route,
+      ).not.toBeNull();
+      expect(home.querySelector(`header nav a[href="${instructions}"]`), route).not.toBeNull();
+      expect(home.querySelector(`footer nav a[href="${articles}"]`), route).not.toBeNull();
+      expect(home.querySelector(`footer nav a[href="${instructions}"]`), route).not.toBeNull();
+    }
   });
 
   it("routes article and instruction breadcrumbs through their hubs", () => {
@@ -1929,14 +1689,12 @@ describe("rendered landing page", () => {
       const showsBreadcrumbs =
         routeDocument.querySelector(`nav[aria-label="${breadcrumbsLabel}"]`) !== null;
       // Structured breadcrumbs describe only a trail the page shows; the home
-      // pages and the film pages show none.
+      // pages, /skachat/ and /stoimost/ show none.
       expect(
         graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList"),
         route,
       ).toBe(showsBreadcrumbs);
-      expect(showsBreadcrumbs, route).toBe(
-        !["/", "/en/", ...FILM_ROUTES, ...AUTONOM_ROUTES].includes(route),
-      );
+      expect(showsBreadcrumbs, route).toBe(!["/", "/en/", ...AUTONOM_ROUTES].includes(route));
     }
   });
 
@@ -2099,135 +1857,6 @@ describe("rendered landing page", () => {
   });
 });
 
-describe("rendered film page", () => {
-  it.each([
-    ["/kak-rabotaet/", "ru"],
-    ["/en/how-it-works/", "en"],
-  ] as const)("%s tells the seven chapters as HTML", (route, locale) => {
-    const film = documents.get(route) as Document;
-    const page = findFilmPage(locale);
-    expect(film.documentElement.getAttribute("lang")).toBe(locale);
-    expect(film.querySelectorAll("h1")).toHaveLength(1);
-    expect(film.querySelector("h1")?.textContent?.trim()).toBe(page.chapters[0]?.title);
-    expect(film.querySelectorAll("section[data-film-chapter]")).toHaveLength(7);
-    expect(film.querySelectorAll("section[data-film-chapter] h2")).toHaveLength(6);
-    expect(film.querySelectorAll("[data-film-rail] a")).toHaveLength(7);
-    expect(film.querySelector("canvas[data-film-canvas]")).not.toBeNull();
-    const sectionIds = [...film.querySelectorAll("section[data-film-chapter]")].map(
-      (section) => section.id,
-    );
-    expect(
-      [...film.querySelectorAll("[data-film-rail] a")].map((link) => link.getAttribute("href")),
-    ).toEqual(sectionIds.map((id) => `#${id}`));
-    expect(film.querySelector(page.heroSecondary.href)).not.toBeNull();
-    const text = film.body.textContent?.replace(/\s+/gu, " ") ?? "";
-    for (const chapter of page.chapters) {
-      for (const phrase of [chapter.kicker, chapter.title, chapter.body, ...chapter.tags]) {
-        expect(text, phrase).toContain(phrase);
-      }
-      if (chapter.status !== undefined) expect(text).toContain(chapter.status);
-    }
-  });
-
-  it.each([
-    ["/kak-rabotaet/", "ru", "/en/how-it-works/"],
-    ["/en/how-it-works/", "en", "/kak-rabotaet/"],
-  ] as const)(
-    "%s publishes canonical, hreflang, JSON-LD and the demo form",
-    (route, locale, alternate) => {
-      const film = documents.get(route) as Document;
-      expect(film.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
-        `https://markiro.app${route}`,
-      );
-      expect(
-        film
-          .querySelector(`link[rel="alternate"][hreflang="${locale === "ru" ? "en" : "ru"}"]`)
-          ?.getAttribute("href"),
-      ).toBe(`https://markiro.app${alternate}`);
-      const graph = JSON.parse(
-        film.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
-      ) as { "@graph": Array<Record<string, unknown>> };
-      expect(graph["@graph"].find((entry) => entry["@type"] === "WebPage")).toMatchObject({
-        url: `https://markiro.app${route}`,
-        inLanguage: locale,
-      });
-      expect(film.querySelector("main#main #demo")).not.toBeNull();
-      expect(
-        enabledDocuments.get(route)?.querySelector("main#main [data-demo-form]"),
-      ).not.toBeNull();
-    },
-  );
-
-  it("keeps the morning light, the night dark and the header in step", () => {
-    const film = documents.get("/kak-rabotaet/") as Document;
-    expect(
-      [...film.querySelectorAll<HTMLElement>("section[data-film-chapter]")].map(
-        (section) => section.dataset.theme,
-      ),
-    ).toEqual(["light", "light", "light", "light", "light", "dark", "dark"]);
-    const chrome = film.querySelector(".film-top");
-    expect(chrome?.getAttribute("data-theme")).toBe("light");
-    expect(chrome?.hasAttribute("data-film-chrome")).toBe(true);
-  });
-
-  it("loads the first poster eagerly, the rest lazily, all decorative and art-directed", () => {
-    const film = documents.get("/kak-rabotaet/") as Document;
-    const images = [...film.querySelectorAll<HTMLImageElement>(".film-chapter__poster img")];
-    expect(images).toHaveLength(7);
-    expect(images[0]?.getAttribute("loading")).toBe("eager");
-    expect(images[0]?.getAttribute("fetchpriority")).toBe("high");
-    for (const image of images.slice(1)) expect(image.getAttribute("loading")).toBe("lazy");
-    for (const image of images) {
-      expect(image.getAttribute("alt")).toBe("");
-      expect(image.getAttribute("width")).not.toBeNull();
-      expect(image.getAttribute("height")).not.toBeNull();
-    }
-    expect(
-      film.querySelectorAll('.film-chapter__poster source[media="(max-width: 860px)"]'),
-    ).toHaveLength(14);
-  });
-
-  it.each([["/en/", "/en/how-it-works/", "See how it works"]] as const)(
-    "%s links its hero to the film",
-    (route, href, label) => {
-      const home = documents.get(route) as Document;
-      const link = home.querySelector<HTMLAnchorElement>(`#hero a[href="${href}"]`);
-      expect(link?.textContent?.replace(/\s+/g, " ").trim()).toBe(`${label} →`);
-    },
-  );
-
-  it("keeps the header demo button on the film page instead of sending visitors home", () => {
-    // Russian pages lead to the installer; the English film keeps its own demo form.
-    expect(
-      documents
-        .get("/en/how-it-works/")
-        ?.querySelector(".landing-header__cta")
-        ?.getAttribute("href"),
-    ).toBe("#demo");
-    expect(
-      documents.get("/kak-rabotaet/")?.querySelector(".landing-header__cta")?.getAttribute("href"),
-    ).toBe("/skachat/");
-    expect(documents.get("/")?.querySelector(".ax-header__cta")?.getAttribute("href")).toBe(
-      "/skachat/",
-    );
-    expect(documents.get("/en/")?.querySelector(".landing-header__cta")?.getAttribute("href")).toBe(
-      "/en/#demo",
-    );
-  });
-
-  it("keeps the decorative arrows out of the film links and the scroll hint", () => {
-    for (const route of FILM_ROUTES) {
-      const film = documents.get(route) as Document;
-      const links = [...film.querySelectorAll(".film-link")];
-      expect(links.length).toBeGreaterThan(0);
-      for (const link of links) {
-        expect(link.querySelector('span[aria-hidden="true"]')).not.toBeNull();
-      }
-      expect(film.querySelector('.film-hero__hint span[aria-hidden="true"]')).not.toBeNull();
-    }
-  });
-});
-
 describe("standalone pages: home, /skachat/, /stoimost/", () => {
   function jsonLd(route: string): Array<Record<string, unknown>> {
     const script = documents.get(route)?.querySelector('script[type="application/ld+json"]');
@@ -2236,8 +1865,37 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
     )["@graph"];
   }
 
+  it("leads the header button of every page to the installer", () => {
+    for (const [route, selector, hreflang] of [
+      ["/", ".ax-header__cta", null],
+      ["/sscc-i-agregatsiya/", ".landing-header__cta", null],
+      ["/en/", ".ax-header__cta", "ru"],
+      ["/en/sscc-and-aggregation/", ".landing-header__cta", "ru"],
+    ] as const) {
+      const cta = documents.get(route)?.querySelector(selector);
+      expect(cta?.getAttribute("href"), route).toBe("/skachat/");
+      expect(cta?.getAttribute("hreflang") ?? null, route).toBe(hreflang);
+    }
+  });
+
+  it("leads English calls to action to the Russian download and pricing pages and says so", () => {
+    const home = documents.get("/en/") as Document;
+    const links = [
+      ...home.querySelectorAll<HTMLAnchorElement>(
+        'main a[href="/skachat/"], main a[href="/stoimost/"]',
+      ),
+    ];
+    expect(links.length).toBeGreaterThanOrEqual(4);
+    for (const link of links) expect(link.getAttribute("hreflang"), link.href).toBe("ru");
+    const text = home.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).toContain("The download and pricing pages are in Russian.");
+    expect(home.querySelector('.ax-hero a[href="/stoimost/"]')?.textContent?.trim()).toBe(
+      "Pricing from 60 000 RUB a year",
+    );
+  });
+
   it("lets the visitor pick the theme and applies it before the first paint", () => {
-    for (const route of ["/", ...AUTONOM_ROUTES]) {
+    for (const route of ["/", "/en/", ...AUTONOM_ROUTES]) {
       const page = documents.get(route) as Document;
       expect(page.documentElement.getAttribute("data-theme"), route).toBe("light");
       expect(page.documentElement.getAttribute("data-theme-choice"), route).toBe("system");
@@ -2411,16 +2069,21 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
   });
 
   it("loads only the hero screen eagerly and gives every image alt text", () => {
-    const images = [...(documents.get("/")?.querySelectorAll("main img") ?? [])];
-    expect(images.length).toBeGreaterThan(10);
-    const eager = images.filter((image) => image.getAttribute("loading") === "eager");
-    expect(eager).toHaveLength(1);
-    expect(eager[0]?.getAttribute("fetchpriority")).toBe("high");
-    expect(Number(eager[0]?.getAttribute("width"))).toBeGreaterThan(0);
-    for (const image of images) expect(image.hasAttribute("alt")).toBe(true);
-    const clients = documents.get("/")?.querySelector(".ax-clients")?.textContent ?? "";
-    expect(clients).toContain("Rebel Apple");
-    expect(clients).toContain("Михайловский перевал");
+    for (const [route, client] of [
+      ["/", "Михайловский перевал"],
+      ["/en/", "Mikhaylovsky Pereval"],
+    ] as const) {
+      const images = [...(documents.get(route)?.querySelectorAll("main img") ?? [])];
+      expect(images.length, route).toBeGreaterThan(10);
+      const eager = images.filter((image) => image.getAttribute("loading") === "eager");
+      expect(eager, route).toHaveLength(1);
+      expect(eager[0]?.getAttribute("fetchpriority"), route).toBe("high");
+      expect(Number(eager[0]?.getAttribute("width")), route).toBeGreaterThan(0);
+      for (const image of images) expect(image.hasAttribute("alt"), route).toBe(true);
+      const clients = documents.get(route)?.querySelector(".ax-clients")?.textContent ?? "";
+      expect(clients, route).toContain("Rebel Apple");
+      expect(clients, route).toContain(client);
+    }
   });
 
   it("lists the new pages in the sitemap and llms.txt", () => {

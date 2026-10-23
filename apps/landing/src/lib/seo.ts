@@ -3,7 +3,6 @@ import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import { articlesForLocale } from "../content/articles";
-import { FILM_SEARCH_PAGES, type FilmPageDefinition } from "../content/film";
 import { AUTONOM_SEARCH_PAGES, type AutonomPageDefinition } from "../content/autonom-pages";
 import { formatRoubles, TARIFFS } from "../content/pricing";
 import { mirrorPathFor } from "./mirror-path.ts";
@@ -22,7 +21,6 @@ const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
   ...AUTONOM_SEARCH_PAGES,
-  ...FILM_SEARCH_PAGES,
   ...HUB_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
@@ -294,27 +292,6 @@ export function buildHubPageGraph(hub: HubPageDefinition, items: readonly HubIte
           name: item.name,
           url: absoluteUrl(item.path),
         })),
-      },
-    ],
-  };
-}
-
-export function buildFilmPageGraph(page: FilmPageDefinition): PageGraph {
-  const pageUrl = absoluteUrl(page.path);
-  return {
-    "@context": "https://schema.org",
-    "@graph": [
-      websiteNode(),
-      organizationNode(),
-      {
-        "@type": "WebPage",
-        "@id": `${pageUrl}#webpage`,
-        url: pageUrl,
-        name: page.title,
-        description: page.description,
-        inLanguage: page.locale,
-        dateModified: page.reviewedAt,
-        isPartOf: { "@id": `${SITE_URL}/#website` },
       },
     ],
   };
@@ -593,7 +570,7 @@ export function renderLlmsTxt(): string {
 - Без облака: во время смены программа не обращается к серверам Маркиро, обновления ставятся из файла, лицензия загружается файлом.
 - Пробный период: 14 дней со всеми функциями, без оплаты. Установщик для Windows 10 и 11: ${absoluteUrl("/skachat/")}
 - Цены за площадку в год, без НДС: ${TARIFFS.map((tariff) => `«${tariff.name}» ${tariff.pricePerYear === null ? "по запросу" : `${formatRoubles(tariff.pricePerYear)} ₽`}`).join(", ")}. Подробно: ${absoluteUrl("/stoimost/")}
-- Контакт: ${ORGANIZATION_EMAIL}, Telegram @${SITE_CONTACTS.telegram.handle}. Разбор линии по видеосвязи: ${absoluteUrl("/kak-rabotaet/#demo")}
+- Контакт: ${ORGANIZATION_EMAIL}, Telegram @${SITE_CONTACTS.telegram.handle}. Разбор линии по видеосвязи: ${absoluteUrl("/#demo")}
 
 ${links("ru", "/")}
 
