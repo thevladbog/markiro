@@ -629,7 +629,8 @@ SHA-256 установщика). Пока владелец не внёс в сб
 
 Задание `standalone-windows-build` (раннер `windows-latest`, Windows Server) собирает хост и установщик и
 запускает `tools/standalone-release/smoke.ps1`. Тесты cargo для Windows идут параллельно в отдельном
-задании `standalone-windows-tests`. Скрипт проверяет:
+задании `standalone-windows-tests` (оно исключает крейт нагрузочного теста `markiro-loadtest`; его компиляцию на
+Windows — `cargo check --tests`, без запуска — делает последний шаг задания `standalone-windows-build`). Скрипт проверяет:
 
 - тихую установку трёх ролей и отказ без роли, точный текст `installation.json`, `/ROLE=HOST`;
 - службу: учётную запись, автозапуск, действия при сбое и их сброс через сутки, перезапуск в новом

@@ -7732,8 +7732,9 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
   empty check list does fail. Whether an unavailable probe on a `spawn` host should fail is an open owner decision.
 - Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
   redacted (`redact()` with the run's secrets) before writing; they are still internal results.
-- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust` and `standalone-windows-tests`, routed by
-  `tools/ci/affected.mjs`); both must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
+- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust`; `standalone-windows-tests` excludes this crate, and the last step of `standalone-windows-build` only
+  type-checks it with `cargo check --locked --tests`, so a Windows-only regression in its tests is caught by that compile step or the
+  opt-in `standalone-load.yml`, never by running them; routed by `tools/ci/affected.mjs`); both Windows jobs must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
   real `markiro-host` (it listens on `0.0.0.0`) or kills and restarts it on its port (`host.rs`, the spawned `kill-restart` and
   `outage` scenarios, the spawned panic test in `scenarios/mod.rs`): run them with `-- --ignored` on a trusted machine. The
   process control (stop, kill, `Drop`) is covered in the gate over a fake `sh`/`sleep` child (Unix). The `wal_watch.rs` tests that

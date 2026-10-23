@@ -67,7 +67,9 @@ apps/standalone/target/release/markiro-loadtest run --profile tiny --host in-pro
 «число дескрипторов недоступно» ожидаемы для `in-process`.
 
 **Тесты самого инструмента.** `cargo test -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml` идёт в
-обычной проверке PR (`standalone-rust` на ubuntu и задача Windows): условие слияния — обе зелёные. Тесты, которые
+обычной проверке PR (`standalone-rust` на ubuntu): условие слияния — зелёная. На Windows эти тесты не идут:
+`standalone-windows-tests` исключает крейт, а последний шаг `standalone-windows-build` только проверяет, что он
+компилируется (`cargo check --locked --tests`). Тесты, которые
 запускают настоящий `markiro-host` (он слушает `0.0.0.0`) или убивают и перезапускают его на том же порту, помечены
 `#[ignore]` и в CI не идут: `host::tests::a_spawned_host_answers_hello_logs_and_stops_on_sigint`,
 `a_dropped_spawned_host_is_killed`, `a_killed_host_restarts_on_its_port_with_its_identity`,

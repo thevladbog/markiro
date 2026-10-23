@@ -287,7 +287,7 @@ test("the standalone app's Vitest suite runs in its own job and in no other app 
 
 test("both standalone cargo test steps report every failing test binary in one run", () => {
   // The load-test crate (~170 tests that start real in-process hosts) is run on
-  // ubuntu only; the Windows job excludes it and just compiles it.
+  // ubuntu only; the Windows tests job excludes it (the installer job type-checks it).
   const expected = {
     "standalone-rust": /--manifest-path apps\/standalone\/Cargo\.toml --workspace --no-fail-fast$/,
     "standalone-windows-tests":
@@ -303,17 +303,30 @@ test("both standalone cargo test steps report every failing test binary in one r
   }
 });
 
-test("the Windows standalone tests job still compiles the load-test crate it does not run", () => {
-  const steps = workflow.jobs["standalone-windows-tests"].steps;
-  const index = steps.findIndex((step) =>
-    step.run?.includes("cargo test --no-run -p markiro-loadtest"),
-  );
-  assert.ok(index >= 0, "a compile-only step for markiro-loadtest exists");
-  assert.match(steps[index].run, /--manifest-path apps\/standalone\/Cargo\.toml/);
+test("the load-test crate is type-checked on Windows by the installer job, off the tests job's critical path", () => {
+  // The tests job (the longer one, ~41-48 min) excludes the crate; the installer
+  // job (~18 min, ~25 min of slack) checks that it compiles. Revert this move if
+  // the installer job ever becomes the longer of the two.
+  const needle = "cargo check --locked --tests -p markiro-loadtest";
+  const testsSteps = workflow.jobs["standalone-windows-tests"].steps;
   assert.ok(
-    steps.findIndex((step) => step.run?.includes("--exclude markiro-loadtest")) < index,
-    "it follows the excluded workspace run",
+    !testsSteps.some(
+      (step) => /markiro-loadtest/.test(step.run ?? "") && !/--exclude/.test(step.run ?? ""),
+    ),
+    "the tests job does not compile the load-test crate",
   );
+  const steps = workflow.jobs["standalone-windows-build"].steps;
+  const index = steps.findIndex((step) => step.run?.includes(needle));
+  assert.ok(index >= 0, "a compile-only step for markiro-loadtest exists in the installer job");
+  assert.equal(steps[index].name, "load test crate compiles on Windows");
+  assert.match(steps[index].run, /--manifest-path apps\/standalone\/Cargo\.toml$/);
+  // It is the last step, after the artifact upload: the installer, its evidence
+  // and the artifact steps stay as they were and survive a failure of this step.
+  assert.equal(index, steps.length - 1, "it is the last step");
+  const upload = steps.findIndex((step) =>
+    (step.uses ?? "").startsWith("actions/upload-artifact@"),
+  );
+  assert.ok(upload >= 0 && upload < index, "it follows the artifact upload");
 });
 
 test("the standalone installer job and the Windows tests job run side by side, each with its own budget", () => {
@@ -329,8 +342,12 @@ test("the standalone installer job and the Windows tests job run side by side, e
     /(^|\n)\s*cargo test\b/u.test(step.run ?? ""),
   );
   assert.deepEqual(installerCargoTests, []);
-  // Each budget is below the old serial 75 minutes.
+  // Each budget is below the old serial 75 minutes. The installer job carries the
+  // load-test type-check (installer ~18 min + ~8-15 min cold), so its budget keeps
+  // that margin and stays below the tests job's.
   assert.ok(installer["timeout-minutes"] < 75 && tests["timeout-minutes"] < 75);
+  assert.ok(installer["timeout-minutes"] >= 55, "room for the installer and the type-check");
+  assert.ok(installer["timeout-minutes"] < tests["timeout-minutes"]);
   // The tests half builds the webview and workspace deps the shell crate compiles against.
   const runs = tests.steps.map((step) => step.run ?? "");
   const build = runs.indexOf("pnpm turbo build --filter '@markiro/standalone...'");
