@@ -187,7 +187,10 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
     {
       "@type": "SoftwareApplication",
       "@id": `${SITE_URL}/#software`,
-      name: "Markiro",
+      // The product is «Маркиро Автоном»; "Markiro" stays the organization and an alias.
+      name: page.locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom",
+      alternateName:
+        page.locale === "ru" ? ["Markiro Autonom", "Markiro"] : ["Маркиро Автоном", "Markiro"],
       url: `${SITE_URL}/`,
       applicationCategory: "BusinessApplication",
       operatingSystem: "Windows, Android",
