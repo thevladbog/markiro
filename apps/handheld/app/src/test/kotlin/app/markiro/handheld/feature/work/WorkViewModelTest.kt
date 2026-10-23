@@ -483,18 +483,25 @@ class WorkViewModelTest {
     }
 
     @Test
-    fun aScanArrivingUnderTheCloseScreenIsIgnored() = runTest {
+    fun aScanArrivingUnderTheCloseScreenJoinsTheNextBox() = runTest {
         // The close is a full-screen state the operator is meant to read; a unit
-        // scanned under it belongs to the next box, not the one just closed.
+        // scanned under it belongs to the next box, not the one just closed. It is
+        // recorded, never dropped (`handleScan`).
         aggregating(capacity = 1)
         val vm = vm()
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
-        vm.closeStep.first { it is BoxCloseStep.Printed }
+        val closed = (vm.closeStep.first { it is BoxCloseStep.Printed } as BoxCloseStep.Printed).box
         scan("b")
-        advanceUntilIdle()
-        assertEquals(1, db.codeDao().countForShift("s1"))
+        // Awaited, not advanced: `advanceUntilIdle` returns while Room is still
+        // writing. This read «1» only because it ran before the scan was handled,
+        // and failed with «expected:<1> but was:<2>» whenever the scan won.
+        val next = (vm.closeStep.first { it is BoxCloseStep.Printed && it.box.boxId != closed.boxId } as BoxCloseStep.Printed).box
+        assertEquals(1, db.boxDao().itemCount(closed.boxId))
+        assertEquals(2, next.ordinal)
+        assertEquals(1, next.itemCount)
+        assertEquals(2, db.codeDao().countForShift("s1"))
     }
 
     @Test
