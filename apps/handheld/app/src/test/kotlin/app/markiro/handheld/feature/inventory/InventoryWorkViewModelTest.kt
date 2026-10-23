@@ -100,6 +100,17 @@ class InventoryWorkViewModelTest {
         assertEquals(count, played.size)
     }
 
+    /**
+     * Waits for a held scan, once accepted, to land: counted and the dialog gone.
+     *
+     * The two arrive separately. The count is Room's, re-read by its observer after the commit; `held`
+     * is this view model's, cleared when `record` comes back to Main. Both reach `state` from Room's
+     * threads in either order, so a state with the new count may still hold the scan -- which is how
+     * this read «expected null, but was:<DateMismatch(...)>» on a CI runner.
+     */
+    private suspend fun awaitAccepted(vm: InventoryWorkViewModel, verified: Int): InventoryWorkUi =
+        vm.state.first { it.progress.verified == verified && it.held == null }
+
     private fun vm(): InventoryWorkViewModel {
         val engine = InventorySyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" }, NetworkModule.strictJson(),
@@ -140,7 +151,9 @@ class InventoryWorkViewModelTest {
         val vm = vm()
         advanceUntilIdle()
         scans.tryEmit(ScanEvent(raw("A1"), null, "debug", 0))
-        advanceUntilIdle()
+        // Awaited, not advanced: `advanceUntilIdle` returns while Room is still writing, and the count
+        // below is read from `state.value`.
+        vm.state.first { it.progress.verified == 1 }
         scans.tryEmit(ScanEvent(raw("A2"), null, "debug", 0))
         val held = vm.state.first { it.held != null }.held
         assertEquals("2026-08-22", held?.codeDate)
@@ -149,8 +162,7 @@ class InventoryWorkViewModelTest {
         assertEquals(1, vm.state.value.progress.verified)
         assertEquals(listOf(SignalKind.OK, SignalKind.ERROR, SignalKind.ERROR), played)
         vm.applyDateAndAccept()
-        val after = vm.state.first { it.progress.verified == 2 }
-        assertNull(after.held)
+        awaitAccepted(vm, verified = 2)
         assertEquals("2026-08-22", vm.state.first { it.activeDate == "2026-08-22" }.activeDate)
         vm.setDate("2026-08-20")
         assertEquals("2026-08-20", vm.state.first { it.activeDate == "2026-08-20" }.activeDate)
@@ -161,7 +173,7 @@ class InventoryWorkViewModelTest {
         val vm = vm()
         advanceUntilIdle()
         scans.tryEmit(ScanEvent(raw("A1"), null, "debug", 0))
-        advanceUntilIdle()
+        vm.state.first { it.progress.verified == 1 }
         scans.tryEmit(ScanEvent(raw("A2"), null, "debug", 0))
         vm.state.first { it.held != null }
         vm.skipHeld()
@@ -170,10 +182,9 @@ class InventoryWorkViewModelTest {
         scans.tryEmit(ScanEvent(raw("A2"), null, "debug", 0))
         vm.state.first { it.held != null }
         vm.acceptAsIs()
-        val after = vm.state.first { it.progress.verified == 2 }
-        assertEquals("2026-08-20", after.activeDate)
-        assertNull(after.held)
+        assertEquals("2026-08-20", awaitAccepted(vm, verified = 2).activeDate)
     }
+
     @Test fun heldScanAndDateRemainOwnedByOriginalGeneration() = runTest {
         val vm = vm()
         advanceUntilIdle()
