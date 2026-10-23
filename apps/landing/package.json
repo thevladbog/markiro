@@ -19,7 +19,7 @@
     "@markiro/domain": "workspace:*",
     "@markiro/legal-documents": "workspace:*",
     "@markiro/ui": "workspace:*",
-    "astro": "7.2.8"
+    "astro": "7.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
