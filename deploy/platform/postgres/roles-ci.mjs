@@ -471,9 +471,14 @@ try {
     throw new Error("Isolated role probe failed");
   }
   const report = JSON.parse(result.stdout);
-  assert.ok(Array.isArray(report.checks) && report.checks.length === 7);
+  assert.ok(Array.isArray(report.checks) && report.checks.length === 8);
   assert.ok(
     report.checks.includes("fixed host probe read-only policy and independent TLS negatives"),
+  );
+  assert.ok(
+    report.checks.includes(
+      "exact append-only catalog privileges accepted and every missing or excess grant rejected",
+    ),
   );
   assert.ok(
     report.checks.includes(

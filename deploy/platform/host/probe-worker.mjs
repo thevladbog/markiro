@@ -133,7 +133,19 @@ export async function probePostgres({ Client, input, ca }) {
             NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','S','v','m') AND c.relowner <> 'markiro_migrator'::regrole) AS business_owner,
             NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND NOT (has_sequence_privilege('markiro_app',c.oid,'USAGE') AND has_sequence_privilege('markiro_app',c.oid,'SELECT'))) AS business_sequences,
             NOT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='pgboss' AND has_schema_privilege('markiro_app',oid,'USAGE')) AS legacy_denied,
-            NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p') AND (NOT (has_table_privilege('markiro_app',c.oid,'SELECT') AND has_table_privilege('markiro_app',c.oid,'INSERT') AND has_table_privilege('markiro_app',c.oid,'UPDATE') AND has_table_privilege('markiro_app',c.oid,'DELETE')) OR has_table_privilege('markiro_app',c.oid,'TRUNCATE'))) AS business_dml
+            NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind IN ('r','p') AND NOT (
+                has_table_privilege('markiro_app',c.oid,'SELECT')
+                AND has_table_privilege('markiro_app',c.oid,'INSERT')
+                AND NOT has_table_privilege('markiro_app',c.oid,'TRUNCATE')
+                AND CASE
+                  WHEN c.relname IN ('release_catalog_publications','release_catalog_objects','release_catalog_reservations','release_catalog_channel_events','release_catalog_receipts','release_catalog_oidc_bindings')
+                    THEN NOT has_table_privilege('markiro_app',c.oid,'UPDATE') AND NOT has_table_privilege('markiro_app',c.oid,'DELETE')
+                  WHEN c.relname='release_catalog_intents'
+                    THEN has_table_privilege('markiro_app',c.oid,'UPDATE') AND NOT has_table_privilege('markiro_app',c.oid,'DELETE')
+                  ELSE has_table_privilege('markiro_app',c.oid,'UPDATE') AND has_table_privilege('markiro_app',c.oid,'DELETE')
+                END
+              )) AS business_dml
           `)
           ).rows[0];
           ensure(Object.values(policy).every((v) => v === true));
