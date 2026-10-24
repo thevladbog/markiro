@@ -111,13 +111,17 @@ test("uses fixed audience, staged key and opaque returned version; commits then 
     },
   );
   assert.equal(f.puts[0].key, `handheld/_uploads/${id}/manifest.json`);
-  const token = f.calls.find((c) => c.url.includes("actions.githubusercontent.com"));
+  const token = f.calls.find(
+    (c) => new URL(c.url).hostname === "fixture.actions.githubusercontent.com",
+  );
   assert.equal(new URL(token.url).searchParams.get("audience"), "markiro-release-catalog");
   assert.equal(token.options.redirect, "error");
-  const publicCall = f.calls.find((c) => c.url.includes("releases.markiro.app"));
+  const publicCall = f.calls.find((c) => new URL(c.url).origin === "https://releases.markiro.app");
   assert.equal(publicCall.options.headers?.Authorization, undefined);
   const commitIndex = f.calls.findIndex((c) => c.url.endsWith("/commit"));
-  const readIndex = f.calls.findIndex((c) => c.url.includes("releases.markiro.app"));
+  const readIndex = f.calls.findIndex(
+    (c) => new URL(c.url).origin === "https://releases.markiro.app",
+  );
   const moveIndex = f.calls.findIndex((c) => c.options.method === "PUT");
   assert.ok(commitIndex < readIndex && readIndex < moveIndex);
 });
@@ -204,10 +208,10 @@ test("a later run validates the full accepted publication before CAS without any
   const f = fixture();
   // Fixture returns the accepted binding only for this authenticated lookup.
   const fetchImpl = async (url) => {
-    if (String(url).includes("actions.githubusercontent.com"))
+    if (new URL(url).hostname === "fixture.actions.githubusercontent.com")
       return Response.json({ value: "fixture.oidc.token" });
     if (String(url).includes("/publications/")) return Response.json(f.result);
-    if (String(url).includes("https://releases.markiro.app/")) return new Response(f.bytes);
+    if (new URL(url).origin === "https://releases.markiro.app") return new Response(f.bytes);
     return Response.json({
       identity: { product: "handheld", channel: "stable" },
       revision: "2",

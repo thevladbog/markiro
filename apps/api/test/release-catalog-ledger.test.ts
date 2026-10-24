@@ -11,7 +11,11 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { CatalogLedger, receiptBytes } from "../src/modules/release-catalog/catalog-ledger";
+import {
+  CatalogLedger,
+  receiptBytes,
+  catalogJournalPath,
+} from "../src/modules/release-catalog/catalog-ledger";
 import { digest, fakeLedgerStore, publicationOperation } from "./support/catalog-ledger";
 const roots: string[] = [];
 afterEach(async () => {
@@ -151,5 +155,33 @@ describe("dual durable release ledger", () => {
       preparedSha256: prepared.sha256,
     });
     expect((await readdir(f.root)).filter((p) => /^[a-f0-9-]{36}\.json$/.test(p))).toHaveLength(2);
+  });
+});
+
+describe("journal path containment at the filesystem boundary", () => {
+  it("accepts only direct UUID receipt and sidecar names", async () => {
+    const f = await fixture(),
+      id = publicationOperation().id;
+    for (const suffix of [".json", ".attempt.json", ".stored.json"])
+      expect(catalogJournalPath(f.root, id + suffix)).toBe(join(f.root, id + suffix));
+    for (const name of [
+      "../outside.json",
+      "/outside.json",
+      "sub/" + id + ".json",
+      "sub\\" + id + ".json",
+      id + "%2f.json",
+      id + ".json/..",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".toUpperCase() + ".json",
+      "bad.json",
+    ])
+      expect(() => catalogJournalPath(f.root, name)).toThrow();
+  });
+  it("rejects traversal and encoded IDs through the public load entry before reading", async () => {
+    const f = await fixture(),
+      ledger = new CatalogLedger(f.config, f.store);
+    for (const id of ["../outside", "%2e%2e%2foutside", "/tmp/outside", "..\\outside"])
+      await expect(ledger.load(id)).rejects.toMatchObject({ code: "invalid_request" });
+    expect(await readdir(f.root)).toEqual([]);
+    expect(f.puts()).toBe(0);
   });
 });

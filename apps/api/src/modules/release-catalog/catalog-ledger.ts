@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import {
   releaseOperationIdSchema,
   releaseSha256Schema,
@@ -42,6 +42,17 @@ const proofSchema = z
   .refine((r) => r.ledgerKey === `_publication-ledger/${r.operationId}.json`);
 function code(e: unknown) {
   return e && typeof e === "object" && "code" in e ? e.code : undefined;
+}
+/** Resolve only a canonical direct journal entry beneath the private directory. */
+export function catalogJournalPath(root: string, name: string): string {
+  const match = /^([a-f0-9-]{36})(?:\.attempt|\.stored)?\.json$/.exec(name);
+  if (!match || !releaseOperationIdSchema.safeParse(match[1]).success)
+    throw new CatalogFault("invalid_request");
+  const directory = resolve(root);
+  const path = resolve(directory, name);
+  if (!path.startsWith(directory + sep) || dirname(path) !== directory)
+    throw new CatalogFault("invalid_request");
+  return path;
 }
 export class CatalogLedger {
   private readonly io: LedgerIO;
@@ -85,7 +96,7 @@ export class CatalogLedger {
   private async read(name: string): Promise<Buffer> {
     await this.directory();
     const f = await open(
-      join(this.config.journalDir, name),
+      catalogJournalPath(this.config.journalDir, name),
       constants.O_RDONLY | constants.O_NOFOLLOW,
     );
     try {
@@ -118,13 +129,13 @@ export class CatalogLedger {
     let created = true,
       file: FileHandle;
     try {
-      file = await open(join(this.config.journalDir, name), "wx", 0o600);
+      file = await open(catalogJournalPath(this.config.journalDir, name), "wx", 0o600);
     } catch (error) {
       if (code(error) !== "EEXIST") throw error;
       created = false;
       if (!(await this.read(name)).equals(bytes)) throw new CatalogFault("conflict");
       file = await open(
-        join(this.config.journalDir, name),
+        catalogJournalPath(this.config.journalDir, name),
         constants.O_RDONLY | constants.O_NOFOLLOW,
       );
     }
