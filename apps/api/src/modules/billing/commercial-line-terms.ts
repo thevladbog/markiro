@@ -31,39 +31,59 @@ export function freezeCommercialLineTerms(
     throw new BadRequestException({ code: "commercial_service_quantity_invalid" });
   const supplied =
     line.commercialTerms == null ? null : commercialLineTermsV4Schema.parse(line.commercialTerms);
+  if (supplied?.version === 3 && line.kind !== "plan")
+    throw new BadRequestException({ code: "commercial_line_terms_invalid" });
   if (!version) return supplied;
   if (!version.documentNameRu || !version.subject || !version.sellerPolicyRevision) return null;
   const license = line.kind === "plan" || line.kind === "addon";
   const resolved = commercialLineTermsV4Schema.parse(
-    version.billingMode === "recurring" && line.kind === "service"
+    supplied?.version === 3
       ? {
-          version: 2,
+          version: 3,
           subject: version.subject,
           documentNameRu: version.documentNameRu,
           documentNameEn: version.documentNameEn,
           sellerPolicyRevision: version.sellerPolicyRevision,
-          billingPeriod: "month",
+          billingPeriod: "custom",
           billingTimezone: "Europe/Moscow",
-          activationRule: "after_current",
-          serviceTerms: monthlyServiceTermsSchema.parse(version.serviceTerms),
-        }
-      : {
-          version: 1,
-          subject: version.subject,
-          documentNameRu: version.documentNameRu,
-          documentNameEn: version.documentNameEn,
-          sellerPolicyRevision: version.sellerPolicyRevision,
-          billingPeriod: license ? version.billingPeriod : null,
-          billingTimezone: license ? "Europe/Moscow" : null,
-          activationRule: license
-            ? line.activationPolicy === "after_current"
+          activationRule:
+            line.activationPolicy === "after_current"
               ? "after_current"
-              : line.activationPolicy === "manual" ||
-                  (line.kind === "addon" && line.activationPolicy == null)
-                ? (supplied?.activationRule ?? "on_application")
-                : "on_application"
-            : null,
-        },
+              : line.activationPolicy === "manual"
+                ? supplied.activationRule
+                : "on_application",
+          termStart: supplied.termStart,
+          termEnd: supplied.termEnd,
+        }
+      : version.billingMode === "recurring" && line.kind === "service"
+        ? {
+            version: 2,
+            subject: version.subject,
+            documentNameRu: version.documentNameRu,
+            documentNameEn: version.documentNameEn,
+            sellerPolicyRevision: version.sellerPolicyRevision,
+            billingPeriod: "month",
+            billingTimezone: "Europe/Moscow",
+            activationRule: "after_current",
+            serviceTerms: monthlyServiceTermsSchema.parse(version.serviceTerms),
+          }
+        : {
+            version: 1,
+            subject: version.subject,
+            documentNameRu: version.documentNameRu,
+            documentNameEn: version.documentNameEn,
+            sellerPolicyRevision: version.sellerPolicyRevision,
+            billingPeriod: license ? version.billingPeriod : null,
+            billingTimezone: license ? "Europe/Moscow" : null,
+            activationRule: license
+              ? line.activationPolicy === "after_current"
+                ? "after_current"
+                : line.activationPolicy === "manual" ||
+                    (line.kind === "addon" && line.activationPolicy == null)
+                  ? (supplied?.activationRule ?? "on_application")
+                  : "on_application"
+              : null,
+          },
   );
   if (supplied && JSON.stringify(supplied) !== JSON.stringify(resolved)) {
     throw new ConflictException({ code: "commercial_review_stale" });
@@ -94,7 +114,8 @@ export async function validateCommercialIssuance(
     if (
       license !== (parsed.data.subject === "software_license") ||
       (line.kind === "plan" && line.quantity !== 1) ||
-      (parsed.data.version === 2 && (line.kind !== "service" || line.quantity !== 1))
+      (parsed.data.version === 2 && (line.kind !== "service" || line.quantity !== 1)) ||
+      (parsed.data.version === 3 && (line.kind !== "plan" || line.quantity !== 1))
     ) {
       throw new BadRequestException({ code: "commercial_line_terms_invalid" });
     }
@@ -137,7 +158,10 @@ export function commercialTermDescription(
     terms.activationRule === "after_current"
       ? "после окончания текущего срока"
       : "с момента применения оплаты";
-  const term = `Срок права использования: ${terms.billingPeriod === "year" ? "1 год" : "1 месяц"}, ${rule}.`;
+  const term =
+    terms.version === 3
+      ? `Срок права использования: с ${formatCivilDate(terms.termStart)} по ${formatCivilDate(terms.termEnd)} включительно, ${rule}.`
+      : `Срок права использования: ${terms.billingPeriod === "year" ? "1 год" : "1 месяц"}, ${rule}.`;
   return legacyDescription ? `${legacyDescription}\n${term}` : term;
 }
 
@@ -149,4 +173,9 @@ export function assertCommercialPlanSequence(
     if (review) throw new ConflictException({ code: "commercial_plan_sequence_review_required" });
     throw new BadRequestException({ code: "commercial_plan_sequence_invalid" });
   }
+}
+
+function formatCivilDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return `${day}.${month}.${year}`;
 }

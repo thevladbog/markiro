@@ -1,0 +1,16 @@
+{
+  "connectionGeneration": null,
+  "state": "disconnected",
+  "clientId": null,
+  "accountId": null,
+  "accountLabel": null,
+  "deliveryState": "idle",
+  "pendingSince": null,
+  "lastAttemptAt": null,
+  "lastConfirmedSnapshotId": null,
+  "lastConfirmedAt": null,
+  "lastConfirmedCopyCreatedAt": null,
+  "errorCode": null,
+  "progressBytes": 0,
+  "nextAttemptAt": null
+}

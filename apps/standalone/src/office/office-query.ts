@@ -44,6 +44,8 @@ export const officeKeys = {
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
+  /** The wizard's demo data (`GET /v1/office/demo-data`, spec 2026-10-21). */
+  demoData: ["office", "demo-data"],
   /** A product's photo (plan ТОВ, `GET /v1/office/products/{id}/photo`); a write changes the list's `photoChecksum` too. */
   productPhoto: (id: string) => ["office", "product-photo", id],
   /** A list row's thumbnail: keyed by the photo's checksum, so a changed photo is read again. */
@@ -57,6 +59,7 @@ export const officeKeys = {
   templateDefaults: ["office", "template-defaults"],
   /** The copies of the database in both folders (plan РК). */
   backups: ["office", "backups"],
+  yandexBackups: ["office", "yandex-backups"],
   /** The host's update package and the devices' versions (plan ОБН-3). */
   updateStatus: ["office", "update-status"],
   hostNetwork: ["office", "host-network"],
@@ -184,9 +187,12 @@ export function createOfficeQueryClient(): QueryClient {
   });
 }
 
-export interface OfficeQueryOptions {
-  /** Read again every this many milliseconds while mounted; never by default. */
-  refetchInterval?: number;
+export interface OfficeQueryOptions<T = unknown> {
+  /**
+   * Read again every this many milliseconds while mounted; never by default. A function chooses by the
+   * answer in hand (`undefined` before the first): a number to poll, `false` to stop.
+   */
+  refetchInterval?: number | ((data: T | undefined) => number | false);
   /**
    * How long an answer stays fresh: 0 by default, so a page reads again
    * whenever it opens; `Infinity` for data that never changes in a session.
@@ -200,13 +206,15 @@ export interface OfficeQueryOptions {
 export function useOfficeQuery<T>(
   key: QueryKey,
   read: (api: HostApi, token: string) => Promise<T>,
-  options: OfficeQueryOptions = {},
+  options: OfficeQueryOptions<T> = {},
 ): UseQueryResult<T, Error> {
   const { api, call } = useOfficeSession();
+  const interval = options.refetchInterval;
   return useQuery({
     queryKey: key,
     queryFn: () => call((token) => read(api, token)),
-    refetchInterval: options.refetchInterval ?? false,
+    refetchInterval:
+      typeof interval === "function" ? (query) => interval(query.state.data) : (interval ?? false),
     staleTime: options.staleTime ?? 0,
     enabled: options.enabled ?? true,
   });

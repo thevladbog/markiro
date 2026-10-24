@@ -79,11 +79,20 @@ internal fun ActiveShiftCard(active: HubActiveShift, onContinue: () -> Unit) {
                     Box(Modifier.fillMaxWidth(fraction).height(6.dp).background(c.accent))
                 }
             }
-            Text(
-                active.summaryAt?.let { stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
-                    ?: stringResource(R.string.hub_active_shift_local),
-                style = t.caption, color = c.fg3,
-            )
+            if (active.shared) {
+                // The figure is the shift-wide total (the work screen's own label), and offline it is the last one the host gave.
+                Text(stringResource(R.string.work_shift_total), style = t.caption, color = c.fg3)
+                active.staleAtMillis?.let { Text(stringResource(R.string.common_data_as_of, TimeText.hhmm(it)), style = t.caption, color = c.warnFg) }
+                active.lineFull?.let {
+                    Text(stringResource(R.string.work_shared_line_full, it.active, it.maxStations), style = t.body.copy(fontSize = 14.sp), color = c.tone(Tone.Warn).fg)
+                }
+            } else {
+                Text(
+                    active.summaryAt?.let { stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
+                        ?: stringResource(R.string.hub_active_shift_local),
+                    style = t.caption, color = c.fg3,
+                )
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.hub_active_shift_continue), modifier = Modifier.weight(1f), style = t.strong.copy(fontSize = 16.sp), color = c.accent)
                 Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c.accent, modifier = Modifier.size(22.dp))

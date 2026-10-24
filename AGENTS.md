@@ -90,11 +90,10 @@ rules; keep shared policies here and detailed procedures beside their code.
   artifact generation, manifests, and verification.
 - `deploy/production`: production Compose, images, preflight, deployment, smoke,
   and contract tests.
-- `deploy/yandex`: runtime inventory, remote deployment, and diagnostics for the
-  Yandex Cloud host.
-- `infra/yandex`: Terraform for Yandex Cloud — IAM, network, compute, managed
-  Postgres, object storage, and station-release buckets, plus the production
-  stack's variables and outputs.
+- `deploy/platform`: the Timeweb production platform (`SERVER_PROFILE=platform-only`):
+  Compose, the Caddy edge for SaaS admin, landing, retired hosts and
+  `releases.markiro.app` (a read-only proxy onto the Timeweb S3 release bucket),
+  preflight, host executor, backup/recovery and their contract tests.
 - `tools/station-release`: station release artifacts, changelog, promotion, and
   object-storage/GitHub mirror contracts.
 - `tools/evidence-package`: evidence package init, seal, and verification.
@@ -448,9 +447,12 @@ means updating both, and the gate is `pnpm test:production-bundle:contract`.
 Merge, artifact publication and deployment are separate outcomes. Use the existing
 release/deployment workflows and their protected environments; do not replace them
 with ad hoc production commands. Read the relevant workflow before dispatch and
-verify its exact source SHA, artifact manifest and evidence. Production deployment
-uses `.github/workflows/release-images.yml` and `deploy-production.yml`; Station
-uses `station-beta-release.yml` and `station-stable-release.yml`.
+verify its exact source SHA, artifact manifest and evidence. Production runs on
+Timeweb (`SERVER_PROFILE=platform-only`) and is released with
+`.github/workflows/release-platform-images.yml` and deployed with
+`deploy-platform.yml`; the Yandex `release-images.yml`/`deploy-production.yml`
+chain was removed on 2026-10-21. Station uses `station-beta-release.yml` and
+`station-stable-release.yml`.
 
 For Station stable releases, the reviewed dispatch/tooling SHA and the accepted
 product source SHA may differ. Preserve that distinction and run the tooling

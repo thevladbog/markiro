@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
-import { landingRoot } from "./film-render.mjs";
+import { landingRoot } from "./landing-build.mjs";
 
 // Renders the first page of the newest published PDF of each instruction the home page shows,
 // in both languages. Uses macOS `sips`; the PNGs are committed, so CI never renders PDFs.

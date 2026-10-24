@@ -25,5 +25,6 @@ object ShiftModule {
     fun teamRefresher(api: StationApi): TeamRefresher = ApiTeamRefresher(api)
 
     @Provides
-    fun shiftCloser(db: HandheldDatabase): ShiftCloser = ShiftCloser(db)
+    fun shiftCloser(db: HandheldDatabase, participation: app.markiro.handheld.core.host.HostParticipation): ShiftCloser =
+        ShiftCloser(db, refresh = participation::refresh)
 }

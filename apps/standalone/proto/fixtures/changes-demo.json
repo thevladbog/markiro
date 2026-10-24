@@ -1,0 +1,34 @@
+{
+  "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "rev": 12,
+  "hasMore": false,
+  "items": [
+    {
+      "entity": "products",
+      "id": "0d5e3c1a-7b2f-4c8d-9e0a-1b2c3d4e5f60",
+      "rev": 3,
+      "deleted": false,
+      "data": {
+        "gtin14": "02900000000018",
+        "name": "Демо: вода питьевая 0,5 л",
+        "printName": "Демо: вода питьевая 0,5 л",
+        "chzProductGroupCode": 13,
+        "boxCapacity": 5,
+        "palletBoxCapacity": 2,
+        "shelfLifeDays": 365,
+        "defaultBoxTemplateId": null,
+        "defaultPalletTemplateId": null,
+        "archived": false,
+        "status": "active",
+        "photoChecksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "demo": true
+      }
+    },
+    {
+      "entity": "products",
+      "id": "0d5e3c1a-7b2f-4c8d-9e0a-1b2c3d4e5f60",
+      "rev": 12,
+      "deleted": true
+    }
+  ]
+}

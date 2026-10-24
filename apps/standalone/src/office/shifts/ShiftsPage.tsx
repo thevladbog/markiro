@@ -23,6 +23,8 @@ import { shiftProductTitle } from "../../lib/shift-product.js";
 import { useCan } from "../access.js";
 import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
+import { DemoBadge } from "../demo/DemoBadge.js";
+import { isDemoShift } from "../demo/demo.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { listViewState } from "../list/list-state.js";
@@ -33,7 +35,9 @@ import { SortToggle } from "../list/SortToggle.js";
 import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { activeFirstByName } from "../records.js";
+import { civilToday } from "../../lib/civil-date.js";
 import {
+  beyondPeriod,
   civilDateLabel,
   findShifts,
   openBlocker,
@@ -49,11 +53,14 @@ import {
 import { shiftCardPath } from "./shift-card.js";
 import { ShiftDrawer } from "./ShiftDrawer.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
+import { CloseReasonDialog } from "./CloseReasonDialog.js";
 import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftCreateDrawer } from "./ShiftEditor.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { ShiftSourceLinks } from "./CloudShifts.js";
+import { ShiftMarks } from "./ShiftMarks.js";
+import { isSharedShift } from "./participation.js";
 import { shiftOutput } from "./shift-text.js";
 
 /**
@@ -87,13 +94,15 @@ type ShiftsDialog =
   | { kind: "plan"; shift: OfficeShift }
   | { kind: "delete"; shift: OfficeShift }
   | { kind: "close"; shift: OfficeShift }
+  | { kind: "reason"; shift: OfficeShift }
   | { kind: "totals"; shift: OfficeShift }
   | { kind: "export"; shift: OfficeShift };
 
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
  * the planned and active shifts and the closed ones of the last 31 days, or
- * every shift of a chosen period; the filters, the search and the pages work
+ * every shift of a chosen period, and with either every shift closed without
+ * its reason (`beyondPeriod`); the filters, the search and the pages work
  * here. A shift names its product, line and counterparty by id, and the page
  * names them from its own lists; a list that does not load leaves the shifts
  * in place, named by the first characters of their ids.
@@ -240,7 +249,11 @@ export function ShiftsPage() {
           product: (shift) =>
             shiftProductTitle(products.data?.find((each) => each.id === shift.productId)),
         });
-  const totals = totalShifts(filtered);
+  // The host adds every shift owing a close reason whatever the period (spec §12.9): it is listed
+  // and filtered like any, but the totals stay the period's and a note says why it is there.
+  const hostToday = civilToday("UTC");
+  const beyond = filtered.filter((shift) => beyondPeriod(shift, asked, hostToday));
+  const totals = totalShifts(filtered.filter((shift) => !beyond.includes(shift)));
   const onSort = (key: string) => {
     setSort((previous) => ({
       key: key as ShiftSortKey,
@@ -277,12 +290,15 @@ export function ShiftsPage() {
       mono: true,
       // The number opens the shift's card (plan О-Ф).
       render: (shift) => (
-        <Link
-          to={shiftCardPath(shift.id)}
-          aria-label={t("office.shifts.cardNamed", { number: shift.number })}
-        >
-          {shift.number}
-        </Link>
+        <span className="shift-cell">
+          <Link
+            to={shiftCardPath(shift.id)}
+            aria-label={t("office.shifts.cardNamed", { number: shift.number })}
+          >
+            {shift.number}
+          </Link>
+          {isDemoShift(shift, products.data) && <DemoBadge />}
+        </span>
       ),
     },
     {
@@ -390,6 +406,7 @@ export function ShiftsPage() {
             {shift.lateDataAt !== null && (
               <StatusChip phase="attention" label={t("office.shifts.lateData")} />
             )}
+            <ShiftMarks shift={shift} />
             {shift.closeReasonText !== null && (
               <span className="shift-cell__quiet">
                 {t("office.shifts.closedByOffice", { reason: shift.closeReasonText })}
@@ -469,13 +486,25 @@ export function ShiftsPage() {
           });
         }
         if (canPlan && shift.status === "active") {
+          // A shift several devices entered is closed whole: the office says so.
+          const whole = isSharedShift(shift);
           items.push({
             key: "close",
-            label: t("office.shifts.close"),
-            ariaLabel: t("office.shifts.closeNamed", named),
+            label: t(whole ? "office.shifts.closeAll" : "office.shifts.close"),
+            ariaLabel: t(whole ? "office.shifts.closeAllNamed" : "office.shifts.closeNamed", named),
             icon: "stop",
             destructive: true,
             onSelect: () => open({ kind: "close", shift }),
+          });
+        }
+        // A shared shift its devices closed without the reason the plan's gap needed (spec §12.9).
+        if (canPlan && shift.status === "closed" && shift.closeReasonMissing === true) {
+          items.push({
+            key: "reason",
+            label: t("office.shifts.supplyReason"),
+            ariaLabel: t("office.shifts.supplyReasonNamed", named),
+            icon: "pencil",
+            onSelect: () => open({ kind: "reason", shift }),
           });
         }
         if (canPlan && shift.status === "planned") {
@@ -650,6 +679,11 @@ export function ShiftsPage() {
           <p className="office-list-note" aria-live="polite">
             {periodNote}
           </p>
+          {beyond.length > 0 && (
+            <p className="office-list-note" aria-live="polite">
+              {t("office.shifts.period.reasonMissingBeyond", { number: beyond.length })}
+            </p>
+          )}
           {shifts.isSuccess && (
             // What the filters keep, however many pages: the figures of the period.
             <p className="office-list-note shift-totals" aria-live="polite">
@@ -747,12 +781,25 @@ export function ShiftsPage() {
           onOutdated={readAgain}
         />
       )}
+      {canPlan && dialog?.kind === "reason" && (
+        <CloseReasonDialog
+          shift={dialog.shift}
+          onClose={() => setDialog(null)}
+          onSaved={(shift) => saved(t("office.shifts.reasonSaved", { number: shift.number }))}
+          onReload={reload}
+          onOutdated={readAgain}
+        />
+      )}
       {dialog?.kind === "totals" && (
         <ShiftTotalsDialog shift={dialog.shift} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === "export" && (
         <Suspense fallback={null}>
-          <ExportDialog shift={dialog.shift} onClose={() => setDialog(null)} />
+          <ExportDialog
+            shift={dialog.shift}
+            demo={isDemoShift(dialog.shift, products.data)}
+            onClose={() => setDialog(null)}
+          />
         </Suspense>
       )}
       {canPlan && dialog?.kind === "plan" && (

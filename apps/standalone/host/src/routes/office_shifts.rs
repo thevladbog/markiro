@@ -1,17 +1,21 @@
 //! Shifts in the office (stage 2a spec §4.2, §4.7): `GET /v1/office/shifts`
 //! and `GET …/{id}` (every role); `POST`, `PUT …/{id}` (with
 //! `expectedRev`), `DELETE …/{id}` and `POST …/{id}/close` (administrators
-//! and technologists, `planShifts`). A shift is no feed record: every change
-//! still takes a host revision, so open streams wake and stations read their
-//! shifts again (`GET /v1/device/shifts`). Every answer carries the shift's
+//! and technologists, `planShifts`), and `PUT …/{id}/close-reason` (the same
+//! roles). A shift is no feed record: every change still takes a host
+//! revision, so open streams wake and stations read their shifts again
+//! (`GET /v1/device/shifts`). Every answer carries the shift's
 //! totals, which its facts give (plan 2a2): they are read, never stored.
+//! Since plan 2b every answer of an opened shift also lists its participants and each
+//! device's part of the totals, and names a reason its devices did not give
+//! (`closeReasonMissing`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
-    OfficeShift, ShiftClose, ShiftCreate, ShiftMode, ShiftStatus, ShiftTotals, ShiftUpdate,
-    UnitLabelTotals, ValidationPrint,
+    shift_close_reasons, OfficeShift, ShiftClose, ShiftCloseReasonSet, ShiftCreate, ShiftMode,
+    ShiftStatus, ShiftTotals, ShiftUpdate, UnitLabelTotals, ValidationPrint,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -23,6 +27,8 @@ use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
 use crate::routes::devices::require_active_line;
 use crate::server::AppState;
+use crate::shift_participants;
+use crate::shift_totals;
 use crate::shifts::{self, NewShift};
 use crate::validate;
 
@@ -38,7 +44,7 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
      pallet_sheet_template_id, validation_print_mode, validation_print_verification, \
      validation_print_template_id, owner_device_id, \
      opened_at, closed_at, close_reason_code, \
-     close_reason_text, late_data_at, created_at, rev, \
+     close_reason_text, late_data_at, close_reason_missing, created_at, rev, \
      CASE mode WHEN 'validation' \
       THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = shifts.id \
             AND o.box_id IS NULL) \
@@ -118,6 +124,7 @@ struct ShiftRow {
     close_reason_code: Option<String>,
     close_reason_text: Option<String>,
     late_data_at: Option<String>,
+    close_reason_missing: bool,
     created_at: String,
     rev: i64,
     accepted_units: i64,
@@ -195,16 +202,35 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
             open_pallets: u32::try_from(row.open_pallets).map_err(ApiError::internal)?,
             unit_labels,
         },
+        participants: Vec::new(),
+        by_device: Vec::new(),
+        close_reason_missing: row.close_reason_missing,
     })
+}
+
+/// A shift's participants and each device's part (plan 2b), in every answer of a shift that
+/// opened; a planned shift has none.
+async fn with_participants(
+    conn: &mut SqliteConnection,
+    mut shift: OfficeShift,
+) -> Result<OfficeShift, ApiError> {
+    if shift.status != ShiftStatus::Planned {
+        shift.participants = shift_participants::list(&mut *conn, &shift.id).await?;
+        shift.by_device = shift_totals::by_device(&mut *conn, &shift.id).await?;
+    }
+    Ok(shift)
 }
 
 async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<OfficeShift>, ApiError> {
     let row: Option<ShiftRow> = sqlx::query_as(&format!("{SELECT} WHERE id = ?"))
         .bind(id)
-        .fetch_optional(conn)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
-    row.map(record).transpose()
+    match row {
+        Some(row) => Ok(Some(with_participants(conn, record(row)?).await?)),
+        None => Ok(None),
+    }
 }
 
 /// How far back the list without a period reaches for closed shifts, by
@@ -223,9 +249,20 @@ pub struct ShiftListQuery {
     planned_to: Option<String>,
 }
 
+/// How many shifts owing a reason (`close_reason_missing`) the list adds
+/// beyond its period, newest production date first. The set empties as the
+/// office gives the reasons; past the cap the oldest wait for the newer ones
+/// (or a period that holds them).
+pub const REASON_MISSING_CAP: i64 = 100;
+
 /// `GET /v1/office/shifts`: without a period every planned and active shift
 /// and the closed ones produced in the last 31 days; with one, every shift
-/// produced in it. Newest production date first.
+/// produced in it. Whatever the period, also every shift closed without the
+/// reason its devices owed (`closeReasonMissing`, plan 2b, spec §12.9), up to
+/// `REASON_MISSING_CAP` of them, so the office's request for it never drops
+/// out of a window: the host filters by period only (status, line and search
+/// are the office's own filters over these rows). Each shift once, newest
+/// production date first.
 pub async fn list_shifts(
     State(state): State<AppState>,
     _context: OfficeContext,
@@ -261,34 +298,44 @@ pub async fn list_shifts(
     let end = |bound: Option<time::Date>, open: &str| {
         bound.map_or_else(|| open.to_owned(), shifts::civil_text)
     };
+    // The shifts owing a reason, beside the period: the cap's newest by the
+    // list's own order. A row both in the period and owing a reason is one row.
+    let reason_missing = format!(
+        "id IN (SELECT id FROM shifts WHERE close_reason_missing = 1 {order} \
+         LIMIT {REASON_MISSING_CAP})"
+    );
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let rows: Vec<ShiftRow> = if produced == (None, None) && planned == (None, None) {
         let cutoff = state.now().date() - time::Duration::days(RECENT_DAYS);
         sqlx::query_as(&format!(
-            "{SELECT} WHERE status <> 'closed' OR production_date >= ? {order}"
+            "{SELECT} WHERE status <> 'closed' OR production_date >= ? \
+             OR {reason_missing} {order}"
         ))
         .bind(shifts::civil_text(cutoff))
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
     } else {
         // Every row has a shift date (`0028` filled the old ones and a
         // trigger fills a new one), so the plain column serves the index
-        // `shifts_planned_date`.
+        // `shifts_planned_date` (beside the key, for the shifts owing a reason).
         sqlx::query_as(&format!(
-            "{SELECT} WHERE production_date >= ? AND production_date <= ? \
-             AND planned_date >= ? AND planned_date <= ? {order}"
+            "{SELECT} WHERE (production_date >= ? AND production_date <= ? \
+             AND planned_date >= ? AND planned_date <= ?) OR {reason_missing} {order}"
         ))
         .bind(end(produced.0, "0001-01-01"))
         .bind(end(produced.1, "9999-12-31"))
         .bind(end(planned.0, "0001-01-01"))
         .bind(end(planned.1, "9999-12-31"))
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
     }
     .map_err(ApiError::internal)?;
-    rows.into_iter()
-        .map(record)
-        .collect::<Result<Vec<_>, _>>()
-        .map(Json)
+    let mut shifts = Vec::with_capacity(rows.len());
+    for row in rows {
+        shifts.push(with_participants(&mut tx, record(row)?).await?);
+    }
+    tx.rollback().await.map_err(ApiError::internal)?;
+    Ok(Json(shifts))
 }
 
 pub async fn get_shift(
@@ -850,10 +897,12 @@ pub async fn delete_shift(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /v1/office/shifts/{id}/close`: the office closes an active shift
-/// with its reason in words, over `expectedRev`; a planned or a closed one
-/// is `shift_status`. Facts a station sends for the shift afterwards are
-/// taken and marked late (plan 2a2).
+/// `POST /v1/office/shifts/{id}/close`: the office closes an active shift whole (plan 2b, spec
+/// §4.2 «Принудительное закрытие») with its reason in words, over `expectedRev`; a planned or a
+/// closed one is `shift_status`. Every part still active or left closes as the office's, and
+/// `shift.force_closed` names them (`notClosed`, first entry first): what the office's warning
+/// «Не закрыли: …» showed, exact because every change of a part stamps the shift's `rev`. Facts a
+/// device sends for the shift afterwards are taken and marked late (plan 2a2); nothing reopens it.
 pub async fn close_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -875,6 +924,7 @@ pub async fn close_shift(
         return Err(shifts::status_conflict(current.status));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    let not_closed = shift_participants::close_open_by_office(&mut tx, &id, &at).await?;
     sqlx::query(
         "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
          closed_by = ?, close_reason_text = ?, rev = ? WHERE id = ?",
@@ -887,16 +937,20 @@ pub async fn close_shift(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let not_closed: Vec<serde_json::Value> = not_closed
+        .iter()
+        .map(|(device_id, state)| json!({ "deviceId": device_id, "state": state.as_str() }))
+        .collect();
     audit::record(
         &mut tx,
         &at,
         Entry {
             actor: context.actor(),
-            action: actions::SHIFT_CLOSE,
+            action: actions::SHIFT_FORCE_CLOSED,
             target_type: Some("shift"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "reason": reason }),
+            details: json!({ "reason": reason, "notClosed": not_closed }),
         },
     )
     .await
@@ -908,6 +962,73 @@ pub async fn close_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(closed))
+}
+
+/// `PUT /v1/office/shifts/{id}/close-reason` (plan 2b, spec §12.9): the office gives one of the six
+/// reason codes to a shift its last device closed without the reason the shift-wide total needed
+/// (`closeReasonMissing`), over `expectedRev`; administrators and technologists (`planShifts`).
+/// The refusals in order: a code that is none of the six (`validation_failed` on `reasonCode`, even
+/// for an unknown id), the lookup (404), a stale revision, a shift that lacks no reason (`conflict`
+/// on `close_reason_not_missing`). It writes `shift.close_reason` `{ reasonCode }`.
+pub async fn set_close_reason(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(set): ApiJson<ShiftCloseReasonSet>,
+) -> Result<Json<OfficeShift>, ApiError> {
+    context.require_shift_planning()?;
+    if !shift_close_reasons::ALL.contains(&set.reason_code.as_str()) {
+        return Err(ApiError::validation(
+            "reasonCode",
+            "one of the six close reason codes",
+        ));
+    }
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_shift_planning_in(&mut tx).await?;
+    let current = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such shift"))?;
+    if current.rev != set.expected_rev {
+        return Err(ApiError::stale_revision(current.rev));
+    }
+    if !current.close_reason_missing {
+        return Err(ApiError::conflict(
+            "close_reason_not_missing",
+            "the shift lacks no close reason",
+        ));
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE shifts SET close_reason_code = ?, close_reason_missing = 0, rev = ? WHERE id = ?",
+    )
+    .bind(&set.reason_code)
+    .bind(rev)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::SHIFT_CLOSE_REASON,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "reasonCode": set.reason_code }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let updated = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(updated))
 }
 
 #[cfg(test)]

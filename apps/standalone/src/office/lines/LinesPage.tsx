@@ -10,6 +10,7 @@ import { RowActionBar } from "../list/RowActionBar.js";
 import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeLine } from "../../host/protocol.js";
+import { lineMaxStations } from "../../host/requests.js";
 import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { activeFirstByName, ArchiveStatus, useStoreRecord } from "../records.js";
@@ -56,6 +57,13 @@ export function LinesPage() {
 
   const columns: TableColumn<OfficeLine>[] = [
     { key: "name", title: t("office.lines.table.name"), render: (line) => line.name },
+    {
+      key: "maxStations",
+      title: t("office.lines.table.maxStations"),
+      mono: true,
+      align: "right",
+      render: (line) => lineMaxStations(line),
+    },
     {
       key: "status",
       title: t("office.lines.table.status"),

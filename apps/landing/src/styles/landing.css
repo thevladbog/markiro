@@ -994,22 +994,21 @@ input:focus-visible {
   padding-left: 1.25rem;
 }
 
-.seo-download {
-  border-top: 1px solid var(--accent);
-}
-
-.seo-download__content {
-  min-width: 0;
-}
-
-.seo-download__actions {
+.seo-hero__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-5);
-  margin-top: var(--sp-6);
+  gap: var(--sp-5) var(--sp-7);
 }
 
-.seo-download__actions > span {
+.seo-hero__actions .text-link,
+.seo-cta__actions .text-link {
+  margin-top: 0;
+}
+
+.seo-hero__note,
+.seo-cta__note {
+  margin: var(--sp-4) 0 0;
   color: var(--fg-3);
   font: 500 0.75rem / 1.4 var(--font-mono);
 }
@@ -1092,11 +1091,6 @@ input:focus-visible {
 
   .seo-related__grid {
     grid-template-columns: 1fr;
-  }
-
-  .seo-download__actions {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .seo-related__grid a {

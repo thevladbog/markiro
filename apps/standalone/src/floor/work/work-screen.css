@@ -340,6 +340,14 @@
   background: var(--ok-fg);
 }
 
+/* Plan 2b: the age of the host's part of a shared total, said only without the link. It stays on a
+   short window, where the plan's bar and percent give their line up. */
+.work-shift-band__stale {
+  margin: 0;
+  font: 600 13px/16px var(--font-ui);
+  white-space: nowrap;
+}
+
 /* The open box: its title and count in one row, the places as cells, its action under them. */
 .work-box-fill {
   display: grid;
@@ -915,8 +923,33 @@
     padding-block: var(--sp-2);
   }
 
+  /* Plan 2b: the age of a shared shift's figures takes the line the plan's bar and percent had. */
+  .work-shift-band__total:has(.work-shift-band__stale) .work-shift-band__bar,
+  .work-shift-band__total:has(.work-shift-band__stale) .work-shift-band__meta {
+    display: none;
+  }
+
   .work-shift-band__count {
     font-size: 48px;
+  }
+
+  /* Plan 2b: a validation band of a shared shift holds four counters and big figures; they narrow
+     so the title and the chips keep two rows beside them. */
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__total {
+    padding-inline: var(--sp-2);
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__count {
+    font-size: 44px;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__small {
+    min-width: 64px;
+    padding-inline: var(--sp-1);
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__small-count {
+    font-size: 28px;
   }
 
   .work-shift-band__small-count {
@@ -1041,6 +1074,10 @@
     display: none;
   }
 
+  .work-shift-band__stale {
+    font: 600 12px/14px var(--font-ui);
+  }
+
   .work-shift-band__small {
     min-width: 72px;
     padding: var(--sp-1);
@@ -1048,6 +1085,36 @@
 
   .work-shift-band__small-count {
     font-size: 28px;
+  }
+
+  /* Plan 2b: «Моя станция» beside the two refusal counters of a validation band: tighter labels, so the
+     chips keep their three words. */
+  .work-shift-band__counters:has(.work-shift-band__small--mine)
+    .work-shift-band__small
+    .work-shift-band__label {
+    letter-spacing: 0.02em;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__count {
+    font-size: 40px;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine)
+    .work-shift-band__small--mine
+    .work-shift-band__small-count {
+    font-size: 24px;
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__small {
+    min-width: 64px;
+  }
+
+  .work-shift-band__counters {
+    gap: var(--sp-1);
+  }
+
+  .work-shift-band__counters:has(.work-shift-band__small--mine) .work-shift-band__total {
+    padding-inline: var(--sp-1);
   }
 
   /* The open box: title and count on a slim row, the cells share the rest, the buttons keep 64 px. */
@@ -1172,4 +1239,26 @@
     padding: var(--sp-2) var(--sp-3);
     gap: var(--sp-2);
   }
+}
+
+/* A demo shift (spec 2026-10-21): the band of «Демо-код» between the shift and the instruments. */
+.work-screen__work:has(> .work-screen__demo) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.work-screen__demo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 2px dashed var(--cat-magenta-border);
+  border-radius: var(--r-3);
+  background: var(--cat-magenta-bg);
+  color: var(--cat-magenta-fg);
+}
+
+.work-screen__demo > p {
+  margin: 0;
+  max-width: 72ch;
 }

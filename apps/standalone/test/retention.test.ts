@@ -19,8 +19,10 @@ import {
   RESEND_WINDOW_MS,
 } from "../src/local/restore-reconcile.js";
 import {
+  DEMO_SSCC_PREFIX,
   DUE_SHIFTS_SQL,
   purgeAcknowledged,
+  purgeRemovedDemo,
   RETAINED_TABLES,
   RETENTION_INTERVAL_MS,
   RETENTION_MS,
@@ -84,11 +86,18 @@ async function finished(
   const job = await readPrintJob(at.local, PAIRING, `job-${serial}`);
   if (job === null) throw new Error("no job");
   await sendLabelJob(resolveContext(at.local, manualRuntime(fakeHardware().hardware).runtime), job);
-  const result = await closeShift(context, "production_defect");
+  const result = await closeShift(context, "production_defect", [], false);
   if (result.kind !== "closed") throw new Error(result.kind);
   at.db
     .prepare("UPDATE outbox SET outcome = ?, acked_at = ? WHERE shift_id = ?")
     .run(outcome, ackedAt, shift.id);
+  // The cache of the shift's shared figures (plan 2b) goes with the shift's copy.
+  at.db
+    .prepare(
+      "INSERT INTO floor_shift_participation (host_id, device_id, shift_id, max_stations, " +
+        "participants, totals, by_device, as_of, seen_at) VALUES (?, ?, ?, 1, '[]', '{}', '[]', ?, 0)",
+    )
+    .run(PAIRING.hostId, PAIRING.deviceId, shift.id, ackedAt);
   if (outcome === "accepted") {
     at.db.prepare("UPDATE floor_shifts SET local_state = 'closed' WHERE id = ?").run(shift.id);
   }
@@ -183,6 +192,7 @@ const NONE = {
   floor_boxes: 0,
   floor_pallets: 0,
   floor_unit_labels: 0,
+  floor_shift_participation: 0,
   outbox: 0,
 };
 const WHOLE = {
@@ -195,6 +205,7 @@ const WHOLE = {
   floor_boxes: 1,
   floor_pallets: 0,
   floor_unit_labels: 0,
+  floor_shift_participation: 1,
   outbox: 5,
 };
 
@@ -657,9 +668,12 @@ describe("the retention of a shift's records on the station", () => {
     const [pallet] = rows(at.db, "SELECT id FROM floor_pallets");
     const context = palletContext(at);
     await disassemblePallet(context, String(pallet?.["id"]), { code: "wrong_product", text: null });
-    const result = await closeShift(context, "production_defect", [
-      openPalletGuard(PAIRING, at.shift.copy.id),
-    ]);
+    const result = await closeShift(
+      context,
+      "production_defect",
+      [openPalletGuard(PAIRING, at.shift.copy.id)],
+      false,
+    );
     if (result.kind !== "closed") throw new Error(result.kind);
     at.db.prepare("UPDATE outbox SET outcome = 'accepted', acked_at = ?").run(CUTOFF);
     at.db.prepare("UPDATE floor_shifts SET local_state = 'closed'").run();
@@ -732,6 +746,52 @@ describe("the retention of a shift's records on the station", () => {
       floor_pallets: 1,
       floor_pallet_exceptions: 1,
     });
+  });
+});
+
+describe("the removal of demo shifts (spec 2026-10-21)", () => {
+  /** The shift's copy made a demo shift's: its snapshot names the demo prefix. */
+  function demo(at: Pick<Station, "db">, shiftId: string): void {
+    at.db
+      .prepare(
+        "UPDATE floor_shifts SET snapshot = json_set(snapshot, '$.issuerPrefix', ?) WHERE id = ?",
+      )
+      .run(DEMO_SSCC_PREFIX, shiftId);
+  }
+
+  it("deletes a demo shift at once when its product left the copies and the host answered every record", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-11-08T11:59:00.000Z");
+    await finished(at, SECOND, "B", "2026-11-08T11:59:00.000Z");
+    demo(at, ENTERED.id);
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    // A real shift, done with only an hour ago, stays.
+    expect(kept(at, SECOND.id)).toEqual(WHOLE);
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(0);
+  });
+
+  it("keeps a demo shift while its product is in the copies or a record of it waits", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-11-08T11:59:00.000Z");
+    demo(at, ENTERED.id);
+    at.db
+      .prepare(
+        "INSERT INTO ref_products (id, gtin14, name, archived, status, demo, rev) " +
+          "VALUES (?, '02900000000018', 'Демо', 0, 'active', 1, 1)",
+      )
+      .run(ENTERED.productId);
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(0);
+    at.db.prepare("DELETE FROM ref_products").run();
+    at.db
+      .prepare(
+        "UPDATE outbox SET acked_at = NULL, outcome = NULL WHERE rowid = (SELECT max(rowid) FROM outbox)",
+      )
+      .run();
+    expect(await purgeRemovedDemo(at.local, PAIRING)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual(WHOLE);
+    // Another pairing's demo copy is never touched.
+    expect(await purgeRemovedDemo(at.local, OTHER_PAIRING)).toBe(0);
   });
 });
 

@@ -165,7 +165,7 @@ export function documentDraftReducer(
               ...line,
               activationPolicy: action.policy,
               commercialTerms:
-                line.commercialTerms?.version === 1
+                line.commercialTerms?.version === 1 || line.commercialTerms?.version === 3
                   ? {
                       ...line.commercialTerms,
                       activationRule:
@@ -173,6 +173,10 @@ export function documentDraftReducer(
                     }
                   : null,
             },
+      );
+    case "line.termChanged":
+      return updateLineById(draft, action.id, (line) =>
+        applyExplicitTerm(line, action.termStart, action.termEnd),
       );
     case "line.moved": {
       const index = draft.lines.findIndex((line) => line.id === action.id);
@@ -189,6 +193,62 @@ export function documentDraftReducer(
     case "line.removed":
       return { ...draft, lines: draft.lines.filter((line) => line.id !== action.id) };
   }
+}
+
+const CIVIL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function explicitTermOf(line: DocumentLineDraft): { start: string; end: string } {
+  if (line.term) return line.term;
+  return line.commercialTerms?.version === 3
+    ? { start: line.commercialTerms.termStart, end: line.commercialTerms.termEnd }
+    : { start: "", end: "" };
+}
+
+function applyExplicitTerm(line: DocumentLineDraft, start: string, end: string): DocumentLineDraft {
+  if (line.kind !== "plan") return line;
+  const rest: DocumentLineDraft = { ...line };
+  delete rest.term;
+  delete rest.baseTerms;
+  delete rest.baseUnit;
+  const current = line.commercialTerms;
+  const baseTerms =
+    line.baseTerms !== undefined
+      ? line.baseTerms
+      : current?.version === 3
+        ? null
+        : (current ?? null);
+  const baseUnit = line.baseUnit ?? (current?.version === 3 ? undefined : line.unit);
+  const restored = {
+    ...rest,
+    commercialTerms: baseTerms,
+    unit: (baseUnit ?? (baseTerms?.version === 1 && baseTerms.billingPeriod)) || line.unit,
+  };
+  if (start === "" && end === "") return restored;
+  const withTerm = {
+    ...restored,
+    term: { start, end },
+    ...(baseTerms !== undefined ? { baseTerms } : {}),
+    ...(baseUnit !== undefined ? { baseUnit } : {}),
+  };
+  const license = current?.version === 1 || current?.version === 3 ? current : baseTerms;
+  if (start === "" || end === "" || (license?.version !== 1 && license?.version !== 3))
+    return withTerm;
+  return {
+    ...withTerm,
+    unit: "period",
+    commercialTerms: {
+      version: 3,
+      subject: "software_license",
+      documentNameRu: license.documentNameRu,
+      documentNameEn: license.documentNameEn,
+      sellerPolicyRevision: license.sellerPolicyRevision,
+      billingPeriod: "custom",
+      billingTimezone: "Europe/Moscow",
+      activationRule: license.activationRule ?? "on_application",
+      termStart: start,
+      termEnd: end,
+    },
+  };
 }
 
 type DocumentMoneyLine = Pick<
@@ -274,6 +334,17 @@ export function validateDocumentDraft(
       errors[`${prefix}.quantity`] = "commercial_plan_quantity_invalid";
     if (!Number.isInteger(line.quantity) || line.quantity < 1)
       errors[`${prefix}.quantity`] = "quantity_must_be_positive_integer";
+    if (line.kind === "plan") {
+      const { start, end } = explicitTermOf(line);
+      if (start !== "" || end !== "") {
+        if (start === "" || end === "") errors[`${prefix}.term`] = "term_both_dates_required";
+        else if (!CIVIL_DATE_PATTERN.test(start) || !CIVIL_DATE_PATTERN.test(end))
+          errors[`${prefix}.term`] = "term_date_invalid";
+        else if (end < start) errors[`${prefix}.term`] = "term_end_before_start";
+        else if (line.commercialTerms?.version !== 3)
+          errors[`${prefix}.term`] = "term_requires_catalog_terms";
+      }
+    }
     if (!MONEY_PATTERN.test(line.agreedUnitPrice))
       errors[`${prefix}.agreedUnitPrice`] = "money_must_have_two_decimal_places";
     if (

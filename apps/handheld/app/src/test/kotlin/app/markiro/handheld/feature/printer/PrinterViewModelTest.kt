@@ -125,7 +125,10 @@ class PrinterViewModelTest {
         model.setDpi(300)
         model.checkAndSave()
         advanceUntilIdle()
-        val saved = model.state.first { it.printers.isNotEmpty() }
+        // Wait for the selection, not for the row. The commit's continuation and Room's
+        // re-query both reach Main from their own threads, so a state listing the saved row
+        // can arrive before the one that selects it; `advanceUntilIdle` controls neither.
+        val saved = model.state.first { it.selected != null }
         assertEquals("192.168.1.40:9100", saved.selected?.address)
         assertEquals(300, saved.selected?.dpi)
         assertEquals("ready", saved.selected?.lastStatus)

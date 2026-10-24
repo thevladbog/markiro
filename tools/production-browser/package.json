@@ -15,7 +15,7 @@
     "test:production": "playwright test --config production.playwright.config.ts",
     "test:landing": "playwright test --config landing.playwright.config.ts",
     "test:landing:lighthouse": "node scripts/lighthouse-landing.mjs",
-    "test:lighthouse-parser": "node --test test/lighthouse-landing.test.mjs",
+    "test:lighthouse-parser": "node --test test/lighthouse-landing.test.mjs test/landing-build.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:product-labels": "node --test test/product-labels-config.test.mjs test/fixture-body.test.mjs && playwright test --config product-labels.playwright.config.ts",
     "test:national-catalog": "playwright test --config national-catalog.playwright.config.ts",
@@ -27,10 +27,7 @@
     "test:tenant-equipment": "playwright test --config tenant-equipment.playwright.config.ts",
     "test:service-periods": "playwright test --config service-periods.playwright.config.ts",
     "test:catalog-regulatory": "playwright test --config catalog-regulatory.playwright.config.ts",
-    "render:film-posters": "node scripts/render-film-posters.mjs",
-    "render:home-images": "node scripts/render-home-images.mjs",
-    "render:instruction-covers": "node scripts/render-instruction-covers.mjs",
-    "capture:station-screens": "node scripts/capture-station-screens.mjs"
+    "render:instruction-covers": "node scripts/render-instruction-covers.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",

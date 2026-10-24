@@ -1,0 +1,219 @@
+name: Reseed station release bucket
+
+# Rebuilds the releases.markiro.app tree of the release each GitHub channel
+# serves now and writes it into the empty Timeweb S3 release bucket. It never
+# overwrites: a channel that already points at another release is refused.
+# "yandex" in the tooling is the historical name of the releases.markiro.app
+# origin. See docs/runbooks/release-hosting.md, step 8.
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner_confirmation:
+        description: Type RESEED-STATION-RELEASES; only the repository owner may dispatch
+        required: true
+        type: string
+      beta_tag:
+        description: Exact tag the GitHub beta channel serves now, e.g. station-v2.4.0-beta.5; empty skips beta
+        required: false
+        type: string
+        default: ""
+      stable_tag:
+        description: Exact tag the GitHub stable channel serves now, e.g. station-v2.3.0; empty skips stable
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      channels: ${{ steps.channels.outputs.channels }}
+    steps:
+      - name: Authorize station release reseed owner
+        id: channels
+        shell: bash
+        env:
+          OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_OWNER: ${{ github.repository_owner }}
+          BETA_TAG: ${{ inputs.beta_tag }}
+          STABLE_TAG: ${{ inputs.stable_tag }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$RELEASE_ACTOR" = "$RELEASE_OWNER"
+          test "$OWNER_CONFIRMATION" = "RESEED-STATION-RELEASES"
+          channels=()
+          if [ -n "$BETA_TAG" ]; then
+            [[ "$BETA_TAG" =~ ^station-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.([1-9][0-9]*)$ ]] || exit 1
+            channels+=("{\"channel\":\"beta\",\"tag\":\"$BETA_TAG\"}")
+          fi
+          if [ -n "$STABLE_TAG" ]; then
+            [[ "$STABLE_TAG" =~ ^station-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+            channels+=("{\"channel\":\"stable\",\"tag\":\"$STABLE_TAG\"}")
+          fi
+          test "${#channels[@]}" -gt 0
+          printf 'channels=[%s]\n' "$(IFS=,; printf '%s' "${channels[*]}")" >> "$GITHUB_OUTPUT"
+
+  reseed:
+    if: github.ref == 'refs/heads/main'
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: station-release
+    # The same groups as the beta and stable release workflows: a reseed never
+    # races a publication of its channel.
+    concurrency:
+      group: station-${{ matrix.channel }}-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.authorize.outputs.channels) }}
+    env:
+      STATION_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
+      CHANNEL: ${{ matrix.channel }}
+      RESEED_TAG: ${{ matrix.tag }}
+
+    steps:
+      - name: Checkout the dispatch SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify main provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+
+      - name: Install locked publisher dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the accepted GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$RESEED_TAG"
+          version="${tag#station-v}"
+          work="$RUNNER_TEMP/station-reseed"
+          rm -rf "$work"
+          mkdir "$work"
+          gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,targetCommitish > "$work/release.json"
+          distribution_sha="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.targetCommitish)' "$work/release.json")"
+          [[ "$distribution_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          gh api "repos/$STATION_RELEASE_REPOSITORY/commits/$distribution_sha" >/dev/null
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-channel "$CHANNEL" "$work/github-channel-latest.json"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-release "$CHANNEL" "$version" "$work/github"
+          node tools/station-release/artifacts.mjs validate-origin github "$CHANNEL" \
+            "$work/github" "$version"
+          release_sha="$(node -e 'const e=require(process.argv[1]);process.stdout.write(e.releaseSha)' "$work/github/release-evidence.json")"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          test "$(git rev-parse "$tag^{commit}")" = "$release_sha"
+          printf 'version=%s\nwork=%s\n' "$version" "$work" >> "$GITHUB_ENV"
+
+      - name: Reseed releases.markiro.app from the GitHub tree
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}
+          RELEASES_S3_BUCKET: ${{ vars.RELEASES_S3_BUCKET }}
+          RELEASES_S3_ENDPOINT: ${{ vars.RELEASES_S3_ENDPOINT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          cleanup_credentials() {
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          }
+          trap cleanup_credentials EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          unset AWS_SESSION_TOKEN
+          node tools/station-release/yandex-publisher.mjs reseed-from-github \
+            "$work/github" "$RESEED_TAG" "$work/release.json" \
+            "$work/github-channel-latest.json" "$CHANNEL" "$work/reseed-record.json" \
+            --confirm-reseed-from-github
+
+      - name: Read the channel back through releases.markiro.app
+        shell: bash
+        run: |
+          set -euo pipefail
+          public="$work/public"
+          mkdir "$public"
+          installer="markiro-station-${version}-windows-x86_64-setup.exe"
+          bundle="markiro-station-${version}-windows-x86_64.nsis.zip"
+          release_base="https://releases.markiro.app/station/$CHANNEL/releases/$version"
+          for asset in \
+            "$installer" \
+            "$bundle" \
+            "$bundle.sig" \
+            latest.json \
+            SHA256SUMS \
+            release-evidence.json \
+            release-notes.md; do
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
+              --output "$public/$asset" "$release_base/$asset"
+          done
+          node tools/station-release/artifacts.mjs validate-origin yandex "$CHANNEL" \
+            "$public" "$version"
+          node tools/station-release/artifacts.mjs compare-origins \
+            "$work/github" "$public" "$CHANNEL" "$version"
+          if [ "$CHANNEL" = "beta" ]; then
+            download_url="https://releases.markiro.app/station/beta/download"
+          else
+            download_url="https://releases.markiro.app/station/download"
+          fi
+          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
+            --output "$work/channel-latest.json" "https://releases.markiro.app/station/$CHANNEL/latest.json"
+          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
+            --output "$work/channel-download.exe" "$download_url"
+          cmp "$work/channel-latest.json" "$public/latest.json"
+          cmp "$work/channel-download.exe" "$public/$installer"
+
+      - name: Record the reseed
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf '### Station %s reseeded: %s\n\n```json\n' "$CHANNEL" "$RESEED_TAG"
+            cat "$work/reseed-record.json"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir "$RUNNER_TEMP/station-reseed-record"
+          cp "$work/reseed-record.json" "$RUNNER_TEMP/station-reseed-record/"
+
+      - name: Upload the reseed record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: station-${{ matrix.channel }}-reseed-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/station-reseed-record/reseed-record.json
+          if-no-files-found: error
+          retention-days: 90

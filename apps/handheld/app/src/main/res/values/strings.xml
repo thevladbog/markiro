@@ -865,4 +865,23 @@
     <string name="host_dataset_reset_body">Закройте приложение этой кнопкой и откройте его снова. Старые задания и очереди будут удалены при запуске. Подключение и настройки принтеров сохранятся.</string>
     <string name="host_dataset_reset_failed">Не удалось обновить локальные данные. Работа остановлена. Повторите попытку.</string>
     <string name="host_dataset_reset_close">Закрыть приложение</string>
+    <string name="shifts_line_full_title">Линия занята</string>
+    <string name="shifts_line_full_text">На линии уже работают %1$d из %2$d устройств. Войти можно, когда одно из них выйдет из смены.</string>
+    <string name="shifts_busy_title">Смена занята</string>
+    <string name="shifts_busy_text">Эту смену ведёт другое устройство, а эта версия сервера не пускает второе. Обновите сервер на площадке или дождитесь закрытия смены.</string>
+    <string name="shifts_part_closed_title">Ваша часть закрыта</string>
+    <string name="shifts_part_closed_text">Это устройство уже закрыло свою часть смены, продолжать работу в ней нельзя. Смена закроется, когда закроют остальные.</string>
+    <string name="work_shift_total">Всего в смене</string>
+    <string name="work_shift_total_of">%1$s из %2$s</string>
+    <string name="work_my_part">Моя смена</string>
+    <string name="work_shared_devices">Работают: %1$d из %2$d</string>
+    <string name="work_shared_line_full">Линия занята: %1$d из %2$d — продолжите работу, место вернётся, когда освободится</string>
+    <string name="work_close_part">Закрыть свою часть</string>
+    <string name="close_part_confirm_title">Закрыть свою часть?</string>
+    <string name="close_part_confirm_text_others">Принято %1$d, ошибок %2$d, дублей %3$d. Смена закроется, когда закроют остальные: %4$d.</string>
+    <string name="close_part_confirm_text_last">Принято %1$d, ошибок %2$d, дублей %3$d. Вы закрываете последним: смена закроется.</string>
+    <string name="close_part_confirm_text_unknown">Принято %1$d, ошибок %2$d, дублей %3$d. Смена закроется, когда закроют остальные участники.</string>
+    <string name="close_summary_part_title">Ваша часть закрыта</string>
+    <string name="close_summary_part_closed">Смена закроется, когда закроют остальные</string>
+    <string name="close_summary_reason_missing">Смена закрыта. Причину недовыполнения плана внесёт офис</string>
 </resources>

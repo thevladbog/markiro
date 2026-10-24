@@ -344,9 +344,14 @@ test("landing publication runbook separates reachability from indexed search evi
     "Валидатор микроразметки",
     "CRM",
     "consent",
-    "docs/seo/ai-search-query-pack.md",
+    "docs/seo/ai-search-query-pack-v2.md",
   ])
     assert.match(runbook, new RegExp(escapeRegExp(required), "i"));
+  // The runbook points at the current query pack; it must exist and name its version.
+  assert.match(
+    await read("docs/seo/ai-search-query-pack-v2.md"),
+    /^# Markiro AI-search query pack v2$/m,
+  );
   assert.match(runbook, /D0[^\n]*только[^\n]*(?:доступност|reachability)/i);
   assert.match(runbook, /D7/);
   assert.match(runbook, /D30/);

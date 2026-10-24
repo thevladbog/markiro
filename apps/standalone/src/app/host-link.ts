@@ -11,6 +11,7 @@ import { readConflictNotices } from "../local/conflict-notices.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import { sendFactBatch } from "../local/facts-sender.js";
 import { syncAllProductPhotos } from "../local/product-photos.js";
+import { sendPendingLeaves, type LeaveShift } from "../local/leave-sender.js";
 import { sendWarehouseBatch } from "../local/warehouse-sender.js";
 import {
   createSyncScheduler,
@@ -18,6 +19,7 @@ import {
   syncReferences,
 } from "../local/reference-sync.js";
 import { noteRestoreEpoch, reconcileRestore, restoreDue } from "../local/restore-reconcile.js";
+import { purgeRemovedDemo } from "../local/retention.js";
 import {
   deviceRejection,
   shellActionFor,
@@ -116,14 +118,24 @@ export interface HostLinkOptions {
    * records name are fetched after every successful sync; without it none is.
    */
   deviceProductPhoto?: HostApi["getDeviceProductPhoto"];
+  /**
+   * `HostApi.leaveShift` (plan 2b): the pauses this station owes the host go when the link is
+   * online, each with this station's leave token, retried like the reads; none — they wait.
+   */
+  leaveShift?: LeaveShift;
+
   dispatch: (action: ShellAction) => void;
 }
 
-/** What the link offers the screens: a sync and both reads now, and the outbox's delivery now. */
+/** What the link offers the screens: a sync and every read now, the outbox, the list and the pauses now. */
 export interface HostLinkControls {
   requestSync: () => void;
   /** Sends the outbox now (after a local write); nothing goes while the link is stopped or not online, or while a failed send's pause runs (its end sends). */
   requestFacts: () => void;
+  /** Reads the station's shifts now (plan 2b: a shared shift's totals, which no revision announces). */
+  requestShifts: () => void;
+  /** Sends the pauses this station owes now (plan 2b, after «Выйти из смены»). */
+  requestLeaves: () => void;
 }
 
 /**
@@ -164,7 +176,10 @@ export interface HostLinkControls {
  * What the host tells this station of its conflicts (plan КНФ: the office's
  * reviews, its displaced scans) is read at the same moments and retried the
  * same way, with a count of its own; what it keeps refreshes the outbox's
- * counts. Returns the requests for a sync and for the delivery.
+ * counts. The pauses this station owes (plan 2b) go at the same moments
+ * and on request (`requestLeaves`), retried with a count of their own; a screen may ask the shifts
+ * again (`requestShifts`): a shared shift's totals change with every scan of another device, which
+ * takes no revision. Returns the requests for a sync, for the delivery, for the shifts and for the pauses.
  */
 export function useHostLink({
   hostId,
@@ -180,10 +195,13 @@ export function useHostLink({
   conflictStatus,
   listDisplacements,
   deviceProductPhoto,
+  leaveShift,
   dispatch,
 }: HostLinkOptions): HostLinkControls {
   const syncNow = useRef<() => void>(() => undefined);
   const factsNow = useRef<() => void>(() => undefined);
+  const shiftsNow = useRef<() => void>(() => undefined);
+  const leavesNow = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (hostId === null || deviceId === null) return;
     // Nothing reaches the shell state after the pairing changed or ended.
@@ -259,6 +277,14 @@ export function useHostLink({
       clearTimeout(noticeRetry);
       noticeRetry = null;
     };
+    // And for the pauses this station owes the host (plan 2b).
+    let leaveFailures = 0;
+    let leaveRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelLeaveRetry = () => {
+      if (leaveRetry === null) return;
+      clearTimeout(leaveRetry);
+      leaveRetry = null;
+    };
     // And for settling a restore of the host.
     let reconcileFailures = 0;
     let reconcileRetry: ReturnType<typeof setTimeout> | null = null;
@@ -300,6 +326,7 @@ export function useHostLink({
       factSender.stop();
       reconciler.stop();
       noticeReader.stop();
+      leaveSender.stop();
       cancelRetry();
       if (photoRetry !== null) {
         clearTimeout(photoRetry);
@@ -311,6 +338,7 @@ export function useHostLink({
       cancelWarehouseRetry();
       cancelReconcileRetry();
       cancelNoticeRetry();
+      cancelLeaveRetry();
     };
     // The products' photos (beta 3), fetched after a sync: best effort, never
     // a sync failure. A failed pass is tried again after `nextSyncRetryMs`
@@ -373,7 +401,17 @@ export function useHostLink({
           stopAll();
         }
         dispatch({ type: "sync_finished", result });
-        if (result.kind === "synced") photoPass();
+        if (result.kind === "synced") {
+          photoPass();
+          // A demo product's tombstone lets its removed shifts go (spec 2026-10-21); a failure
+          // waits for the hourly retention pass.
+          purgeRemovedDemo(local, { hostId, deviceId }).then(
+            (purged) => {
+              if (active && purged > 0) dispatch({ type: "outbox_changed" });
+            },
+            () => undefined,
+          );
+        }
       } catch (error) {
         if (!active) return;
         // A rejected key or a changed certificate needs a new pairing.
@@ -520,6 +558,42 @@ export function useHostLink({
         }
       }
     });
+    // One sending of the pauses at a time (plan 2b), retried like the reads above, only with the
+    // link online (or without events at all, as the outbox); a settled pause took a revision on
+    // the host, and the list is read again for the figures. A refused key ends the link.
+    const leaveSender = createSyncScheduler(async () => {
+      if (!active || leaveShift === undefined) return;
+      if (!online && !watchFailed) return;
+      cancelLeaveRetry();
+      try {
+        const { sent, stale } = await sendPendingLeaves(
+          local,
+          pairing,
+          leaveShift,
+          () => new Date(),
+        );
+        if (!active) return;
+        leaveFailures = 0;
+        if (sent + stale > 0) shiftReader.trigger();
+      } catch (error) {
+        if (!active) return;
+        const action = shellActionFor(error, null);
+        if (action) {
+          stopAll();
+          dispatch(action);
+          return;
+        }
+        if (error instanceof HostError && error.code === "not_paired") return;
+        leaveFailures += 1;
+        if (online) {
+          leaveRetry = setTimeout(() => {
+            leaveRetry = null;
+            leaveSender.trigger();
+          }, nextSyncRetryMs(leaveFailures));
+        }
+      }
+    });
+
     // One batch of the outbox at a time, retried like the reads above. A
     // full batch asks for the next one at once; a refused key ends the link.
     const factSender = createSyncScheduler(async () => {
@@ -662,8 +736,11 @@ export function useHostLink({
       factSender.trigger();
       reconciler.trigger();
       noticeReader.trigger();
+      leaveSender.trigger();
     };
     syncNow.current = everything;
+    shiftsNow.current = () => shiftReader.trigger();
+    leavesNow.current = () => leaveSender.trigger();
     // A screen's request after a local write sends at once, unless a failed
     // send's pause runs: that pause sends, so `attempts` counts retries and not
     // scans (plan ОЧ; final review of plan 2a6, m8). Going online, a revision
@@ -690,6 +767,7 @@ export function useHostLink({
             cancelWarehouseRetry();
             cancelReconcileRetry();
             cancelNoticeRetry();
+            cancelLeaveRetry();
             return;
           }
           if (status.restoreEpoch !== undefined && status.restoreEpoch !== epochSeen) {
@@ -710,6 +788,10 @@ export function useHostLink({
           }
           if (reconcileFailures > 0 && reconcileRetry === null) reconciler.trigger();
           if (noticeFailures > 0 && noticeRetry === null) noticeReader.trigger();
+          // The pauses wait for the link, as the outbox: going online sends them.
+          if ((watching && !wasOnline) || (leaveFailures > 0 && leaveRetry === null)) {
+            leaveSender.trigger();
+          }
         },
         onRevision: (rev) => {
           if (!active) return;
@@ -744,6 +826,8 @@ export function useHostLink({
       active = false;
       syncNow.current = () => undefined;
       factsNow.current = () => undefined;
+      shiftsNow.current = () => undefined;
+      leavesNow.current = () => undefined;
       stopAll();
       unwatch?.();
     };
@@ -761,9 +845,15 @@ export function useHostLink({
     conflictStatus,
     listDisplacements,
     deviceProductPhoto,
+    leaveShift,
     dispatch,
   ]);
   const requestSync = useCallback(() => syncNow.current(), []);
   const requestFacts = useCallback(() => factsNow.current(), []);
-  return useMemo(() => ({ requestSync, requestFacts }), [requestSync, requestFacts]);
+  const requestShifts = useCallback(() => shiftsNow.current(), []);
+  const requestLeaves = useCallback(() => leavesNow.current(), []);
+  return useMemo(
+    () => ({ requestSync, requestFacts, requestShifts, requestLeaves }),
+    [requestSync, requestFacts, requestShifts, requestLeaves],
+  );
 }

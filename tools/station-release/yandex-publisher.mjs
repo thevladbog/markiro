@@ -18,14 +18,19 @@ import { createStationObjectStore, validateStationImmutableObject } from "./obje
 import { stationReleaseLocation } from "./origins.mjs";
 import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
+// "yandex" is the historical name of the releases.markiro.app origin (the
+// Station updater's own name for it); the bucket now lives on Timeweb S3, read
+// path-style and served publicly through the platform edge.
 const PUBLIC_BASE_URL = "https://releases.markiro.app";
-const YANDEX_S3_ENDPOINT = "https://storage.yandexcloud.net";
+const RELEASES_S3_ENDPOINT = "https://s3.twcstorage.ru";
+const RELEASES_S3_REGION = "ru-1";
 const MAX_BACKUP_INDEX_BYTES = 256 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_INSTALLER_BYTES = 512 * 1024 * 1024;
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const MUTABLE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const BOOTSTRAP_CONFIRMATION = "--confirm-empty-channel-bootstrap";
+const RESEED_CONFIRMATION = "--confirm-reseed-from-github";
 const SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(["beta", "stable"]);
@@ -81,6 +86,14 @@ function bootstrapInvalid() {
 
 function incompleteBaseline() {
   throw new Error("incomplete station release baseline");
+}
+
+function reseedInvalid() {
+  throw new Error("invalid station release reseed");
+}
+
+function reseedConflict() {
+  throw new Error("station release reseed conflicts with the published channel");
 }
 
 function validBucket(bucket) {
@@ -178,7 +191,7 @@ export function createYandexProviderReader({ bucket, fetchImpl = fetch, waitImpl
       ) {
         bootstrapInvalid();
       }
-      const url = `${YANDEX_S3_ENDPOINT}/${bucket}/${key}`;
+      const url = `${RELEASES_S3_ENDPOINT}/${bucket}/${key}`;
       for (let attempt = 0; ; attempt += 1) {
         let response;
         try {
@@ -518,7 +531,7 @@ function parseSourceVersion(channel, sourceTag) {
   return parsed.text;
 }
 
-function validateBootstrapRelease(release, channel, sourceTag, evidence) {
+function validateBootstrapRelease(release, channel, sourceTag) {
   if (
     !hasExactKeys(release, ["tagName", "isDraft", "isPrerelease", "targetCommitish"]) ||
     release.tagName !== sourceTag ||
@@ -546,24 +559,29 @@ function stableProvenanceFrom(evidence) {
   return Object.fromEntries(STABLE_PROVENANCE_KEYS.map((key) => [key, evidence[key]]));
 }
 
+// The staging inputs a published GitHub tree carries in its own evidence.
+function stagingInputsFrom(githubTree, channel, version, evidence) {
+  return {
+    channel,
+    inputDirectory: githubTree,
+    version,
+    pubDate: evidence.publishedAt,
+    baseSha: evidence.baseSha,
+    releaseSha: evidence.releaseSha,
+    ...(channel === "stable"
+      ? {
+          notesPath: join(githubTree, stationAssetNames(version).notes),
+          stableProvenance: stableProvenanceFrom(evidence),
+        }
+      : {}),
+  };
+}
+
 async function stageBootstrapTrees({ githubTree, channel, version, source }) {
   const root = await mkdtemp(join(tmpdir(), "markiro-station-bootstrap-"));
   const githubDirectory = join(root, "github");
   const yandexDirectory = join(root, "yandex");
-  const common = {
-    channel,
-    inputDirectory: githubTree,
-    version,
-    pubDate: source.evidence.publishedAt,
-    baseSha: source.evidence.baseSha,
-    releaseSha: source.evidence.releaseSha,
-    ...(channel === "stable"
-      ? {
-          notesPath: join(githubTree, stationAssetNames(version).notes),
-          stableProvenance: stableProvenanceFrom(source.evidence),
-        }
-      : {}),
-  };
+  const common = stagingInputsFrom(githubTree, channel, version, source.evidence);
   try {
     await stageStationRelease({ ...common, origin: "github", outputDirectory: githubDirectory });
     await stageStationRelease({ ...common, origin: "yandex", outputDirectory: yandexDirectory });
@@ -971,6 +989,181 @@ async function writeBootstrapRecord({
   }
 }
 
+// Re-seeding rebuilds the releases.markiro.app tree of a release that GitHub
+// already serves. The GitHub tree is the only input, so the rebuild must first
+// reproduce that tree byte for byte from its own evidence.
+async function stageReseedTrees({ githubTree, channel, version, source }) {
+  const root = await mkdtemp(join(tmpdir(), "markiro-station-reseed-"));
+  const githubDirectory = join(root, "github");
+  const yandexDirectory = join(root, "yandex");
+  const common = stagingInputsFrom(githubTree, channel, version, source.evidence);
+  try {
+    await stageStationRelease({ ...common, origin: "github", outputDirectory: githubDirectory });
+    await stageStationRelease({ ...common, origin: "yandex", outputDirectory: yandexDirectory });
+    const names = stationAssetNames(version);
+    for (const name of Object.values(names)) {
+      const [published, rebuilt] = await Promise.all([
+        readFile(join(githubTree, name)),
+        readFile(join(githubDirectory, name)),
+      ]);
+      if (!equalBytes(published, rebuilt)) reseedInvalid();
+    }
+    await compareStationReleaseOrigins({
+      githubDirectory: githubTree,
+      yandexDirectory,
+      channel,
+      version,
+    });
+    const yandex = await validateStationReleaseDirectory(yandexDirectory, {
+      channel,
+      origin: "yandex",
+      version,
+    });
+    return { root, yandexDirectory, github: source, yandex, names };
+  } catch {
+    await rm(root, { recursive: true, force: true });
+    reseedInvalid();
+  }
+}
+
+async function readReseedInput(path) {
+  if (!isCanonicalAbsolutePath(path)) reseedInvalid();
+  try {
+    const info = await lstat(path);
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size <= 0 ||
+      info.size > MAX_BACKUP_INDEX_BYTES
+    ) {
+      reseedInvalid();
+    }
+    return await readFile(path);
+  } catch {
+    reseedInvalid();
+  }
+}
+
+// Only an empty channel, or one this same reseed already wrote in part, may be
+// written. A channel that points anywhere else has moved on and stays as it is.
+async function reseedMutableState(store, channel, targets) {
+  let current;
+  try {
+    current = await Promise.all(
+      mutableDescriptors(channel).map(({ key }) => store.getMutable(key)),
+    );
+  } catch {
+    publicationFailed();
+  }
+  const [manifest, installer] = current;
+  const [targetManifest, targetInstaller] = mutableTargetObjects(targets);
+  const matches = (object, target) =>
+    object !== null &&
+    object.contentType === target.contentType &&
+    object.sourceKey === target.sourceKey &&
+    equalBytes(object.bytes, target.bytes);
+  if (manifest === null && installer === null) return "created";
+  if (matches(manifest, targetManifest) && installer === null) return "completed";
+  if (matches(manifest, targetManifest) && matches(installer, targetInstaller)) return "existing";
+  reseedConflict();
+}
+
+async function publishReseedImmutables(store, tree, channel, version) {
+  const objects = descriptors(channel, version, tree);
+  try {
+    await Promise.all(objects.map((object) => validateStationImmutableObject(object)));
+  } catch {
+    reseedInvalid();
+  }
+  const absent = [];
+  const present = [];
+  try {
+    for (const object of objects) {
+      try {
+        await store.assertAbsent(object.key);
+        absent.push(object);
+      } catch (error) {
+        if (error?.message !== "station release object already exists") throw error;
+        present.push(object);
+      }
+    }
+  } catch {
+    publicationFailed();
+  }
+  // An immutable key is never overwritten: whatever an earlier attempt left
+  // there must already be this release, checked before the first write.
+  for (const object of present) {
+    let bytes;
+    try {
+      bytes = await store.readPublic(object.key, {
+        contentType: object.contentType,
+        cacheControl: object.cacheControl,
+        contentDisposition: object.contentDisposition,
+        maxBytes: object.maxBytes,
+      });
+    } catch {
+      publicationFailed();
+    }
+    if (!equalBytes(bytes, await readFile(object.file))) reseedConflict();
+  }
+  try {
+    for (const object of absent) {
+      await store.putImmutable(object.key, object.file, object.contentType);
+    }
+  } catch {
+    publicationFailed();
+  }
+  await readPublicTree({ reader: store, tree, channel, version });
+  if (present.length === 0) return "published";
+  return absent.length === 0 ? "existing" : "completed";
+}
+
+async function writeReseedRecord({
+  path,
+  channel,
+  version,
+  sourceTag,
+  release,
+  releaseMetadataSha256,
+  githubChannelManifestSha256,
+  trees,
+  result,
+}) {
+  const { names } = trees;
+  const record = {
+    schemaVersion: 1,
+    operation: "station-release-reseed-from-github",
+    channel,
+    version,
+    publicBaseUrl: PUBLIC_BASE_URL,
+    source: {
+      tagName: sourceTag,
+      baseSha: trees.github.evidence.baseSha,
+      releaseSha: trees.github.evidence.releaseSha,
+      distributionSha: release.targetCommitish,
+      releaseMetadataSha256,
+      githubChannelManifestSha256,
+      evidenceSha256: trees.github.assets[names.evidence],
+    },
+    origins: {
+      github: originBootstrapEvidence("github", trees.github, names),
+      yandex: originBootstrapEvidence("yandex", trees.yandex, names),
+    },
+    commonAssets: {
+      installerSha256: trees.github.assets[names.installer],
+      bundleSha256: trees.github.assets[names.bundle],
+      signatureSha256: trees.github.assets[names.signature],
+      notesSha256: trees.github.assets[names.notes],
+    },
+    result,
+  };
+  try {
+    await writeExclusive(path, `${JSON.stringify(record, null, 2)}\n`);
+  } catch {
+    publicationFailed();
+  }
+}
+
 export function createYandexPublisher({ store, providerReader } = {}) {
   ensureStore(store);
   if (providerReader !== undefined) ensureProviderReader(providerReader);
@@ -1089,7 +1282,7 @@ export function createYandexPublisher({ store, providerReader } = {}) {
       } catch {
         bootstrapInvalid();
       }
-      validateBootstrapRelease(releaseMetadata.value, channel, input.sourceTag, source.evidence);
+      validateBootstrapRelease(releaseMetadata.value, channel, input.sourceTag);
 
       const trees = await stageBootstrapTrees({
         githubTree: input.githubTree,
@@ -1168,6 +1361,98 @@ export function createYandexPublisher({ store, providerReader } = {}) {
           immutables: immutableResult,
           channelBaseline,
           recovery: "not-required",
+        });
+      } finally {
+        await rm(trees.root, { recursive: true, force: true });
+      }
+    },
+
+    async reseedFromGithub(input = {}) {
+      if (
+        !hasExactKeys(input, [
+          "githubTree",
+          "sourceTag",
+          "releaseMetadataPath",
+          "githubChannelManifestPath",
+          "channel",
+          "recordPath",
+          "confirmation",
+        ]) ||
+        input.confirmation !== RESEED_CONFIRMATION ||
+        !CHANNELS.has(input.channel)
+      ) {
+        reseedInvalid();
+      }
+      const { channel, sourceTag } = input;
+      let version;
+      try {
+        version = parseSourceVersion(channel, sourceTag);
+      } catch {
+        reseedInvalid();
+      }
+      await Promise.all([
+        canonicalExistingDirectory(input.githubTree).catch(() => reseedInvalid()),
+        ensureNewBootstrapOutput(input.recordPath).catch(() => reseedInvalid()),
+      ]);
+      const [releaseMetadataBytes, githubChannelManifest] = await Promise.all([
+        readReseedInput(input.releaseMetadataPath),
+        readReseedInput(input.githubChannelManifestPath),
+      ]);
+      let release;
+      let source;
+      try {
+        release = JSON.parse(releaseMetadataBytes.toString("utf8"));
+        validateBootstrapRelease(release, channel, sourceTag);
+        source = await validateStationReleaseDirectory(input.githubTree, {
+          channel,
+          origin: "github",
+          version,
+        });
+      } catch {
+        reseedInvalid();
+      }
+      // The accepted release is the one the GitHub channel serves right now.
+      const githubManifest = await readFile(
+        join(input.githubTree, stationAssetNames(version).manifest),
+      );
+      if (!equalBytes(githubChannelManifest, githubManifest)) reseedInvalid();
+
+      const trees = await stageReseedTrees({
+        githubTree: input.githubTree,
+        channel,
+        version,
+        source,
+      });
+      try {
+        const targets = await readTargets(releaseTargets(channel, version, trees.yandexDirectory));
+        const channelState = await reseedMutableState(store, channel, targets);
+        const immutables = await publishReseedImmutables(
+          store,
+          trees.yandexDirectory,
+          channel,
+          version,
+        );
+        // The manifest goes first and the /download alias last, so an
+        // interrupted run leaves a state the next run recognizes and finishes.
+        try {
+          if (channelState === "existing") await verifyTargets(store, targets);
+          else await promoteTargets(store, targets);
+        } catch {
+          publicationFailed();
+        }
+        await writeReseedRecord({
+          path: input.recordPath,
+          channel,
+          version,
+          sourceTag,
+          release,
+          releaseMetadataSha256: sha256(releaseMetadataBytes),
+          githubChannelManifestSha256: sha256(githubChannelManifest),
+          trees,
+          result: {
+            immutables: `${immutables}-and-public-verified`,
+            channel: `${channelState}-and-public-verified`,
+          },
         });
       } finally {
         await rm(trees.root, { recursive: true, force: true });
@@ -1274,6 +1559,37 @@ export async function runYandexPublisherCli(args, { publisher } = {}) {
       confirmation,
     });
   }
+  if (command === "reseed-from-github") {
+    if (values.length !== 7) commandInvalid();
+    const [
+      githubTree,
+      sourceTag,
+      releaseMetadataPath,
+      githubChannelManifestPath,
+      channel,
+      recordPath,
+      confirmation,
+    ] = values;
+    for (const path of [githubTree, releaseMetadataPath, githubChannelManifestPath, recordPath]) {
+      ensureCliPath(path);
+    }
+    ensureCliChannel(channel);
+    try {
+      parseSourceVersion(channel, sourceTag);
+    } catch {
+      commandInvalid();
+    }
+    if (confirmation !== RESEED_CONFIRMATION) commandInvalid();
+    return publisher.reseedFromGithub({
+      githubTree,
+      sourceTag,
+      releaseMetadataPath,
+      githubChannelManifestPath,
+      channel,
+      recordPath,
+      confirmation,
+    });
+  }
   if (command === "promote") {
     if (values.length !== 3) commandInvalid();
     const [tree, channel, backupDirectory] = values;
@@ -1305,13 +1621,13 @@ function boundedPrintable(value, minBytes, maxBytes) {
 }
 
 export function createYandexPublisherClientConfig(env) {
-  const endpoint = env?.YANDEX_STATION_RELEASE_ENDPOINT;
-  const bucket = env?.YANDEX_STATION_RELEASE_BUCKET;
+  const endpoint = env?.RELEASES_S3_ENDPOINT;
+  const bucket = env?.RELEASES_S3_BUCKET;
   const accessKeyId = env?.AWS_ACCESS_KEY_ID;
   const secretAccessKey = env?.AWS_SECRET_ACCESS_KEY;
   const sessionToken = env?.AWS_SESSION_TOKEN;
   if (
-    endpoint !== YANDEX_S3_ENDPOINT ||
+    endpoint !== RELEASES_S3_ENDPOINT ||
     !validBucket(bucket) ||
     typeof accessKeyId !== "string" ||
     !/^[A-Za-z0-9_-]{16,128}$/.test(accessKeyId) ||
@@ -1324,7 +1640,13 @@ export function createYandexPublisherClientConfig(env) {
     bucket,
     client: {
       endpoint,
-      region: "ru-central1",
+      region: RELEASES_S3_REGION,
+      // Path-style keeps the request host equal to the endpoint; a dotted
+      // bucket name would also break virtual-host TLS.
+      forcePathStyle: true,
+      // Only the checksums an operation requires; Timeweb S3 is not AWS.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       maxAttempts: 3,
       credentials: {
         accessKeyId,

@@ -6,14 +6,21 @@ import { promisify } from "node:util";
 
 import { chromium } from "@playwright/test";
 
+import { landingBuildEnvironment, landingRoot, prepareLandingDist } from "./landing-build.mjs";
+
 const execFileAsync = promisify(execFile);
 export const LIGHTHOUSE_RUN_COUNT = 3;
-/** The home page, one commercial topic page, one article and the film: the page templates that carry leads. */
+/**
+ * Both home pages, the download and pricing pages, one commercial topic page and one
+ * article: the page templates that carry leads.
+ */
 export const LIGHTHOUSE_ROUTES = Object.freeze([
   "/",
+  "/skachat/",
+  "/stoimost/",
   "/markirovka-chestny-znak/",
   "/stati/markirovka-piva-2026/",
-  "/kak-rabotaet/",
+  "/en/",
 ]);
 export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   seo: 1,
@@ -30,18 +37,10 @@ export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
  */
 /**
  * The gate must measure what production serves: the enabled demo form with its
- * captcha container. Any PUBLIC_* value already in the environment wins, so a
- * caller can still audit the disabled variant on purpose.
+ * captcha container. The Playwright suite builds from the same environment, so
+ * CI builds the landing once for both (landing-build.mjs).
  */
-export function lighthouseBuildEnvironment(environment) {
-  return {
-    PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
-    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_lighthouse-gate-key",
-    PUBLIC_PHONE: "+7 960 495-46-10",
-    ...environment,
-    ASTRO_TELEMETRY_DISABLED: "1",
-  };
-}
+export const lighthouseBuildEnvironment = landingBuildEnvironment;
 
 export function representativeLighthouseReport(reports) {
   if (reports.length !== LIGHTHOUSE_RUN_COUNT) {
@@ -123,12 +122,11 @@ async function waitForServer(url, child) {
 
 export async function runLandingLighthouse() {
   const toolRoot = path.resolve(import.meta.dirname, "..");
-  const appRoot = path.resolve(toolRoot, "../../apps/landing");
-  const astro = path.join(appRoot, "node_modules/.bin/astro");
+  const astro = path.join(landingRoot, "node_modules/.bin/astro");
   const environment = lighthouseBuildEnvironment(process.env);
-  await execFileAsync(astro, ["build"], { cwd: appRoot, env: environment });
+  prepareLandingDist(process.env);
   const preview = spawn(astro, ["preview", "--host", "127.0.0.1", "--port", "5473"], {
-    cwd: appRoot,
+    cwd: landingRoot,
     env: environment,
     stdio: "ignore",
   });

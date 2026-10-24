@@ -1,5 +1,11 @@
 # Production deploy через Docker Compose
 
+> Выведено из работы 21.10.2026: прод работает на Timeweb, workflow
+> **Publish production images** (`release-images.yml`) и **Deploy production**
+> (`deploy-production.yml`) удалены. Выпуск и деплой платформы — по
+> [timeweb-platform-preparation.md](timeweb-platform-preparation.md). Документ
+> оставлен как описание прежнего контура Yandex.
+
 MVP разворачивается одним GitHub-hosted job напрямую на app VM. ALB, self-hosted
 runner, deployment controller и rehearsal workflow не участвуют.
 
@@ -40,8 +46,8 @@ Scope ограничивает сервисы, а не Git commits: API image в
 source SHA с установленной версией. Station публикуется отдельным beta/stable
 workflow после проверки серверного выпуска; `scope=api-only` не выпускает её.
 
-Изменение только `.github/workflows/deploy-production.yml` выбирает CI job
-`production-bundle`: он выполняет production и Yandex workflow contracts.
+Контур Yandex (legacy edge, Compose-смоук, `test:yandex-runtime`) из CI убран
+21.10.2026, а сами workflow выпуска и деплоя удалены в тот же день.
 Дополнительные файлы включают свои consumer jobs. Изменение самого CI,
 классификатора, общих toolchain files или неизвестного пути требует полного CI.
 Обязательный `ci-required` продолжает проверять все выбранные результаты;

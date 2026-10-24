@@ -17,7 +17,7 @@ import app.markiro.handheld.core.design.Tone
 
 /**
  * The full-screen states an entry can end in: confirming another line's
- * shift, entering, and the four refusals.
+ * shift, entering, the four refusals, a full line, an old host's busy and a closed part.
  *
  * One composable for the list and the hub's «Продолжить», because the two go
  * through the same `ShiftRepository.enter` and can be refused the same way --
@@ -96,6 +96,38 @@ fun ShiftDialogScreen(
                 },
                 primary = StateAction(stringResource(R.string.common_got_it), onDismiss),
                 tone = Tone.Err,
+                primaryIsAccent = false,
+            )
+        }
+        is ShiftDialog.LineFull -> {
+            AppBar(stringResource(R.string.shifts_title), onDismiss)
+            FullScreenState(
+                Icons.Outlined.Factory,
+                stringResource(R.string.shifts_line_full_title),
+                stringResource(R.string.shifts_line_full_text, dialog.active, dialog.maxStations),
+                primary = StateAction(stringResource(R.string.common_got_it), onDismiss),
+                tone = Tone.Warn,
+                primaryIsAccent = false,
+            )
+        }
+        ShiftDialog.Busy -> {
+            AppBar(stringResource(R.string.shifts_title), onDismiss)
+            FullScreenState(
+                Icons.Outlined.Factory,
+                stringResource(R.string.shifts_busy_title),
+                stringResource(R.string.shifts_busy_text),
+                primary = StateAction(stringResource(R.string.common_got_it), onDismiss),
+                tone = Tone.Warn,
+                primaryIsAccent = false,
+            )
+        }
+        ShiftDialog.PartClosed -> {
+            AppBar(stringResource(R.string.shifts_title), onDismiss)
+            FullScreenState(
+                Icons.Outlined.Factory,
+                stringResource(R.string.shifts_part_closed_title),
+                stringResource(R.string.shifts_part_closed_text),
+                primary = StateAction(stringResource(R.string.common_got_it), onDismiss),
                 primaryIsAccent = false,
             )
         }

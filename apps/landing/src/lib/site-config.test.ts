@@ -34,6 +34,7 @@ describe("readPublicSiteConfig", () => {
       captchaClientKey: null,
       consentVersion: null,
       demoEndpoint: null,
+      leadEndpoint: null,
       legalLinks: null,
       phone: null,
     });
@@ -63,6 +64,7 @@ describe("readPublicSiteConfig", () => {
       captchaClientKey: "ysc1_test-client-key",
       consentVersion: "MKR-PD-02/2026.08/01",
       demoEndpoint: "/api/demo-requests",
+      leadEndpoint: "/api/landing-leads",
       legalLinks: {
         consent: "/personal-data-consent/",
         privacy: "/privacy/",
@@ -124,6 +126,7 @@ describe("readPublicSiteConfig", () => {
       captchaClientKey: null,
       consentVersion: null,
       demoEndpoint: null,
+      leadEndpoint: null,
       legalLinks: null,
       phone: null,
     });
@@ -134,6 +137,7 @@ describe("readPublicSiteConfig", () => {
       captchaClientKey: null,
       consentVersion: null,
       demoEndpoint: null,
+      leadEndpoint: null,
       legalLinks: null,
       phone: null,
     });

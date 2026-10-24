@@ -270,6 +270,14 @@ class ShiftRepositoryTest {
     }
 
     @Test
+    fun aCloudDeviceLeavingOwesTheHostNothing() = runTest {
+        server.shutdown()
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        repo().leave("s1")
+        assertEquals(emptyList<String>(), app.markiro.handheld.core.host.ShiftParticipationStore(db).pendingLeaves())
+    }
+
+    @Test
     fun leavingAnotherShiftLeavesTheActivePointerAlone() = runTest {
         server.shutdown()
         db.shiftDao().upsertAll(listOf(ShiftEntityFixtures.bundled("s1"), ShiftEntityFixtures.bundled("s2")))

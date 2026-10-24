@@ -155,6 +155,12 @@ loserDeviceId, winnerShiftId }` — never the code nor its hash; both office
 roles may, a conflict reviewed already answers as it is and writes no row,
 and a review takes a host revision (no feed item) so the stations' streams
 wake and ask after their conflicts.
+Plan 2b adds `shift.join` and `shift.leave` (the device; `{ number, rejoined }`
+and `{ number }`), `shift.part_closed` (the device; `{ number, actualQty,
+closedBoxCount, reasonCode }`), `shift.force_closed` (the office user; `{ reason,
+notClosed }`), `shift.close_reason` (the office user; `{ reasonCode }`) and
+`line.max_stations_changed` (the administrator; `{ from, to }`). A repeated entry
+or leave writes none.
 Disaggregation (plan ДЗГ) writes `disaggregation_reason.create` / `.update` (target
 `disaggregation_reason`; details `{ name, sortOrder }` and the update's `changed`),
 and, with the target `disaggregation_document`: `disaggregation.create`
@@ -172,6 +178,9 @@ administrators and technologists (`require_disaggregation_in`), no revision, the
 its target, details `{ formatId, formatVersion, packingCount }`. The host checks that the
 document is applied (`conflict` `document_not_applied`) and that `packingCount` is the number
 of its distinct SSCCs (a refusal writes no row); it never sees the file.
+«Удалить демо-данные» writes `demo_data.delete` (the administrator, target `product`/the demo
+product's id, details `{ shifts, boxes, pallets, codes }`); the rows of earlier actions on the demo
+objects stay. `host.bootstrap` names `demoData` (its production date) when the wizard installed it.
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -343,7 +352,7 @@ wrote it; `Workstation` — the PC's own settings (plan 2a7), which outlive any
 pairing. Of the 29 tables 12 are `Disposable`, the 8 of migration `0006`,
 `floor_print_jobs` of `0007`, the two pallet tables of `0008`, the three warehouse tables of
 `0012`, `floor_block_drops` of `0013` and `floor_unit_labels` of `0015` are `DeviceData` (below), and
-`workstation_settings` of `0007` is the one `Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
+`workstation_settings` of `0007` is the one `Workstation` table. `floor_shift_participation` (plan 2b, `0022`: a shared shift's figures) is `Disposable`. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables
 (`no_table_has_a_foreign_key`): a plain key fails the forget at its `DELETE`,
@@ -795,8 +804,8 @@ record of its `operatorId`.
 The catalog grants no access, so its flags stay flags: an archived product
 and a disabled template ride the feed with `archived` and `enabled`, since a
 station keeps them for history and leaves them out of its pickers. A
-product is never deleted and never has a tombstone; a deleted template
-leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
+product is never deleted and never has a tombstone, except the demo product, which «Удалить
+демо-данные» deletes («Demo data»); a deleted template leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
 `markiro_proto::category_default_id`, the same text `FEED_KEYS` builds in
 SQL), and clearing it writes a tombstone of that key. The organization's
 three defaults ride its record (`defaultBoxTemplateId`,
@@ -1073,6 +1082,54 @@ leaves the badge working and does not count). The watch is the shell's
 never takes the screen down. Verified in a browser (Chromium, a harness with a
 fake local database) at 1280×800, 1920×1080 and 1024×600; not on WebView2, a
 real panel or a real scanner.
+
+## Demo data
+
+Spec `docs/superpowers/specs/2026-10-21-standalone-wizard-demo-data-design.md` (owner's decisions
+of 2026-10-21: О4 option В, Д1–Д3). The wizard's «Установить демо-данные» sends
+`demoData: { productionDate }` (the wizard's today in the organization's zone; the host keeps no
+zone database), and `bootstrap` makes the set in its own transaction and revision
+(`host/src/demo.rs`): the demo product (`products.demo = 1`, migration `0053`, GTIN
+`02900000000018` of restricted circulation, its photo built in with `include_bytes!`), the SSCC
+counters of the demo prefix `290000000` (extensions 0 and 1) and a planned demo shift on the first
+line with the stock box and pallet defaults. Without both defaults, or with an organization whose
+prefix is the demo one, the wizard is `validation_failed` on `demoData` and nothing is created. The
+trial starts with the wizard either way.
+
+- `products.demo` is the one flag: a shift is a demo shift when its product is (the product is no
+  field of a shift edit). The flag is set only by the wizard; `PUT` of the demo product and of its
+  photo is `conflict` on `demo_product`, so a real GTIN can never hide behind it.
+- A demo shift's number is drawn from the counter `DEMO` (`DEMO-001`, `/S` from a station;
+  `shifts::insert`), and its snapshot's `issuerPrefix` is the demo prefix
+  (`shift_snapshot`), so it spends nothing of the organization's numbering. `0053` rebuilds
+  `shift_number_counters` (with its rowids) to let the key `DEMO` past its five-character
+  `CHECK`. `GET /v1/office/sscc` leaves the demo prefix out while the demo product exists, and its
+  `PUT` answers `not_found`; the organization takes no GLN of the demo prefix meanwhile.
+- Isolation: the office's export record and the export-file upload refuse a format
+  `*_xml_gismt_*` of a demo shift (`conflict` `demo_shift`, `demo::refuse_gismt`); its TXT and CSV
+  are saved as `DEMO_…`. Adding a demo box or pallet to a disaggregation document refuses the
+  whole addition (`conflict` `demo_box`, `details.ssccs`). Every shift-bound query of
+  `usage_stats.rs` leaves demo shifts out (the partial index `products_demo` keeps the plans off the
+  catalog), and the office's «Обзор» leaves them out of the figures, the chart, the line cards and
+  the first steps.
+- `GET /v1/office/demo-data` (every office role) and `DELETE` (administrators) in
+  `routes/demo_data.rs`: one transaction and one revision delete every fact, box, pallet, export
+  file, warehouse pallet and reprint of the demo shifts, the shifts, the `DEMO` counter, the demo
+  prefix's blocks and counters, the photo and the product; the product leaves the feed as a
+  tombstone (the only product that ever does). An open demo shift refuses it (`conflict`
+  `demo_shift_active`, `details.shifts`). Nothing there answers `present: false` with no
+  revision or row. The audit keeps its rows; the delete writes `demo_data.delete`.
+- The removed shifts' ids stay in `demo_removed_shifts`: a station's late fact of one is
+  acknowledged `accepted` and dropped (`facts::apply`), so its queue drains. The table is business
+  data of the cloud import's replacement (`BUSINESS_TABLES`), and a replacement over demo data
+  also drops the demo prefix's counters and the `DEMO` counter rather than keep them as floors.
+- The station knows a demo shift by its number (`isDemoShiftNumber`): «Демо-код» on the work
+  screen feeds the next demo code it holds no scan of (`nextDemoCode`) through the scan gate; a
+  label of a demo shift without a printer shows as a preview in the label panel, and «Готово» is
+  «Продолжить без этикетки» without its question (a `sent` job needs printer bytes). The shell's
+  migration `0021` adds `ref_products.demo`; after a sync and in the hourly pass
+  `purgeRemovedDemo` deletes the copies of demo-prefix shifts whose product left the copies once
+  their queue is answered.
 
 ## Catalog and label templates
 
@@ -1735,10 +1792,15 @@ the host keeps accepting the previous version. It is 5 since part B of plan
 snapshot's frozen `validationPrint` and the `unit_label` fact; 4 since its part
 A for shift modes: the body of a shift entry, `ShiftEnter`, and a validation
 shift's `ok` scan with `boxId: null`; 3 since plan ПЛ-Х for pallets, 2 since
-plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
-stage 1, of stage 2a, of pallets and of shift modes, and a station finds a
+plan 2a1), 6 since plan ТСД (the handheld on the host) and 7 since plan 2b
+(several devices in one shift: a `shift_closed` fact closes a part; app build
+1.1.0), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
+stage 1, of stage 2a, of pallets and of shift modes (a device of protocol 5 or
+older is accepted by a 7 host, since the minimum stays 1), and a station finds a
 host of an older protocol too old (`host_too_old` at the probe;
-`hello-future.json` stays one protocol ahead, now 6).
+`hello-future.json` stays one protocol ahead, now 8). The owner records each
+release in `tools/standalone-release/releases.json` (for 1.1.0: version 1.1.0,
+protocol 7, minProtocol 1); the tooling does not enforce it.
 The print policy (`markiro_proto::ValidationPrint`, `validationPrintSchema`) is
 the cloud's `validationPrint` without its reprocessing of earlier codes (part
 C): `{ "mode": "none" }` or `{ "mode": "duplicate_dm", "verification":
@@ -1817,6 +1879,131 @@ knows every writer into `boxes`; a new writer must touch `changed_at`.
 A touch stamps at least the newest stamp committed so far (`registry_touch::stamp`, under the write lock), and
 a walk's `until` is the newest `changed_at` its snapshot holds (not the clock), so a change that commits after
 a walk read its snapshot lands in the next window; `since` is inclusive and the boxes at `until` repeat.
+
+### Several devices in one shift (plan 2b)
+
+Protocol 7; host migration `0052_multi_station_shifts.sql` (columns only). A line has
+`max_stations` (1–16, default 1; `OfficeLine.maxStations`, `PUT /v1/office/lines/{id}` with
+`maxStations`, administrators, never below the live devices of an active shift: `conflict`
+`line_stations_in_use` `{ active }`; `line.max_stations_changed` `{ from, to }`). A participant
+(`shift_participants`) is `active` (holds a slot), `left` (`POST /v1/device/shifts/{id}/leave`,
+frees the slot; repeating changes nothing; `shift.leave` `{ number }`; never entered:
+`shift_not_entered`) or `closed`. Each participant row carries `joinedRev` (`shift_participants.joined_rev`, the
+host revision of the write that took the slot: a first entry or a return from `left`; migration 0052 backfills
+a row already there with its shift's revision) and the wire shape exposes it (`ShiftParticipant.joinedRev`,
+optional for older hosts). The leave takes an optional strict body `ShiftLeave { joinedRev }`
+(`shift-leave.json`): when the token is not the row's current one (a re-entry came after that leave was sent)
+the host answers the shift as it is with no write, no audit row and no revision, so a stale or in-flight leave
+cannot undo a re-entry; with no body the leave acts on the current state, as before; a malformed body is
+`validation_failed`. A client echoes the `joinedRev` of its own row from its last enter/list answer. A slot is an active participant whose device is not revoked.
+Entry into an open shift (`host/src/shift_participants.rs` `decide_entry`): an active participant
+enters again (no revision and no audit row, only its last-entered instant is touched); a closed one that names `multi-station-v1` reads the shift back with no write (`myState` `closed`), while a build that does not name it gets `shift_status` `closed` (every old build shows «закрыта»; the read-back's `active` would send it on producing into a closed part); a left or new device
+takes a slot while fewer than `max_stations` others hold one (`shift.join`); a new device that does
+not name `multi-station-v1` is `shift_busy`. A `shift_closed` fact closes the sender's part; with no
+other participant active or left it closes the shift (`closed_by_kind = 'device'`, `closed_by` the
+last closer; `closed_at` is the LATEST instant among the device-closed parts, because an offline
+station's earlier close may arrive last). A shift opened by an old build can be joined by a capable device (decision D4 checks only the joiner's capability); when the old opener closes its own `shift_closed` only its part closes. Receipts: `partClosed`, `reasonMissing`, `alreadyClosed`. The reason
+(`reason_need`, fixture `shift-close-reason-shared.json`): a one-device shift keeps stage 2a's
+refusal; in a shared shift only the closing close may need one, by the whole shift's accepted
+units against `shifts.planned_qty`, and a close without it closes the shift with
+`close_reason_missing`, which the office clears with `PUT /v1/office/shifts/{id}/close-reason`
+(`shift.close_reason`). A closed part's later facts are accepted and stamp its `late_data_at`.
+Every participant change stamps the shift's `rev` with a revision. `GET /v1/device/shifts` and the
+entry's answer carry, for an open or closed shift, `maxStations`, `participants` and `myState`;
+`totals { accepted, boxesClosed, pallets, asOf }` and `byDevice` (`host/src/shift_totals.rs`, read
+from the facts through `boxes_shift`, `box_items_live`, `pallets_shift`, `code_owners_shift_unboxed`;
+a scan takes no revision, so devices read the list again to refresh totals) come in the LIST for an
+`active` shift only (a closed shift of the last 30 days would cost a query over its units on every
+poll of every device; a client keeps a closed shift's figures from the last answer that had them),
+while the answer of one shift (an entry, a leave, a closed shift read back) carries them for any
+non-planned status; `OfficeShift` carries
+`participants`, `byDevice` and `closeReasonMissing`. The export's `stationClosedAt` is the latest accepted close
+instant of the shift's devices (`NULL` when the office closed it).
+
+### Several devices in one shift: the station (plan 2b)
+
+`docs/superpowers/plans/2026-10-20-multi-station-station.md`. Every entry names
+`multi-station-v1` (`STATION_SHIFT_ENTER`, `shift-enter-multi.json`). What the host's list and the
+answers of an entry and a leave say of a shared shift (`maxStations`, `participants`, `myState`,
+`totals`, `byDevice`, and this station's own `participants[].joinedRev` as `joined_rev`) is kept
+in `floor_shift_participation` (shell migration `0022`, `TableClass::Disposable`, and in
+`RETAINED_TABLES` of the retention pass with a pair in `local_db.rs`;
+`src/floor/shifts/shift-participation.ts`): one row per shift, written with the copy in the same
+transaction, never recalculated, a read older than the row's `as_of` ignored unless the station
+saw the row more than a minute before (a host clock set back); every list read drops the rows of
+shifts the pairing no longer keeps. The host's list carries `totals` and `byDevice` for active
+shifts only: a closed list item updates the participants and `myState` of a row already there and
+keeps its figures (`COALESCE` against the stored row), and makes no row where none is kept (never
+zeros). A shift is shared when `maxStations > 1` or more than one device ever entered
+(`sharedParticipation`); a solo station on a line of one sees stage 2a.
+
+The hub card joins («Присоединиться», online only), names who works the shift when another
+device does, and says a part the host reports closed. When the other devices hold every slot by
+the cache it says «Линия занята: N из M» and keeps the join (and the resume of a paused part),
+online only (offline the card says «Нужна связь с хостом» in place of the count, which the
+participants line still gives) — the hint is advisory and the host decides capacity: the host's list names a revoked
+device's part `active`, but a revoked device holds no slot on the host (`active_others`), so a
+station that replaces a revoked one gets in although its card counts the line full (PR #775). A
+refusal `shift_line_full` is said with its numbers, an entry answered `myState: "closed"` is `part_closed`, enters no copy and caches the
+answer's figures; a shared shift's progress is the whole shift's. The work screen's band shows
+«Всего в смене» K (the others' part by the host plus this station's own codes, less those the
+host counts for no one here — answered `conflict` or `rejected`, or displaced, `readLostCodes`, so a
+code two devices took counts once, the earliest scan's; final review I2; `sharedCount`) against the
+plan and «Моя станция» N, the group named «Моя станция: N · Всего в смене: K из M»,
+and «данные от ЧЧ:ММ» while the link is down; it asks the link for the list every 15 s while
+shared and online (`useShiftParticipation`, `HostLinkControls.requestShifts`: another device's
+scan takes no revision). The plan notice comes when K reaches the plan.
+
+«Закрыть мою часть» keeps stage 2a's blockers and transaction; the reason follows
+`stationReasonRequired` (the host's `reason_need`, fixture `shift-close-reason-shared.json`): a
+shift only this station ever worked keeps stage 2a's rule, offline too; a shared close asks it only
+online of the last closer, never offline (the host marks it missing). The closed panel says the
+part's state from the stored receipt (`readPartState`: `queued`, `waiting`, `shift_closed`,
+`reason_missing`, `refused`; `unknown` when the copy is gone or the read fails, said as nothing
+rather than as «queued»; a close just written here starts from `queued`, final review m4). The queue screen calls a `shift_closed` record «Закрытие смены станцией».
+
+«Выйти из смены» and a move to another line pause the part (`markLeave`, `leave_requested_at`; a
+sign-out does not); the link sends pauses when online (`sendPendingLeaves`,
+`HostLinkControls.requestLeaves`) with the body `{ joinedRev }` from `joined_rev` (no body when
+none is kept). The sender settles only a permanent refusal (`not_found`, `shift_not_entered`,
+`validation_failed`); every other failure keeps the pause queued and does not block the pauses
+behind it. An answer whose `myState` is still `active` settles it as already re-entered (the host
+saw a later stay and wrote nothing), and any entry, online or offline, drops a pending one.
+`SYNC_SCHEMA_VERSION` stays 5.
+
+A station can work a part the host has as `left` (final review I1), deterministically: the operator
+leaves with the link up (the host frees the slot), the link drops, and «Продолжить» on the card
+(enabled offline for an entered copy) works from the stored snapshot; and by a race: a pause in
+flight carries the still-current token (an active part's re-entry stamps no new `joinedRev`), the
+entry reaches the host first, and the pause frees the slot after it. Left so, another device could
+take the slot and the line would run over `maxStations`. So while the work screen of an active
+shift is open (not leaving, not closed by the office), the floor (`FloorApp`, `rejoinLeftPart` in
+`src/floor/shifts/shift-rejoin.ts`) enters it again with `STATION_SHIFT_ENTER` whenever the link
+is up and the cache says `myState: "left"` with no pause of the operator's own waiting: when the
+link comes back and after every read of the host's list (the pause sender's settle asks for one).
+The return is tracked by the work gate, so a leave drains it before its pause is written. Decision:
+a full line (`shift_line_full`) does not stop the station — it keeps producing, its scans are facts
+the host takes from a left part, nothing kept changes — and the work screen says «Линия занята: N
+из M» with why and that the station returns by itself (`floor.work.lineFull`); every later read
+tries again, and the notice goes once the return is taken. A part closed on the host meanwhile is
+kept as closed. A refused key goes to the shell; any other failure waits for the next read.
+
+Known limits and release order:
+
+- Two host reads with the same whole-second `as_of` overwrite each other in arrival order (`>=`),
+  so an older read of the same second can land last; the next read after a revision event
+  corrects it (final review m1).
+- An offline station whose paused part meets a line that looks full in a stale cache cannot
+  resume it from the card until the link is back (online the host decides); this follows the
+  host's rule (final review m11, PR #775). A press while the link says online whose request finds
+  no host falls back to the stored snapshot as every entry does (`enterShift`'s transport case).
+- Participant names are cut at one line at 860 px and narrower (tap-to-expand later); the 1280x720
+  second card of an unshared pair clips 3 px, outside the guard matrix.
+- The shell CSS of the band and cards uses `:has()` (Chromium 105+, WebView2 is newer).
+- `test/station-fit.browser.test.ts` takes about 13–23 minutes (`PLAYWRIGHT_CORE`); run it with
+  `work-screen-fit.browser.test.ts` when the hub or the band changes.
+- Release the host (protocol 7) first; a 1.1.0 station must land before it joins a multi-device
+  line, and a station older than that is `shift_busy` on a shared shift.
 
 ## Signed documents and trust keys
 
@@ -2060,7 +2247,7 @@ codes, and the system's own words go to the shell's stderr only.
   checked only by the probe crate. The order of the GDI calls lives
   in `submit` over `WindowsPrintApi` and is tested on every OS; `mod native` is
   `cfg(windows)` (feature `Win32_Storage_Xps` for `StartDocW`) and compiles only in
-  `standalone-windows-build` — plan ДРВ type-checked it with a probe crate outside the
+  the Windows jobs (`standalone-windows-tests`, `standalone-windows-build`) — plan ДРВ type-checked it with a probe crate outside the
   repository, and it has never been run. `tests/fixtures/hardware-shapes.json` pins the
   answers for both sides (`windowsPrintOutcomeSchema`, `windowsJobObservationSchema`). The
   wrapper (`createTauriWindowsPrinting`, `windowsPrintResult`) never throws: `before_start`
@@ -2659,7 +2846,9 @@ uninstalls that keep the data, one with the host running), then
 `tools/standalone-release/prepare.mjs` writes the installer under its
 release name with `release-evidence.json` (version, commit, roles, hash and
 size, `Get-AuthenticodeSignature`'s status) and `SHA256SUMS`, uploaded as
-`standalone-installer-<sha>` for 30 days. `pnpm test:standalone-release:contract`
+`standalone-installer-<sha>` for 30 days. The workspace's Windows cargo tests
+run beside it in `standalone-windows-tests`; `ci-required` needs both.
+`pnpm test:standalone-release:contract`
 pins the overlay, the hooks, the job's step order and the smoke test's checks.
 The installer is not signed (owner question П12); `sign-overlay.mjs` builds
 the Tauri overlay for a certificate in the build machine's store, and no
@@ -2750,7 +2939,8 @@ runs on Windows in the macOS tests: the administrator prompt, the handle's
 sharing on NTFS, a process started from a held file and the final path
 (Windows-only unit tests in `update/package.rs`), removable drives and the
 passive update with the hooks (`smoke.ps1` runs `/P /UPDATE` without `/R`)
-are checked by the Windows job and by hand.
+are checked by the Windows jobs (`standalone-windows-tests` runs the unit
+tests, `standalone-windows-build` the smoke test) and by hand.
 
 ## Update distribution
 
@@ -3043,8 +3233,9 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   current line stays on the list even when archived. A station that works on
   an active shift may be moved all the same (owner question В9, option А;
   nothing refuses it): the dialog reads `GET /v1/office/shifts` when it opens,
-  for a station only, finds the active shift the station opened
-  (`stationShift`: `ownerDeviceId`), and once another line is chosen, an
+  for a station only, finds the active shift the station works
+  (`stationShift`: an active participant, since plan 2b; `ownerDeviceId` only
+  for a host before protocol 7), and once another line is chosen, an
   empty one included, says in a live region that the station finishes its
   work, signs the operator out and shows the new line's shifts, or, when
   «Не выбрана» is chosen, asks for a line (two texts, chosen by
@@ -3593,6 +3784,100 @@ writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
   «Данные изменились…» rather than that the shift is now active, since the
   host answers `stale_revision`.
 
+### Several devices in one shift (office, plan 2b)
+
+- The office reads participation from `OfficeShift.participants`, `byDevice`
+  and `closeReasonMissing` and from `OfficeLine.maxStations` (protocol 7). All
+  are optional, so a host before it shows the office as it was: a shift with no
+  participants has no «Станции» tab, no marks, no «целиком», and a line with no
+  limit is a line of one. Every rule about participants lives in
+  `src/office/shifts/participation.ts` (`isSharedShift`, `participantLook`,
+  `isSilent`, `deviceWorksShift`, `presenceOf`); `ownerDeviceId` is only «who
+  opened it» and is never used to find the shift a device works
+  (`stationShift`, `installWarnings` use `deviceWorksShift`).
+- «Линии»: an active line's «Переименовать» dialog also edits «Максимум станций
+  в смене» (`maxStationsRule`, 1–16, `lineUpdate` sends it only when it
+  differs from `lineMaxStations(line)`); adding and bringing a line back do not
+  carry it. The form refuses a value below the busiest active shift's active
+  participants as soon as the shifts are read (`activeStationsOnLine`), and
+  maps the host's `conflict` `line_stations_in_use` `{ active }` to the same
+  field. When the shifts are not read the client check is skipped and the
+  host's refusal is the only guard. The list has a column «Макс. станций».
+- «Смены»: the list gains no column. A shared shift's status cell adds one quiet
+  line («Устройств: N, закрыли часть: K») and a shift closed without its reason
+  the tag «Причина не указана» (`ShiftMarks`). The card gains the tab
+  «Станции» (`ShiftStations`) when the shift names participants: device and
+  kind, entry, state (a phase tag: working, silent, paused, part closed, closed
+  from the office), the units, boxes and pallets of each device from `byDevice`.
+  A participant is silent when it is `active` and the host last heard it more
+  than ten minutes before this PC's «now». «Итоги» adds «По устройствам»
+  (names from `participants`, so a technologist sees them) only when `byDevice`
+  has more than one entry; a participant missing from `byDevice` shows a dash.
+- Silence is an office-only rule: ten minutes, applied only on lines with
+  `maxStations > 1` (the overview card and attention row). The spec §7 states
+  it without that limit; the owner is to confirm. The silent mark of «Обзор»
+  moves only with its 30-second poll, and `ShiftStations` takes `nowMs` once
+  per render (not live). Revoked devices are excluded from «N из M», presence
+  and silence, but stay in the «Станции» tab and in the forced-close «Не
+  закрыли» list: the host gives a revoked device no slot, yet its open part
+  still blocks auto-close.
+- «Закрыть смену целиком» (row action, card button, dialog title and submit)
+  replaces «Закрыть» for a shift with more than one participant; the dialog
+  names `participants.filter(state != "closed")` («Не закрыли: …») from the
+  loaded shift and sends the unchanged `{ reason, expectedRev }`: the host
+  closes every open part as the office's and audits `shift.force_closed`; a
+  preview older than the host's state ends as `stale_revision`.
+- «Указать причину» (`planShifts`; row action and card button) is for a closed
+  shift with `closeReasonMissing`: a select of the six
+  `SHIFT_CLOSE_REASON_CODES` and `PUT …/close-reason`; a reason set meanwhile
+  (`close_reason_not_missing`) is an alert in words of its own and a re-read of
+  the list. The host adds every shift with `closeReasonMissing` to every
+  `listShifts` answer whatever its period (host section «Shifts», up to 100),
+  so the request stays until the reason is given. «Обзор» lists such a shift
+  under «Требует внимания» whatever its date; its other blocks read only its
+  own days (`inOverviewPeriod`: the planned dates from today minus 6 days to
+  tomorrow, `overviewPeriod`), so an old shift owing a reason is no line
+  card's «Последняя». «Смены» lists it with the tag and the action even outside
+  the chosen period or the default 31 days (`beyondPeriod`), filtered by
+  status, line and search like any row; such rows stay out of the totals line,
+  and a note says how many are shown beyond the period. For the list without
+  a period the office tells them apart by this PC's UTC day against the host's
+  31 days, so at the window's edge one may be told apart a day early or late
+  (it affects the note and the totals only).
+- «Устройства»: the «Линия» cell carries a participation tag under the line's
+  name (working, paused, part closed; `presenceOf`); the page reads the shifts
+  for it and claims nothing when they do not load. No column was added. The
+  page does not poll (its devices list and the «Связь» column are read when it
+  opens and after a write, like the rest of the pages but «Обзор» and an active
+  shift's card, which read every 30 s), so the tag is as of the last read; the
+  revoke dialog names the active shifts the device has an open part in from the
+  same read.
+- «Обзор»: a line's card says «станций в смене: N из M» only for a line whose
+  limit is above one and whose shift names participants (N the active ones); a
+  participant of such a line silent for ten minutes is one attention row and
+  takes the place of the plain silent-device row of the same device; a shift
+  closed without its reason is one row with the way to its card; an active
+  shift whose every open part (`active` or `left`) belongs to a revoked device or
+  a paused one is one row («ждёт отозванное или приостановленное устройство»,
+  `waitingOnAbsentDevices`, with the way to the card's «Станции»): the host
+  counts those parts as open, so the shift never closes by itself. A lone
+  station that merely paused is not listed. The card's «Станции» tab marks
+  «Нет связи» by the host's clock (`useHostClock`, the overview's source) and
+  not at all while it is unknown; an active shift's card reads every 30 s.
+- The blank: `ShiftTaskFormData.closingRule` is `"each_part"` for the office
+  («Каждая станция закрывает свою часть; смена закрывается, когда закрыли все,
+  или из офиса.») and absent for the cloud, whose rule (the opener closes) is
+  true there. `closingRule` is optional in `packages/domain`, so the cloud's
+  bytes and golden parity are unchanged; two each-part snapshot fixtures pin the
+  office's sentence, and the office's parity test declares it.
+- Exports are keyed by `shift_id` and carry no device: nothing changed, pinned
+  by `export-multi-station.test.ts` (codes of both devices in scan order, boxes
+  by SSCC, the operation time is the latest device close the host reports).
+- Layout: the office rows are pinned by a CSS-text contract test only. No
+  office browser harness exists, so 1280×690 has not been measured (see the
+  release checklist: «Смены» status cell, «Станции» tab, totals dialog,
+  «Устройства» chip, «Обзор» overflow, focus ring; dark and light).
+
 ## License in the office and on the floor
 
 - Plan ЛЦ-3 (license spec §9). The host computes the license (plan ЛЦ-2);
@@ -3747,7 +4032,17 @@ administrators and technologists write them (`planShifts`, «Writes»). The
 list without a period holds every planned and active shift and the closed
 ones produced in the last 31 days of the host's clock (UTC); `?from=&to=`
 (either may be left out) every shift produced in the period, both ends
-included; newest production date first. A shift is no feed record, but every
+included; newest production date first. Either way the list also holds
+every shift marked `close_reason_missing` (plan 2b, spec §12.9: the office's
+request for the reason must stay visible), once and in the same order, up to
+`REASON_MISSING_CAP` (100) of them, the newest by that order; past the cap
+the older ones wait for the newer ones' reasons or a period that holds them.
+The host filters by period only (`ShiftListQuery` refuses any other key):
+status, line and search are the office's filters over these rows, so an
+explicit status or line that does not match still hides such a shift there.
+The rule changes no field and no `PROTOCOL_VERSION`: the route is
+office-only, an older office just shows the extra rows as rows, and a newer
+office against an older host just lacks them. A shift is no feed record, but every
 change of one takes a host revision, stamped on its `rev`, with no feed item,
 so open streams wake and stations read their shifts again. `OfficeShift`
 carries ids, not names: the office names products, lines and counterparties
@@ -3830,15 +4125,18 @@ planned (`conflict` on `duplicate_template_not_fit`, after the pallet
 template), and `shift.open` names `validationPrintTemplateId` and
 `validationPrintTemplateRev`. A
 closed shift is `shift_status` for every station, a shift of another line (or a
-station without one) `shift_line`, a shift another station opened
-`shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
+station without one) `shift_line`, a shift a device that never entered an open
+shift and names no `multi-station-v1` meets `shift_busy` (stage 2a's answer,
+kept for older builds), and one that names it `shift_line_full` while every
+slot of the line's `maxStations` is held (plan 2b, below). The snapshot is at most
 320 KB (a `CHECK` of `0009`, `shifts::MAX_SNAPSHOT_BYTES`): a box layout and a
 pallet layout (or a duplicate layout) that together exceed it keep the shift planned (`conflict` on
 `snapshot_too_large`, checked at the entry after the templates, before a
 revision is taken). The host never checks a layout's content: the station
 does, with `labelTemplateSpecSchema`, when it enters. The opening writes
-`shift.open`; a second device's first entry (`shift.enter`) comes with plan
-2b, since in stage 2a a station's first entry is the opening.
+`shift.open`; a later device's first entry, or its return after it left, writes
+`shift.join` (`{ number, rejoined }`, plan 2b; the name `shift.enter` foreseen
+here was not used).
 
 The create and the enter, like the block issue, read the device again inside
 the write transaction (`AuthDevice::require_station_in`, first after
@@ -3867,7 +4165,7 @@ re-entry reads it through `ShiftSnapshot`: a field added to the struct later
 is an `Option` with `#[serde(default)]`, or the shifts opened before cannot be
 entered again.
 
-The audit rows of this part are six, all `ok`: `shift.create` (an office user,
+The audit rows of this part are seven, all `ok`: `shift.create` (an office user,
 or a station as the device; target `shift`, details `{ number, productId,
 lineId, productionDate }`), `shift.update` (an office user; the update details
 of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
@@ -3875,7 +4173,9 @@ of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
 `palletTemplateId`, no row when nothing changed), `shift.delete` (an office
 user; `{ number }`), `shift.open` (the station; `{ number, templateId,
 templateRev }`, plus `palletTemplateId` and `palletTemplateRev` for a shift
-with pallets), `shift.close` (an office user; `{ reason }`) and
+with pallets), `shift.close` (the device whose close closed the shift; plan 2b adds
+`participants`, `acceptedTotal`, `reasonMissing` for a shared shift),
+`shift.force_closed` (an office user; `{ reason, notClosed }`) and
 `sscc.block.issue` (a station; target `sscc_block`; `{ issuerPrefix,
 extension, fromSerial, toSerial }`). A refusal writes none.
 
@@ -3883,8 +4183,10 @@ The office closes an active shift (`POST …/{id}/close`, `{ reason,
 expectedRev }`, administrators and technologists), for a station that died or
 a shift nobody will finish: the reason is words, 3–500 characters without
 control characters (`validate::close_reason`), kept in `close_reason_text`; a
-planned or a closed shift is `shift_status`. The close writes the audit row
-`shift.close` with the details `{ reason }` (the trimmed text). The refusals
+planned or a closed shift is `shift_status`. The close also closes every part still open as the
+office's and writes `shift.force_closed` with `{ reason, notClosed: [{ deviceId,
+state }] }` (plan 2b; before it the office wrote `shift.close` `{ reason }`,
+which old rows keep), `reason` being the trimmed text. The refusals
 come in the order of `PUT`: a bad reason is 400 even for an unknown id, then
 the lookup (404), then a stale `expectedRev` (`stale_revision`), then
 `shift_status`. A station's close is a fact (plan 2a2) with one of the
@@ -6307,6 +6609,27 @@ and the XML «Расформирование упаковки» are plan ДЗГ-
 
 ## Backups and restore
 
+Yandex Disk integration is under development (plan
+`docs/superpowers/plans/2026-10-22-standalone-yandex-disk-backups.md`). The
+`backup-cloud` workspace crate owns strict profiles, bounded age envelopes,
+direct OAuth and Disk transport and loopback callback parsing. `host/src/yandex`
+owns a separate delivery journal, service-account DPAPI credentials and the token
+coordinator. Host startup, admin routes, audit, native source pins and separate
+refresh/delivery loops are wired. Tauri native connection/profile import/export,
+Office status UI, marker-first remote retention and empty-host recovery are implemented.
+Recovery verifies before elevation and again in the fixed-target elevated helper,
+then uses the existing restore lock/intent. Its protected journal and exact restore
+receipt support resume without applying the snapshot twice. Unsent local facts
+block recovery; the preflight never deletes them. After restore, cloud stays
+disconnected until an Office administrator reconnects with ClientSecret.
+Host tests do not establish Windows or live-provider end-user acceptance; see
+`docs/verification/standalone-yandex-disk-acceptance.md`.
+Never substitute the shell's per-user secret store (which permits plaintext off
+Windows) for service credentials: this store fails closed off Windows. Every
+credential mutation must use one shared `TokenSupervisor`, with the generation
+captured when authorization began; direct raw-store writes are for its boundary
+and tests only. The native Windows DPAPI/ACL/LocalService checks remain separate.
+
 Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
 pilot spec's §11 and §22; the procedure is
 `docs/runbooks/standalone-backup-restore.md`). One worker task
@@ -7060,19 +7383,20 @@ either; a file log is stage 5.
     through the Windows driver; a crash between `sending` and `sent`;
   - the verification window in WebView2 on the touch panel, and the dead end
     of an unresolved label of a shift on another line (an owner question).
-- The Windows service and DPAPI run only in the `standalone-windows-build`
-  job: it compiles the service and the Tauri app for Windows, and its cargo
-  tests round-trip a key through DPAPI. Since plan УСТ it also builds the
-  installer and runs its smoke test on the runner (see «Installer and
-  service»). A real Windows user profile, two PCs over Wi-Fi, kiosk mode and
+- The Windows service and DPAPI run only in the two Windows jobs:
+  `standalone-windows-tests` compiles the service and the Tauri app for
+  Windows and its cargo tests round-trip a key through DPAPI;
+  `standalone-windows-build`, beside it, builds the installer and runs its
+  smoke test on the runner (see «Installer and service»). They were one
+  serial job until the split. A real Windows user profile, two PCs over Wi-Fi, kiosk mode and
   the installer's windows still need a manual check on Windows
   (`docs/runbooks/standalone-install.md`, «Ручная проверка на Windows»); a run
   on macOS proves none of it.
 - The `windows-sys` features of kiosk mode, the spooler and the power request,
   `serialport`, `base64` for every system and `libudev-dev` in `standalone-rust`
   came with plan 2a4's owner step (its Task 1, which also closed plan 1f2's).
-  The shell's `cfg(windows)` code still compiles only in
-  `standalone-windows-build`, which has not run on this code: plan 2a4
+  The shell's `cfg(windows)` code still compiles only in the Windows jobs
+  (`standalone-windows-tests`, `standalone-windows-build`), which have not run on this code: plan 2a4
   type-checked `printer.rs`, `printer/spooler.rs`, `power.rs`,
   `power/windows.rs`, `scanner.rs`, `scanner/runtime.rs` and `lockdown.rs`, with
   their module tests, for `x86_64-pc-windows-msvc` (`cargo check` and
@@ -7088,8 +7412,8 @@ either; a file log is stage 5.
   cannot reach them: deleting `.on_window_event(...)` in `run`, deleting the
   rollback in `enter_lockdown`'s error path, and the `cfg(windows)` code. The
   last needs the `windows-sys` features `Win32_Graphics_Gdi` and
-  `Win32_UI_WindowsAndMessaging` and compiles only in
-  `standalone-windows-build`, where the one test that touches it
+  `Win32_UI_WindowsAndMessaging` and compiles only in the Windows jobs; in
+  `standalone-windows-tests` the one test that touches it
   (`on_windows_a_refused_enter_leaves_the_flag_off`) also runs.
 - Kiosk mode by hand, on Windows 10 and 11 with a build from that job. None
   of it has been run; check at least:
@@ -7405,3 +7729,66 @@ device's. «Устройства и версии» shows each device's version n
 against the host's window (`compatible`, `incompatible`, `host_older`, `unknown`). The only
 version rules left are the update offer's (a newer host with a signed package, `minUpgradeFrom`)
 and the protocol window (`app_too_old` / `host_too_old`).
+
+## Load and soak harness
+
+`apps/standalone/loadtest` (crate `markiro-loadtest`, a dev and acceptance tool, never shipped; its version stays `0.0.0`) is the
+harness of spec 2026-10-20 §8. It drives the real `markiro-host` over HTTPS with simulated devices (one per station or handheld:
+`engine.rs` is a pure state machine, `device.rs` its network tasks) in one shared shift. A ledger of receipts is the oracle: at
+the end the host's totals and its database (read-only, from outside) must equal it exactly. Six drills (`drills.rs`) are the ways a
+shared shift ends: close in three orders, force-close from the office, close with no reason, and a stale `leave` that must not undo
+a re-entry. They are **not** fault injection. A backup is taken under load and at the end; the last is restored into a folder of its own
+(`probes.rs`). After the main run, nine multi-station scenarios (`scenarios/`, plan `docs/superpowers/plans/2026-10-22-multi-station-load-test-scenarios.md`) run one by one, each on a fresh host and site in the run's host mode with its own metrics (its deliberate 409/401/refused connections never reach the main thresholds; its latencies are recorded, not judged): `line-full`, `capability`, `leave-reenter`, `closed-part`, `close-races`, `lines`, `backup-mid-close`, and, with `--host spawn` only, `kill-restart` and `outage` (not judged in-process or attached: a verdict warning). A failed scenario check is a correctness failure. `Profile.scenarios` (`--set scenarios=all|none|a,b`): all for tiny and smoke, none for soak. A file-only WAL observer (`wal_watch.rs`, 100 ms, the WAL header's checkpoint sequence and the wal-index) adds `walWatch` to the report; the harness never checkpoints. The owner's runbook is `docs/runbooks/standalone-load-test.md` (Russian).
+
+- Commands: `markiro-loadtest run --profile tiny|smoke|soak [--set field=value]… [--out DIR] [--keep-data] [--host spawn|in-process|attach]`,
+  `compare OLD.json NEW.json`, `summary REPORT.json`. Exit 0 pass, 1 failed verdict or regression, 2 the run could not be made.
+  Profiles and thresholds live in `profile.rs` (`Thresholds::for_profile`): tiny is a 20 s self-test (2 stations + 1 handheld,
+  latencies four times looser), smoke 4 stations + 2 handhelds × 5 scans/s for 3 minutes, soak the same × 10 scans/s for 4 hours with
+  three backups. Spec §8 gives no numbers; they are starting values, to be calibrated.
+- Host modes: `in-process` listens on 127.0.0.1 only; `spawn` (the default) starts `markiro-host` as a child, which has no bind option
+  and listens on `0.0.0.0`, so it refuses to start without `--accept-network-exposure` (trusted or isolated network only; the CI
+  workflow never passes it); `attach` uses a running throwaway host (credentials from `MARKIRO_LOAD_OFFICE_DEVICE_KEY`,
+  `MARKIRO_LOAD_ADMIN_LOGIN`, `MARKIRO_LOAD_ADMIN_PASSWORD`, never the command line) and has not been exercised.
+- Unavailable probes are warnings, not failures: an `in-process` run does not judge host memory, descriptors or the host log; an
+  empty check list does fail. Whether an unavailable probe on a `spawn` host should fail is an open owner decision.
+- Outputs go only under `--out` (`$MARKIRO_LOAD_OUT`, default `~/markiro-load`); a folder inside a git checkout is refused. Reports are
+  redacted (`redact()` with the run's secrets) before writing; they are still internal results.
+- Gate: unit tests and `tests/write_review.rs` run with the workspace (`standalone-rust`; `standalone-windows-tests` excludes this crate, and the last step of `standalone-windows-build` only
+  type-checks it with `cargo check --locked --tests`, so a Windows-only regression in its tests is caught by that compile step or the
+  opt-in `standalone-load.yml`, never by running them; routed by `tools/ci/affected.mjs`); both Windows jobs must be green to merge. `tests/self_run.rs` is `#[ignore]`, and so is every test that spawns the
+  real `markiro-host` (it listens on `0.0.0.0`) or kills and restarts it on its port (`host.rs`, the spawned `kill-restart` and
+  `outage` scenarios, the spawned panic test in `scenarios/mod.rs`): run them with `-- --ignored` on a trusted machine. The
+  process control (stop, kill, `Drop`) is covered in the gate over a fake `sh`/`sleep` child (Unix). The `wal_watch.rs` tests that
+  read a live `-shm` are ignored on Windows ("Windows -shm read unverified"). The load itself is manual or the opt-in
+  `.github/workflows/standalone-load.yml` (`workflow_dispatch` only, in-process, never required, never run on GitHub yet). Run a smoke
+  after changing a hot write path (facts, SSCC blocks, entry, leave, close, backup, restore) or `db.rs`.
+- Payloads are built from `markiro-proto` types, so a renamed wire field breaks the build. The plan-2b names `maxStations`,
+  `participants`, `totals`, `byDevice`, `closeReasonMissing`, `partClosed`, `reasonMissing`, `multi-station-v1` appear as strings in
+  `engine.rs`, `device.rs`, `drills.rs`, `run.rs` and `site.rs`; change them together with the fixtures.
+- `tests/write_review.rs` is spec §8's write review: hot write paths (`receive_facts`, `issue_block`, `enter_shift`) call
+  `begin_write`, no function reads on a deferred `pool.begin()` and then writes (a textual scan that recognises only `pool.begin()`),
+  the code check holds no transaction, a facts batch is one transaction of at most 100 records, a backup is one `VACUUM INTO`. A new
+  write route takes `begin_write`.
+- Observed (one macOS debug build, in-process host): smoke 180 s, 5403 scans, facts p99 about 34 ms, `sscc_block` p99 112 ms, WAL
+  backlog about 997 frames, 168 of 168 checks. The backlog sits just under SQLite's 1000-frame auto-checkpoint: it is the ceiling of
+  the checkpoint sawtooth, not a load measure. This is not a performance validation.
+- Observed with the scenarios (one macOS release build, one machine, plan 2026-10-22 acceptance): smoke in-process 5394 scans, facts p99
+  17.9 ms, `sscc_block` p99 67 ms, 168 of 168 checks, 7 scenarios held and `kill-restart`/`outage` not judged; smoke spawned 5402
+  scans, facts p99 29.7 ms, `sscc_block` p99 94 ms, 168 of 168, all 9 scenarios held. The WAL watch shows the automatic checkpoint keeps
+  up (log restarts every 1-2 s on average, at most about 10 s apart, backlog above 1000 frames in 0.2-0.7 % of samples and at most
+  1100), but the log file grows to about twice the trigger (7-9 MiB; no `journal_size_limit`); no explicit checkpoint was needed.
+- Not simulated: label checks, box exceptions, validation shifts, disaggregation, warehouse pallets, the handheld's warehouse and
+  pallet-event routes, printers, scanners, a real LAN, the Windows service. Exercised by the scenarios, not by the main load:
+  `shift_line_full` and revoked devices, a build without `multi-station-v1` (the host answers `shift_busy`, and `shift_status` for a
+  closed part, never `protocol_unsupported`, which comes only from the protocol-version header; wizard-created lines default to limit
+  1, so scenarios set it), leave and re-entry under load, late facts of a closed part and two closers at once, N closes at once and
+  the office racing a device, three lines and shifts at once, a copy in the middle of the closes, and on a spawned host a `kill -9`
+  with WAL recovery and a stop with device back-off. Still not exercised: a host 5xx (no host test hook, so the device back-off is
+  tested against refused connections only), the stations' and handhelds' own back-off (the harness's device model is), a power cut,
+  the office closing after a device closed the LAST part, a kill landing inside a flush (`committedButUnacknowledged` was 0 in every
+  run, so the resend-after-crash stored-receipt path is unexercised), the process scenarios in-process or in the workflow.
+  Windows-only and unverified: reading `host.db-shm`, retry of the restore's `os error 32`, PowerShell vitals, restarting a host on
+  the same port. On Windows `kill-restart`, `outage` and `backup-mid-close` (restoring a copy the backup worker may hold) are not
+  judged (`scenarios::NOT_JUDGED_ON_WINDOWS`, `judged_in_process`). Release-build numbers are one macOS machine; `soak`, `attach`, Linux, a real LAN or handhelds, and the workflow
+  (never run on GitHub) have never run. Harness fixes made on the way: `api.rs` error classes (`net_*` metric keys) and `strip_ansi`
+  in `scan_log` (the host log's colour codes hid ERROR lines).

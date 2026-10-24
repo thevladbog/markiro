@@ -161,9 +161,18 @@ describe("the brand gradient", () => {
     );
   });
 
-  it("is the whole face of the hub card's panel whatever the photo is", () => {
-    expect(read("src/floor/shifts/ShiftCard.tsx")).toMatch(
-      /className="shift-card__photo"\s+faceAlways/,
+  it("is the hub card's panel face behind a cut-out or the monogram; an opaque photo fills the panel instead", () => {
+    // The panel takes the photo's own backing (owner, 2026-10-20: a studio shot in a gradient
+    // frame read as a picture in a pink border).
+    expect(read("src/floor/shifts/ShiftCard.tsx")).not.toMatch(/faceAlways/);
+    const opaque = '.shift-hub .shift-card__photo[data-photo-backing="none"]';
+    expect(hub).toContain(`${opaque} { padding: 0; }`);
+    expect(hub).toMatch(
+      /\.shift-hub \.shift-card__photo\[data-photo-backing="none"\] \.product-photo \{[^}]*padding: 0;[^}]*object-fit: cover;[^}]*\}/,
+    );
+    // The fitted picture on the gradient keeps its room and stays whole.
+    expect(hub).toMatch(
+      /\.shift-hub \.shift-card__photo \.product-photo \{[^}]*padding: var\(--sp-6\);[^}]*object-fit: contain;[^}]*\}/,
     );
   });
 });

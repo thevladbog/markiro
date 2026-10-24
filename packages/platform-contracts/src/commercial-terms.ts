@@ -1,5 +1,7 @@
 import {
+  explicitCommercialPeriodTerm,
   resolveCommercialPeriod,
+  resolveExplicitCommercialPeriod,
   type CommercialPeriod,
   type SellerTaxPolicy,
 } from "@markiro/domain";
@@ -54,7 +56,7 @@ export const sellerTaxPolicySchema = z
 
 export const commercialPeriodSchema = z
   .object({
-    billingPeriod: z.enum(["month", "year"]),
+    billingPeriod: z.enum(["month", "year", "custom"]),
     billingTimezone: z.literal("Europe/Moscow"),
     calendarPolicyVersion: z.literal(1),
     anchorAt: z.iso.datetime({ offset: true }),
@@ -69,7 +71,18 @@ export const commercialPeriodSchema = z
   .strict()
   .superRefine((period, ctx) => {
     try {
-      const expected = resolveCommercialPeriod(period);
+      const expected =
+        period.billingPeriod === "custom"
+          ? resolveExplicitCommercialPeriod(explicitCommercialPeriodTerm(period))
+          : resolveCommercialPeriod({ ...period, billingPeriod: period.billingPeriod });
+      if (
+        period.billingPeriod === "custom" &&
+        (period.cycle !== 0 || Date.parse(period.anchorAt) !== Date.parse(period.startsAt))
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "An explicit period has cycle 0 anchored at its start",
+        });
       if (
         Date.parse(period.startsAt) !== Date.parse(expected.startsAt) ||
         Date.parse(period.endsAt) !== Date.parse(expected.endsAt)
@@ -123,9 +136,38 @@ const recurringServiceLineTermsSchema = z
   })
   .strict();
 
+const civilDateSchema = z.string().refine((value) => {
+  try {
+    resolveExplicitCommercialPeriod({ termStart: value, termEnd: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Expected a valid YYYY-MM-DD civil date");
+
+const explicitTermLineTermsSchema = z
+  .object({
+    version: z.literal(3),
+    subject: z.literal("software_license"),
+    documentNameRu: commercialDocumentNameSchema,
+    documentNameEn: commercialDocumentNameSchema.nullable(),
+    sellerPolicyRevision: sellerPolicyRevisionSchema,
+    billingPeriod: z.literal("custom"),
+    billingTimezone: z.literal("Europe/Moscow"),
+    activationRule: z.enum(["on_application", "after_current"]),
+    termStart: civilDateSchema,
+    termEnd: civilDateSchema,
+  })
+  .strict()
+  .refine((terms) => terms.termEnd >= terms.termStart, {
+    path: ["termEnd"],
+    message: "The term must not end before it starts",
+  });
+
 export const commercialLineTermsV4Schema = z.union([
   commercialLineTermsSchema,
   recurringServiceLineTermsSchema,
+  explicitTermLineTermsSchema,
 ]);
 
 export const catalogCommercialMetadataShape = {
@@ -156,6 +198,12 @@ export function validateCommercialLineKind(
       path: ["quantity"],
       message: "A plan line quantity must be one",
     });
+  if (line.commercialTerms?.version === 3 && (line.kind !== "plan" || line.quantity !== 1))
+    ctx.addIssue({
+      code: "custom",
+      path: ["quantity"],
+      message: "An explicit-term line must be a plan line with quantity one",
+    });
   if (line.commercialTerms?.version === 2 && (line.kind !== "service" || line.quantity !== 1))
     ctx.addIssue({
       code: "custom",
@@ -180,8 +228,8 @@ export function isCommercialPlanSequenceValid(
   if (plans.length <= 1) return true;
   const rule = (line: (typeof plans)[number] | undefined) => {
     if (!line) return null;
-    const terms = commercialLineTermsSchema.safeParse(line.commercialTerms);
-    if (terms.success) return terms.data.activationRule;
+    const terms = commercialLineTermsV4Schema.safeParse(line.commercialTerms);
+    if (terms.success && terms.data.version !== 2) return terms.data.activationRule;
     if (line.activationPolicy === "after_current") return "after_current";
     if (line.activationPolicy === "manual") return null;
     return "on_application";

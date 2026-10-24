@@ -32,6 +32,9 @@ class CloudBackend @Inject constructor(private val api: StationApi) : StationBac
         inventories = api.inventoryTasks().items.size,
     )
 
+    /** The cloud has no slots of a line: nothing to free, nothing asked. */
+    override suspend fun leave(shiftId: String): String? = null
+
     private companion object {
         val OPEN_SHIFT_STATUSES = setOf("planned", "active")
     }

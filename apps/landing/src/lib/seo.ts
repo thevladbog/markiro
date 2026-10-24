@@ -3,7 +3,9 @@ import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import { articlesForLocale } from "../content/articles";
-import { FILM_SEARCH_PAGES, type FilmPageDefinition } from "../content/film";
+import { AUTONOM_SEARCH_PAGES, type AutonomPageDefinition } from "../content/autonom-pages";
+import { formatRoubles, TARIFFS } from "../content/pricing";
+import { TARIFFS_EN } from "../content/autonom-en";
 import { mirrorPathFor } from "./mirror-path.ts";
 
 export { mirrorPathFor };
@@ -19,7 +21,7 @@ const ORGANIZATION_EMAIL = SITE_CONTACTS.email;
 const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
-  ...FILM_SEARCH_PAGES,
+  ...AUTONOM_SEARCH_PAGES,
   ...HUB_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
@@ -31,10 +33,9 @@ const SOFTWARE_FACTS = {
       "Проверка кодов маркировки Data Matrix на линии",
       "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
-      "Офлайн-работа станции с локальным журналом",
-      "Сборка паллет и инвентаризация на ТСД с Android",
-      "Обмен с 1С по CommerceML",
-      "Выгрузки отчётов смены для ГИС МТ",
+      "Работа без интернета: программа и база на ПК завода",
+      "Сборка паллет на ТСД с Android",
+      "Выгрузки смены в TXT, CSV и XML для ГИС МТ и 1С",
     ],
   },
   en: {
@@ -43,10 +44,9 @@ const SOFTWARE_FACTS = {
       "Data Matrix code verification on the line",
       "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
-      "Offline station with a local journal",
-      "Pallet building and inventory on an Android handheld",
-      "1C exchange over CommerceML",
-      "Shift report exports for GIS MT",
+      "No internet needed: the software and the database run on the plant's PCs",
+      "Pallet building on an Android handheld",
+      "Shift exports in TXT, CSV and XML for GIS MT and 1C",
     ],
   },
 } as const;
@@ -187,10 +187,13 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
     {
       "@type": "SoftwareApplication",
       "@id": `${SITE_URL}/#software`,
-      name: "Markiro",
+      // The product is «Маркиро Автоном»; "Markiro" stays the organization and an alias.
+      name: page.locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom",
+      alternateName:
+        page.locale === "ru" ? ["Markiro Autonom", "Markiro"] : ["Маркиро Автоном", "Markiro"],
       url: `${SITE_URL}/`,
       applicationCategory: "BusinessApplication",
-      operatingSystem: "Windows, Android, Web",
+      operatingSystem: "Windows, Android",
       description: homePage?.description,
       inLanguage: page.locale,
       featureList: [...facts.features],
@@ -296,25 +299,89 @@ export function buildHubPageGraph(hub: HubPageDefinition, items: readonly HubIte
   };
 }
 
-export function buildFilmPageGraph(page: FilmPageDefinition): PageGraph {
+export interface AutonomGraphOptions {
+  readonly faq?: readonly { question: string; answer: string }[];
+  /** Adds the Product with one Offer per published yearly price (/stoimost/). */
+  readonly offers?: boolean;
+}
+
+function productNode(page: AutonomPageDefinition): JsonLdObject {
   const pageUrl = absoluteUrl(page.path);
+  const offers = TARIFFS.flatMap((tariff) =>
+    tariff.pricePerYear === null
+      ? []
+      : [
+          {
+            "@type": "Offer",
+            name: `«${tariff.name}»`,
+            description: tariff.features.join(", "),
+            url: pageUrl,
+            price: tariff.pricePerYear,
+            priceCurrency: "RUB",
+            availability: "https://schema.org/InStock",
+            seller: { "@id": `${SITE_URL}/#organization` },
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price: tariff.pricePerYear,
+              priceCurrency: "RUB",
+              valueAddedTaxIncluded: false,
+              unitText: "год",
+              referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: "ANN" },
+            },
+          },
+        ],
+  );
+  const prices = offers.map((offer) => offer.price);
   return {
-    "@context": "https://schema.org",
-    "@graph": [
-      websiteNode(),
-      organizationNode(),
-      {
-        "@type": "WebPage",
-        "@id": `${pageUrl}#webpage`,
-        url: pageUrl,
-        name: page.title,
-        description: page.description,
-        inLanguage: page.locale,
-        dateModified: page.reviewedAt,
-        isPartOf: { "@id": `${SITE_URL}/#website` },
-      },
-    ],
+    "@type": "Product",
+    "@id": `${pageUrl}#product`,
+    name: "Маркиро Автоном",
+    description:
+      "Программа маркировки и агрегации для Windows: станция на линии, ТСД на складе и офис на ПК заказчика. Лицензия на площадку на год.",
+    brand: { "@type": "Brand", name: "Маркиро" },
+    category: "Программное обеспечение для маркировки и агрегации",
+    offers: {
+      "@type": "AggregateOffer",
+      priceCurrency: "RUB",
+      lowPrice: Math.min(...prices),
+      highPrice: Math.max(...prices),
+      offerCount: offers.length,
+      offers,
+    },
   };
+}
+
+export function buildAutonomPageGraph(
+  page: AutonomPageDefinition,
+  options: AutonomGraphOptions = {},
+): PageGraph {
+  const pageUrl = absoluteUrl(page.path);
+  const graph: JsonLdObject[] = [
+    websiteNode(),
+    organizationNode(),
+    {
+      "@type": "WebPage",
+      "@id": `${pageUrl}#webpage`,
+      url: pageUrl,
+      name: page.title,
+      description: page.description,
+      inLanguage: page.locale,
+      dateModified: page.reviewedAt,
+      isPartOf: { "@id": `${SITE_URL}/#website` },
+    },
+  ];
+  if (options.offers === true) graph.push(productNode(page));
+  if (options.faq !== undefined) {
+    graph.push({
+      "@type": "FAQPage",
+      mainEntity: options.faq.map(({ question, answer }) => ({
+        "@type": "Question",
+        name: question,
+        acceptedAnswer: { "@type": "Answer", text: answer },
+      })),
+    });
+  }
+  return { "@context": "https://schema.org", "@graph": graph };
 }
 
 export function buildLegalPageGraph(
@@ -492,37 +559,42 @@ export function renderLlmsTxt(): string {
 
 ## Русский
 
-> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.
+> «Маркиро Автоном»: программа маркировки и агрегации для Windows. Программа, база и копии работают на ПК заказчика, интернет для смены не нужен.
 
 ## Коротко о продукте
 
-- Что это: производственная система маркировки «Честный знак». Коды Data Matrix проверяются на станции при сканировании, единицы собираются в короба и паллеты с SSCC, этикетки печатаются в ZPL или TSPL, каждое действие остаётся в журнале.
+- Что это: производственная программа маркировки «Честный знак». Главный ПК в офисе держит базу, станции на линиях и ТСД на складе подключаются к нему по локальной сети завода.
+- Станция: проверяет каждый код Data Matrix при сканировании (структура GS1, GTIN товара смены, дубли, неполное чтение), собирает короба и паллеты с SSCC, печатает этикетки ZPL или TSPL.
 - Товарные группы: любая маркируемая продукция, например соки и вода, молочная продукция, пиво, косметика. Правила конкретной товарной группы сверяются до запуска.
 - Уровни агрегации: единица → короб → паллета. Паллеты собирают на станции и на ТСД.
-- ТСД: терминал на Android собирает паллеты, снимает с них коробы и проводит инвентаризацию у стеллажа.
-- Рабочее место: станция для Windows x64, сканер как клавиатурный ввод или через COM-порт, принтер ZPL или TSPL по сети, через COM-порт или USB.
-- Офлайн: станция работает без сети с локальным журналом SQLite и отправляет очередь после восстановления связи с ключом идемпотентности.
-- Интеграции: обмен с 1С по CommerceML, публичный REST API с OpenAPI, выгрузки отчётов смены TXT, CSV и XML агрегации для ГИС МТ, чтение статусов кодов через True API «Честного знака».
-- Киоск выбытия: сотрудник сканирует бейдж и коды, заявка проводится в кабинете через кассу или списанием.
-- Контакт: ${ORGANIZATION_EMAIL}. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
+- ТСД: терминал на Android собирает и разбирает паллеты и печатает их этикетки в той же смене.
+- Офис: смены, товары, шаблоны этикеток, конфликты, резервные копии и выгрузки смены в TXT, CSV и XML для ГИС МТ на том же ПК.
+- 1С: данные смены передаются в 1С файлами выгрузки. Прямой обмен с 1С и загрузка каталога из файла в планах.
+- Без облака: во время смены программа не обращается к серверам Маркиро, обновления ставятся из файла, лицензия загружается файлом.
+- Пробный период: 14 дней со всеми функциями, без оплаты. Установщик для Windows 10 и 11: ${absoluteUrl("/skachat/")}
+- Цены за площадку в год, без НДС: ${TARIFFS.map((tariff) => `«${tariff.name}» ${tariff.pricePerYear === null ? "по запросу" : `${formatRoubles(tariff.pricePerYear)} ₽`}`).join(", ")}. Подробно: ${absoluteUrl("/stoimost/")}
+- Контакт: ${ORGANIZATION_EMAIL}, Telegram @${SITE_CONTACTS.telegram.handle}. Разбор линии по видеосвязи: ${absoluteUrl("/#demo")}
 
 ${links("ru", "/")}
 
 ## English
 
-> Production serialization, aggregation, and traceability with offline-capable line stations.
+> Markiro Autonom: serialization and aggregation software for Windows. The software, the database and the backups run on the plant's own PCs; a shift needs no internet.
 
 ## About the product
 
-- What it is: a Chestny ZNAK production serialization system. Data Matrix codes are validated on the station at scan time, items are aggregated into cases and pallets with SSCC, labels print in ZPL or TSPL, and every action stays in the log.
+- What it is: Chestny ZNAK production serialization software. The main PC in the office holds the database; stations on the lines and handhelds in the warehouse connect to it over the plant's local network.
+- Station: validates every Data Matrix code at scan time (GS1 structure, the shift's GTIN, duplicates, partial reads), builds cases and pallets with SSCC and prints labels in ZPL or TSPL.
 - Product groups: any marked goods, for example juice and water, dairy, beer and cosmetics. The rules of a specific product group are checked before launch.
 - Aggregation levels: item → case → pallet. Pallets are built on the station and on the handheld.
-- Handheld: an Android terminal builds pallets, removes cases from them and runs inventory at the rack.
-- Workstation: a Windows x64 station, a scanner as keyboard input or over a COM port, a ZPL or TSPL printer over the network, COM port or USB.
-- Offline: the station works without a network with a local SQLite journal and submits its queue after reconnecting with an idempotency key.
-- Integrations: 1C exchange over CommerceML, a public REST API with OpenAPI, shift report exports as TXT, CSV and aggregation XML for GIS MT, code status reads through the Chestny ZNAK True API.
-- Disposal kiosk: an employee scans a badge and codes, and the request is processed in the cabinet through the register or as a write-off.
-- Contact: ${ORGANIZATION_EMAIL}. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
+- Handheld: an Android terminal builds pallets, adds and removes cases and prints pallet labels in the same shift.
+- Office: shifts, products, label templates, conflicts, backups and shift exports in TXT, CSV and XML for GIS MT on the same PC.
+- 1C: shift data reaches 1C as export files. A direct 1C exchange and a catalogue import from a file are planned.
+- No cloud: during a shift the software contacts no Markiro servers; updates and the licence are loaded from a file.
+- Interface language: Russian.
+- Trial: 14 days with every feature, no payment. The download page is in Russian: ${absoluteUrl("/skachat/")}
+- Prices per site per year in roubles, VAT not applicable: ${TARIFFS.map((tariff) => `${TARIFFS_EN[tariff.code].name} ${tariff.pricePerYear === null ? "on request" : `${formatRoubles(tariff.pricePerYear)} RUB`}`).join(", ")}. The pricing page is in Russian: ${absoluteUrl("/stoimost/")}
+- Contact: ${ORGANIZATION_EMAIL}. A 30-minute video call about your line: ${absoluteUrl("/en/#demo")}
 
 ${links("en", "/en/")}
 

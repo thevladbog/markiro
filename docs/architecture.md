@@ -307,7 +307,7 @@ rollout, diagnostic queries and evidence limits.
 
 ## 4. Data & retention (hot / warm / cold)
 
-- Postgres (Yandex Managed), multi-tenant via `tenant_id` on every row.
+- Postgres, multi-tenant via `tenant_id` on every row.
 - `codes` and the scan-event journal are **month-partitioned from day one**
   (native RANGE partitions managed by the API's `ensure-partitions` job —
   portable across docker dev and managed PG; pg_partman intentionally not required);
@@ -564,8 +564,9 @@ and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
 
 ## 8. Deployment
 
-- MVP: one Yandex Cloud VM + Docker Compose (api, admin, landing behind
-  Caddy) + Managed Postgres + Object Storage. RF residency (152-ФЗ).
+- Production: one Timeweb VM + Docker Compose (platform API, SaaS admin,
+  landing and `releases.markiro.app` behind Caddy) + PostgreSQL + Timeweb S3.
+  RF residency (152-ФЗ). The original MVP ran on Yandex Cloud until 2026-10.
 - `KIOSK_ORIGIN` must be set whenever the pickup kiosk PWA is served from a
   different origin than the API — which is the normal on-prem case, since the
   kiosk's pairing screen takes a server address. It is optional (an
@@ -621,33 +622,14 @@ and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
   request, taking down kiosk pairing for every tenant for the rest of the
   window.
 
-### Yandex SaaS production status
+### Production hosting status
 
-The repository now contains a Yandex SaaS implementation: reviewed Terraform
-roots, protected GitHub plan/apply and deployment workflows, a private ALB
-path, managed PostgreSQL, private versioned state/media/audit storage, Lockbox
-boundaries, and operator runbooks. This is repository implementation, not a
-live deployment. No real cloud IDs, domain, secret payloads, SMTP delivery,
-alert delivery, restore evidence, or DNS convergence evidence is committed.
-
-The one-customer MVP has one private 2 vCPU / 4 GiB application VM and one
-private Managed PostgreSQL `s3-c2-m8` host. The public ALB remains attached to
-SWS and global/per-IP ARL; WAF is deferred only for this one-customer phase. A
-host failure or deployment can interrupt service; the design does not claim
-high availability or zero downtime. The deferred HA path adds an application target
-and a multi-host PostgreSQL topology after load and recovery evidence justify
-it. GHCR keeps digest-addressed API and edge releases under its approved
-retention policy. The shared media bucket remains private and separates avatar
-and future product-image keys by prefix; the application controls access.
-
-Runbooks require the exact protected GitHub environments `production`,
-`production-infrastructure`, `production-public-dns`, and
-`production-postgres-owner`. Public DNS stays false until the separately
-approved first go-live procedure passes. The database-only owner environment
-attests the completed cluster apply, exact owner creation, and runtime Lockbox
-write before the saved database plan can proceed. The
-production controller uses serial-console host-key evidence and OS Login for
-the private app host; it does not trust a static SSH key.
+Production runs on one Timeweb host (`SERVER_PROFILE=platform-only`, see
+`deploy/platform` and [platform preparation](runbooks/timeweb-platform-preparation.md)).
+The Yandex SaaS implementation (Terraform, ALB, Managed PostgreSQL, Lockbox,
+OS Login deployment and the release CDN) was retired on 2026-10-21/22 and its
+code removed. `releases.markiro.app` is served by the platform edge from a
+Timeweb S3 bucket; see [release hosting](runbooks/release-hosting.md).
 
 ## National Catalog product import and confirmed links
 

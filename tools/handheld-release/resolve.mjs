@@ -17,11 +17,12 @@ async function readPublished(channel, fetchImpl = fetch) {
   return await response.text();
 }
 
-export async function resolveRelease({ channel, bump, fetchImpl }) {
+export async function resolveRelease({ channel, bump, fetchImpl, emptyChannelConfirmation = "" }) {
   return nextHandheldRelease({
     publishedText: await readPublished(channel, fetchImpl),
     bump,
     channel,
+    emptyChannelConfirmation,
   });
 }
 
@@ -29,9 +30,10 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\",
   const next = await resolveRelease({
     channel: process.env.CHANNEL || "stable",
     bump: process.env.BUMP || "patch",
+    emptyChannelConfirmation: process.env.EMPTY_CHANNEL_CONFIRMATION ?? "",
   });
   const output = process.env.GITHUB_OUTPUT;
-  const line = `version_name=${next.versionName}\nversion_code=${next.versionCode}\nfirst=${next.first}\n`;
+  const line = `version_name=${next.versionName}\nversion_code=${next.versionCode}\n`;
   if (output) appendFileSync(output, line);
   console.log(line.trim());
 }

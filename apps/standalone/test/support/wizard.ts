@@ -9,6 +9,7 @@ import {
 import { fireEvent, screen } from "@testing-library/react";
 
 import type { BootstrapRequest, StockTemplate, TemplatePurpose } from "../../src/host/protocol.js";
+import { civilToday } from "../../src/lib/civil-date.js";
 
 function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -86,7 +87,16 @@ export const EXPECTED_TEMPLATES: StockTemplate[] = [
   ...family("pallet", buildPalletLabelTemplates(), PALLET_LABEL_TEMPLATE_NAME),
 ];
 
-/** The request `completeWizard` produces. */
+/**
+ * The request `completeWizard` produces: the demo data is ticked by default (spec 2026-10-21),
+ * its shift produced on the organization's today. A getter, so a test that runs across midnight
+ * reads the date when it compares.
+ */
+export function expectedRequest(): BootstrapRequest {
+  return { ...EXPECTED_REQUEST, demoData: { productionDate: civilToday("Europe/Moscow") } };
+}
+
+/** The request `completeWizard` produces with «Установить демо-данные» unticked. */
 export const EXPECTED_REQUEST: BootstrapRequest = {
   admin: { login: "admin", name: "Ирина Смирнова", password: "correct horse battery" },
   org: {

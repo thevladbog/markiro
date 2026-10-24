@@ -651,6 +651,9 @@ pub async fn add_lines(
     .await
     .map_err(ApiError::internal)?;
     let mut present: HashSet<String> = present.into_iter().collect();
+    // A demo box or pallet goes into no document for ГИС МТ (spec 2026-10-21): the whole
+    // addition is refused, naming them.
+    let mut demo_ssccs: Vec<String> = Vec::new();
     for (offset, line) in lines.iter().enumerate() {
         let position = last + 1 + i64::try_from(offset).map_err(ApiError::internal)?;
         let Some(sscc) = line.sscc.as_deref() else {
@@ -701,6 +704,12 @@ pub async fn add_lines(
                 if target.cloud {
                     context.require_admin_in(&mut tx).await?;
                 }
+                if let Some(product_id) = &target.product_id {
+                    if crate::demo::is_demo_product(&mut tx, product_id).await? {
+                        demo_ssccs.push(sscc.to_owned());
+                        continue;
+                    }
+                }
                 insert_line(
                     &mut tx,
                     &id,
@@ -714,6 +723,13 @@ pub async fn add_lines(
                 .await?;
             }
         }
+    }
+    if !demo_ssccs.is_empty() {
+        return Err(ApiError::conflict(
+            "demo_box",
+            "a demo box or pallet goes into no disaggregation document",
+        )
+        .with_details(json!({ "constraint": "demo_box", "ssccs": demo_ssccs })));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(

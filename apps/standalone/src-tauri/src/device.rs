@@ -237,6 +237,12 @@ pub struct DeviceState {
 }
 
 impl DeviceState {
+    pub(crate) fn yandex_context(&self) -> Result<YandexHost, DeviceError> {
+        Ok(YandexHost {
+            device: self.paired()?,
+            dataset: self.dataset.clone(),
+        })
+    }
     /// Read `device.json` from the app's local data directory `dir`; an
     /// unreadable file is reported by `status` until `forget` removes it.
     pub fn load(dir: PathBuf) -> Self {
@@ -781,6 +787,46 @@ impl DeviceState {
     }
 }
 
+pub(crate) struct YandexHost {
+    device: Arc<PairedDevice>,
+    dataset: Arc<DatasetState>,
+}
+impl YandexHost {
+    pub(crate) async fn request(
+        &self,
+        current: &DeviceState,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        token: &str,
+    ) -> Result<HostResponse, DeviceError> {
+        if !Arc::ptr_eq(&self.device, &current.paired()?) {
+            return Err(DeviceError::HostChanged);
+        }
+        if path != "/v1/office/me" && !path.starts_with("/v1/office/backups/yandex") {
+            return Err(DeviceError::Request(RequestError::InvalidRequest));
+        }
+        if method != "GET" {
+            current.require_mutations()?;
+        }
+        self.device
+            .client
+            .send_within(
+                method,
+                path,
+                body,
+                Credentials {
+                    device_key: Some(&self.device.key),
+                    office_token: Some(token),
+                    dataset_epoch: self.dataset.epoch(&self.device.config.host_id),
+                },
+                Some(Duration::from_secs(600)),
+            )
+            .await
+            .map_err(DeviceError::Request)
+    }
+}
+
 /// Routes the webview may reach through `host_request`. Pairing routes are
 /// excluded: their answers carry a new device key, which must never cross
 /// IPC. The line goes through [`DeviceState::select_line`], which also keeps
@@ -798,7 +844,10 @@ fn webview_may_reach(path: &str) -> bool {
     device_route
         || route == "/v1/bootstrap"
         || route == "/v1/changes"
-        || (route.starts_with("/v1/office/") && !route.starts_with(UPDATE_PACKAGE_PREFIX))
+        || (route.starts_with("/v1/office/")
+            && !route.starts_with(UPDATE_PACKAGE_PREFIX)
+            && route != "/v1/office/backups/yandex/auth"
+            && !route.starts_with("/v1/office/backups/yandex/auth/"))
 }
 
 /// The address of a host as it is kept in `device.json`: `https://host[:port]`
@@ -931,6 +980,9 @@ mod tests {
             "/v1/device/update/installer?x=1",
             // The upload goes through `update_stage` only.
             "/v1/office/update-package/manifest",
+            "/v1/office/backups/yandex/auth/begin",
+            "/v1/office/backups/yandex/auth/complete",
+            "/v1/office/backups/yandex/auth/attempt/123?x=1",
             "/v1/office/update-package/6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b/installer",
         ] {
             assert!(!webview_may_reach(route), "{route}");

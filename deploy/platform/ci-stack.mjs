@@ -122,6 +122,8 @@ const environment = {
   MARKIRO_LANDING_DOMAIN: "landing.localhost",
   MARKIRO_RETIRED_ADMIN_DOMAIN: "admin.localhost",
   MARKIRO_RETIRED_KIOSK_DOMAIN: "kiosk.localhost",
+  MARKIRO_RELEASES_DOMAIN: "releases.localhost",
+  MARKIRO_RELEASES_BUCKET: "markiro-releases",
   S3_PUBLIC_ORIGIN: "https://storage.example.org",
   ACME_EMAIL: "ci@markiro.local",
   PLATFORM_CI_HTTP_PORT: String(httpPort),
@@ -258,13 +260,16 @@ try {
     .filter(Boolean);
   assert.deepEqual(queue, [
     "__pgboss__send-it",
+    "anonymize-landing-leads",
     "dispatch-email-outbox",
+    "dispatch-lead-notifications",
     "materialize-subscription-statuses",
     "platform-report-repair",
     "platform-report-run",
     "prune-email-deliveries",
     "reconcile-email-deliveries",
     "send-email-delivery",
+    "send-lead-digest",
   ]);
   evidence.queues = queue;
   await browserSmoke(httpsPort, evidenceDir);

@@ -13,6 +13,7 @@ import type { HostUpdateOffer } from "../update/host-offer.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
 import { emergencyEndsAt, floorLicenseLine } from "./license.js";
+import { isDemoShiftNumber } from "./demo/demo-codes.js";
 import { FloorChip } from "./FloorChip.js";
 import { LinkDot } from "./LinkDot.js";
 import { FloorUpdateLine } from "./FloorUpdateLine.js";
@@ -575,6 +576,16 @@ export function FloorStatusBar({
             `display: contents` keeps it out of the row's layout. The detail is read, not painted:
             the chip stays short.
           */}
+          {/* A demo shift (spec 2026-10-21): its codes and labels are no production's. */}
+          {isDemoShiftNumber(shiftNumber) && (
+            <FloorChip
+              kind="demo"
+              tone="warn"
+              icon="barcode"
+              text={t("floor.demo.chip")}
+              form="full"
+            />
+          )}
           <div className="floor-stock-chip-region" aria-live="polite">
             {stockTone !== null && shiftStock !== null && (
               <div

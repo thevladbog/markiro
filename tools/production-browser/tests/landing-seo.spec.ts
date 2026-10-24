@@ -1,13 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-// Headless Chromium has no GPU; SwiftShader provides WebGL 2 for the film tests below.
-// This config caps workers at 1, so a describe-scoped override would need a second
-// worker and Playwright refuses; the flags are harmless for the file's other, non-WebGL
-// pages, so they are declared once for the whole file instead.
-test.use({ launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } });
 
 interface LegalArtifactManifestEntry {
   readonly fileName: string;
@@ -26,6 +20,22 @@ const verificationRoutes = [
   "/d/MKR-BRD-01/2026.08/01/15.08.2026",
 ] as const;
 
+const LATEST_RELEASE = {
+  v: 1,
+  product: "markiro-standalone",
+  channel: "stable",
+  version: "0.4.0",
+  releasedAt: "2026-10-18T09:00:00Z",
+  installer: {
+    url: "https://releases.markiro.app/standalone/stable/0.4.0/markiro-standalone-0.4.0-windows-x86_64-setup.exe",
+    sha256: "3f9c1e7a52d84b06c9e1f3a7d20b5e8c41f6a9d3b7e2c05f18a4d6b9e3c7f201",
+    sizeBytes: 64_987_136,
+  },
+  manifestUrl:
+    "https://releases.markiro.app/standalone/stable/0.4.0/markiro-standalone-0.4.0.update.jws",
+  notes: [],
+};
+
 test.beforeEach(async ({ page }) => {
   await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
     await route.fulfill({
@@ -34,10 +44,21 @@ test.beforeEach(async ({ page }) => {
       status: 200,
     });
   });
+  // /skachat/ reads the installer pointer from the public release bucket.
+  await page.route("https://releases.markiro.app/standalone/stable/latest.json", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(LATEST_RELEASE),
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      status: 200,
+    });
+  });
 });
 
 const routes = [
   "/",
+  "/skachat/",
+  "/stoimost/",
   "/stati/",
   "/instruktsii/",
   "/en/articles/",
@@ -54,11 +75,9 @@ const routes = [
   "/stati/dubl-koda-markirovki-pivo/",
   "/stati/otchet-o-nanesenii-kodov-pivo/",
   "/rabochee-mesto-upakovki/",
-  "/kiosk-samovydachi/",
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
-  "/kak-rabotaet/",
   "/en/",
   "/en/chestny-znak-serialization/",
   "/en/sscc-and-aggregation/",
@@ -72,11 +91,9 @@ const routes = [
   "/en/articles/duplicate-beer-marking-code-russia/",
   "/en/articles/beer-code-application-report-russia/",
   "/en/packing-workstation/",
-  "/en/self-service-pickup-kiosk/",
   "/en/1c-integration/",
   "/en/offline-production/",
   "/en/faq/",
-  "/en/how-it-works/",
   "/legal/",
   "/privacy/",
   "/personal-data-consent/",
@@ -164,139 +181,214 @@ test("GTM stays offline until analytics consent and loads only once after permis
   await expect.poll(() => gtmRequests).toHaveLength(1);
 });
 
-test("a successful demo request emits one submit attempt and one lead event", async ({ page }) => {
-  await page.route("https://www.googletagmanager.com/**", async (route) => {
-    await route.fulfill({ body: "", contentType: "application/javascript", status: 200 });
+// The owner's decision (#787): the home pages carry no call form. Leads come through
+// /skachat/ and /stoimost/, and «Разобрать линию» leads to the contacts of the home page.
+for (const [route, label] of [
+  ["/", "Разобрать линию за 30 минут"],
+  ["/en/", "Walk through your line in 30 minutes"],
+] as const) {
+  test(`${route} has no call form and leads the line review to its contacts`, async ({ page }) => {
+    await page.goto(route);
+    await expect(page.locator("[data-demo-form]")).toHaveCount(0);
+    const call = page.locator("#demo").getByRole("link", { name: label, exact: true });
+    await expect(call).toHaveAttribute("href", "mailto:hello@markiro.app");
+    await expect(
+      page.locator("#demo").getByRole("link", { name: "hello@markiro.app", exact: true }),
+    ).toBeVisible();
+    for (const href of await page
+      .locator('main a[data-analytics="landing_demo_click"]')
+      .evaluateAll((links) => links.map((link) => link.getAttribute("href") ?? ""))) {
+      expect(href === `${route}#demo` || href.startsWith("mailto:"), href).toBe(true);
+    }
   });
-  await page.route("**/api/demo-requests", async (route) => {
-    const request = route.request().postDataJSON() as { requestId?: string };
-    await route.fulfill({
-      body: JSON.stringify({ accepted: true, requestId: request.requestId }),
-      contentType: "application/json",
-      status: 202,
+}
+
+test.describe("standalone lead forms", () => {
+  async function addCaptchaToken(form: ReturnType<Page["locator"]>, token: string): Promise<void> {
+    await form.evaluate((element, value) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "smart-token";
+      input.value = value;
+      element.append(input);
+    }, token);
+  }
+
+  test("/skachat/ posts the download lead and shows the installer from latest.json", async ({
+    page,
+    isMobile,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window.crypto, "randomUUID", {
+        value: () => "33333333-3333-4333-8333-333333333333",
+      });
     });
-  });
-
-  await page.goto("/");
-  await page.locator("[data-consent-accept]").click();
-  const form = page.locator("[data-demo-form]");
-  await form.evaluate((element) => {
-    const token = document.createElement("input");
-    token.name = "smart-token";
-    token.type = "hidden";
-    element.append(token);
-  });
-  await form.locator('input[name="name"]').fill("Анна");
-  await form.locator('input[name="company"]').fill("Завод Север");
-  await form.locator('input[name="email"]').fill("anna@example.test");
-  await form.locator('input[name="consent"]').check();
-  await form.locator('input[name="smart-token"]').evaluate((input) => {
-    (input as HTMLInputElement).value = "captcha-token";
-  });
-  await form.locator('button[type="submit"]').click();
-  await expect(page.locator("[data-demo-success]")).toBeVisible();
-
-  expect(
-    await page.evaluate(() => {
-      const layer = (window as Window & { dataLayer?: unknown[] }).dataLayer ?? [];
-      return layer
-        .filter(
-          (item): item is Record<string, unknown> =>
-            typeof item === "object" && item !== null && "event" in item,
-        )
-        .map((item) => item.event)
-        .filter((event) => event === "landing_form_submit" || event === "landing_form_success");
-    }),
-  ).toEqual(["landing_form_submit", "landing_form_success"]);
-});
-
-const demoCases = [
-  {
-    company: "Завод Север",
-    consent:
-      "Даю согласие на обработку персональных данных на условиях согласия и подтверждаю, что ознакомился с политикой обработки персональных данных.",
-    emailInput: " ANNA@EXAMPLE.TEST ",
-    expectedPayload: {
-      captchaToken: "ru-captcha-token",
-      company: "Завод Север",
-      consentVersion: "MKR-PD-02/2026.08/01",
-      email: "anna@example.test",
-      locale: "ru",
-      name: "Анна",
-      phone: "+79991234567",
-      requestId: "11111111-1111-4111-8111-111111111111",
-      sourcePath: "/",
-      website: "",
-    },
-    name: "Анна",
-    path: "/",
-    phone: "8 (999) 123-45-67",
-    success: "Запрос получили",
-    token: "ru-captcha-token",
-  },
-  {
-    company: "Factory",
-    consent:
-      "I consent to the processing of my personal data under the personal-data consent and confirm that I have read the personal-data processing policy.",
-    emailInput: " ADA@EXAMPLE.TEST ",
-    expectedPayload: {
-      captchaToken: "en-captcha-token",
-      company: "Factory",
-      consentVersion: "MKR-PD-02/2026.08/01",
-      email: "ada@example.test",
-      locale: "en",
-      name: "Ada",
-      requestId: "22222222-2222-4222-8222-222222222222",
-      sourcePath: "/en/",
-      website: "",
-    },
-    name: "Ada",
-    path: "/en/",
-    phone: "",
-    success: "Request received",
-    token: "en-captcha-token",
-  },
-] as const;
-
-for (const demoCase of demoCases) {
-  test(`${demoCase.path} submits the exact localized demo request`, async ({ page }) => {
-    await page.addInitScript((requestId) => {
-      Object.defineProperty(window.crypto, "randomUUID", { value: () => requestId });
-    }, demoCase.expectedPayload.requestId);
-
-    let requestPayload: unknown;
-    await page.route("**/api/demo-requests", async (route) => {
-      requestPayload = route.request().postDataJSON();
+    let payload: unknown;
+    await page.route("**/api/landing-leads", async (route) => {
+      payload = route.request().postDataJSON();
       await route.fulfill({
-        body: JSON.stringify({ accepted: true, requestId: demoCase.expectedPayload.requestId }),
+        body: JSON.stringify({ accepted: true, requestId: "33333333-3333-4333-8333-333333333333" }),
         contentType: "application/json",
         status: 202,
       });
     });
 
-    await page.goto(demoCase.path);
-    const form = page.locator("form[data-demo-form]");
-    await expect(form.locator('label[for="consent"]')).toHaveText(demoCase.consent);
-    await form.locator('input[name="name"]').fill(demoCase.name);
-    await form.locator('input[name="company"]').fill(demoCase.company);
-    await form.locator('input[name="email"]').fill(demoCase.emailInput);
-    if (demoCase.phone.length > 0) {
-      await form.locator('input[name="phone"]').fill(demoCase.phone);
-    }
-    await form.locator('input[name="consent"]').check();
-    await form.evaluate((element, token) => {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "smart-token";
-      input.value = token;
-      element.append(input);
-    }, demoCase.token);
+    await page.goto("/?utm_source=yandex&utm_medium=cpc");
+    let releaseReads = 0;
+    page.on("request", (request) => {
+      if (request.url().endsWith("/standalone/stable/latest.json")) releaseReads += 1;
+    });
+    await page.goto("/skachat/", { waitUntil: "networkidle" });
+    // The cookie panel covers the form on phones; a visitor answers it first.
+    await page.locator("[data-consent-reject]").click();
+    // The release bucket and the captcha are third parties: nothing is asked before the form.
+    expect(releaseReads).toBe(0);
+    await expect(page.locator("[data-release-fact]").first()).toBeHidden();
+    const form = page.locator("form[data-lead-form]");
+    await form.locator('input[name="email"]').fill("ivan@zavod");
+    await expect(page.locator('[data-release="version"]').first()).toHaveText("0.4.0");
+    expect(releaseReads).toBe(1);
+    await form.locator('button[type="submit"]').click();
+    await expect(form.locator('[data-error-for="email"]')).toHaveText(
+      "Проверьте почту: не хватает домена, например zavod.ru",
+    );
+    await expect(form.locator('[data-error-for="company"]')).toHaveText("Укажите компанию");
+    expect(payload).toBeUndefined();
+
+    await form.locator('input[name="email"]').fill(" Ivan@Zavod.ru ");
+    await form.locator('input[name="company"]').fill("ООО «Пивоварня»");
+    await form.locator('input[name="consent"]').check({ force: true });
+    await addCaptchaToken(form, "download-token");
     await form.locator('button[type="submit"]').click();
 
-    await expect(page.locator("[data-demo-success]")).toContainText(demoCase.success);
-    expect(requestPayload).toEqual(demoCase.expectedPayload);
+    await expect(page.locator("[data-download-ready] [data-release-only] h2")).toBeFocused();
+    expect(payload).toEqual({
+      captchaToken: "download-token",
+      company: "ООО «Пивоварня»",
+      consentVersion: "MKR-PD-02/2026.08/01",
+      email: "ivan@zavod.ru",
+      intent: "download",
+      locale: "ru",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      sourcePath: "/skachat/",
+      utm: { source: "yandex", medium: "cpc" },
+      website: "",
+    });
+    const link = page.locator("[data-release-link]:visible");
+    await expect(link).toHaveAttribute("href", LATEST_RELEASE.installer.url);
+    await expect(page.locator('[data-release="sha256"]')).toHaveText(
+      LATEST_RELEASE.installer.sha256,
+    );
+    await expect(page.locator("#pervyy-zapusk")).toBeVisible();
+    await expect(page.locator("[data-download-ready]")).toContainText(
+      isMobile ? "Ссылка отправлена" : "Ссылка готова",
+    );
   });
-}
+
+  test("/skachat/ says the version is being prepared when latest.json is missing", async ({
+    page,
+  }) => {
+    await page.route("https://releases.markiro.app/standalone/stable/latest.json", (route) =>
+      route.fulfill({ status: 404, body: "", headers: { "access-control-allow-origin": "*" } }),
+    );
+    await page.route("**/api/landing-leads", (route) =>
+      route.fulfill({ body: "{}", contentType: "application/json", status: 202 }),
+    );
+    await page.goto("/skachat/");
+    await page.locator("[data-consent-reject]").click();
+    const form = page.locator("form[data-lead-form]");
+    await form.locator('input[name="email"]').fill("ivan@zavod.ru");
+    await form.locator('input[name="company"]').fill("Завод");
+    await form.locator('input[name="consent"]').check({ force: true });
+    await addCaptchaToken(form, "token");
+    await form.locator('button[type="submit"]').click();
+    await expect(page.locator("[data-pending-only] h2")).toHaveText("Версия готовится");
+    await expect(page.locator("[data-pending-only]")).toContainText("ivan@zavod.ru");
+    await expect(page.locator("[data-release-only]")).toBeHidden();
+  });
+
+  test("/skachat/ keeps the data and offers a retry after a failed request", async ({ page }) => {
+    let attempts = 0;
+    await page.route("**/api/landing-leads", async (route) => {
+      attempts += 1;
+      if (attempts === 1) await route.abort("failed");
+      else await route.fulfill({ body: "{}", contentType: "application/json", status: 202 });
+    });
+    await page.goto("/skachat/");
+    await page.locator("[data-consent-reject]").click();
+    const form = page.locator("form[data-lead-form]");
+    await form.locator('input[name="email"]').fill("ivan@zavod.ru");
+    await form.locator('input[name="company"]').fill("Завод");
+    await form.locator('input[name="consent"]').check({ force: true });
+    await addCaptchaToken(form, "token");
+    await form.locator('button[type="submit"]').click();
+    await expect(form.locator("[data-lead-alert]")).toBeVisible();
+    await expect(form.locator('[data-label="retry"]')).toBeVisible();
+    await expect(form.locator('input[name="email"]')).toHaveValue("ivan@zavod.ru");
+    await form.locator('button[type="submit"]').click();
+    await expect(page.locator("[data-download-ready]")).toBeVisible();
+    expect(attempts).toBe(2);
+  });
+
+  test("/stoimost/ requests an invoice for the tariff chosen on a price card", async ({ page }) => {
+    let payload: Record<string, unknown> | undefined;
+    await page.route("**/api/landing-leads", async (route) => {
+      payload = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ body: "{}", contentType: "application/json", status: 202 });
+    });
+    await page.goto("/stoimost/");
+    await page.locator("[data-consent-reject]").click();
+    await page.locator('[data-tariff="workshop"] a[data-invoice-tariff]').click();
+    const form = page.locator("form[data-lead-form]");
+    await expect(form.locator('select[name="tariffCode"]')).toHaveValue("workshop");
+    await expect(page).toHaveURL(/\/stoimost\/\?tarif=workshop#schet$/u);
+
+    await form.locator('input[name="inn"]').fill("77070838");
+    await form.locator('button[type="submit"]').click();
+    await expect(form.locator('[data-error-for="inn"]')).toHaveText(
+      "ИНН — 10 цифр для организации или 12 для ИП",
+    );
+    await expect(form.locator('[data-error-for="consent"]')).toHaveText(
+      "Нужно согласие на обработку данных",
+    );
+
+    await form.locator('input[name="inn"]').fill("7707083893");
+    await form.locator('input[name="email"]').fill("buh@zavod.ru");
+    await form.locator('input[name="consent"]').check({ force: true });
+    await addCaptchaToken(form, "invoice-token");
+    await form.locator('button[type="submit"]').click();
+    await expect(page.locator("[data-invoice-success]")).toContainText(
+      "Счёт по тарифу «Цех» и ссылку на договор-оферту пришлём на buh@zavod.ru",
+    );
+    expect(payload).toMatchObject({
+      intent: "invoice",
+      inn: "7707083893",
+      tariffCode: "workshop",
+      email: "buh@zavod.ru",
+      sourcePath: "/stoimost/",
+    });
+    expect(payload).not.toHaveProperty("company");
+  });
+
+  test("the theme switch follows the system and remembers a choice", async ({ page, isMobile }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.locator("[data-consent-reject]").click();
+    if (isMobile) {
+      await page.locator("[data-menu-trigger]").click();
+      await page.locator('.ax-menu [data-theme-option="light"]').click();
+    } else {
+      await page.locator("[data-theme-toggle]").click();
+      await page.locator('#ax-theme-menu [data-theme-option="light"]').click();
+    }
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.goto("/stoimost/");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    // Product screens and the recommended plan stay dark in both themes.
+    await expect(page.locator('[data-tariff="line"]')).toHaveAttribute("data-theme", "dark");
+  });
+});
 
 for (const route of routes) {
   test(`${route} renders without browser or layout errors`, async ({ page }) => {
@@ -320,7 +412,9 @@ for (const route of routes) {
   });
 }
 
-test("the captcha runtime loads only once the visitor reaches the demo form", async ({ page }) => {
+test("the captcha runtime loads only once the visitor reaches the download form", async ({
+  page,
+}) => {
   let captchaRequests = 0;
   await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
     captchaRequests += 1;
@@ -331,15 +425,15 @@ test("the captcha runtime loads only once the visitor reaches the demo form", as
     });
   });
 
-  await page.goto("/", { waitUntil: "networkidle" });
+  await page.goto("/skachat/", { waitUntil: "networkidle" });
   expect(captchaRequests).toBe(0);
   await expect(
     page.locator('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
   ).toHaveCount(0);
 
-  await page.locator('[data-demo-form] input[name="name"]').focus();
+  await page.locator('[data-lead-form] input[name="email"]').focus();
   await expect.poll(() => captchaRequests).toBe(1);
-  await page.locator('[data-demo-form] input[name="company"]').focus();
+  await page.locator('[data-lead-form] input[name="company"]').focus();
   await page.waitForTimeout(200);
   expect(captchaRequests).toBe(1);
 });
@@ -372,16 +466,19 @@ test("article hero keeps a clear heading hierarchy", async ({ page }) => {
   expect(sizes.heading).toBeGreaterThan(sizes.lead * 1.5);
 });
 
-for (const [route, wordmark, theme] of [
-  ["/", "маркиро", "light"],
-  ["/en/", "MARKIRO", "light"],
-  ["/sscc-i-agregatsiya/", "маркиро", "dark"],
-  ["/en/sscc-and-aggregation/", "MARKIRO", "dark"],
+for (const [route, wordmark, headerTheme, footerTheme] of [
+  ["/", "маркиро", "light", "dark"],
+  ["/en/", "MARKIRO", "light", "dark"],
+  ["/sscc-i-agregatsiya/", "маркиро", "dark", "dark"],
+  ["/en/sscc-and-aggregation/", "MARKIRO", "dark", "dark"],
 ] as const) {
   test(`${route} renders the localized exact brand in its header and footer`, async ({ page }) => {
     await page.goto(route);
-    const colors = BRAND_COLORS[theme as "light" | "dark"];
-    for (const brand of [page.locator("header .brand-mark"), page.locator("footer .brand-mark")]) {
+    for (const [brand, theme] of [
+      [page.locator("header .brand-mark"), headerTheme],
+      [page.locator("footer .brand-mark"), footerTheme],
+    ] as const) {
+      const colors = BRAND_COLORS[theme];
       await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
       await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
       expect(
@@ -416,38 +513,45 @@ for (const [route, wordmark, theme] of [
   });
 }
 
-for (const route of ["/", "/en/"] as const) {
-  test(`${route} renders the public contact phone`, async ({ page }) => {
-    await page.goto(route);
-    const expectedPhone = "+7 960 495-46-10";
-    const expectedHref = "tel:+79604954610";
+test("/ renders the public contact phone", async ({ page }) => {
+  await page.goto("/");
+  const expectedHref = "tel:+79604954610";
+  expect(
+    await page
+      .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
+      .evaluateAll((links) => links.map((link) => (link as HTMLElement).dataset.placement).sort()),
+  ).toEqual(["final", "header", "header_mobile", "menu"]);
+  const final = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
+  await expect(final).toBeVisible();
+  await expect(final).toHaveAttribute("href", expectedHref);
+});
 
-    await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(4);
-    expect(
-      await page
-        .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
-        .evaluateAll((links) =>
-          links.map((link) => (link as HTMLElement).dataset.placement).sort(),
-        ),
-    ).toEqual(["demo", "footer", "header", "hero"]);
-    for (const phone of [
-      page.locator("#hero").getByRole("link", { name: expectedPhone, exact: true }),
-      page.locator("#demo").getByRole("link", { name: expectedPhone, exact: true }),
-    ]) {
-      await expect(phone).toBeVisible();
-      await expect(phone).toHaveAttribute("href", expectedHref);
-    }
-  });
-}
+test("/en/ renders the public contact phone", async ({ page }) => {
+  await page.goto("/en/");
+  const expectedHref = "tel:+79604954610";
+  expect(
+    await page
+      .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
+      .evaluateAll((links) => links.map((link) => (link as HTMLElement).dataset.placement).sort()),
+  ).toEqual(["final", "header", "header_mobile", "menu"]);
+  const final = page.locator("#demo").getByRole("link", { name: "+7 960 495-46-10", exact: true });
+  await expect(final).toBeVisible();
+  await expect(final).toHaveAttribute("href", expectedHref);
+});
 
 test("language switch connects exact page counterparts", async ({ page }) => {
   await page.goto("/en/offline-production/");
   const menuTrigger = page.locator("[data-menu-trigger]");
   if (await menuTrigger.isVisible()) await menuTrigger.click();
 
-  await expect(page.locator('a[hreflang="ru"]')).toHaveAttribute("href", "/oflayn-rabota/");
-  await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("href", "/en/offline-production/");
-  await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("aria-current", "page");
+  // English pages also mark their links to the Russian-only download page with hreflang.
+  const languages = page.locator(".language-switch");
+  await expect(languages.locator('a[hreflang="ru"]')).toHaveAttribute("href", "/oflayn-rabota/");
+  await expect(languages.locator('a[hreflang="en"]')).toHaveAttribute(
+    "href",
+    "/en/offline-production/",
+  );
+  await expect(languages.locator('a[hreflang="en"]')).toHaveAttribute("aria-current", "page");
 });
 
 for (const [route, counterpart, registry] of [
@@ -666,47 +770,6 @@ for (const route of ["/d/mkr-pd-01/2026.08/01/15.08.2026", "/d/MKR-PD-01/2026.08
   });
 }
 
-test.describe("film page", () => {
-  test("starts the 3D stage only after the first scroll", async ({ page }) => {
-    await page.goto("/kak-rabotaet/", { waitUntil: "networkidle" });
-    const film = page.locator("[data-film]");
-    await expect(film).not.toHaveClass(/film--live/);
-    await page.evaluate(() => window.scrollBy({ top: 400, behavior: "instant" }));
-    await expect(film).toHaveClass(/film--live/, { timeout: 20_000 });
-    await expect
-      .poll(async () => Number(await film.getAttribute("data-film-time")), { timeout: 10_000 })
-      .toBeGreaterThan(0);
-  });
-
-  test("marks the chapter the rail links to", async ({ page, isMobile }) => {
-    test.skip(isMobile, "the rail is hidden on phones");
-    // The rail follows the scroll position, not the 3D stage. With motion allowed, the first
-    // scroll starts the stage, and on a CI browser without a GPU its build and first
-    // software-rendered frames hold the main thread past this test's timeout.
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/kak-rabotaet/");
-    await page.evaluate(() => window.scrollBy({ top: 2000, behavior: "instant" }));
-    const link = page.locator('[data-film-rail] a[href="#warehouse"]');
-    await expect(link).toBeVisible();
-    await link.click();
-    await expect(link).toHaveAttribute("aria-current", "step");
-  });
-
-  test("keeps the posters and never goes live with reduced motion", async ({ browser }) => {
-    const context = await browser.newContext({
-      baseURL: "http://127.0.0.1:5473",
-      reducedMotion: "reduce",
-    });
-    const page = await context.newPage();
-    await page.goto("/kak-rabotaet/");
-    await page.evaluate(() => window.scrollBy({ top: 1400, behavior: "instant" }));
-    await page.waitForTimeout(1_000);
-    await expect(page.locator("[data-film]")).not.toHaveClass(/film--live/);
-    await expect(page.locator("#line .film-chapter__poster img")).toBeVisible();
-    await context.close();
-  });
-});
-
 test.describe("home page", () => {
   test("cookie panel buttons keep readable hover colors on the light home", async ({ page }) => {
     await page.goto("/");
@@ -732,75 +795,34 @@ test.describe("home page", () => {
       .toBe("rgb(107, 229, 153)");
   });
 
-  test("hotspots show their screen on hover and focus, and Escape hides it", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "phones get the card strip instead of hotspots");
-    await page.goto("/");
-    await page.locator("[data-consent-reject]").click();
-    const spot = page.locator("[data-map-spot]").filter({ hasText: "Склад" });
-    const tip = spot.locator('[role="tooltip"]');
-    await expect(tip).toBeHidden();
-    await spot.locator("a").hover();
-    await expect(tip).toBeVisible();
-    await expect(tip.locator("img")).toHaveAttribute("alt", /ТСД/u);
-    await page.mouse.move(1, 1);
-    await expect(tip).toBeHidden();
-    await spot.locator("a").focus();
-    await expect(tip).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(tip).toBeHidden();
-  });
-
-  test("the warehouse hotspot or card leads to the handheld row", async ({ page, isMobile }) => {
-    await page.goto("/");
-    await page.locator("[data-consent-reject]").click();
-    const link = isMobile
-      ? page.locator(".home-hero__strip a").filter({ hasText: "Склад" })
-      : page.locator("[data-map-spot]").filter({ hasText: "Склад" }).locator("a");
-    await link.click();
-    await expect(page).toHaveURL(/#product-handheld$/u);
-    await expect(page.locator("#product-handheld")).toBeInViewport();
-  });
-
-  test("the kiosk and integrations cards line up their frames and links", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "the cards stack on phones");
-    const box = (selector: string) =>
-      page.locator(selector).evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
-      });
-    for (const width of [1440, 1024]) {
-      await page.setViewportSize({ width, height: 900 });
-      await page.goto("/");
-      expect(await box("#product-integrations"), `${width} card`).toEqual(
-        await box("#product-kiosk"),
+  test("loads no 3D code", async ({ page, baseURL }) => {
+    // Three.js could only ship in our own bundles. Third-party scripts such as the
+    // captcha the call form loads near the bottom are out of scope. A lazily loaded
+    // chunk can also arrive twice (modulepreload, then import), and CDP keeps the body
+    // of only one copy, so every script URL the page loaded is fetched again here.
+    expect(baseURL).toBeDefined();
+    const origin = new URL(baseURL ?? "").origin;
+    for (const route of ["/", "/en/"]) {
+      const scripts = new Set<string>();
+      const collect = (response: Response) => {
+        if (response.request().resourceType() !== "script") return;
+        if (new URL(response.url()).origin !== origin) return;
+        scripts.add(response.url());
+      };
+      page.on("response", collect);
+      await page.goto(route, { waitUntil: "networkidle" });
+      await page.evaluate(() =>
+        window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }),
       );
-      for (const part of [".screen-frame", ".text-link"]) {
-        const kiosk = await box(`#product-kiosk ${part}`);
-        const integrations = await box(`#product-integrations ${part}`);
-        expect(integrations.top, `${width} ${part}`).toBe(kiosk.top);
+      await page.waitForLoadState("networkidle");
+      page.off("response", collect);
+      expect(scripts.size, route).toBeGreaterThan(0);
+      for (const url of scripts) {
+        const response = await page.request.get(url);
+        expect(response.ok(), url).toBe(true);
+        expect(await response.text(), `${route} ${url}`).not.toContain("WebGLRenderer");
       }
     }
-  });
-
-  test("loads no 3D code", async ({ page }) => {
-    const scripts: Promise<string>[] = [];
-    page.on("response", (response) => {
-      if (response.request().resourceType() === "script") scripts.push(response.text());
-    });
-    await page.goto("/", { waitUntil: "networkidle" });
-    await page.evaluate(() =>
-      window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }),
-    );
-    await page.waitForLoadState("networkidle");
-    const bodies = await Promise.all(scripts);
-    expect(bodies.length).toBeGreaterThan(0);
-    for (const body of bodies) expect(body).not.toContain("WebGLRenderer");
   });
 
   for (const viewport of [
@@ -810,7 +832,7 @@ test.describe("home page", () => {
   ] as const) {
     test(`fits ${viewport.width} px without horizontal scrolling`, async ({ page }) => {
       await page.setViewportSize(viewport);
-      for (const route of ["/", "/en/"]) {
+      for (const route of ["/", "/skachat/", "/stoimost/", "/en/"]) {
         await page.goto(route, { waitUntil: "networkidle" });
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -884,7 +906,11 @@ test.describe("header", () => {
           return { label: label(element), past: Math.round(past) };
         })
         .filter((item) => item.past > 0);
-      const wrapped = [...header.querySelectorAll(".landing-nav a, .landing-header__cta")]
+      const wrapped = [
+        ...header.querySelectorAll(
+          ".landing-nav a, .landing-header__cta, .ax-nav a, .ax-header__cta > span:first-child",
+        ),
+      ]
         .filter(shown)
         .filter((element) => {
           const range = document.createRange();
@@ -907,6 +933,7 @@ test.describe("header", () => {
       await page.setViewportSize({ width, height: 900 });
       for (const route of [
         "/",
+        "/stoimost/",
         "/en/",
         "/markirovka-chestny-znak/",
         "/en/chestny-znak-serialization/",
@@ -921,7 +948,11 @@ test.describe("header", () => {
         const trigger = page.locator("[data-menu-trigger]");
         if (await trigger.isVisible()) {
           await trigger.click();
-          await expect(phone, `${route} at ${width} px, menu open`).toBeVisible();
+          // The standalone header shows the number as a call button and in the menu.
+          await expect(
+            page.locator('[data-header] a[href^="tel:"]:visible').first(),
+            `${route} at ${width} px, menu open`,
+          ).toBeVisible();
           expect(await problems(page), `${route} at ${width} px, menu open`).toEqual({
             cutOff: [],
             wrapped: [],

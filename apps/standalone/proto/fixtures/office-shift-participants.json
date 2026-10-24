@@ -1,0 +1,86 @@
+{
+  "id": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+  "number": "OCT26-004",
+  "status": "closed",
+  "mode": "aggregation",
+  "palletsEnabled": false,
+  "createdFrom": "office",
+  "productId": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+  "lineId": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+  "counterpartyId": "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+  "productionDate": "2026-10-08",
+  "plannedDate": "2026-10-08",
+  "plannedQty": 1200,
+  "boxCapacity": 12,
+  "boxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+  "palletBoxCapacity": null,
+  "palletTemplateId": null,
+  "palletSheetTemplateId": null,
+  "ownerDeviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "openedAt": "2026-10-08T06:02:00Z",
+  "closedAt": "2026-10-08T14:10:00Z",
+  "closeReasonCode": null,
+  "closeReasonText": null,
+  "lateDataAt": null,
+  "createdAt": "2026-10-07T15:30:00Z",
+  "rev": 88,
+  "totals": {
+    "acceptedUnits": 547,
+    "unitsInClosedBoxes": 540,
+    "closedBoxes": 45,
+    "openBoxes": 0,
+    "lastFactAt": "2026-10-08T14:10:02Z",
+    "deviceIds": ["7c9e6679-7425-40de-944b-e07fc1f90ae7", "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d"],
+    "closedPallets": 0,
+    "openPallets": 0
+  },
+  "participants": [
+    {
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceKind": "station",
+      "deviceName": "Станция линии 1",
+      "state": "closed",
+      "firstEnteredAt": "2026-10-08T06:02:00Z",
+      "joinedAt": "2026-10-08T06:02:00Z",
+      "joinedRev": 12,
+      "leftAt": null,
+      "closedAt": "2026-10-08T14:10:00Z",
+      "closedBy": "device",
+      "closedActualQty": 427,
+      "closedReasonCode": null,
+      "lateDataAt": null,
+      "lastSeenAt": "2026-10-08T14:10:02Z"
+    },
+    {
+      "deviceId": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+      "deviceKind": "handheld",
+      "deviceName": "ТСД 1",
+      "state": "closed",
+      "firstEnteredAt": "2026-10-08T06:30:00Z",
+      "joinedAt": "2026-10-08T06:30:00Z",
+      "joinedRev": 15,
+      "leftAt": null,
+      "closedAt": "2026-10-08T13:00:00Z",
+      "closedBy": "device",
+      "closedActualQty": 120,
+      "closedReasonCode": null,
+      "lateDataAt": null,
+      "lastSeenAt": "2026-10-08T13:00:01Z"
+    }
+  ],
+  "byDevice": [
+    {
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "accepted": 427,
+      "boxesClosed": 35,
+      "pallets": 0
+    },
+    {
+      "deviceId": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+      "accepted": 120,
+      "boxesClosed": 10,
+      "pallets": 0
+    }
+  ],
+  "closeReasonMissing": true
+}

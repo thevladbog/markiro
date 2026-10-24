@@ -11,19 +11,26 @@ const workflow = await text(".github/workflows/ci.yml");
 const parsed = load(workflow);
 const job = parsed.jobs["standalone-windows-build"];
 const runs = job.steps.map((step) => step.run ?? step.uses ?? "");
+// The Windows tests run in a job of their own, beside the installer job.
+const testsJob = parsed.jobs["standalone-windows-tests"];
+const testRuns = testsJob.steps.map((step) => step.run ?? step.uses ?? "");
 const smoke = await text("tools/standalone-release/smoke.ps1");
 
 test("the Windows job builds, smoke-tests and keeps the installer, in that order", () => {
-  assert.ok(job["timeout-minutes"] >= 60);
+  // The smoke step alone may take 25 minutes before its own timeout stops it.
+  // The load-test type-check (cold debug profile, ~8-15 min) runs after it.
+  assert.ok(job["timeout-minutes"] >= 55);
   const order = [
     "pnpm test:standalone-release:contract",
-    "cargo test --manifest-path apps/standalone/Cargo.toml --workspace",
+    "pnpm turbo build --filter '@markiro/standalone...'",
     "cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-host",
     "apps/standalone/src-tauri/binaries/markiro-host-x86_64-pc-windows-msvc.exe",
     "tauri build --config src-tauri/tauri.installer.conf.json --bundles nsis",
     "./tools/standalone-release/smoke.ps1 -BundleDir apps/standalone/target/release/bundle/nsis",
     "node tools/standalone-release/prepare.mjs",
     "actions/upload-artifact@",
+    // Compile-only, last: the artifact steps above stay as they were.
+    "cargo check --locked --tests -p markiro-loadtest --manifest-path apps/standalone/Cargo.toml",
   ].map((needle) => runs.findIndex((run) => run.includes(needle)));
   assert.ok(
     order.every((index) => index >= 0),
@@ -65,6 +72,29 @@ test("the smoke test checks what the installer promises", () => {
 
 /** The whole step that runs `needle`, as parsed YAML. */
 const stepRunning = (needle) => job.steps.find((step) => (step.run ?? "").includes(needle));
+
+test("the Windows tests job runs the workspace's tests and holds no secret either", () => {
+  assert.equal(testsJob["runs-on"], "windows-latest");
+  const cargo = testRuns.findIndex((run) =>
+    run.startsWith("cargo test --manifest-path apps/standalone/Cargo.toml --workspace"),
+  );
+  assert.ok(cargo >= 0, "the workspace's tests run in the tests job");
+  // It makes no release build, installer or artifact: those are the other job's.
+  for (const run of testRuns) {
+    assert.doesNotMatch(run, /cargo build --release|tauri build|smoke\.ps1|upload-artifact/u);
+  }
+  assert.equal(testsJob.permissions, undefined);
+  assert.equal(testsJob.environment, undefined);
+  assert.equal(testsJob.env, undefined);
+  const body = JSON.stringify(testsJob);
+  assert.doesNotMatch(body, /secrets\./u);
+  assert.doesNotMatch(body, /GITHUB_TOKEN|github\.token|\bAUTHENTICODE_|\bPFX\b|\bpassword\b/iu);
+  for (const step of testsJob.steps) {
+    assert.equal(step.env, undefined, `${step.name ?? step.uses} sets no environment`);
+    if (step.uses !== undefined) assert.match(step.uses, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/u);
+  }
+  for (const run of testRuns) assert.doesNotMatch(run, /\$\{\{/u);
+});
 
 test("the job holds no secret and gives none to a pull request from a fork", () => {
   // Workflow level: read-only token, and neither this job nor any other asks
@@ -161,10 +191,10 @@ test("a notes draft from the full history lands in the artifact folder, after pr
 });
 
 test("the export tool's tests run once the domain they compare with is built", () => {
-  const build = runs.findIndex(
+  const build = testRuns.findIndex(
     (run) => run === "pnpm turbo build --filter '@markiro/standalone...'",
   );
-  const exportTests = runs.findIndex((run) => run === "pnpm test:standalone-export");
+  const exportTests = testRuns.findIndex((run) => run === "pnpm test:standalone-export");
   assert.ok(build >= 0, "the workspace build is there");
   assert.ok(exportTests > build, `the export tests come after it: ${build} < ${exportTests}`);
 });

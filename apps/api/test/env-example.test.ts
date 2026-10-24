@@ -19,10 +19,8 @@ import { loadEnv } from "../src/env";
  * repeating it. Hence this file.
  *
  * Deliberately NOT covered: `.env.production.example`. Every value there is
- * blank on purpose, supplied from the secret manager at deploy time, and
- * `deploy/yandex/test/runtime-env.test.mjs` already pins it to exactly that
- * all-blank shape via `environmentKeysFromExample`. Asserting it bootable
- * would contradict that contract, not reinforce it.
+ * blank on purpose, supplied from the secret manager at deploy time.
+ * Asserting it bootable would contradict that contract, not reinforce it.
  */
 const EXAMPLE_PATH = join(__dirname, "../../../.env.example");
 
@@ -67,6 +65,60 @@ describe(".env.example", () => {
     );
     expect(production.VALIDATION_DM_DUPLICATE_ENABLED).toBe("");
   });
+  it("ships landing lead Telegram alerts disabled and the retention bounded", () => {
+    const env = loadEnv(EXAMPLE_ENV);
+    expect(env.LEAD_TELEGRAM_ENABLED).toBe(false);
+    expect(env.LEAD_TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(env.LEAD_RETENTION_MONTHS).toBe(12);
+    const production = parseExampleEnv(
+      readFileSync(join(__dirname, "../../../.env.production.example"), "utf8"),
+    );
+    for (const key of [
+      "LEAD_TELEGRAM_ENABLED",
+      "LEAD_TELEGRAM_BOT_TOKEN",
+      "LEAD_TELEGRAM_CHAT_ID",
+      "LEAD_RETENTION_MONTHS",
+    ]) {
+      expect(production[key], key).toBe("");
+    }
+    // Those blanks reach loadEnv when the secret store leaves them unset; they
+    // must mean "Telegram off, default retention", not a boot failure.
+    const blankLeads = loadEnv({
+      ...EXAMPLE_ENV,
+      LEAD_TELEGRAM_ENABLED: production.LEAD_TELEGRAM_ENABLED,
+      LEAD_TELEGRAM_BOT_TOKEN: production.LEAD_TELEGRAM_BOT_TOKEN,
+      LEAD_TELEGRAM_CHAT_ID: production.LEAD_TELEGRAM_CHAT_ID,
+      LEAD_RETENTION_MONTHS: production.LEAD_RETENTION_MONTHS,
+    });
+    expect(blankLeads.LEAD_TELEGRAM_ENABLED).toBe(false);
+    expect(blankLeads.LEAD_TELEGRAM_CHAT_ID).toBeUndefined();
+    expect(blankLeads.LEAD_RETENTION_MONTHS).toBe(12);
+  });
+
+  it("ships standalone release storage unset and its production placeholders bootable", () => {
+    const env = loadEnv(EXAMPLE_ENV);
+    expect(env.RELEASES_S3_BUCKET).toBeUndefined();
+    expect(env.RELEASES_PUBLIC_ORIGIN).toBe("https://releases.markiro.app");
+    const production = parseExampleEnv(
+      readFileSync(join(__dirname, "../../../.env.production.example"), "utf8"),
+    );
+    const keys = [
+      "RELEASES_S3_ENDPOINT",
+      "RELEASES_S3_REGION",
+      "RELEASES_S3_BUCKET",
+      "RELEASES_S3_ACCESS_KEY_ID",
+      "RELEASES_S3_SECRET_ACCESS_KEY",
+      "RELEASES_PUBLIC_ORIGIN",
+    ];
+    for (const key of keys) expect(production[key], key).toBe("");
+    const blank = loadEnv({
+      ...EXAMPLE_ENV,
+      ...Object.fromEntries(keys.map((key) => [key, production[key]])),
+    });
+    expect(blank.RELEASES_S3_ENDPOINT).toBeUndefined();
+    expect(blank.RELEASES_PUBLIC_ORIGIN).toBe("https://releases.markiro.app");
+  });
+
   it("boots the API exactly as `cp .env.example .env` leaves it", () => {
     expect(() => loadEnv(EXAMPLE_ENV)).not.toThrow();
   });

@@ -209,12 +209,12 @@ describe.skipIf(!databaseUrl)("replacement execution forward migration", () => {
   it("commits constraint addition before the separate validation transaction", async () => {
     const added = (
       await pool.query(
-        "SELECT DISTINCT tx FROM replacement_test_ddl_trace WHERE statement LIKE '%ADD CONSTRAINT%NOT VALID%'",
+        "SELECT DISTINCT tx FROM replacement_test_ddl_trace WHERE statement LIKE '%ADD CONSTRAINT%NOT VALID%' AND (statement LIKE '%working_device_%' OR statement LIKE '%station_pairing_codes%')",
       )
     ).rows;
     const validated = (
       await pool.query(
-        "SELECT DISTINCT tx FROM replacement_test_ddl_trace WHERE statement LIKE '%VALIDATE CONSTRAINT%'",
+        "SELECT DISTINCT tx FROM replacement_test_ddl_trace WHERE statement LIKE '%VALIDATE CONSTRAINT%' AND (statement LIKE '%working_device_%' OR statement LIKE '%station_pairing_codes%')",
       )
     ).rows;
     expect(added).toHaveLength(1);

@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 
+import type { ShiftPeriod } from "../../host/api.js";
 import type {
   CounterpartyRecord,
   LabelTemplateSummary,
@@ -221,6 +222,32 @@ export function sortShifts(
     .map((shift, index) => ({ shift, index }))
     .sort((a, b) => compare(a.shift, b.shift) || a.index - b.index)
     .map(({ shift }) => shift);
+}
+
+/** How far back the host's list without a period keeps closed shifts (`RECENT_DAYS`), by production date. */
+export const RECENT_DAYS = 31;
+
+/**
+ * Whether the host listed `shift` only because it owes a close reason (plan 2b, spec §12.9): the
+ * host adds every such shift to the list whatever its period, so the request for the reason never
+ * drops out of a window. Outside `asked` (both ends included, the two periods narrowing each
+ * other), or for the list without a period produced more than `RECENT_DAYS` before the host's day
+ * `hostToday` (the host's clock is UTC: this PC's UTC day stands in, so a shift at the window's
+ * edge may be told apart a day early or late).
+ */
+export function beyondPeriod(
+  shift: OfficeShift,
+  asked: ShiftPeriod | null,
+  hostToday: string,
+): boolean {
+  if (shift.closeReasonMissing !== true) return false;
+  if (asked === null) return civilDaysBetween(shift.productionDate, hostToday) > RECENT_DAYS;
+  const within = (date: string, from: string | undefined, to: string | undefined) =>
+    (from === undefined || date >= from) && (to === undefined || date <= to);
+  return !(
+    within(shift.productionDate, asked.from, asked.to) &&
+    within(shift.plannedDate, asked.plannedFrom, asked.plannedTo)
+  );
 }
 
 /** The totals row of the list: what the shifts it keeps put in closed boxes and on closed pallets. */

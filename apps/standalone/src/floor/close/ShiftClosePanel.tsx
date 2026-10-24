@@ -7,7 +7,7 @@ import { Alert, Button } from "@markiro/ui";
 
 import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { formatQuantity } from "../shifts/shift-text.js";
-import type { CloseBlocker, CloseSummary } from "./shift-close.js";
+import type { CloseBlocker, CloseSummary, PartState } from "./shift-close.js";
 import "./shift-close.css";
 
 /**
@@ -39,7 +39,7 @@ export function deviation(plannedQty: number, actualQty: number): string {
 
 /**
  * Whether two readings of the summary say the same to the operator: the plan,
- * the fact, the closed boxes, whether a reason is needed, and what keeps the
+ * the fact, the closed boxes, whether a reason is needed (the link only through it), and what keeps the
  * shift open (the open box's codes and the open pallet's boxes included). A
  * close goes on the reading that was shown, never on another.
  */
@@ -53,12 +53,21 @@ export function sameSummary(shown: CloseSummary, read: CloseSummary): boolean {
         (a.kind !== "open_box" || (b.kind === "open_box" && a.items === b.items)) &&
         // The question names the boxes of the open pallet (plan ПЛ-Ц): other boxes, another question.
         (a.kind !== "open_pallet" || (b.kind === "open_pallet" && a.boxes === b.boxes));
+  // Plan 2b: whether the part closes the shift decides the words and the reason; the whole
+  // shift's count moves with the other devices at every read and is not compared. The link counts
+  // only through the reason it asks (`reasonRequired`, compared below): a flapping Wi-Fi that asks
+  // the same reason does not make the operator confirm again (final review m6).
+  const samePart =
+    shown.part === undefined || read.part === undefined
+      ? shown.part === read.part
+      : shown.part.closesShift === read.part.closesShift;
   return (
     shown.plannedQty === read.plannedQty &&
     shown.actualQty === read.actualQty &&
     shown.closedBoxes === read.closedBoxes &&
     shown.reasonRequired === read.reasonRequired &&
-    sameBlocker
+    sameBlocker &&
+    samePart
   );
 }
 
@@ -160,6 +169,12 @@ export interface ShiftClosePanelProps {
   clock?: () => number;
   /** A validation shift (plan РЕЖ): its codes have no box, and the summary names none. */
   boxless?: boolean;
+  /**
+   * A shift several devices may work (plan 2b): this station closes only its part, said so from
+   * the first view, before the summary is read. Once it is, the summary's `part` is the one source
+   * of every word of the part.
+   */
+  ownPart?: boolean;
 }
 
 /**
@@ -193,6 +208,7 @@ export function ShiftClosePanel({
   onClosePallet,
   clock = realClock,
   boxless = false,
+  ownPart = false,
 }: ShiftClosePanelProps) {
   const { t } = useTranslation();
   const [reason, setReason] = useState<ShiftCloseReasonCode | null>(null);
@@ -245,6 +261,10 @@ export function ShiftClosePanel({
     }
     const average = averagePerBox(summary.actualQty, summary.closedBoxes);
     const chosen = summary.reasonRequired ? reason : null;
+    // Plan 2b: a part of a shared shift is judged by the whole shift's count against the plan.
+    const part = summary.part ?? null;
+    const judged = part === null ? summary.actualQty : part.total;
+    const planned = summary.plannedQty;
     return (
       <>
         <div className="shift-close__body">
@@ -254,27 +274,29 @@ export function ShiftClosePanel({
               <dd>{productName}</dd>
             </div>
             <div>
-              <dt>{t("floor.close.plan")}</dt>
-              <dd>
-                {summary.plannedQty === null
-                  ? t("floor.close.noPlan")
-                  : formatQuantity(summary.plannedQty)}
-              </dd>
+              <dt>{t(part === null ? "floor.close.plan" : "floor.close.part.planShift")}</dt>
+              <dd>{planned === null ? t("floor.close.noPlan") : formatQuantity(planned)}</dd>
             </div>
             <div>
-              <dt>{t("floor.close.actual")}</dt>
+              <dt>{t(part === null ? "floor.close.actual" : "floor.close.part.mine")}</dt>
               <dd>{formatQuantity(summary.actualQty)}</dd>
             </div>
-            {summary.plannedQty !== null && (
+            {part !== null && (
+              <div>
+                <dt>{t("floor.close.part.total")}</dt>
+                <dd>{formatQuantity(part.total)}</dd>
+              </div>
+            )}
+            {planned !== null && (
               <div>
                 <dt>{t("floor.close.deviation")}</dt>
-                <dd>{deviation(summary.plannedQty, summary.actualQty)}</dd>
+                <dd>{deviation(planned, judged)}</dd>
               </div>
             )}
             {!boxless && (
               <>
                 <div>
-                  <dt>{t("floor.close.boxes")}</dt>
+                  <dt>{t(part === null ? "floor.close.boxes" : "floor.close.part.boxes")}</dt>
                   <dd>{formatQuantity(summary.closedBoxes)}</dd>
                 </div>
                 <div>
@@ -284,26 +306,29 @@ export function ShiftClosePanel({
               </>
             )}
           </dl>
-          {summary.plannedQty !== null && (
+          {planned !== null && (
             <p
               className="shift-close__result"
-              data-tone={
-                summary.actualQty === summary.plannedQty
-                  ? "ok"
-                  : summary.actualQty < summary.plannedQty
-                    ? "warn"
-                    : "info"
-              }
+              data-tone={judged === planned ? "ok" : judged < planned ? "warn" : "info"}
             >
-              {summary.actualQty === summary.plannedQty
+              {judged === planned
                 ? t("floor.close.result.met")
-                : summary.actualQty < summary.plannedQty
-                  ? t("floor.close.result.short", {
-                      quantity: formatQuantity(summary.plannedQty - summary.actualQty),
-                    })
-                  : t("floor.close.result.over", {
-                      quantity: formatQuantity(summary.actualQty - summary.plannedQty),
-                    })}
+                : judged < planned
+                  ? t("floor.close.result.short", { quantity: formatQuantity(planned - judged) })
+                  : t("floor.close.result.over", { quantity: formatQuantity(judged - planned) })}
+            </p>
+          )}
+          {part !== null && (
+            <p className="shift-close__part">
+              {t(
+                !part.online
+                  ? summary.reasonRequired
+                    ? "floor.close.part.offlineReason"
+                    : "floor.close.part.offline"
+                  : part.closesShift
+                    ? "floor.close.part.last"
+                    : "floor.close.part.othersOpen",
+              )}
             </p>
           )}
           {summary.reasonRequired && (
@@ -335,7 +360,9 @@ export function ShiftClosePanel({
               </div>
             </div>
           )}
-          <p className="shift-close__note">{t("floor.close.irreversible")}</p>
+          <p className="shift-close__note">
+            {t(part === null ? "floor.close.irreversible" : "floor.close.part.irreversible")}
+          </p>
           {palletAsked && (
             <Alert
               tone="warn"
@@ -345,7 +372,13 @@ export function ShiftClosePanel({
                 capacity: formatQuantity(palletCapacity),
               })}
             >
-              <p>{t("floor.close.palletIrreversible")}</p>
+              <p>
+                {t(
+                  part === null
+                    ? "floor.close.palletIrreversible"
+                    : "floor.close.part.palletIrreversible",
+                )}
+              </p>
             </Alert>
           )}
         </div>
@@ -356,20 +389,25 @@ export function ShiftClosePanel({
             disabled={summary.reasonRequired && chosen === null}
             {...press(() => (palletAsked ? onClosePallet(chosen) : onClose(chosen)))}
           >
-            {t(palletAsked ? "floor.close.confirmPallet" : "floor.close.confirm")}
+            {t(
+              palletAsked
+                ? part === null
+                  ? "floor.close.confirmPallet"
+                  : "floor.close.part.confirmPallet"
+                : part === null
+                  ? "floor.close.confirm"
+                  : "floor.close.part.confirm",
+            )}
           </Button>
         </div>
       </>
     );
   };
+  const own = summary === null ? ownPart : (summary.part ?? null) !== null;
+  const title = t(own ? "floor.close.part.title" : "floor.close.title", { number });
   return (
-    <section
-      className="shift-close"
-      aria-label={t("floor.close.title", { number })}
-      tabIndex={-1}
-      ref={viewRef}
-    >
-      <h3>{t("floor.close.title", { number })}</h3>
+    <section className="shift-close" aria-label={title} tabIndex={-1} ref={viewRef}>
+      <h3>{title}</h3>
       {note !== null && (
         <Alert
           tone={note === "failed" ? "error" : "warn"}
@@ -382,7 +420,9 @@ export function ShiftClosePanel({
           {t(
             summary?.blocker?.kind === "open_pallet"
               ? "floor.close.closingPallet"
-              : "floor.close.closing",
+              : own
+                ? "floor.close.part.closing"
+                : "floor.close.closing",
           )}
         </p>
       )}
@@ -403,6 +443,12 @@ export interface ShiftClosedPanelProps {
   clock?: () => number;
   /** A validation shift (plan РЕЖ): the numbers name its codes and no box. */
   boxless?: boolean;
+  /**
+   * What became of the close of this station's part of a shared shift (plan 2b): waiting in the
+   * outbox, waiting for the others, the shift closed (with or without the reason it needed), or
+   * refused. `null` or absent: a solo shift's close, said as before.
+   */
+  part?: PartState | "unknown" | null;
 }
 
 /**
@@ -419,14 +465,18 @@ export function ShiftClosedPanel({
   onDone,
   clock = realClock,
   boxless = false,
+  part = null,
 }: ShiftClosedPanelProps) {
   const { t } = useTranslation();
   const { viewRef, settled } = useViewGuard<HTMLDivElement>("closed", clock);
-  const title = t("floor.close.done.title", { number });
+  const title =
+    part === null
+      ? t("floor.close.done.title", { number })
+      : t("floor.close.part.done.title", { number });
   return (
     <div role="group" aria-label={title} tabIndex={-1} ref={viewRef} className="shift-close">
       <Alert tone="ok" role="presentation" className="shift-close__done" title={title}>
-        <p>{t("floor.close.done.body")}</p>
+        <p>{part === null ? t("floor.close.done.body") : t(`floor.close.part.done.${part}`)}</p>
         <p>
           {boxless
             ? t("floor.validation.closedNumbers", { quantity: formatQuantity(record.actualQty) })

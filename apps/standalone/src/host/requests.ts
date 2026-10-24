@@ -23,6 +23,7 @@ import type {
   ProductCreate,
   ProductUpdate,
   ShiftClose,
+  ShiftCloseReasonSet,
   ShiftCreate,
   ShiftEnter,
   ShiftExportRecord,
@@ -123,24 +124,35 @@ export function lineCreate(name: string): LineCreate {
 
 /**
  * What a line is to become; `lineUpdate` sends what differs from the loaded
- * line. `name` is the trimmed value `lineNameRule` accepted.
+ * line. `name` is the trimmed value `lineNameRule` accepted. `maxStations` is
+ * the line's limit of devices in one shift (plan 2b), the number
+ * `maxStationsRule` accepted; left out, the limit is not touched.
  */
 export interface LineChange {
   name: string;
   archived: boolean;
+  maxStations?: number;
+}
+
+/** A line's limit of devices in one shift; a host before protocol 7 sends none, which is one. */
+export function lineMaxStations(line: Pick<OfficeLine, "name" | "maxStations">): number {
+  return line.maxStations ?? 1;
 }
 
 /**
- * `PUT /v1/office/lines/{id}` (`line-update.json`): only the fields that
- * change, with the loaded revision.
+ * `PUT /v1/office/lines/{id}` (`line-update.json`, `line-update-max-stations.json`):
+ * only the fields that change, with the loaded revision.
  */
 export function lineUpdate(
-  line: Pick<OfficeLine, "name" | "archived" | "rev">,
+  line: Pick<OfficeLine, "name" | "archived" | "rev" | "maxStations">,
   next: LineChange,
 ): LineUpdate {
   const update: LineUpdate = { expectedRev: line.rev };
   if (next.name !== line.name) update.name = next.name;
   if (next.archived !== line.archived) update.archived = next.archived;
+  if (next.maxStations !== undefined && next.maxStations !== lineMaxStations(line)) {
+    update.maxStations = next.maxStations;
+  }
   return update;
 }
 
@@ -596,6 +608,14 @@ export function shiftClose(reason: string, expectedRev: number): ShiftClose {
 }
 
 /**
+ * `PUT /v1/office/shifts/{id}/close-reason` (`shift-close-reason-set.json`, plan 2b): one of the
+ * six reason codes for a shared shift its devices closed without one, over the loaded revision.
+ */
+export function shiftCloseReasonSet(reasonCode: string, expectedRev: number): ShiftCloseReasonSet {
+  return { reasonCode, expectedRev };
+}
+
+/**
  * What an export wrote (plan ЧЗ): its format, its line limit, its pallet
  * (`null` for a shift's export), the base `document_id` of its files, each
  * part's counts and the boxes written on no pallet because their pallet had
@@ -634,12 +654,16 @@ export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
 }
 
 /**
- * The body of every shift entry this station sends (`shift-enter.json`, plan
- * РЕЖ): it works validation shifts, and prints their Data Matrix duplicate
- * (part B, task B6), so the host lets it enter both.
+ * The body of every shift entry this station sends (`shift-enter-multi.json`, plan 2b): it works
+ * validation shifts and prints their Data Matrix duplicate (plan РЕЖ, part B), and it joins a shift
+ * another device works while the line has a free slot (`multi-station-v1`, protocol 7).
  */
 export const STATION_SHIFT_ENTER: ShiftEnter = {
-  supports: [SHIFT_SUPPORTS.validation, SHIFT_SUPPORTS.validationDmDuplicate],
+  supports: [
+    SHIFT_SUPPORTS.validation,
+    SHIFT_SUPPORTS.validationDmDuplicate,
+    SHIFT_SUPPORTS.multiStation,
+  ],
 };
 
 /** What a station's new shift carries: the operator's choices and the request's id. */

@@ -105,6 +105,7 @@ import {
   type OfficePalletPage,
   type PalletListQuery,
 } from "./pack-cards.js";
+import { yandexBackupStatusSchema, type YandexBackupStatus } from "./yandex-backups.js";
 import {
   badgeInfoSchema,
   badgeSaltSchema,
@@ -128,6 +129,8 @@ import {
   officeOperatorSchema,
   officePalletSchema,
   officeProductSchema,
+  demoDataSummarySchema,
+  type DemoDataSummary,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
@@ -215,8 +218,10 @@ import {
   type ProductGroup,
   type ProductUpdate,
   type ShiftClose,
+  type ShiftCloseReasonSet,
   type ShiftCreate,
   type ShiftEnter,
+  type ShiftLeave,
   type ShiftExportRecord,
   type ShiftExportRows,
   type BoxReportRows,
@@ -397,6 +402,13 @@ export interface HostApi {
   listProductGroups: (token: string) => Promise<ProductGroup[]>;
   /** Every product, archived ones included. */
   listProducts: (token: string) => Promise<OfficeProduct[]>;
+  /** Whether the wizard's demo data is there and what its shifts made (spec 2026-10-21). */
+  getDemoData: (token: string) => Promise<DemoDataSummary>;
+  /**
+   * «Удалить демо-данные» (administrators): what was removed, `present: false` when nothing was
+   * there; `conflict` on `demo_shift_active` while a demo shift is open.
+   */
+  deleteDemoData: (token: string) => Promise<DemoDataSummary>;
   createProduct: (token: string, create: ProductCreate) => Promise<OfficeProduct>;
   updateProduct: (token: string, id: string, update: ProductUpdate) => Promise<OfficeProduct>;
   /** Every template, without its layout. */
@@ -447,6 +459,15 @@ export interface HostApi {
   /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
   deleteShift: (token: string, id: string) => Promise<void>;
   closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
+  /**
+   * `PUT …/close-reason` (plan 2b): the reason of a shared shift its devices closed without one;
+   * `conflict` on `close_reason_not_missing` once it is set. Administrators and technologists.
+   */
+  setShiftCloseReason: (
+    token: string,
+    id: string,
+    set: ShiftCloseReasonSet,
+  ) => Promise<OfficeShift>;
   /**
    * What the shift's exports are built from, in one snapshot of the host
    * (plan ЧЗ); every office role. A planned shift answers with empty lists.
@@ -644,6 +665,15 @@ export interface HostApi {
    */
   enterShift: (id: string, enter: ShiftEnter) => Promise<EnteredShift>;
   /**
+   * Pauses this station's part of a shift it works (plan 2b, protocol 7): the host frees its slot
+   * of the line (`left`) and answers the shift as this station sees it, without the snapshot.
+   * `leave` is this station's own `joinedRev` (`ShiftLeave`, `shift-leave.json`) from its last
+   * entry answer; a token that is no longer the host's (a later entry stamped a new one) changes
+   * nothing and the answer's `myState` stays `active`. `null` sends no body (no token known).
+   * Repeating it changes nothing; `conflict` `shift_not_entered` for a shift it never entered.
+   */
+  leaveShift: (id: string, leave: ShiftLeave | null) => Promise<DeviceShift>;
+  /**
    * A block of SSCC serials for this station; the same `requestId` answers the
    * same block, and the same id with another prefix is `validation_failed` on
    * `requestId`. Stations only.
@@ -690,6 +720,9 @@ export interface HostApi {
   registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   /** The copies in both folders (plan РК); every office role reads them. */
   getBackups: (token: string) => Promise<BackupState>;
+  getYandexBackups: (token: string) => Promise<YandexBackupStatus>;
+  retryYandexBackup: (token: string, generation: string) => Promise<YandexBackupStatus>;
+  disconnectYandex: (token: string, generation: string) => Promise<YandexBackupStatus>;
   /**
    * The counts by month for the support bundle (beta 3 feedback); administrators
    * only, `forbidden` for another role.
@@ -1011,6 +1044,16 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: z.array(officeProductSchema),
       }),
+    getDemoData: (token) =>
+      client.request("GET", "/v1/office/demo-data", {
+        officeToken: token,
+        schema: demoDataSummarySchema,
+      }),
+    deleteDemoData: (token) =>
+      client.request("DELETE", "/v1/office/demo-data", {
+        officeToken: token,
+        schema: demoDataSummarySchema,
+      }),
     createProduct: (token, create) =>
       client.request("POST", "/v1/office/products", {
         body: create,
@@ -1181,6 +1224,13 @@ export function createHostApi(client: HostClient): HostApi {
         body: enter,
         schema: enteredShiftSchema,
       }),
+    leaveShift: (id, leave) =>
+      leave === null
+        ? client.request("POST", `/v1/device/shifts/${id}/leave`, { schema: deviceShiftSchema })
+        : client.request("POST", `/v1/device/shifts/${id}/leave`, {
+            body: leave,
+            schema: deviceShiftSchema,
+          }),
     requestSsccBlock: (request) =>
       client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
     checkCode: (codeHash) =>
@@ -1227,6 +1277,12 @@ export function createHostApi(client: HostClient): HostApi {
     closeShift: (token, id, close) =>
       client.request("POST", `/v1/office/shifts/${id}/close`, {
         body: close,
+        officeToken: token,
+        schema: officeShiftSchema,
+      }),
+    setShiftCloseReason: (token, id, set) =>
+      client.request("PUT", `/v1/office/shifts/${id}/close-reason`, {
+        body: set,
         officeToken: token,
         schema: officeShiftSchema,
       }),
@@ -1474,6 +1530,23 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", "/v1/office/backups", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getYandexBackups: (token) =>
+      client.request("GET", "/v1/office/backups/yandex", {
+        officeToken: token,
+        schema: yandexBackupStatusSchema,
+      }),
+    retryYandexBackup: (token, generation) =>
+      client.request("POST", "/v1/office/backups/yandex/retry", {
+        officeToken: token,
+        body: { expectedGeneration: generation },
+        schema: yandexBackupStatusSchema,
+      }),
+    disconnectYandex: (token, generation) =>
+      client.request("DELETE", "/v1/office/backups/yandex/connection", {
+        officeToken: token,
+        body: { expectedGeneration: generation },
+        schema: yandexBackupStatusSchema,
       }),
     getUsageStats: (token) =>
       client.request("GET", "/v1/office/usage-stats", {

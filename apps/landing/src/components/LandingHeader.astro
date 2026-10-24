@@ -2,24 +2,28 @@
 import type { PublicPhone } from "../lib/site-config";
 import { getUiCopy } from "../content/ui";
 import type { PageMetadata } from "../lib/seo";
-import { hubPath } from "../content/hubs";
+import { DOWNLOAD_PATH, SITE_NAV } from "../content/autonom";
+import { SITE_NAV_EN } from "../content/autonom-en";
 import BrandMark from "./BrandMark.astro";
 
 interface Props {
   page: Pick<PageMetadata, "locale" | "path" | "alternatePath">;
   phone: PublicPhone | null;
-  /** Overrides the demo button's target for a page with its own #demo section, such as the film. */
-  demoHref?: string;
 }
 
-const { page, phone, demoHref } = Astro.props;
+const { page, phone } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
 const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
 const enPath = page.locale === "en" ? page.path : (page.alternatePath ?? "/en/");
-const paths = page.locale === "ru"
-  ? { faq: "/faq/", film: "/kak-rabotaet/" }
-  : { faq: "/en/faq/", film: "/en/how-it-works/" };
+// Both languages share the standalone navigation of their home page.
+const links = (page.locale === "ru" ? SITE_NAV : SITE_NAV_EN).map(
+  (item) => [item.href, item.label] as const,
+);
+// The download page is Russian only; an English link to it says so with hreflang.
+const cta = page.locale === "ru"
+  ? { label: "Скачать пробную версию", hreflang: undefined }
+  : { label: "Download the trial", hreflang: "ru" };
 ---
 
 <header class="landing-header" data-header>
@@ -28,11 +32,7 @@ const paths = page.locale === "ru"
   </a>
 
   <nav class="landing-nav" id="landing-navigation" aria-label={copy.navigationLabel} data-menu>
-    <a href={`${homePath}#product`}>{copy.nav.product}</a>
-    <a href={paths.film}>{copy.nav.howItWorks}</a>
-    <a href={hubPath(page.locale, "instructions")}>{copy.nav.instructions}</a>
-    <a href={hubPath(page.locale, "articles")}>{copy.nav.articles}</a>
-    <a href={paths.faq}>{copy.nav.faq}</a>
+    {links.map(([href, label]) => <a href={href}>{label}</a>)}
     {phone && (
       <a
         class="landing-nav__phone"
@@ -50,8 +50,8 @@ const paths = page.locale === "ru"
     </span>
   </nav>
 
-  <a class="button button--compact landing-header__cta" href={demoHref ?? `${homePath}#demo`} data-analytics="landing_demo_click" data-placement="header">
-    {copy.requestDemoShort}
+  <a class="button button--compact landing-header__cta" href={DOWNLOAD_PATH} hreflang={cta.hreflang} data-analytics="landing_download_click" data-placement="header">
+    {cta.label}
   </a>
   <button
     class="menu-trigger"

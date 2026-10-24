@@ -37,22 +37,22 @@ test("replacement migrations ship in journal order and API image before readers"
 });
 
 test("every replacement runtime has a release artifact and owned CI gate", async () => {
-  const edge = await read("deploy/production/edge.Dockerfile");
-  for (const app of ["admin", "saas-admin"]) {
-    assert.ok(edge.includes(`/workspace/apps/${app}/dist /srv/${app}`));
-    assert.equal(
-      classifyChangedFiles([`apps/${app}/src/replacement.ts`]).jobs.production_bundle,
-      true,
-    );
-  }
-  assert.match(
-    await read(".github/workflows/release-images.yml"),
-    /deploy\/production\/api\.Dockerfile/,
+  const edge = await read("deploy/platform/edge.Dockerfile");
+  assert.ok(edge.includes("/workspace/apps/saas-admin/dist /srv/saas-admin"));
+  // The platform edge serves the SaaS admin; the cabinet is no longer served
+  // online (2026-10-21) and keeps its suites in the optional galleries.
+  assert.equal(
+    classifyChangedFiles(["apps/saas-admin/src/replacement.ts"]).jobs.production_bundle,
+    true,
   );
-  assert.match(
-    await read(".github/workflows/release-images.yml"),
-    /deploy\/production\/edge\.Dockerfile/,
+  assert.equal(
+    classifyChangedFiles(["apps/admin/src/replacement.ts"]).jobs.cabinet_station_galleries,
+    true,
   );
+  // The platform release builds the API image and the platform edge.
+  const platformRelease = await read(".github/workflows/release-platform-images.yml");
+  assert.match(platformRelease, /deploy\/production\/api\.Dockerfile/);
+  assert.match(platformRelease, /deploy\/platform\/edge\.Dockerfile/);
   assert.match(await read(".github/workflows/station-beta-release.yml"), /apps\/station/);
   assert.match(await read(".github/workflows/station-stable-release.yml"), /source_beta_tag/);
   assert.match(await read(".github/workflows/handheld-release.yml"), /assembleRelease/);
@@ -72,7 +72,7 @@ test("every replacement runtime has a release artifact and owned CI gate", async
     ],
     [
       "tools/production-browser/device-replacement-tests/replacement.spec.ts",
-      ["production_bundle"],
+      ["cabinet_station_galleries"],
     ],
   ]) {
     const result = classifyChangedFiles([path]);

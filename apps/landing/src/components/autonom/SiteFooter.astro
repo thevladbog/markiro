@@ -1,0 +1,75 @@
+---
+import { PRICING_PATH } from "../../content/autonom";
+import { operatorRequisites, SITE_CONTACTS } from "../../content/contacts";
+import BrandMark from "../BrandMark.astro";
+
+interface Props {
+  /** «short» is the single line of /skachat/: requisites and the address only. */
+  variant?: "full" | "short";
+  locale?: "ru" | "en";
+}
+
+const { variant = "full", locale = "ru" } = Astro.props;
+const COPY = {
+  ru: {
+    home: "/",
+    homeLabel: "Маркиро, на главную страницу",
+    footerLabel: "Подвал",
+    brand: "Маркиро",
+    cookies: "Настройки cookies",
+    links: [
+      ["/markirovka-chestny-znak/", "Маркировка"],
+      [PRICING_PATH, "Цены"],
+      ["/instruktsii/", "Инструкции"],
+      ["/stati/", "Статьи"],
+      ["/legal/", "Документы"],
+      ["/privacy/", "Политика обработки данных"],
+    ],
+  },
+  en: {
+    home: "/en/",
+    homeLabel: "Markiro home page",
+    footerLabel: "Footer",
+    brand: "Markiro",
+    cookies: "Cookie settings",
+    links: [
+      ["/en/chestny-znak-serialization/", "Serialization"],
+      ["/en/sscc-and-aggregation/", "SSCC and aggregation"],
+      ["/en/instructions/", "Instructions"],
+      ["/en/articles/", "Articles"],
+      ["/en/faq/", "Questions"],
+      ["/en/legal/", "Legal documents"],
+      ["/en/privacy/", "Processing policy"],
+    ],
+  },
+} as const;
+const copy = COPY[locale];
+---
+
+<footer class:list={["ax-footer", `ax-footer--${variant}`]} data-theme="dark">
+  <div class="ax-container ax-footer__inner">
+    {variant === "full" && (
+      <div class="ax-footer__top">
+        <a href={copy.home} aria-label={copy.homeLabel}><BrandMark locale={locale} /></a>
+        <nav class="ax-footer__nav" aria-label={copy.footerLabel}>
+          {copy.links.map(([href, label]) => <a href={href}>{label}</a>)}
+        </nav>
+      </div>
+    )}
+    <div class="ax-footer__bottom">
+      <p class="ax-footer__requisites">© 2026 {copy.brand} · {operatorRequisites(locale)}</p>
+      <div class="ax-footer__extra">
+        <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
+        {locale === "ru" ? (
+          <a href="/en/" hreflang="en" lang="en">English</a>
+        ) : (
+          <span class="ax-footer__languages">
+            <a href="/" hreflang="ru" lang="ru">RU</a>
+            <a href="/en/" hreflang="en" lang="en" aria-current="page">EN</a>
+          </span>
+        )}
+        <button type="button" data-consent-settings>{copy.cookies}</button>
+      </div>
+    </div>
+  </div>
+</footer>

@@ -49,7 +49,8 @@
 - **Сборка.** Артефакт CI `standalone-installer-<коммит>` для коммита `917f92ab4` (установщик
   `markiro-standalone-<версия>-windows-x86_64-setup.exe`, `release-evidence.json`, `SHA256SUMS`).
   Его даёт разработка: задание `standalone-windows-build` должно быть зелёным, включая шаг
-  «Install, crash, reinstall and uninstall on this runner» (памятка беты, раздел 3, шаг 1).
+  «Install, crash, reinstall and uninstall on this runner», и задание `standalone-windows-tests` тоже
+  (памятка беты, раздел 3, шаг 1).
 - **Организация.** Название, ИНН из 10 или 12 цифр **с верной контрольной цифрой** (мастер без него не
   пустит; он нужен и для документа Честного знака), GLN из 13 цифр с верной контрольной цифрой.
   Площадка пробная: её выгрузки в Честный знак не загружать.

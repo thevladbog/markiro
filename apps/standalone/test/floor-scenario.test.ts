@@ -251,9 +251,12 @@ async function runScenario() {
     }),
   ).toMatchObject({ kind: "done" });
   expect(
-    await closeShift(context, "production_order_changed", [
-      openPalletGuard(PAIRING, shift.copy.id),
-    ]),
+    await closeShift(
+      context,
+      "production_order_changed",
+      [openPalletGuard(PAIRING, shift.copy.id)],
+      false,
+    ),
   ).toMatchObject({ kind: "closed" });
 
   host.answerNext("unreachable");

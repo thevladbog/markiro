@@ -3,6 +3,7 @@ import { formatLegalEffectiveDate } from "@markiro/legal-documents";
 
 import type { PublicPhone } from "../lib/site-config";
 import type { SeoPageDefinition } from "../content/pages";
+import { DOWNLOAD_PATH, PRICING_PATH } from "../content/autonom";
 import { getUiCopy } from "../content/ui";
 import { buildPageGraph } from "../lib/seo";
 import BaseLayout from "../layouts/BaseLayout.astro";
@@ -19,7 +20,8 @@ interface Props {
 const { page, phone } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
-const stationDownloadUrl = "https://releases.markiro.app/station/download";
+// /skachat/ and /stoimost/ are Russian only; English links to them say so with hreflang.
+const ruOnly = page.locale === "en" ? "ru" : undefined;
 ---
 
 <BaseLayout metadata={page} graph={buildPageGraph(page)}>
@@ -31,9 +33,15 @@ const stationDownloadUrl = "https://releases.markiro.app/station/download";
         <p class="section-index">{page.eyebrow}</p>
         <h1>{page.heading}</h1>
         <p class="seo-hero__lead">{page.introduction}</p>
-        <a class="button" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="seo-hero">
-          {copy.discussTask} <span aria-hidden="true">→</span>
-        </a>
+        <div class="seo-hero__actions">
+          <a class="button" href={DOWNLOAD_PATH} hreflang={ruOnly} data-analytics="landing_download_click" data-placement="seo-hero">
+            {copy.download} <span aria-hidden="true">→</span>
+          </a>
+          <a class="text-link" href={PRICING_PATH} hreflang={ruOnly} data-analytics="landing_pricing_click" data-placement="seo-hero">
+            {copy.pricing} <span aria-hidden="true">→</span>
+          </a>
+        </div>
+        {copy.ruPagesNote.length > 0 && <p class="seo-hero__note">{copy.ruPagesNote}</p>}
         <p class="seo-hero__reviewed">
           {copy.reviewedLabel}: <time datetime={page.reviewedAt} data-reviewed-at>{formatLegalEffectiveDate(page.reviewedAt, page.locale)}</time>
         </p>
@@ -72,38 +80,20 @@ const stationDownloadUrl = "https://releases.markiro.app/station/download";
         </div>
       )}
 
-      {page.stationDownload && (
-        <section class="seo-download" data-station-download aria-labelledby="station-download-title">
-          <p class="section-index">{page.stationDownload.eyebrow}</p>
-          <div class="seo-download__content">
-            <h2 id="station-download-title">{page.stationDownload.title}</h2>
-            <p>{page.stationDownload.description}</p>
-            <div class="seo-download__actions">
-              <a
-                class="button"
-                href={stationDownloadUrl}
-                data-analytics="station_download_click"
-                data-placement="workstation-page"
-              >
-                {page.stationDownload.actionLabel} <span aria-hidden="true">↓</span>
-              </a>
-              <span>{page.stationDownload.meta}</span>
-            </div>
-          </div>
-        </section>
-      )}
-
       <RelatedPages page={page} />
     </article>
 
     <section class="seo-cta" aria-labelledby="seo-cta-title">
       <div class="container seo-cta__inner">
         <div>
-          <p class="section-index">{copy.seoCtaKicker}</p>
-          <h2 id="seo-cta-title">{copy.seoCtaHeading}</h2>
+          <p class="section-index">{copy.trialKicker}</p>
+          <h2 id="seo-cta-title">{copy.trialHeading}</h2>
+          {copy.ruPagesNote.length > 0 && <p class="seo-cta__note">{copy.ruPagesNote}</p>}
         </div>
         <div class="seo-cta__actions">
-          <a class="button" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="seo-cta">{copy.requestDemo} <span aria-hidden="true">→</span></a>
+          <a class="button" href={DOWNLOAD_PATH} hreflang={ruOnly} data-analytics="landing_download_click" data-placement="seo-cta">{copy.download} <span aria-hidden="true">→</span></a>
+          <a class="text-link" href={PRICING_PATH} hreflang={ruOnly} data-analytics="landing_pricing_click" data-placement="seo-cta">{copy.pricing} <span aria-hidden="true">→</span></a>
+          <a class="text-link" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="seo-cta">{copy.callLink} <span aria-hidden="true">→</span></a>
           {phone && (
             <a class="seo-cta__phone" href={phone.href} data-analytics="landing_phone_click" data-placement="seo-cta">{phone.display}</a>
           )}

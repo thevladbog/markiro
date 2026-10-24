@@ -36,6 +36,24 @@ function unexpected(name: keyof HostApi): Promise<never> {
  */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
   return {
+    getYandexBackups: vi.fn<HostApi["getYandexBackups"]>(async () => ({
+      connectionGeneration: null,
+      state: "disconnected",
+      clientId: null,
+      accountId: null,
+      accountLabel: null,
+      deliveryState: "idle",
+      pendingSince: null,
+      lastAttemptAt: null,
+      lastConfirmedSnapshotId: null,
+      lastConfirmedAt: null,
+      lastConfirmedCopyCreatedAt: null,
+      errorCode: null,
+      progressBytes: 0,
+      nextAttemptAt: null,
+    })),
+    retryYandexBackup: vi.fn<HostApi["retryYandexBackup"]>(() => unexpected("retryYandexBackup")),
+    disconnectYandex: vi.fn<HostApi["disconnectYandex"]>(() => unexpected("disconnectYandex")),
     bootstrap: vi.fn<HostApi["bootstrap"]>(() => unexpected("bootstrap")),
     officeLogin: vi.fn<HostApi["officeLogin"]>(() => unexpected("officeLogin")),
     officeLogout: vi.fn<HostApi["officeLogout"]>(async () => undefined),
@@ -106,6 +124,8 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getBadgeSalt: vi.fn<HostApi["getBadgeSalt"]>(() => unexpected("getBadgeSalt")),
     listProductGroups: vi.fn<HostApi["listProductGroups"]>(() => unexpected("listProductGroups")),
     listProducts: vi.fn<HostApi["listProducts"]>(() => unexpected("listProducts")),
+    getDemoData: vi.fn<HostApi["getDemoData"]>(() => unexpected("getDemoData")),
+    deleteDemoData: vi.fn<HostApi["deleteDemoData"]>(() => unexpected("deleteDemoData")),
     createProduct: vi.fn<HostApi["createProduct"]>(() => unexpected("createProduct")),
     updateProduct: vi.fn<HostApi["updateProduct"]>(() => unexpected("updateProduct")),
     listTemplates: vi.fn<HostApi["listTemplates"]>(() => unexpected("listTemplates")),
@@ -160,6 +180,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateShift: vi.fn<HostApi["updateShift"]>(() => unexpected("updateShift")),
     deleteShift: vi.fn<HostApi["deleteShift"]>(() => unexpected("deleteShift")),
     closeShift: vi.fn<HostApi["closeShift"]>(() => unexpected("closeShift")),
+    setShiftCloseReason: vi.fn<HostApi["setShiftCloseReason"]>(() =>
+      unexpected("setShiftCloseReason"),
+    ),
     getShiftExportSource: vi.fn<HostApi["getShiftExportSource"]>(() =>
       unexpected("getShiftExportSource"),
     ),
@@ -173,6 +196,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getDevice: vi.fn<HostApi["getDevice"]>(async () => DEVICE_INFO),
     createDeviceShift: vi.fn<HostApi["createDeviceShift"]>(() => unexpected("createDeviceShift")),
     enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
+    leaveShift: vi.fn<HostApi["leaveShift"]>(() => unexpected("leaveShift")),
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
     getDeviceProductPhoto: vi.fn<HostApi["getDeviceProductPhoto"]>(async () => ({ photo: null })),

@@ -1,0 +1,20 @@
+{
+  "id": "0d5e3c1a-7b2f-4c8d-9e0a-1b2c3d4e5f60",
+  "gtin14": "02900000000018",
+  "name": "Демо: вода питьевая 0,5 л",
+  "printName": "Демо: вода питьевая 0,5 л",
+  "chzProductGroupCode": 13,
+  "boxCapacity": 5,
+  "palletBoxCapacity": 2,
+  "shelfLifeDays": 365,
+  "defaultBoxTemplateId": null,
+  "defaultPalletTemplateId": null,
+  "defaultPalletSheetId": null,
+  "egaisCode": null,
+  "defaultCounterpartyId": null,
+  "photoChecksum": null,
+  "demo": true,
+  "archived": false,
+  "status": "active",
+  "rev": 3
+}

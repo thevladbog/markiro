@@ -25,27 +25,32 @@ test("the next version comes from the channel, not from a person", async () => {
   const next = await resolveRelease({
     channel: "stable",
     bump: "minor",
-    fetchImpl: serving(published("0.4.7", 12)),
+    fetchImpl: serving(published("1.6.1", 15)),
   });
-  assert.deepEqual(next, { versionName: "0.5.0", versionCode: 13, first: false });
+  assert.deepEqual(next, { versionName: "1.7.0", versionCode: 16 });
 });
 
-test("an empty channel publishes the baseline", async () => {
+test("an empty channel needs the confirmation and continues after the recorded build", async () => {
+  await assert.rejects(
+    () => resolveRelease({ channel: "stable", bump: "patch", fetchImpl: empty }),
+    /serves no latest\.json/,
+  );
   const next = await resolveRelease({
     channel: "stable",
-    bump: "patch",
+    bump: "minor",
     fetchImpl: empty,
+    emptyChannelConfirmation: "1.6.1 (15)",
   });
-  assert.deepEqual(next, { versionName: "0.1.0", versionCode: 1, first: true });
+  assert.deepEqual(next, { versionName: "1.7.0", versionCode: 16 });
 });
 
 test("publishing resolves a new version without a matching changelog entry", async () => {
   const next = await resolveRelease({
     channel: "stable",
     bump: "patch",
-    fetchImpl: serving(published("0.4.7", 12)),
+    fetchImpl: serving(published("1.6.1", 15)),
   });
-  assert.deepEqual(next, { versionName: "0.4.8", versionCode: 13, first: false });
+  assert.deepEqual(next, { versionName: "1.6.2", versionCode: 16 });
 });
 
 test("a channel pointer that answers neither 200 nor 404 stops the release", async () => {

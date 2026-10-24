@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { commercialLineTermsSchema } from "@markiro/platform-contracts";
+import { commercialLineTermsV4Schema } from "@markiro/platform-contracts";
 import type { InvoiceApplicationResultSource as InvoiceApplicationResult } from "@markiro/platform-contracts";
 import { lockInvoiceCommercialOrigin, validateInvoiceSaleOrigin } from "./commercial-sale-origin";
 import { DB } from "../../auth/auth.module";
@@ -472,7 +472,7 @@ function resolveActivationPolicy(
     }
     return undefined;
   }
-  const terms = commercialLineTermsSchema.safeParse(line.commercialTerms);
+  const terms = commercialLineTermsV4Schema.safeParse(line.commercialTerms);
   if (
     terms.success &&
     selection.activationPolicy &&

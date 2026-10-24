@@ -1,17 +1,21 @@
-//! Shifts at a station (stage 2a spec §4.2, §4.7), with the device key, for
-//! stations only: `GET /v1/device/shifts`, `POST /v1/device/shifts` and
-//! `POST /v1/device/shifts/{id}/enter`. A
+//! Shifts at a station or a handheld (stage 2a spec §4.2, §4.7), with the device key:
+//! `GET /v1/device/shifts`, `POST /v1/device/shifts`,
+//! `POST /v1/device/shifts/{id}/enter` and `POST /v1/device/shifts/{id}/leave`. A
 //! station reads its shifts at the moments it reads its device record
 //! (after it subscribes to the link and after every revision event), since a
 //! shift is no feed record: shifts are per line, and an open one carries up
 //! to two layouts (a box's and, with pallets, a pallet's), its snapshot at
-//! most 320 KB.
+//! most 320 KB. Since plan 2b an open or closed shift also carries its line's limit, its
+//! participants and the asking device's state; an active shift in the list also carries the whole
+//! shift's totals as of the read and each device's part (a closed one in the list carries neither;
+//! the answer of an entry or a leave carries them for any status). A scan takes no revision, so a
+//! device reads this list again to refresh its totals.
 
 use axum::extract::State;
 use axum::Json;
 use markiro_proto::{
     shift_supports, DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftEnter,
-    ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus, ValidationPrint,
+    ShiftLeave, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus, ValidationPrint,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -23,6 +27,8 @@ use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::routes::devices::require_active_line;
 use crate::server::AppState;
+use crate::shift_participants::{self, EntryDecision};
+use crate::shift_totals;
 use crate::shifts::{self, NewShift};
 use crate::validate;
 
@@ -38,8 +44,9 @@ const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_f
      s.planned_qty, s.box_capacity, s.box_template_id, \
      s.pallet_box_capacity, s.pallet_template_id, s.validation_print_mode, \
      s.validation_print_verification, s.validation_print_template_id, s.owner_device_id, \
-     s.opened_at, s.closed_at \
+     s.opened_at, s.closed_at, l.max_stations \
      FROM shifts s JOIN products p ON p.id = s.product_id \
+     JOIN lines l ON l.id = s.line_id \
      LEFT JOIN counterparties c ON c.id = s.counterparty_id";
 
 #[derive(sqlx::FromRow)]
@@ -69,14 +76,17 @@ struct ShiftRow {
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
+    /// The line's limit of devices in one shift (plan 2b).
+    max_stations: u32,
 }
 
 fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
     let created_from = row.created_from.parse().map_err(ApiError::internal)?;
+    let status: ShiftStatus = row.status.parse().map_err(ApiError::internal)?;
     Ok(DeviceShift {
         number: shifts::format_number(&row.number_month_key, row.number_seq, created_from),
         id: row.id,
-        status: row.status.parse().map_err(ApiError::internal)?,
+        status,
         mode: row.mode.parse().map_err(ApiError::internal)?,
         pallets_enabled: row.pallets_enabled,
         created_from,
@@ -102,6 +112,13 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         opened_at: row.opened_at,
         closed_at: row.closed_at,
         snapshot: None,
+        // Plan 2b: an open or closed shift names its line's limit; `with_participation` adds the
+        // rest.
+        max_stations: (status != ShiftStatus::Planned).then_some(row.max_stations),
+        participants: None,
+        my_state: None,
+        totals: None,
+        by_device: None,
     })
 }
 
@@ -112,6 +129,47 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<DeviceShif
         .await
         .map_err(ApiError::internal)?;
     row.map(record).transpose()
+}
+
+/// An open or closed shift as `device_id` sees it (plan 2b): its participants, the device's own
+/// state and, when `with_totals`, the whole shift's totals as of `as_of` and each device's part.
+/// A planned shift has none. The list asks for totals of an active shift only: every closed shift
+/// of the last 30 days would cost a query over its boxes and pallets on every poll of every
+/// device; the answer of one shift (entry, leave) asks for them whatever its status.
+async fn with_participation(
+    conn: &mut SqliteConnection,
+    mut shift: DeviceShift,
+    device_id: &str,
+    as_of: &str,
+    with_totals: bool,
+) -> Result<DeviceShift, ApiError> {
+    if shift.status == ShiftStatus::Planned {
+        return Ok(shift);
+    }
+    let participants = shift_participants::list(&mut *conn, &shift.id).await?;
+    shift.my_state = participants
+        .iter()
+        .find(|participant| participant.device_id == device_id)
+        .map(|participant| participant.state);
+    if with_totals {
+        shift.totals = Some(shift_totals::totals(&mut *conn, &shift.id, as_of).await?);
+        shift.by_device = Some(shift_totals::by_device(&mut *conn, &shift.id).await?);
+    }
+    shift.participants = Some(participants);
+    Ok(shift)
+}
+
+/// [`read`] of a shift that must exist, as `device_id` sees it.
+async fn read_for(
+    conn: &mut SqliteConnection,
+    id: &str,
+    device_id: &str,
+    as_of: &str,
+) -> Result<DeviceShift, ApiError> {
+    let shift = read(&mut *conn, id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    with_participation(conn, shift, device_id, as_of, true).await
 }
 
 const STATION_ONLY: &str = "only a station works on shifts";
@@ -160,10 +218,15 @@ pub async fn list_device_shifts(
     .fetch_all(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let as_of = state.timestamp();
+    let mut shifts = Vec::with_capacity(rows.len());
+    for row in rows {
+        let shift = record(row)?;
+        let with_totals = shift.status == ShiftStatus::Active;
+        shifts.push(with_participation(&mut tx, shift, &device.id, &as_of, with_totals).await?);
+    }
     tx.rollback().await.map_err(ApiError::internal)?;
-    Ok(Json(DeviceShifts {
-        shifts: rows.into_iter().map(record).collect::<Result<_, _>>()?,
-    }))
+    Ok(Json(DeviceShifts { shifts }))
 }
 
 /// `conflict` on `shift_line`: the shift is not on the station's line, or
@@ -368,13 +431,12 @@ fn require_supports(
     }
 }
 
-/// A shift as an entry reads it.
+/// A shift as an entry reads it, with its line's limit (plan 2b).
 #[derive(sqlx::FromRow)]
 struct EntryRow {
     status: String,
     mode: String,
     line_id: String,
-    owner_device_id: Option<String>,
     product_id: String,
     box_template_id: String,
     pallet_template_id: Option<String>,
@@ -387,28 +449,28 @@ struct EntryRow {
     number_month_key: String,
     number_seq: i64,
     created_from: String,
+    max_stations: u32,
 }
 
-/// `POST /v1/device/shifts/{id}/enter`: a station on the shift's line opens
-/// a planned shift (the host freezes its snapshot and makes the station its
-/// owner) or enters again the active shift it opened; the answer carries the
-/// snapshot, so a station that lost its database gets it back. A closed
-/// shift is `shift_status`, another line `shift_line`, a shift another
-/// station opened `shift_busy`, and a plan whose layouts together would
-/// not fit the snapshot `snapshot_too_large`, once its templates fit. Opening
-/// takes a revision, so the other stations of the line see the shift busy;
-/// entering again takes none.
+/// `POST /v1/device/shifts/{id}/enter`: a station or a handheld on the shift's line opens a
+/// planned shift (the host freezes its snapshot, the device becomes its opener and first
+/// participant) or enters an open one; the answer carries the snapshot, so a device that lost its
+/// database gets it back, and (plan 2b) the participants and totals.
 ///
-/// The body (`ShiftEnter`, protocol 4, plan РЕЖ) names what the station
-/// works; a station of protocol 3 sends none (no `Content-Type`), which names
-/// nothing. A validation shift needs `validation-v1`, on its opening and on
-/// every entry again (a station rolled back to an older build must not work
-/// it as an aggregation one): otherwise `station_update`, after the shift's
-/// own refusals above and before anything is frozen or written. A
-/// validation shift that prints a duplicate (part B) also needs
-/// `validation-dm-duplicate-v1`, and its snapshot freezes the duplicate
-/// template whole (`shifts::snapshot`: `duplicate_template_not_fit` when it
-/// no longer fits, after the pallet template; the bound counts its layout).
+/// An open shift (plan 2b, spec §4.2 «Вход», `shift_participants::decide_entry`): an active
+/// participant enters again (no revision, no audit row); one that closed its part reads the shift
+/// back and nothing is written; one that left takes a slot again and a new device takes one, while
+/// fewer than the line's `max_stations` other live devices hold a slot — a revision stamped on the
+/// shift and `shift.join` (`{ number, rejoined }`). A device that never entered and did not name
+/// `multi-station-v1` is `shift_busy` as in stage 2a; one that named it meets a full line as
+/// `shift_line_full`. A closed shift is `shift_status`, another line `shift_line`.
+///
+/// The body (`ShiftEnter`, protocol 4) names what the device works; a station of protocol 3 sends
+/// none. A validation shift needs `validation-v1` (and `validation-dm-duplicate-v1` when it prints
+/// a duplicate), a handheld always `handheld-host-v1`: otherwise `station_update`, after the
+/// shift's own refusals and before anything is frozen or written. Opening checks the license
+/// (`require_new_shifts`) and freezes the snapshot (`snapshot_too_large`, the template refusals);
+/// joining an open shift checks neither (plan 2b: joining is no new shift).
 pub async fn enter_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -430,10 +492,11 @@ pub async fn enter_shift(
         )
         .await?;
     let shift: Option<EntryRow> = sqlx::query_as(
-        "SELECT status, mode, line_id, owner_device_id, product_id, box_template_id, \
-         pallet_template_id, pallet_sheet_template_id, validation_print_mode, \
-         validation_print_verification, validation_print_template_id, counterparty_id, \
-         snapshot, number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+        "SELECT s.status, s.mode, s.line_id, s.product_id, s.box_template_id, \
+         s.pallet_template_id, s.pallet_sheet_template_id, s.validation_print_mode, \
+         s.validation_print_verification, s.validation_print_template_id, s.counterparty_id, \
+         s.snapshot, s.number_month_key, s.number_seq, s.created_from, l.max_stations \
+         FROM shifts s JOIN lines l ON l.id = s.line_id WHERE s.id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -452,13 +515,34 @@ pub async fn enter_shift(
     if line_id.as_deref() != Some(shift.line_id.as_str()) {
         return Err(line_conflict());
     }
-    if shift
-        .owner_device_id
-        .as_deref()
-        .is_some_and(|owner| owner != device.id)
-    {
-        return Err(shifts::busy());
-    }
+    // Plan 2b: who may work an open shift is its participants' and its line's business.
+    let decision = if status == ShiftStatus::Planned {
+        None
+    } else {
+        let current = shift_participants::state_of(&mut tx, &id, &device.id).await?;
+        let active_others = shift_participants::active_others(&mut tx, &id, &device.id).await?;
+        let multi = enter
+            .supports
+            .iter()
+            .any(|name| name == shift_supports::MULTI_STATION);
+        match shift_participants::decide_entry(current, active_others, shift.max_stations, multi) {
+            EntryDecision::Busy => return Err(shifts::busy()),
+            EntryDecision::LineFull {
+                max_stations,
+                active,
+            } => return Err(shifts::line_full(max_stations, active)),
+            // A build that does not name `multi-station-v1` cannot be told that only its own
+            // part is closed: it would take the shift for its own, active, and resume producing
+            // into a closed part. Every older build shows `shift_status` as «закрыта».
+            EntryDecision::ReadClosed if !multi => {
+                return Err(shifts::status_conflict(ShiftStatus::Closed))
+            }
+            decision @ (EntryDecision::Reenter
+            | EntryDecision::ReadClosed
+            | EntryDecision::Rejoin
+            | EntryDecision::Join) => Some(decision),
+        }
+    };
     let validation_print = shifts::stored_print(
         &shift.validation_print_mode,
         shift.validation_print_verification.as_deref(),
@@ -477,31 +561,60 @@ pub async fn enter_shift(
         duplicate.is_some(),
         &enter,
     )?;
+    let origin = shift.created_from.parse().map_err(ApiError::internal)?;
+    let number = shifts::format_number(&shift.number_month_key, shift.number_seq, origin);
     let snapshot = match shift.snapshot {
-        // The station that opened the shift enters it again.
         Some(text) => {
-            sqlx::query(
-                "UPDATE shift_participants SET last_entered_at = ? \
-                 WHERE shift_id = ? AND device_id = ?",
-            )
-            .bind(&at)
-            .bind(&id)
-            .bind(&device.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(ApiError::internal)?;
             let snapshot: ShiftSnapshot =
                 serde_json::from_str(&text).map_err(ApiError::internal)?;
-            let mut entered = read(&mut tx, &id)
-                .await?
-                .ok_or_else(|| ApiError::internal("shift vanished"))?;
-            tx.commit().await.map_err(ApiError::internal)?;
+            let mut entered = match decision {
+                Some(EntryDecision::Reenter) => {
+                    shift_participants::touch(&mut tx, &id, &device.id, &at).await?;
+                    let entered = read_for(&mut tx, &id, &device.id, &at).await?;
+                    tx.commit().await.map_err(ApiError::internal)?;
+                    entered
+                }
+                // Nothing to write: the transaction rolls back when dropped.
+                Some(EntryDecision::ReadClosed) => read_for(&mut tx, &id, &device.id, &at).await?,
+                Some(joining @ (EntryDecision::Join | EntryDecision::Rejoin)) => {
+                    let rejoined = joining == EntryDecision::Rejoin;
+                    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+                    if rejoined {
+                        shift_participants::rejoin(&mut tx, &id, &device.id, &at, rev).await?;
+                    } else {
+                        shift_participants::join(&mut tx, &id, &device.id, &at, rev).await?;
+                    }
+                    shifts::stamp_revision(&mut tx, &id, rev).await?;
+                    audit::record(
+                        &mut tx,
+                        &at,
+                        Entry {
+                            actor: Actor::Device(&device.id),
+                            action: actions::SHIFT_JOIN,
+                            target_type: Some("shift"),
+                            target_id: Some(&id),
+                            outcome: Outcome::Ok,
+                            details: json!({ "number": number, "rejoined": rejoined }),
+                        },
+                    )
+                    .await
+                    .map_err(ApiError::internal)?;
+                    let entered = read_for(&mut tx, &id, &device.id, &at).await?;
+                    commit_with_revision(tx, &state.revisions, rev)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    entered
+                }
+                // Refused above, or no decision at all: an open shift's entry is always decided.
+                Some(EntryDecision::Busy | EntryDecision::LineFull { .. }) | None => {
+                    return Err(ApiError::internal("an open shift's entry was not decided"))
+                }
+            };
             entered.snapshot = Some(snapshot);
             return Ok(Json(entered));
         }
         None => {
-            // Opening is the one move a license that ran out closes (plan
-            // ЛЦ-2, spec §3.3); the owner's entry again above never is.
+            // Opening is the one move a license that ran out closes (plan ЛЦ-2, spec §3.3).
             crate::license::gate::require_new_shifts(&state, &mut tx).await?;
             let own_logo = crate::license::gate::custom_branding(&state, &mut tx).await?;
             let snapshot = shifts::snapshot(
@@ -514,8 +627,8 @@ pub async fn enter_shift(
                 duplicate,
             )
             .await?;
-            // Custom branding is a license feature: without it the shift freezes no
-            // logo, and every print of it falls back to the bundled Markiro one.
+            // Custom branding is a license feature: without it the shift freezes no logo, and
+            // every print of it falls back to the bundled Markiro one.
             if own_logo {
                 snapshot
             } else {
@@ -538,20 +651,9 @@ pub async fn enter_shift(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
-    sqlx::query(
-        "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) \
-         VALUES (?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(&device.id)
-    .bind(&at)
-    .bind(&at)
-    .execute(&mut *tx)
-    .await
-    .map_err(ApiError::internal)?;
-    let origin = shift.created_from.parse().map_err(ApiError::internal)?;
+    shift_participants::join(&mut tx, &id, &device.id, &at, rev).await?;
     let mut details = json!({
-        "number": shifts::format_number(&shift.number_month_key, shift.number_seq, origin),
+        "number": number,
         "templateId": snapshot.box_template.id,
         "templateRev": snapshot.box_template.rev,
     });
@@ -581,12 +683,94 @@ pub async fn enter_shift(
     )
     .await
     .map_err(ApiError::internal)?;
-    let mut opened = read(&mut tx, &id)
-        .await?
-        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    let mut opened = read_for(&mut tx, &id, &device.id, &at).await?;
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
     opened.snapshot = Some(snapshot);
     Ok(Json(opened))
+}
+
+/// `conflict` on `shift_not_entered`: the device never entered the shift (plan 2b).
+pub fn not_entered() -> ApiError {
+    ApiError::conflict("shift_not_entered", "this device never entered the shift")
+}
+
+/// `POST /v1/device/shifts/{id}/leave` (plan 2b, spec §4.2 «Выход»): an active participant pauses
+/// its part and frees its slot of the line (`left`), with a revision stamped on the shift and
+/// `shift.leave`; it may enter again while a slot is free. A participant that left or closed
+/// already (a closed shift's participants all have) answers the shift as it is and writes nothing,
+/// so a leave retried after a lost answer is harmless. The optional body `{ joinedRev }` names the
+/// stay the client means to end (`ShiftParticipant.joinedRev` of its last answer): when the row's
+/// token differs a re-entry came after the leave was sent, and the leave answers the shift as it is
+/// with no write, no audit row and no revision. A device that never entered is `conflict` on
+/// `shift_not_entered`, an unknown shift `not_found`. The answer is the shift as the device sees it,
+/// without the snapshot.
+pub async fn leave_shift(
+    State(state): State<AppState>,
+    device: AuthDevice,
+    ApiPath(id): ApiPath<String>,
+    leave: Option<ApiJson<ShiftLeave>>,
+) -> Result<Json<DeviceShift>, ApiError> {
+    if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
+        return Err(ApiError::forbidden(WORKS_SHIFTS));
+    }
+    let token = leave.map(|ApiJson(leave)| leave.joined_rev);
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    device
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            WORKS_SHIFTS,
+        )
+        .await?;
+    let number: Option<(String, i64, String)> = sqlx::query_as(
+        "SELECT number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let (month_key, seq, created_from) =
+        number.ok_or_else(|| ApiError::not_found("no such shift"))?;
+    let current = shift_participants::state_of(&mut tx, &id, &device.id)
+        .await?
+        .ok_or_else(not_entered)?;
+    // A leave naming a token that is not the row's current one is the leave of an earlier stay (a
+    // re-entry came after it was sent): it answers the shift as it is, with no write.
+    let stale = match token {
+        Some(token) => {
+            let current = shift_participants::joined_rev_of(&mut tx, &id, &device.id).await?;
+            current.and_then(|rev| u64::try_from(rev).ok()) != Some(token)
+        }
+        None => false,
+    };
+    if stale || !shift_participants::leaves(current) {
+        // Nothing to write: the transaction rolls back when dropped.
+        return Ok(Json(read_for(&mut tx, &id, &device.id, &at).await?));
+    }
+    let origin = created_from.parse().map_err(ApiError::internal)?;
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    shift_participants::leave(&mut tx, &id, &device.id, &at).await?;
+    shifts::stamp_revision(&mut tx, &id, rev).await?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: Actor::Device(&device.id),
+            action: actions::SHIFT_LEAVE,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "number": shifts::format_number(&month_key, seq, origin) }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let left = read_for(&mut tx, &id, &device.id, &at).await?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(left))
 }

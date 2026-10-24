@@ -62,12 +62,13 @@ import { useHostUpdateCheck } from "../update/use-host-offer.js";
 import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
-import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
+import { purgeAcknowledged, purgeRemovedDemo, scheduleRetention } from "../local/retention.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
 import type { WindowMode } from "../office/window-mode.js";
-import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
+import { BootstrapEntry } from "../wizard/BootstrapEntry.js";
+import { YandexResume } from "../wizard/YandexResume.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
 import { createFullscreenController, type FullscreenController } from "./fullscreen.js";
@@ -383,6 +384,12 @@ function AppScreens({
       } catch (error) {
         failure ??= error;
       }
+      // The demo shifts the office removed (spec 2026-10-21) go at once, not after 30 days.
+      try {
+        purged += await purgeRemovedDemo(localDb, pairing);
+      } catch (error) {
+        failure ??= error;
+      }
       if (purged > 0) dispatch({ type: "outbox_changed" });
       if (failure !== null) {
         throw failure instanceof Error ? failure : new Error("retention pass failed");
@@ -390,7 +397,7 @@ function AppScreens({
     });
   }, [localDb, keptHostId, keptDeviceId]);
 
-  const { requestSync, requestFacts } = useHostLink({
+  const { requestSync, requestFacts, requestShifts, requestLeaves } = useHostLink({
     hostId: linked?.hostId ?? null,
     deviceId: linked?.deviceId ?? null,
     connection: connectionApi,
@@ -404,6 +411,7 @@ function AppScreens({
     conflictStatus: hostApi.conflictStatus,
     listDisplacements: hostApi.listDisplacements,
     deviceProductPhoto: hostApi.getDeviceProductPhoto,
+    leaveShift: hostApi.leaveShift,
     dispatch,
   });
   // The site's license as this station last heard it (plan ЛЦ-3): the floor's
@@ -961,7 +969,10 @@ function AppScreens({
           }
         />
       )}
-      {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
+      {view.kind === "host_missing" && role === "host" && <YandexResume />}
+      {view.kind === "bootstrap" && (
+        <BootstrapEntry onSubmit={bootstrap} recoveryAllowed={role === "host"} />
+      )}
       {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
       {view.kind === "network_pairing" && scannerSetup && (
         <WorkstationSetup
@@ -1108,6 +1119,8 @@ function AppScreens({
                 warehouseLookup={hostApi.warehouseLookup}
                 palletSheets={hostApi.getDevicePalletSheets}
                 requestFacts={requestFacts}
+                requestShifts={requestShifts}
+                requestLeaves={requestLeaves}
                 source={floorGate.source}
                 printing={printing}
                 hardware={hardwareApi}

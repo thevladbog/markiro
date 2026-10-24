@@ -1,0 +1,257 @@
+---
+import { CALL_HREF, DOWNLOAD_COPY } from "../../content/autonom";
+import { findAutonomPage } from "../../content/autonom-pages";
+import { SITE_CONTACTS } from "../../content/contacts";
+import { buildAutonomPageGraph } from "../../lib/seo";
+import { readPublicSiteConfig } from "../../lib/site-config";
+import AutonomPage from "./AutonomPage.astro";
+import Icon from "./Icon.astro";
+import LeadConsent from "./LeadConsent.astro";
+import LeadSubmit from "./LeadSubmit.astro";
+
+const page = findAutonomPage("/skachat/");
+const config = readPublicSiteConfig(
+  {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
+  },
+  "ru",
+);
+const enabled =
+  config.leadEndpoint !== null &&
+  config.legalLinks !== null &&
+  config.captchaClientKey !== null &&
+  config.consentVersion !== null;
+const copy = DOWNLOAD_COPY;
+const placeholderFile = "markiro-standalone-<версия>-windows-x86_64-setup.exe";
+const phoneText = config.phone === null ? "" : `, ${config.phone.display}`;
+---
+
+<AutonomPage metadata={page} graph={buildAutonomPageGraph(page)} phone={config.phone} footer="short">
+  <section class="ax-dl" aria-labelledby="download-title" data-download-start>
+    <div class="ax-container ax-dl__grid">
+      <div class="ax-dl__intro">
+        <p class="ax-badge"><span class="ax-badge__dot" aria-hidden="true"></span>{copy.badge}</p>
+        <h1 class="ax-h1 ax-h1--page" id="download-title">{copy.title}</h1>
+        <p class="ax-lead">
+          <span class="ax-only-wide">{copy.lead}</span>
+          <span class="ax-only-narrow">{copy.leadPhone}</span>
+        </p>
+        <dl class="ax-meta">
+          <div data-release-fact hidden><dt>{copy.meta.version}</dt><dd data-release="version"></dd></div>
+          <div data-release-fact hidden><dt>{copy.meta.released}</dt><dd data-release="date"></dd></div>
+          <div data-release-fact hidden><dt>{copy.meta.size}</dt><dd data-release="size"></dd></div>
+          <div><dt>{copy.meta.system}</dt><dd>{copy.system}</dd></div>
+        </dl>
+      </div>
+
+      <div class="ax-form-card">
+        <form
+          class="ax-form"
+          id="lead-form"
+          data-lead-form
+          data-intent="download"
+          data-endpoint={enabled ? config.leadEndpoint : undefined}
+          data-consent-version={enabled ? config.consentVersion : undefined}
+          novalidate
+        >
+          <h2 class="ax-h3 ax-form__title">{copy.form.title}</h2>
+          <fieldset class="ax-form__fields" data-lead-fields disabled={!enabled}>
+            <div class="ax-field">
+              <label for="download-email">{copy.form.email}</label>
+              <input id="download-email" name="email" type="email" autocomplete="email" inputmode="email" maxlength="254" placeholder={copy.form.emailPlaceholder} required />
+              <p class="ax-field__error" id="download-email-error" data-error-for="email"></p>
+            </div>
+            <div class="ax-field">
+              <label for="download-company">{copy.form.company}</label>
+              <input id="download-company" name="company" type="text" autocomplete="organization" maxlength="120" placeholder={copy.form.companyPlaceholder} required />
+              <p class="ax-field__error" id="download-company-error" data-error-for="company"></p>
+            </div>
+            <p class="ax-form__hint">{copy.form.later}</p>
+            {enabled && config.legalLinks && config.captchaClientKey && (
+              <LeadConsent idPrefix="download" legalLinks={config.legalLinks} captchaClientKey={config.captchaClientKey} />
+            )}
+            <LeadSubmit label={copy.form.submit} labelNarrow={copy.form.submitPhone} icon="arrow-right" iconNarrow="mail" />
+          </fieldset>
+          <p class="ax-form__status" data-form-status aria-live="polite"></p>
+          {enabled ? (
+            <p class="ax-form__note">
+              <span class="ax-only-wide">{copy.form.note}</span>
+              <span class="ax-only-narrow">{copy.form.notePhone}</span>
+            </p>
+          ) : (
+            <p class="ax-form__note">
+              Отправка формы пока не подключена. Напишите на <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>,
+              пришлём ссылку на установщик.
+            </p>
+          )}
+        </form>
+      </div>
+
+      <div class="ax-inside">
+        <p class="ax-kicker ax-kicker--muted">{copy.insideTitle}</p>
+        <ul>
+          {copy.inside.map((item) => (
+            <li>
+              <Icon name={item.icon} size={22} />
+              <div><strong>{item.title}</strong><span>{item.text}</span></div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="ax-dl ax-dl--ready" aria-label="Установщик" data-download-ready hidden>
+    <div class="ax-container">
+      <div data-release-only>
+        <div class="ax-ready-head">
+          <span class="ax-ready-head__mark" aria-hidden="true"><Icon name="check" size={26} /></span>
+          <div>
+            <h2 class="ax-h1 ax-h1--ready" tabindex="-1" data-ready-heading>
+              <span class="ax-only-wide">{copy.ready.title}</span>
+              <span class="ax-only-narrow">{copy.ready.titlePhone}</span>
+            </h2>
+            <p class="ax-lead">
+              <span class="ax-only-wide">{copy.ready.text.split("{email}")[0]}<span data-ready-email></span>{copy.ready.text.split("{email}")[1]}</span>
+              <span class="ax-only-narrow">{copy.ready.textPhone.split("{email}")[0]}<span data-ready-email></span>{copy.ready.textPhone.split("{email}")[1]}</span>
+            </p>
+          </div>
+        </div>
+        <div class="ax-file">
+          <span class="ax-file__icon" aria-hidden="true"><Icon name="file-download" size={22} /></span>
+          <div class="ax-file__body">
+            <p class="ax-file__name" data-release="file">{placeholderFile}</p>
+            <p class="ax-file__meta">
+              Версия <span data-release="version"></span> · <span data-release="date"></span> · <span data-release="size"></span> · Windows 10, 11 · x64
+            </p>
+            <p class="ax-hash">
+              <span class="ax-hash__label">SHA-256</span>
+              <code class="ax-hash__value" data-release="sha256"></code>
+              <button type="button" class="ax-icon-button ax-icon-button--sm" data-copy="sha256" data-copied-label="SHA-256 скопирован" aria-label={copy.ready.copyHash}>
+                <Icon name="copy" size={16} />
+              </button>
+            </p>
+          </div>
+          <div class="ax-file__actions">
+            <a class="ax-btn ax-btn--accent ax-btn--lg ax-btn--glow ax-only-wide" href="#" data-release-link data-analytics="landing_installer_download" data-placement="ready">
+              <span>{copy.ready.download}</span>
+              <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
+            </a>
+            <button type="button" class="ax-btn ax-btn--outline ax-btn--block ax-only-narrow" data-copy="link" data-copied-label={copy.ready.copied}>
+              <Icon name="copy" size={18} />
+              <span>{copy.ready.copyLink}</span>
+            </button>
+            <a class="ax-btn ax-btn--accent ax-btn--block ax-only-narrow" href="#" data-release-link data-analytics="landing_installer_download" data-placement="ready_phone">
+              <span>{copy.ready.downloadPhone}</span>
+              <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
+            </a>
+          </div>
+        </div>
+        <p class="ax-visually-hidden" data-copy-status aria-live="polite"></p>
+      </div>
+
+      <div data-pending-only hidden>
+        <div class="ax-ready-head ax-ready-head--pending">
+          <span class="ax-ready-head__mark" aria-hidden="true"><Icon name="mail" size={24} /></span>
+          <div>
+            <h2 class="ax-h1 ax-h1--ready" tabindex="-1" data-ready-heading>{copy.ready.pendingTitle}</h2>
+            <p class="ax-lead">{copy.ready.pendingText.split("{email}")[0]}<span data-ready-email></span>{copy.ready.pendingText.split("{email}")[1]}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="ax-section ax-section--card" id="pervyy-zapusk" aria-labelledby="smartscreen-title" data-download-after hidden>
+    <div class="ax-container ax-smart">
+      <div class="ax-smart__text">
+        <p class="ax-kicker">{copy.smartscreen.kicker}</p>
+        <h2 class="ax-h2 ax-h2--md" id="smartscreen-title">{copy.smartscreen.title}</h2>
+        <p class="ax-muted">{copy.smartscreen.lead}</p>
+        <ol class="ax-numbered">
+          {copy.smartscreen.steps.map((step) => (
+            <li><strong>{step.title}</strong><span>{step.text}</span></li>
+          ))}
+        </ol>
+        <h3 class="ax-h3">{copy.smartscreen.verifyTitle}</h3>
+        <p class="ax-muted">{copy.smartscreen.verifyText}</p>
+        <div class="ax-code" data-theme="dark">
+          <code data-release="command">Get-FileHash .\{placeholderFile} -Algorithm SHA256</code>
+          <button type="button" class="ax-icon-button ax-icon-button--sm" data-copy="command" data-copy-text={`Get-FileHash .\\${placeholderFile} -Algorithm SHA256`} data-copied-label="Команда скопирована" aria-label="Скопировать команду">
+            <Icon name="copy" size={16} />
+          </button>
+        </div>
+      </div>
+      <figure class="ax-smart__windows">
+        <div aria-hidden="true">
+          <p class="ax-smart__step"><span>2</span>{copy.smartscreen.stepTwo}</p>
+          <div class="ax-smartscreen">
+            <span class="ax-smartscreen__close"><Icon name="close" size={18} /></span>
+            <p class="ax-smartscreen__title">{copy.smartscreen.windowTitle}</p>
+            <p>{copy.smartscreen.windowText}</p>
+            <p><span class="ax-smartscreen__focus">{copy.smartscreen.more}</span></p>
+            <p class="ax-smartscreen__buttons"><span class="ax-smartscreen__button">{copy.smartscreen.dontRun}</span></p>
+          </div>
+          <p class="ax-smart__step"><span>3</span>{copy.smartscreen.stepThree}</p>
+          <div class="ax-smartscreen">
+            <span class="ax-smartscreen__close"><Icon name="close" size={18} /></span>
+            <p class="ax-smartscreen__title">{copy.smartscreen.windowTitle}</p>
+            <p>{copy.smartscreen.windowText}</p>
+            <p class="ax-smartscreen__details">Приложение: <span data-release="file">{placeholderFile}</span><br />{copy.smartscreen.publisher}</p>
+            <p class="ax-smartscreen__buttons">
+              <span class="ax-smartscreen__button ax-smartscreen__button--focus">{copy.smartscreen.run}</span>
+              <span class="ax-smartscreen__button">{copy.smartscreen.dontRun}</span>
+            </p>
+          </div>
+        </div>
+        <figcaption>{copy.smartscreen.disclaimer}</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="ax-section" aria-labelledby="next-title" data-download-after hidden>
+    <div class="ax-container">
+      <h2 class="ax-h2 ax-h2--md" id="next-title">{copy.next.title}</h2>
+      <ol class="ax-next">
+        {copy.next.steps.map((step, index) => (
+          <li class="ax-card">
+            <span class="ax-steps__index ax-steps__index--accent">0{index + 1}</span>
+            <h3 class="ax-h3">{step.title}</h3>
+            <p class="ax-muted">{step.text}</p>
+          </li>
+        ))}
+      </ol>
+      <div class="ax-help">
+        <span class="ax-avatar ax-avatar--sm" aria-hidden="true">ВБ</span>
+        <div class="ax-help__text">
+          <h3 class="ax-h3">{copy.next.helpTitle}</h3>
+          <p class="ax-muted">{copy.next.helpText} Telegram <a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a>{phoneText}.</p>
+        </div>
+        <div class="ax-help__actions">
+          <a class="ax-btn ax-btn--dark" href={CALL_HREF} data-analytics="landing_demo_click" data-placement="download_next">{copy.next.call}</a>
+          <a class="ax-btn ax-btn--outline" href="/instruktsii/">{copy.next.instructions}<Icon name="arrow-up-right" size={16} /></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    import { initDownloadPage } from "../../scripts/download-page";
+    import { browserLeadFormRuntime, fetchLatestRelease, initLeadForm } from "../../scripts/lead-form";
+
+    const downloadPage = initDownloadPage(document, {
+      fetchRelease: () => fetchLatestRelease(window),
+      copy: (text) => navigator.clipboard.writeText(text),
+    });
+    const form = document.querySelector<HTMLFormElement>("[data-lead-form]");
+    if (form !== null) {
+      form.addEventListener("focusin", downloadPage.prefetch, { once: true });
+      form.addEventListener("pointerdown", downloadPage.prefetch, { once: true });
+      initLeadForm(form, browserLeadFormRuntime(window), ({ email }) => {
+        void downloadPage.accept(email);
+      });
+    }
+  </script>
+</AutonomPage>

@@ -296,7 +296,7 @@ describe("office devices", () => {
     expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
   });
 
-  it("reads the shifts for a station only", async () => {
+  it("reads the shifts once for the table, and a non-station's dialog adds none of its own", async () => {
     const session = adminSession();
     session.api.updateDevice.mockResolvedValue({ ...OFFICE_PC, name: "Бухгалтерия" });
     await openDevices(session);
@@ -304,7 +304,7 @@ describe("office devices", () => {
     fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Бухгалтерия" } });
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
-    expect(session.api.listShifts).not.toHaveBeenCalled();
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
   });
 
   it("moves a station all the same when the shifts did not load, and says nothing of one", async () => {
@@ -317,7 +317,8 @@ describe("office devices", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
     );
-    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(1));
+    // The table's read failed; the dialog's observer mounts on the errored query and asks once more.
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
     chooseValue("Линия", other.id);
     expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
     expect(within(dialog()).queryByRole("alert")).toBeNull();

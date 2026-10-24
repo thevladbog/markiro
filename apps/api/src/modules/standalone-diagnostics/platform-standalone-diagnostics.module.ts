@@ -4,7 +4,10 @@ import { PlatformAuditModule } from "../../platform-auth/platform-audit.module";
 import { PlatformStandaloneDiagnosticsController } from "./platform-standalone-diagnostics.controller";
 import { StandaloneDiagnosticsRetention } from "./standalone-diagnostics-retention";
 import {
-  noPublishedStandaloneBuild,
+  createStandaloneReleasesRuntime,
+  standaloneLatestBuildSource,
+} from "../standalone-releases/release-runtime";
+import {
   STANDALONE_DIAGNOSTICS_CLOCK,
   STANDALONE_LATEST_BUILD,
   StandaloneDiagnosticsService,
@@ -32,7 +35,12 @@ export class PlatformStandaloneDiagnosticsModule {
       providers: [
         { provide: STANDALONE_SUPPORT_KEYS, useValue: keys },
         { provide: STANDALONE_DIAGNOSTICS_CLOCK, useValue: () => new Date() },
-        { provide: STANDALONE_LATEST_BUILD, useValue: noPublishedStandaloneBuild },
+        {
+          provide: STANDALONE_LATEST_BUILD,
+          useValue: standaloneLatestBuildSource(
+            createStandaloneReleasesRuntime(env)?.store ?? null,
+          ),
+        },
         StandaloneDiagnosticsService,
         StandaloneDiagnosticsRetention,
       ],

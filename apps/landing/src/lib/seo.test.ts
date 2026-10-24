@@ -4,12 +4,10 @@ import { describe, expect, it } from "vitest";
 import { BEER_MARKING_2026_ARTICLE, BEER_MARKING_2026_ARTICLE_EN } from "../content/articles";
 import { findHubPage } from "../content/hubs";
 import { findSeoPage } from "../content/pages";
-import { findFilmPage } from "../content/film";
 import { getLegalDocumentPage } from "../content/legal-pages";
 import {
   attachOrganizationContact,
   buildArticlePageGraph,
-  buildFilmPageGraph,
   buildHubPageGraph,
   buildPageGraph,
   buildLegalPageGraph,
@@ -114,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(72);
+    expect(sitemap.match(/<url>/g)).toHaveLength(70);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -132,8 +130,10 @@ describe("SEO generators", () => {
     expect(llms).not.toContain("Паллетная агрегация запланирована");
     expect(llms).not.toContain("для линий розлива");
     expect(llms).toContain(
-      "> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.",
+      "> «Маркиро Автоном»: программа маркировки и агрегации для Windows. Программа, база и копии работают на ПК заказчика, интернет для смены не нужен.",
     );
+    expect(llms).toContain("https://markiro.app/skachat/");
+    expect(llms).toContain("https://markiro.app/stoimost/");
     expect(llms).toContain("https://markiro.app/sscc-i-agregatsiya/");
     expect(llms).toContain("https://markiro.app/stati/agregatsiya-piva-v-koroba/");
     expect(llms).toContain("https://markiro.app/stati/markirovka-piva-2026/");
@@ -155,7 +155,7 @@ describe("SEO generators", () => {
     expect(llms).toContain("https://markiro.app/en/articles/beer-code-application-report-russia/");
     expect(llms).toContain("## English");
     expect(llms).toContain(
-      "> Production serialization, aggregation, and traceability with offline-capable line stations.",
+      "> Markiro Autonom: serialization and aggregation software for Windows. The software, the database and the backups run on the plant's own PCs; a shift needs no internet.",
     );
     expect(llms).toContain("https://markiro.app/en/sscc-and-aggregation/");
     expect(llms).not.toMatch(/ranking|ранжир/i);
@@ -172,9 +172,11 @@ describe("SEO generators", () => {
     expect(llms).toContain("https://markiro.app/llms-full.txt");
     expect(llms).toContain("https://markiro.app/faq.md");
     expect(llms).toContain("## About the product");
-    expect(llms).not.toMatch(
-      /(?<!\p{L})(?:цена|цены|прайс|price|pricing|клиент\p{L}*|customer\p{L}*|гарант\p{L}*)(?!\p{L})/iu,
+    // Prices are public since 2026-10-21 (spec 2026-10-20, 9.1) and come from content/pricing.ts.
+    expect(llms).toContain(
+      "«Старт» 60 000 ₽, «Линия» 120 000 ₽, «Цех» 240 000 ₽, «Завод» по запросу",
     );
+    expect(llms).not.toMatch(/(?<!\p{L})(?:клиент\p{L}*|customer\p{L}*|гарант\p{L}*)(?!\p{L})/iu);
   });
 
   it("publishes an RSS feed per locale with every article", () => {
@@ -220,7 +222,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(72);
+    expect(sitemap.match(/<url>/g)).toHaveLength(70);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -488,7 +490,7 @@ describe("SEO generators", () => {
     const graph = buildPageGraph(findSeoPage("/oflayn-rabota/"));
     const webPage = graph["@graph"].find((entry) => entry["@type"] === "WebPage");
 
-    expect(webPage).toMatchObject({ dateModified: "2026-09-06" });
+    expect(webPage).toMatchObject({ dateModified: "2026-10-23" });
   });
 
   it("describes the software with visible facts only", () => {
@@ -500,30 +502,32 @@ describe("SEO generators", () => {
     );
 
     expect(ru).toMatchObject({
+      name: "Маркиро Автоном",
+      alternateName: ["Markiro Autonom", "Markiro"],
       url: "https://markiro.app/",
-      operatingSystem: "Windows, Android, Web",
+      operatingSystem: "Windows, Android",
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
     });
     expect(ru?.featureList).toEqual([
       "Проверка кодов маркировки Data Matrix на линии",
       "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
-      "Офлайн-работа станции с локальным журналом",
-      "Сборка паллет и инвентаризация на ТСД с Android",
-      "Обмен с 1С по CommerceML",
-      "Выгрузки отчётов смены для ГИС МТ",
+      "Работа без интернета: программа и база на ПК завода",
+      "Сборка паллет на ТСД с Android",
+      "Выгрузки смены в TXT, CSV и XML для ГИС МТ и 1С",
     ]);
     expect(en).toMatchObject({
+      name: "Markiro Autonom",
+      alternateName: ["Маркиро Автоном", "Markiro"],
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/en/instructions/" },
     });
     expect(en?.featureList).toEqual([
       "Data Matrix code verification on the line",
       "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
-      "Offline station with a local journal",
-      "Pallet building and inventory on an Android handheld",
-      "1C exchange over CommerceML",
-      "Shift report exports for GIS MT",
+      "No internet needed: the software and the database run on the plant's PCs",
+      "Pallet building on an Android handheld",
+      "Shift exports in TXT, CSV and XML for GIS MT and 1C",
     ]);
     expect(ru).not.toHaveProperty("offers");
     expect(ru).not.toHaveProperty("aggregateRating");
@@ -536,32 +540,22 @@ describe("SEO generators", () => {
   });
 });
 
-describe("film page search surfaces", () => {
-  it("lists both locales in the sitemap with reciprocal hreflang", () => {
+// The film and the disposal kiosk were retired with a 301 to the home page of their
+// language; search surfaces must not advertise them any more.
+describe("retired pages", () => {
+  const retired = [
+    "/kak-rabotaet/",
+    "/en/how-it-works/",
+    "/kiosk-samovydachi/",
+    "/en/self-service-pickup-kiosk/",
+  ];
+
+  it("are absent from the sitemap and llms.txt", () => {
     const sitemap = renderSitemapXml();
-    expect(sitemap).toContain("<loc>https://markiro.app/kak-rabotaet/</loc>");
-    expect(sitemap).toContain("<loc>https://markiro.app/en/how-it-works/</loc>");
-    expect(sitemap).toContain(
-      '<xhtml:link rel="alternate" hreflang="en" href="https://markiro.app/en/how-it-works/" />',
-    );
-    expect(sitemap).toContain(
-      '<xhtml:link rel="alternate" hreflang="ru" href="https://markiro.app/kak-rabotaet/" />',
-    );
-  });
-
-  it("describes the film in llms.txt for both languages", () => {
     const llms = renderLlmsTxt();
-    expect(llms).toContain("- [Как работает](https://markiro.app/kak-rabotaet/): ");
-    expect(llms).toContain("- [How it works](https://markiro.app/en/how-it-works/): ");
-  });
-
-  it("builds a web page graph without breadcrumbs, like the home page", () => {
-    const nodes = buildFilmPageGraph(findFilmPage("ru"))["@graph"];
-    expect(nodes.find((node) => node["@type"] === "WebPage")).toMatchObject({
-      url: "https://markiro.app/kak-rabotaet/",
-      inLanguage: "ru",
-      dateModified: "2026-09-26",
-    });
-    expect(nodes.some((node) => node["@type"] === "BreadcrumbList")).toBe(false);
+    for (const path of retired) {
+      expect(sitemap, path).not.toContain(`https://markiro.app${path}`);
+      expect(llms, path).not.toContain(`https://markiro.app${path}`);
+    }
   });
 });

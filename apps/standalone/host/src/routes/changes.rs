@@ -113,6 +113,7 @@ struct ProductFeedRow {
     archived: bool,
     status: String,
     photo_checksum: Option<String>,
+    demo: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -340,7 +341,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                  pallet_box_capacity, shelf_life_days, default_box_template_id, \
                  default_pallet_template_id, archived, status, \
                  (SELECT ph.checksum FROM product_photos ph WHERE ph.product_id = products.id) \
-                 AS photo_checksum FROM products WHERE id = ?",
+                 AS photo_checksum, demo FROM products WHERE id = ?",
             )
             .bind(&key.id)
             .fetch_one(&mut *conn)
@@ -359,6 +360,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 archived: row.archived,
                 status: row.status.parse().map_err(ApiError::internal)?,
                 photo_checksum: row.photo_checksum,
+                demo: row.demo,
             })
         }
         entities::LABEL_TEMPLATES => {

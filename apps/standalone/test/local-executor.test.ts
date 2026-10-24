@@ -121,6 +121,7 @@ describe("local database on node:sqlite", () => {
       "floor_print_jobs",
       "floor_restore_epochs",
       "floor_scans",
+      "floor_shift_participation",
       "floor_shifts",
       "floor_sign_in_failures",
       "floor_sscc_blocks",

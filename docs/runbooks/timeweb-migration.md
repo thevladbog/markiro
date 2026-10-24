@@ -177,3 +177,16 @@ implementation does not authorize resource creation or prove target readiness.
 No provider, server, DNS, mail, storage or resource-deletion change was performed
 by this implementation. The quoted inventory/pricing/CI statements are dated
 handoff observations and must be refreshed at execution time.
+
+## Release storage update: 2026-10-22
+
+Yandex Cloud is retired; its Terraform, host runtime and the workflows that
+reached the old VM were removed. `releases.markiro.app` moves to a Timeweb S3
+bucket served read-only by the platform edge. The release workflows publish
+there with `RELEASES_S3_*` credentials. Bucket creation, public read, CORS,
+keys, platform env, DNS and the transfer of already published artifacts are
+owner steps in [release hosting](release-hosting.md). The new bucket starts
+empty: restore `station/` before the next Station release, otherwise its
+workflow refuses. The handheld workflow continues an empty channel after the
+recorded last build `1.6.1 (15)` once the dispatch confirms it. The separate signer is not carried over: signing moves into
+the standalone product.

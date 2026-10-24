@@ -11,6 +11,7 @@ import type {
   OfficeShift,
   OfficeUser,
   PalletSheets,
+  ShiftParticipant,
   ShiftTotals,
   TemplateDefaults,
 } from "../../src/host/protocol.js";
@@ -279,6 +280,83 @@ export const CLOSED: OfficeShift = {
     closedPallets: 0,
     openPallets: 0,
   },
+};
+
+/** The station that opened `ACTIVE`, and a handheld that joined it (ids as `device-shifts-participants.json`). */
+export const STATION_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+export const HANDHELD_ID = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+
+/** A participant, the opening station by default; every field the host sends is present. */
+export function participant(overrides: Partial<ShiftParticipant> = {}): ShiftParticipant {
+  return {
+    deviceId: STATION_ID,
+    deviceKind: "station",
+    deviceName: "Станция линии 1",
+    state: "active",
+    firstEnteredAt: "2026-10-08T06:02:00Z",
+    joinedAt: "2026-10-08T06:02:00Z",
+    leftAt: null,
+    closedAt: null,
+    closedBy: null,
+    closedActualQty: null,
+    closedReasonCode: null,
+    lateDataAt: null,
+    lastSeenAt: "2026-10-08T09:41:00Z",
+    ...overrides,
+  };
+}
+
+export const PARTICIPANT_A: ShiftParticipant = participant();
+export const PARTICIPANT_B: ShiftParticipant = participant({
+  deviceId: HANDHELD_ID,
+  deviceKind: "handheld",
+  deviceName: "ТСД 1",
+  firstEnteredAt: "2026-10-08T06:30:00Z",
+  joinedAt: "2026-10-08T07:10:00Z",
+});
+
+/**
+ * `ACTIVE` worked by two devices, 547 accepted units between them (427 and 120), as
+ * `device-shifts-participants.json` has it; the plan (1 200) is not met.
+ */
+export const SHARED: OfficeShift = {
+  ...ACTIVE,
+  participants: [PARTICIPANT_A, PARTICIPANT_B],
+  byDevice: [
+    { deviceId: STATION_ID, accepted: 427, boxesClosed: 35, pallets: 0 },
+    { deviceId: HANDHELD_ID, accepted: 120, boxesClosed: 10, pallets: 0 },
+  ],
+  totals: { ...ACTIVE.totals, deviceIds: [STATION_ID, HANDHELD_ID] },
+};
+
+/** `SHARED` after its last device closed it without the reason the plan's gap needed (`office-shift-participants.json`). */
+export const SHARED_NO_REASON: OfficeShift = {
+  ...SHARED,
+  status: "closed",
+  closedAt: "2026-10-08T14:10:00Z",
+  closeReasonMissing: true,
+  rev: 88,
+  participants: [
+    participant({
+      state: "closed",
+      closedAt: "2026-10-08T14:10:00Z",
+      closedBy: "device",
+      closedActualQty: 427,
+      lastSeenAt: "2026-10-08T14:10:02Z",
+    }),
+    participant({
+      deviceId: HANDHELD_ID,
+      deviceKind: "handheld",
+      deviceName: "ТСД 1",
+      joinedAt: "2026-10-08T07:10:00Z",
+      firstEnteredAt: "2026-10-08T06:30:00Z",
+      state: "closed",
+      closedAt: "2026-10-08T13:00:00Z",
+      closedBy: "device",
+      closedActualQty: 120,
+      lastSeenAt: "2026-10-08T13:00:01Z",
+    }),
+  ],
 };
 
 /**

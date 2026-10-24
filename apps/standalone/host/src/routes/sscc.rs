@@ -20,6 +20,9 @@ use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::server::AppState;
 use crate::validate;
 
+/// A counter row that is not the demo prefix's while the demo product exists; `?` the prefix.
+const NOT_DEMO: &str = "NOT (issuer_prefix = ? AND EXISTS (SELECT 1 FROM products WHERE demo = 1))";
+
 fn counter(
     issuer_prefix: String,
     extension: i64,
@@ -43,9 +46,13 @@ fn counter(
 /// what it just wrote, read before the commit releases the write lock,
 /// without a second connection from `state.pool`).
 async fn read_state(conn: &mut SqliteConnection) -> Result<SsccState, ApiError> {
-    let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
-        "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters ORDER BY issuer_prefix, extension",
-    )
+    // The demo prefix's counters (spec 2026-10-21, decision О4) are no organization's: the
+    // office neither lists nor moves them while the demo data is there.
+    let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(&format!(
+        "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters \
+         WHERE {NOT_DEMO} ORDER BY issuer_prefix, extension"
+    ))
+    .bind(crate::demo::DEMO_PREFIX)
     .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
@@ -102,11 +109,13 @@ pub async fn put_counter(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
-    let row: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT next_serial, rev FROM sscc_counters WHERE issuer_prefix = ? AND extension = ?",
-    )
+    let row: Option<(i64, i64)> = sqlx::query_as(&format!(
+        "SELECT next_serial, rev FROM sscc_counters WHERE issuer_prefix = ? AND extension = ? \
+         AND {NOT_DEMO}"
+    ))
     .bind(&prefix)
     .bind(i64::from(extension))
+    .bind(crate::demo::DEMO_PREFIX)
     .fetch_optional(&mut *tx)
     .await
     .map_err(ApiError::internal)?;

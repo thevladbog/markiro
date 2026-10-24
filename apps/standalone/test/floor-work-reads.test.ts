@@ -3,7 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { processScan } from "../src/floor/work/scan-pipeline.js";
-import { readOpenBox, readWorkTotals } from "../src/floor/work/work-reads.js";
+import {
+  readLostCodes,
+  readOpenBox,
+  readWorkTotals,
+  SHIFT_LOST_CODES_SQL,
+} from "../src/floor/work/work-reads.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
 import {
@@ -177,6 +182,43 @@ describe("what the work screen shows of a shift", () => {
     await expect(readWorkTotals(executor, PAIRING, SHIFT_ID)).resolves.toMatchObject({
       accepted: 1,
     });
+  });
+
+  it("counts the codes the host does not count for this station: answered conflict or rejected, or displaced (final review I2)", async () => {
+    const { db, executor } = openLocalDb();
+    const shift = await enteredShift(executor);
+    const context = scanContext(executor, shift, { newId: () => crypto.randomUUID() });
+    for (const serial of ["L1", "L2", "L3", "L4", "L5"]) await processScan(context, km(serial));
+    const scans = rows(db, "SELECT scan_id FROM floor_codes ORDER BY scanned_at").map((row) =>
+      String(row["scan_id"]),
+    );
+    expect(scans).toHaveLength(5);
+    const [ok = "", conflict = "", rejected = "", displaced = ""] = scans;
+    const id = { ok, conflict, rejected, displaced };
+    await expect(readLostCodes(executor, PAIRING, SHIFT_ID)).resolves.toBe(0);
+    const settle = db.prepare("UPDATE outbox SET outcome = ?, acked_at = ? WHERE id = ?");
+    settle.run("accepted", "2026-10-08T07:00:00.000Z", id.ok);
+    settle.run("conflict", "2026-10-08T07:00:00.000Z", id.conflict);
+    settle.run("rejected", "2026-10-08T07:00:00.000Z", id.rejected);
+    settle.run("accepted", "2026-10-08T07:00:00.000Z", id.displaced);
+    const [lostCode] = rows(db, "SELECT code_hash FROM floor_codes WHERE scan_id = ?", displaced);
+    db.prepare(
+      "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
+        "code_hash, box_id, detected_at, winner_shift_number, winner_same_device, " +
+        "winner_scanned_at, learned_at) VALUES (?, ?, 'c-1', ?, ?, ?, NULL, " +
+        "'2026-10-08T07:00:01Z', '0001', 0, '2026-10-08T06:00:00.000Z', " +
+        "'2026-10-08T07:00:02.000Z')",
+    ).run(HOST_ID, DEVICE_ID, id.displaced, SHIFT_ID, String(lostCode?.["code_hash"]));
+    // Lost: the conflict, the rejected and the displaced one; the accepted and the waiting count.
+    await expect(readLostCodes(executor, PAIRING, SHIFT_ID)).resolves.toBe(3);
+    await expect(readLostCodes(executor, PAIRING, OTHER_SHIFT)).resolves.toBe(0);
+    // Searched through the codes of the shift and each record by its own key.
+    const steps = db
+      .prepare(`EXPLAIN QUERY PLAN ${SHIFT_LOST_CODES_SQL}`)
+      .all(HOST_ID, DEVICE_ID, SHIFT_ID)
+      .map((step) => String(step["detail"]));
+    expect(steps.join("\n")).toContain("floor_codes_shift");
+    expect(steps.filter((step) => step.startsWith("SCAN "))).toEqual([]);
   });
 
   it("follows the scans: a code in, a duplicate out", async () => {

@@ -11,7 +11,7 @@ const smartCaptchaOrigin = "https://smartcaptcha.cloud.yandex.ru";
 const yandexWebmasterVerificationScript =
   "https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js";
 const expectedLandingCsp =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://releases.markiro.app https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const expectedVbtechCsp =
   "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const publicLandingBuildVariables = Object.freeze([
@@ -57,6 +57,7 @@ const kioskForbiddenPaths = Object.freeze([
   "/api/auth/session",
   "/api/admin/tenants",
   "/api/demo-requests",
+  "/api/landing-leads",
   "/1c_exchange",
   "/station",
   "/station/bootstrap",
@@ -484,6 +485,9 @@ function assertAuthorityContract(adapted, { alb }) {
       );
       assert.match(contentSecurityPolicies[0], /frame-src[^;]*https:\/\/mc\.yandex\.ru/);
       assert.match(contentSecurityPolicies[0], /connect-src[^;]*wss:\/\/mc\.yandex\.ru/);
+      // /skachat/ reads the installer pointer standalone/stable/latest.json from the release bucket.
+      assert.match(contentSecurityPolicies[0], /connect-src[^;]*https:\/\/releases\.markiro\.app/);
+      assert.doesNotMatch(contentSecurityPolicies[0], /script-src[^;]*releases\.markiro\.app/);
     } else {
       assert.doesNotMatch(contentSecurityPolicies[0], /smartcaptcha/i);
     }
@@ -512,7 +516,9 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET"], ["OPTIONS"], ["POST"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
-          : [["POST"], ...Array.from({ length: 14 }, () => ["GET", "HEAD"])],
+          : // Landing: the demo/lead POST, then GET/HEAD only, including the two
+            // permanent redirects of the retired film and kiosk pages.
+            [["POST"], ...Array.from({ length: 16 }, () => ["GET", "HEAD"])],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -577,16 +583,25 @@ function assertAuthorityContract(adapted, { alb }) {
   assert.ok(adminProxies.every(({ proxies }) => proxies.length === 1));
   const adminRoutes = applicationOrderedRouteTable(admin);
   for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
-    const request = { method, path: "/api/demo-requests" };
-    const selected = selectedAdaptedRoute(adminRoutes, request);
-    assert.deepEqual(
-      selected.match,
-      [{ path: ["/api/demo-requests"] }],
-      "admin demo-request denial must match the exact path for every method",
-    );
-    assertOnlyPlain404(selected, request);
+    for (const path of ["/api/demo-requests", "/api/landing-leads"]) {
+      const request = { method, path };
+      const selected = selectedAdaptedRoute(adminRoutes, request);
+      assert.deepEqual(
+        selected.match,
+        [{ path: ["/api/demo-requests", "/api/landing-leads"] }],
+        "admin public-form denial must match the exact paths for every method",
+      );
+      assertOnlyPlain404(selected, request);
+    }
   }
-  for (const path of ["/api/demo-request", "/api/demo-requests/", "/api/demo-requests/extra"]) {
+  for (const path of [
+    "/api/demo-request",
+    "/api/demo-requests/",
+    "/api/demo-requests/extra",
+    "/api/landing-lead",
+    "/api/landing-leads/",
+    "/api/landing-leads/extra",
+  ]) {
     const request = { method: "POST", path };
     const selected = selectedAdaptedRoute(adminRoutes, request);
     assert.equal(
@@ -640,38 +655,54 @@ function assertAuthorityContract(adapted, { alb }) {
   assertKioskRoutingBoundary(kiosk);
   const landingProxies = proxyRoutes(landing);
   assert.equal(landingProxies.length, 1);
-  assert.deepEqual(landingProxies[0].paths, ["/api/demo-requests"]);
+  assert.deepEqual(landingProxies[0].paths, ["/api/demo-requests", "/api/landing-leads"]);
   assert.deepEqual(landingProxies[0].methods, ["POST"]);
   assert.deepEqual(landingProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
   const landingRoutes = applicationOrderedRouteTable(landing);
-  const landingDemoRequest = { method: "POST", path: "/api/demo-requests" };
-  const selectedLandingDemoRequest = selectedAdaptedRoute(landingRoutes, landingDemoRequest);
-  assert.deepEqual(
-    nestedObjects(selectedLandingDemoRequest).filter(
-      (candidate) => candidate.handler === "request_body",
-    ),
-    [{ handler: "request_body", max_size: 4000 }],
-  );
-  assert.equal(
-    nestedObjects(selectedLandingDemoRequest).filter(
-      (candidate) => candidate.handler === "reverse_proxy",
-    ).length,
-    1,
-  );
-  assert.ok(
-    nestedObjects(selectedLandingDemoRequest).every(
-      (candidate) => candidate.handler !== "file_server" && candidate.handler !== "static_response",
-    ),
-  );
-  for (const method of ["GET", "HEAD", "PUT"]) {
-    const request = { method, path: "/api/demo-requests" };
-    assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
+  for (const path of ["/api/demo-requests", "/api/landing-leads"]) {
+    const landingFormRequest = { method: "POST", path };
+    const selectedLandingFormRequest = selectedAdaptedRoute(landingRoutes, landingFormRequest);
+    assert.deepEqual(
+      nestedObjects(selectedLandingFormRequest).filter(
+        (candidate) => candidate.handler === "request_body",
+      ),
+      [{ handler: "request_body", max_size: 4000 }],
+      path,
+    );
+    assert.equal(
+      nestedObjects(selectedLandingFormRequest).filter(
+        (candidate) => candidate.handler === "reverse_proxy",
+      ).length,
+      1,
+      path,
+    );
+    assert.deepEqual(
+      nestedObjects(selectedLandingFormRequest).filter(
+        (candidate) => candidate.handler === "rewrite",
+      ),
+      [{ handler: "rewrite", strip_path_prefix: "/api" }],
+      path,
+    );
+    assert.ok(
+      nestedObjects(selectedLandingFormRequest).every(
+        (candidate) =>
+          candidate.handler !== "file_server" && candidate.handler !== "static_response",
+      ),
+      path,
+    );
+    for (const method of ["GET", "HEAD", "PUT"]) {
+      const request = { method, path };
+      assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
+    }
   }
   for (const path of [
     "/api",
     "/api/demo-request",
     "/api/demo-requests/",
     "/api/demo-requests/extra",
+    "/api/landing-lead",
+    "/api/landing-leads/",
+    "/api/landing-leads/extra",
     "/api/other",
     "/api/auth/session",
     "/1c_exchange",
@@ -1439,6 +1470,45 @@ test("direct Caddy adapter exposes only the four exact legacy legal redirects pl
       redirects.some((route) => adaptedRouteMatches(route, { method: "GET", path: malformed })),
       false,
       `${malformed} must not match a legacy redirect`,
+    );
+  }
+});
+
+test("direct Caddy adapter moves the retired film and kiosk pages permanently to their home page", async () => {
+  const adapted = await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8"));
+  const routeTable = applicationOrderedRouteTable(applicationRoute(adapted, landingHost));
+  const permanent = routeTable.filter((route) =>
+    nestedObjects(route).some(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 301,
+    ),
+  );
+  const expected = new Map([
+    ["/kak-rabotaet/", "/{http.request.uri.prefixed_query}"],
+    ["/kak-rabotaet", "/{http.request.uri.prefixed_query}"],
+    ["/kak-rabotaet/index.html", "/{http.request.uri.prefixed_query}"],
+    ["/kak-rabotaet.md", "/{http.request.uri.prefixed_query}"],
+    ["/kiosk-samovydachi/", "/{http.request.uri.prefixed_query}"],
+    ["/kiosk-samovydachi.md", "/{http.request.uri.prefixed_query}"],
+    ["/en/how-it-works/", "/en/{http.request.uri.prefixed_query}"],
+    ["/en/how-it-works.md", "/en/{http.request.uri.prefixed_query}"],
+    ["/en/self-service-pickup-kiosk/", "/en/{http.request.uri.prefixed_query}"],
+    ["/en/self-service-pickup-kiosk", "/en/{http.request.uri.prefixed_query}"],
+  ]);
+  for (const [retired, location] of expected) {
+    const matching = permanent.filter((route) =>
+      adaptedRouteMatches(route, { method: "GET", path: retired }),
+    );
+    assert.equal(matching.length, 1, `${retired} must select one permanent redirect`);
+    const response = nestedObjects(matching[0]).find(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 301,
+    );
+    assert.deepEqual(response.headers?.Location, [location], retired);
+  }
+  for (const live of ["/", "/en/", "/faq/", "/kak-rabotaet-x/", "/en/how-it-works-x/"]) {
+    assert.equal(
+      permanent.some((route) => adaptedRouteMatches(route, { method: "GET", path: live })),
+      false,
+      `${live} must not be redirected`,
     );
   }
 });

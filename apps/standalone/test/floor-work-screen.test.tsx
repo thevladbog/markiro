@@ -269,6 +269,28 @@ describe("the work screen of a shift", () => {
     expect(rows(at.db, "SELECT count(*) AS n FROM outbox WHERE kind = 'scan'")).toEqual([{ n: 2 }]);
   });
 
+  it("feeds the next demo code from «Демо-код» of a demo shift, as a scan (spec 2026-10-21)", async () => {
+    const at = await station({ ...ENTERED, number: "DEMO-001" });
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    await screenWork.settled();
+    expect(screen.getByText(/Демо-смена: сканер не нужен/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Демо-код" }));
+    await waitFor(() => expect(shown("Принято в смене")).toBe("1"));
+    fireEvent.click(screen.getByRole("button", { name: "Демо-код" }));
+    await waitFor(() => expect(shown("Принято в смене")).toBe("2"));
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 2 }]);
+    expect(screenWork.props.touch).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers no «Демо-код» on a real shift", async () => {
+    const at = await station();
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    await screenWork.settled();
+    expect(screen.queryByRole("button", { name: "Демо-код" })).toBeNull();
+  });
+
   it("hands a scan on its way to the floor's gate, so a leave waits for it", async () => {
     const at = await station();
     const held = holdingWrites(at.local);
@@ -704,8 +726,9 @@ describe("the work screen never lets a full box take another code", () => {
     // operator closes the message nothing holds the full box any more.
     let reads = 0;
     const local: LocalExecutor = {
+      // The shared-shift figures' cache read (plan 2b) is not the entry's first read.
       query: (sql, params, row) =>
-        (reads += 1) === 1
+        !sql.includes("floor_shift_participation") && (reads += 1) === 1
           ? Promise.reject(new LocalDbError("statement_failed", "disk busy"))
           : at.local.query(sql, params, row),
       transaction: (statements) => at.local.transaction(statements),
@@ -769,8 +792,9 @@ describe("the work screen never lets a full box take another code", () => {
     let reads = 0;
     let failing = true;
     const local: LocalExecutor = {
+      // The shared-shift figures' cache read (plan 2b) is not the entry's first read.
       query: (sql, params, row) =>
-        (reads += 1) === 1
+        !sql.includes("floor_shift_participation") && (reads += 1) === 1
           ? Promise.reject(new LocalDbError("statement_failed", "disk busy"))
           : at.local.query(sql, params, row),
       transaction: (statements) =>

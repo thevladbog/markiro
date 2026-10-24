@@ -16,6 +16,7 @@ import {
   badgeSaltSchema,
   blockSizesUpdateSchema,
   bootstrapRequestSchema,
+  demoDataSummarySchema,
   bootstrapResponseSchema,
   boxReportRowsSchema,
   canonicalSaltSchema,
@@ -100,14 +101,17 @@ import {
   productUpdateSchema,
   LABEL_VERIFICATIONS,
   REPRINT_REASONS,
+  MAX_STATIONS,
   SHIFT_SUPPORTS,
   UNIT_LABEL_ERROR_CODES,
   UNIT_LABEL_EVENTS,
   unitLabelFactSchema,
   validationPrintSchema,
+  shiftCloseReasonSetSchema,
   shiftCloseSchema,
   shiftCreateSchema,
   shiftEnterSchema,
+  shiftLeaveSchema,
   shiftExportRecordSchema,
   shiftExportRowsSchema,
   shiftUpdateSchema,
@@ -271,6 +275,30 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
   });
 });
 
+describe("demo data (spec 2026-10-21)", () => {
+  it("the demo product rides the feed with its flag and leaves as a tombstone", () => {
+    const raw = fixture("changes-demo.json") as { items: Array<{ data?: unknown }> };
+    const changes = changesResponseSchema.parse(raw);
+    expect(productRecordSchema.parse(changes.items[0]?.data)).toEqual(raw.items[0]?.data);
+    expect(productRecordSchema.parse(changes.items[0]?.data).demo).toBe(true);
+    expect([changes.items[1]?.entity, changes.items[1]?.deleted]).toEqual(["products", true]);
+    const milk = changesResponseSchema.parse(fixture("changes-catalog.json")).items[4]?.data;
+    expect(productRecordSchema.parse(milk).demo).toBeUndefined();
+  });
+
+  it("the wizard sends demoData with the demo shift's production date", () => {
+    const request = fixture("bootstrap-request-demo.json") as Record<string, unknown>;
+    expect(bootstrapRequestSchema.parse(request).demoData).toEqual({
+      productionDate: "2026-10-21",
+    });
+    expect(bootstrapRequestSchema.safeParse({ ...request, demoData: true }).success).toBe(false);
+    expect(
+      bootstrapRequestSchema.safeParse({ ...request, demoData: { productionDate: "21.10.2026" } })
+        .success,
+    ).toBe(false);
+  });
+});
+
 /** `data` of item `index` of a feed fixture, as an object. */
 function feedRecord(name: string, index: number): Record<string, unknown> {
   const changes = changesResponseSchema.parse(fixture(name));
@@ -332,6 +360,7 @@ const RESPONSES = [
   ["sscc-state.json", ssccStateSchema],
   ["office-user-record.json", officeUserRecordSchema],
   ["error-unauthorized.json", errorBodySchema],
+  ["error-line-stations-in-use.json", errorBodySchema],
   ["pairing-code.json", pairingCodeSchema],
   ["changes-response.json", changesResponseSchema],
   ["counterparty-record.json", counterpartyRecordSchema],
@@ -343,6 +372,8 @@ const RESPONSES = [
   ["product-group.json", productGroupSchema],
   ["office-product.json", officeProductSchema],
   ["office-product-egais.json", officeProductSchema],
+  ["office-product-demo.json", officeProductSchema],
+  ["demo-data-summary.json", demoDataSummarySchema],
   ["product-photo-state.json", productPhotoStateSchema],
   ["template-summary.json", labelTemplateSummarySchema],
   ["label-template.json", labelTemplateSchema],
@@ -358,6 +389,10 @@ const RESPONSES = [
   ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
   ["device-shifts.json", deviceShiftsSchema],
+  ["device-shifts-participants.json", deviceShiftsSchema],
+  ["office-shift-participants.json", officeShiftSchema],
+  ["error-shift-line-full.json", errorBodySchema],
+  ["facts-response-part-close.json", factReceiptsSchema],
   ["device-shift-entered.json", enteredShiftSchema],
   ["device-shift-entered-pallets.json", enteredShiftSchema],
   ["device-shift-entered-sheet.json", enteredShiftSchema],
@@ -374,6 +409,7 @@ const REQUESTS = [
   ["bootstrap-request-address.json", bootstrapRequestSchema],
   ["office-login-request.json", officeLoginRequestSchema],
   ["bootstrap-request.json", bootstrapRequestSchema],
+  ["bootstrap-request-demo.json", bootstrapRequestSchema],
   ["org-profile-update.json", orgProfileUpdateSchema],
   ["org-logo-put.json", orgLogoPutSchema],
   ["product-photo-put.json", productPhotoPutSchema],
@@ -393,6 +429,7 @@ const REQUESTS = [
   ["employee-update.json", employeeUpdateSchema],
   ["line-create.json", lineCreateSchema],
   ["line-update.json", lineUpdateSchema],
+  ["line-update-max-stations.json", lineUpdateSchema],
   ["device-update.json", deviceUpdateSchema],
   ["pairing-code-request.json", pairingCodeRequestSchema],
   ["operator-create.json", operatorCreateSchema],
@@ -411,6 +448,10 @@ const REQUESTS = [
   ["shift-create-validation-print.json", shiftCreateSchema],
   ["shift-enter.json", shiftEnterSchema],
   ["shift-enter-empty.json", shiftEnterSchema],
+  ["shift-enter-multi.json", shiftEnterSchema],
+  ["shift-enter-handheld-multi.json", shiftEnterSchema],
+  ["shift-leave.json", shiftLeaveSchema],
+  ["shift-close-reason-set.json", shiftCloseReasonSetSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
@@ -554,15 +595,17 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
   };
 
   it("speaks protocol 4 and enters a shift naming what this station works", () => {
-    // Protocol 4 brought the modes, 5 the duplicate print, 6 the handheld on the host.
-    expect(PROTOCOL_VERSION).toBe(6);
+    // Protocol 4 brought the modes, 5 the duplicate print, 6 the handheld on the host, 7 several devices in one shift.
+    expect(PROTOCOL_VERSION).toBe(7);
     expect(SHIFT_SUPPORTS).toStrictEqual({
       validation: "validation-v1",
       validationDmDuplicate: "validation-dm-duplicate-v1",
       handheldHost: "handheld-host-v1",
+      multiStation: "multi-station-v1",
     });
-    // The station of part A works validation, and says so on every entry.
-    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter.json"));
+    // The station works validation, prints its duplicate and, since plan 2b, joins a shift
+    // another device works (`multi-station-v1`), and says so on every entry.
+    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter-multi.json"));
     expect(shiftEnterSchema.parse(STATION_SHIFT_ENTER)).toStrictEqual(STATION_SHIFT_ENTER);
   });
 
@@ -3483,7 +3526,7 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
   const frozen = entered.snapshot.validationPrint;
 
   it("speaks protocol 5 with the domain's names", () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+    expect(PROTOCOL_VERSION).toBe(7);
     expect(LABEL_VERIFICATIONS).toStrictEqual(["none", "required"]);
     expect(REPRINT_REASONS).toStrictEqual(["not_printed", "damaged", "lost"]);
     expect(UNIT_LABEL_EVENTS).toStrictEqual([
@@ -3883,7 +3926,7 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
   type Row = Record<string, unknown>;
 
   it("is the version of the current hello fixtures, and the future one stays ahead", () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+    expect(PROTOCOL_VERSION).toBe(7);
     for (const name of ["hello.json", "hello-restored.json", "hello-replaced.json"]) {
       expect((fixture(name) as Row).protocol, name).toBe(PROTOCOL_VERSION);
     }
@@ -3931,5 +3974,73 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
     expect(
       bootstrapRequestSchema.parse(fixture("bootstrap-request-address.json")).addressConfirmed,
     ).toBe(true);
+  });
+});
+
+describe("several devices in one shift (plan 2b)", () => {
+  it("reads a shared shift whose devices add up to its totals", () => {
+    const [shift] = deviceShiftsSchema.parse(fixture("device-shifts-participants.json")).shifts;
+    expect(shift).toBeDefined();
+    const byDevice = shift?.byDevice ?? [];
+    expect(byDevice.reduce((sum, part) => sum + part.accepted, 0)).toBe(shift?.totals?.accepted);
+    expect(shift?.participants?.map((participant) => participant.deviceId)).toStrictEqual(
+      byDevice.map((part) => part.deviceId),
+    );
+    expect(shift?.myState).toBe("active");
+    expect(shift?.maxStations).toBe(2);
+  });
+
+  it("reads a closed shift of the list with its participation and no totals", () => {
+    const closed = deviceShiftsSchema.parse(fixture("device-shifts-participants.json")).shifts[1];
+    expect(closed?.status).toBe("closed");
+    expect(closed?.myState).toBe("closed");
+    expect(closed?.maxStations).toBe(2);
+    expect(closed?.participants).toHaveLength(1);
+    expect(closed?.totals).toBeUndefined();
+    expect(closed?.byDevice).toBeUndefined();
+  });
+
+  it("reads the leave token of a participant and keeps a strict leave body", () => {
+    const list = deviceShiftsSchema.parse(fixture("device-shifts-participants.json"));
+    expect(list.shifts[0]?.participants?.map((part) => part.joinedRev)).toStrictEqual([12, 15]);
+    expect(list.shifts[1]?.participants?.[0]?.joinedRev).toBeUndefined();
+    expect(shiftLeaveSchema.parse({ joinedRev: 12 })).toStrictEqual({ joinedRev: 12 });
+    for (const body of [{}, { joinedRev: -1 }, { joinedRev: 1.5 }, { joinedRev: 1, extra: true }]) {
+      expect(shiftLeaveSchema.safeParse(body).success).toBe(false);
+    }
+  });
+
+  it("reads a shift of a host before protocol 7 without them", () => {
+    const [old] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts;
+    expect(old?.participants).toBeUndefined();
+    expect(old?.totals).toBeUndefined();
+    expect(old?.byDevice).toBeUndefined();
+    expect(
+      officeShiftSchema.parse(fixture("office-shift.json")).closeReasonMissing,
+    ).toBeUndefined();
+  });
+
+  it("reads a line's limit and bounds it in an update", () => {
+    expect(officeLineSchema.parse(fixture("office-line.json")).maxStations).toBe(2);
+    expect(lineUpdateSchema.safeParse({ maxStations: 16, expectedRev: 1 }).success).toBe(true);
+    for (const maxStations of [0, 17, 1.5]) {
+      expect(lineUpdateSchema.safeParse({ maxStations, expectedRev: 1 }).success).toBe(false);
+    }
+  });
+
+  it("bounds the line's limit and the participant's state like the host", () => {
+    expect(MAX_STATIONS).toBe(16);
+    const shift = fixture("device-shifts-participants.json") as {
+      shifts: Record<string, unknown>[];
+    };
+    const first = shift.shifts[0] as Record<string, unknown>;
+    for (const maxStations of [0, 17]) {
+      expect(deviceShiftsSchema.safeParse({ shifts: [{ ...first, maxStations }] }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      deviceShiftsSchema.safeParse({ shifts: [{ ...first, myState: "paused" }] }).success,
+    ).toBe(false);
   });
 });

@@ -1,5 +1,13 @@
 # Bootstrap Yandex origin для Station releases
 
+> **Выведено из работы 22.10.2026.** Yandex Cloud больше не используется:
+> Terraform `infra/yandex`, workflow `yandex-infrastructure.yml` и runbook
+> `yandex-infrastructure*.md` удалены, а бакет `releases.markiro.app` переехал в
+> Timeweb S3 за edge платформы ([хостинг выпусков](release-hosting.md)). Документ
+> сохранён как запись о том, как вводился dual-origin контур станции; его
+> команды больше не выполнимы. Секреты publisher теперь называются
+> `RELEASES_S3_*`.
+
 Это одноразовая операторская процедура. Она не является разрешением на
 Terraform apply, изменение DNS, запись GitHub secrets, cloud probe или
 публикацию release. Каждый отмеченный stop point требует отдельного человеческого

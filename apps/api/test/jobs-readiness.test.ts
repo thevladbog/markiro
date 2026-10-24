@@ -22,6 +22,7 @@ import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-status
 import type { PlatformReportRunnerService } from "../src/platform-reports/platform-report-runner.service";
 import type { SupportChatJobsService } from "../src/modules/support-chat/support-chat-jobs.service";
 import type { SupportChatSyncService } from "../src/modules/support-chat/support-chat-sync.service";
+import type { LandingLeadJobsService } from "../src/modules/landing-leads/landing-lead-jobs.service";
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -112,6 +113,7 @@ function serviceWith(
     platformReports?: PlatformReportRunnerService;
     supportChatJobs?: SupportChatJobsService;
     supportChatSync?: SupportChatSyncService;
+    landingLeads?: LandingLeadJobsService;
   } = {},
 ) {
   pgBossMock.instances.push(boss);
@@ -185,6 +187,7 @@ function serviceWith(
       options.platformReports,
       options.supportChatJobs,
       options.supportChatSync,
+      options.landingLeads,
     ),
     subscriptionStatus,
     signerScheduler,
@@ -192,6 +195,42 @@ function serviceWith(
 }
 
 describe("PgBossService readiness", () => {
+  it("runs the landing lead jobs in the legacy profile too, on their schedules only", async () => {
+    const workIds = [...WORKER_IDS, "lead-dispatch", "lead-digest", "lead-anonymize"];
+    const boss = fakeBoss({ workIds });
+    const landingLeads = {
+      dispatchNotifications: vi.fn(async () => 0),
+      sendDailyDigest: vi.fn(async () => "empty" as const),
+      anonymizeStale: vi.fn(async () => 0),
+    };
+    const { service } = serviceWith(boss, {
+      landingLeads: landingLeads as unknown as LandingLeadJobsService,
+    });
+    await service.onModuleInit();
+    try {
+      expect(boss.schedule).toHaveBeenCalledWith("dispatch-lead-notifications", "* * * * *");
+      expect(boss.schedule).toHaveBeenCalledWith("send-lead-digest", "0 6 * * *");
+      expect(boss.schedule).toHaveBeenCalledWith("anonymize-landing-leads", "40 2 * * *");
+      expect(landingLeads.sendDailyDigest).not.toHaveBeenCalled();
+      expect(landingLeads.anonymizeStale).not.toHaveBeenCalled();
+      await expect(service.checkReady()).resolves.toBeUndefined();
+      for (const [queue, job] of [
+        ["dispatch-lead-notifications", landingLeads.dispatchNotifications],
+        ["send-lead-digest", landingLeads.sendDailyDigest],
+        ["anonymize-landing-leads", landingLeads.anonymizeStale],
+      ] as const) {
+        const registration = boss.work.mock.calls.find(([name]) => name === queue) as unknown as [
+          string,
+          () => Promise<void>,
+        ];
+        await registration[1]();
+        expect(job).toHaveBeenCalledOnce();
+      }
+    } finally {
+      await service.onModuleDestroy();
+    }
+  });
+
   it.each([false, true])(
     "accepts the extra support-chat worker with platform reports enabled=%s",
     async (reportsEnabled) => {

@@ -11,7 +11,7 @@ import { recordSmokeDiagnostic } from "./smoke-diagnostic.mjs";
 const APPLICATION_CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const LANDING_CSP =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://releases.markiro.app https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const VBTECH_CSP =
   "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const LANDING_SITE_URL = "https://markiro.app";
@@ -122,6 +122,18 @@ export const ROUTE_CHECKS = Object.freeze([
     kind: "not-found",
     expected: "404, not HTML on admin authority",
   }),
+  Object.freeze({
+    method: "GET",
+    path: "/api/landing-leads",
+    kind: "not-found",
+    expected: "404, not HTML on admin authority",
+  }),
+  Object.freeze({
+    method: "POST",
+    path: "/api/landing-leads",
+    kind: "not-found",
+    expected: "404, not HTML on admin authority",
+  }),
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
 
@@ -162,7 +174,6 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/en/chestny-znak-serialization/", "landing-page"]),
   Object.freeze(["GET", "/en/sscc-and-aggregation/", "landing-page"]),
   Object.freeze(["GET", "/en/packing-workstation/", "landing-page"]),
-  Object.freeze(["GET", "/en/self-service-pickup-kiosk/", "landing-page"]),
   Object.freeze(["GET", "/en/1c-integration/", "landing-page"]),
   Object.freeze(["GET", "/en/offline-production/", "landing-page"]),
   Object.freeze(["GET", "/en/faq/", "landing-page"]),
@@ -194,6 +205,12 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["POST", "/api/demo-request", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests/", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests/extra", "not-found"]),
+  Object.freeze(["GET", "/api/landing-leads", "not-found"]),
+  Object.freeze(["HEAD", "/api/landing-leads", "not-found"]),
+  Object.freeze(["PUT", "/api/landing-leads", "not-found"]),
+  Object.freeze(["POST", "/api/landing-lead", "not-found"]),
+  Object.freeze(["POST", "/api/landing-leads/", "not-found"]),
+  Object.freeze(["POST", "/api/landing-leads/extra", "not-found"]),
   Object.freeze(["POST", "/api/other", "not-found"]),
   Object.freeze(["GET", "/missing/", "branded-not-found"]),
 ]);
@@ -1455,6 +1472,25 @@ async function runLandingSmoke(options, client) {
   assertLandingDemoSubmission(
     demoSubmission,
     demoSubmissionBody,
+    options.landingDemoSubmissionState,
+  );
+  // The lead form shares the demo form's switch, captcha and edge route, so an
+  // empty body proves the same two states without creating a lead or a mail.
+  const leadSubmission = await publicRequest(client, new URL("/api/landing-leads", baseUrl), {
+    method: "POST",
+    body: "{}",
+    headers: { "content-type": "application/json" },
+  });
+  const leadSubmissionBody = await getText(leadSubmission);
+  assertHeaders(
+    leadSubmission,
+    new URL(baseUrl).protocol === "https:",
+    "landing POST /api/landing-leads",
+    LANDING_CSP,
+  );
+  assertLandingDemoSubmission(
+    leadSubmission,
+    leadSubmissionBody,
     options.landingDemoSubmissionState,
   );
   return { releaseSha: root.headers.get("x-markiro-release-sha") };

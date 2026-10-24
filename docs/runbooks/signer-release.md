@@ -46,10 +46,10 @@ repository-level secret.
 | `SIGNER_TAURI_SIGNING_PRIVATE_KEY`          | secret   | The minisign private key that signs every update on every customer machine         |
 | `SIGNER_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret   | Its password                                                                       |
 | `STATION_RELEASE_REPOSITORY_TOKEN`          | secret   | Fine-grained token with release Contents read/write in the distribution repository |
-| `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`      | secret   | Object storage credential, shared with the Station's releases                      |
-| `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`  | secret   | Object storage credential                                                          |
-| `YANDEX_STATION_RELEASE_BUCKET`             | variable | The bucket behind `releases.markiro.app`                                           |
-| `YANDEX_STATION_RELEASE_ENDPOINT`           | variable | `https://storage.yandexcloud.net`                                                  |
+| `RELEASES_S3_ACCESS_KEY_ID`                 | secret   | Object storage credential, shared with the Station's releases                      |
+| `RELEASES_S3_SECRET_ACCESS_KEY`             | secret   | Object storage credential                                                          |
+| `RELEASES_S3_BUCKET`                        | variable | The bucket behind `releases.markiro.app`                                           |
+| `RELEASES_S3_ENDPOINT`                      | variable | `https://s3.twcstorage.ru`                                                         |
 
 The matching **public** key is committed as `plugins.updater.pubkey` in
 `apps/signer/src-tauri/tauri.conf.json`. It is not secret, and replacing it
@@ -60,13 +60,13 @@ The environment is protected by `required_reviewers`, so a dispatch waits for an
 approval before the job starts. That is deliberate: the approval is the second
 pair of eyes on a build that will install itself on customer machines.
 
-The bucket's policy lives in `infra/yandex/modules/station-releases/main.tf`
-and grants the publisher **and the public** both `station/*` and `signer/*`.
-The public grant matters as much as the write grant: without it the workflow's
-read-back fails and, worse, the agent's updater could never fetch
+The bucket is the Timeweb S3 release bucket behind `releases.markiro.app`; its
+setup is in [release hosting](release-hosting.md). The publisher key must be
+able to write `signer/*`, and the public must be able to read it, both in the
+bucket and through the platform edge, which forwards only the exact signer
+layouts. The public read matters as much as the write grant: without it the
+workflow's read-back fails and, worse, the agent's updater could never fetch
 `latest.json` — a release that goes green and silently never reaches anyone.
-The module is still named `station-releases` because renaming it would change
-the terraform address and destroy the bucket; it serves both products.
 
 ## Cutting a release
 

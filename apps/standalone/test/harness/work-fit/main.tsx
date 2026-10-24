@@ -40,6 +40,9 @@ const photoKind = query.get("photo") ?? "none";
 /** `big=1`: a six-figure count over a seven-figure plan; `long=1`: a long counterparty's name. */
 const big = query.get("big") === "1";
 const longName = query.get("long") === "1";
+// Plan 2b: the band of a shift several devices work, its figures old without the link.
+const shared = query.get("shared") === "1";
+const stale = query.get("stale") === "1";
 
 /** A bottle-ish picture drawn on a canvas: transparent PNG, opaque PNG (white), or a JPEG. */
 function drawPhoto(kind: string): { media: string; base64: string } | null {
@@ -185,6 +188,16 @@ function Harness() {
                   accepted={big ? 123456 : items}
                   plannedQty={big ? 1200000 : 600}
                   modeLabel={validation ? "Проверка" : "Агрегация"}
+                  {...(shared
+                    ? {
+                        shared: {
+                          mine: big ? 61728 : items,
+                          total: big ? 123456 : items * 3,
+                          asOf: "2026-10-08T09:41:07Z",
+                          stale,
+                        },
+                      }
+                    : {})}
                   {...(validation ? { refused: { duplicates: 1, errors: 0 } } : {})}
                 />
                 <div

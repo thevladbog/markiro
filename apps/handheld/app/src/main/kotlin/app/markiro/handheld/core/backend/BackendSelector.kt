@@ -33,4 +33,5 @@ class BackendSelector(
     override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto =
         current().boxRegistry(since, until, cursor, limit)
     override suspend fun hubCounts(): HubCounts = current().hubCounts()
+    override suspend fun leave(shiftId: String): String? = current().leave(shiftId)
 }

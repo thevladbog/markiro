@@ -1,0 +1,311 @@
+---
+import { Picture } from "astro:assets";
+
+import officeOverview from "../../assets/standalone/office-overview-dark.png";
+import labelBox from "../../assets/standalone/label-box-100x150.png";
+import labelPallet from "../../assets/standalone/label-pallet-100x150.png";
+import stationAggregation from "../../assets/standalone/station-aggregation-dark-r3.png";
+import stationDuplicate from "../../assets/standalone/station-duplicate-dark-r3.png";
+import stationOffline from "../../assets/standalone/station-hub-offline-dark-r4.png";
+import tsdWork from "../../assets/standalone/tsd-work-dark.png";
+import {
+  CALL_HREF,
+  DOWNLOAD_PATH,
+  HOME_COPY,
+  PRICING_PATH,
+  TRIAL_FACTS,
+} from "../../content/autonom";
+import { homeCover } from "../../content/home-images";
+import type { SeoPageDefinition } from "../../content/pages";
+import {
+  ADDONS,
+  FIRST_SITES_SEATS_LEFT,
+  findTariff,
+  formatRoubles,
+  LAUNCH_OPTIONS,
+  PRICE_TERMS,
+} from "../../content/pricing";
+import { buildPageGraph } from "../../lib/seo";
+import { readPublicSiteConfig } from "../../lib/site-config";
+import AutonomPage from "./AutonomPage.astro";
+import ClientStrip from "./ClientStrip.astro";
+import FaqSection from "./FaqSection.astro";
+import FinalCta from "./FinalCta.astro";
+import Icon from "./Icon.astro";
+import PriceCards from "./PriceCards.astro";
+
+interface Props {
+  page: SeoPageDefinition;
+}
+
+const { page } = Astro.props;
+const phone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone;
+const copy = HOME_COPY;
+const covers = [homeCover("ru", "mkr-ins-01"), homeCover("ru", "mkr-ins-02"), homeCover("ru", "mkr-ins-09")];
+const startPrice = formatRoubles(findTariff("start").priceFrom);
+---
+
+<AutonomPage metadata={page} graph={buildPageGraph(page)} phone={phone}>
+  <section class="ax-hero" aria-labelledby="hero-title">
+    <div class="ax-container">
+      <div class="ax-hero__copy">
+        <div class="ax-hero__title">
+          <p class="ax-badge"><span class="ax-badge__dot" aria-hidden="true"></span>{copy.hero.badge}</p>
+          <h1 class="ax-h1" id="hero-title">
+            <span class="ax-h1__light">{copy.hero.titleLight[0]}<br />{copy.hero.titleLight[1]}</span>{" "}
+            <span class="ax-h1__strong">{copy.hero.titleStrong}</span>
+          </h1>
+        </div>
+        <div class="ax-hero__action">
+          <p class="ax-lead">{copy.hero.lead}</p>
+          <div class="ax-actions ax-actions--hero">
+            <a class="ax-btn ax-btn--accent ax-btn--lg ax-btn--glow" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="hero">
+              <span class="ax-only-wide">Скачать пробную версию</span>
+              <span class="ax-only-narrow">Прислать ссылку на почту</span>
+              <span class="ax-btn__icon">
+                <Icon name="download" size={18} class="ax-only-wide" />
+                <Icon name="mail" size={18} class="ax-only-narrow" />
+              </span>
+            </a>
+            <p class="ax-note ax-only-narrow">{copy.hero.phoneNote}</p>
+            <a class="ax-btn ax-btn--outline ax-btn--lg" href={PRICING_PATH} data-analytics="landing_pricing_click" data-placement="hero">
+              Цены от {startPrice} ₽ в год
+            </a>
+          </div>
+          <ul class="ax-facts">
+            {TRIAL_FACTS.map((fact) => <li><Icon name="check" size={15} />{fact}</li>)}
+          </ul>
+        </div>
+      </div>
+
+      <figure class="ax-shot ax-shot--hero">
+        <div class="ax-shot__frame">
+          <Picture
+            src={stationAggregation}
+            alt={copy.hero.screenAlt}
+            widths={[390, 720, 1080, 1440, 2160]}
+            sizes="(min-width: 1440px) 1316px, calc(100vw - 2rem)"
+            formats={["avif", "webp"]}
+            loading="eager"
+            fetchpriority="high"
+          />
+        </div>
+        <figcaption class="ax-shot__caption ax-only-narrow">{copy.hero.screenCaption}</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <ClientStrip kicker={copy.clients.kicker} />
+
+  <section class="ax-section ax-local" id="bez-oblaka" data-theme="dark" aria-labelledby="local-title">
+    <div class="ax-container">
+      <div class="ax-local__grid">
+        <div class="ax-local__text">
+          <p class="ax-kicker">{copy.local.kicker}</p>
+          <h2 class="ax-h2" id="local-title">{copy.local.title}</h2>
+          <p class="ax-lead">{copy.local.lead}</p>
+          <figure class="ax-network" aria-label="Схема: главный ПК в офисе, две станции на линиях и ТСД на складе в локальной сети завода">
+            <div class="ax-network__head">
+              <span class="ax-network__label">{copy.local.networkLabel}</span>
+              <span class="ax-network__badge"><Icon name="wifi-off" size={16} />{copy.local.networkBadge}</span>
+            </div>
+            <div class="ax-network__hub">
+              <Icon name="office" size={22} />
+              <span><strong>{copy.local.hub.title}</strong><small>{copy.local.hub.note}</small></span>
+            </div>
+            <div class="ax-network__wires" aria-hidden="true"></div>
+            <ul class="ax-network__nodes">
+              {copy.local.nodes.map((node) => (
+                <li>
+                  <Icon name={node.icon} size={20} />
+                  <strong>{node.title}</strong>
+                  <small>{node.note}</small>
+                </li>
+              ))}
+            </ul>
+          </figure>
+        </div>
+        <figure class="ax-shot ax-shot--panel">
+          <div class="ax-shot__frame">
+            <Picture
+              src={stationOffline}
+              alt={copy.local.screenAlt}
+              widths={[390, 644, 1288]}
+              sizes="(min-width: 1200px) 644px, calc(100vw - 2rem)"
+              formats={["avif", "webp"]}
+              loading="lazy"
+            />
+          </div>
+          <figcaption class="ax-shot__status"><span class="ax-dot ax-dot--warn" aria-hidden="true"></span>{copy.local.screenCaption}</figcaption>
+        </figure>
+      </div>
+      <ul class="ax-figures">
+        {copy.local.facts.map((fact) => (
+          <li><strong>{fact.value}</strong><span>{fact.text}</span></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="ax-section ax-section--card" id="produkt" aria-labelledby="product-title">
+    <div class="ax-container">
+      <div class="ax-section__head ax-section__head--split">
+        <div>
+          <p class="ax-kicker">{copy.product.kicker}</p>
+          <h2 class="ax-h2" id="product-title">{copy.product.title}</h2>
+        </div>
+        <p class="ax-muted">{copy.product.lead}</p>
+      </div>
+      <div class="ax-cards ax-cards--wide-left">
+        <article class="ax-card ax-card--screen">
+          <h3 class="ax-h3">{copy.product.station.title}</h3>
+          <p class="ax-muted">{copy.product.station.text}</p>
+          <ul class="ax-tags">{copy.product.station.tags.map((tag) => <li>{tag}</li>)}</ul>
+          <div class="ax-shot__frame ax-shot__frame--flat">
+            <Picture src={stationDuplicate} alt={copy.product.station.alt} widths={[390, 804, 1608]} sizes="(min-width: 1200px) 804px, calc(100vw - 4rem)" formats={["avif", "webp"]} loading="lazy" />
+          </div>
+        </article>
+        <article class="ax-card ax-card--screen">
+          <h3 class="ax-h3">{copy.product.handheld.title}</h3>
+          <p class="ax-muted">{copy.product.handheld.text}</p>
+          <div class="ax-stage">
+            <div class="ax-phone">
+              <Picture src={tsdWork} alt={copy.product.handheld.alt} widths={[216, 432, 648]} sizes="216px" formats={["avif", "webp"]} loading="lazy" />
+            </div>
+          </div>
+        </article>
+        <article class="ax-card ax-card--screen">
+          <h3 class="ax-h3">{copy.product.office.title}</h3>
+          <p class="ax-muted">{copy.product.office.text}</p>
+          <ul class="ax-tags">{copy.product.office.tags.map((tag) => <li>{tag}</li>)}</ul>
+          <div class="ax-shot__frame ax-shot__frame--flat">
+            <Picture src={officeOverview} alt={copy.product.office.alt} widths={[390, 736, 1440]} sizes="(min-width: 1200px) 736px, calc(100vw - 4rem)" formats={["avif", "webp"]} loading="lazy" />
+          </div>
+        </article>
+        <article class="ax-card ax-card--screen">
+          <h3 class="ax-h3">{copy.product.labels.title}</h3>
+          <p class="ax-muted">{copy.product.labels.text}</p>
+          <div class="ax-stage ax-stage--labels">
+            <Picture class="ax-label ax-label--left" src={labelBox} alt={copy.product.labels.boxAlt} widths={[200, 400]} sizes="200px" formats={["avif", "webp"]} loading="lazy" />
+            <Picture class="ax-label ax-label--right" src={labelPallet} alt={copy.product.labels.palletAlt} widths={[200, 400]} sizes="200px" formats={["avif", "webp"]} loading="lazy" />
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="ax-section" id="start" aria-labelledby="start-title">
+    <div class="ax-container">
+      <p class="ax-kicker">{copy.start.kicker}</p>
+      <h2 class="ax-h2 ax-h2--narrow" id="start-title">{copy.start.title}</h2>
+      <ol class="ax-steps">
+        {copy.start.steps.map((step, index) => (
+          <li class:list={{ "ax-steps__last": index === copy.start.steps.length - 1 }}>
+            <span class="ax-steps__index">0{index + 1}</span>
+            <h3 class="ax-h3">{step.title}</h3>
+            <p class="ax-muted">{step.text}</p>
+          </li>
+        ))}
+      </ol>
+      <div class="ax-panel ax-requirements">
+        <p class="ax-kicker ax-kicker--muted">{copy.start.requirementsTitle}</p>
+        <ul>
+          {copy.start.requirements.map((item) => (
+            <li>
+              <Icon name={item.icon} size={22} />
+              <div><strong>{item.title}</strong><span>{item.text}</span></div>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div class="ax-actions ax-actions--row">
+        <a class="ax-btn ax-btn--accent ax-btn--lg" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="start">
+          <span>Скачать пробную версию</span>
+          <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
+        </a>
+        <a class="ax-link" href={CALL_HREF} data-analytics="landing_demo_click" data-placement="start">{copy.start.callLink} <Icon name="arrow-right" size={16} /></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="ax-section ax-section--card" id="tseny" aria-labelledby="pricing-title">
+    <div class="ax-container">
+      <div class="ax-section__head ax-section__head--split">
+        <div>
+          <p class="ax-kicker">{copy.pricing.kicker}</p>
+          <h2 class="ax-h2 ax-h2--narrow" id="pricing-title">{copy.pricing.title}</h2>
+        </div>
+        <aside class="ax-offer">
+          <p class="ax-kicker">Первые 10 площадок</p>
+          <p>−30% на первый год для «Линии», «Цеха» и «Завода». Осталось мест: {FIRST_SITES_SEATS_LEFT}.</p>
+        </aside>
+      </div>
+      <PriceCards />
+      <div class="ax-price-notes">
+        <div>
+          <p class="ax-kicker ax-kicker--muted">Дополнения к «Линии» и «Цеху»</p>
+          <dl class="ax-price-list">
+            {ADDONS.map((item) => <div><dt>{item.name}</dt><dd>{item.price}</dd></div>)}
+          </dl>
+        </div>
+        <div>
+          <p class="ax-kicker ax-kicker--muted">Запуск</p>
+          <dl class="ax-price-list">
+            {LAUNCH_OPTIONS.map((item) => <div><dt>{item.name}</dt><dd>{item.price}</dd></div>)}
+          </dl>
+        </div>
+        <div>
+          <p class="ax-kicker ax-kicker--muted">Условия</p>
+          <ul class="ax-terms">{PRICE_TERMS.map((term) => <li>{term}</li>)}</ul>
+          <a class="ax-link" href={PRICING_PATH}>Все цены и примеры расчёта <Icon name="arrow-right" size={16} /></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="ax-section" id="kto" aria-labelledby="people-title">
+    <div class="ax-container">
+      <p class="ax-kicker">{copy.people.kicker}</p>
+      <h2 class="ax-h2" id="people-title">{copy.people.title}</h2>
+      <div class="ax-people">
+        <article class="ax-card ax-founder">
+          <div class="ax-founder__head">
+            <span class="ax-avatar" aria-hidden="true">{copy.people.founder.initials}</span>
+            <div>
+              <h3 class="ax-h3">{copy.people.founder.name}</h3>
+              <p class="ax-mono-note">{copy.people.founder.role}</p>
+            </div>
+          </div>
+          <p class="ax-founder__text">{copy.people.founder.text}</p>
+          <ul class="ax-checklist ax-checklist--loose">
+            {copy.people.founder.promises.map((item) => <li><Icon name="check" size={16} />{item}</li>)}
+          </ul>
+        </article>
+        <article class="ax-card ax-docs">
+          <div class="ax-docs__text">
+            <h3 class="ax-h3">{copy.people.docs.title}</h3>
+            <p class="ax-muted">{copy.people.docs.text}</p>
+            <ul class="ax-docs__links">
+              {copy.people.docs.links.map((link) => (
+                <li><a href={link.href}>{link.label}<Icon name="arrow-up-right" size={16} /></a></li>
+              ))}
+            </ul>
+          </div>
+          <div class="ax-docs__covers" aria-hidden="true">
+            {covers.map((cover, index) => (
+              <Picture class={`ax-docs__cover ax-docs__cover--${index + 1}`} src={cover} alt="" widths={[180, 360]} sizes="180px" formats={["avif", "webp"]} loading="lazy" />
+            ))}
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <FaqSection id="voprosy" kicker={copy.faq.kicker} title={copy.faq.title} entries={page.faq ?? []}>
+    Если ответа здесь нет, напишите в Telegram <a href="https://t.me/thevladbog">@thevladbog</a> или на
+    <a href="mailto:hello@markiro.app">hello@markiro.app</a>.
+  </FaqSection>
+
+  <FinalCta phone={phone} id="demo" />
+
+</AutonomPage>

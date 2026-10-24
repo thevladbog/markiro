@@ -1,4 +1,4 @@
-import { formatSsccHri, type ShiftCloseReasonCode } from "@markiro/domain";
+import { formatSsccHri, type LabelTemplateSpec, type ShiftCloseReasonCode } from "@markiro/domain";
 import type { TFunction } from "i18next";
 import {
   useCallback,
@@ -27,7 +27,13 @@ import {
   type CloseNote,
   type ClosedNumbers,
 } from "../close/ShiftClosePanel.js";
-import { closeShift, readCloseSummary, type CloseSummary } from "../close/shift-close.js";
+import {
+  closeShift,
+  readCloseSummary,
+  readPartState,
+  type CloseSummary,
+  type PartState,
+} from "../close/shift-close.js";
 import {
   BoxUnavailableError,
   clearOpenBox,
@@ -67,6 +73,7 @@ import {
   type PalletContext,
   type ShiftPallets,
 } from "../pallets/pallets.js";
+import { isDemoShiftNumber, nextDemoCode } from "../demo/demo-codes.js";
 import { LabelPanel, type LabelNote } from "../print/LabelPanel.js";
 import {
   boxLabelStep,
@@ -97,7 +104,9 @@ import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
+import { activeOthers, sharedCount, sharedParticipation } from "../shifts/shift-participation.js";
 import { formatQuantity } from "../shifts/shift-text.js";
+import { useShiftParticipation } from "./use-shift-participation.js";
 import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
 import {
   printsUnitLabels,
@@ -125,6 +134,7 @@ import { processScan, type ScanContext, type ScanOutcome } from "./scan-pipeline
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
 import {
+  readLostCodes,
   readOpenBox,
   readOpenBoxSerials,
   readValidationCounts,
@@ -271,6 +281,21 @@ export interface WorkScreenProps {
    * shift's close are finished as usual.
    */
   officeClosed?: boolean;
+  /**
+   * `ShellState.shiftReads.done` (plan 2b): what the host's last read said of a shared shift is
+   * read again after every read of the list. Absent: read once.
+   */
+  shiftReads?: number;
+  /**
+   * Asks the link to read the host's list now (`HostLinkControls.requestShifts`, plan 2b): a
+   * shared shift's totals are asked every `SHIFT_TOTALS_POLL_MS` while the link is up.
+   */
+  onRefreshShifts?: () => void;
+  /**
+   * `ShellState.outboxVersion` (plan 2b): the closed part's state is read again after every batch
+   * of receipts.
+   */
+  outboxVersion?: number;
 }
 
 /** What stops the scanning until the operator acts (stage 2a spec §5.7.3). */
@@ -533,6 +558,11 @@ interface Live {
 
 type LiveRef = MutableRefObject<Live>;
 
+/** The panel's `demoPreview`, left out for a real shift (`exactOptionalPropertyTypes`). */
+function demoPreviewProp(spec: LabelTemplateSpec | undefined): { demoPreview?: LabelTemplateSpec } {
+  return spec === undefined ? {} : { demoPreview: spec };
+}
+
 function pairingOf(now: Live): Pairing {
   return { hostId: now.hostId, deviceId: now.deviceId };
 }
@@ -781,6 +811,15 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
  */
 export function WorkScreen(props: WorkScreenProps) {
   const { shift, leaving, onLeave, source, linkHeld = false, officeClosed = false } = props;
+  // A demo shift (spec 2026-10-21): «Демо-код» instead of a scanner, the label on the screen
+  // instead of a printer.
+  const demo = isDemoShiftNumber(shift.copy.number);
+  const demoPreviewOf = (job: { purpose: "box" | "pallet" }): LabelTemplateSpec | undefined =>
+    !demo
+      ? undefined
+      : job.purpose === "pallet"
+        ? shift.snapshot.palletTemplate?.spec
+        : shift.snapshot.boxTemplate.spec;
   const { t } = useTranslation();
   const [totals, setTotals] = useState<WorkTotals | null>(null);
   const [last, setLast] = useState<Last | null>(null);
@@ -809,6 +848,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const palletsMissing = !validation && shift.copy.palletsEnabled && pallets === null;
   const [stop, setStopState] = useState<Stop | null>(palletsMissing ? PALLETS_MISSING : null);
   const [planReached, setPlanReached] = useState(false);
+  // A shared shift's plan notice was dismissed (plan 2b): it is derived from the whole shift's
+  // count, and comes back no more.
+  const [planDismissed, setPlanDismissed] = useState(false);
   // The label the work stopped for: what its panel says under it, and whether a decision runs.
   const [labelNote, setLabelNote] = useState<LabelNote | null>(null);
   const [labelBusy, setLabelBusy] = useState(false);
@@ -832,6 +874,72 @@ export function WorkScreen(props: WorkScreenProps) {
   const [counts, setCounts] = useState<ValidationCounts | null>(null);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
+  // Plan 2b: what the host's last read said of a shift several devices may work; `null` for a
+  // solo shift, whose screen is stage 2a's.
+  const participation = useShiftParticipation({
+    local: props.local,
+    pairing: props.pairing,
+    shiftId: shift.copy.id,
+    shiftReads: props.shiftReads ?? 0,
+    online: props.online,
+    ...(props.onRefreshShifts === undefined ? {} : { onRefresh: props.onRefreshShifts }),
+  });
+  const sharedPart = sharedParticipation(participation);
+  // What became of the close of this station's part of a shared shift (plan 2b).
+  const [partState, setPartState] = useState<PartState | null>(null);
+  // Read when the part is closed here, and again after every batch of receipts and every list.
+  const closedHere = stop?.kind === "closed";
+  const sharedHere = sharedPart !== null;
+  const { hostId: partHost, deviceId: partDevice } = props.pairing;
+  useEffect(() => {
+    if (!closedHere || !sharedHere) return undefined;
+    let cancelled = false;
+    readPartState(props.local, { hostId: partHost, deviceId: partDevice }, shift.copy.id).then(
+      (state) => {
+        // An unknown read (no row: the shift copy is gone) keeps what was known before.
+        if (!cancelled && state !== null) setPartState(state);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    closedHere,
+    sharedHere,
+    props.local,
+    partHost,
+    partDevice,
+    shift.copy.id,
+    props.outboxVersion,
+    props.shiftReads,
+  ]);
+
+  // This station's codes the host counts for no one here (final review I2): read while the shift
+  // is shared, again after every batch of receipts (a `conflict`), every notice read that brought a
+  // displacement (both change the outbox's version) and every list. A failed read keeps the last.
+  const [lost, setLost] = useState(0);
+  useEffect(() => {
+    if (!sharedHere) return undefined;
+    let cancelled = false;
+    readLostCodes(props.local, { hostId: partHost, deviceId: partDevice }, shift.copy.id).then(
+      (count) => {
+        if (!cancelled) setLost(count);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    sharedHere,
+    props.local,
+    partHost,
+    partDevice,
+    shift.copy.id,
+    props.outboxVersion,
+    props.shiftReads,
+  ]);
 
   // How the shift's labels are rendered: a test's own, else from the shift's snapshot, with
   // the organization logo it froze or the Markiro one (plan А4, #703).
@@ -1337,7 +1445,7 @@ export function WorkScreen(props: WorkScreenProps) {
   /** The shift's close summary as this station's records have it now. */
   const readSummaryNow = useCallback((): Promise<CloseSummary> => {
     const now = live.current;
-    return readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
+    return readCloseSummary(now.local, pairingOf(now), now.shift.copy.id, now.online);
   }, []);
 
   /**
@@ -1378,9 +1486,12 @@ export function WorkScreen(props: WorkScreenProps) {
       try {
         const now = live.current;
         const guards = [openPalletGuard(pairingOf(now), now.shift.copy.id)];
-        const result = await closeShift(boxContextOf(live), reason, guards);
+        const result = await closeShift(boxContextOf(live), reason, guards, live.current.online);
         if (result.kind === "closed") {
           live.current.onRecorded();
+          // The record was just written to the outbox: its part waits there (final review m4),
+          // until the stored receipt's read says more.
+          setPartState("queued");
           setStop({ kind: "closed", record: result.record });
           return;
         }
@@ -1960,13 +2071,19 @@ export function WorkScreen(props: WorkScreenProps) {
   const readSummary = () =>
     queue.run(async () => {
       const now = live.current;
-      await showSummary(await readCloseSummary(now.local, pairingOf(now), now.shift.copy.id), null);
+      await showSummary(
+        await readCloseSummary(now.local, pairingOf(now), now.shift.copy.id, now.online),
+        null,
+      );
     });
 
   /** «Закрыть смену», pressed while nothing stops the work: the summary first. */
   const openClose = () => {
     if (leavingNow() || stopRef.current !== null) return;
     setPlanReached(false);
+    // Only a shared plan notice that was showing is dismissed (final review m5): opened before the
+    // plan was reached, the close takes away no notice that has yet to come.
+    if (sharedReached) setPlanDismissed(true);
     setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
     void live.current
       .track(readSummary())
@@ -2144,6 +2261,31 @@ export function WorkScreen(props: WorkScreenProps) {
     resumeWork();
   };
 
+  /**
+   * «Демо-код» (spec 2026-10-21): the next demo code this station holds no scan of, handed to
+   * the gate as a scan of the scanner is — the one way into the pipeline.
+   */
+  const demoScan = () => {
+    const now = live.current;
+    now.touch();
+    if (leavingNow()) {
+      refuse(true);
+      return;
+    }
+    void now
+      .track(
+        queue.run(async () => {
+          const raw = await nextDemoCode(
+            now.local,
+            pairingOf(now),
+            now.shift.snapshot.product.gtin14,
+          );
+          if (raw !== null) await scan(raw);
+        }),
+      )
+      .catch(() => undefined);
+  };
+
   useEffect(
     () =>
       source.start((raw) => {
@@ -2319,6 +2461,34 @@ export function WorkScreen(props: WorkScreenProps) {
   const openBox = totals?.openBox ?? null;
   const items = openBox?.itemCount ?? 0;
   const canClose = items > 0 && stop === null && !leaving;
+  // Plan 2b: the whole shift's count — the others' part by the host and this station's own codes —
+  // and the plan reached by it, said once until dismissed or the close opens.
+  const shared =
+    sharedPart === null
+      ? null
+      : sharedCount(sharedPart, props.pairing.deviceId, totals?.accepted ?? 0, lost);
+  const sharedReached =
+    shared !== null &&
+    plannedQty !== null &&
+    plannedQty > 0 &&
+    shared.total >= plannedQty &&
+    !planDismissed &&
+    stop?.kind !== "close" &&
+    stop?.kind !== "closed";
+  const planShowing = shared === null ? planReached : sharedReached;
+  // Plan 2b (final review I1): the host has this station's part as `left` and the other devices
+  // hold every slot, by its last read — the station's return was refused. The work goes on (the
+  // host takes the facts of a left part), and the floor tries the return again after every read.
+  const othersActive =
+    participation === null ? 0 : activeOthers(participation, props.pairing.deviceId).length;
+  const lineFullHere =
+    participation !== null &&
+    participation.myState === "left" &&
+    participation.leaveRequestedAt === null &&
+    othersActive >= participation.maxStations
+      ? { active: othersActive, maxStations: participation.maxStations }
+      : null;
+  const closeLabel = t(shared === null ? "floor.close.open" : "floor.close.openPart");
   const palletBoxes = pallet?.boxCount ?? 0;
   // The waiting message follows what `refresh` reads: with no open pallet, or one below
   // its capacity (it closed, or a box was taken off it), nothing waits any more.
@@ -2419,10 +2589,39 @@ export function WorkScreen(props: WorkScreenProps) {
             // the line as it did, whatever the band asks.
             {...(totals === null ? {} : { local: props.local })}
             productId={shift.copy.productId}
+            {...(shared === null
+              ? {}
+              : {
+                  shared: {
+                    mine: shared.mine,
+                    total: shared.total,
+                    asOf: shared.asOf,
+                    stale: !props.online,
+                  },
+                })}
           />
+          {demo && (
+            <div className="work-screen__demo" role="note">
+              <p>{t("floor.demo.work.body")}</p>
+              <Button size="floor" variant="secondary" onClick={demoScan}>
+                {t("floor.demo.work.code")}
+              </Button>
+            </div>
+          )}
           {officeClosed && stop?.kind !== "closed" && (
             <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
               {t("floor.work.officeClosed.body")}
+            </Alert>
+          )}
+          {lineFullHere !== null && !officeClosed && stop?.kind !== "closed" && (
+            <Alert
+              tone="warn"
+              title={t("floor.work.lineFull.title", {
+                active: lineFullHere.active,
+                maxStations: lineFullHere.maxStations,
+              })}
+            >
+              {t("floor.work.lineFull.body")}
             </Alert>
           )}
           <div className="work-screen__instruments" data-layout={validation ? "validation" : "box"}>
@@ -2592,7 +2791,7 @@ export function WorkScreen(props: WorkScreenProps) {
           disabled={stop !== null || leaving}
           onClick={openClose}
         >
-          {t("floor.close.open")}
+          {closeLabel}
         </FooterAction>
       </FloorFooter>
       {/*
@@ -2663,11 +2862,11 @@ export function WorkScreen(props: WorkScreenProps) {
             </>,
             retry(closePalletNow),
           )}
-        {planReached &&
+        {planShowing &&
           card(
             "ok",
             t("floor.work.planReached", {
-              quantity: formatQuantity(totals?.accepted ?? 0),
+              quantity: formatQuantity(shared?.total ?? totals?.accepted ?? 0),
               planned: formatQuantity(plannedQty ?? 0),
             }),
             null,
@@ -2680,13 +2879,18 @@ export function WorkScreen(props: WorkScreenProps) {
                   style={leaving || stop !== null ? WAITING_STYLE : undefined}
                   onClick={openClose}
                 >
-                  {t("floor.close.open")}
+                  {closeLabel}
                 </Button>
               )}
               <Button
                 size="floor"
                 variant="secondary"
-                onClick={() => dismiss(() => setPlanReached(false))}
+                onClick={() =>
+                  dismiss(() => {
+                    setPlanReached(false);
+                    setPlanDismissed(true);
+                  })
+                }
               >
                 {t("floor.work.continue")}
               </Button>
@@ -2792,6 +2996,7 @@ export function WorkScreen(props: WorkScreenProps) {
               palletCapacity={pallets?.capacity ?? null}
               onClosePallet={confirmPalletClose}
               boxless={validation}
+              ownPart={sharedPart !== null}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
@@ -2805,6 +3010,7 @@ export function WorkScreen(props: WorkScreenProps) {
               leaving={leaving}
               onDone={onLeave}
               boxless={validation}
+              part={sharedPart === null ? null : (partState ?? "unknown")}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
@@ -2833,6 +3039,7 @@ export function WorkScreen(props: WorkScreenProps) {
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
               egaisOffSheet={sheetWithoutEgais(stop.job, shift)}
+              {...demoPreviewProp(demoPreviewOf(stop.job))}
             />
           </div>
         )}

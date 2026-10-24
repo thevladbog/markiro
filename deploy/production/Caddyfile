@@ -45,7 +45,7 @@
 (landing_csp) {
 	header {
 		defer
-		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://releases.markiro.app https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'"
 	}
 }
 
@@ -96,7 +96,7 @@
 (admin_routes) {
 	root * /srv/admin
 	route {
-		@adminDemo path /api/demo-requests
+		@adminDemo path /api/demo-requests /api/landing-leads
 		handle @adminDemo {
 			respond 404
 		}
@@ -307,7 +307,7 @@
 	route {
 		@landingDemo {
 			method POST
-			path /api/demo-requests
+			path /api/demo-requests /api/landing-leads
 		}
 		handle @landingDemo {
 			request_body {
@@ -322,6 +322,25 @@
 		@landingReserved path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /health* /openapi.json /docs*
 		handle @landingReserved {
 			respond 404
+		}
+
+		# Retired pages answer with a permanent redirect to the home page of
+		# their language, before any file or canonical-form rule sees them: the
+		# film and the disposal kiosk (2026-10-23).
+		@retiredRu {
+			method GET HEAD
+			path /kak-rabotaet /kak-rabotaet/ /kak-rabotaet/* /kak-rabotaet.md /kiosk-samovydachi /kiosk-samovydachi/ /kiosk-samovydachi/* /kiosk-samovydachi.md
+		}
+		handle @retiredRu {
+			redir * /{http.request.uri.prefixed_query} 301
+		}
+
+		@retiredEn {
+			method GET HEAD
+			path /en/how-it-works /en/how-it-works/ /en/how-it-works/* /en/how-it-works.md /en/self-service-pickup-kiosk /en/self-service-pickup-kiosk/ /en/self-service-pickup-kiosk/* /en/self-service-pickup-kiosk.md
+		}
+		handle @retiredEn {
+			redir * /en/{http.request.uri.prefixed_query} 301
 		}
 
 		@landingAssets {

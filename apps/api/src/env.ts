@@ -1,3 +1,8 @@
+import {
+  configureStandaloneReleases,
+  DEFAULT_RELEASES_PUBLIC_ORIGIN,
+  STANDALONE_RELEASES_CONFIG_ERROR,
+} from "./modules/standalone-releases/release-config";
 import { configureGrantSigning } from "./modules/device-grants/grant-keyset";
 import {
   configureStandaloneLicenseSigning,
@@ -248,6 +253,30 @@ const EnvSchema = z
     LANDING_DEMO_RATE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
     LANDING_DEMO_SOURCE_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
     LANDING_DEMO_GLOBAL_LIMIT: z.coerce.number().int().min(1).max(10_000).default(100),
+    // Landing lead alerts and the daily digest in the owner's Telegram (spec
+    // 2026-10-20 §15.4). Off by default: leads and e-mails work without it,
+    // and readiness never depends on Telegram. The message carries no personal
+    // data, only the company, attribution and a link to the lead card.
+    LEAD_TELEGRAM_ENABLED: explicitBooleanSchema.optional().transform((value) => value ?? false),
+    LEAD_TELEGRAM_BOT_TOKEN: z
+      .string()
+      .regex(/^\d{1,20}:[A-Za-z0-9_-]{20,100}$/)
+      .optional(),
+    LEAD_TELEGRAM_CHAT_ID: z
+      .string()
+      .regex(/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/)
+      .optional(),
+    // Leads without movement this long, and lost leads, lose their contacts.
+    LEAD_RETENTION_MONTHS: z.coerce.number().int().min(1).max(60).default(12),
+    // The public release bucket's own keys, for «Выпуски автонома» (spec 2026-10-20
+    // §5.4). Optional as a set: absent, the section says «не настроено» and
+    // readiness never depends on it. Uploads go there from the admin's browser.
+    RELEASES_S3_ENDPOINT: z.string().optional(),
+    RELEASES_S3_REGION: z.string().optional(),
+    RELEASES_S3_BUCKET: z.string().optional(),
+    RELEASES_S3_ACCESS_KEY_ID: z.string().optional(),
+    RELEASES_S3_SECRET_ACCESS_KEY: z.string().optional(),
+    RELEASES_PUBLIC_ORIGIN: z.string().default(DEFAULT_RELEASES_PUBLIC_ORIGIN),
     S3_ENDPOINT: storageEndpointSchema,
     S3_REGION: z.string().min(1),
     S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),
@@ -344,6 +373,15 @@ const EnvSchema = z
       });
     }
     try {
+      configureStandaloneReleases(env);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        path: ["RELEASES_S3_ENDPOINT"],
+        message: STANDALONE_RELEASES_CONFIG_ERROR,
+      });
+    }
+    try {
       configureStandaloneSupportKeys(env);
     } catch {
       ctx.addIssue({
@@ -406,6 +444,17 @@ const EnvSchema = z
         }
       }
     }
+    if (env.LEAD_TELEGRAM_ENABLED) {
+      for (const name of ["LEAD_TELEGRAM_BOT_TOKEN", "LEAD_TELEGRAM_CHAT_ID"] as const) {
+        if (!env[name]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [name],
+            message: "required when lead Telegram alerts are enabled",
+          });
+        }
+      }
+    }
     if (env.DADATA_SECRET && !env.DADATA_TOKEN) {
       ctx.addIssue({
         code: "custom",
@@ -454,6 +503,16 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "LANDING_DEMO_RATE_WINDOW_SECONDS",
     "LANDING_DEMO_SOURCE_LIMIT",
     "LANDING_DEMO_GLOBAL_LIMIT",
+    "LEAD_TELEGRAM_ENABLED",
+    "LEAD_TELEGRAM_BOT_TOKEN",
+    "LEAD_TELEGRAM_CHAT_ID",
+    "LEAD_RETENTION_MONTHS",
+    "RELEASES_S3_ENDPOINT",
+    "RELEASES_S3_REGION",
+    "RELEASES_S3_BUCKET",
+    "RELEASES_S3_ACCESS_KEY_ID",
+    "RELEASES_S3_SECRET_ACCESS_KEY",
+    "RELEASES_PUBLIC_ORIGIN",
     ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
     "DADATA_TOKEN",
     "DADATA_SECRET",

@@ -171,7 +171,7 @@
 
 Локальный Lighthouse даёт лабораторную оценку. field Core Web Vitals не являются Lighthouse-оценкой и записываются только после появления реальных полевых данных.
 
-AI-поиск проверяется по `docs/seo/ai-search-query-pack.md`, результаты записываются по `docs/seo/ai-search-audit-template.md`. Ответы оцениваются по фактической точности и качеству citations, а не только по упоминанию бренда.
+AI-поиск проверяется по `docs/seo/ai-search-query-pack-v2.md` (v1 — исторический базис D0 от 06.09.2026), результаты записываются по `docs/seo/ai-search-audit-template.md`. Ответы оцениваются по фактической точности и качеству citations, а не только по упоминанию бренда.
 
 CRM integration остаётся отдельным release gate: включение формы, доставка писем или rollback не разрешают CRM forwarding и не меняют его статус.
 

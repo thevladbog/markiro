@@ -1,0 +1,14 @@
+{
+  "receipts": [
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "outcome": "accepted",
+      "details": { "partClosed": true }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "outcome": "accepted",
+      "details": { "reasonMissing": true }
+    }
+  ]
+}

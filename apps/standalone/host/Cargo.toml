@@ -1,6 +1,6 @@
 [package]
 name = "markiro-host"
-version = "1.0.0"
+version = "1.1.0"
 description = "Markiro standalone host: the LAN service with the master database"
 edition = "2021"
 license-file = "../../../LICENSE"
@@ -22,6 +22,8 @@ flate2 = { version = "=1.1.10", default-features = false, features = ["rust_back
 futures-util = "=0.3.34"
 if-addrs = "=0.15.0"
 markiro-proto = { path = "../proto" }
+markiro-backup-cloud = { path = "../backup-cloud" }
+zeroize = "=1.9.0"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "aws_lc_rs"] }
 rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
 serde = { version = "1", features = ["derive"] }
@@ -38,6 +40,10 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "=0.8.1"
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
 
 [dev-dependencies]
 http-body-util = "0.1"

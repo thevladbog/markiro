@@ -28,6 +28,23 @@ export function blockState(...queries: readonly UseQueryResult<unknown, Error>[]
   return "ready";
 }
 
+/**
+ * The host's clock, read with its copies' state (`now`) and again every `OVERVIEW_POLL_MS`: what the
+ * overview and a shift's card measure a device's silence by, never this PC's own clock.
+ */
+export function useHostClock(): UseQueryResult<BackupState, Error> {
+  return useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token), {
+    refetchInterval: OVERVIEW_POLL_MS,
+  });
+}
+
+/** The host's time in ms as of its last answer; `null` while it has not answered, or its last read failed. */
+export function hostNowMs(clock: UseQueryResult<BackupState, Error>): number | null {
+  if (!clock.isSuccess) return null;
+  const ms = Date.parse(clock.data.now);
+  return Number.isNaN(ms) ? null : ms;
+}
+
 export interface OverviewData {
   admin: boolean;
   org: UseQueryResult<OrgProfile, Error>;
@@ -57,6 +74,20 @@ export interface OverviewData {
   refetchAll: () => void;
 }
 
+/** The shift dates the overview asks the host for: the last seven days and tomorrow. */
+export function overviewPeriod(today: string): { plannedFrom: string; plannedTo: string } {
+  return { plannedFrom: addCivilDays(today, -6), plannedTo: addCivilDays(today, 1) };
+}
+
+/**
+ * Whether a shift of the host's answer is one of the overview's days: the host adds every shift
+ * closed without its reason whatever its date (spec §12.9), which only «Требует внимания» reads.
+ */
+export function inOverviewPeriod(shift: OfficeShift, today: string): boolean {
+  const { plannedFrom, plannedTo } = overviewPeriod(today);
+  return shift.plannedDate >= plannedFrom && shift.plannedDate <= plannedTo;
+}
+
 /** Every read behind «Обзор», each its own query, so one failing leaves the others. */
 export function useOverviewData(): OverviewData {
   const { user } = useOfficeSession();
@@ -67,7 +98,7 @@ export function useOverviewData(): OverviewData {
   const today = civilToday(zone);
   const yesterday = addCivilDays(today, -1);
   const tomorrow = addCivilDays(today, 1);
-  const period = { plannedFrom: addCivilDays(today, -6), plannedTo: tomorrow };
+  const period = overviewPeriod(today);
   const shifts = useOfficeQuery(
     officeKeys.shiftList(period),
     (api, token) => api.listShifts(token, period),
@@ -84,9 +115,7 @@ export function useOverviewData(): OverviewData {
     refetchInterval: OVERVIEW_POLL_MS,
     enabled: admin,
   });
-  const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token), {
-    refetchInterval: OVERVIEW_POLL_MS,
-  });
+  const backups = useHostClock();
   const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token));
 
   const staleRead = [shifts, conflicts, backups].some(

@@ -10,6 +10,7 @@ pub mod conflicts;
 pub mod disaggregation;
 pub mod handheld;
 pub mod license;
+pub mod multi;
 pub mod routes;
 pub mod update;
 

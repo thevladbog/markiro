@@ -835,4 +835,23 @@
     <string name="host_dataset_reset_body">Close the app using this button, then open it again. Old tasks and queues will be cleared at startup. Pairing and printer settings will be kept.</string>
     <string name="host_dataset_reset_failed">Local data could not be reset. Work is blocked. Try again.</string>
     <string name="host_dataset_reset_close">Close application</string>
+    <string name="shifts_line_full_title">The line is full</string>
+    <string name="shifts_line_full_text">%1$d of %2$d devices are already working on this line. You can join when one of them leaves the shift.</string>
+    <string name="shifts_busy_title">The shift is taken</string>
+    <string name="shifts_busy_text">Another device works this shift, and this server version does not admit a second one. Update the server on the site or wait for the shift to close.</string>
+    <string name="shifts_part_closed_title">Your part is closed</string>
+    <string name="shifts_part_closed_text">This device has already closed its part of the shift and cannot work in it any more. The shift closes when the others close theirs.</string>
+    <string name="work_shift_total">In the shift total</string>
+    <string name="work_shift_total_of">%1$s of %2$s</string>
+    <string name="work_my_part">My shift</string>
+    <string name="work_shared_devices">Working: %1$d of %2$d</string>
+    <string name="work_shared_line_full">The line is full: %1$d of %2$d — keep working, your place comes back when one frees up</string>
+    <string name="work_close_part">Close my part</string>
+    <string name="close_part_confirm_title">Close your part?</string>
+    <string name="close_part_confirm_text_others">Accepted %1$d, errors %2$d, duplicates %3$d. The shift closes when the others close theirs: %4$d.</string>
+    <string name="close_part_confirm_text_last">Accepted %1$d, errors %2$d, duplicates %3$d. You are the last to close: the shift will close.</string>
+    <string name="close_part_confirm_text_unknown">Accepted %1$d, errors %2$d, duplicates %3$d. The shift closes when the other participants close theirs.</string>
+    <string name="close_summary_part_title">Your part is closed</string>
+    <string name="close_summary_part_closed">The shift closes when the others close theirs</string>
+    <string name="close_summary_reason_missing">The shift is closed. The office will enter the reason the plan was not met</string>
 </resources>

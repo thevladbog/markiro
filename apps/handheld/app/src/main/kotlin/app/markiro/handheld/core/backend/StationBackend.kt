@@ -34,6 +34,15 @@ interface StationBackend {
     suspend fun palletBootstrap(): PalletBootstrapDto
     suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto
     suspend fun hubCounts(): HubCounts
+
+    /**
+     * Frees this device's slot of a shift several devices may work (plan 2b). The cloud has no slots and answers `null` without a call; the
+     * host answers `POST /v1/device/shifts/{id}/leave`. Throws what the other calls throw (`IOException`, `HttpException`).
+     * Returns this device's state in the shift as the host answered it (`active|left|closed`), `null` when none was said: `active` means the
+     * host ignored the leave (a stale token) and the part still holds its slot. No default on purpose (final review C1): a delegating
+     * backend that forgot it answered `null` for the host and the leave never left the device.
+     */
+    suspend fun leave(shiftId: String): String?
 }
 
 /** A backend that answers nothing: the base of test doubles and of the host backend before it exists. */
@@ -49,4 +58,5 @@ object NoBackend : StationBackend {
     override suspend fun palletBootstrap(): PalletBootstrapDto = unsupported()
     override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto = unsupported()
     override suspend fun hubCounts(): HubCounts = unsupported()
+    override suspend fun leave(shiftId: String): String? = unsupported()
 }

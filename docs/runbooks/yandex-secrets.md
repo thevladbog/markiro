@@ -46,6 +46,17 @@ materialization или перезапуск API вручную.
 `Publish production images` для merge-коммита и передайте его run ID и SHA в
 `Deploy production`. Не пересобирайте и не подменяйте образы под старым SHA.
 
+## Оповещения о заявках в Telegram
+
+Необязательные оповещения о заявках лендинга и ежедневная сводка. Ключи
+`LEAD_TELEGRAM_ENABLED`, `LEAD_TELEGRAM_BOT_TOKEN` и `LEAD_TELEGRAM_CHAT_ID` либо
+добавляются в `markiro-production-runtime` вместе, либо отсутствуют целиком;
+`LEAD_RETENTION_MONTHS` (1..60, по умолчанию 12) добавляется отдельно и тоже
+необязателен. Без этих записей заявки сохраняются и письма уходят, а готовность
+сервиса от Telegram не зависит. `LEAD_TELEGRAM_BOT_TOKEN` — секрет: не печатайте и
+не сохраняйте его в Git. Контейнеру API при включении нужен исходящий HTTPS только
+к `https://api.telegram.org`; группа безопасности `app` разрешает исходящий трафик.
+
 ## Национальный каталог
 
 Read-only импорт использует уже зашифрованный True API токен выбранного арендатора.
@@ -81,8 +92,8 @@ activation и tenant smoke описан в `docs/runbooks/national-catalog-live-
 Эти имена входят в обязательный runtime inventory даже при выключенном импорте.
 Включение и заполнение списка разрешённых хостов выполняются после проверок из
 `docs/runbooks/national-catalog-import.md`.
-Порядок отдельной выкладки настроек описан в
-[`deploy/yandex/national-catalog-rollout.md`](../../deploy/yandex/national-catalog-rollout.md).
+Порядок отдельной выкладки настроек описывал `deploy/yandex/national-catalog-rollout.md`,
+удалённый вместе с Yandex-контуром 22.10.2026.
 
 ## Офлайн-лицензии «Markiro Автоном»
 
