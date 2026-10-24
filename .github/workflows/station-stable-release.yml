@@ -280,6 +280,7 @@ jobs:
           # 1.4.0, run 34428792139, failed exactly that way on beta.2).
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
           pnpm --filter @markiro/platform-contracts build
           pnpm test:station-release:contract
 
@@ -539,6 +540,7 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
           pnpm --filter @markiro/platform-contracts build
 
       - name: Download dual-origin stable candidate

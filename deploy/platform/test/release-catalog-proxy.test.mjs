@@ -68,17 +68,21 @@ test(
     const { request } = await import("node:http");
     const rawGet = (url, init = {}) =>
       new Promise((resolve, reject) => {
-        const req = request(url, { headers: init.headers }, (res) => {
-          const chunks = [];
-          res.on("data", (b) => chunks.push(b));
-          res.on("end", () =>
-            resolve({
-              status: res.statusCode,
-              headers: new Map(Object.entries(res.headers)),
-              text: async () => Buffer.concat(chunks).toString(),
-            }),
-          );
-        });
+        const req = request(
+          url,
+          { headers: init.headers, ...(init.rawPath ? { path: init.rawPath } : {}) },
+          (res) => {
+            const chunks = [];
+            res.on("data", (b) => chunks.push(b));
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode,
+                headers: new Map(Object.entries(res.headers)),
+                text: async () => Buffer.concat(chunks).toString(),
+              }),
+            );
+          },
+        );
         req.on("error", reject);
         req.end();
       });
@@ -133,7 +137,7 @@ test(
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
-    const r = await rawGet(url + "/station/stable/latest.json?versionId=attacker", {
+    const r = await rawGet(url + "/station/stable/latest.json?versionId=attacker%2Fencoded", {
       headers: {
         Host: "releases.test",
         Authorization: "Bearer fake",
@@ -167,6 +171,22 @@ test(
         });
         assert.equal(response.status, 404, `${host}${path}`);
       }
+    for (const path of [
+      "/%73tation/stable/latest.json",
+      "/station%2fstable/latest.json",
+      "/station%252fstable/latest.json",
+      "/station/beta/%2e%2e/stable/latest.json",
+      "/station/stable/%6catest.json",
+      "/station//stable/latest.json",
+      "/station/./stable/latest.json",
+      "/station/beta/../stable/latest.json",
+      "/Station/stable/latest.json",
+      "/station/stable/releases/1.0.0/file%2eexe",
+    ]) {
+      const response = await rawGet(url, { rawPath: path, headers: { Host: "releases.test" } });
+      assert.equal(response.status, 404, `noncanonical release path ${path}`);
+      assert.equal(response.headers.get("cache-control"), "no-store", path);
+    }
     const down = await rawGet(url + "/station/download", { headers: { Host: "down.test" } });
     assert.equal(down.status, 503);
     assert.equal(down.headers.get("cache-control"), "no-store");

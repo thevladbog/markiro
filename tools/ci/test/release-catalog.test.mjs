@@ -134,3 +134,35 @@ test("Turbo hashes canonical validator sources outside the packaging workspace",
     );
   assert.ok(Object.hasOwn(task.inputs, "build.mjs"), "default package inputs remain included");
 });
+
+test("every fresh catalog workflow builds the domain dependency before contracts", () => {
+  for (const file of [
+    "ci.yml",
+    "station-beta-release.yml",
+    "station-stable-release.yml",
+    "station-release-reseed.yml",
+    "handheld-release.yml",
+  ]) {
+    const workflow = load(readFileSync(`.github/workflows/${file}`, "utf8"));
+    for (const [name, job] of Object.entries(workflow.jobs)) {
+      const commands = job.steps?.map((s) => s.run ?? "").join("\n") ?? "";
+      const contracts = commands.indexOf("pnpm --filter @markiro/platform-contracts build");
+      if (contracts < 0) continue;
+      const earlier = commands.slice(0, contracts);
+      assert.ok(
+        earlier.includes("pnpm --filter @markiro/domain build") ||
+          earlier.includes("pnpm turbo run build --filter=@markiro/domain"),
+        `${file}/${name}: missing earlier domain build`,
+      );
+    }
+  }
+});
+test("handheld sync-download builds the compiled catalog verifier before loading it", () => {
+  const workflow = load(readFileSync(".github/workflows/handheld-release.yml", "utf8"));
+  const commands = workflow.jobs["sync-download"].steps.map((s) => s.run ?? "").join("\n");
+  const run = commands.indexOf("node tools/handheld-release/download.mjs");
+  const before = commands.slice(0, run);
+  assert.ok(run >= 0);
+  assert.ok(before.includes("pnpm --filter @markiro/domain build"));
+  assert.ok(before.includes("pnpm --filter @markiro/platform-contracts build"));
+});

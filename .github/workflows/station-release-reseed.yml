@@ -111,6 +111,7 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
           pnpm --filter @markiro/platform-contracts build
 
       - name: Download the accepted GitHub release

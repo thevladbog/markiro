@@ -140,6 +140,7 @@ jobs:
           set -euo pipefail
           corepack enable
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
           pnpm --filter @markiro/platform-contracts build
 
       - name: Restore the signing key
@@ -271,6 +272,8 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
       - name: Verify the current catalog download URL
         env:
           CHANNEL: ${{ inputs.channel }}

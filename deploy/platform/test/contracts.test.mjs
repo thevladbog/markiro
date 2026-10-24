@@ -454,7 +454,10 @@ test("the release host is a read-only, deny-by-default window onto the pinned ca
     const body = routes.match(new RegExp(`@${name} \\{([\\s\\S]*?)\\n\\t\\t\\}`, "u"))?.[1];
     assert.ok(body, name);
     assert.match(body, /^\s*method GET HEAD$/mu, name);
-    return new RegExp(body.match(/path_regexp (\S+)/u)?.[1] ?? "^$", "u");
+    return new RegExp(
+      body.match(/vars_regexp \{http\.request\.orig_uri\} (\S+)/u)?.[1] ?? "^$",
+      "u",
+    );
   };
   const immutable = matcher("releaseImmutable");
   const pointer = matcher("releasePointer");
@@ -530,7 +533,9 @@ test("the release host serves every path the handheld updater and publisher use"
   const caddy = read("deploy/platform/Caddyfile");
   const pattern = (name) =>
     new RegExp(
-      caddy.match(new RegExp(`@${name} \\{[\\s\\S]*?path_regexp (\\S+)`, "u"))?.[1] ?? "^$",
+      caddy.match(
+        new RegExp(`@${name} \\{[\\s\\S]*?vars_regexp \\{http\\.request\\.orig_uri\\} (\\S+)`, "u"),
+      )?.[1] ?? "^$",
       "u",
     );
   const served = (path) =>
