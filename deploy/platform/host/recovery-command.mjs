@@ -6,6 +6,10 @@ import { readFile, lstat } from "node:fs/promises";
 import { canonical, digest, ensure, keys } from "../backup/schemas.mjs";
 import { assertPrivateRootSync, assertBindFileSync, readPrivateFile } from "./files.mjs";
 export const RECOVERY_BUNDLE_FILES = Object.freeze([
+  "deploy/platform/host/upgrade-state.mjs",
+  "deploy/platform/host/upgrade-admission.mjs",
+  "deploy/platform/host/upgrade-phase-admission.mjs",
+  "deploy/platform/host/upgrade-proofs.mjs",
   "deploy/platform/recovery-transport.mjs",
   "deploy/platform/admit-release.mjs",
   "deploy/platform/admission-process.mjs",

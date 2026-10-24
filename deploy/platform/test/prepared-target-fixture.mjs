@@ -9,8 +9,8 @@ import {
   fingerprintHostConfiguration,
 } from "../host/config.mjs";
 
-export async function preparedFixture(t) {
-  const f = await privateFixture(t);
+export async function preparedFixture(t, options) {
+  const f = await privateFixture(t, options);
   const identity = hostIdentity();
   const runtimeSnapshot = await snapshotHostConfig(f);
   const migrationFile = join(f.root, "migration-source.env");

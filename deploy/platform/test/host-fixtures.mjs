@@ -60,10 +60,12 @@ export const envBytes = (env) =>
       .join(""),
   );
 
-export async function privateFixture(t) {
-  const root = await mkdtemp(join(await realpath(tmpdir()), "markiro-host-"));
-  await chmod(root, 0o700);
-  t.after(() => rm(root, { recursive: true, force: true }));
+export async function privateFixture(t, { nested = false } = {}) {
+  const parent = await mkdtemp(join(await realpath(tmpdir()), "markiro-host-"));
+  await chmod(parent, 0o700);
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const root = nested ? join(parent, "state") : parent;
+  if (nested) await mkdir(root, { mode: 0o700 });
   const { manifest } = release();
   const env = hostEnv(manifest, root);
   const envFile = join(root, "source.env");

@@ -1,7 +1,11 @@
 import { canonical, ensure, keys } from "../backup/schemas.mjs";
 import { snapshotActivation } from "./recovery-activation-admission.mjs";
 import { fingerprintHostConfiguration } from "./config.mjs";
-import { createHostObservers, createAcceptedRecoveryObservers, guarded } from "./observe.mjs";
+import {
+  createUpgradeHostObservers,
+  createAcceptedRecoveryObservers,
+  guarded,
+} from "./observe.mjs";
 import { withHeldUpgradeState } from "./upgrade-state.mjs";
 import { runHostProcess } from "./process.mjs";
 import { readProtectedEnv } from "../preflight.mjs";
@@ -49,7 +53,9 @@ export function createUpgradeObservers(input, dependencies = {}) {
         else
           ensure(
             !state.migrationEntered &&
-              ["admitted", "old-stopped", "backup-verified"].includes(state.phase),
+              ["admitted", "old-stopped", "backup-verified", "activation-admitted"].includes(
+                state.phase,
+              ),
           );
         same(oldOperation.identity, admission.predecessor.identity);
         same(candidateOperation.identity, admission.identity);
@@ -99,11 +105,15 @@ export function createUpgradeObservers(input, dependencies = {}) {
             return result;
           },
         };
-        const observer = (candidate ? createHostObservers : createAcceptedRecoveryObservers)(
-          operation,
-          policy,
-          options,
-        );
+        const observer = candidate
+          ? createUpgradeHostObservers(
+              candidateOperation,
+              oldOperation,
+              predecessorContainers,
+              policy,
+              options,
+            )
+          : createAcceptedRecoveryObservers(operation, policy, options);
         const allowedServices = candidate
           ? [
               "postgres",
@@ -128,7 +138,24 @@ export function createUpgradeObservers(input, dependencies = {}) {
           containers[row.service] = row.container.Id;
           if (!candidate || row.service === "postgres")
             ensure(row.container.Id === predecessorContainers[row.service]);
-          else ensure(!Object.values(predecessorContainers).includes(row.container.Id));
+          else {
+            const retained = row.container.Id === predecessorContainers[row.service];
+            if (retained) {
+              ensure(!active(row.container));
+              const required = row.service === "api" ? "api-started" : "edge-started";
+              const stages = [
+                "migration-entered",
+                "migrated",
+                "api-started",
+                "edge-started",
+                "healthy",
+              ];
+              ensure(
+                stages.indexOf(state.phase) < stages.indexOf(required) ||
+                  (state.phase === required && state.status === "entered"),
+              );
+            } else ensure(!Object.values(predecessorContainers).includes(row.container.Id));
+          }
           if (row.service === "edge")
             same(row.container.HostConfig.PortBindings, {
               "8080/tcp": [{ HostIp: "", HostPort: "80" }],
@@ -143,6 +170,10 @@ export function createUpgradeObservers(input, dependencies = {}) {
           if (mode === "stopped") ensure(row.service === "postgres" || !active(row.container));
         }
         if (!candidate) same(containers, predecessorContainers);
+        else
+          ensure(
+            ["postgres", "api", "edge"].every((service) => Object.hasOwn(containers, service)),
+          );
         const systemId = String(
           (
             await observer.command([
