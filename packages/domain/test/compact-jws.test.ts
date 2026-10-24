@@ -130,9 +130,14 @@ describe("compact JWS ES256", () => {
   });
 
   it("signs only what it verifies: a valid kid, a JSON payload, no lone surrogate", async () => {
-    for (const kid of ["", "k".repeat(129)]) {
+    // A kid is 1-128 UTF-16 units, as `MAX_KID_UNITS` in `markiro_proto::trust`
+    // counts: 65 emoji are 130 units, though only 65 code points.
+    for (const kid of ["", "k".repeat(129), "😀".repeat(65)]) {
       await expect(signCompactJws(pair.privateKey, { typ: TYP, kid }, {})).rejects.toThrow();
     }
+    await expect(
+      signCompactJws(pair.privateKey, { typ: TYP, kid: "😀".repeat(64) }, {}),
+    ).resolves.toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
     await expect(
       signCompactJws(pair.privateKey, { typ: TYP, kid: "k1" }, undefined),
     ).rejects.toThrow("The payload is not JSON");

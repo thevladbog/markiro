@@ -616,6 +616,11 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
     expect(enter(Array.from({ length: 32 }, (_, index) => `cap-${index}`))).toBe(true);
     expect(enter([""])).toBe(false);
     expect(enter(["x".repeat(65)])).toBe(false);
+    // In UTF-16 units, as the host's `validate::shift_supports` counts: 32 emoji
+    // are 64 units, 33 are 66 (though only 33 code points, which Zod's own
+    // `.max()` would take).
+    expect(enter(["😀".repeat(32)])).toBe(true);
+    expect(enter(["😀".repeat(33)])).toBe(false);
     expect(enter(Array.from({ length: 33 }, (_, index) => `cap-${index}`))).toBe(false);
     expect(enter("validation-v1")).toBe(false);
     expect(enter([1])).toBe(false);

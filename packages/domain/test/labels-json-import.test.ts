@@ -171,11 +171,45 @@ describe("labelTemplateSpecStrictSchema", () => {
     const strict = labelTemplateSpecStrictSchema.safeParse(input);
     expect(strict.success).toBe(false);
     if (strict.success) return;
-    const codes = strict.error.issues.map((issue) => issue.code);
-    // Root and element: direct `unrecognized_keys`; the barcode's `data` is a
-    // union, so its unknown key arrives inside an `invalid_union` issue.
-    expect(codes.filter((code) => code === "unrecognized_keys")).toHaveLength(2);
-    expect(codes).toContain("invalid_union");
+    // Every unknown key is reported once, where it sits. The barcode's `data`
+    // is a union (an enum or a strict object); since Zod 4.6 the branch that
+    // matched reports its `unrecognized_keys` directly, at the absolute path,
+    // instead of nesting them inside an `invalid_union`.
+    expect(
+      strict.error.issues.map((issue) =>
+        issue.code === "unrecognized_keys"
+          ? { path: issue.path, keys: issue.keys }
+          : { path: issue.path, code: issue.code },
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        { path: [], keys: ["comment"] },
+        { path: ["elements", 0], keys: ["maxlines"] },
+        { path: ["elements", 1, "data"], keys: ["foo"] },
+      ]),
+    );
+    expect(strict.error.issues).toHaveLength(3);
+  });
+
+  it("warns once per unknown key, including the one inside the barcode's data union", () => {
+    const result = parseLabelJson(
+      JSON.stringify({
+        ...EXAMPLE_SPEC,
+        elements: [
+          {
+            kind: "barcode",
+            id: "bc",
+            xMm: 2,
+            yMm: 20,
+            format: "code128",
+            data: { literal: "123", foo: 1 },
+            sizeMm: 5,
+          },
+        ],
+      }),
+      { purpose: "pallet" },
+    );
+    expect(result.warnings.map((warning) => warning.source)).toEqual(["elements.0.data.foo"]);
   });
 });
 

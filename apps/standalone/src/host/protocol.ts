@@ -1,4 +1,5 @@
 import type { ProductLabelEvent, ReprintReason, VerificationPolicy } from "@markiro/domain";
+import { utf16BoundedString } from "@markiro/domain";
 import { z } from "zod";
 
 import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
@@ -222,7 +223,7 @@ export const LICENSE_FEATURE_KEYS = [
 ] as const;
 /**
  * The most a license file may hold (`verify::MAX_FILE_BYTES`). Zod's `.max()`
- * counts UTF-16 units, not bytes: the host's 16 KiB byte limit is the one that
+ * counts code points, not bytes: the host's 16 KiB byte limit is the one that
  * decides (a `.mklic` file is ASCII, where the two agree).
  */
 export const MAX_LICENSE_FILE_BYTES = 16 * 1024;
@@ -1568,10 +1569,11 @@ export const SHIFT_SUPPORTS = {
  * The body of `POST /v1/device/shifts/{id}/enter` (`markiro_proto::ShiftEnter`,
  * protocol 4, `shift-enter.json`): what the station can work. Left out, as
  * the Rust type's default, it names nothing (`shift-enter-empty.json`), which
- * is how the host reads a station of protocol 3 that sends no body.
+ * is how the host reads a station of protocol 3 that sends no body. A name
+ * is 1-64 UTF-16 units, as `validate::shift_supports` counts.
  */
 export const shiftEnterSchema = z.strictObject({
-  supports: z.array(z.string().min(1).max(64)).max(32).optional(),
+  supports: z.array(utf16BoundedString(1, 64)).max(32).optional(),
 });
 export type ShiftEnter = z.infer<typeof shiftEnterSchema>;
 
