@@ -35,14 +35,19 @@ The worker holds a repeatable-read transaction, exports its snapshot for
 `pg_dump --snapshot`, and inventories data in the same transaction. Sequences,
 which are not MVCC, are read before and after while the external fence remains
 held. Dumps go directly to a private file, never stdout. The archive is streamed
-in 64 KiB chunks and exclusively published after fsync. The metadata read limit
-remains 1 MiB; oversized inventory fails closed.
+in 64 KiB chunks and exclusively published after fsync. Inventory documents have an explicit 2 MiB cap; other control files remain 1 MiB.
+Oversized inventory fails closed.
 
 Inventory contains sorted roles and attributes, memberships, typed object
 identities and owners/ACLs, default privileges, extensions, table row-byte digests
 and counts, sequence values and `is_called`, index/constraint state and migration
 journal digest/count, plus independent definition fingerprints. Row-byte digests include encrypted column bytes; no rows or
-ciphertexts appear in evidence. All metadata and archive bytes are private.
+ciphertexts appear in ordinary table evidence. Release catalog tables are the
+explicit exception: their non-secret raw row JSON, local receipt/attempt/ack bytes
+and VersionIds are embedded as catalogBackup in the encrypted inventory. The
+exact snapshot row hashes/counts and journal metadata are verified. A catalog
+backup without its complete local journal cannot pass restore or host gates.
+See [catalog recovery](../../../docs/runbooks/release-catalog-recovery.md). All metadata and archive bytes are private.
 
 Role mapping is exhaustive `{version:1,roles:[{source,target}],allowedDeltas:[]}`.
 Unsafe source role attributes may only be explicitly removed with

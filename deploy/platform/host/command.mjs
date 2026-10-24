@@ -148,6 +148,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/backup/local-runtime.mjs",
   "deploy/platform/backup/inventory.mjs",
   "deploy/platform/backup/definitions.mjs",
+  "deploy/platform/backup/catalog.mjs",
   "deploy/platform/postgres/roles.mjs",
   "deploy/platform/postgres/pg_hba.conf",
   "deploy/platform/compose.yml",

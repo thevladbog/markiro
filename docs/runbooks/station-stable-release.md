@@ -1,5 +1,12 @@
 # Station stable release runbook
 
+> Актуальный publisher использует [неизменяемый каталог](release-hosting.md):
+> OIDC intent → staging VersionId → verified commit → revision CAS. До dispatch
+> требуются approved history reservations и writer epoch. `seed-baseline` закрыт;
+> прежние provider bootstrap/compensation инструкции ниже — исторический контекст,
+> они не разрешают direct-S3 публикацию или автоматическое удаление после lost response.
+> Всегда сохраняйте publication journal и проверяйте точный source/tooling SHA.
+
 Ручной выпуск Windows x64 stable-версии Markiro Station из одной явно принятой
 dual-origin beta. Workflow не выбирает newest beta, не добавляет более новые
 изменения из `main` и не устанавливает обновление на станции автоматически.

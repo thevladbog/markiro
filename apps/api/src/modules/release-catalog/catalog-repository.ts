@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
 import {
   channelChangeRequestSchema,
+  isReservedHistoryVersion,
   channelSnapshotSchema,
   publicationRequestSchema,
   releaseOperationIdSchema,
@@ -166,9 +167,17 @@ export class CatalogRepository {
       .select()
       .from(reservations)
       .where(scopeWhere(reservations, request.identity));
-    // A range cannot be opened until the product adapter proves its ordering and complete upper bound.
-    if (rows.some((r) => r.kind === "closed" || r.kind === "range"))
-      throw new CatalogFault("not_ready");
+    // Unknown history is closed. A reviewed issued upper bound reserves its entire semver base.
+    if (rows.some((r) => r.kind === "closed")) throw new CatalogFault("not_ready");
+    if (
+      rows.some(
+        (r) =>
+          r.kind === "range" &&
+          (r.upperBound === null ||
+            isReservedHistoryVersion(request.identity.version, r.upperBound)),
+      )
+    )
+      throw new CatalogFault("conflict");
     const paths = new Set(request.files.map((f) => derivePublicPath(request.identity, f.name)));
     if (
       rows.some(

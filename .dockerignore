@@ -71,3 +71,8 @@ dist/
 coverage/
 **/coverage/
 .markiro-releases/
+
+!tools/signer-release/
+!tools/signer-release/artifacts.mjs
+!tools/signer-release/manifest.mjs
+!tools/signer-release/version.mjs

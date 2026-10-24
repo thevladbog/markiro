@@ -15,6 +15,7 @@ COPY apps/api ./apps/api
 COPY packages/release-validation ./packages/release-validation
 COPY tools/station-release ./tools/station-release
 COPY tools/handheld-release/manifest.mjs ./tools/handheld-release/manifest.mjs
+COPY tools/signer-release ./tools/signer-release
 COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/email ./packages/email

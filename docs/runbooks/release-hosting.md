@@ -1,306 +1,157 @@
-# Хостинг выпусков: `releases.markiro.app` на Timeweb S3
+# Хостинг выпусков: `releases.markiro.app` и неизменяемый каталог
 
-С 22.10.2026 выпуски станции, подписанта, ТСД и автонома лежат в отдельном бакете
-Timeweb S3, а `https://releases.markiro.app` раздаёт их через edge платформы
-(Caddy на хосте платформы). Yandex Object Storage, CDN и Terraform
-`infra/yandex` удалены. Публичные URL не менялись: updater-эндпоинты станции и
-подписанта, `latest.json` ТСД и страница `/skachat/` читают тот же домен.
+Timeweb S3 хранит версии байтов. PostgreSQL-каталог определяет, какая точная версия
+принадлежит публичному пути. Caddy раздаёт только результат внутреннего API resolver.
+Развёртывание, DNS/TLS, публикация и обновление установленного устройства — отдельные
+gates; наличие кода в main не доказывает ни один из них.
 
-## Как устроено
+## Защита от перезаписи
 
-- **Бакет.** Один бакет выпусков в Timeweb S3, path-style:
-  `https://s3.twcstorage.ru/<bucket>/<key>`, регион `ru-1`. Это не приватный
-  бакет платформы (`S3_BUCKET`): preflight отклоняет совпадение имён.
-- **Чтение.** Сайт `releases_routes` в `deploy/platform/Caddyfile` пропускает
-  только `GET`/`HEAD` точных раскладок ниже. Он отбрасывает query string
-  клиента (`?acl`, `?versionId`, листинги), а также заголовки `Authorization`,
-  `Cookie` и `Origin`. Из ответа бакета убираются `x-amz-*`, `Server`,
-  `Set-Cookie` и CORS-заголовки. Всё остальное, включая корень, листинг, другие
-  префиксы и методы, получает `404` с `Cache-Control: no-store`. Ключа к бакету у
-  edge нет: объекты читаются анонимно.
-- **Кэш.** `Cache-Control` объекта главный. Издатели пишут
-  `public, max-age=0, must-revalidate` на указатели и
-  `public, max-age=31536000, immutable` на версии. Публикация станции сверяет
-  это значение через `releases.markiro.app`. Если у объекта заголовка нет
-  (например, у файлов автонома, загруженных из браузера), edge ставит
-  `public, max-age=60, must-revalidate` на `latest.json` и `/download` и годовой
-  `immutable` на файлы версии. Отсутствующий объект отдаётся как `404`, сбой
-  бакета как `502`, оба с `no-store`: версию, запрошенную до публикации, браузер
-  не запомнит как отсутствующую.
-- **CORS.** `Access-Control-Allow-Origin: https://<MARKIRO_LANDING_DOMAIN>`
-  ставится только на `GET`. Он нужен `fetchLatestRelease` на `/skachat/`.
-  Preflight-запросы не нужны: это простой `GET`.
-- **Загрузка.** Station, signer и handheld пишут из GitHub Actions ключом
-  издателя. Автоном пишет SaaS API: браузер админки отправляет presigned PUT на
-  `https://s3.twcstorage.ru`, и только этот origin разрешён в `connect-src`
-  `saas_admin_csp` (`RELEASES_UPLOAD_ORIGIN` в `deploy/platform/preflight.mjs`).
+Поведенческая проверка Timeweb показала, что `If-None-Match: *` не предотвращает
+повторный PUT. Нельзя заменять защиту на HEAD+PUT или считать 200 подтверждением
+неизменяемости. Legacy conditional-write guards сохраняются, но действующие
+Station/handheld/standalone publisher paths используют каталог:
 
-| Путь                                                                                 | Что это                                 |
-| ------------------------------------------------------------------------------------ | --------------------------------------- |
-| `station/{beta,stable}/latest.json`, `handheld/{beta,stable}/latest.json`            | указатель канала                        |
-| `signer/stable/latest.json`, `standalone/{beta,stable}/latest.json`                  | указатель канала                        |
-| `station/download`, `station/beta/download`, `signer/download`                       | постоянная ссылка на текущий установщик |
-| `handheld/download`, `handheld/beta/download`                                        | постоянная ссылка на текущий APK        |
-| `{station,handheld}/{beta,stable}/releases/<version>/<file>`                         | неизменяемые файлы версии               |
-| `signer/stable/releases/<version>/<file>`, `standalone/{beta,stable}/<x.y.z>/<file>` | неизменяемые файлы версии               |
+1. Аутентифицированный издатель создаёт intent с точными version/sourceSha/именами,
+   размерами, MIME и SHA256. Product source SHA отделён от workflow tooling SHA.
+2. Загружает только выданные `product/_uploads/<intent>/<name>` staging keys и
+   сохраняет VersionId каждого ответа в приватном durable журнале.
+3. API читает **точные версии**, проверяет полные байты и канонический product
+   manifest/signature/evidence, сохраняет локальный receipt и versioned S3 receipt.
+   Только затем одна DB-транзакция фиксирует весь набор файлов и аудит.
+4. Издатель проверяет полный публичный readback, затем меняет канал отдельным CAS
+   по исходной revision и operation ID. `latest.json` и `/download` читают одну
+   привязку канала. Lost response не разрешает новый ID, повторный PUT или
+   автоматическое удаление GitHub-канала/S3-объектов.
 
-`/download` — это копия объекта со своим `Content-Disposition`, а не редирект.
+Чтение существующего пути всегда использует записанный VersionId и SHA256.
+Замена current S3 head не меняет релиз. Resolver проверяет весь файл до HEAD/range/
+отправки байтов, использует приватный bounded cache и disk reserve. Нет места,
+нет exact version или недоступна DB — ошибка, без fallback к текущему объекту.
 
-## Шаги владельца
+## Публичные маршруты
 
-Порядок важен: без шагов 1–6 ни один release-workflow не опубликует версию.
+| Путь                                                                                 | Назначение               |
+| ------------------------------------------------------------------------------------ | ------------------------ |
+| `station/{beta,stable}/latest.json`, `handheld/{beta,stable}/latest.json`            | указатель канала         |
+| `signer/stable/latest.json`, `standalone/{beta,stable}/latest.json`                  | указатель канала         |
+| `station/download`, `station/beta/download`, `signer/download`                       | текущий установщик       |
+| `handheld/download`, `handheld/beta/download`                                        | текущий APK              |
+| `{station,handheld}/{beta,stable}/releases/<version>/<file>`                         | точная immutable binding |
+| `signer/stable/releases/<version>/<file>`, `standalone/{beta,stable}/<x.y.z>/<file>` | точная immutable binding |
 
-### 1. Бакет
+Caddy разрешает только GET/HEAD, отбрасывает query, Authorization, Cookie, Origin
+и upstream служебные заголовки. Internal resolver недоступен через обычные tenant/
+SaaS hosts. Кэш: версии — `public, max-age=31536000, immutable`, pointers/download —
+`no-cache`, ошибки — `no-store`. CORS чтения разрешает только landing origin.
+Публичное чтение S3 может оставаться для диагностики, но не участвует в принятой
+раздаче. `/download` отдаёт проверенные байты, не redirect на S3.
 
-Создайте в Timeweb Cloud бакет S3 в регионе `ru-1`, например
-`markiro-releases`. Имя должно отличаться от приватного бакета платформы.
-Если Timeweb позволяет, включите версионирование объектов.
+## Настройка до rollout
 
-### 2. Публичное чтение префиксов
+- Отдельный `markiro-releases`, endpoint `https://s3.twcstorage.ru`, регион `ru-1`.
+  Не использовать backup/media bucket. Versioning включён, current/noncurrent
+  lifecycle expiry для upload и ledger prefixes отсутствует. Это проверяется
+  фактически, не только по названию настройки в панели.
+- Publisher key: GetObject/PutObject только `station/*`, `signer/*`, `handheld/*`.
+  SaaS API key: GetObject/PutObject и ограниченный ListBucket только `standalone/*`.
+  Catalog key: GetObjectVersion в четырёх release prefixes; PutObject,
+  GetObjectVersion и ListBucketVersions только `_publication-ledger/*`.
+  Без DeleteObject/DeleteObjectVersion, управления бакетом и доступа к копиям.
+- S3 CORS: только origin SaaS admin, PUT и нужные signing/checksum headers;
+  ExposeHeaders включает `x-amz-version-id`, чтобы сохранить точную запись.
+  Проверить старый VersionId и denial matrix отдельно, без вывода ключей.
+- `station-release` и `handheld-release`: secrets `RELEASES_S3_ACCESS_KEY_ID`,
+  `RELEASES_S3_SECRET_ACCESS_KEY`, variable `RELEASES_S3_BUCKET`; для Station
+  `RELEASES_S3_ENDPOINT=https://s3.twcstorage.ru`. Существующие signing secrets
+  остаются в protected environments. OIDC использует `id-token: write` и audience
+  `markiro-release-catalog`, exact repo/owner/main/environment/workflow SHA pins.
+  Новый tooling SHA требует reviewed pin; одного имени workflow недостаточно.
+- Платформа: `MARKIRO_RELEASES_DOMAIN`, `MARKIRO_RELEASES_BUCKET` и пять
+  `RELEASES_S3_*` для SaaS upload. Catalog использует отдельные
+  `RELEASE_CATALOG_S3_ENDPOINT`, `RELEASE_CATALOG_S3_REGION`,
+  `RELEASE_CATALOG_S3_BUCKET`, `RELEASE_CATALOG_S3_ACCESS_KEY_ID`,
+  `RELEASE_CATALOG_S3_SECRET_ACCESS_KEY`, `RELEASE_CATALOG_CACHE_DIR`,
+  `RELEASE_CATALOG_JOURNAL_DIR`, `RELEASE_CATALOG_CACHE_BYTES`,
+  `RELEASE_CATALOG_OBJECT_BYTES`, `RELEASE_CATALOG_DISK_RESERVE_BYTES`,
+  `RELEASE_CATALOG_DOWNLOADS`, `RELEASE_CATALOG_TIMEOUT_MS`,
+  `RELEASE_CATALOG_WRITERS_ENABLED`, `RELEASE_CATALOG_PUBLISHERS_JSON`.
+- До выкатки измерить свободный диск и крупнейшие accepted artifacts, выбрать
+  явные capacity/object/reserve bounds. Cache и journal — приватные отдельные
+  mounts `/opt/markiro-platform/release-catalog/{cache,journal}`, uid/gid1000,
+  mode0700, один API/coordinator. Не создавать/chown mounts как side effect.
+  Bootstrap только platform-only с `RELEASE_CATALOG_WRITERS_ENABLED=false`.
 
-Edge не подписывает запросы, поэтому вариант «приватный бакет и ключ у прокси»
-не реализован. Бакету нужно анонимное чтение объектов
-`station/*`, `signer/*`, `handheld/*` и `standalone/*`. Листинг давать не нужно.
+Не выкатывать неполный runtime.env: preflight должен пройти до protected dispatch.
+Секреты передаются штатным защищённым способом, не в аргументах, логах или Git.
 
-- Если Timeweb поддерживает политику бакета, разрешите `s3:GetObject` для
-  `Principal: "*"` ровно на эти четыре префикса, без `s3:ListBucket`.
-- Если поддерживается только тип бакета «публичный», включите его и не кладите
-  в этот бакет ничего, кроме выпусков. Прямые ссылки
-  `https://s3.twcstorage.ru/<bucket>/...` при этом тоже станут публичными, и
-  ограничения edge их не касаются.
+### GitHub environments
 
-Проверьте, что анонимное чтение существующего объекта даёт `200`, а листинг
-бакета не даёт `200`:
-
-```bash
-curl -sS -o /dev/null -w '%{http_code}\n' "https://s3.twcstorage.ru/<bucket>/?list-type=2"
-```
-
-### 3. CORS бакета для загрузки автонома
-
-Браузер SaaS-админки загружает установщик presigned PUT-запросом. Без CORS
-раздел покажет «Хранилище не приняло файл». Правило:
-
-```json
-{
-  "CORSRules": [
-    {
-      "AllowedOrigins": ["https://saas-admin.markiro.app"],
-      "AllowedMethods": ["PUT"],
-      "AllowedHeaders": ["content-type"],
-      "MaxAgeSeconds": 3600
-    }
-  ]
-}
-```
-
-Применить можно через панель Timeweb или любой S3-клиент, например:
-
-```bash
-aws s3api put-bucket-cors --endpoint-url https://s3.twcstorage.ru \
-  --bucket <bucket> --cors-configuration file://releases-cors.json
-```
-
-Ключ берите из переменных окружения или профиля, не из аргументов команды.
-`GET` в это правило не добавляйте: CORS для чтения отдаёт edge.
-
-### 4. Ключи
-
-Нужны два набора ключей:
-
-- **Издатель** (GitHub Actions: станция, подписант, ТСД) — запись в
-  `station/*`, `signer/*`, `handheld/*`.
-- **SaaS API** (автоном) — запись в `standalone/*`.
-
-Если Timeweb позволяет ограничить ключ префиксом или завести отдельного
-S3-пользователя, ограничьте каждый ключ своими префиксами и не давайте права на
-удаление. Если ключ видит весь бакет, учтите: утечка env платформы позволит
-перезаписать выпуски станции. В таком случае храните ключ издателя только в
-GitHub environments.
-
-### 5. GitHub environments
-
-`station-release` (станция и подписант):
+`station-release` (Station publisher):
 
 - secret `RELEASES_S3_ACCESS_KEY_ID`;
 - secret `RELEASES_S3_SECRET_ACCESS_KEY`;
-- variable `RELEASES_S3_BUCKET` — имя бакета;
-- variable `RELEASES_S3_ENDPOINT` — ровно `https://s3.twcstorage.ru`.
+- variable `RELEASES_S3_BUCKET`;
+- variable `RELEASES_S3_ENDPOINT`.
 
-`handheld-release` (ТСД):
+`handheld-release` (ТСД publisher):
 
 - secret `RELEASES_S3_ACCESS_KEY_ID`;
 - secret `RELEASES_S3_SECRET_ACCESS_KEY`;
 - variable `RELEASES_S3_BUCKET`.
 
-Эндпоинт ТСД закреплён в самом workflow.
-
-Секреты задавайте через stdin, а не аргументом:
+Секреты передаются через stdin из защищённых файлов, например:
 
 ```bash
 gh secret set RELEASES_S3_ACCESS_KEY_ID --env station-release < "$access_key_file"
 gh secret set RELEASES_S3_SECRET_ACCESS_KEY --env station-release < "$secret_key_file"
-gh variable set RELEASES_S3_BUCKET --env station-release --body markiro-releases
-gh variable set RELEASES_S3_ENDPOINT --env station-release --body https://s3.twcstorage.ru
 ```
 
-Старые `YANDEX_STATION_RELEASE_*` удалите из обоих environments: workflow их
-больше не читают.
+Старые `YANDEX_STATION_RELEASE_*` не используются новым publisher. Их удаление
+не заменяет проверку нового хранилища и не должно затрагивать независимые копии.
 
-### 6. Env платформы и выкатка edge
+## История и перенос
 
-В защищённый `runtime.env` платформы (инвентарь — `deploy/platform/env.example`)
-добавьте:
+Следовать [импорту и recovery](release-catalog-recovery.md). Полный текущий GitHub
+listing не доказывает всю выданную историю. Недоступные старые байты оставляют
+reserved404/write409; неизвестная верхняя граница закрывает namespace.
 
-```text
-MARKIRO_RELEASES_DOMAIN=releases.markiro.app
-MARKIRO_RELEASES_BUCKET=<bucket>
-RELEASES_S3_ENDPOINT=https://s3.twcstorage.ru
-RELEASES_S3_REGION=ru-1
-RELEASES_S3_BUCKET=<bucket>
-RELEASES_S3_ACCESS_KEY_ID=<ключ SaaS API>
-RELEASES_S3_SECRET_ACCESS_KEY=<секрет SaaS API>
-```
+- **Станция.** Сначала импорт/резервация всей доказанной истории, затем read-only
+  resolver и readback. `station-release-reseed.yml` принимает exact GitHub tags,
+  releaseSha и canonical origin conversion; пересобирает только origin metadata,
+  не бинарники. `owner_confirmation=RESEED-STATION-RELEASES`, `beta_tag`, `stable_tag`
+  остаются обязательным reviewed вводом. Пустой каталог требует revision0, а не
+  просто HTTP404. Публикация идёт через intent/VersionId/commit/CAS, журнал всегда
+  сохраняется в workflow artifact. `seed-baseline` закрыт: старый Terraform proof
+  не является admission каталога. Не запускать reseed по двум heads как замену
+  инвентаризации. Stable сохраняет exact-beta source/binary provenance.
+- **Подписант.** Только проверенный исторический import/read. Новые релизы и
+  publisher API исключены; отсутствие исходного набора не разрешает новый baseline.
+- **ТСД.** Сохранить занятые старые версии даже без APK. Первый новый выпуск —
+  `1.7.0 (16)` после `1.6.1 (15)` при доказанно пустом канале и явном
+  `empty_channel_confirmation=1.6.1 (15)`. Это не разрешение включить namespace
+  с недоказанной историей. См. [выпуск ТСД](handheld-release.md).
+- **Автоном.** 1.0.0 уже выпущен. Сохранить оригинальные installer и signed update
+  manifest. 1.1.0 — кандидат; его подпись и клиентское обновление требуют отдельной
+  проверки. SaaS UI считает hashes до загрузки, сохраняет intent при retry и
+  никогда не удаляет байты после неоднозначного результата регистрации.
 
-Два `MARKIRO_RELEASES_*` обязательны: без них edge не стартует. Пять
-`RELEASES_S3_*` задаются вместе или не задаются вовсе: без них раздел
-«Выпуски автонома» пишет «не настроено». `RELEASES_S3_BUCKET` должен совпадать
-с `MARKIRO_RELEASES_BUCKET`. Если задан `RELEASES_PUBLIC_ORIGIN`, он должен
-равняться `https://<MARKIRO_RELEASES_DOMAIN>`. Всё это проверяет
-`node deploy/platform/preflight.mjs`. Затем выпустите образы
-(`release-platform-images.yml`) и выкатите платформу (`deploy-platform.yml`)
-обычным путём.
+## Защищённый запуск и проверка
 
-### 7. DNS
+1. Exact reviewed main CI, образ и source closure; fresh backup, изолированный
+   restore и независимые encrypted Mac/Timeweb copies с каталогом и журналом.
+2. Runtime/mount/IAM/versioning/lifecycle/OIDC gates; writers disabled; approved
+   history import. Затем protected rollout read-only resolver.
+3. Проверить intended host и строгий TLS до A-записи `releases.markiro.app` на
+   платформу. DNS и release-host smoke проверять отдельно от обычного deploy smoke.
+4. Полные SHA/signature readbacks, GET/HEAD/range/ETag, denied routes, cache и
+   уникальный technical byte-swap: заменить current S3 version и доказать, что
+   resolver продолжает возвращать первоначальную pinned версию. Все версии сохранить.
+5. Только для доказанного namespace — отдельный reviewed writer epoch activation
+   и protected publication/reseed. Проверять exact source, revision, original
+   VersionIds и полные публичные байты после каждой операции.
 
-Замените запись `releases.markiro.app`: вместо CNAME на CDN Yandex нужна
-A-запись на хост платформы (тот же адрес, что у `markiro.app` и
-`saas-admin.markiro.app`). Caddy получит сертификат сам, когда DNS укажет на
-хост. Пока DNS не переключён, Caddy повторяет выпуск сертификата, а остальные
-сайты платформы работают. Деплой-смоук платформы `releases.markiro.app` не
-проверяет, поэтому выкатка не зависит от DNS.
-
-### 8. Перенос уже выпущенных артефактов
-
-Новый бакет пуст. Release-workflow рассчитаны на продолжение существующих
-каналов, поэтому перенос нужно закончить **до** следующего выпуска:
-
-- **Станция.** `mode=publish` требует полной пары `station/<channel>/latest.json`
-  и `station/<channel>/download` и отказывает до первой записи. `seed-baseline`
-  требует отсутствующего GitHub-канала и доказательства Terraform-плана, поэтому
-  для повторного засева не подходит. Бакет засевает отдельный workflow
-  `Reseed station release bucket` (`.github/workflows/station-release-reseed.yml`).
-  Он берёт выпуск, который сейчас отдаёт канал GitHub-зеркала
-  `thevladbog/markiro-station-releases`, восстанавливает из него дерево
-  `releases.markiro.app` и записывает его в бакет. Порядок такой:
-  1. Узнайте версии, на которые сейчас указывают каналы зеркала:
-
-     ```bash
-     curl -fsSL https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json | jq -r .version
-     curl -fsSL https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json | jq -r .version
-     ```
-
-  2. Запустите workflow из `main`, подставив теги `station-v<версия>`:
-
-     ```bash
-     gh workflow run station-release-reseed.yml --ref main \
-       -f owner_confirmation=RESEED-STATION-RELEASES \
-       -f beta_tag=station-v<beta> -f stable_tag=station-v<stable>
-     ```
-
-     Пустой тег пропускает канал. Запустить может только владелец репозитория.
-     Запись идёт ключом издателя из environment `station-release`, под той же
-     блокировкой, что и выпуск канала (`station-beta-release` и
-     `station-stable-release`). Workflow проверяет запись чтением через
-     `releases.markiro.app`, поэтому запускайте его после шагов 6 и 7.
-
-  Для каждого канала workflow:
-  1. Проверяет выпуск: он опубликован, не черновик, признак pre-release
-     соответствует каналу, канал GitHub отдаёт ровно его `latest.json`, а тег в
-     этом репозитории указывает на `releaseSha` из evidence.
-  2. Скачивает дерево анонимно и проверяет его валидатором GitHub-источника.
-     Затем пересобирает дерево GitHub из его же evidence и требует побайтового
-     совпадения со скачанным. После этого собирает дерево `releases.markiro.app`
-     и сверяет его с GitHub через `compareStationReleaseOrigins`: отличаются
-     только `latest.json`, поле `distribution` в evidence и `SHA256SUMS`.
-  3. Записывает семь неизменяемых объектов условной записью
-     (`If-None-Match: *`) с их `Content-Type` и годовым `immutable`
-     `Cache-Control`. Объект, который уже лежит под ключом, не перезаписывается:
-     его байты сверяются через `releases.markiro.app` до первой записи.
-  4. Записывает `latest.json` канала и читает его через `releases.markiro.app`.
-     Затем копирует установщик в `/download` с `Content-Disposition` и ключом
-     источника в метаданных. Указатель пишется первым, `/download` последним.
-  5. Читает всё обратно через `releases.markiro.app`. Следующий шаг ещё раз
-     скачивает дерево и пару `curl` и сравнивает их с GitHub.
-
-  Повторный запуск безопасен. Готовый канал workflow только перечитывает, а
-  прерванный дописывает: часть неизменяемых объектов или `latest.json` без
-  `/download`. Если канал уже указывает на другой выпуск или под ключом лежит
-  другой объект, workflow ничего не пишет и завершается ошибкой. Итог с
-  sha256 попадает в summary запуска и в артефакт
-  `station-<channel>-reseed-record-*`, который хранится 90 дней.
-
-  Засевается только голова каждого канала. `mode=publish` стабильного канала
-  читает исходную бету из `station/beta/releases/<beta>/`, поэтому продвигать в
-  stable можно только засеянную бету или бету, выпущенную после засева.
-  Выпуски со старым (legacy) evidence workflow не принимает.
-
-  Пока дерева нет, станции с двумя источниками обновлений должны брать их из
-  GitHub-зеркала: по коду updater (`apps/station/src-tauri/src/updater.rs`)
-  сетевая или HTTP-ошибка основного источника переключает на GitHub. Вживую
-  это не проверено.
-
-- **Подписант.** Не переносится: отдельного подписанта больше не будет,
-  подпись войдёт в автоном (решение владельца 22.10.2026). Префикс `signer/`
-  и workflow подписанта пока остаются в коде; их уберут вместе с
-  `apps/signer`.
-- **ТСД.** GitHub-зеркала нет, и старые файлы не нужны: терминалы получат
-  новый выпуск. При пустом канале `handheld-release` продолжает после последней
-  сборки на терминалах, `1.6.1 (15)` (`HANDHELD_LAST_DISTRIBUTED`), и только
-  если в запуске подтверждено `empty_channel_confirmation=1.6.1 (15)`. Без
-  подтверждения выпуск откажет; `versionCode 1` он больше не выпускает.
-  Порядок — «Первый выпуск в пустой канал» в
-  [выпуске ТСД](handheld-release.md).
-- **Автоном.** Переносить нечего: раздел «Выпуски автонома» публикует в новый
-  бакет с первой загрузки.
-
-### 9. Проверка после переключения
-
-```bash
-curl -sS -D - -o /dev/null https://releases.markiro.app/station/stable/latest.json
-# 200, Content-Type: application/json, Cache-Control от объекта
-curl -sS -o /dev/null -w '%{http_code}\n' https://releases.markiro.app/
-# 404
-curl -sS -o /dev/null -w '%{http_code}\n' 'https://releases.markiro.app/station/stable/latest.json?acl'
-# 200: query отброшен, ACL не отдаётся
-curl -sS -o /dev/null -D - -H 'Origin: https://markiro.app' \
-  https://releases.markiro.app/standalone/stable/latest.json | grep -i '^access-control-allow-origin'
-# access-control-allow-origin: https://markiro.app
-curl -sS -o /dev/null -w '%{http_code}\n' -X PUT https://releases.markiro.app/station/stable/latest.json
-# 404
-```
-
-Затем откройте `https://markiro.app/skachat/`: страница показывает версию из
-`latest.json`, в консоли браузера нет CORS-ошибки. Проверьте также, что
-установленная станция находит обновление в Центре обновлений.
-
-## Что проверено и что нет
-
-Автоматически проверяются конфигурация edge (`deploy/platform/test`), preflight,
-контракты release-workflow и инструментов (`tools/*-release/test`) и
-отказы сайта выпусков в CI-стенде платформы (`deploy/platform/smoke.mjs`):
-корень, листинг, чужие префиксы и небезопасные методы дают `404`. Поведение
-прокси (отброс query и учётных данных, `Cache-Control` объекта, `404`/`502` с
-`no-store`, CORS только на `GET`) проверено вручную на `caddy:2.11.4-alpine` с
-поддельным upstream.
-
-Засев станции проверяется контрактными тестами с поддельным бакетом
-(`tools/station-release/test/reseed.test.mjs`, `reseed-workflow.test.mjs`).
-Сборка дерева проверена на настоящих выпусках зеркала `2.4.0-beta.5` и `2.3.0`:
-пересборка повторяет дерево GitHub побайтово, засев в бакет в памяти проходит
-до конца.
-
-Не проверены: живой Timeweb S3 (политика, CORS, условная запись `If-None-Match`,
-которой пользуются издатели, пользовательские метаданные при копировании в
-`/download`), DNS и TLS `releases.markiro.app`, публикация и засев каждым
-workflow и обновление установленной станции, подписанта и ТСД.
+Ни локальные тесты, ни CI не доказывают Windows updater, CryptoAPI/DPAPI,
+установленный ТСД, сканер, принтер или заводскую смену. Указывать эти проверки
+отдельно. При отказе — сохранить journals и закрыть раздачу/публикацию; не откатывать
+Caddy к mutable anonymous S3 и не очищать immutable copies.

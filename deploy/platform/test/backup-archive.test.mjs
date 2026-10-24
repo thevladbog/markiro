@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
-import { writeFile, readFile } from "node:fs/promises";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { privateFixture } from "./host-fixtures.mjs";
 import { fakeDocker } from "./backup-runtime-fixture.mjs";
@@ -9,9 +9,19 @@ import { createDatabaseBackup } from "../backup/archive.mjs";
 import { readPrivateFile, inventoryDocumentOptions } from "../host/files.mjs";
 import { mapInventory } from "../backup/inventory.mjs";
 import { verifyDatabaseRestore } from "../backup/restore.mjs";
+import { catalogTables } from "../backup/catalog.mjs";
 import { canonical, digest } from "../backup/schemas.mjs";
 
-for (const scenario of ["complete", "production-sized", "oversized", "final-fence-failure"])
+for (const scenario of [
+  "complete",
+  "production-sized",
+  "oversized",
+  "final-fence-failure",
+  "catalog-complete",
+  "catalog-missing-journal",
+  "catalog-missing-snapshot",
+  "catalog-journal-changed",
+])
   test(`backup ${scenario}`, async (t) => {
     const nearLimit = scenario === "oversized";
     const large = nearLimit || scenario === "production-sized";
@@ -67,6 +77,38 @@ for (const scenario of ["complete", "production-sized", "oversized", "final-fenc
         migrationJournal: null,
       },
     };
+    const catalog = scenario.startsWith("catalog-");
+    const catalogJournal = join(root, "journal");
+    if (catalog) {
+      if (scenario !== "catalog-missing-journal") await mkdir(catalogJournal, { mode: 0o700 });
+      captured.catalogState = catalogTables.map((name) => ({
+        name,
+        rows:
+          name === "release_catalog_epochs"
+            ? [
+                JSON.stringify({
+                  id: randomUUID(),
+                  product: "handheld",
+                  channel: "stable",
+                  enabled: false,
+                }),
+              ]
+            : [],
+      }));
+      captured.inventory.tables = captured.catalogState.map((t) => ({
+        schema: "public",
+        name: t.name,
+        count: String(t.rows.length),
+        sha256: digest(
+          t.rows
+            .map(digest)
+            .sort()
+            .map((h) => h + "\n")
+            .join(""),
+        ),
+      }));
+      if (scenario === "catalog-missing-snapshot") delete captured.catalogState;
+    }
     if (large) {
       // Valid identifiers and multibyte UTF-8 make this a byte, not character, boundary.
       for (let n = 0; n < 5500; n++)
@@ -107,10 +149,15 @@ for (const scenario of ["complete", "production-sized", "oversized", "final-fenc
       operationId,
       target,
       connectionFile,
+      ...(catalog
+        ? { catalogJournal: { path: catalogJournal, uid: process.getuid(), optional: true } }
+        : {}),
       run,
       writerFence: {
         observe: async ({ boundary }) => {
           if (boundary === "after-snapshot") {
+            if (scenario === "catalog-journal-changed")
+              await writeFile(join(catalogJournal, `${randomUUID()}.json`), "{}", { mode: 0o600 });
             assert.equal(docker.containers.size + docker.volumes.size, 0);
             for (const name of ["database.dump", "inventory.json"])
               await assert.rejects(readFile(join(root, `backup-${operationId}`, name)), {
@@ -134,7 +181,11 @@ for (const scenario of ["complete", "production-sized", "oversized", "final-fenc
       },
     };
     const directory = join(root, `backup-${operationId}`);
-    if (nearLimit || scenario === "final-fence-failure") {
+    if (
+      nearLimit ||
+      scenario === "final-fence-failure" ||
+      (catalog && scenario !== "catalog-complete")
+    ) {
       let failureError;
       try {
         await createDatabaseBackup(request);
@@ -145,7 +196,7 @@ for (const scenario of ["complete", "production-sized", "oversized", "final-fenc
       for (const name of ["database.dump", "inventory.json", "input", "output"])
         await assert.rejects(readFile(join(directory, name)), { code: "ENOENT" });
       if (nearLimit) assert.ok(failureError.stage?.startsWith("inventory-limit-"));
-      else assert.equal(failureError.stage, "fence-validation");
+      else if (!catalog) assert.equal(failureError.stage, "fence-validation");
       const failure = JSON.parse(await readPrivateFile(directory, "failure.json"));
       assert.equal(failure.status, "recovery-required");
       assert.equal(failure.cleanup.verified, true);
@@ -157,6 +208,12 @@ for (const scenario of ["complete", "production-sized", "oversized", "final-fenc
         inventoryDocumentOptions,
       );
       const document = JSON.parse(published);
+      if (catalog)
+        assert.deepEqual(document.catalogBackup, {
+          schema: 1,
+          state: captured.catalogState,
+          journal: [],
+        });
       assert.equal(digest(published), backup.inventorySha256);
       assert.equal(document.archiveSha256, digest(await readFile(backup.archivePath)));
       assert.deepEqual(document.inventory, captured.inventory);

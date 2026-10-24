@@ -424,3 +424,5 @@ export class CatalogService {
     return result;
   }
 }
+
+export { metadata as catalogPublicationMetadata };

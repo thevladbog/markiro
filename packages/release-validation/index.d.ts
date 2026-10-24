@@ -37,3 +37,9 @@ export function assertSupersedes(
   options?: { channel: "beta" | "stable" },
 ): HandheldManifest;
 export function handheldApkName(version: string): string;
+
+export function signerArtifactNames(version: string): { installer: string; signature: string };
+export function validateSignerReleaseFiles(
+  reader: StationFileReader,
+  expected: { version: string },
+): Promise<{ manifest: unknown; evidence: unknown; hashes: Record<string, string> }>;

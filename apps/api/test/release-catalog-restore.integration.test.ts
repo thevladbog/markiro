@@ -11,6 +11,11 @@ import {
 } from "../src/modules/release-catalog/catalog-policy";
 import { scanRecovery } from "../src/modules/release-catalog/catalog-recovery";
 import { reconcileRecovery } from "../src/modules/release-catalog/catalog-recovery-apply";
+import {
+  applyCatalogRecovery,
+  recoveryEvidenceDigest,
+  recoveryPlanDigest,
+} from "../src/modules/release-catalog/catalog-operator";
 import { receiptBytes, digest } from "../src/modules/release-catalog/catalog-receipts";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { fakeLedgerStore } from "./support/catalog-ledger";
@@ -32,6 +37,8 @@ describe.skipIf(!url)("catalog stale snapshot recovery", () => {
     repo = new CatalogRepository(source.db, audit),
     recovered = new CatalogRepository(old.db, audit);
   const epoch = randomUUID();
+  const runtimeRole = `rc_restore_reader_${randomUUID().replaceAll("-", "_")}`;
+  let roleCreated = false;
   let sourceCreated = false,
     oldCreated = false;
   beforeAll(async () => {
@@ -44,6 +51,8 @@ describe.skipIf(!url)("catalog stale snapshot recovery", () => {
       container,
     ]);
     expect(result.stdout.trim()).toBe("immutable-release-catalog-20261024");
+    await admin.query(`CREATE ROLE "${runtimeRole}" NOLOGIN`);
+    roleCreated = true;
     await admin.query(`CREATE DATABASE "${name}" TEMPLATE catalog_test`);
     sourceCreated = true;
     await source.pool.query(
@@ -56,6 +65,7 @@ describe.skipIf(!url)("catalog stale snapshot recovery", () => {
     await old.pool.end();
     if (sourceCreated) await admin.query(`DROP DATABASE "${name}"`);
     if (oldCreated) await admin.query(`DROP DATABASE "${restored}"`);
+    if (roleCreated) await admin.query(`DROP ROLE "${runtimeRole}"`);
     await admin.end();
   });
   it("restores actual older dump, fences old writers and reserves newer prepared names without inferring channel COMMIT", async () => {
@@ -74,6 +84,9 @@ describe.skipIf(!url)("catalog stale snapshot recovery", () => {
     };
     const oldRequest = { ...request, identity: { ...request.identity, version: "0.9.0" } };
     const oldIntent = await repo.reserveIntent(principal, randomUUID(), oldRequest);
+    await source.pool.query(
+      `GRANT USAGE ON SCHEMA public TO "${runtimeRole}"; GRANT SELECT,INSERT ON release_catalog_receipts,release_catalog_reservations TO "${runtimeRole}"`,
+    );
     const dump = await run(
       "docker",
       ["exec", container, "pg_dump", "-U", "postgres", "--format=custom", name],
@@ -200,6 +213,27 @@ describe.skipIf(!url)("catalog stale snapshot recovery", () => {
     expect(
       (await old.pool.query("SELECT count(*)::int n FROM release_catalog_publications")).rows,
     ).toEqual([{ n: 0 }]);
+    const acl = await old.pool.query(
+      "SELECT has_table_privilege($1,'release_catalog_receipts','SELECT') AS read,has_table_privilege($1,'release_catalog_receipts','INSERT') AS insert,has_table_privilege($1,'release_catalog_receipts','UPDATE') AS update,has_table_privilege($1,'release_catalog_receipts','DELETE') AS delete,has_table_privilege($1,'release_catalog_receipts','TRUNCATE') AS truncate",
+      [runtimeRole],
+    );
+    expect(acl.rows).toEqual([
+      { read: true, insert: true, update: false, delete: false, truncate: false },
+    ]);
+    const restricted = await old.pool.connect();
+    try {
+      await restricted.query(`SET ROLE "${runtimeRole}"`);
+      for (const query of [
+        "UPDATE release_catalog_receipts SET sha256=sha256",
+        "DELETE FROM release_catalog_receipts",
+        "TRUNCATE release_catalog_receipts",
+      ]) {
+        await expect(restricted.query(query)).rejects.toMatchObject({ code: "42501" });
+      }
+    } finally {
+      await restricted.query("RESET ROLE");
+      restricted.release();
+    }
     const plan = await scanRecovery(f.store, {
       bucket: "markiro-releases",
       writersFenced: true,
@@ -212,8 +246,57 @@ describe.skipIf(!url)("catalog stale snapshot recovery", () => {
       timeoutMs: 1000,
     });
     expect(plan.channels).toMatchObject([{ readable: false, reason: "unconfirmed_channel" }]);
-    await reconcileRecovery(old.db, plan, audit, actor);
-    await reconcileRecovery(old.db, plan, audit, actor);
+    const evidence = {
+      schema: 1,
+      bucket: "markiro-releases",
+      independentInventoryComplete: true,
+      independentReceipts: inventory.map((r) => {
+        const stored = [...f.versions.values()].find(
+          (v) => v.key === `_publication-ledger/${r.id}.json`,
+        );
+        if (!stored) throw new Error("fixture");
+        return { ...r, base64: stored.bytes.toString("base64") };
+      }),
+      technicalKeys: [],
+      limits: { maxPages: 10, maxRecords: 100, maxBytes: 1048576, timeoutMs: 1000 },
+    };
+    const now = Date.now();
+    const admission = {
+      schema: 1,
+      action: "recover",
+      operationId: randomUUID(),
+      executorSha: "b".repeat(40),
+      runId: "123",
+      runAttempt: "1",
+      epoch,
+      evidenceSha256: recoveryEvidenceDigest(evidence),
+      expiresAt: new Date(now + 60000).toISOString(),
+      reviewedPlanSha256: "0".repeat(64),
+    };
+    const operator = {
+      db: old.db,
+      audit,
+      actor,
+      admission,
+      now: () => now,
+      authorize: async () => {},
+      assertFenced: async () => {},
+    };
+    await expect(applyCatalogRecovery(evidence, f.store, operator)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(
+      (await old.pool.query("SELECT count(*)::int n FROM release_catalog_epochs WHERE enabled"))
+        .rows,
+    ).toEqual([{ n: 0 }]);
+    expect(
+      (await old.pool.query("SELECT count(*)::int n FROM release_catalog_reservations")).rows,
+    ).toEqual([{ n: 0 }]);
+    operator.admission.reviewedPlanSha256 = recoveryPlanDigest(plan);
+    expect(await applyCatalogRecovery(evidence, f.store, operator)).toMatchObject({
+      writersMayEnable: false,
+    });
+    await applyCatalogRecovery(evidence, f.store, operator);
     expect(
       (await old.pool.query("SELECT count(*)::int n FROM release_catalog_reservations")).rows,
     ).toEqual([{ n: 2 }]);

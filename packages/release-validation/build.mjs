@@ -8,6 +8,9 @@ for (const path of [
   "station-release/origins.mjs",
   "station-release/version.mjs",
   "handheld-release/manifest.mjs",
+  "signer-release/artifacts.mjs",
+  "signer-release/manifest.mjs",
+  "signer-release/version.mjs",
 ]) {
   const target = new URL(path, output);
   await mkdir(fileURLToPath(new URL("./", target)), { recursive: true });
@@ -15,5 +18,5 @@ for (const path of [
 }
 await writeFile(
   new URL("index.mjs", output),
-  'export { stationAssetNames, validateStationReleaseFiles } from "./station-release/artifacts.mjs";\nexport { parseHandheldManifest, assertSupersedes, handheldApkName } from "./handheld-release/manifest.mjs";\n',
+  'export { stationAssetNames, validateStationReleaseFiles } from "./station-release/artifacts.mjs";\nexport { validateSignerReleaseFiles, signerArtifactNames } from "./signer-release/artifacts.mjs";\nexport { parseHandheldManifest, assertSupersedes, handheldApkName } from "./handheld-release/manifest.mjs";\n',
 );

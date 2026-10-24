@@ -1319,7 +1319,7 @@ test("release hosting runbook inventories the Timeweb bucket, keys and edge", as
     const end = hosting.indexOf("\n### ", start + heading.length);
     return hosting.slice(start, end === -1 ? undefined : end);
   };
-  const environments = section("### 5. GitHub environments");
+  const environments = section("### GitHub environments");
   // Each environment owns exactly the list under its own heading line, up to
   // the first line that is not a list item.
   const inventory = (name) => {
@@ -1357,37 +1357,48 @@ test("release hosting runbook inventories the Timeweb bucket, keys and edge", as
   );
   assert.match(environments, /YANDEX_STATION_RELEASE_\*/u);
 
-  const publicRead = section("### 2. Публичное чтение префиксов");
   for (const prefix of ["station/*", "signer/*", "handheld/*", "standalone/*"])
-    assert.ok(publicRead.includes(`\`${prefix}\``), prefix);
-  assert.match(publicRead, /Листинг давать не нужно/u);
-  const cors = section("### 3. CORS бакета");
-  assert.match(cors, /"AllowedOrigins": \["https:\/\/saas-admin\.markiro\.app"\]/u);
-  assert.match(cors, /"AllowedMethods": \["PUT"\]/u);
-  const platform = section("### 6. Env платформы");
-  for (const key of ["MARKIRO_RELEASES_DOMAIN", "MARKIRO_RELEASES_BUCKET", "RELEASES_S3_REGION"])
-    assert.match(platform, new RegExp(`${key}=`, "u"));
-  // An empty bucket must not silently restart the handheld versionCode or
-  // promise a station publish the tooling refuses.
-  const transfer = section("### 8. Перенос уже выпущенных артефактов");
-  assert.match(transfer, /`empty_channel_confirmation=1\.6\.1 \(15\)`/u);
-  assert.match(transfer, /`versionCode 1` он больше не выпускает/u);
-  assert.match(transfer, /`seed-baseline`[\s\S]*не подходит/u);
-  // The station reseed is the workflow the runbook dispatches, with its exact
-  // inputs, and it documents what it refuses.
+    assert.ok(hosting.includes(`\`${prefix}\``), prefix);
+  for (const requirement of [
+    "GetObjectVersion",
+    "ListBucketVersions",
+    "VersionId",
+    "no-cache",
+    "no-store",
+    "RELEASE_CATALOG_WRITERS_ENABLED=false",
+    "writers disabled",
+    "revision0",
+    "reviewed writer epoch",
+    "1.0.0 уже выпущен",
+    "полные байты",
+    "HEAD+PUT",
+  ])
+    assert.ok(hosting.includes(requirement), requirement);
+  for (const key of [
+    "MARKIRO_RELEASES_DOMAIN",
+    "MARKIRO_RELEASES_BUCKET",
+    "RELEASE_CATALOG_CACHE_BYTES",
+    "RELEASE_CATALOG_DISK_RESERVE_BYTES",
+    "RELEASE_CATALOG_PUBLISHERS_JSON",
+  ])
+    assert.ok(hosting.includes(key), key);
+  assert.match(hosting, /CORS[\s\S]*PUT[\s\S]*x-amz-version-id/u);
+  assert.match(hosting, /`empty_channel_confirmation=1\.6\.1 \(15\)`/u);
+  assert.match(hosting, /`seed-baseline` закрыт/u);
   await access(new URL(".github/workflows/station-release-reseed.yml", root));
-  assert.match(transfer, /`\.github\/workflows\/station-release-reseed\.yml`/u);
-  assert.match(
-    transfer,
-    /gh workflow run station-release-reseed\.yml --ref main \\\n\s+-f owner_confirmation=RESEED-STATION-RELEASES \\\n\s+-f beta_tag=station-v<beta> -f stable_tag=station-v<stable>/u,
+  for (const input of [
+    "station-release-reseed.yml",
+    "owner_confirmation=RESEED-STATION-RELEASES",
+    "beta_tag",
+    "stable_tag",
+  ])
+    assert.ok(hosting.includes(input), input);
+  assert.match(hosting, /истории[\s\S]*VersionId/u);
+  assert.match(hosting, /не бинарники/u);
+  assert.match(hosting, /нет[\s\S]*fallback|без fallback/iu);
+  assert.match(hosting, /Windows updater[\s\S]*установленный ТСД/u);
+  assert.doesNotMatch(
+    hosting,
+    /Указатель пишется первым|Повторный запуск безопасен|Переносить нечего/u,
   );
-  assert.match(transfer, /`thevladbog\/markiro-station-releases`/u);
-  assert.match(transfer, /`compareStationReleaseOrigins`/u);
-  assert.match(transfer, /`If-None-Match: \*`/u);
-  assert.match(transfer, /Указатель пишется первым, `\/download` последним/u);
-  assert.match(transfer, /Повторный запуск безопасен/u);
-  assert.match(transfer, /уже указывает на другой выпуск[\s\S]*ничего не пишет/u);
-  assert.match(transfer, /`station\/beta\/releases\/<beta>\/`/u);
-  assert.doesNotMatch(transfer, /ещё не сделан/u);
-  assert.match(hosting, /## Что проверено и что нет/u);
 });

@@ -1,3 +1,4 @@
+import { captureCatalogJournal, validateCatalogBackup } from "./catalog.mjs";
 import { join } from "node:path";
 import { rm, lstat } from "node:fs/promises";
 import {
@@ -28,6 +29,7 @@ export async function createDatabaseBackup({
   writerFence,
   run,
   recoveryRuntime,
+  catalogJournal,
 }) {
   identity(operationId, target);
   target = plain(target);
@@ -86,7 +88,14 @@ export async function createDatabaseBackup({
     const dump = join(output, "database.dump");
     const h = await readFileHeader(dump);
     ensure(h === "PGDMP");
-    result = { captured, dump };
+    const journal = catalogJournal ? await captureCatalogJournal(catalogJournal) : undefined;
+    if (captured.catalogState?.some((t) => t.rows.length)) ensure(journal !== undefined);
+    const catalogBackup = captured.catalogState
+      ? { schema: 1, state: captured.catalogState, journal: journal ?? [] }
+      : undefined;
+    ensure(captured.catalogState || !journal?.length);
+    validateCatalogBackup(catalogBackup, captured.inventory);
+    result = { captured, dump, catalogBackup, journal };
   } catch (error) {
     problem = error.stage && error.stage !== "validation" ? error : fail(`${phase}-validation`);
   }
@@ -117,6 +126,11 @@ export async function createDatabaseBackup({
       );
       validateFencePair({ before, after }, operationId, target);
       ensure(Date.parse(startedAt) <= Date.parse(before.observedAt));
+      if (catalogJournal)
+        ensure(
+          canonical((await captureCatalogJournal(catalogJournal)) ?? null) ===
+            canonical(result.journal ?? null),
+        );
       phase = "inventory";
       const archive = await hashArchive(directory, result.dump);
       const inventory = {
@@ -138,6 +152,7 @@ export async function createDatabaseBackup({
           postgresVersion: result.captured.postgresVersion,
         },
         inventory: result.captured.inventory,
+        ...(result.catalogBackup ? { catalogBackup: result.catalogBackup } : {}),
       };
       const inventoryBytes = Buffer.from(canonical(inventory) + "\n");
       if (inventoryBytes.length > inventoryDocumentOptions.maxBytes)

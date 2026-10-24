@@ -32,24 +32,7 @@ export async function reconcileRecovery(
   audit: Pick<PlatformAuditService, "record">,
   actor: Actor,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-    await tx.execute(sql`SET LOCAL statement_timeout = '15s'`);
-    await tx.execute(sql`LOCK TABLE release_catalog_epochs IN SHARE ROW EXCLUSIVE MODE`);
-    await tx.update(epochs).set({ enabled: false });
-    await tx.update(channels).set({ readable: false });
-    await audit.record(tx, {
-      ...actor,
-      action: "release_catalog.recovery.fence",
-      outcome: "success",
-      tenantId: null,
-      targetType: "release_catalog",
-      targetId: null,
-      reason: null,
-      before: null,
-      after: { writersEnabled: false, channelsReadable: false },
-    });
-  });
+  await fenceCatalogRecovery(db, audit, actor);
   if (plan.writersMayEnable !== false) throw new CatalogFault("not_ready");
   const proofs = new Map(plan.receipts.map((r) => [r.operation.id, r]));
   if (proofs.size !== plan.receipts.length) throw new CatalogFault("not_ready");
@@ -158,6 +141,31 @@ export async function reconcileRecovery(
         writersEnabled: false,
         channelsReadable: false,
       },
+    });
+  });
+}
+
+export async function fenceCatalogRecovery(
+  db: Db,
+  audit: Pick<PlatformAuditService, "record">,
+  actor: Actor,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    await tx.execute(sql`SET LOCAL statement_timeout = '15s'`);
+    await tx.execute(sql`LOCK TABLE release_catalog_epochs IN SHARE ROW EXCLUSIVE MODE`);
+    await tx.update(epochs).set({ enabled: false });
+    await tx.update(channels).set({ readable: false });
+    await audit.record(tx, {
+      ...actor,
+      action: "release_catalog.recovery.fence",
+      outcome: "success",
+      tenantId: null,
+      targetType: "release_catalog",
+      targetId: null,
+      reason: null,
+      before: null,
+      after: { writersEnabled: false, channelsReadable: false },
     });
   });
 }

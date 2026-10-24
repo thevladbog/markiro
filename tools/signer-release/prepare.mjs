@@ -1,8 +1,9 @@
+import { validateSignerReleaseFiles } from "./artifacts.mjs";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { assertValidSignerManifest, buildSignerManifest } from "./manifest.mjs";
+import { buildSignerManifest } from "./manifest.mjs";
 import { signerObjectKey, signerPublicUrl } from "./object-storage.mjs";
 import { signerArtifactNames } from "./version.mjs";
 
@@ -39,11 +40,6 @@ async function locateBundle(bundleDir) {
     throw new Error(`no detached signature ${signature} in ${bundleDir}`);
   }
   return { installer, signature };
-}
-
-function expectedNames(version) {
-  const names = signerArtifactNames(version);
-  return [CHECKSUM_FILE, EVIDENCE_FILE, MANIFEST_FILE, names.installer, names.signature].sort();
 }
 
 export async function prepareSignerRelease({
@@ -111,85 +107,25 @@ export async function prepareSignerRelease({
 }
 
 export async function verifyPreparedSignerRelease({ directory, version }) {
-  const names = signerArtifactNames(version);
   const entries = (await readdir(directory)).sort();
-  if (entries.join("\n") !== expectedNames(version).join("\n")) {
-    throw new Error("prepared signer release has an unexpected asset set");
-  }
-
   const bytes = Object.fromEntries(
     await Promise.all(entries.map(async (name) => [name, await readFile(join(directory, name))])),
   );
-  const manifest = JSON.parse(bytes[MANIFEST_FILE].toString("utf8"));
-  assertValidSignerManifest(manifest);
-  const expectedUrl = signerPublicUrl(signerObjectKey({ version, filename: names.installer }));
-  if (
-    manifest.version !== version ||
-    manifest.platforms["windows-x86_64"].url !== expectedUrl ||
-    manifest.platforms["windows-x86_64"].signature !==
-      bytes[names.signature].toString("utf8").trim()
-  ) {
-    throw new Error("prepared signer manifest does not match its release assets");
-  }
-
-  const evidence = JSON.parse(bytes[EVIDENCE_FILE].toString("utf8"));
-  if (
-    evidence?.schemaVersion !== 1 ||
-    evidence?.product !== "signer" ||
-    evidence?.channel !== "stable" ||
-    evidence?.version !== version
-  ) {
-    throw new Error("prepared signer release evidence is invalid");
-  }
-  validateSource(evidence.source?.repository, evidence.source?.sha);
-
-  const primaryNames = [names.installer, names.signature, MANIFEST_FILE].sort();
-  if (
-    Object.keys(evidence.assets ?? {})
-      .sort()
-      .join("\n") !== primaryNames.join("\n")
-  ) {
-    throw new Error("prepared signer release evidence names unexpected assets");
-  }
-  for (const name of primaryNames) {
-    const actualHash = sha256(bytes[name]);
-    if (
-      evidence.assets[name]?.sha256 !== actualHash ||
-      evidence.assets[name]?.size !== bytes[name].length
-    ) {
-      throw new Error(`prepared signer release checksum mismatch: ${name}`);
-    }
-  }
-
-  const checksumLines = bytes[CHECKSUM_FILE].toString("utf8").trim().split("\n");
-  const checksumEntries = new Map();
-  for (const line of checksumLines) {
-    const match = /^([a-f0-9]{64})  ([^/\\]+)$/.exec(line);
-    if (!match || checksumEntries.has(match[2])) {
-      throw new Error("prepared signer SHA256SUMS is invalid");
-    }
-    checksumEntries.set(match[2], match[1]);
-  }
-  const hashedNames = [names.installer, names.signature, MANIFEST_FILE, EVIDENCE_FILE].sort();
-  if ([...checksumEntries.keys()].sort().join("\n") !== hashedNames.join("\n")) {
-    throw new Error("prepared signer SHA256SUMS names unexpected assets");
-  }
-  const hashes = {};
-  for (const name of hashedNames) {
-    const actualHash = sha256(bytes[name]);
-    if (checksumEntries.get(name) !== actualHash) {
-      throw new Error(`prepared signer release checksum mismatch: ${name}`);
-    }
-    hashes[name] = actualHash;
-  }
-  hashes[CHECKSUM_FILE] = sha256(bytes[CHECKSUM_FILE]);
-
+  const result = await validateSignerReleaseFiles(
+    {
+      names: entries,
+      size: (name) => bytes[name].length,
+      digest: async (name) => sha256(bytes[name]),
+      text: async (name, maximum) => {
+        if (bytes[name].length > maximum) throw new Error("signer text exceeds limit");
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes[name]);
+      },
+    },
+    { version },
+  );
   return {
+    ...result,
     directory,
-    names,
     paths: Object.fromEntries(entries.map((name) => [name, join(directory, name)])),
-    hashes,
-    manifest,
-    evidence,
   };
 }
