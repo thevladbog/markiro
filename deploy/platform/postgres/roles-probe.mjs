@@ -211,7 +211,7 @@ try {
     }
   }
   checks.push("both logins verify CA and hostname; wrong CA, hostname and plaintext denied");
-  phase = "read-only host probe";
+  phase = "catalog append-only host probe";
   const hostProbe = await probePostgres({
     Client,
     input: { appUrl, migrationUrl: migratorUrl },
@@ -219,6 +219,73 @@ try {
   });
   assert.equal(hostProbe.postgresVersion, postgresVersion);
   assert.equal(hostProbe.tls.san, "db.private");
+  phase = "catalog exact privilege negatives";
+  const appendOnly = [
+    "release_catalog_publications",
+    "release_catalog_objects",
+    "release_catalog_reservations",
+    "release_catalog_channel_events",
+    "release_catalog_receipts",
+    "release_catalog_oidc_bindings",
+  ];
+  const mutations = [];
+  for (const table of appendOnly) {
+    for (const privilege of ["SELECT", "INSERT"])
+      mutations.push([
+        `REVOKE ${privilege} ON public.${table} FROM markiro_app`,
+        `GRANT ${privilege} ON public.${table} TO markiro_app`,
+      ]);
+    for (const privilege of ["UPDATE", "DELETE", "TRUNCATE"])
+      mutations.push([
+        `GRANT ${privilege} ON public.${table} TO markiro_app`,
+        `REVOKE ${privilege} ON public.${table} FROM markiro_app`,
+      ]);
+  }
+  for (const privilege of ["SELECT", "INSERT", "UPDATE"])
+    mutations.push([
+      `REVOKE ${privilege} ON public.release_catalog_intents FROM markiro_app`,
+      `GRANT ${privilege} ON public.release_catalog_intents TO markiro_app`,
+    ]);
+  for (const privilege of ["DELETE", "TRUNCATE"])
+    mutations.push([
+      `GRANT ${privilege} ON public.release_catalog_intents TO markiro_app`,
+      `REVOKE ${privilege} ON public.release_catalog_intents FROM markiro_app`,
+    ]);
+  for (const table of ["release_catalog_channels", "release_catalog_epochs", "organization"])
+    for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"])
+      mutations.push([
+        `REVOKE ${privilege} ON public.${table} FROM markiro_app`,
+        `GRANT ${privilege} ON public.${table} TO markiro_app`,
+      ]);
+  // Effective grants through PUBLIC are just as dangerous as direct grants.
+  mutations.push([
+    "GRANT UPDATE ON public.release_catalog_objects TO PUBLIC",
+    "REVOKE UPDATE ON public.release_catalog_objects FROM PUBLIC",
+  ]);
+  // A similarly named future table is not an append-only exception.
+  await migrator.query("CREATE TABLE public.release_catalog_future_probe(id int)");
+  mutations.push([
+    "REVOKE UPDATE, DELETE ON public.release_catalog_future_probe FROM markiro_app",
+    "GRANT UPDATE, DELETE ON public.release_catalog_future_probe TO markiro_app",
+  ]);
+  try {
+    for (const [change, restore] of mutations) {
+      await migrator.query(change);
+      try {
+        await assert.rejects(
+          probePostgres({ Client, input: { appUrl, migrationUrl: migratorUrl }, ca }),
+        );
+      } finally {
+        await migrator.query(restore);
+      }
+    }
+    await probePostgres({ Client, input: { appUrl, migrationUrl: migratorUrl }, ca });
+  } finally {
+    await migrator.query("DROP TABLE public.release_catalog_future_probe");
+  }
+  checks.push(
+    "exact append-only catalog privileges accepted and every missing or excess grant rejected",
+  );
   phase = "effective host probe privilege negatives";
   await migrator.query("CREATE SEQUENCE public.host_probe_sequence");
   try {

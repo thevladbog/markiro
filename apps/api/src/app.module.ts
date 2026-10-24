@@ -1,3 +1,4 @@
+import { ReleaseCatalogModule } from "./modules/release-catalog/release-catalog.module";
 import { ServerProfileModule } from "./server-profile";
 import { DeviceGrantsModule } from "./modules/device-grants/device-grants.module";
 import { PlatformGrantReadinessModule } from "./modules/device-grants/platform-grant-readiness.module";
@@ -103,6 +104,7 @@ export class AppModule {
       },
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
+    const releaseCatalogModule = ReleaseCatalogModule.forRoot(env);
     const supportChatModule = SupportChatModule.forRoot(env);
     // One instance: the leads section imports it for provisioning (see PlatformLeadsModule).
     const platformTenantsModule = PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN);
@@ -115,7 +117,7 @@ export class AppModule {
           PlatformHttpModule,
           AuthModule.forRoot({ db: setup.db, pool: setup.pool }),
           PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
-          PlatformStandaloneLicensesModule.forRoot(env),
+          PlatformStandaloneLicensesModule.forRoot(env, releaseCatalogModule),
           PlatformCatalogModule,
           PlatformEntitlementsModule,
           platformTenantsModule,
@@ -131,7 +133,8 @@ export class AppModule {
           PlatformOperationsModule.forRoot(env),
           PlatformServicePeriodsModule,
           PlatformLeadsModule.forRoot(platformTenantsModule),
-          PlatformStandaloneReleasesModule.forRoot(env),
+          PlatformStandaloneReleasesModule.forRoot(env, releaseCatalogModule),
+          releaseCatalogModule,
           SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
           TenantBillingModule.forRoot(env.ADMIN_ORIGIN, true),
           supportChatModule,
@@ -150,11 +153,12 @@ export class AppModule {
         PlatformHttpModule,
         AuthModule.forRoot(setup),
         DeviceGrantsModule.forRoot(env),
+        releaseCatalogModule,
         ...(setup.platformAuth
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
               PlatformGrantReadinessModule.forRoot(env),
-              PlatformStandaloneLicensesModule.forRoot(env),
+              PlatformStandaloneLicensesModule.forRoot(env, releaseCatalogModule),
               PlatformCatalogModule,
               PlatformEntitlementsModule,
               platformTenantsModule,
@@ -170,7 +174,7 @@ export class AppModule {
               PlatformOperationsModule.forRoot(env),
               PlatformServicePeriodsModule,
               PlatformLeadsModule.forRoot(platformTenantsModule),
-              PlatformStandaloneReleasesModule.forRoot(env),
+              PlatformStandaloneReleasesModule.forRoot(env, releaseCatalogModule),
             ]
           : []),
         AuthorizationModule,

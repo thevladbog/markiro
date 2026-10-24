@@ -4,7 +4,9 @@ import {
   type StandaloneReleaseChannelView,
   type StandaloneReleaseList,
   type StandaloneReleaseRegistration,
-  type StandaloneReleaseTarget,
+  type StandaloneReleaseUploadRequest,
+  type StandaloneReleaseRegisterRequest,
+  type StandaloneReleaseSetLatest,
   type StandaloneReleaseUpload,
 } from "@markiro/platform-contracts";
 
@@ -23,7 +25,7 @@ export function listStandaloneReleases(): Promise<StandaloneReleaseList> {
 }
 
 export function requestStandaloneReleaseUpload(
-  target: StandaloneReleaseTarget,
+  target: StandaloneReleaseUploadRequest,
 ): Promise<StandaloneReleaseUpload> {
   const body = contracts.upload.body.parse(target);
   return platformApiFetch(`${PATH}/uploads`, {
@@ -34,7 +36,7 @@ export function requestStandaloneReleaseUpload(
 }
 
 export function registerStandaloneRelease(
-  target: StandaloneReleaseTarget,
+  target: StandaloneReleaseRegisterRequest,
 ): Promise<StandaloneReleaseRegistration> {
   const body = contracts.register.body.parse(target);
   return platformApiFetch(`${PATH}/registrations`, {
@@ -46,10 +48,10 @@ export function registerStandaloneRelease(
 
 export function setStandaloneReleaseLatest(
   channel: StandaloneReleaseChannel,
-  version: string,
+  change: StandaloneReleaseSetLatest,
 ): Promise<StandaloneReleaseChannelView> {
   const params = contracts.setLatest.params.parse({ channel });
-  const body = contracts.setLatest.body.parse({ version });
+  const body = contracts.setLatest.body.parse(change);
   return platformApiFetch(`${PATH}/${params.channel}/latest`, {
     method: "PUT",
     body: JSON.stringify(body),

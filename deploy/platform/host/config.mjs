@@ -1,3 +1,4 @@
+import { CATALOG_RUNTIME_KEYS, assertCatalogMounts } from "../catalog-config.mjs";
 import { createHash } from "node:crypto";
 import { canonical, digest as configurationDigest, ensure, plain } from "../backup/schemas.mjs";
 import { rmdir, unlink } from "node:fs/promises";
@@ -18,6 +19,7 @@ import {
 // Explicit inventory from env.example, including its commented optional keys.
 // Disabled worker switches are the only additional preflight-supported keys.
 const runtimeKeys = new Set([
+  ...CATALOG_RUNTIME_KEYS,
   "SERVER_PROFILE",
   "PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA",
   "VITE_SERVER_PROFILE",
@@ -196,6 +198,7 @@ export async function snapshotHostConfig({ root, candidateId, envFile, manifest 
     assertPrivateFileSync(envFile);
     const env = await readProtectedEnv(envFile);
     validateRuntime(env, manifest);
+    assertCatalogMounts(env);
     // Validate compact bindings before creating anything. Snapshot path is checked
     // after publication because it must already exist at child construction.
     for (const key of pgFiles) assertBindFileSync(env[key]);

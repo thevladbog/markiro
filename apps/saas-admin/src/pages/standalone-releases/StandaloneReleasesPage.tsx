@@ -42,7 +42,13 @@ export function StandaloneReleasesPage() {
     t(`standaloneReleases.channel.${channel}`);
 
   const pointer = useMutation({
-    mutationFn: (target: PointerMove) => setStandaloneReleaseLatest(target.channel, target.version),
+    mutationFn: (target: PointerMove) =>
+      setStandaloneReleaseLatest(target.channel, {
+        version: target.version,
+        operationId: target.operationId,
+        expectedRevision: target.expectedRevision,
+        kind: target.direction === "rollback" ? "rollback" : "forward",
+      }),
     onSuccess: (view, target) => {
       queryClient.setQueryData<StandaloneReleaseList>(standaloneReleaseKeys.list(), (current) =>
         current?.configured
@@ -77,10 +83,10 @@ export function StandaloneReleasesPage() {
           channel: channelName(result.release.channel),
         }),
       }),
-    onError: (error, target) =>
+    onError: (error) =>
       setNotice({
         tone: "error",
-        message: releaseErrorMessage("register", error, { version: target.version }),
+        message: releaseErrorMessage("register", error),
       }),
     onSettled: refresh,
   });
@@ -135,9 +141,9 @@ export function StandaloneReleasesPage() {
             view={view}
             busy={pending.isPending || pointer.isPending}
             onMove={openMove}
-            onRegisterPending={(version) => {
+            onRegisterPending={(intentId) => {
               setNotice(null);
-              pending.mutate({ channel: view.channel, version });
+              pending.mutate({ intentId });
             }}
           />
         ))}

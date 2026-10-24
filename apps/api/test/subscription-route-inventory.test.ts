@@ -1,3 +1,16 @@
+import {
+  CATALOG_PUBLISHER_POLICY,
+  CatalogPublisherGuard,
+  isCatalogPublisherRoute,
+} from "../src/modules/release-catalog/catalog-publisher.guard";
+const MACHINE_ROUTES: readonly string[] = [
+  "POST /release-publisher/intents (CatalogPublisherController.create)",
+  "GET /release-publisher/intents/:id (CatalogPublisherController.get)",
+  "POST /release-publisher/intents/:id/commit (CatalogPublisherController.commit)",
+  "PUT /release-publisher/channels/:product/:channel (CatalogPublisherController.change)",
+  "GET /release-publisher/publications/:product/:channel/:version (CatalogPublisherController.publication)",
+  "GET /release-publisher/channels/:product/:channel (CatalogPublisherController.channel)",
+];
 import { PublicApiGuard, PUBLIC_API_SCOPE } from "../src/modules/public-api/public-api.guard";
 import type { Type } from "@nestjs/common";
 import { RequestMethod } from "@nestjs/common";
@@ -1173,6 +1186,9 @@ describe("registered subscription route inventory", () => {
         ...((Reflect.getMetadata(GUARDS_METADATA, route.handler) ?? []) as Type[]),
       ];
       return (
+        guards.includes(CatalogPublisherGuard) ||
+        reflector.getAllAndOverride(CATALOG_PUBLISHER_POLICY, [route.handler, route.controller]) !==
+          undefined ||
         guards.includes(PublicApiGuard) ||
         guards.includes(SubscriptionAccessGuard) ||
         UNSAFE_METHODS.has(route.method) ||
@@ -1180,12 +1196,26 @@ describe("registered subscription route inventory", () => {
       );
     });
     const encounteredExemptions: string[] = [];
+    const encounteredMachines: string[] = [];
     const unclassified: string[] = [];
 
     for (const route of inspected) {
       const classGuards = (Reflect.getMetadata(GUARDS_METADATA, route.controller) ?? []) as Type[];
       const methodGuards = (Reflect.getMetadata(GUARDS_METADATA, route.handler) ?? []) as Type[];
       const guards = [...classGuards, ...methodGuards];
+      if (
+        guards.includes(CatalogPublisherGuard) ||
+        reflector.getAllAndOverride(CATALOG_PUBLISHER_POLICY, [route.handler, route.controller]) !==
+          undefined
+      ) {
+        expect(
+          isCatalogPublisherRoute(route.controller, route.handler),
+          `invalid machine boundary ${routeKey(route)}`,
+        ).toBe(true);
+        expect(MACHINE_ROUTES).toContain(routeKey(route));
+        encounteredMachines.push(routeKey(route));
+        continue;
+      }
       if (guards.includes(PublicApiGuard)) {
         expect(guards.map((guard) => guard.name)).toEqual(["PublicApiGuard"]);
         expect(
@@ -1289,8 +1319,15 @@ describe("registered subscription route inventory", () => {
       }
     }
 
+    expect(encounteredMachines.sort()).toEqual([...MACHINE_ROUTES].sort());
     expect(unclassified, "unclassified registered unsafe routes").toEqual([]);
     expect(encounteredExemptions.sort()).toEqual(Object.keys(EXEMPTIONS).sort());
+  });
+
+  it("does not expose the private catalog resolver through the legacy profile", () => {
+    expect(
+      routes.filter((route) => route.path.startsWith("/internal/release-catalog")).map(routeKey),
+    ).toEqual([]);
   });
 
   it("keeps every platform route inside the isolated platform policy boundary", () => {

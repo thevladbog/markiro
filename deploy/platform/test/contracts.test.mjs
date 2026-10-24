@@ -431,7 +431,7 @@ test("optional standalone release storage comes as a set on the CSP's upload ori
   assert.equal(caddy.match(/import saas_admin_csp/g)?.length, 1);
 });
 
-test("the release host is a read-only, deny-by-default window onto the release bucket", () => {
+test("the release host is a read-only, deny-by-default window onto the pinned catalog", () => {
   const caddy = read("deploy/platform/Caddyfile");
   const block = (start) => {
     const from = caddy.indexOf(start);
@@ -440,28 +440,24 @@ test("the release host is a read-only, deny-by-default window onto the release b
   };
   const upstream = block("(releases_upstream) {");
   const routes = block("(releases_routes) {");
-  // Reads go path-style to the upload origin, into the configured bucket, with
-  // the client's query string (?acl, ?versionId, listings) dropped.
-  assert.match(upstream, /^\trewrite \* \/\{\$MARKIRO_RELEASES_BUCKET\}\{path\}\?$/mu);
-  assert.equal(upstream.match(/reverse_proxy (\S+) \{/u)?.[1], RELEASES_UPLOAD_ORIGIN);
-  assert.match(upstream, /header_up Host \{upstream_hostport\}/u);
+  assert.match(upstream, /rewrite \* \/internal\/release-catalog\{path\}\?/u);
+  assert.equal(upstream.match(/reverse_proxy (\S+) \{/u)?.[1], "api:3000");
   for (const header of ["Authorization", "Cookie", "Origin"])
-    assert.match(upstream, new RegExp(`header_up -${header}\\n`, "u"));
+    assert.ok(upstream.includes(`header_up -${header}`));
   assert.match(upstream, /header_down -X-Amz-\*/u);
   assert.match(upstream, /header_down -Access-Control-\*/u);
-  // The object's own Cache-Control is authoritative (the Station release checks
-  // it through this host); the edge only supplies one that is missing.
-  assert.match(upstream, /^\theader \?Cache-Control "\{args\[0\]\}"$/mu);
-  assert.doesNotMatch(upstream, /header_down \??Cache-Control/u);
-  // A missing or failed object is never cached under an immutable lifetime.
+  assert.doesNotMatch(upstream, /\?Cache-Control|MARKIRO_RELEASES_BUCKET|https:\/\/s3/u);
   assert.match(upstream, /status 403 404[\s\S]*?Cache-Control no-store\s+respond 404/u);
-  assert.match(upstream, /status 5xx[\s\S]*?Cache-Control no-store\s+respond 502/u);
+  assert.match(upstream, /status 5xx[\s\S]*?Cache-Control no-store\s+respond 503/u);
 
   const matcher = (name) => {
     const body = routes.match(new RegExp(`@${name} \\{([\\s\\S]*?)\\n\\t\\t\\}`, "u"))?.[1];
     assert.ok(body, name);
     assert.match(body, /^\s*method GET HEAD$/mu, name);
-    return new RegExp(body.match(/path_regexp (\S+)/u)?.[1] ?? "^$", "u");
+    return new RegExp(
+      body.match(/vars_regexp \{http\.request\.orig_uri\} (\S+)/u)?.[1] ?? "^$",
+      "u",
+    );
   };
   const immutable = matcher("releaseImmutable");
   const pointer = matcher("releasePointer");
@@ -507,8 +503,7 @@ test("the release host is a read-only, deny-by-default window onto the release b
     assert.doesNotMatch(path, immutable, path);
     assert.doesNotMatch(path, pointer, path);
   }
-  assert.match(routes, /import releases_upstream "public, max-age=31536000, immutable"/u);
-  assert.match(routes, /import releases_upstream "public, max-age=60, must-revalidate"/u);
+  assert.equal(routes.match(/import releases_upstream/gu)?.length, 2);
   // CORS for the landing's download page only, on GET only; everything else 404.
   assert.match(
     routes,
@@ -518,7 +513,7 @@ test("the release host is a read-only, deny-by-default window onto the release b
   assert.match(routes, /\n\t\theader Cache-Control no-store\n\t\trespond 404\n\t\}\n\}$/u);
   assert.match(
     caddy,
-    /https:\/\/\{\$MARKIRO_RELEASES_DOMAIN\}:8443 \{\n\timport releases_headers\n\timport releases_routes\n\}/u,
+    /https:\/\/\{\$MARKIRO_RELEASES_DOMAIN\}:8443 \{\n\timport releases_headers\n\timport releases_routes\n\thandle_errors \{[\s\S]*?respond 503[\s\S]*?\n\}/u,
   );
   const plain = block("http://{$MARKIRO_RELEASES_DOMAIN}:8080 {");
   assert.match(plain, /redir @safe https:\/\/\{\$MARKIRO_RELEASES_DOMAIN\}\{uri\} 308/u);
@@ -538,7 +533,9 @@ test("the release host serves every path the handheld updater and publisher use"
   const caddy = read("deploy/platform/Caddyfile");
   const pattern = (name) =>
     new RegExp(
-      caddy.match(new RegExp(`@${name} \\{[\\s\\S]*?path_regexp (\\S+)`, "u"))?.[1] ?? "^$",
+      caddy.match(
+        new RegExp(`@${name} \\{[\\s\\S]*?vars_regexp \\{http\\.request\\.orig_uri\\} (\\S+)`, "u"),
+      )?.[1] ?? "^$",
       "u",
     );
   const served = (path) =>

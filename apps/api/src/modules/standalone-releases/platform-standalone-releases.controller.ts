@@ -2,7 +2,8 @@ import {
   platformStandaloneReleaseContracts,
   type StandaloneReleaseChannel,
   type StandaloneReleaseSetLatest,
-  type StandaloneReleaseTarget,
+  type StandaloneReleaseUploadRequest,
+  type StandaloneReleaseRegisterRequest,
 } from "@markiro/platform-contracts";
 import { Body, Controller, Get, HttpCode, Param, Post, Put, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
@@ -25,8 +26,11 @@ export class PlatformStandaloneReleasesController {
   @ApiOperation({ summary: "List standalone releases by channel with each channel's latest" })
   @PlatformApiProtectedOk({ response: contracts.list.response })
   @RequirePlatformCapabilities("standaloneReleases.manage")
-  async list() {
-    return parsePlatformResponse(contracts.list.response, await this.releases.list());
+  async list(@Req() request: RequestWithPlatformPrincipal) {
+    return parsePlatformResponse(
+      contracts.list.response,
+      await this.releases.list(request.platformPrincipal!),
+    );
   }
 
   @Post("uploads")
@@ -34,13 +38,13 @@ export class PlatformStandaloneReleasesController {
   @ApiOperation({
     summary: "Get presigned PUT URLs for a new version's installer and manifest",
     description:
-      "Refused for a registered version or one not newer than every registered version in the channel.",
+      "Reserves the complete declared file set; only isolated staged keys receive short-lived PUT URLs.",
   })
   @PlatformApiProtectedOk({ body: contracts.upload.body, response: contracts.upload.response })
   @RequirePlatformCapabilities("standaloneReleases.manage")
   async upload(
     @Req() request: RequestWithPlatformPrincipal,
-    @Body(new ZodValidationPipe(contracts.upload.body)) body: StandaloneReleaseTarget,
+    @Body(new ZodValidationPipe(contracts.upload.body)) body: StandaloneReleaseUploadRequest,
   ) {
     return parsePlatformResponse(
       contracts.upload.response,
@@ -59,7 +63,7 @@ export class PlatformStandaloneReleasesController {
   @RequirePlatformCapabilities("standaloneReleases.manage")
   async register(
     @Req() request: RequestWithPlatformPrincipal,
-    @Body(new ZodValidationPipe(contracts.register.body)) body: StandaloneReleaseTarget,
+    @Body(new ZodValidationPipe(contracts.register.body)) body: StandaloneReleaseRegisterRequest,
   ) {
     return parsePlatformResponse(
       contracts.register.response,
@@ -84,7 +88,7 @@ export class PlatformStandaloneReleasesController {
   ) {
     return parsePlatformResponse(
       contracts.setLatest.response,
-      await this.releases.setLatest(request.platformPrincipal!, channel, body.version),
+      await this.releases.setLatest(request.platformPrincipal!, channel, body),
     );
   }
 }

@@ -1,0 +1,20 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tools/station-release/artifacts.mjs",
+        "$TURBO_ROOT$/tools/station-release/origins.mjs",
+        "$TURBO_ROOT$/tools/station-release/version.mjs",
+        "$TURBO_ROOT$/tools/handheld-release/manifest.mjs",
+        "$TURBO_ROOT$/tools/signer-release/artifacts.mjs",
+        "$TURBO_ROOT$/tools/signer-release/manifest.mjs",
+        "$TURBO_ROOT$/tools/signer-release/version.mjs"
+      ]
+    },
+    "test": {
+      "dependsOn": ["^build", "build"]
+    }
+  }
+}

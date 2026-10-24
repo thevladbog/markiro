@@ -1,3 +1,4 @@
+import { catalogComposeFiles } from "../catalog-config.mjs";
 import { canonical, ensure, keys, plain } from "../backup/schemas.mjs";
 import { readProtectedEnv, validateConfig } from "../preflight.mjs";
 import { fingerprintHostConfiguration, hostChildEnvironment } from "./config.mjs";
@@ -52,7 +53,7 @@ export function preparedHostBoundary({
       ensure(value === expected);
     }
     environment = freezeHostValue(hostChildEnvironment({ interpolation, dockerConfig }));
-    onEnvironment(environment);
+    onEnvironment(environment, catalogComposeFiles(runtime));
   };
   const observeTarget = async (name) => {
     onOwnership(false);

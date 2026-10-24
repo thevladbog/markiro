@@ -1,3 +1,4 @@
+import { validateCatalogConfig } from "./catalog-config.mjs";
 import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -259,6 +260,7 @@ export function validateConfig(env, manifest) {
       if (!/^[1-9][0-9]*$/u.test(env[key] ?? "")) fail(key);
     if (!env.SUPPORT_CHATWOOT_API_TOKEN) fail("SUPPORT_CHATWOOT_API_TOKEN");
   }
+  validateCatalogConfig(env);
   return release;
 }
 

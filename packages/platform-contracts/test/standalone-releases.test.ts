@@ -59,29 +59,41 @@ describe("standalone release contracts (spec 2026-10-20 §5)", () => {
     ).toBe(false);
   });
 
-  it("asks for a channel and a version, nothing the client could forge", () => {
-    expect(
-      platformStandaloneReleaseContracts.upload.body.safeParse({
-        channel: "stable",
-        version: "0.4.0",
-      }).success,
-    ).toBe(true);
-    expect(
-      platformStandaloneReleaseContracts.upload.body.safeParse({
-        channel: "stable",
-        version: "0.4.0",
-        sha256: SHA,
-      }).success,
-    ).toBe(false);
+  it("binds uploads to descriptors, registrations to intents and channel moves to a revision", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const upload = {
+      channel: "stable",
+      version: "0.4.0",
+      sourceSha: "a".repeat(40),
+      idempotencyKey: id,
+      installer: { sha256: SHA, sizeBytes: 100 },
+      manifest: { sha256: SHA, sizeBytes: 100 },
+    };
+    expect(platformStandaloneReleaseContracts.upload.body.parse(upload)).toEqual(upload);
+    for (const body of [
+      { channel: "stable", version: "0.4.0" },
+      { ...upload, key: "standalone/stable/latest.json" },
+      { ...upload, installer: { sha256: SHA, sizeBytes: 268435457 } },
+      { ...upload, manifest: { sha256: SHA, sizeBytes: 65537 } },
+    ])
+      expect(platformStandaloneReleaseContracts.upload.body.safeParse(body).success).toBe(false);
+    expect(platformStandaloneReleaseContracts.register.body.parse({ intentId: id })).toEqual({
+      intentId: id,
+    });
     expect(
       platformStandaloneReleaseContracts.register.body.safeParse({
-        channel: "nightly",
+        channel: "stable",
         version: "0.4.0",
       }).success,
     ).toBe(false);
-    expect(
-      platformStandaloneReleaseContracts.setLatest.params.safeParse({ channel: "beta" }).success,
-    ).toBe(true);
+    const move = { version: "0.4.0", operationId: id, expectedRevision: "7", kind: "rollback" };
+    expect(platformStandaloneReleaseContracts.setLatest.body.parse(move)).toEqual(move);
+    for (const body of [
+      { version: "0.4.0" },
+      { ...move, expectedRevision: "-1" },
+      { ...move, kind: "force" },
+    ])
+      expect(platformStandaloneReleaseContracts.setLatest.body.safeParse(body).success).toBe(false);
   });
 
   it("tells an unconfigured section apart from a configured one", () => {
@@ -93,7 +105,14 @@ describe("standalone release contracts (spec 2026-10-20 §5)", () => {
         configured: true,
         publicOrigin: "https://releases.markiro.app",
         channels: [
-          { channel: "stable", latest: null, latestReadable: true, releases: [], pending: [] },
+          {
+            channel: "stable",
+            revision: "0",
+            latest: null,
+            latestReadable: true,
+            releases: [],
+            pending: [],
+          },
         ],
       }).success,
     ).toBe(true);

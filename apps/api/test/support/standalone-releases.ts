@@ -25,6 +25,10 @@ export class MemoryStore implements StandaloneReleaseStore {
     const object = this.objects.get(key);
     return Promise.resolve(object ? { size: object.body.byteLength } : null);
   }
+  async headVersion(key: string) {
+    const head = await this.head(key);
+    return head ? { ...head, versionId: "fixture-version" } : null;
+  }
   read(key: string, maxBytes: number) {
     if (this.failReads) return Promise.reject(new Error("connect ETIMEDOUT"));
     const object = this.objects.get(key);

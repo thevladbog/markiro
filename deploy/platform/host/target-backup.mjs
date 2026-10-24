@@ -1,4 +1,5 @@
 /** Trusted operator library; no serialized callbacks, observations or remote CLI. */
+import { CATALOG_ROOT } from "../catalog-config.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -271,6 +272,7 @@ async function produceTargetBackup(
           operationId: op.identity.operationId,
           target: op.identity.target,
           connectionFile,
+          catalogJournal: { path: join(CATALOG_ROOT, "journal"), uid: 1000, optional: true },
           run,
           recoveryRuntime,
           writerFence: {

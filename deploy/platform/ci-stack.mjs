@@ -178,6 +178,7 @@ try {
   for (const [name, service] of Object.entries(config.services))
     if (name !== "edge") assert.ok(!service.ports?.length, `${name} exposes a port`);
   assert.equal(config.services.api.environment.SERVER_PROFILE, "platform-only");
+  assert.deepEqual(config.services.api.volumes ?? [], []);
   for (const port of config.services.edge.ports) assert.equal(port.host_ip, "127.0.0.1");
   assert.equal(new URL(config.services.api.environment.DATABASE_URL).username, "markiro_app");
   assert.equal(

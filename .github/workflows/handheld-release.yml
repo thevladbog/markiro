@@ -113,6 +113,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: handheld-release
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: apps/handheld
@@ -137,6 +140,8 @@ jobs:
           set -euo pipefail
           corepack enable
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
 
       - name: Restore the signing key
         shell: bash
@@ -205,14 +210,15 @@ jobs:
         run: rm -f "$RUNNER_TEMP/handheld.jks"
 
       # Publication runs only after the signature has been proven, and it moves
-      # the channel pointer after verifying immutable artifacts, then refreshes
-      # the download URL. The storage credential is scoped
+      # the channel revision after catalog registration and full readback.
+      # The download URL is projected from that same revision. The storage credential is scoped
       # to this one command and to no build step.
       - name: Publish to the channel
         if: ${{ inputs.publish }}
         working-directory: ${{ github.workspace }}
         shell: bash
         env:
+          EMPTY_CHANNEL_CONFIRMATION: ${{ inputs.empty_channel_confirmation }}
           RELEASES_S3_ENDPOINT: https://s3.twcstorage.ru
           RELEASES_S3_BUCKET: ${{ vars.RELEASES_S3_BUCKET }}
           RELEASES_S3_ACCESS_KEY_ID: ${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}
@@ -240,6 +246,15 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Retain catalog publication receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: handheld-catalog-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/handheld-catalog/
+          if-no-files-found: ignore
+          retention-days: 30
+
   sync-download:
     if: github.ref == 'refs/heads/main' && inputs.action == 'sync-download'
     needs: authorize
@@ -257,11 +272,9 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
-      - name: Refresh the current download URL
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
+      - name: Verify the current catalog download URL
         env:
           CHANNEL: ${{ inputs.channel }}
-          RELEASES_S3_ENDPOINT: https://s3.twcstorage.ru
-          RELEASES_S3_BUCKET: ${{ vars.RELEASES_S3_BUCKET }}
-          RELEASES_S3_ACCESS_KEY_ID: ${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}
-          RELEASES_S3_SECRET_ACCESS_KEY: ${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}
         run: node tools/handheld-release/download.mjs

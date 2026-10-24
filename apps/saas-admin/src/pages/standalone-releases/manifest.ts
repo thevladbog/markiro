@@ -19,6 +19,7 @@ export const MANIFEST_MAX_BYTES = 64 * 1024;
  */
 const previewSchema = z.object({
   product: z.string(),
+  sourceSha: z.string().regex(/^[0-9a-f]{40}$/),
   version: standaloneReleaseVersionSchema,
   channel: standaloneReleaseChannelSchema,
   installer: z.object({
@@ -30,6 +31,7 @@ const previewSchema = z.object({
 });
 
 export interface ManifestPreview {
+  sourceSha: string;
   version: string;
   channel: StandaloneReleaseChannel;
   installer: { name: string; sha256: string; sizeBytes: number };
@@ -72,8 +74,8 @@ export function readManifestText(text: string): ManifestReading {
   if (parsed.data.product !== STANDALONE_RELEASE_PRODUCT) {
     return { ok: false, problem: "wrong_product" };
   }
-  const { version, channel, installer, notes } = parsed.data;
-  return { ok: true, preview: { version, channel, installer, notes: notes ?? [] } };
+  const { version, channel, sourceSha, installer, notes } = parsed.data;
+  return { ok: true, preview: { version, channel, sourceSha, installer, notes: notes ?? [] } };
 }
 
 export async function readManifestFile(file: Blob): Promise<ManifestReading> {

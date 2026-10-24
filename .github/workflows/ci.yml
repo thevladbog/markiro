@@ -117,6 +117,7 @@ jobs:
       # first (the comparison skips explicitly when it is not built).
       - run: pnpm turbo run build --filter=@markiro/domain
       - run: pnpm test:standalone-export
+      - run: pnpm --filter @markiro/platform-contracts build
       - run: pnpm test:handheld-release:contract
       # The maker's tool for the encrypted usage statistics of a support text.
       - run: pnpm test:standalone-support:contract
@@ -185,6 +186,46 @@ jobs:
       # `api#test` already declares `dependsOn: @markiro/db#test`, so the two
       # Postgres consumers stay serialized against the single database here.
       - run: pnpm turbo test --filter=@markiro/db --filter=@markiro/api --concurrency=1 --force
+
+      # Separate disposable cluster: actual stale pg_dump/pg_restore and runtime
+      # ACL checks must not skip or touch the ordinary shared API test database.
+      - name: Prepare isolated release catalog PostgreSQL
+        id: catalog-postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+          catalog_id=$(docker run -d --name markiro-release-catalog-test-20261024 \
+            --label markiro.task=immutable-release-catalog-20261024 \
+            -p 127.0.0.1:33791:5432 -e POSTGRES_PASSWORD -e POSTGRES_DB=catalog_test postgres:17-alpine)
+          echo "container_id=$catalog_id" >> "$GITHUB_OUTPUT"
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec "$catalog_id" pg_isready -h 127.0.0.1 -U postgres -d catalog_test; then ready=true; break; fi
+            sleep 1
+          done
+          test "$ready" = true
+          catalog_url="postgres://postgres:$POSTGRES_PASSWORD@127.0.0.1:33791/catalog_test"
+          echo "CATALOG_TEST_DATABASE_URL=$catalog_url" >> "$GITHUB_ENV"
+          DATABASE_URL="$catalog_url" pnpm --filter @markiro/db db:migrate:runtime
+      - name: Verify release catalog and actual recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CATALOG_TEST_DATABASE_URL"
+          pnpm --filter @markiro/api build
+          pnpm test:release-catalog:contract
+          node --test deploy/platform/test/backup-catalog-postgres.test.mjs
+          (cd apps/api && pnpm exec vitest run test/release-catalog-*.integration.test.ts test/standalone-releases.e2e.test.ts)
+      - name: Remove only this job's catalog PostgreSQL
+        if: always() && steps.catalog-postgres.outputs.container_id != ''
+        env:
+          CATALOG_TEST_CONTAINER_ID: ${{ steps.catalog-postgres.outputs.container_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker inspect --format '{{ index .Config.Labels "markiro.task" }}' "$CATALOG_TEST_CONTAINER_ID")" = immutable-release-catalog-20261024
+          docker rm -fv "$CATALOG_TEST_CONTAINER_ID"
 
   verify-app-tests:
     needs: classify-changes
@@ -821,6 +862,8 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @markiro/domain build
+      - run: pnpm --filter @markiro/platform-contracts build
       - name: Verify station release contracts
         run: pnpm test:station-release:contract
       # vite can't resolve `@markiro/ui`/`@markiro/db`/`@markiro/domain`

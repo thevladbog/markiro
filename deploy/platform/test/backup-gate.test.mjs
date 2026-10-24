@@ -99,3 +99,15 @@ test("backup admission verifies a complete inventory above the control-file capa
   await appendFile(f.backup.inventoryPath, " ");
   await assert.rejects(verifyBackupGate(f));
 });
+
+test("catalog rows cannot pass backup gate without full ledger snapshot evidence", async (t) => {
+  const f = await preparedFixture(t);
+  f.document.inventory.tables.push({
+    schema: "public",
+    name: "release_catalog_receipts",
+    count: "1",
+    sha256: "a".repeat(64),
+  });
+  await f.publish();
+  await assert.rejects(verifyBackupGate(f));
+});

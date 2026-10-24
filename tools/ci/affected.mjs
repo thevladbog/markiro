@@ -160,10 +160,40 @@ function isRootToolchainPath(path) {
   return /^(?:tsconfig(?:\..+)?\.json|eslint(?:\..+)?\.(?:js|mjs|cjs)|\.prettier.+)$/u.test(path);
 }
 
+const catalogJobs = [
+  ...new Set([
+    ...appJobs.api,
+    "verify_app_tests",
+    ...stationJobs,
+    ...signerJobs,
+    ...standaloneJobs,
+    standaloneAppTests,
+    "handheld_android",
+  ]),
+];
+const canonicalReleaseValidator =
+  /^tools\/(?:station-release\/(?:artifacts|origins|version)|handheld-release\/manifest|signer-release\/(?:artifacts|manifest|version))\.mjs$/u;
+
 function jobsForPath(path) {
   if (path.startsWith("tools/station-printer-tests/")) return stationJobs;
   if (isDocumentation(path)) return [];
   if (isRootToolchainPath(path)) return ALL_JOBS;
+  // Shared publication/restore safety owns API/DB/platform and every publisher.
+  if (
+    path.startsWith("tools/release-catalog/") ||
+    path.startsWith("packages/release-validation/") ||
+    /^packages\/platform-contracts\/(?:src|test)\/release-(?:catalog|history)(?:\.test)?\.ts$/u.test(
+      path,
+    ) ||
+    path === "packages/db/src/schema/release-catalog.ts" ||
+    path.startsWith("apps/api/src/modules/release-catalog/") ||
+    path === "deploy/platform/Caddyfile" ||
+    path === "deploy/platform/catalog-config.mjs" ||
+    path === "deploy/platform/compose.catalog.yml" ||
+    path === "deploy/platform/backup/catalog.mjs" ||
+    canonicalReleaseValidator.test(path)
+  )
+    return catalogJobs;
 
   if (
     path === "packages/platform-contracts/src/chz-signer.ts" ||

@@ -524,14 +524,14 @@ function validateInfrastructureEvidence(evidence) {
   return evidence;
 }
 
-function parseSourceVersion(channel, sourceTag) {
+export function parseSourceVersion(channel, sourceTag) {
   const parsed =
     channel === "beta" ? parseStationBetaTag(sourceTag) : parseStationStableTag(sourceTag);
   if (!parsed || sourceTag !== `station-v${parsed.text}`) bootstrapInvalid();
   return parsed.text;
 }
 
-function validateBootstrapRelease(release, channel, sourceTag) {
+export function validateBootstrapRelease(release, channel, sourceTag) {
   if (
     !hasExactKeys(release, ["tagName", "isDraft", "isPrerelease", "targetCommitish"]) ||
     release.tagName !== sourceTag ||
@@ -992,7 +992,7 @@ async function writeBootstrapRecord({
 // Re-seeding rebuilds the releases.markiro.app tree of a release that GitHub
 // already serves. The GitHub tree is the only input, so the rebuild must first
 // reproduce that tree byte for byte from its own evidence.
-async function stageReseedTrees({ githubTree, channel, version, source }) {
+export async function stageReseedTrees({ githubTree, channel, version, source }) {
   const root = await mkdtemp(join(tmpdir(), "markiro-station-reseed-"));
   const githubDirectory = join(root, "github");
   const yandexDirectory = join(root, "yandex");
@@ -1026,7 +1026,7 @@ async function stageReseedTrees({ githubTree, channel, version, source }) {
   }
 }
 
-async function readReseedInput(path) {
+export async function readReseedInput(path) {
   if (!isCanonicalAbsolutePath(path)) reseedInvalid();
   try {
     const info = await lstat(path);

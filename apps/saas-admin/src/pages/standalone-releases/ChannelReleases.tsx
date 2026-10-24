@@ -12,6 +12,8 @@ import { Alert, Button, StatusChip, Table, type TableColumn } from "@markiro/ui"
 import { formatMegabytes, formatReleaseDateTime } from "./releaseFormat.js";
 
 export interface PointerMove {
+  operationId: string;
+  expectedRevision: string;
   channel: StandaloneReleaseChannel;
   version: string;
   previous: string | null;
@@ -55,7 +57,16 @@ export function ChannelReleases({
         size="compact"
         variant={direction === "promote" ? "primary" : "secondary"}
         disabled={busy}
-        onClick={() => onMove({ channel, version: release.version, previous: latest, direction })}
+        onClick={() =>
+          onMove({
+            channel,
+            version: release.version,
+            previous: latest,
+            direction,
+            operationId: crypto.randomUUID(),
+            expectedRevision: view.revision,
+          })
+        }
       >
         {t(
           direction === "promote"
@@ -174,14 +185,14 @@ export function ChannelReleases({
           <Alert tone="warn" title={t("standaloneReleases.pending.title")}>
             <p className="releases-alert-line">{t("standaloneReleases.pending.hint")}</p>
             <ul className="releases-pending">
-              {view.pending.map((version) => (
-                <li key={version}>
+              {view.pending.map(({ version, intentId }) => (
+                <li key={intentId}>
                   <code>{version}</code>
                   <Button
                     size="compact"
                     variant="secondary"
                     disabled={busy}
-                    onClick={() => onRegisterPending(version)}
+                    onClick={() => onRegisterPending(intentId)}
                   >
                     {t("standaloneReleases.pending.register")}
                   </Button>

@@ -28,6 +28,7 @@ services:
         condition: service_healthy
     logging: *compact-logging
 
+  # The base API journal/cache binds remain merged by unique mount target.
   api:
     mem_limit: 1536m
     cpus: 1.25

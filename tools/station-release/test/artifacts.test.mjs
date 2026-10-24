@@ -16,6 +16,7 @@ import {
   stationAssetNames,
   validateLegacyGithubStationReleaseDirectory,
   validateStationReleaseDirectory,
+  validateStationReleaseFiles,
 } from "../artifacts.mjs";
 
 const version = "0.1.0-beta.1";
@@ -838,4 +839,42 @@ test("rejects checksum text that does not match the downloaded assets", async ()
     validateStationReleaseDirectory(output, { origin: "github", version }),
     /invalid station release artifacts/,
   );
+});
+
+test("verified byte reader preserves the directory validator acceptance and hash checks", async () => {
+  const { input, output } = await stageCanonicalBetaTree();
+  try {
+    const bytes = new Map(
+      await Promise.all(
+        Object.values(names).map(async (name) => [name, await readFile(join(output, name))]),
+      ),
+    );
+    const reader = {
+      names: [...bytes.keys()],
+      size: (name) => bytes.get(name).length,
+      text: async (name, maximum) => {
+        const value = bytes.get(name);
+        assert.ok(value.length <= maximum);
+        return new TextDecoder("utf-8", { fatal: true }).decode(value);
+      },
+      digest: async (name) => createHash("sha256").update(bytes.get(name)).digest("hex"),
+    };
+    const expected = { channel: "beta", origin: "github", version };
+    assert.deepEqual(
+      await validateStationReleaseFiles(reader, expected),
+      await validateStationReleaseDirectory(output, expected),
+    );
+    bytes.set(names.bundle, Buffer.from("different bundle"));
+    await assert.rejects(
+      validateStationReleaseFiles(reader, expected),
+      /invalid station release artifacts/,
+    );
+    await assert.rejects(
+      validateStationReleaseFiles({ ...reader, names: [...reader.names, "extra"] }, expected),
+      /invalid station release artifacts/,
+    );
+  } finally {
+    await rm(input, { recursive: true });
+    await rm(output, { recursive: true });
+  }
 });

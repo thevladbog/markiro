@@ -8,8 +8,8 @@ export type ReleaseOperation = "upload" | "register" | "setLatest";
 export interface ReleaseErrorMessage {
   key: string;
   params?: Record<string, string | number>;
-  /** A refused registration of a new version deletes its objects server-side. */
-  filesRemoved?: boolean;
+  /** Rejected staging evidence is retained; registration never deletes objects. */
+  filesRetained?: boolean;
 }
 
 const KNOWN_CODES: ReadonlySet<string> = new Set(STANDALONE_RELEASE_ERROR_CODES);
@@ -37,9 +37,8 @@ export function releaseErrorMessage(
   return {
     key: `standaloneReleases.errors.${code}`,
     params,
-    // The API discards an unregistered version it refuses; an immutable
-    // refusal is about a registered version, whose files stay.
-    filesRemoved:
+    // Neither a failed validation nor an immutable conflict deletes evidence.
+    filesRetained:
       operation === "register" &&
       (error.status === 422 || code === "standalone_release_version_not_newer"),
   };

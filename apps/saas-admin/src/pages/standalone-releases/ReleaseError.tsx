@@ -9,8 +9,8 @@ export function ReleaseError({ message }: { message: ReleaseErrorMessage }) {
   return (
     <Alert tone="error" role="alert">
       <p className="releases-alert-line">{t(message.key, message.params ?? {})}</p>
-      {message.filesRemoved ? (
-        <p className="releases-alert-line">{t("standaloneReleases.errors.filesRemoved")}</p>
+      {message.filesRetained ? (
+        <p className="releases-alert-line">{t("standaloneReleases.errors.filesRetained")}</p>
       ) : null}
     </Alert>
   );

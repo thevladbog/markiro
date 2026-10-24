@@ -184,7 +184,7 @@ test("every third-party action is pinned to a commit", () => {
   }
 });
 
-test("repairing the download URL uses the owner gate and release concurrency without a new build", () => {
+test("verifying the catalog download URL uses the owner gate and release concurrency without a new build", () => {
   assert.equal(workflow.on.workflow_dispatch.inputs.action.default, "release");
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.action.options, [
     "release",
@@ -202,10 +202,8 @@ test("repairing the download URL uses the owner gate and release concurrency wit
   );
   assert.ok(publish);
   assert.equal(publish.env.CHANNEL, "${{ inputs.channel }}");
-  assert.equal(
-    publish.env.RELEASES_S3_SECRET_ACCESS_KEY,
-    "${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}",
-  );
+  assert.deepEqual(publish.env, { CHANNEL: "${{ inputs.channel }}" });
+  assert.equal(sync.permissions?.["id-token"], undefined);
   for (const step of sync.steps) {
     assert.ok(
       !JSON.stringify(step).includes("MARKIRO_HANDHELD_"),
@@ -215,4 +213,16 @@ test("repairing the download URL uses the owner gate and release concurrency wit
     if (step.run?.includes("pnpm install")) assert.equal(step.env, undefined);
     if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}$/);
   }
+});
+
+test("catalog publication has OIDC and compiled canonical contracts before signing", () => {
+  const release = workflow.jobs.release;
+  assert.equal(release.permissions["id-token"], "write");
+  assert.equal(release.permissions.contents, "read");
+  const install = release.steps.find((step) => step.run?.includes("pnpm install"));
+  assert.match(install.run, /pnpm --filter @markiro\/platform-contracts build/);
+  const publish = release.steps.find((step) =>
+    step.run?.includes("tools/handheld-release/publish.mjs"),
+  );
+  assert.equal(publish.env.EMPTY_CHANNEL_CONFIRMATION, "${{ inputs.empty_channel_confirmation }}");
 });

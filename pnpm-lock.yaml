@@ -176,6 +176,9 @@ importers:
       '@markiro/platform-contracts':
         specifier: workspace:*
         version: link:../../packages/platform-contracts
+      '@markiro/release-validation':
+        specifier: workspace:*
+        version: link:../../packages/release-validation
       '@nestjs/common':
         specifier: 11.2.1
         version: 11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1)
@@ -218,6 +221,9 @@ importers:
       fflate:
         specifier: 0.8.3
         version: 0.8.3
+      jose:
+        specifier: 6.2.9
+        version: 6.2.9
       markdown-it:
         specifier: 15.0.3
         version: 15.0.3
@@ -836,6 +842,8 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+
+  packages/release-validation: {}
 
   packages/ui:
     dependencies:

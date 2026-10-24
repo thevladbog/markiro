@@ -280,6 +280,8 @@ jobs:
           # 1.4.0, run 34428792139, failed exactly that way on beta.2).
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
           pnpm test:station-release:contract
 
       - name: Prepare stable release source
@@ -497,6 +499,7 @@ jobs:
     timeout-minutes: 60
     environment: station-release
     permissions:
+      id-token: write
       actions: read
       contents: write
     env:
@@ -504,6 +507,13 @@ jobs:
       STATION_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
 
     steps:
+      - name: Require reviewed catalog history for legacy baseline
+        if: inputs.mode == 'seed-baseline'
+        shell: bash
+        run: |
+          echo "Legacy baseline must be imported with the reviewed catalog history plan before release publication." >&2
+          exit 1
+
       - name: Checkout release tooling
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -528,7 +538,10 @@ jobs:
 
       - name: Install locked publisher dependencies
         shell: bash
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
 
       - name: Download dual-origin stable candidate
         if: inputs.mode == 'publish'
@@ -571,7 +584,8 @@ jobs:
             release_sha="$(sed -n 's/^release_sha=//p' "$state")"
             git fetch "$RUNNER_TEMP/station-stable-candidate/source.bundle" "$release_sha"
             test "$(git rev-parse FETCH_HEAD)" = "$release_sha"
-            git checkout --detach "$release_sha"
+            # Keep reviewed dispatch tooling; product provenance remains the exact fetched SHA.
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
             node tools/station-release/artifacts.mjs validate-origin github stable \
               "$RUNNER_TEMP/station-stable-candidate/github" "$version"
             node tools/station-release/artifacts.mjs validate-origin yandex stable \
@@ -661,7 +675,7 @@ jobs:
             exit 1
           fi
           source_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_REPOSITORY_TOKEN" | base64 -w0)"
-          git -c "http.extraheader=$source_auth_header" push origin "HEAD:refs/heads/$candidate_ref"
+          git -c "http.extraheader=$source_auth_header" push origin "$release_sha:refs/heads/$candidate_ref"
           node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" github-publication-attempted
           distribution_sha="$(gh api "repos/$STATION_RELEASE_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
@@ -717,7 +731,7 @@ jobs:
           node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" \
             yandex-publication-attempted
-          node tools/station-release/yandex-publisher.mjs publish-immutable \
+          node tools/station-release/catalog-cli.mjs publish-immutable \
             "$RUNNER_TEMP/station-stable-candidate/yandex" stable "$version"
           node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" both-origin-published
@@ -779,7 +793,7 @@ jobs:
             "$yandex_public" "$version"
           node tools/station-release/artifacts.mjs compare-origins \
             "$github_public" "$yandex_public" stable "$version"
-          node tools/station-release/yandex-publisher.mjs validate-public \
+          node tools/station-release/catalog-cli.mjs validate-public \
             "$yandex_public" stable "$version"
           for evidence_path in \
             "$github_public/release-evidence.json" \
@@ -860,7 +874,7 @@ jobs:
           node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" \
             seed-publication-attempted
-          node tools/station-release/yandex-publisher.mjs seed-baseline \
+          node tools/station-release/catalog-cli.mjs seed-baseline \
             "$github_tree" "$seed_stable_tag" "$release_metadata" \
             "$infrastructure_evidence" stable "$seed_backup" "$bootstrap_record" \
             --confirm-empty-channel-bootstrap
@@ -900,57 +914,12 @@ jobs:
           restoration_failed=false
           yandex_backup="$RUNNER_TEMP/station-stable-yandex-channel-backup"
 
-          rollback_transaction() {
-            status="$?"
-            trap - EXIT HUP INT TERM
-            if [ "$status" -eq 0 ]; then
-              unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-              return 0
-            fi
-            if [ "$yandex_may_have_changed" = true ]; then
-              if ! node tools/station-release/yandex-publisher.mjs rollback stable "$yandex_backup"; then
-                restoration_failed=true
-              fi
-            fi
-            if [ "$github_may_have_changed" = true ]; then
-              if [ "$github_channel_preexisting" = false ]; then
-                if ! gh release delete station-stable-channel \
-                  --repo "$STATION_RELEASE_REPOSITORY" --cleanup-tag --yes; then
-                  restoration_failed=true
-                fi
-              else
-                if ! gh release upload station-stable-channel --repo "$STATION_RELEASE_REPOSITORY" \
-                  "$RUNNER_TEMP/station-stable-github-channel-backup/latest.json" --clobber; then
-                  restoration_failed=true
-                else
-                  if ! rm -rf "$RUNNER_TEMP/station-stable-github-rollback-verify" || \
-                    ! mkdir "$RUNNER_TEMP/station-stable-github-rollback-verify"; then
-                    restoration_failed=true
-                  elif ! env -u GH_TOKEN -u GITHUB_TOKEN \
-                    node tools/station-release/github-public.mjs download-channel-exact stable \
-                    "$RUNNER_TEMP/station-stable-github-channel-backup/latest.json" \
-                    "$RUNNER_TEMP/station-stable-github-rollback-verify/latest.json"; then
-                    restoration_failed=true
-                  fi
-                fi
-              fi
-            fi
+          # A lost CAS reply is ambiguous. Preserve both origins and the journal;
+          # never compensate with an unbound pointer write or delete a GitHub channel.
+          cleanup_credentials() {
             unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-            if [ "$restoration_failed" = true ]; then
-              node tools/station-release/release-summary.mjs transition \
-                "$RUNNER_TEMP/station-stable-release-summary.json" \
-                restoration-failed >/dev/null 2>&1 || true
-              echo "station release mutable restoration failed" >&2
-              exit 86
-            fi
-            if [ "$github_may_have_changed" = true ] || [ "$yandex_may_have_changed" = true ]; then
-              node tools/station-release/release-summary.mjs transition \
-                "$RUNNER_TEMP/station-stable-release-summary.json" \
-                restored >/dev/null 2>&1 || true
-            fi
-            exit "$status"
           }
-          trap rollback_transaction EXIT
+          trap cleanup_credentials EXIT
           trap 'exit 129' HUP
           trap 'exit 130' INT
           trap 'exit 143' TERM
@@ -973,7 +942,7 @@ jobs:
           fi
 
           rm -rf "$yandex_backup"
-          node tools/station-release/yandex-publisher.mjs backup-mutables stable "$yandex_backup"
+          node tools/station-release/catalog-cli.mjs backup-mutables stable "$yandex_backup"
 
           github_tree="$RUNNER_TEMP/station-stable-github-public"
           test -d "$github_tree"
@@ -1000,7 +969,7 @@ jobs:
             "$RUNNER_TEMP/station-stable-release-summary.json" github-promoted
 
           yandex_may_have_changed=true
-          node tools/station-release/yandex-publisher.mjs promote \
+          node tools/station-release/catalog-cli.mjs promote \
             "$RUNNER_TEMP/station-stable-yandex-public" stable "$yandex_backup"
           rm -rf "$RUNNER_TEMP/station-stable-yandex-channel-verify"
           mkdir "$RUNNER_TEMP/station-stable-yandex-channel-verify"
@@ -1010,8 +979,8 @@ jobs:
           curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
             --output "$RUNNER_TEMP/station-stable-yandex-channel-verify/download" \
             "https://releases.markiro.app/station/download"
-          cmp "$RUNNER_TEMP/station-stable-yandex-channel-verify/latest.json" \
-            "$RUNNER_TEMP/station-stable-yandex-public/latest.json"
+          node tools/station-release/catalog-cli.mjs verify-channel \
+            "$RUNNER_TEMP/station-stable-yandex-public" stable "$version"
           cmp "$RUNNER_TEMP/station-stable-yandex-channel-verify/download" \
             "$RUNNER_TEMP/station-stable-yandex-public/markiro-station-${version}-windows-x86_64-setup.exe"
           node tools/station-release/release-summary.mjs transition \
@@ -1057,3 +1026,12 @@ jobs:
             "$RUNNER_TEMP/station-stable-seed-infrastructure.json" \
             "$RUNNER_TEMP/station-stable-seed-releases.json" \
             "$RUNNER_TEMP/station-stable-seed-latest.txt"
+
+      - name: Preserve catalog operation journal
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: station-catalog-station-stable-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/station-catalog-*
+          if-no-files-found: warn
+          retention-days: 30

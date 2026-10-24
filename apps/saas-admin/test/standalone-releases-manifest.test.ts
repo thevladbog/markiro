@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { readManifestText, selectionIssues } from "../src/pages/standalone-releases/manifest.js";
-import { INSTALLER_BYTES, INSTALLER_SHA, manifestJws } from "./standalone-releases-fixtures.js";
+import {
+  INSTALLER_BYTES,
+  INSTALLER_SHA,
+  SOURCE_SHA,
+  manifestJws,
+} from "./standalone-releases-fixtures.js";
 
 describe("standalone release manifest preview", () => {
   it("decodes the base64url payload, including Cyrillic notes", () => {
@@ -9,6 +14,7 @@ describe("standalone release manifest preview", () => {
     expect(reading).toEqual({
       ok: true,
       preview: {
+        sourceSha: SOURCE_SHA,
         version: "0.7.0",
         channel: "stable",
         installer: {

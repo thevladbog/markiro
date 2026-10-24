@@ -1,3 +1,4 @@
+import { captureCatalogState } from "./catalog.mjs";
 import { createDatabaseSql, compareDatabaseLocale } from "./locale.mjs";
 /** Trusted image entry point. Never logs SQL, credentials, child output or rows. */
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
@@ -95,6 +96,7 @@ async function archive() {
     .snapshot;
   ensure(/^[A-F0-9-]+$/u.test(snapshotId));
   const inventory = await captureInventory(client);
+  const catalogState = await captureCatalogState(client, inventory);
   phase = "dump";
   await writeFile("/work/out/database.dump", "", { mode: 0o600, flag: "wx" });
   await processRun(
@@ -117,7 +119,12 @@ async function archive() {
   ensure(canonical(inventory.sequences) === canonical(await captureSequences(client)));
   await noWriters(client, applicationName);
   await client.query("COMMIT");
-  await save("inventory.json", { snapshotId, postgresVersion: version, inventory });
+  await save("inventory.json", {
+    snapshotId,
+    postgresVersion: version,
+    inventory,
+    ...(catalogState ? { catalogState } : {}),
+  });
 }
 async function restore() {
   const request = JSON.parse(await readFile("/input/request.json", "utf8"));

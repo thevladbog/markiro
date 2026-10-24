@@ -1,3 +1,4 @@
+import { validateCatalogBackup } from "./catalog.mjs";
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
 import {
@@ -42,6 +43,7 @@ export function validateBackupInventory(document, { operationId, target, archive
     "completedAt",
     "runtime",
     "inventory",
+    ...(Object.hasOwn(v, "catalogBackup") ? ["catalogBackup"] : []),
   ]);
   bound(v, operationId, target);
   ensure(
@@ -62,6 +64,7 @@ export function validateBackupInventory(document, { operationId, target, archive
       timestamp(v.completedAt) <= Date.now() + 30000,
   );
   validateInventory(v.inventory);
+  validateCatalogBackup(v.catalogBackup, v.inventory);
   return v;
 }
 export async function verifyDatabaseRestore({

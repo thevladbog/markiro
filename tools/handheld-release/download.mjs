@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import { assertValidHandheldManifest, parseHandheldManifest } from "./manifest.mjs";
 import {
-  createHandheldObjectStore,
   handheldDownloadKey,
   handheldManifestKey,
   handheldObjectKey,
@@ -55,9 +54,9 @@ export async function syncHandheldDownload({ channel = "stable", store, fetchImp
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/"))) {
-  const url = await syncHandheldDownload({
+  const { verifyCatalogHandheldDownload } = await import("./catalog-publisher.mjs");
+  const { downloadUrl: url } = await verifyCatalogHandheldDownload({
     channel: process.env.CHANNEL || "stable",
-    store: createHandheldObjectStore({}),
   });
   console.log(url);
 }

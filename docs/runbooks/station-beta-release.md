@@ -1,5 +1,12 @@
 # Station beta release runbook
 
+> Актуальный publisher использует [неизменяемый каталог](release-hosting.md):
+> OIDC intent → staging VersionId → verified commit → revision CAS. До dispatch
+> требуются approved history reservations и writer epoch. `seed-baseline` закрыт;
+> прежние provider bootstrap/compensation инструкции ниже — исторический контекст,
+> они не разрешают direct-S3 публикацию или автоматическое удаление после lost response.
+> Всегда сохраняйте publication journal и проверяйте точный source/tooling SHA.
+
 Ручная публикация Windows-бета-версии Station. Автоматическая установка на
 станциях не выполняется: оператор сам запускает установщик после проверки окна
 смены и состояния outbox.

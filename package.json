@@ -18,6 +18,7 @@
     "test:ci-policy": "node --test tools/ci/test/*.test.mjs",
     "test:indexnow": "node --test tools/indexnow/test/*.test.mjs",
     "indexnow:submit": "node tools/indexnow/submit.mjs",
+    "test:release-catalog:contract": "node --test tools/release-catalog/test/*.test.mjs",
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
     "test:signer-release:contract": "node --test tools/signer-release/test/*.test.mjs",
     "test:standalone-release:contract": "node --test tools/standalone-release/test/*.test.mjs",
