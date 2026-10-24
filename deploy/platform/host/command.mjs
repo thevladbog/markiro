@@ -18,6 +18,7 @@ import { executePreparedDeployment } from "./deploy.mjs";
 import { runHostProcess } from "./process.mjs";
 import {
   createHostObservers,
+  createUpgradeHostObservers,
   createCleanupObserver,
   validateObservationPolicy,
   observerProducer,
@@ -402,6 +403,27 @@ function smokeRequest(host, path, sha, status, request = httpsRequest) {
   });
 }
 
+export function verifyPlatformSmoke(context, request) {
+  return guarded(async () => {
+    const values = context.configuration.runtimeSnapshot.interpolation;
+    for (const [host, path, status] of [
+      [values.MARKIRO_LANDING_DOMAIN, "/", 200],
+      [values.MARKIRO_SAAS_ADMIN_DOMAIN, "/login", 200],
+      [values.MARKIRO_SAAS_ADMIN_DOMAIN, "/api/platform/tenants", 401],
+      [values.MARKIRO_SAAS_ADMIN_DOMAIN, "/station/sync", 404],
+      [values.MARKIRO_RETIRED_ADMIN_DOMAIN, "/api/auth/get-session", 410],
+      [values.MARKIRO_RETIRED_KIOSK_DOMAIN, "/kiosk/sync", 410],
+    ])
+      await smokeRequest(
+        host,
+        path,
+        context.identity.admission.manifest.sourceSha,
+        status,
+        request,
+      );
+  });
+}
+
 // Shared physical fence binding for host admission and target-local recovery copies.
 export function hostFenceEnforcementSha256({ target, policy, hbaSha256 }) {
   return digest({
@@ -417,11 +439,21 @@ export function hostFenceEnforcementSha256({ target, policy, hbaSha256 }) {
 }
 
 export async function createHostAdapters(loaded, options = {}) {
+  return buildHostAdapters(loaded, options, createHostObservers);
+}
+// Only the upgrade installed runtime supplies retained authority. Ordinary and
+// recovery deliveries retain the current single-authority observer unchanged.
+export async function createUpgradeHostAdapters(loaded, oldOperation, retainedIds, options = {}) {
+  return buildHostAdapters(loaded, options, (op, policy, dependencies) =>
+    createUpgradeHostObservers(op, oldOperation, retainedIds, policy, dependencies),
+  );
+}
+async function buildHostAdapters(loaded, options, createObservers) {
   const { record, receipt, verified, verifySources } = loaded;
   const op = record.deployment,
     policy = record.observationPolicy;
   const runProcess = options.runProcess ?? runHostProcess;
-  const observers = createHostObservers(op, policy, {
+  const observers = createObservers(op, policy, {
     runProcess,
     signal: options.signal,
     readMachineId: options.readMachineId,
@@ -481,6 +513,7 @@ export async function createHostAdapters(loaded, options = {}) {
         admitted = true;
         await verifyMeasured(context);
       }),
+    verifyRoles: (context) => guarded(() => verifyMeasured(context)),
     inspectTarget: (context) =>
       guarded(async () => {
         const { state } = await inspect(context);
@@ -537,25 +570,7 @@ export async function createHostAdapters(loaded, options = {}) {
       verified.evidence.cleanup.resources,
       observers.command,
     ),
-    smoke: (context) =>
-      guarded(async () => {
-        const values = context.configuration.runtimeSnapshot.interpolation;
-        for (const [host, path, status] of [
-          [values.MARKIRO_LANDING_DOMAIN, "/", 200],
-          [values.MARKIRO_SAAS_ADMIN_DOMAIN, "/login", 200],
-          [values.MARKIRO_SAAS_ADMIN_DOMAIN, "/api/platform/tenants", 401],
-          [values.MARKIRO_SAAS_ADMIN_DOMAIN, "/station/sync", 404],
-          [values.MARKIRO_RETIRED_ADMIN_DOMAIN, "/api/auth/get-session", 410],
-          [values.MARKIRO_RETIRED_KIOSK_DOMAIN, "/kiosk/sync", 410],
-        ])
-          await smokeRequest(
-            host,
-            path,
-            context.identity.admission.manifest.sourceSha,
-            status,
-            options.httpsRequest,
-          );
-      }),
+    smoke: (context) => verifyPlatformSmoke(context, options.httpsRequest),
   };
 }
 export async function runHostCommand(args, options = {}) {

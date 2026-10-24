@@ -249,3 +249,15 @@ test("observations reject a retained-ID set differing from the durable pre-stop 
   });
   assert.equal(f.commands.length, 0);
 });
+test("backup source observation returns the actual verified PG HBA mount with stopped authority", async (t) => {
+  const f = await upgradeObservationFixture(t);
+  f.stop();
+  const expected = f.d.state.containers[0].Mounts.find(
+    (m) => m.Destination === "/etc/postgresql/pg_hba.conf",
+  ).Source;
+  await run(f, async (store) => {
+    const result = await store.guard(observer(f).inspectBackupSource);
+    assert.equal(result.hbaPath, expected);
+    assert.deepEqual(result.observation.containers, f.predecessorContainers);
+  });
+});

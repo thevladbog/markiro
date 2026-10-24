@@ -107,7 +107,10 @@ export async function executeUpgradeActivation(input, adapters, options) {
             },
             workload: {
               ...adapters.workload,
-              inspect: (request) => store.guard((cap) => adapters.workload.inspect(request, cap)),
+              inspect: (request) =>
+                store.guard((cap) =>
+                  adapters.workload.inspect({ ...context("restore-cleanup"), ...request }, cap),
+                ),
             },
           },
           onEnvironment: (env, files) => {

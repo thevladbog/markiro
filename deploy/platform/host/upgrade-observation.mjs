@@ -29,7 +29,7 @@ export function createUpgradeObservers(input, dependencies = {}) {
     Object.values(predecessorContainers).every((id) => /^[a-f0-9]{64}$/u.test(id)) &&
       new Set(Object.values(predecessorContainers)).size === 3,
   );
-  const inspect = (mode, capability) =>
+  const inspect = (mode, capability, backupSource = false) =>
     guarded(() =>
       withHeldUpgradeState(capability, async (held) => {
         const { state, root, predecessor } = held;
@@ -203,7 +203,7 @@ export function createUpgradeObservers(input, dependencies = {}) {
         await verify();
         // Container/config/physical identity proof only. Schema, SQL policy and TLS
         // checks are separate preparation/return gates, never inferred from this.
-        return snapshotActivation({
+        const observation = snapshotActivation({
           version: 1,
           kind: "platform-upgrade-observation",
           operationId: admission.identity.operationId,
@@ -212,9 +212,17 @@ export function createUpgradeObservers(input, dependencies = {}) {
           phase: state.phase,
           containers,
         });
+        if (!backupSource) return observation;
+        ensure(mode === "stopped");
+        const hbaPath = observed.owned
+          .find((row) => row.service === "postgres")
+          .container.Mounts.find((m) => m.Destination === "/etc/postgresql/pg_hba.conf")?.Source;
+        ensure(typeof hbaPath === "string");
+        return snapshotActivation({ observation, hbaPath });
       }),
     );
   return Object.freeze({
+    inspectBackupSource: (cap) => inspect("stopped", cap, true),
     inspectOld: (cap) => inspect("old", cap),
     inspectStoppedOld: (cap) => inspect("stopped", cap),
     inspectCandidate: (cap) => inspect("candidate", cap),

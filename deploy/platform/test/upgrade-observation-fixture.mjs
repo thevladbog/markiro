@@ -220,7 +220,29 @@ export async function upgradeObservationFixture(
       let value;
       if (args[0] === "info") value = d.state.info;
       else if (args[0] === "container" && args[1] === "ls")
-        return { stdout: d.state.containers.map((c) => c.Id).join("\n") };
+        return {
+          stdout: d.state.containers
+            .map((c) =>
+              args.at(-1) === "json"
+                ? JSON.stringify({
+                    Names: c.Name.slice(1),
+                    Labels: Object.entries(c.Config.Labels)
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(","),
+                  })
+                : c.Id,
+            )
+            .join("\n"),
+        };
+      else if (args[0] === "volume" && args[1] === "ls")
+        return {
+          stdout: JSON.stringify({
+            Name: d.state.volume.Name,
+            Labels: Object.entries(d.state.volume.Labels)
+              .map(([k, v]) => `${k}=${v}`)
+              .join(","),
+          }),
+        };
       else if (args[1] === "inspect") {
         const rows = d.state[args[0] === "volume" ? "volume" : `${args[0]}s`];
         value =

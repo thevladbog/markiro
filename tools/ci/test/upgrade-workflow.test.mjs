@@ -1,0 +1,42 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { load } from "js-yaml";
+import { classifyChangedFiles } from "../affected.mjs";
+test("upgrade phases are independently protected, serialized and stdin-only", () => {
+  const raw = readFileSync(".github/workflows/upgrade-platform.yml", "utf8"),
+    w = load(raw);
+  assert.deepEqual(Object.keys(w.on), ["workflow_dispatch"]);
+  assert.deepEqual(w.on.workflow_dispatch.inputs.phase.options, [
+    "prepare",
+    "activate",
+    "return-old",
+  ]);
+  assert.deepEqual(w.concurrency, {
+    group: "timeweb-platform-production",
+    "cancel-in-progress": false,
+  });
+  const job = w.jobs.deploy;
+  assert.equal(job.environment, "production-deploy");
+  assert.ok(job.if.includes("refs/heads/main") && job.if.includes("github.run_attempt == 1"));
+  assert.deepEqual(job.permissions, { contents: "read", actions: "read", packages: "read" });
+  assert.equal(job.steps[0].with["persist-credentials"], false);
+  assert.equal(job.steps[0].with.ref, "${{ github.sha }}");
+  for (const step of job.steps.filter((s) => s.uses)) assert.match(step.uses, /@[a-f0-9]{40}$/u);
+  const run = job.steps.at(-1).run;
+  assert.ok(run.includes("printf '%s\\0'"));
+  assert.ok(run.includes('/usr/bin/env -i PATH="$(dirname "$node_bin"):/usr/bin:/bin"'));
+  assert.ok(run.includes('"$node_bin" deploy/platform/upgrade-transport.mjs run'));
+  assert.ok(!run.includes("${{"));
+});
+test("upgrade implementation and workflow select required platform contracts and production bundle", () => {
+  for (const file of [
+    "deploy/platform/upgrade-transport.mjs",
+    "deploy/platform/host/upgrade-command-runtime.mjs",
+    ".github/workflows/upgrade-platform.yml",
+  ]) {
+    const { jobs } = classifyChangedFiles([file]);
+    assert.equal(jobs.production_bundle, true);
+    assert.equal(jobs.platform_contracts, true);
+  }
+});
