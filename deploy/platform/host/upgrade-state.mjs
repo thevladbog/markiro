@@ -1,10 +1,34 @@
 import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { withHostState } from "./state.mjs";
+import { withHostState, withHeldHostState } from "./state.mjs";
 import { stateError, validateBackup, validateIdentity } from "./state-validation.mjs";
 import { createPrivateDirectory, readPrivateFile, writePrivateFile } from "./files.mjs";
 import { activationHash, snapshotActivation } from "./recovery-activation-admission.mjs";
 import { validateUpgradeAdmission } from "./upgrade-admission.mjs";
+
+const upgradeCapabilities = new WeakMap();
+
+// Only a capability issued by this store can read upgrade authority. The host
+// consumes and drains it; neither an ordinary token nor JSON can impersonate it.
+export async function withHeldUpgradeState(capability, action) {
+  const held = upgradeCapabilities.get(capability);
+  if (!held || typeof action !== "function") throw stateError();
+  return withHeldHostState(capability, async () => {
+    let active = true;
+    const verify = async () => {
+      if (!active) throw stateError();
+      return held();
+    };
+    try {
+      const context = await verify();
+      const result = await action({ ...context, verify });
+      await verify();
+      return result;
+    } finally {
+      active = false;
+    }
+  });
+}
 
 const phases = ["admitted", "old-stopped", "backup-verified"];
 const bytes = (value) => Buffer.from(JSON.stringify(value) + "\n");
@@ -137,6 +161,24 @@ export async function withUpgradeState(root, input, callback, { now = Date.now }
       guard: (action) =>
         guarded(async (capability) => {
           if (typeof action !== "function") throw stateError();
+          upgradeCapabilities.set(capability, async () => {
+            if (!active) throw stateError();
+            await integrity();
+            await checkAdmission();
+            if (state.status === "recovery-required") throw stateError();
+            return {
+              root,
+              state: snapshotActivation(state),
+              predecessor: snapshotActivation(
+                JSON.parse(
+                  (await readUpgradePredecessor(root, admission.predecessor.identity))
+                    .activationOperation,
+                ),
+              ),
+            };
+          });
+          // Host capability lifetime/single-use/drain is authoritative. The
+          // WeakMap entry cannot make a revoked host token live again.
           return action(capability);
         }),
       fail,

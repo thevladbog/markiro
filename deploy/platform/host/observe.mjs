@@ -163,6 +163,17 @@ function repositoryDigest(reference) {
 // These are factual Docker observations, not a complete PostgreSQL acceptance.
 // The caller must run the fixed PostgreSQL/TLS probe before returning a held fence.
 export function createHostObservers(operation, policyInput, options = {}) {
+  return createObservers(operation, policyInput, options, false);
+}
+
+// The first upgrade accepts this exact historical executor/recipe only. This is
+// not a caller-supplied env allowlist or an image-ID compatibility heuristic.
+export function createAcceptedRecoveryObservers(operation, policyInput, options = {}) {
+  ensure(operation.identity.executorSha === "69f288e0a5299cabee229ce7dddf58bcba9fd22c");
+  return createObservers(operation, policyInput, options, true);
+}
+
+function createObservers(operation, policyInput, options, legacyEdge) {
   const policy = validateObservationPolicy(policyInput);
   const command = createDockerCommand(operation, options.runProcess, options.signal);
   const readMachineId = options.readMachineId ?? (() => readFile("/etc/machine-id", "utf8"));
@@ -338,8 +349,7 @@ export function createHostObservers(operation, policyInput, options = {}) {
               "MARKIRO_SAAS_ADMIN_DOMAIN",
               "MARKIRO_RETIRED_KIOSK_DOMAIN",
               "MARKIRO_LANDING_DOMAIN",
-              "MARKIRO_RELEASES_DOMAIN",
-              "MARKIRO_RELEASES_BUCKET",
+              ...(!legacyEdge ? ["MARKIRO_RELEASES_DOMAIN", "MARKIRO_RELEASES_BUCKET"] : []),
               "S3_PUBLIC_ORIGIN",
               "ACME_EMAIL",
             ].map((key) => [key, config[key]]),

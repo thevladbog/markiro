@@ -7,9 +7,9 @@ export const upgradeBytes = (value) => Buffer.from(JSON.stringify(value) + "\n")
 
 // Synthetic complete predecessor, matching the existing recovery persistence
 // shapes. Historical expiry is deliberately four days before the new admission.
-export function upgradeFixture() {
-  const prior = hostIdentity();
-  const recovered = hostIdentity();
+export function upgradeFixture(options = {}) {
+  const prior = options.prior ?? hostIdentity();
+  const recovered = options.recovered ?? hostIdentity();
   const original = {
     version: 1,
     sequence: 14,
@@ -104,7 +104,7 @@ export function upgradeFixture() {
       maxAgeMs: 3600000,
       producers: Object.fromEntries(names.map((name) => [name, name])),
     },
-    configuration: {
+    configuration: options.configuration ?? {
       candidateId: recovered.operationId,
       runtimeSnapshot: {},
       migrationSnapshot: {},
@@ -133,10 +133,10 @@ export function upgradeFixture() {
     phase: "activate",
     installedRoot: `/opt/markiro-platform/recovery-bootstrap/${recovered.executorSha}`,
     dispatch: activation.dispatch,
-    observationPolicy: {},
+    observationPolicy: options.policy ?? {},
     operation: {
-      root: "/opt/markiro-platform/state",
-      dockerConfig: "/opt/markiro-platform/state/docker",
+      root: options.root ?? "/opt/markiro-platform/state",
+      dockerConfig: `${options.root ?? "/opt/markiro-platform/state"}/docker`,
       activation,
     },
   };
@@ -144,8 +144,8 @@ export function upgradeFixture() {
   const predecessorBytes = Object.fromEntries(
     Object.entries(records).map(([name, value]) => [name, upgradeBytes(value)]),
   );
-  const identity = hostIdentity();
-  identity.configurationSha256 = "e".repeat(64);
+  const identity = options.identity ?? hostIdentity();
+  if (!options.identity) identity.configurationSha256 = "e".repeat(64);
   const input = {
     version: 1,
     kind: "platform-accepted-recovery-upgrade",
