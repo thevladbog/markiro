@@ -1,0 +1,106 @@
+name: Upgrade accepted Timeweb recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Separately approved upgrade phase; new run only
+        required: true
+        type: choice
+        options: [prepare, activate, return-old]
+      executor_sha:
+        description: Pinned reviewed upgrade executor, identical for all phases
+        required: true
+        type: string
+      executor_ci_run_id:
+        description: Successful main-push CI for the pinned executor SHA
+        required: true
+        type: string
+      executor_ci_run_attempt:
+        description: Exact successful executor CI attempt
+        required: true
+        type: string
+      source_sha:
+        description: Exact published product source SHA (independent of executor SHA)
+        required: true
+        type: string
+      publisher_run_id:
+        description: Successful protected release-platform-images publisher run
+        required: true
+        type: string
+      publisher_run_attempt:
+        description: Exact publisher attempt
+        required: true
+        type: string
+      artifact_id:
+        description: Immutable complete platform release artifact ID
+        required: true
+        type: string
+      operation_id:
+        description: Independently prepared host operation UUID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: timeweb-platform-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    environment: production-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Deliver pinned prepared platform operation
+        env:
+          TIMEWEB_PLATFORM_HOST: ${{ vars.TIMEWEB_PLATFORM_HOST }}
+          TIMEWEB_PLATFORM_SSH_PORT: ${{ vars.TIMEWEB_PLATFORM_SSH_PORT }}
+          TIMEWEB_PLATFORM_SSH_USER: ${{ vars.TIMEWEB_PLATFORM_SSH_USER }}
+          TIMEWEB_PLATFORM_KNOWN_HOSTS: ${{ vars.TIMEWEB_PLATFORM_KNOWN_HOSTS }}
+          TIMEWEB_PLATFORM_SSH_PRIVATE_KEY: ${{ secrets.TIMEWEB_PLATFORM_SSH_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          EXECUTOR_SHA: ${{ inputs.executor_sha }}
+          UPGRADE_PHASE: ${{ inputs.phase }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DISPATCH_RUN_ID: ${{ github.run_id }}
+          DISPATCH_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXECUTOR_CI_RUN_ID: ${{ inputs.executor_ci_run_id }}
+          EXECUTOR_CI_RUN_ATTEMPT: ${{ inputs.executor_ci_run_attempt }}
+          PRODUCT_SOURCE_SHA: ${{ inputs.source_sha }}
+          PUBLISHER_RUN_ID: ${{ inputs.publisher_run_id }}
+          PUBLISHER_RUN_ATTEMPT: ${{ inputs.publisher_run_attempt }}
+          RELEASE_ARTIFACT_ID: ${{ inputs.artifact_id }}
+          OPERATION_ID: ${{ inputs.operation_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          node_bin="$(command -v node)"
+          # Bash builtin printf: secrets cross stdin, never an OS argv or a file artifact.
+          # Start Node with an empty environment before any loader can read NODE_OPTIONS.
+          printf '%s\0' \
+            "$TIMEWEB_PLATFORM_HOST" "$TIMEWEB_PLATFORM_SSH_PORT" "$TIMEWEB_PLATFORM_SSH_USER" \
+            "$TIMEWEB_PLATFORM_SSH_PRIVATE_KEY" "$TIMEWEB_PLATFORM_KNOWN_HOSTS" "$GITHUB_TOKEN" "$GITHUB_ACTOR" \
+            "$UPGRADE_PHASE" "$DISPATCH_SHA" "$DISPATCH_RUN_ID" "$DISPATCH_RUN_ATTEMPT" \
+            "$EXECUTOR_SHA" "$EXECUTOR_CI_RUN_ID" "$EXECUTOR_CI_RUN_ATTEMPT" \
+            "$PRODUCT_SOURCE_SHA" "$PUBLISHER_RUN_ID" "$PUBLISHER_RUN_ATTEMPT" \
+            "$RELEASE_ARTIFACT_ID" "$OPERATION_ID" | \
+            /usr/bin/env -i PATH="$(dirname "$node_bin"):/usr/bin:/bin" HOME=/nonexistent LANG=C \
+            "$node_bin" deploy/platform/upgrade-transport.mjs run

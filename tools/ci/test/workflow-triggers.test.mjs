@@ -15,6 +15,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "deploy-platform.yml": ["workflow_dispatch"],
     "handheld-release.yml": ["workflow_dispatch"],
     "recover-platform.yml": ["workflow_dispatch"],
+    "upgrade-platform.yml": ["workflow_dispatch"],
     "release-platform-images.yml": ["workflow_dispatch"],
     "signer-download-repair.yml": ["workflow_dispatch"],
     "signer-stable-release.yml": ["workflow_dispatch"],

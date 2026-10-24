@@ -3,7 +3,60 @@ import { chmod, mkdir } from "node:fs/promises";
 import { assertPrivateRootSync, readPrivateFile } from "../host/files.mjs";
 import { ensure, runtime, fail } from "./schemas.mjs";
 import { withHeldHostState } from "../host/state.mjs";
+import { withHeldUpgradeState } from "../host/upgrade-state.mjs";
 const recoveryRuntimes = new WeakMap();
+
+// This factory cannot be supplied an arbitrary predecessor or phase. It consumes
+// the live upgrade guard and binds independently provisioned bytes for this op.
+export function withUpgradeBackupRuntime(capability, action) {
+  return withHeldUpgradeState(capability, async (held) => {
+    const { root, state } = held;
+    ensure(
+      state.phase === "backup-verified" &&
+        state.status === "entered" &&
+        state.oldRuntime &&
+        !state.migrationEntered &&
+        typeof action === "function",
+    );
+    const admission = state.admission;
+    const original = await readPrivateFile(root, "backup-runtime.json");
+    const originalState = JSON.parse(await readPrivateFile(root, "state.json"));
+    ensure(
+      runtime(JSON.parse(original)).executorSha === originalState.current.identity.executorSha,
+    );
+    const priorName = `recovery-backup-runtime-${admission.predecessor.identity.operationId}.json`;
+    const priorBytes = await readPrivateFile(root, priorName);
+    ensure(
+      runtime(JSON.parse(priorBytes)).executorSha === admission.predecessor.identity.executorSha,
+    );
+    const name = `upgrade-backup-runtime-${admission.identity.operationId}.json`;
+    const bytes = await readPrivateFile(root, name);
+    const config = runtime(JSON.parse(bytes));
+    ensure(
+      config.executorSha === admission.identity.executorSha &&
+        config.provenance === "live-source" &&
+        config.dockerExecutable === "/usr/bin/docker" &&
+        config.endpoint === "unix:///var/run/docker.sock",
+    );
+    await held.verify();
+    const context = Object.freeze({});
+    recoveryRuntimes.set(context, {
+      root,
+      operationId: admission.identity.operationId,
+      name,
+      bytes,
+      original,
+      priorName,
+      priorBytes,
+      verify: held.verify,
+    });
+    try {
+      return await action(held, context);
+    } finally {
+      recoveryRuntimes.delete(context);
+    }
+  });
+}
 export function withRecoveryBackupRuntime(capability, action) {
   return withHeldHostState(capability, async (held) => {
     const issued = [];
@@ -46,6 +99,9 @@ export async function readBackupRuntime(root, operationId, recoveryRuntime) {
   if (recoveryRuntime === undefined) return readPrivateFile(root, "backup-runtime.json");
   const bound = recoveryRuntimes.get(recoveryRuntime);
   ensure(bound && bound.root === root && bound.operationId === operationId);
+  if (bound.verify) await bound.verify();
+  if (bound.priorName)
+    ensure((await readPrivateFile(root, bound.priorName)).equals(bound.priorBytes));
   ensure((await readPrivateFile(root, "backup-runtime.json")).equals(bound.original));
   const bytes = await readPrivateFile(root, bound.name);
   ensure(bytes.equals(bound.bytes));

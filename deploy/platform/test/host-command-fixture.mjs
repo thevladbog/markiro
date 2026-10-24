@@ -1,12 +1,12 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-export async function operationFixture(t) {
+export async function operationFixture(t, fixtureOptions) {
   const { preparedFixture } = await import("./prepared-target-fixture.mjs");
   const { readFile } = await import("node:fs/promises");
   const { dirname } = await import("node:path");
   const { HOST_BUNDLE_FILES } = await import("../host/command.mjs");
   const { digest } = await import("../backup/schemas.mjs");
-  const f = await preparedFixture(t);
+  const f = await preparedFixture(t, fixtureOptions);
   const installed = join(f.root, "installed");
   await mkdir(installed, { mode: 0o700 });
   const files = {};

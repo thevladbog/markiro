@@ -135,24 +135,33 @@ export async function observePostgresAdmin({ context, state, command, hbaSha256 
   });
 }
 
-export async function runPostgresProbe({ context, policy, command, workerPath, verifySources }) {
+export async function runPostgresProbe({
+  context,
+  policy,
+  command,
+  workerPath,
+  verifySources,
+  registerCleanup,
+}) {
   let directory,
     created = false,
     terminated = true,
     problem,
-    result;
+    result,
+    containerId,
+    unregisterCleanup;
   const name = `markiro-platform-probe-${context.identity.operationId}`;
   const image = context.identity.admission.registry.api;
   const mounts = {};
   const uid = process.getuid(),
     gid = process.getgid();
   const executorUser = `${uid}:${gid}`;
-  const existing = async () =>
-    String((await command(["container", "ls", "--all", "--format", "{{.Names}}"], true)).stdout)
+  const existing = async (run = command) =>
+    String((await run(["container", "ls", "--all", "--format", "{{.Names}}"], true)).stdout)
       .trim()
       .split("\n");
-  const inspect = async () => {
-    const values = JSON.parse((await command(["container", "inspect", name], true)).stdout);
+  const inspect = async (run = command) => {
+    const values = JSON.parse((await run(["container", "inspect", name], true)).stdout);
     ensure(Array.isArray(values) && values.length === 1);
     const c = values[0];
     ensure(
@@ -185,7 +194,29 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
     same(c.Mounts.map((m) => m.Destination).sort(), Object.keys(mounts).sort());
     for (const m of c.Mounts)
       ensure(m.Type === "bind" && !m.RW && m.Source === mounts[m.Destination]);
+    if (containerId) ensure(c.Id === containerId);
+    else containerId = c.Id;
     return c;
+  };
+  // Trusted in-memory recovery registration. It carries this invocation's exact
+  // recipe, private mounts and first observed ID, never a caller-selected name.
+  const cleanup = async (run) => {
+    ensure(created && terminated);
+    if ((await existing(run)).includes(name)) {
+      const c = await inspect(run);
+      if (c.State.Running || c.State.Restarting || c.State.Paused)
+        await run(["container", "stop", "--time", "10", c.Id], true);
+      const stopped = await inspect(run);
+      ensure(
+        !stopped.State.Running &&
+          !stopped.State.Restarting &&
+          !stopped.State.Paused &&
+          (stopped.State.Status === "exited" || stopped.State.Status === "created"),
+      );
+      await run(["container", "rm", c.Id], true);
+    }
+    ensure(!(await existing(run)).includes(name));
+    unregisterCleanup?.();
   };
   try {
     ensure(Number.isSafeInteger(uid) && uid >= 0 && Number.isSafeInteger(gid) && gid >= 0);
@@ -216,6 +247,7 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
     // private files. Bind only executor-owned 0600 inodes and use that trusted UID.
     for (const source of Object.values(mounts)) assertPrivateFileSync(source);
     // Mark intended ownership before create: a failed CLI may have reached Docker.
+    unregisterCleanup = registerCleanup?.(cleanup);
     created = true;
     await command([
       "create",
@@ -256,15 +288,7 @@ export async function runPostgresProbe({ context, policy, command, workerPath, v
   }
   if (created && terminated) {
     try {
-      if ((await existing()).includes(name)) {
-        const c = await inspect();
-        if (c.State.Running || c.State.Restarting || c.State.Paused)
-          await command(["container", "stop", "--time", "10", c.Id], true);
-        const stopped = await inspect();
-        ensure(stopped.State.Status === "exited" || stopped.State.Status === "created");
-        await command(["container", "rm", c.Id], true);
-      }
-      ensure(!(await existing()).includes(name));
+      await cleanup(command);
     } catch (error) {
       problem = error;
       terminated = error.terminationConfirmed !== false;

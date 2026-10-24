@@ -6,6 +6,7 @@ mod support;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -137,22 +138,46 @@ async fn close_pool_closes_a_connection_on_its_way_back_to_the_pool() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("host.db");
     let wal = dir.path().join("host.db-wal");
+    let hold_return = Arc::new(AtomicBool::new(false));
+    let resume_return = Arc::new(tokio::sync::Semaphore::new(0));
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
+        .after_release({
+            let hold_return = hold_return.clone();
+            let resume_return = resume_return.clone();
+            move |_, _| {
+                let hold_return = hold_return.clone();
+                let resume_return = resume_return.clone();
+                Box::pin(async move {
+                    if hold_return.swap(false, Ordering::SeqCst) {
+                        resume_return.acquire().await.unwrap().forget();
+                    }
+                    Ok(true)
+                })
+            }
+        })
         .connect_with(markiro_host::db::options(&db).create_if_missing(true))
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    // What dropping a pooled connection spawns, polled once here: the
-    // pool is still open, so it pings the connection before it goes back.
+    // Pause after the return's is_closed check, before its real SQLite ping.
+    // A ping alone can finish on its first poll, so it cannot synchronize us.
+    hold_return.store(true, Ordering::SeqCst);
     let mut back = std::pin::pin!(conn.return_to_pool());
     let returned =
         std::future::poll_fn(|cx| std::task::Poll::Ready(back.as_mut().poll(cx).is_ready())).await;
-    assert!(!returned, "the ping is under way");
+    assert!(!returned, "the return is held at after_release");
+    assert!(!hold_return.load(Ordering::SeqCst), "the hook was reached");
     drop(conn);
 
-    tokio::join!(close_pool(&pool), back);
-
+    let mut closing = std::pin::pin!(close_pool(&pool));
+    let closed =
+        std::future::poll_fn(|cx| std::task::Poll::Ready(closing.as_mut().poll(cx).is_ready()))
+            .await;
+    assert!(!closed, "close waits for the returning connection's permit");
+    assert!(pool.is_closed());
+    resume_return.add_permits(1);
+    tokio::join!(closing, back);
     assert_eq!(pool.size(), 0);
     // SQLite removes the WAL when the last connection to the file closes.
     let mut last = markiro_host::db::options(&db).connect().await.unwrap();

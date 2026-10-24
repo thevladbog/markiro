@@ -163,6 +163,36 @@ function repositoryDigest(reference) {
 // These are factual Docker observations, not a complete PostgreSQL acceptance.
 // The caller must run the fixed PostgreSQL/TLS probe before returning a held fence.
 export function createHostObservers(operation, policyInput, options = {}) {
+  return createObservers(operation, policyInput, options, false);
+}
+
+// The first upgrade accepts this exact historical executor/recipe only. This is
+// not a caller-supplied env allowlist or an image-ID compatibility heuristic.
+export function createAcceptedRecoveryObservers(operation, policyInput, options = {}) {
+  ensure(operation.identity.executorSha === "69f288e0a5299cabee229ce7dddf58bcba9fd22c");
+  return createObservers(operation, policyInput, options, true);
+}
+
+// Upgrade-only dual authority: exact retained IDs select the complete old
+// recipe. Every other owned application selects the complete candidate recipe.
+// Selection is never based on image equality; ordinary callers cannot enable it.
+export function createUpgradeHostObservers(
+  operation,
+  oldOperation,
+  retainedIds,
+  policyInput,
+  options = {},
+) {
+  ensure(oldOperation.identity.executorSha === "69f288e0a5299cabee229ce7dddf58bcba9fd22c");
+  keys(retainedIds, ["postgres", "api", "edge"]);
+  ensure(Object.values(retainedIds).every(hex) && new Set(Object.values(retainedIds)).size === 3);
+  same(operation.identity.target, oldOperation.identity.target);
+  return createObservers(operation, policyInput, options, false, {
+    operation: oldOperation,
+    ids: retainedIds,
+  });
+}
+function createObservers(operation, policyInput, options, legacyEdge, retained) {
   const policy = validateObservationPolicy(policyInput);
   const command = createDockerCommand(operation, options.runProcess, options.signal);
   const readMachineId = options.readMachineId ?? (() => readFile("/etc/machine-id", "utf8"));
@@ -235,6 +265,9 @@ export function createHostObservers(operation, policyInput, options = {}) {
       containers.push(c);
     }
     const config = await readProtectedEnv(operation.configuration.runtimeSnapshot.path);
+    const oldConfig = retained
+      ? await readProtectedEnv(retained.operation.configuration.runtimeSnapshot.path)
+      : null;
     const owned = [];
     for (const c of containers) {
       const labels = c.Config.Labels ?? {};
@@ -282,10 +315,15 @@ export function createHostObservers(operation, policyInput, options = {}) {
       for (const [name, n] of Object.entries(c.NetworkSettings.Networks))
         ensure(n.NetworkID === Object.values(policy.networks).find((p) => p.name === name)?.id);
       if (service !== "edge") same(c.HostConfig.PortBindings ?? {}, {});
+      const old = retained && c.Id === retained.ids[service];
+      if (old && service !== "postgres") ensure(!active);
+      const containerOperation = old ? retained.operation : operation;
+      const containerConfig = old ? oldConfig : config;
+      const containerLegacy = old ? true : legacyEdge;
       let reference, id;
-      let selectedAdmission = operation.identity.admission;
+      let selectedAdmission = containerOperation.identity.admission;
       if (service === "postgres") {
-        reference = `postgres:17-alpine@${config.MARKIRO_POSTGRES_IMAGE_DIGEST}`;
+        reference = `postgres:17-alpine@${containerConfig.MARKIRO_POSTGRES_IMAGE_DIGEST}`;
         id = policy.postgresImageId;
       } else {
         const priorImage =
@@ -304,7 +342,7 @@ export function createHostObservers(operation, policyInput, options = {}) {
               ["entry", "command", "recovery"].includes(boundary)));
         const admission = prior
           ? context.previousHealthy.identity.admission
-          : operation.identity.admission;
+          : containerOperation.identity.admission;
         selectedAdmission = admission;
         const selected = admission.registry[service === "edge" ? "edge" : "api"];
         reference = selected.reference;
@@ -338,11 +376,10 @@ export function createHostObservers(operation, policyInput, options = {}) {
               "MARKIRO_SAAS_ADMIN_DOMAIN",
               "MARKIRO_RETIRED_KIOSK_DOMAIN",
               "MARKIRO_LANDING_DOMAIN",
-              "MARKIRO_RELEASES_DOMAIN",
-              "MARKIRO_RELEASES_BUCKET",
+              ...(!containerLegacy ? ["MARKIRO_RELEASES_DOMAIN", "MARKIRO_RELEASES_BUCKET"] : []),
               "S3_PUBLIC_ORIGIN",
               "ACME_EMAIL",
-            ].map((key) => [key, config[key]]),
+            ].map((key) => [key, containerConfig[key]]),
           ),
           SERVER_PROFILE: "platform-only",
           VITE_SERVER_PROFILE: "platform-only",
@@ -351,8 +388,8 @@ export function createHostObservers(operation, policyInput, options = {}) {
       } else {
         const environment =
           service === "api"
-            ? config
-            : await readProtectedEnv(operation.configuration.migrationSnapshot.path);
+            ? containerConfig
+            : await readProtectedEnv(containerOperation.configuration.migrationSnapshot.path);
         expectedEnv = {
           ...inherited,
           ...environment,
@@ -388,8 +425,8 @@ export function createHostObservers(operation, policyInput, options = {}) {
         else {
           const expected =
             service === "api"
-              ? config
-              : await readProtectedEnv(operation.configuration.migrationSnapshot.path);
+              ? containerConfig
+              : await readProtectedEnv(containerOperation.configuration.migrationSnapshot.path);
           ensure(env.DATABASE_URL === expected.DATABASE_URL && env.NODE_ENV === "production");
           same(
             c.Config.Cmd,
@@ -402,7 +439,7 @@ export function createHostObservers(operation, policyInput, options = {}) {
       if (service === "migrate")
         ensure(
           c.Name === `/${context.migration.name}` &&
-            labels["io.markiro.operation"] === operation.identity.operationId &&
+            labels["io.markiro.operation"] === containerOperation.identity.operationId &&
             labels["com.docker.compose.oneoff"] === "True",
         );
       else
@@ -418,13 +455,13 @@ export function createHostObservers(operation, policyInput, options = {}) {
               "/etc/postgresql/pg_hba.conf": c.Mounts.find(
                 (m) => m.Destination === "/etc/postgresql/pg_hba.conf",
               )?.Source,
-              "/run/markiro-postgres/server.crt": config.MARKIRO_POSTGRES_SERVER_CERT_FILE,
-              "/run/markiro-postgres/server.key": config.MARKIRO_POSTGRES_SERVER_KEY_FILE,
-              "/run/markiro-postgres/password": config.MARKIRO_POSTGRES_PASSWORD_FILE,
+              "/run/markiro-postgres/server.crt": containerConfig.MARKIRO_POSTGRES_SERVER_CERT_FILE,
+              "/run/markiro-postgres/server.key": containerConfig.MARKIRO_POSTGRES_SERVER_KEY_FILE,
+              "/run/markiro-postgres/password": containerConfig.MARKIRO_POSTGRES_PASSWORD_FILE,
             }
           : service === "edge"
             ? {}
-            : { "/run/markiro-postgres/ca.crt": config.MARKIRO_POSTGRES_CA_FILE };
+            : { "/run/markiro-postgres/ca.crt": containerConfig.MARKIRO_POSTGRES_CA_FILE };
       const writableBinds = catalogMountBindings(env, service);
       const named =
         service === "postgres"

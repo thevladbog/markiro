@@ -54,8 +54,8 @@ export function productionAuthorization(
     expiresAt,
   };
 }
-export async function productionFixture(t) {
-  const f = await preparedFixture(t);
+export async function productionFixture(t, options) {
+  const f = await preparedFixture(t, options);
   f.record.version = 2;
   for (const x of [f.record, f.document, f.evidence, f.expected]) x.provenance = "live-source";
   for (const x of [f.document.runtime, f.evidence.runtime]) x.architecture = "amd64";
