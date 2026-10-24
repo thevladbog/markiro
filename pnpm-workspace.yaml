@@ -34,7 +34,9 @@ overrides:
   "svgo@4": "4.1.0"
   postcss: "8.5.23"
   js-yaml: "5.4.1"
-  undici: "7.29.1"
+  # jsdom and unifont (Astro) pull undici. 7.30.1 is the first release patched
+  # for GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472.
+  undici: "7.30.1"
   # GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and
   # GHSA-5jgf-p345-68v8: host confusion and SSRF in fast-uri < 3.1.6, then
   # GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3 and GHSA-hrr3-gc8f-f4qj, patched

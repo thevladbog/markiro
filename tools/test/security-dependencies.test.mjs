@@ -30,7 +30,8 @@ const patched = {
   "ip-address": "10.7.4", // GHSA-rxp7-6hxx-x8q5
   "brace-expansion": "5.0.12", // GHSA-q2hr-2g5m-vwhr
   "engine.io": "6.6.10", // GHSA-2gc4-cqfq-p2gv
-  undici: "7.29.1", // GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3 and seven lower advisories
+  // 7.29.1 also covers GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3 and seven lower advisories
+  undici: "7.30.1", // GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472
   "js-yaml": "5.4.1", // GHSA-r3ph-w7gj-g6xm
   // 15.0.1 also covers GHSA-253c-mchw-3w2r, 15.0.2 GHSA-r7fv-28h4-cvq7
   "markdown-it": "15.0.3", // GHSA-vfgh-jcmw-g37q, GHSA-gfr2-rv44-r23c
