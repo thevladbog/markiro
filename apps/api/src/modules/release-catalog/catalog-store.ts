@@ -55,6 +55,7 @@ export interface CatalogStore {
   writeReceipt(operationId: string, bytes: Buffer): Promise<{ key: string; versionId: string }>;
   listReceiptVersions(
     cursor?: ReceiptCursor,
+    signal?: AbortSignal,
   ): Promise<{ versions: ReceiptVersion[]; nextCursor: ReceiptCursor | undefined }>;
 }
 function sdkTransport(config: CatalogStorageConfig): CatalogTransport {
@@ -202,7 +203,7 @@ export class S3CatalogStore implements CatalogStore {
       throw new CatalogFault("unavailable");
     }
   }
-  async listReceiptVersions(cursor?: ReceiptCursor) {
+  async listReceiptVersions(cursor?: ReceiptCursor, signal = AbortSignal.timeout(60000)) {
     if (cursor && (!cursor.key.startsWith("_publication-ledger/") || !safeKey(cursor.key)))
       throw new CatalogFault("invalid_request");
     try {
@@ -213,7 +214,7 @@ export class S3CatalogStore implements CatalogStore {
           MaxKeys: 1000,
           ...(cursor ? { KeyMarker: cursor.key, VersionIdMarker: version(cursor.versionId) } : {}),
         },
-        AbortSignal.timeout(60000),
+        signal,
       );
       if (typeof r.truncated !== "boolean" || r.versions.length > 1000)
         throw new CatalogFault("unavailable");
