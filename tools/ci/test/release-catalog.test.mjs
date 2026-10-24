@@ -166,3 +166,25 @@ test("handheld sync-download builds the compiled catalog verifier before loading
   assert.ok(before.includes("pnpm --filter @markiro/domain build"));
   assert.ok(before.includes("pnpm --filter @markiro/platform-contracts build"));
 });
+
+test("validator packaging test schedules its own build on a clean runner", () => {
+  const dry = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "node_modules/turbo/bin/turbo",
+        "run",
+        "test",
+        "--filter=@markiro/release-validation",
+        "--dry=json",
+      ],
+      { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] },
+    ),
+  );
+  const task = dry.tasks.find((t) => t.taskId === "@markiro/release-validation#test");
+  assert.ok(task);
+  assert.ok(
+    task.dependencies.includes("@markiro/release-validation#build"),
+    "packaging test requires its own generated runtime",
+  );
+});

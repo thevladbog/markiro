@@ -12,6 +12,9 @@
         "$TURBO_ROOT$/tools/signer-release/manifest.mjs",
         "$TURBO_ROOT$/tools/signer-release/version.mjs"
       ]
+    },
+    "test": {
+      "dependsOn": ["^build", "build"]
     }
   }
 }
