@@ -432,6 +432,15 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     progress("copy generated private tree into the isolated daemon");
     await shell(["mkdir", "-p", parent]);
     await outer(["cp", `${parent}/.`, `${containerId}:${parent}`]);
+    progress("verify copied private PostgreSQL TLS file metadata");
+    evidence.copiedTlsFiles = {};
+    for (const file of ["ca.crt", "server.crt", "server.key", "password"]) {
+      const metadata = (
+        await shell(["stat", "-c", "%u:%g:%a:%s", join(root, "pg", file)])
+      ).stdout.trim();
+      assert.match(metadata, /^\d+:\d+:[0-7]{3,4}:\d+$/u);
+      evidence.copiedTlsFiles[file] = metadata;
+    }
     progress("assign generated private PostgreSQL TLS file ownership");
     await shell([
       "chown",

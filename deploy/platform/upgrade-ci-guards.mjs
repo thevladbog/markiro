@@ -196,5 +196,18 @@ export function rehearsalFailure(phase, error) {
   const executable = ["docker", "git", "openssl", "which"].includes(error.rehearsalExecutable)
     ? error.rehearsalExecutable
     : null;
-  return { phase, code, command, name, exitStatus, executable };
+  // Reduce private stderr to a fixed category; never publish any matching text.
+  const stderr = typeof error.stderr === "string" ? error.stderr : "";
+  const reasons = [
+    [/No such file or directory\s*$/mu, "missing-path"],
+    [/(?:Operation not permitted|Permission denied)\s*$/mu, "permission-denied"],
+    [/Read-only file system\s*$/mu, "read-only-filesystem"],
+    [/No space left on device\s*$/mu, "capacity"],
+    [/OCI runtime exec failed:/u, "container-exec"],
+  ];
+  const processReason =
+    command === "docker exec"
+      ? (reasons.find(([pattern]) => pattern.test(stderr))?.[1] ?? null)
+      : null;
+  return { phase, code, command, name, exitStatus, executable, processReason };
 }

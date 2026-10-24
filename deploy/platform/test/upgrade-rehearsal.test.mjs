@@ -245,6 +245,7 @@ test("safe rehearsal failures retain only sanitized error and process metadata",
       name: "Error",
       exitStatus: 1,
       executable: "docker",
+      processReason: null,
     },
   );
   assert.equal(
@@ -292,4 +293,26 @@ test("safe rehearsal executable permits only known basenames independently of co
   );
   for (const rehearsalExecutable of [undefined, "/usr/bin/docker", "docker secret", "arbitrary"])
     assert.equal(rehearsalFailure("fixed phase", { rehearsalExecutable }).executable, null);
+});
+
+test("safe rehearsal failures expose only fixed filesystem and runtime error categories", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  for (const [suffix, expected] of [
+    ["No such file or directory", "missing-path"],
+    ["Operation not permitted", "permission-denied"],
+    ["Permission denied", "permission-denied"],
+    ["Read-only file system", "read-only-filesystem"],
+    ["No space left on device", "capacity"],
+  ]) {
+    const value = rehearsalFailure("fixed phase", {
+      name: "Error",
+      code: 1,
+      rehearsalExecutable: "docker",
+      rehearsalCommand: "docker exec",
+      stderr: `chown: /private/NEVER_PUBLISH: ${suffix}\n`,
+    });
+    assert.equal(value.processReason, expected);
+    assert.ok(!JSON.stringify(value).includes("NEVER_PUBLISH"));
+  }
+  assert.equal(rehearsalFailure("fixed phase", { stderr: "arbitrary secret" }).processReason, null);
 });
