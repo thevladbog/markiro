@@ -40,3 +40,29 @@ test("upgrade implementation and workflow select required platform contracts and
     assert.equal(jobs.platform_contracts, true);
   }
 });
+test("required production gate rehearses exact old return and exports only safe result", () => {
+  const w = load(readFileSync(".github/workflows/ci.yml", "utf8"));
+  const steps = w.jobs["production-bundle"].steps;
+  assert.equal(steps[0].with["fetch-depth"], 0);
+  const recovery = steps.findIndex((s) => s.run?.includes("deploy/platform/recovery-ci.mjs"));
+  const rehearsal = steps.findIndex((s) => s.run?.includes("rehearseUpgrade"));
+  const stack = steps.findIndex((s) => s.run?.includes("deploy/platform/ci-stack.mjs"));
+  assert.ok(recovery >= 0 && rehearsal > recovery && stack > rehearsal);
+  assert.match(
+    steps[rehearsal].run,
+    /docker pull --platform linux\/amd64 docker:28-dind@sha256:[a-f0-9]{64}/u,
+  );
+  assert.ok(steps[rehearsal].run.includes('rehearseUpgrade(["--local-ci"])'));
+  assert.ok(steps[rehearsal].run.includes('flag: "wx"'));
+  const evidence = steps.find((s) => s.with?.name === "platform-upgrade-return-evidence");
+  assert.ok(evidence);
+  assert.equal(evidence.if, "success()");
+  assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/u);
+  assert.equal(evidence.with.path, "${{ runner.temp }}/platform-upgrade-return.json");
+  assert.equal(evidence.with["if-no-files-found"], "error");
+  assert.equal(evidence.with.overwrite, false);
+  assert.equal(
+    classifyChangedFiles(["deploy/platform/upgrade-ci.mjs"]).jobs.production_bundle,
+    true,
+  );
+});

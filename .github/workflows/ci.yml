@@ -369,6 +369,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -462,6 +463,25 @@ jobs:
           compression-level: 0
       - name: Verify isolated failed-activation recovery integration
         run: sudo --preserve-env=RUNNER_TEMP,GITHUB_SHA "$(command -v node)" deploy/platform/recovery-ci.mjs --local-ci
+      - name: Rehearse exact old-runtime return before migration
+        run: |
+          docker pull --platform linux/amd64 docker:28-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
+          node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          import { join } from "node:path";
+          import { rehearseUpgrade } from "./deploy/platform/upgrade-ci.mjs";
+          const result = await rehearseUpgrade(["--local-ci"]);
+          await writeFile(join(process.env.RUNNER_TEMP, "platform-upgrade-return.json"), JSON.stringify(result) + "\n", { mode: 0o600, flag: "wx" });
+          NODE
+      - name: Preserve successful isolated return evidence
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-upgrade-return-evidence
+          path: ${{ runner.temp }}/platform-upgrade-return.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
       - name: Verify isolated platform-only preparation stack
         env:
           MARKIRO_SOURCE_SHA: ${{ github.sha }}
