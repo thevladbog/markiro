@@ -552,4 +552,5 @@ export * from "./warehouse-reprint/unified-contracts.js";
 
 export { isValidInn, normalizeInn } from "./inn.js";
 export * from "./signed-documents/compact-jws.js";
+export { utf16BoundedString } from "./utf16-string.js";
 export * from "./standalone-license/index.js";

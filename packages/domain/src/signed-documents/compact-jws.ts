@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { utf16BoundedString } from "../utf16-string.js";
+
 /**
  * A compact JWS with ES256 (ECDSA P-256 SHA-256, the 64-byte IEEE P1363
  * signature): the format of the cloud's offline grants and of the standalone
@@ -18,7 +20,7 @@ export type CompactJwsVerification =
   { ok: true; kid: string; payload: Uint8Array } | { ok: false; reason: CompactJwsFailure };
 
 const protectedHeaderSchema = z
-  .object({ typ: z.string(), alg: z.literal("ES256"), kid: z.string().min(1).max(128) })
+  .object({ typ: z.string(), alg: z.literal("ES256"), kid: utf16BoundedString(1, 128) })
   .strict();
 
 /** Unpadded base64url of `bytes`. */

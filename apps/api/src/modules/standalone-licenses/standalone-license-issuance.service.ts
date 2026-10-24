@@ -94,8 +94,8 @@ function unprintable(code: number): boolean {
 
 /**
  * The signed customer name (plan Д4): refused characters become spaces; at most
- * 300 UTF-16 units, as Zod's `.max(300)` and the host's `utf16_len` count them,
- * never splitting a surrogate pair.
+ * 300 UTF-16 units, as the license schema (`utf16BoundedString`) and the
+ * host's `utf16_len` count them, never splitting a surrogate pair.
  */
 function plainName(value: string): string {
   const printable = [...value]

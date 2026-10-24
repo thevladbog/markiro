@@ -31,7 +31,7 @@ pub const MAX_LICENSE_BYTES: usize = 16 * 1024;
 pub const MAX_UPDATE_MANIFEST_BYTES: usize = 64 * 1024;
 /// `format` of the host's activation request (spec §6.3).
 pub const ACTIVATION_REQUEST_FORMAT: &str = "markiro-activation-request-v1";
-/// The longest `kid`, in UTF-16 code units as the domain's Zod counts.
+/// The longest `kid`, in UTF-16 code units as the domain's `utf16BoundedString` counts.
 const MAX_KID_UNITS: usize = 128;
 /// `Number.MAX_SAFE_INTEGER`: the domain reads every count and instant as a
 /// JavaScript number, so a larger one is malformed on both sides.

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { utf16BoundedString } from "../utf16-string.js";
+
 /** `typ` of a license file's JWS header (spec 2026-10-13 §4.1). */
 export const STANDALONE_LICENSE_TYP = "markiro-standalone-license+jws";
 /** `typ` of an update manifest's JWS header (spec §10.1). */
@@ -71,8 +73,9 @@ function isPlainText(value: string): boolean {
   }
   return true;
 }
+/** 1 to `max` UTF-16 units of plain text, as `is_plain_text` in `markiro_proto::trust` counts. */
 const plainText = (max: number) =>
-  z.string().min(1).max(max).refine(isPlainText, "Control characters are not allowed");
+  utf16BoundedString(1, max).refine(isPlainText, "Control characters are not allowed");
 
 function versionParts(value: string): readonly [number, number, number] {
   const match = VERSION.exec(value);
@@ -108,7 +111,7 @@ export const standaloneLicensePayloadV1Schema = z
     version: z.literal(1),
     licenseId: uuid,
     sequence: positive,
-    issuer: z.string().min(1).max(256),
+    issuer: utf16BoundedString(1, 256),
     tenantId: standaloneOpaqueIdSchema,
     siteId: standaloneOpaqueIdSchema,
     hostId: uuid,
