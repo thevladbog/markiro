@@ -93,6 +93,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
       });
     } catch (error) {
       const executable = basename(bin);
+      error.rehearsalExecutable = executable;
       error.rehearsalCommand = `${executable} ${args[executable === "docker" ? 2 : 0]}`;
       throw error;
     }
@@ -431,7 +432,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     progress("copy generated private tree into the isolated daemon");
     await shell(["mkdir", "-p", parent]);
     await outer(["cp", `${parent}/.`, `${containerId}:${parent}`]);
-    progress("assign generated private TLS file ownership");
+    progress("assign generated private PostgreSQL TLS file ownership");
     await shell([
       "chown",
       "70:70",
@@ -439,7 +440,9 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     ]);
     // The pinned API runs as node (UID 1000), while the server key/password
     // remain owned by PostgreSQL UID 70. Only the public test CA is shared.
+    progress("verify pinned API runtime user");
     assert.equal((await inspect("image", rehearsalImages.api)).Config.User, "node");
+    progress("assign generated private client CA file ownership");
     await shell(["chown", "1000:1000", join(root, "pg/ca.crt")]);
     const interpolation = {
       ...values,

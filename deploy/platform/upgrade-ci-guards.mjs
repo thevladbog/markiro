@@ -181,5 +181,20 @@ export function rehearsalFailure(phase, error) {
     : /^(?:ERR_[A-Z0-9_]+|E[A-Z0-9_]+)$/u.test(error.code ?? "")
       ? error.code
       : "REHEARSAL_FAILED";
-  return { phase, code, command };
+  const name = new Set([
+    "Error",
+    "TypeError",
+    "RangeError",
+    "SyntaxError",
+    "AssertionError",
+    "AbortError",
+    "AggregateError",
+  ]).has(error.name)
+    ? error.name
+    : "Error";
+  const exitStatus = Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : null;
+  const executable = ["docker", "git", "openssl", "which"].includes(error.rehearsalExecutable)
+    ? error.rehearsalExecutable
+    : null;
+  return { phase, code, command, name, exitStatus, executable };
 }

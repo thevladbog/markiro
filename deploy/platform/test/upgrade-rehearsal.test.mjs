@@ -225,21 +225,71 @@ test("rehearsal configuration binds the written private snapshots and rejects la
   await assert.rejects(fingerprintHostConfiguration({ root: f.root, ...result.configuration }));
 });
 
-test("safe rehearsal failures retain only fixed command category and exit code", async () => {
+test("safe rehearsal failures retain only sanitized error and process metadata", async () => {
   const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
   assert.deepEqual(
     rehearsalFailure("copy generated private tree", {
+      name: "Error",
       code: 1,
       rehearsalCommand: "docker cp",
+      rehearsalExecutable: "docker",
+      stdout: "private",
+      argv: ["private"],
       stderr: "DO NOT PUBLISH fixture secret",
       stack: "private",
     }),
-    { phase: "copy generated private tree", code: "PROCESS_EXIT_1", command: "docker cp" },
+    {
+      phase: "copy generated private tree",
+      code: "PROCESS_EXIT_1",
+      command: "docker cp",
+      name: "Error",
+      exitStatus: 1,
+      executable: "docker",
+    },
   );
   assert.equal(
     JSON.stringify(
-      rehearsalFailure("fixed phase", { code: "bad secret", rehearsalCommand: "private secret" }),
+      rehearsalFailure("fixed phase", {
+        name: "private secret",
+        code: "bad secret",
+        rehearsalCommand: "private secret",
+        cmd: "/private/secret",
+      }),
     ).includes("secret"),
     false,
   );
+});
+
+test("safe rehearsal process metadata rejects invalid exit statuses and arbitrary names", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  for (const code of [undefined, null, "1", -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    const result = rehearsalFailure("fixed phase", {
+      name: "Error private",
+      code,
+      rehearsalCommand: "/private/docker exec secret",
+      rehearsalExecutable: "/private/docker",
+    });
+    assert.equal(result.name, "Error");
+    assert.equal(result.exitStatus, null);
+    assert.equal(result.executable, null);
+  }
+  const result = rehearsalFailure("fixed phase", { name: "TypeError", code: "ENOENT" });
+  assert.equal(result.name, "TypeError");
+  assert.equal(result.code, "ENOENT");
+  assert.equal(result.exitStatus, null);
+});
+
+test("safe rehearsal executable permits only known basenames independently of command verbs", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  assert.equal(
+    rehearsalFailure("fixed phase", {
+      name: "Error",
+      code: "ENOENT",
+      rehearsalExecutable: "which",
+      rehearsalCommand: "which docker",
+    }).executable,
+    "which",
+  );
+  for (const rehearsalExecutable of [undefined, "/usr/bin/docker", "docker secret", "arbitrary"])
+    assert.equal(rehearsalFailure("fixed phase", { rehearsalExecutable }).executable, null);
 });
