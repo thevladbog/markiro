@@ -8,8 +8,8 @@ import {
 import { fakeDocker } from "./backup-runtime-fixture.mjs";
 import { canonical } from "../backup/schemas.mjs";
 
-export async function targetBackupFixture(t, mode) {
-  const f = await commandIntegrationFixture(t);
+export async function targetBackupFixture(t, mode, fixtureOptions) {
+  const f = await commandIntegrationFixture(t, null, fixtureOptions);
   const host = await integrationOptions(f.root);
   const operation = Object.fromEntries(
     ["root", "identity", "configuration", "dockerConfig"].map((k) => [k, f.record.deployment[k]]),

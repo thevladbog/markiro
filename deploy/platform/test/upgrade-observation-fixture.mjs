@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { preparedFixture } from "./prepared-target-fixture.mjs";
 import { dockerFixture } from "./host-observe-fixture.mjs";
 import { upgradeFixture, upgradeBytes, upgradeHash } from "./upgrade-fixture.mjs";
 import { canonical } from "../backup/schemas.mjs";
@@ -11,7 +12,9 @@ export async function upgradeObservationFixture(
   t,
   { candidatePatch = {}, daemonFixture, candidateOperationId } = {},
 ) {
-  const d = daemonFixture ?? (await dockerFixture(t));
+  const d =
+    daemonFixture ??
+    (await dockerFixture(t, { fixture: await preparedFixture(t, { nested: true }) }));
   const root = d.op.root;
   const oldEnv = { ...d.f.env };
   delete oldEnv.MARKIRO_RELEASES_DOMAIN;

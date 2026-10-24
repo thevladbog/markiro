@@ -202,3 +202,44 @@ for (const field of ["Id", "Architecture", "Os", "repository", "digest"]) {
     assert.throws(() => validateRehearsalImage(daemon));
   });
 }
+
+test("rehearsal configuration binds the written private snapshots and rejects later mutation", async (t) => {
+  const { createRehearsalConfiguration } = await import("../upgrade-ci.mjs");
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { readFile, lstat, appendFile } = await import("node:fs/promises");
+  const { fingerprintHostConfiguration } = await import("../host/config.mjs");
+  const { digest } = await import("../backup/schemas.mjs");
+  const f = await privateFixture(t, { nested: true });
+  const result = await createRehearsalConfiguration(f.root, f.env, f.env.DATABASE_URL);
+  for (const key of ["runtimeSnapshot", "migrationSnapshot"]) {
+    const snapshot = result.configuration[key];
+    assert.equal((await lstat(snapshot.path)).mode & 0o777, 0o600);
+    assert.equal(snapshot.sha256, digest(await readFile(snapshot.path)));
+  }
+  assert.equal(
+    (await fingerprintHostConfiguration({ root: f.root, ...result.configuration }))
+      .configurationSha256,
+    result.sha256,
+  );
+  await appendFile(result.configuration.migrationSnapshot.path, "CHANGED=1\n");
+  await assert.rejects(fingerprintHostConfiguration({ root: f.root, ...result.configuration }));
+});
+
+test("safe rehearsal failures retain only fixed command category and exit code", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  assert.deepEqual(
+    rehearsalFailure("copy generated private tree", {
+      code: 1,
+      rehearsalCommand: "docker cp",
+      stderr: "DO NOT PUBLISH fixture secret",
+      stack: "private",
+    }),
+    { phase: "copy generated private tree", code: "PROCESS_EXIT_1", command: "docker cp" },
+  );
+  assert.equal(
+    JSON.stringify(
+      rehearsalFailure("fixed phase", { code: "bad secret", rehearsalCommand: "private secret" }),
+    ).includes("secret"),
+    false,
+  );
+});

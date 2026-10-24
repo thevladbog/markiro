@@ -52,11 +52,12 @@ test("required production gate rehearses exact old return and exports only safe 
     steps[rehearsal].run,
     /docker pull --platform linux\/amd64 docker:28-dind@sha256:[a-f0-9]{64}/u,
   );
-  assert.ok(steps[rehearsal].run.includes('rehearseUpgrade(["--local-ci"])'));
+  assert.ok(steps[rehearsal].run.includes('rehearseUpgrade(["--local-ci"], {'));
   assert.ok(steps[rehearsal].run.includes('flag: "wx"'));
   const evidence = steps.find((s) => s.with?.name === "platform-upgrade-return-evidence");
   assert.ok(evidence);
-  assert.equal(evidence.if, "success()");
+  assert.equal(evidence.if, "always()");
+  assert.ok(steps[rehearsal].run.includes("writeResult:"));
   assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/u);
   assert.equal(evidence.with.path, "${{ runner.temp }}/platform-upgrade-return.json");
   assert.equal(evidence.with["if-no-files-found"], "error");

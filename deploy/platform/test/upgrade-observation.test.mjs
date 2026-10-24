@@ -261,3 +261,11 @@ test("backup source observation returns the actual verified PG HBA mount with st
     assert.deepEqual(result.observation.containers, f.predecessorContainers);
   });
 });
+
+test("upgrade fixtures keep the predecessor operation inside an executor-owned private parent", async (t) => {
+  const { dirname } = await import("node:path");
+  const { assertPrivateRootSync } = await import("../host/files.mjs");
+  const f = await upgradeObservationFixture(t);
+  assertPrivateRootSync(dirname(f.root));
+  assert.equal(f.root.endsWith("/state"), true);
+});

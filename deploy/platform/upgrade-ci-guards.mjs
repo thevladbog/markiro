@@ -166,3 +166,20 @@ export function validateRehearsalImage(daemon) {
     ),
   );
 }
+
+// Public failure evidence never includes command arguments, stderr, stack, env
+// or generated credentials. A fixed executable/verb category locates the boundary.
+export function rehearsalFailure(phase, error) {
+  const command =
+    /^(?:git (?:show|ls-files|rev-parse)|openssl (?:req|x509)|docker (?:cp|exec|network|image|container|volume|pull|run|inspect|info|context))$/u.test(
+      error.rehearsalCommand ?? "",
+    )
+      ? error.rehearsalCommand
+      : null;
+  const code = Number.isSafeInteger(error.code)
+    ? `PROCESS_EXIT_${error.code}`
+    : /^(?:ERR_[A-Z0-9_]+|E[A-Z0-9_]+)$/u.test(error.code ?? "")
+      ? error.code
+      : "REHEARSAL_FAILED";
+  return { phase, code, command };
+}

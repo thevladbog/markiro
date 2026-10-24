@@ -11,7 +11,7 @@ import { targetBackupFixture } from "./target-backup-fixture.mjs";
 import { upgradeOldRuntime, upgradePreparation } from "./upgrade-fixture.mjs";
 
 async function fixture(t, mode) {
-  const b = await targetBackupFixture(t, mode);
+  const b = await targetBackupFixture(t, mode, { nested: true });
   const f = await upgradeObservationFixture(t, {
     daemonFixture: {
       f: b.f,

@@ -56,7 +56,9 @@ private Caddy CA and `.localhost` names, so it does not verify public DNS or ACM
 
 The required `production-bundle` CI job runs this rehearsal serially after the
 failed-activation recovery check and before the platform stack. Its
-`platform-upgrade-return-evidence` artifact contains only the safe result JSON.
+`platform-upgrade-return-evidence` artifact contains only the safe result JSON,
+including the fixed failing stage and command category after a failed run.
+A failed result remains a failed CI gate and cannot establish return acceptance.
 The private rehearsal directory is never an artifact. The exact old executor
 Git objects must be present in the checkout before starting.
 

@@ -10,8 +10,8 @@ import { digest } from "../backup/schemas.mjs";
 import { runHostProcess } from "../host/process.mjs";
 
 const save = (path, value) => writeFile(path, JSON.stringify(value), { mode: 0o600 });
-export async function commandIntegrationFixture(t, failureMode = null) {
-  const f = await operationFixture(t);
+export async function commandIntegrationFixture(t, failureMode = null, fixtureOptions) {
+  const f = await operationFixture(t, fixtureOptions);
   const { record, receipt } = f;
   const op = record.deployment,
     policy = record.observationPolicy;

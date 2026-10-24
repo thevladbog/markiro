@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isMainModule } from "../production/cli-main.mjs";
@@ -28,6 +28,7 @@ import { executeUpgradePreparation } from "./host/upgrade-preparation.mjs";
 import { executeUpgradeReturn } from "./host/upgrade-return.mjs";
 import {
   validateRehearsalImage,
+  rehearsalFailure,
   rehearsalLabel,
   rehearsalStagingNetwork,
   assertFreshRehearsalName,
@@ -41,7 +42,37 @@ import {
 } from "./upgrade-ci-guards.mjs";
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export async function rehearseUpgrade(argv) {
+// Hash the read-back private files as configuration integrity evidence. These
+// SHA256 values are file identities, never password authentication verifiers.
+export async function createRehearsalConfiguration(root, values, migrationUrl) {
+  const { createPrivateDirectory, writePrivateFile, readPrivateFile } =
+    await import("./host/files.mjs");
+  const candidateId = randomUUID();
+  await createPrivateDirectory(root, "candidates", { exclusive: false });
+  const relative = `candidates/${candidateId}`;
+  await createPrivateDirectory(root, relative);
+  await writePrivateFile(root, `${relative}/runtime.env`, envBytes(values));
+  await writePrivateFile(
+    root,
+    `${relative}/migration.env`,
+    Buffer.from(`DATABASE_URL=${migrationUrl}\n`),
+  );
+  const configuration = { candidateId };
+  for (const name of ["runtime", "migration"]) {
+    const path = `${relative}/${name}.env`;
+    configuration[`${name}Snapshot`] = {
+      path: join(root, path),
+      sha256: digest(await readPrivateFile(root, path)),
+    };
+  }
+  return {
+    configuration,
+    sha256: (await fingerprintHostConfiguration({ root, ...configuration })).configurationSha256,
+  };
+}
+
+export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {}) {
+  assert.equal(typeof writeResult, "function");
   assert.deepEqual(argv, ["--local-ci"]);
   const parent = await mkdtemp(join(await realpath("/tmp"), "markiro-upgrade-ci-"));
   await chmod(parent, 0o700);
@@ -51,14 +82,21 @@ export async function rehearseUpgrade(argv) {
   const root = join(parent, "state");
   await mkdir(root, { mode: 0o700 });
   const env = { PATH: process.env.PATH, HOME: homedir(), LANG: "C.UTF-8" };
-  const command = (bin, args, options = {}) =>
-    run(bin, args, {
-      env,
-      cwd: repository,
-      timeout: 120000,
-      maxBuffer: 4 * 1024 * 1024,
-      ...options,
-    });
+  const command = async (bin, args, options = {}) => {
+    try {
+      return await run(bin, args, {
+        env,
+        cwd: repository,
+        timeout: 120000,
+        maxBuffer: 4 * 1024 * 1024,
+        ...options,
+      });
+    } catch (error) {
+      const executable = basename(bin);
+      error.rehearsalCommand = `${executable} ${args[executable === "docker" ? 2 : 0]}`;
+      throw error;
+    }
+  };
   const endpoint = JSON.parse((await command("docker", ["context", "inspect"])).stdout)[0]
     ?.Endpoints?.docker?.Host;
   assert.match(endpoint ?? "", /^unix:\/\//u);
@@ -240,6 +278,7 @@ export async function rehearseUpgrade(argv) {
     await mkdir(join(root, "pg"), { mode: 0o700 });
     await mkdir(join(root, "docker"), { mode: 0o700 });
     await mkdir(join(parent, "postgres"), { mode: 0o700 });
+    progress("read exact old Git source closure");
     const closure = {};
     for (const file of [
       "compose.yml",
@@ -262,6 +301,7 @@ export async function rehearseUpgrade(argv) {
     evidence.oldSources = { executorSha: rehearsalExecutor, files: closure };
     await save("old-source-closure.json", evidence.oldSources);
     // Audit current executable bytes, including synthetic fixture generators.
+    progress("hash current executable source closure");
     const currentFiles = (await command("git", ["ls-files", "deploy/platform"])).stdout
       .trim()
       .split("\n")
@@ -279,6 +319,7 @@ export async function rehearseUpgrade(argv) {
       appPassword = randomBytes(32).toString("hex"),
       migratorPassword = randomBytes(32).toString("hex");
     await writeFile(join(root, "pg/password"), password, { mode: 0o600, flag: "wx" });
+    progress("generate private rehearsal TLS files");
     const openssl = (args) => command("openssl", args);
     await openssl([
       "req",
@@ -377,27 +418,9 @@ export async function rehearseUpgrade(argv) {
     delete values.MARKIRO_RELEASES_BUCKET;
     const generated = Object.freeze({ ...values });
     validateRehearsalEnvironment(values, generated, parent);
-    const config = async (value) => {
-      const candidateId = randomUUID(),
-        dir = join(root, "candidates", candidateId);
-      await mkdir(dir, { recursive: true, mode: 0o700 });
-      const runtime = envBytes(value),
-        migration = Buffer.from(
-          `DATABASE_URL=postgresql://markiro_migrator:${migratorPassword}@db.private/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt\n`,
-        );
-      await writeFile(join(dir, "runtime.env"), runtime, { mode: 0o600, flag: "wx" });
-      await writeFile(join(dir, "migration.env"), migration, { mode: 0o600, flag: "wx" });
-      const configuration = {
-        candidateId,
-        runtimeSnapshot: { path: join(dir, "runtime.env"), sha256: digest(runtime) },
-        migrationSnapshot: { path: join(dir, "migration.env"), sha256: digest(migration) },
-      };
-      return {
-        configuration,
-        sha256: (await fingerprintHostConfiguration({ root, ...configuration }))
-          .configurationSha256,
-      };
-    };
+    progress("write and verify generated private configuration snapshots");
+    const migrationUrl = `postgresql://markiro_migrator:${migratorPassword}@db.private/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt`;
+    const config = (value) => createRehearsalConfiguration(root, value, migrationUrl);
     const oldConfig = await config(values),
       candidateConfig = await config({
         ...values,
@@ -405,8 +428,10 @@ export async function rehearseUpgrade(argv) {
         MARKIRO_RELEASES_BUCKET: "synthetic-releases",
       });
     // Copy a private generated tree, never bind a host path/socket to the daemon.
+    progress("copy generated private tree into the isolated daemon");
     await shell(["mkdir", "-p", parent]);
     await outer(["cp", `${parent}/.`, `${containerId}:${parent}`]);
+    progress("assign generated private TLS file ownership");
     await shell([
       "chown",
       "70:70",
@@ -423,6 +448,7 @@ export async function rehearseUpgrade(argv) {
       COMPOSE_DISABLE_ENV_FILE: "1",
       DOCKER_CONFIG: join(root, "docker"),
     };
+    progress("bind fixed private Compose interpolation");
     const composeEnv = join(parent, "compose.env");
     await save("compose.env", envBytes(interpolation).toString());
     await outer(["cp", composeEnv, `${containerId}:${composeEnv}`]);
@@ -903,7 +929,7 @@ export async function rehearseUpgrade(argv) {
         stderr: String(error.stderr ?? "").slice(0, 524288),
       }),
     );
-    problem = { phase, code: typeof error.code === "string" ? error.code : "REHEARSAL_FAILED" };
+    problem = rehearsalFailure(phase, error);
   } finally {
     if (owned) {
       try {
@@ -929,6 +955,7 @@ export async function rehearseUpgrade(argv) {
     evidence.completed = completed && !problem;
     evidence.problem = problem ?? null;
     await save("result.json", evidence);
+    await writeResult(structuredClone(evidence));
     process.stdout.write(`Rehearsal evidence: ${parent}/result.json\n`);
   }
   if (problem)
