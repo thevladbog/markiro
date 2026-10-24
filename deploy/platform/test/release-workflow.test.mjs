@@ -86,3 +86,28 @@ test("protected job loads artifact ID, checks before login/push and retains part
   );
   assert.doesNotMatch(steps.map((s) => s.run ?? "").join("\n"), /docker build|ci-stack/);
 });
+
+test("both publisher jobs select and verify the same classic store before images are built or loaded", () => {
+  const w = workflow();
+  const scripts = [];
+  for (const [name, job] of Object.entries(w.jobs)) {
+    const index = job.steps.findIndex(
+      (s) => s.name === "Select classic store for portable platform images",
+    );
+    assert.ok(index >= 0, name);
+    const setup = job.steps[index];
+    scripts.push(setup.run);
+    assert.match(setup.run, /RUNNER_ENVIRONMENT.*github-hosted/);
+    assert.match(setup.run, /RUNNER_OS.*Linux/);
+    assert.match(setup.run, /docker ps -aq/);
+    assert.match(setup.run, /"containerd-snapshotter": false/);
+    assert.match(setup.run, /"storage-driver": "overlay2"/);
+    assert.match(setup.run, /sudo systemctl restart docker/);
+    assert.match(setup.run, /docker info.*Driver.*overlay2/);
+    const imageStep = job.steps.findIndex((s) =>
+      /docker build|release-images.mjs load/.test(s.run ?? ""),
+    );
+    assert.ok(imageStep > index, name);
+  }
+  assert.equal(scripts[0], scripts[1]);
+});

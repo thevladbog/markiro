@@ -158,3 +158,15 @@ reserved404/write409; неизвестная верхняя граница за�
 установленный ТСД, сканер, принтер или заводскую смену. Указывать эти проверки
 отдельно. При отказе — сохранить journals и закрыть раздачу/публикацию; не откатывать
 Caddy к mutable anonymous S3 и не очищать immutable copies.
+
+## Формат образов платформы
+
+Защищённый `release-platform-images.yml` выбирает classic Docker image store
+(`overlay2`, `containerd-snapshotter=false`) на обоих эфемерных GitHub-hosted
+runner до сборки или загрузки образов. Production daemon не перенастраивается.
+Это сохраняет контракт одиночного Linux/amd64 manifest и точного config ID.
+
+После каждого push издатель применяет тот же строгий registry validator, что и
+production admission. OCI index, другая платформа, несовпадающий config ID или
+ошибка чтения оставляют incomplete evidence и не создают complete manifest.
+Привязки исходников, CI, archive SHA256, image ID и protected approval сохраняются.

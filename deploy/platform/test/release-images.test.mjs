@@ -39,6 +39,25 @@ async function fixture(t) {
         const repository = args[4].split(":platform-")[0];
         return JSON.stringify([`${repository}@${id(repository === api ? "d" : "e")}`]);
       }
+      if (args[0] === "manifest" && args[1] === "inspect") {
+        const reference = args[3];
+        const repository = reference.split("@")[0];
+        const mediaType = "application/vnd.oci.image.manifest.v1+json";
+        return JSON.stringify({
+          Ref: reference,
+          Descriptor: {
+            digest: reference.split("@")[1],
+            mediaType,
+            platform: { os: "linux", architecture: "amd64" },
+          },
+          OCIManifest: {
+            schemaVersion: 2,
+            mediaType,
+            config: { digest: id(repository === api ? "b" : "c") },
+            layers: [],
+          },
+        });
+      }
       if (args[0] === "tag") images.set(args[2], args[1]);
       if (args[0] === "save") await writeFile(args[2], "verified docker bytes");
       return "";
@@ -140,6 +159,13 @@ test("publishes exactly checked IDs and binds digest manifest and complete evide
       ["push", `${edge}:platform-${sha}-456-2`],
     ],
   );
+  assert.deepEqual(
+    f.calls.filter(([verb]) => verb === "manifest"),
+    [
+      ["manifest", "inspect", "--verbose", `${api}@${id("d")}`],
+      ["manifest", "inspect", "--verbose", `${edge}@${id("e")}`],
+    ],
+  );
   assert.ok(!f.calls.some(([verb]) => ["build", "load", "tag"].includes(verb)));
 });
 
@@ -237,3 +263,30 @@ test("CLI carries explicit GitHub identity through verify/load/publish and rejec
     await assert.rejects(main(args, env, f.io));
   assert.equal(f.calls.length, 0);
 });
+
+for (const repository of [api, edge])
+  for (const kind of ["index", "wrong-config", "wrong-platform", "registry-error"])
+    test(`published ${repository} ${kind} never produces complete release evidence`, async (t) => {
+      const f = await fixture(t);
+      const run = f.io.run;
+      f.io.run = async (args) => {
+        const text = await run(args);
+        if (args[0] !== "manifest" || !args[3].startsWith(`${repository}@`)) return text;
+        if (kind === "registry-error") throw new Error("private registry response");
+        const value = JSON.parse(text);
+        if (kind === "index") return JSON.stringify([value]);
+        if (kind === "wrong-config") value.OCIManifest.config.digest = id("f");
+        if (kind === "wrong-platform") value.Descriptor.platform.architecture = "arm64";
+        return JSON.stringify(value);
+      };
+      const outputDirectory = join(f.directory, "published");
+      await assert.rejects(
+        publishImages({ ...f, expected, outputDirectory }, f.io),
+        /platform publication failed/,
+      );
+      await assert.rejects(readFile(join(outputDirectory, "platform-manifest.json")));
+      const text = await readFile(join(outputDirectory, "release-evidence.json"), "utf8");
+      assert.equal(JSON.parse(text).status, "incomplete");
+      assert.ok(!text.includes("private registry response"));
+      assert.equal(f.calls.filter(([verb]) => verb === "push").length, repository === api ? 1 : 2);
+    });
