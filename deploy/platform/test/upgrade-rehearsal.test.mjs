@@ -316,3 +316,91 @@ test("safe rehearsal failures expose only fixed filesystem and runtime error cat
   }
   assert.equal(rehearsalFailure("fixed phase", { stderr: "arbitrary secret" }).processReason, null);
 });
+
+test("private rehearsal tree is streamed and every received file is byte-bound", async (t) => {
+  const { stageRehearsalTree } = await import("../upgrade-ci.mjs");
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { mkdir, writeFile, readFile, lstat } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { runHostProcess } = await import("../host/process.mjs");
+  const { digest } = await import("../backup/schemas.mjs");
+  const source = await privateFixture(t, { nested: true });
+  await mkdir(join(source.root, "pg"), { mode: 0o700, recursive: true });
+  await writeFile(join(source.root, "pg/ca.crt"), "PRIVATE fixture bytes", { mode: 0o600 });
+  const run = promisify(execFile);
+  for (const corrupt of [false, "bytes", "mode"]) {
+    const target = await privateFixture(t, { nested: true });
+    let streamed = false;
+    const io = {
+      archive: async (root) =>
+        (await run("tar", ["-C", root, "-cf", "-", "."], { encoding: "buffer" })).stdout,
+      extract: async (bytes) => {
+        assert.ok(Buffer.isBuffer(bytes));
+        await runHostProcess({
+          executable: "/usr/bin/tar",
+          args: ["--no-same-owner", "-xpf", "-", "-C", target.root],
+          cwd: target.root,
+          env: { PATH: process.env.PATH },
+          input: bytes,
+          timeoutMs: 10000,
+          outputLimitBytes: 1048576,
+        });
+        streamed = true;
+        if (corrupt === "bytes") await writeFile(join(target.root, "pg/ca.crt"), "changed");
+        if (corrupt === "mode") {
+          const { chmod } = await import("node:fs/promises");
+          const mode = (await lstat(join(source.root, "pg/ca.crt"))).mode & 0o777;
+          await chmod(join(target.root, "pg/ca.crt"), mode === 0o600 ? 0o644 : 0o600);
+        }
+      },
+      inspectFile: async (relative) => {
+        assert.equal(streamed, true);
+        const path = join(target.root, relative),
+          s = await lstat(path);
+        return { sha256: digest(await readFile(path)), size: s.size, mode: s.mode & 0o777 };
+      },
+    };
+    if (corrupt) await assert.rejects(stageRehearsalTree(source.root, io));
+    else assert.ok((await stageRehearsalTree(source.root, io)).files > 0);
+  }
+});
+
+test("private rehearsal staging rejects linked source files before transmission", async (t) => {
+  const { stageRehearsalTree } = await import("../upgrade-ci.mjs");
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { symlink, link, unlink } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const source = await privateFixture(t, { nested: true });
+  let transmitted = false;
+  const io = {
+    archive: async () => {
+      transmitted = true;
+      throw Error("must not archive");
+    },
+  };
+  const path = join(source.root, "linked");
+  await symlink("pg/ca.crt", path);
+  await assert.rejects(stageRehearsalTree(source.root, io));
+  await unlink(path);
+  await link(join(source.root, "pg/ca.crt"), path);
+  await assert.rejects(stageRehearsalTree(source.root, io));
+  assert.equal(transmitted, false);
+});
+
+test("safe rehearsal archive errors retain a fixed executable category without argv", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const value = rehearsalFailure("fixed phase", {
+    name: "Error",
+    code: 1,
+    rehearsalExecutable: "tar",
+    rehearsalCommand: "tar archive",
+    argv: ["private"],
+    stderr: "private",
+  });
+  assert.equal(value.executable, "tar");
+  assert.equal(value.command, "tar archive");
+  assert.equal(value.exitStatus, 1);
+  assert.ok(!JSON.stringify(value).includes("private"));
+});

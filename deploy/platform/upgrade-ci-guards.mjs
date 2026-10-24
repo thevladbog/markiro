@@ -171,7 +171,7 @@ export function validateRehearsalImage(daemon) {
 // or generated credentials. A fixed executable/verb category locates the boundary.
 export function rehearsalFailure(phase, error) {
   const command =
-    /^(?:git (?:show|ls-files|rev-parse)|openssl (?:req|x509)|docker (?:cp|exec|network|image|container|volume|pull|run|inspect|info|context))$/u.test(
+    /^(?:git (?:show|ls-files|rev-parse)|openssl (?:req|x509)|tar archive|docker (?:cp|exec|network|image|container|volume|pull|run|inspect|info|context))$/u.test(
       error.rehearsalCommand ?? "",
     )
       ? error.rehearsalCommand
@@ -193,7 +193,9 @@ export function rehearsalFailure(phase, error) {
     ? error.name
     : "Error";
   const exitStatus = Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : null;
-  const executable = ["docker", "git", "openssl", "which"].includes(error.rehearsalExecutable)
+  const executable = ["docker", "git", "openssl", "which", "tar"].includes(
+    error.rehearsalExecutable,
+  )
     ? error.rehearsalExecutable
     : null;
   // Reduce private stderr to a fixed category; never publish any matching text.

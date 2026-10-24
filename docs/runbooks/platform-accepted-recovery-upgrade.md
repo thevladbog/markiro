@@ -43,7 +43,10 @@ uses its own uniquely labelled container and named volume; it does not mount the
 host Docker socket or host directories. It downloads the three pinned old images
 before disconnecting its only staging network. No application is launched until
 network attachments and default routes are absent and a real TCP egress probe is
-refused. The normal inner application networks remain unchanged.
+refused. The normal inner application networks remain unchanged. Generated private files,
+including Compose interpolation, travel as a bounded tar stream through the
+isolated container process. Every received file must match its local SHA256,
+size and mode before PostgreSQL starts; links are rejected before transmission.
 
 All credentials, TLS keys and database contents are generated for the rehearsal.
 The old schema is initialized by the pinned old migrator and restored from a

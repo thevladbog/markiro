@@ -5,7 +5,16 @@
  */
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -71,6 +80,39 @@ export async function createRehearsalConfiguration(root, values, migrationUrl) {
   };
 }
 
+// Stream the generated private tree through the container process rather than
+// relying on daemon archive-copy mount resolution. Verify every received file.
+export async function stageRehearsalTree(root, io) {
+  const files = [];
+  async function walk(relative) {
+    const path = join(root, relative),
+      metadata = await lstat(path);
+    assert.equal(metadata.uid, process.getuid());
+    assert.equal(metadata.isSymbolicLink(), false);
+    if (metadata.isDirectory()) {
+      assert.equal(metadata.mode & 0o777, 0o700);
+      for (const name of (await readdir(path)).sort()) {
+        assert.match(name, /^[a-zA-Z0-9_.-]+$/u);
+        await walk(join(relative, name));
+      }
+    } else {
+      assert.equal(metadata.isFile(), true);
+      assert.equal(metadata.nlink, 1);
+      const mode = metadata.mode & 0o777;
+      assert.ok([0o600, 0o644].includes(mode));
+      files.push({ relative, mode, size: metadata.size, sha256: digest(await readFile(path)) });
+    }
+  }
+  await walk("");
+  assert.ok(files.length > 0);
+  const archive = await io.archive(root);
+  assert.ok(Buffer.isBuffer(archive));
+  await io.extract(archive);
+  for (const { relative, ...expected } of files)
+    assert.deepEqual(await io.inspectFile(relative), expected);
+  return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
+}
+
 export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {}) {
   assert.equal(typeof writeResult, "function");
   assert.deepEqual(argv, ["--local-ci"]);
@@ -94,7 +136,10 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     } catch (error) {
       const executable = basename(bin);
       error.rehearsalExecutable = executable;
-      error.rehearsalCommand = `${executable} ${args[executable === "docker" ? 2 : 0]}`;
+      error.rehearsalCommand =
+        executable === "tar"
+          ? "tar archive"
+          : `${executable} ${args[executable === "docker" ? 2 : 0]}`;
       throw error;
     }
   };
@@ -428,10 +473,37 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
         MARKIRO_RELEASES_DOMAIN: "releases.localhost",
         MARKIRO_RELEASES_BUCKET: "synthetic-releases",
       });
-    // Copy a private generated tree, never bind a host path/socket to the daemon.
-    progress("copy generated private tree into the isolated daemon");
+    const interpolation = {
+      ...values,
+      MARKIRO_PLATFORM_ENV_FILE: oldConfig.configuration.runtimeSnapshot.path,
+      MARKIRO_PLATFORM_MIGRATION_ENV_FILE: oldConfig.configuration.migrationSnapshot.path,
+      COMPOSE_DISABLE_ENV_FILE: "1",
+      DOCKER_CONFIG: join(root, "docker"),
+    };
+    const composeEnv = join(parent, "compose.env");
+    await save("compose.env", envBytes(interpolation).toString());
+    // Stream only the private generated tree, never bind a host path/socket.
+    progress("stream and verify generated private tree in the isolated daemon");
     await shell(["mkdir", "-p", parent]);
-    await outer(["cp", `${parent}/.`, `${containerId}:${parent}`]);
+    evidence.privateTreeTransfer = await stageRehearsalTree(parent, {
+      archive: async (directory) =>
+        (await command("tar", ["-C", directory, "-cf", "-", "."], { encoding: "buffer" })).stdout,
+      extract: (bytes) =>
+        stdinOuter(
+          ["exec", "-i", containerId, "tar", "--no-same-owner", "-xpf", "-", "-C", parent],
+          bytes,
+        ),
+      inspectFile: async (relative) => {
+        const path = join(parent, relative);
+        const sha = (await shell(["sha256sum", path])).stdout;
+        assert.match(sha, /^[a-f0-9]{64} {2}/u);
+        assert.equal(sha.slice(66), `${path}\n`);
+        const metadata = (await shell(["stat", "-c", "%a:%s", path])).stdout.trim();
+        assert.match(metadata, /^[0-7]{3,4}:\d+$/u);
+        const [mode, size] = metadata.split(":");
+        return { sha256: sha.slice(0, 64), size: Number(size), mode: Number.parseInt(mode, 8) };
+      },
+    });
     progress("verify copied private PostgreSQL TLS file metadata");
     evidence.copiedTlsFiles = {};
     for (const file of ["ca.crt", "server.crt", "server.key", "password"]) {
@@ -453,17 +525,6 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     assert.equal((await inspect("image", rehearsalImages.api)).Config.User, "node");
     progress("assign generated private client CA file ownership");
     await shell(["chown", "1000:1000", join(root, "pg/ca.crt")]);
-    const interpolation = {
-      ...values,
-      MARKIRO_PLATFORM_ENV_FILE: oldConfig.configuration.runtimeSnapshot.path,
-      MARKIRO_PLATFORM_MIGRATION_ENV_FILE: oldConfig.configuration.migrationSnapshot.path,
-      COMPOSE_DISABLE_ENV_FILE: "1",
-      DOCKER_CONFIG: join(root, "docker"),
-    };
-    progress("bind fixed private Compose interpolation");
-    const composeEnv = join(parent, "compose.env");
-    await save("compose.env", envBytes(interpolation).toString());
-    await outer(["cp", composeEnv, `${containerId}:${composeEnv}`]);
     const composeRun = async (args) => {
       await verifyIsolation();
       return nested(
