@@ -218,6 +218,9 @@ importers:
       fflate:
         specifier: 0.8.3
         version: 0.8.3
+      jose:
+        specifier: 6.2.9
+        version: 6.2.9
       markdown-it:
         specifier: 15.0.3
         version: 15.0.3

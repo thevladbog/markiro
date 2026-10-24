@@ -28,6 +28,7 @@ const {
   releaseCatalogReservations: reservations,
   releaseCatalogChannels: channels,
   releaseCatalogChannelEvents: events,
+  releaseCatalogOidcBindings: oidcBindings,
 } = schema;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Scope = ChannelSnapshot["identity"];
@@ -35,6 +36,7 @@ type IntentRow = typeof intents.$inferSelect;
 type PublicationRow = typeof publications.$inferSelect;
 export interface CatalogPrincipal {
   fingerprint: string;
+  tokenHash?: string;
 }
 type Actor = Pick<PlatformAuditEvent, "actorPlatformUserId" | "actorRole" | "requestId">;
 export interface CatalogPublicationInput {
@@ -140,6 +142,23 @@ export class CatalogRepository {
       throw new CatalogFault("not_ready");
     return row;
   }
+  private async bindToken(tx: Tx, principal: CatalogPrincipal, intentId: string) {
+    if (principal.tokenHash === undefined) return;
+    const tokenHash = parse(releaseSha256Schema, principal.tokenHash);
+    await this.lock(tx, `oidc:${tokenHash}`);
+    const [previous] = await tx
+      .select()
+      .from(oidcBindings)
+      .where(eq(oidcBindings.tokenHash, tokenHash));
+    if (previous) {
+      if (previous.intentId !== intentId || previous.principalHash !== principal.fingerprint)
+        throw new CatalogFault("forbidden");
+      return;
+    }
+    await tx
+      .insert(oidcBindings)
+      .values({ tokenHash, intentId, principalHash: principal.fingerprint });
+  }
   private async unreserved(tx: Tx, request: PublicationRequest) {
     const rows = await tx
       .select()
@@ -174,6 +193,7 @@ export class CatalogRepository {
       if (previous) {
         if (previous.requestDigest !== digest) throw new CatalogFault("conflict");
         if (previous.epochId !== epoch.id) throw new CatalogFault("not_ready");
+        await this.bindToken(tx, principal, previous.id);
         return view(previous);
       }
       await this.unreserved(tx, request);
@@ -191,17 +211,26 @@ export class CatalogRepository {
         })
         .returning();
       if (!row) throw new CatalogFault("unavailable");
+      await this.bindToken(tx, principal, row.id);
       return view(row);
     });
   }
   async getIntent(principal: CatalogPrincipal, id: unknown) {
-    const [row] = await this.db
-      .select()
-      .from(intents)
-      .where(eq(intents.id, parse(releaseOperationIdSchema, id)));
-    if (!row) throw new CatalogFault("not_found");
-    owner(principal, row);
-    return view(row);
+    return this.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(intents)
+        .where(eq(intents.id, parse(releaseOperationIdSchema, id)));
+      if (!row) throw new CatalogFault("not_found");
+      owner(principal, row);
+      await this.epoch(
+        tx,
+        parse(channelSnapshotSchema.shape.identity, { product: row.product, channel: row.channel }),
+        row.epochId,
+      );
+      await this.bindToken(tx, principal, row.id);
+      return view(row);
+    });
   }
   private async addReceipt(tx: Tx, receipt: VerifiedReceipt, kind: "publication" | "channel") {
     const r = parse(receiptSchema, receipt);
@@ -268,6 +297,7 @@ export class CatalogRepository {
         .where(eq(intents.id, intentId))
         .for("update");
       if (!intent) throw new CatalogFault("not_found");
+      await this.bindToken(tx, principal, intent.id);
       const [existing] = await tx
         .select()
         .from(publications)

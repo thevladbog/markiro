@@ -332,6 +332,57 @@ describe.skipIf(!url)("catalog transactional repository", () => {
       ).rows,
     ).toEqual([{ n: 1 }]);
   });
+  it("atomically binds one OIDC token digest to one intent, including racing creation", async () => {
+    const f = await setup(),
+      machine = { ...principal, tokenHash: "1".repeat(64) };
+    const results = await Promise.allSettled([
+      repo.reserveIntent(machine, randomUUID(), f.request),
+      repo.reserveIntent(machine, randomUUID(), {
+        ...f.request,
+        identity: { ...f.request.identity, version: `1.0.${version++}` },
+      }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ code: "forbidden" }) }),
+    ]);
+    const winner = results.find((r) => r.status === "fulfilled");
+    if (winner?.status !== "fulfilled") throw new Error("fixture");
+    const intent = winner.value;
+    expect(
+      (
+        await pool.query("SELECT count(*)::int n FROM release_catalog_intents WHERE epoch_id=$1", [
+          f.epoch,
+        ])
+      ).rows,
+    ).toEqual([{ n: 1 }]);
+    expect((await repo.reserveIntent(machine, intent.idempotencyKey, intent.request)).id).toBe(
+      intent.id,
+    );
+    const renewed = { ...principal, tokenHash: "2".repeat(64) };
+    expect((await repo.reserveIntent(renewed, intent.idempotencyKey, intent.request)).id).toBe(
+      intent.id,
+    );
+    await expect(
+      repo.reserveIntent({ ...machine, fingerprint: "e".repeat(64) }, randomUUID(), {
+        ...f.request,
+        identity: { ...f.request.identity, version: `1.0.${version++}` },
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(
+      (
+        await pool.query(
+          "SELECT token_hash,principal_hash,intent_id FROM release_catalog_oidc_bindings ORDER BY token_hash",
+        )
+      ).rows,
+    ).toEqual(
+      ["1", "2"].map((c) => ({
+        token_hash: c.repeat(64),
+        principal_hash: principal.fingerprint,
+        intent_id: intent.id,
+      })),
+    );
+  });
   it("keeps history-closed namespaces unavailable to new publication", async () => {
     const f = await setup();
     const r = receipt();

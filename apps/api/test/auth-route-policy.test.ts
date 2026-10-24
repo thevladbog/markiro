@@ -1,3 +1,10 @@
+import { SetMetadata, UseGuards } from "@nestjs/common";
+import {
+  CATALOG_PUBLISHER_POLICY,
+  CatalogPublisherGuard,
+  CatalogPublisherRoute,
+  isCatalogPublisherRoute,
+} from "../src/modules/release-catalog/catalog-publisher.guard";
 import { createServer, type Server } from "node:http";
 import express from "express";
 import request from "supertest";
@@ -72,5 +79,23 @@ describe("raw organization route policy", () => {
     }
 
     await request(app).post("/api/auth/organization/create").expect(404);
+  });
+});
+
+describe("explicit release machine policy classification", () => {
+  class Routes {
+    @CatalogPublisherRoute() machine() {}
+    @SetMetadata(CATALOG_PUBLISHER_POLICY, true) missingGuard() {}
+    @UseGuards(CatalogPublisherGuard) missingPolicy() {}
+    ordinary() {}
+  }
+  it("requires both policy and exact machine guard, never generic public metadata", () => {
+    expect(isCatalogPublisherRoute(Routes, Routes.prototype.machine)).toBe(true);
+    for (const handler of [
+      Routes.prototype.missingGuard,
+      Routes.prototype.missingPolicy,
+      Routes.prototype.ordinary,
+    ])
+      expect(isCatalogPublisherRoute(Routes, handler)).toBe(false);
   });
 });
