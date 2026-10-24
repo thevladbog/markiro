@@ -33,7 +33,7 @@ const {
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Scope = ChannelSnapshot["identity"];
 type IntentRow = typeof intents.$inferSelect;
-type PublicationRow = typeof publications.$inferSelect;
+export type PublicationRow = typeof publications.$inferSelect;
 export interface CatalogPrincipal {
   fingerprint: string;
   tokenHash?: string;
@@ -280,6 +280,7 @@ export class CatalogRepository {
     input: CatalogPublicationInput,
     receipt: VerifiedReceipt,
     actor: Actor,
+    beforeCommit?: (registered: PublicationRow[]) => void,
   ): Promise<{ outcome: "registered" | "unchanged"; publication: PublicationRow }> {
     const intentId = parse(releaseOperationIdSchema, id),
       expected = parse(releaseOperationIdSchema, epoch);
@@ -310,6 +311,9 @@ export class CatalogRepository {
       )
         throw new CatalogFault("not_ready");
       await this.unreserved(tx, request);
+      beforeCommit?.(
+        await tx.select().from(publications).where(scopeWhere(publications, request.identity)),
+      );
       await this.addReceipt(tx, receipt, "publication");
       const [publication] = await tx
         .insert(publications)
@@ -358,6 +362,52 @@ export class CatalogRepository {
       return { outcome: "registered", publication };
     });
   }
+  async activeEpoch(input: unknown) {
+    const scope = parse(channelSnapshotSchema.shape.identity, input);
+    return this.transaction(async (tx) => (await this.epoch(tx, scope)).id);
+  }
+  async publicationByIntent(id: string) {
+    const [row] = await this.db
+      .select()
+      .from(publications)
+      .where(eq(publications.intentId, parse(releaseOperationIdSchema, id)));
+    return row ? this.publication(row.id) : null;
+  }
+  async publication(id: string) {
+    const [row] = await this.db
+      .select()
+      .from(publications)
+      .where(eq(publications.id, parse(releaseOperationIdSchema, id)));
+    if (!row) throw new CatalogFault("not_found");
+    const files = await this.db.select().from(objects).where(eq(objects.publicationId, row.id));
+    const [intent] = await this.db.select().from(intents).where(eq(intents.id, row.intentId));
+    if (!intent || files.length !== row.fileCount) throw new CatalogFault("not_ready");
+    return {
+      publication: row,
+      files: files.map((f) => ({
+        ...f,
+        contentType: parse(
+          publicationRequestSchema.shape.files.element.shape.contentType,
+          f.contentType,
+        ),
+      })),
+      request: parse(publicationRequestSchema, intent.request),
+    };
+  }
+  async publicationByIdentity(identity: PublicationRequest["identity"]) {
+    const [row] = await this.db
+      .select()
+      .from(publications)
+      .where(and(scopeWhere(publications, identity), eq(publications.version, identity.version)));
+    return row ? this.publication(row.id) : null;
+  }
+  async channelEvent(id: string) {
+    const [row] = await this.db
+      .select()
+      .from(events)
+      .where(eq(events.id, parse(releaseOperationIdSchema, id)));
+    return row ?? null;
+  }
   async readPath(path: string): Promise<PinnedObject | null> {
     const [row] = await this.db
       .select({
@@ -395,6 +445,10 @@ export class CatalogRepository {
     input: unknown,
     receipt: VerifiedReceipt,
     actor: Actor,
+    authority?: {
+      principal?: CatalogPrincipal;
+      beforeCommit: (target: PublicationRow, previous: PublicationRow | null) => void;
+    },
   ): Promise<ChannelSnapshot> {
     const change = parse(channelChangeSchema, input),
       { identity } = change;
@@ -404,6 +458,17 @@ export class CatalogRepository {
       await this.lock(tx, `${identity.product}/${identity.channel}`);
       await this.epoch(tx, identity, change.epoch);
       const [previous] = await tx.select().from(events).where(eq(events.id, change.operationId));
+      if (authority?.principal) {
+        const [targetIntent] = await tx
+          .select({ intent: intents })
+          .from(intents)
+          .innerJoin(publications, eq(publications.intentId, intents.id))
+          .where(eq(publications.id, change.targetPublicationId));
+        if (!targetIntent) throw new CatalogFault("conflict");
+        owner(authority.principal, targetIntent.intent);
+        if (targetIntent.intent.epochId !== change.epoch) throw new CatalogFault("not_ready");
+        await this.bindToken(tx, authority.principal, targetIntent.intent.id);
+      }
       if (previous) {
         if (
           previous.product !== identity.product ||
@@ -436,6 +501,10 @@ export class CatalogRepository {
       const revision = current?.revision ?? 0n;
       if (revision.toString() !== change.expectedRevision || revision === 9223372036854775807n)
         throw new CatalogFault("conflict");
+      const [previousPublication] = current?.publicationId
+        ? await tx.select().from(publications).where(eq(publications.id, current.publicationId))
+        : [];
+      authority?.beforeCommit(target, previousPublication ?? null);
       await this.addReceipt(tx, receipt, "channel");
       await tx.insert(events).values({
         id: change.operationId,

@@ -3,8 +3,12 @@ import {
   CatalogPublisherGuard,
   isCatalogPublisherRoute,
 } from "../src/modules/release-catalog/catalog-publisher.guard";
-// No machine controllers registered until the complete catalog service is wired.
-const MACHINE_ROUTES: readonly string[] = [];
+const MACHINE_ROUTES: readonly string[] = [
+  "POST /release-publisher/intents (CatalogPublisherController.create)",
+  "GET /release-publisher/intents/:id (CatalogPublisherController.get)",
+  "POST /release-publisher/intents/:id/commit (CatalogPublisherController.commit)",
+  "PUT /release-publisher/channels/:product/:channel (CatalogPublisherController.change)",
+];
 import { PublicApiGuard, PUBLIC_API_SCOPE } from "../src/modules/public-api/public-api.guard";
 import type { Type } from "@nestjs/common";
 import { RequestMethod } from "@nestjs/common";

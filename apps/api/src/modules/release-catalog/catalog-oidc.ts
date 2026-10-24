@@ -65,6 +65,15 @@ const configSchema = z
       seen.add(key);
     }
   });
+export function publisherConfiguration(raw: string | undefined): PublisherConfig | null {
+  if (!raw) return null;
+  try {
+    if (Buffer.byteLength(raw) > 65536) throw new Error();
+    return configSchema.parse(JSON.parse(raw));
+  } catch {
+    throw new Error("Invalid release catalog publisher configuration");
+  }
+}
 export type PublisherConfig = z.infer<typeof configSchema>;
 const claimsSchema = z.object({
   iss: z.literal(CATALOG_OIDC_ISSUER),

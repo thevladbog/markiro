@@ -79,7 +79,19 @@ it("constructs the real platform module without cabinet auth and rejects disable
           p !== "/demo-requests" &&
           p !== "/landing-leads",
       ),
-    ).toEqual([]);
+    ).toEqual([
+      "/release-publisher/intents",
+      "/release-publisher/intents/{id}",
+      "/release-publisher/intents/{id}/commit",
+      "/release-publisher/channels/{product}/{channel}",
+    ]);
+    for (const [path, method] of [
+      ["/release-publisher/intents", "post"],
+      ["/release-publisher/intents/{id}", "get"],
+      ["/release-publisher/intents/{id}/commit", "post"],
+      ["/release-publisher/channels/{product}/{channel}", "put"],
+    ] as const)
+      expect(document.paths[path]?.[method]?.security).toEqual([{ releasePublisherOidc: [] }]);
     const actor = {
       userId: "platform-user",
       email: "platform@example.test",

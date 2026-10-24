@@ -415,11 +415,7 @@ export async function stageStationRelease({
   return evidence;
 }
 
-async function validateStationReleaseDirectoryInternal(
-  directory,
-  expected,
-  { legacyGithubOnly } = {},
-) {
+async function validateStationReleaseFilesInternal(reader, expected, { legacyGithubOnly } = {}) {
   const channel = expected?.channel ?? "beta";
   ensureChannelVersion(channel, expected?.version);
   const origin = expected?.origin;
@@ -428,7 +424,7 @@ async function validateStationReleaseDirectoryInternal(
     ? legacyGithubReleaseLocation(channel, expected.version)
     : releaseLocation({ channel, origin, version: expected.version });
   const names = stationAssetNames(expected.version);
-  const entries = await readdir(directory);
+  const entries = reader.names;
   const allowed = new Set(Object.values(names));
   if (entries.length !== allowed.size || entries.some((entry) => !allowed.has(entry))) invalid();
   for (const name of [
@@ -440,24 +436,24 @@ async function validateStationReleaseDirectoryInternal(
     names.notes,
     names.evidence,
   ]) {
-    await regularFile(
-      join(directory, name),
-      name === names.signature ? MAX_SIGNATURE_BYTES : MAX_ARTIFACT_BYTES,
-    );
+    const size = reader.size(name);
+    if (
+      !Number.isSafeInteger(size) ||
+      size < 1 ||
+      size > (name === names.signature ? MAX_SIGNATURE_BYTES : MAX_ARTIFACT_BYTES)
+    )
+      invalid();
   }
-  const manifest = parseStationUpdateManifest(
-    await readFile(join(directory, names.manifest), "utf8"),
-    {
-      channel,
-      origin,
-      version: expected.version,
-      bundleUrl: releaseAssetUrl(location, names.bundle),
-    },
-  );
-  const detachedSignature = (await readFile(join(directory, names.signature), "utf8")).trim();
+  const manifest = parseStationUpdateManifest(await reader.text(names.manifest, MAX_TEXT_BYTES), {
+    channel,
+    origin,
+    version: expected.version,
+    bundleUrl: releaseAssetUrl(location, names.bundle),
+  });
+  const detachedSignature = (await reader.text(names.signature, MAX_SIGNATURE_BYTES)).trim();
   ensureSafeText(detachedSignature, MAX_SIGNATURE_BYTES);
   if (manifest.platforms["windows-x86_64"].signature !== detachedSignature) invalid();
-  const checksums = (await readFile(join(directory, names.checksums), "utf8"))
+  const checksums = (await reader.text(names.checksums, MAX_TEXT_BYTES))
     .split("\n")
     .filter(Boolean);
   const expectedChecksumNames = [
@@ -481,10 +477,10 @@ async function validateStationReleaseDirectoryInternal(
     checksumByName.set(name, line.slice(0, 64));
   }
   for (const name of expectedChecksumNames)
-    if (checksumByName.get(name) !== (await sha256(join(directory, name)))) invalid();
+    if (checksumByName.get(name) !== (await reader.digest(name))) invalid();
   let evidence;
   try {
-    evidence = JSON.parse(await readFile(join(directory, names.evidence), "utf8"));
+    evidence = JSON.parse(await reader.text(names.evidence, MAX_TEXT_BYTES));
   } catch {
     invalid();
   }
@@ -525,7 +521,7 @@ async function validateStationReleaseDirectoryInternal(
     (evidence.authenticode !== false ||
       evidence.physicalAcceptance !== "NOT RUN" ||
       !SHA256.test(evidence.notesSha256) ||
-      evidence.notesSha256 !== (await sha256(join(directory, names.notes))))
+      evidence.notesSha256 !== (await reader.digest(names.notes)))
   ) {
     invalid();
   }
@@ -550,14 +546,43 @@ async function validateStationReleaseDirectoryInternal(
   validateSha(evidence.baseSha);
   validateSha(evidence.releaseSha);
   ensureDate(evidence.publishedAt);
-  ensureSafeText(await readFile(join(directory, names.notes), "utf8"));
+  ensureSafeText(await reader.text(names.notes, MAX_TEXT_BYTES));
   return {
     manifest,
     evidence,
     assets: Object.fromEntries(
-      await Promise.all(entries.map(async (name) => [name, await sha256(join(directory, name))])),
+      await Promise.all(entries.map(async (name) => [name, await reader.digest(name)])),
     ),
   };
+}
+
+/** Accept only a reader of fully verified immutable bytes. Both callers use this same policy. */
+export async function validateStationReleaseFiles(reader, expected) {
+  return validateStationReleaseFilesInternal(reader, expected);
+}
+
+async function validateStationReleaseDirectoryInternal(directory, expected, options) {
+  const names = await readdir(directory);
+  const sizes = new Map();
+  for (const name of names) {
+    await regularFile(join(directory, name));
+    sizes.set(name, (await lstat(join(directory, name))).size);
+  }
+  return validateStationReleaseFilesInternal(
+    {
+      names,
+      size: (name) => sizes.get(name),
+      text: async (name, maximum) => {
+        if (sizes.get(name) > maximum) invalid();
+        const bytes = await readFile(join(directory, name));
+        if (bytes.byteLength > maximum) invalid();
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      },
+      digest: (name) => sha256(join(directory, name)),
+    },
+    expected,
+    options,
+  );
 }
 
 export async function validateStationReleaseDirectory(directory, expected) {
@@ -797,4 +822,9 @@ async function main() {
   invalid();
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) await main();
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

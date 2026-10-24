@@ -1,3 +1,4 @@
+import { ReleaseCatalogModule } from "./modules/release-catalog/release-catalog.module";
 import { ServerProfileModule } from "./server-profile";
 import { DeviceGrantsModule } from "./modules/device-grants/device-grants.module";
 import { PlatformGrantReadinessModule } from "./modules/device-grants/platform-grant-readiness.module";
@@ -132,6 +133,7 @@ export class AppModule {
           PlatformServicePeriodsModule,
           PlatformLeadsModule.forRoot(platformTenantsModule),
           PlatformStandaloneReleasesModule.forRoot(env),
+          ReleaseCatalogModule.forRoot(env),
           SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
           TenantBillingModule.forRoot(env.ADMIN_ORIGIN, true),
           supportChatModule,
@@ -150,6 +152,7 @@ export class AppModule {
         PlatformHttpModule,
         AuthModule.forRoot(setup),
         DeviceGrantsModule.forRoot(env),
+        ReleaseCatalogModule.forRoot(env),
         ...(setup.platformAuth
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),

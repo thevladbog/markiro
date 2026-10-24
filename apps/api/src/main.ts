@@ -112,6 +112,10 @@ export async function createApplication(env: Env) {
         app,
         addPlatformSessionSecurity(
           new DocumentBuilder()
+            .addBearerAuth(
+              { type: "http", scheme: "bearer", bearerFormat: "GitHub OIDC JWT" },
+              "releasePublisherOidc",
+            )
             .setTitle("Markiro API")
             .setVersion("0.1")
             .setDescription(
@@ -181,6 +185,10 @@ export async function createApplication(env: Env) {
         app,
         addPlatformSessionSecurity(
           new DocumentBuilder()
+            .addBearerAuth(
+              { type: "http", scheme: "bearer", bearerFormat: "GitHub OIDC JWT" },
+              "releasePublisherOidc",
+            )
             .setTitle("Markiro Platform API")
             .setVersion("0.1")
             .setDescription(

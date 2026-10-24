@@ -195,3 +195,44 @@ export const channelChangeRequestSchema = z
   })
   .strict();
 export type ChannelChangeRequest = z.infer<typeof channelChangeRequestSchema>;
+
+export const catalogIntentViewSchema = z
+  .object({
+    id: releaseOperationIdSchema,
+    identity: releaseIdentitySchema,
+    state: z.enum(["pending", "verified", "committed", "failed"]),
+    expiresAt: z.iso.datetime(),
+    files: z
+      .array(releaseFileSpecSchema.extend({ key: z.string().max(512) }).strict())
+      .min(1)
+      .max(16)
+      .refine(distinctNames),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.files.some((f) => f.key !== `${v.identity.product}/_uploads/${v.id}/${f.name}`))
+      ctx.addIssue({ code: "custom", message: "invalid staged key" });
+  });
+export const catalogPublicationResultSchema = z
+  .object({
+    publicationId: releaseOperationIdSchema,
+    identity: releaseIdentitySchema,
+    files: z
+      .array(
+        releaseFileSpecSchema
+          .extend({ publicPath: z.string().max(512), versionId: releaseVersionIdSchema })
+          .strict(),
+      )
+      .min(1)
+      .max(16)
+      .refine(distinctNames),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    const prefix =
+      v.identity.product === "standalone"
+        ? `/${v.identity.product}/${v.identity.channel}/${v.identity.version}/`
+        : `/${v.identity.product}/${v.identity.channel}/releases/${v.identity.version}/`;
+    if (v.files.some((f) => f.publicPath !== `${prefix}${f.name}`))
+      ctx.addIssue({ code: "custom", message: "invalid publication path" });
+  });

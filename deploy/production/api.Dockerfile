@@ -4,6 +4,7 @@ RUN corepack enable && corepack prepare pnpm@11.10.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY patches ./patches
 COPY apps/api/package.json ./apps/api/package.json
+COPY packages/release-validation/package.json ./packages/release-validation/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
 COPY packages/email/package.json ./packages/email/package.json
@@ -11,6 +12,9 @@ COPY packages/platform-contracts/package.json ./packages/platform-contracts/pack
 COPY packages/legal-documents/package.json ./packages/legal-documents/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/api ./apps/api
+COPY packages/release-validation ./packages/release-validation
+COPY tools/station-release ./tools/station-release
+COPY tools/handheld-release/manifest.mjs ./tools/handheld-release/manifest.mjs
 COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/email ./packages/email
@@ -21,6 +25,7 @@ RUN pnpm --filter @markiro/platform-contracts build
 RUN pnpm --filter @markiro/db build
 RUN pnpm --filter @markiro/email build
 RUN pnpm --filter @markiro/legal-documents build
+RUN pnpm --filter @markiro/release-validation build
 RUN pnpm --filter @markiro/api build
 RUN pnpm --config.allow-unused-patches=true --filter @markiro/api deploy --legacy --prod /out/api
 RUN find /out/api -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \) \

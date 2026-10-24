@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { generateKeyPair, SignJWT } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
-import { verifyPublisherToken } from "../src/modules/release-catalog/catalog-oidc";
+import {
+  verifyPublisherToken,
+  publisherConfiguration,
+} from "../src/modules/release-catalog/catalog-oidc";
 import { oidcFixture } from "./support/catalog-oidc";
 let f: Awaited<ReturnType<typeof oidcFixture>>;
 beforeAll(async () => {
@@ -175,4 +178,17 @@ describe("pinned GitHub release publisher identity", () => {
       }),
     ).rejects.toMatchObject({ code: "unavailable", message: "release catalog: unavailable" });
   });
+});
+
+it("publisher runtime config is absent or exactly pinned, with redacted startup errors", async () => {
+  const f = await oidcFixture();
+  expect(publisherConfiguration(undefined)).toBeNull();
+  expect(publisherConfiguration(JSON.stringify(f.config))).toEqual(f.config);
+  for (const raw of [
+    "private invalid value",
+    JSON.stringify({ ...f.config, credential: "private" }),
+  ])
+    expect(() => publisherConfiguration(raw)).toThrow(
+      "Invalid release catalog publisher configuration",
+    );
 });

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  catalogIntentViewSchema,
+  catalogPublicationResultSchema,
   releaseIdentitySchema,
   releaseFileSpecSchema,
   releaseVersionIdSchema,
@@ -192,4 +194,38 @@ describe("release catalog admission contracts", () => {
       channelChangeRequestSchema.safeParse({ ...change, latest: { url: "https://evil" } }).success,
     ).toBe(false);
   });
+});
+
+it("response contracts bind upload keys and public paths without extra credentials", () => {
+  const intent = {
+    id,
+    identity: request.identity,
+    state: "pending",
+    expiresAt: "2026-10-24T18:00:00.000Z",
+    files: [{ ...file, key: `standalone/_uploads/${id}/${file.name}` }],
+  };
+  expect(catalogIntentViewSchema.parse(intent)).toEqual(intent);
+  expect(
+    catalogIntentViewSchema.safeParse({ ...intent, secretAccessKey: "forbidden" }).success,
+  ).toBe(false);
+  expect(
+    catalogIntentViewSchema.safeParse({
+      ...intent,
+      files: [{ ...file, key: `station/_uploads/${id}/${file.name}` }],
+    }).success,
+  ).toBe(false);
+  const result = {
+    publicationId: id,
+    identity: request.identity,
+    files: [
+      { ...file, publicPath: `/standalone/stable/1.0.0/${file.name}`, versionId: "opaque-version" },
+    ],
+  };
+  expect(catalogPublicationResultSchema.parse(result)).toEqual(result);
+  expect(
+    catalogPublicationResultSchema.safeParse({
+      ...result,
+      files: [{ ...result.files[0], publicPath: `/standalone/beta/1.0.0/${file.name}` }],
+    }).success,
+  ).toBe(false);
 });

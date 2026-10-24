@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { lstat, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -271,7 +271,7 @@ async function setStable(version, outputPath) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+async function main() {
   const [, , command, argument, outputPath] = process.argv;
   if (command === "prepare") {
     await prepare(argument, outputPath);
@@ -280,4 +280,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   } else {
     invalid("invalid station beta release command");
   }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }
