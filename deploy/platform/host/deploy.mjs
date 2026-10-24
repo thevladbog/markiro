@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import { catalogComposeFiles } from "../catalog-config.mjs";
 import { canonical, ensure, keys, plain } from "../backup/schemas.mjs";
 import { preparedHostBoundary } from "./deployment-boundary.mjs";
 import { runHostProcess } from "./process.mjs";
@@ -6,9 +6,6 @@ import { withHostState } from "./state.mjs";
 import { sameTarget, validateIdentity } from "./state-validation.mjs";
 
 const project = "markiro-platform";
-const composeFiles = ["../compose.yml", "../compose.compact.yml"].map((path) =>
-  fileURLToPath(new URL(path, import.meta.url)),
-);
 const functions = [
   "verifyRelease",
   "verifyImages",
@@ -131,6 +128,7 @@ export async function executePreparedDeployment(input, adapters) {
       let targetOwned = false;
       let migrationEntered = false;
       let environment;
+      let composeFiles = catalogComposeFiles({});
       const context = (boundary) => ({
         ...operation,
         project,
@@ -156,8 +154,9 @@ export async function executePreparedDeployment(input, adapters) {
         onOwnership: (owned) => {
           targetOwned = owned;
         },
-        onEnvironment: (value) => {
+        onEnvironment: (value, files) => {
           environment = value;
+          composeFiles = files;
         },
       });
       const compose = async (args, recovery = false) => {
@@ -174,10 +173,7 @@ export async function executePreparedDeployment(input, adapters) {
             "compose",
             "--project-name",
             project,
-            "--file",
-            composeFiles[0],
-            "--file",
-            composeFiles[1],
+            ...composeFiles.flatMap((path) => ["--file", path]),
             ...args,
           ],
           cwd: root,

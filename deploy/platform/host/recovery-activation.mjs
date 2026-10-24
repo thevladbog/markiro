@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import { catalogComposeFiles } from "../catalog-config.mjs";
 import { canonical, ensure, keys, plain } from "../backup/schemas.mjs";
 import { runHostProcess } from "./process.mjs";
 import { preparedHostBoundary } from "./deployment-boundary.mjs";
@@ -7,9 +7,6 @@ import { snapshotActivation } from "./recovery-activation-admission.mjs";
 import { withRecoveryActivationState } from "./recovery-activation-state.mjs";
 
 const project = "markiro-platform";
-const composeFiles = ["../compose.yml", "../compose.compact.yml"].map((path) =>
-  fileURLToPath(new URL(path, import.meta.url)),
-);
 const functions = [
   "verifyRelease",
   "verifyImages",
@@ -73,6 +70,7 @@ export async function executeRecoveryActivation(input, adapters) {
       let environment,
         targetOwned = false,
         releaseVerified = false;
+      let composeFiles = catalogComposeFiles({});
       const context = (boundary) => ({
         root,
         dockerConfig,
@@ -105,8 +103,9 @@ export async function executeRecoveryActivation(input, adapters) {
         onOwnership: (value) => {
           targetOwned = value;
         },
-        onEnvironment: (value) => {
+        onEnvironment: (value, files) => {
           environment = value;
+          composeFiles = files;
         },
       });
       const stopped = async () => {
@@ -167,10 +166,7 @@ export async function executeRecoveryActivation(input, adapters) {
                 "compose",
                 "--project-name",
                 project,
-                "--file",
-                composeFiles[0],
-                "--file",
-                composeFiles[1],
+                ...composeFiles.flatMap((path) => ["--file", path]),
                 ...args,
               ],
               cwd: root,

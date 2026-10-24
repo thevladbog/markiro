@@ -1,0 +1,15 @@
+# Selected by the protected host boundary only for a complete catalog configuration.
+# Paths must already pass the private-directory ownership proof; never auto-create.
+services:
+  api:
+    volumes:
+      - type: bind
+        source: /opt/markiro-platform/release-catalog/cache
+        target: /opt/markiro-platform/release-catalog/cache
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/markiro-platform/release-catalog/journal
+        target: /opt/markiro-platform/release-catalog/journal
+        bind:
+          create_host_path: false

@@ -83,12 +83,15 @@ it("constructs the real platform module without cabinet auth and rejects disable
       "/release-publisher/intents",
       "/release-publisher/intents/{id}",
       "/release-publisher/intents/{id}/commit",
+      "/release-publisher/publications/{product}/{channel}/{version}",
       "/release-publisher/channels/{product}/{channel}",
     ]);
     for (const [path, method] of [
       ["/release-publisher/intents", "post"],
       ["/release-publisher/intents/{id}", "get"],
       ["/release-publisher/intents/{id}/commit", "post"],
+      ["/release-publisher/publications/{product}/{channel}/{version}", "get"],
+      ["/release-publisher/channels/{product}/{channel}", "get"],
       ["/release-publisher/channels/{product}/{channel}", "put"],
     ] as const)
       expect(document.paths[path]?.[method]?.security).toEqual([{ releasePublisherOidc: [] }]);

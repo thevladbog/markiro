@@ -32,7 +32,10 @@ test("API is one private process with exclusive journal/cache binds and no publi
     for (const [name, svc] of Object.entries(services))
       if (name !== "edge") assert.equal(svc.ports, undefined);
   assert.equal(base.services.api.deploy.replicas, 1);
-  const volumes = base.services.api.volumes;
+  assert.equal(base.services.api.volumes, undefined, "disabled catalog has no production binds");
+  const catalog = load(readFileSync("deploy/platform/compose.catalog.yml", "utf8"));
+  assert.deepEqual(Object.keys(catalog.services), ["api"]);
+  const volumes = catalog.services.api.volumes;
   for (const name of ["cache", "journal"])
     assert.ok(
       volumes.some(

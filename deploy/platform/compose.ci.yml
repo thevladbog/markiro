@@ -4,6 +4,8 @@ services:
   migrate:
     image: ghcr.io/thevladbog/markiro-api:${MARKIRO_SOURCE_SHA:?required}
   api:
+    # Catalog is disabled here. Never bind production host directories in synthetic CI.
+    volumes: !override []
     environment:
       PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: "true"
     image: ghcr.io/thevladbog/markiro-api:${MARKIRO_SOURCE_SHA:?required}

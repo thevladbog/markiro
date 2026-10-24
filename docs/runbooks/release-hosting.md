@@ -80,6 +80,9 @@ SaaS hosts. Кэш: версии — `public, max-age=31536000, immutable`, poin
   явные capacity/object/reserve bounds. Cache и journal — приватные отдельные
   mounts `/opt/markiro-platform/release-catalog/{cache,journal}`, uid/gid1000,
   mode0700, один API/coordinator. Не создавать/chown mounts как side effect.
+  Защищённый host boundary добавляет `compose.catalog.yml` к base+compact только
+  при полной проверенной конфигурации каталога. Без неё base+compact не требуют
+  каталогов cache/journal; передать произвольный Compose-файл через runtime нельзя.
   Bootstrap только platform-only с `RELEASE_CATALOG_WRITERS_ENABLED=false`.
 
 Не выкатывать неполный runtime.env: preflight должен пройти до protected dispatch.

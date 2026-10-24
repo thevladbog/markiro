@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { lstatSync, realpathSync } from "node:fs";
 export const CATALOG_ROOT = "/opt/markiro-platform/release-catalog";
 export const CATALOG_RUNTIME_KEYS = [
@@ -122,4 +123,11 @@ export function assertExclusiveCatalogMounts(containers, apiId) {
       CATALOG_ROOT.startsWith(`${source}/`));
   for (const c of containers)
     if (c.Id !== apiId && (c.Mounts ?? []).some((m) => overlap(m.Source))) fail();
+}
+
+/** Fixed installed composition, derived from the byte-bound runtime rather than caller flags. */
+export function catalogComposeFiles(env) {
+  const files = ["compose.yml", "compose.compact.yml"];
+  if (validateCatalogConfig(env)) files.push("compose.catalog.yml");
+  return files.map((path) => fileURLToPath(new URL(path, import.meta.url)));
 }

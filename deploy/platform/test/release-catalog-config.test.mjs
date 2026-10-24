@@ -143,3 +143,66 @@ test("foreign containers cannot share catalog binds even when stopped or mountin
     ),
   );
 });
+
+test("catalog composition is selected only from complete validated runtime configuration", async () => {
+  const module = await import("../catalog-config.mjs");
+  assert.equal(typeof module.catalogComposeFiles, "function");
+  const names = (value) => module.catalogComposeFiles(value).map((p) => p.split("/").at(-1));
+  assert.deepEqual(names({}), ["compose.yml", "compose.compact.yml"]);
+  assert.deepEqual(names(env()), ["compose.yml", "compose.compact.yml", "compose.catalog.yml"]);
+  assert.throws(() => names({ RELEASE_CATALOG_CACHE_DIR: env().RELEASE_CATALOG_CACHE_DIR }));
+  assert.deepEqual(names({ COMPOSE_FILE: "/attacker/compose.yml" }), names({}));
+});
+
+test("both protected source closures bind the conditional catalog composition", async () => {
+  const { HOST_BUNDLE_FILES } = await import("../host/command.mjs");
+  const recovery = await import("../host/recovery-command.mjs");
+  assert.ok(HOST_BUNDLE_FILES.includes("deploy/platform/compose.catalog.yml"));
+  assert.ok(recovery.RECOVERY_BUNDLE_FILES.includes("deploy/platform/compose.catalog.yml"));
+});
+
+test("protected boundary derives composition from byte-bound runtime, without forwarding catalog secrets", async (t) => {
+  const { preparedFixture } = await import("./prepared-target-fixture.mjs");
+  const { readFile, writeFile } = await import("node:fs/promises");
+  const { createHash } = await import("node:crypto");
+  const { fingerprintHostConfiguration } = await import("../host/config.mjs");
+  const { preparedHostBoundary } = await import("../host/deployment-boundary.mjs");
+  const f = await preparedFixture(t),
+    configuration = f.expected.configuration;
+  const snapshot = configuration.runtimeSnapshot;
+  const bytes = Buffer.from(
+    (await readFile(snapshot.path, "utf8")) +
+      "\n" +
+      Object.entries(env())
+        .filter(([k]) => k.startsWith("RELEASE_CATALOG_"))
+        .map(([k, v]) => `${k}=${v}`)
+        .join("\n") +
+      "\n",
+  );
+  await writeFile(snapshot.path, bytes);
+  snapshot.sha256 = createHash("sha256").update(bytes).digest("hex");
+  const identity = {
+    ...f.identity,
+    configurationSha256: (await fingerprintHostConfiguration({ root: f.root, ...configuration }))
+      .configurationSha256,
+  };
+  let observed;
+  const boundary = preparedHostBoundary({
+    root: f.root,
+    identity,
+    configuration,
+    dockerConfig: f.dockerConfig,
+    preparedTarget: f.record,
+    preparedPolicy: {},
+    adapters: {},
+    context: () => ({}),
+    onEnvironment: (environment, files) => {
+      observed = { environment, files };
+    },
+  });
+  await boundary.checkConfiguration();
+  assert.equal(observed.files?.at(-1)?.split("/").at(-1), "compose.catalog.yml");
+  assert.equal(observed.environment.RELEASE_CATALOG_S3_SECRET_ACCESS_KEY, undefined);
+  await writeFile(snapshot.path, Buffer.concat([bytes, Buffer.from("# changed\n")]));
+  await assert.rejects(boundary.checkConfiguration());
+});
