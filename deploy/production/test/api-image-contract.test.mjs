@@ -184,3 +184,21 @@ test("API image packages and executes the compatibility probe against its final 
   const probe = source.indexOf("RUN node /opt/markiro/working-device-compatibility.mjs");
   assert.ok(runtime >= 0 && copy > runtime && probe > copy);
 });
+
+test("API image context includes the canonical release validator build closure", async () => {
+  const ignore = await readFile(new URL(".dockerignore", root), "utf8");
+  for (const rule of [
+    "!packages/release-validation/",
+    "!packages/release-validation/**",
+    "!tools/",
+    "!tools/station-release/",
+    "!tools/station-release/artifacts.mjs",
+    "!tools/station-release/version.mjs",
+    "!tools/station-release/origins.mjs",
+    "!tools/handheld-release/",
+    "!tools/handheld-release/manifest.mjs",
+  ])
+    assert.ok(ignore.split("\n").includes(rule), `missing image build input ${rule}`);
+  assert.match(ignore, /^\*\*\/dist\/$/m);
+  assert.match(ignore, /^\*\*\/node_modules$/m);
+});

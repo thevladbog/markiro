@@ -21,7 +21,7 @@ import {
   type ProductAcceptance,
 } from "./catalog-product";
 import { derivePublicPath, deriveUploadKey } from "./catalog-policy";
-import { digest } from "./catalog-receipts";
+import { digest, catalogPointerBytes } from "./catalog-receipts";
 export interface CatalogCaller {
   principal: CatalogPrincipal;
   product: Exclude<ReleaseProduct, "signer">;
@@ -365,7 +365,7 @@ export class CatalogService {
     };
     const old = current.publicationId ? await repository.publication(current.publicationId) : null;
     validateTransition(target.publication, old?.publication ?? null);
-    const bytes = Buffer.from(JSON.stringify(accepted.pointer));
+    const bytes = catalogPointerBytes(accepted.pointer);
     const receipt = await ledger.prepare({
       schema: 1,
       id: change.operationId,

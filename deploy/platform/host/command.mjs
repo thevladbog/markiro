@@ -153,6 +153,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/compose.yml",
   "deploy/platform/compose.compact.yml",
   "deploy/platform/preflight.mjs",
+  "deploy/platform/catalog-config.mjs",
   "deploy/platform/release-manifest.mjs",
   "deploy/platform/release-evidence.mjs",
   "deploy/platform/release-admission.mjs",

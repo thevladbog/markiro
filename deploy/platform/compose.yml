@@ -22,6 +22,19 @@ services:
   api:
     image: ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}
     restart: unless-stopped
+    deploy:
+      replicas: 1
+    volumes:
+      - type: bind
+        source: /opt/markiro-platform/release-catalog/cache
+        target: /opt/markiro-platform/release-catalog/cache
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/markiro-platform/release-catalog/journal
+        target: /opt/markiro-platform/release-catalog/journal
+        bind:
+          create_host_path: false
     mem_limit: 3g
     env_file:
       - path: ${MARKIRO_PLATFORM_ENV_FILE:?MARKIRO_PLATFORM_ENV_FILE is required}

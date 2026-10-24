@@ -18,6 +18,15 @@
 !apps/landing/
 !apps/landing/**
 !packages/
+!packages/release-validation/
+!packages/release-validation/**
+!tools/
+!tools/station-release/
+!tools/station-release/artifacts.mjs
+!tools/station-release/version.mjs
+!tools/station-release/origins.mjs
+!tools/handheld-release/
+!tools/handheld-release/manifest.mjs
 !packages/db/
 !packages/db/**
 !packages/domain/

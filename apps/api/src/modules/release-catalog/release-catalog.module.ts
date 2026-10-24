@@ -1,3 +1,5 @@
+import { CatalogResolver } from "./catalog-resolver";
+import { CatalogResolverController } from "./catalog-resolver.controller";
 import { createHash } from "node:crypto";
 import { Module, type DynamicModule } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
@@ -72,13 +74,38 @@ export class ReleaseCatalogModule {
     );
     const config = configureCatalog(strings);
     const publisher = publisherConfiguration(strings.RELEASE_CATALOG_PUBLISHERS_JSON);
+    if (config && env.SERVER_PROFILE !== "platform-only")
+      throw new Error("Invalid release catalog configuration");
+    const writers = strings.RELEASE_CATALOG_WRITERS_ENABLED;
+    if (config && !["false", "true"].includes(writers ?? ""))
+      throw new Error("Invalid release catalog configuration");
+    if (writers === "true" && (!config || !publisher))
+      throw new Error("Invalid release catalog configuration");
     if (publisher && !config) throw new Error("Invalid release catalog configuration");
     return {
       module: ReleaseCatalogModule,
       imports: [PlatformAuditModule],
-      controllers: [CatalogPublisherController],
+      controllers: [
+        CatalogPublisherController,
+        ...(env.SERVER_PROFILE === "platform-only" ? [CatalogResolverController] : []),
+      ],
       providers: [
         CatalogPublisherGuard,
+        {
+          provide: CatalogRepository,
+          inject: [DB, PlatformAuditService],
+          useFactory: (db: Db, audit: PlatformAuditService) => new CatalogRepository(db, audit),
+        },
+        {
+          provide: VerifiedCache,
+          useFactory: () => (config ? new VerifiedCache(config, new S3CatalogStore(config)) : null),
+        },
+        {
+          provide: CatalogResolver,
+          inject: [CatalogRepository, VerifiedCache],
+          useFactory: (repository: CatalogRepository, cache: VerifiedCache | null) =>
+            cache ? new CatalogResolver(repository, cache) : null,
+        },
         {
           provide: CATALOG_PUBLISHER_VERIFY,
           useValue: (token: string) => {
@@ -88,12 +115,12 @@ export class ReleaseCatalogModule {
         },
         {
           provide: CatalogService,
-          inject: [DB, PlatformAuditService],
-          useFactory: (db: Db, audit: PlatformAuditService) => {
-            if (!config) return null;
+          inject: [DB, CatalogRepository, VerifiedCache],
+          useFactory: (db: Db, repository: CatalogRepository, cache: VerifiedCache | null) => {
+            if (!config || !cache) return null;
             const store = new S3CatalogStore(config);
             return new CatalogService({
-              repository: new CatalogRepository(db, audit),
+              repository,
               ledger: new CatalogLedger(
                 {
                   journalDir: config.journalDir,
@@ -105,9 +132,12 @@ export class ReleaseCatalogModule {
                 },
                 store,
               ),
-              cache: new VerifiedCache(config, store),
+              cache,
               bucket: config.bucket,
-              authorize: (caller) => recheckCatalogCaller(db, caller),
+              authorize: (caller, action) => {
+                if (action !== "read" && writers !== "true") throw new CatalogFault("not_ready");
+                return recheckCatalogCaller(db, caller);
+              },
             });
           },
         },

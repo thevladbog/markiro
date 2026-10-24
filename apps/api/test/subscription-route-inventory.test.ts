@@ -1322,6 +1322,12 @@ describe("registered subscription route inventory", () => {
     expect(encounteredExemptions.sort()).toEqual(Object.keys(EXEMPTIONS).sort());
   });
 
+  it("does not expose the private catalog resolver through the legacy profile", () => {
+    expect(
+      routes.filter((route) => route.path.startsWith("/internal/release-catalog")).map(routeKey),
+    ).toEqual([]);
+  });
+
   it("keeps every platform route inside the isolated platform policy boundary", () => {
     const reflector = new Reflector();
     const unprotected = routes

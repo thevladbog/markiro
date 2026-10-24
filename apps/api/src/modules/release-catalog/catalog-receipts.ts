@@ -192,6 +192,12 @@ function canonical(v: unknown): string {
   if (encoded === undefined) throw new CatalogFault("invalid_request");
   return encoded;
 }
+/** Identical across JSONB round trips, receipt preparation and public resolver. */
+export function catalogPointerBytes(value: Record<string, unknown>): Buffer {
+  const bytes = Buffer.from(canonical(value));
+  if (bytes.length > 65536) throw new CatalogFault("invalid_request");
+  return bytes;
+}
 export function operation(input: unknown): ReceiptOperation {
   const result = receiptOperationSchema.safeParse(input);
   if (!result.success) throw new CatalogFault("invalid_request");

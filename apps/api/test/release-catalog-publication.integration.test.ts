@@ -298,6 +298,7 @@ describe.skipIf(!url)("catalog publication with real DB, cache and durable journ
   });
   it("channel CAS has one winner, exact operation retry and no supplied pointer", async () => {
     const f = await setup();
+    expect(await f.repo.readSnapshot("/handheld/download")).toBeNull();
     const pub = await f.service.commitIntent(f.caller, f.intent.id, { files: f.files });
     const scope = { product: "handheld", channel: "stable" };
     const change = {
@@ -327,6 +328,40 @@ describe.skipIf(!url)("catalog publication with real DB, cache and durable journ
         pointer: { url: "https://evil.invalid" },
       }),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    const file = pub.files.find((v) => v.name.endsWith(".apk"));
+    if (!file) throw new Error();
+    expect(await f.repo.readSnapshot(file.publicPath)).toMatchObject({
+      kind: "object",
+      mutable: false,
+      object: { versionId: file.versionId },
+    });
+    const pointer = await f.repo.readSnapshot("/handheld/stable/latest.json");
+    expect(pointer?.kind).toBe("pointer");
+    if (pointer?.kind !== "pointer") throw new Error();
+    expect(JSON.parse(pointer.bytes.toString()).versionName).toBe(f.request.identity.version);
+    expect(hash(pointer.bytes)).toBe(pointer.sha256);
+    const event = await pool.query(
+      "SELECT id FROM release_catalog_channel_events WHERE product='handheld' AND channel='stable' AND revision=1",
+    );
+    const prepared = await f.ledger.load(event.rows[0].id);
+    if (prepared.kind !== "channel") throw new Error();
+    expect(pointer.bytes.toString("base64")).toBe(prepared.pointer.base64);
+    expect(pointer.sha256).toBe(prepared.pointer.sha256);
+    expect(await f.repo.readSnapshot("/handheld/download")).toMatchObject({
+      kind: "object",
+      mutable: true,
+      object: { publicPath: file.publicPath, versionId: file.versionId },
+    });
+    await pool.query(
+      "UPDATE release_catalog_channels SET readable=false WHERE product='handheld' AND channel='stable'",
+    );
+    await expect(f.repo.readSnapshot("/handheld/download")).rejects.toMatchObject({
+      code: "not_ready",
+    });
+    await expect(f.repo.readSnapshot("/handheld/stable/latest.json")).rejects.toMatchObject({
+      code: "not_ready",
+    });
+    expect(await f.repo.readSnapshot("/handheld/_uploads/secret")).toBeNull();
   });
   it("rechecks authorization after full file verification and before DB visibility", async () => {
     const f = await setup();

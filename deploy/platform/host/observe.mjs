@@ -1,3 +1,4 @@
+import { catalogMountBindings, assertExclusiveCatalogMounts } from "../catalog-config.mjs";
 import { readFile } from "node:fs/promises";
 import { canonical, digest, ensure, keys, plain } from "../backup/schemas.mjs";
 import { runHostProcess } from "./process.mjs";
@@ -424,6 +425,7 @@ export function createHostObservers(operation, policyInput, options = {}) {
           : service === "edge"
             ? {}
             : { "/run/markiro-postgres/ca.crt": config.MARKIRO_POSTGRES_CA_FILE };
+      const writableBinds = catalogMountBindings(env, service);
       const named =
         service === "postgres"
           ? { "/var/lib/postgresql/data": policy.volume.name }
@@ -432,16 +434,23 @@ export function createHostObservers(operation, policyInput, options = {}) {
             : {};
       same(
         c.Mounts.map((m) => m.Destination).sort(),
-        [...Object.keys(binds), ...Object.keys(named)].sort(),
+        [...Object.keys(binds), ...Object.keys(writableBinds), ...Object.keys(named)].sort(),
       );
       for (const m of c.Mounts) {
         if (Object.hasOwn(binds, m.Destination))
           ensure(m.Type === "bind" && m.Source === binds[m.Destination] && !m.RW);
+        else if (Object.hasOwn(writableBinds, m.Destination))
+          ensure(m.Type === "bind" && m.Source === writableBinds[m.Destination] && m.RW);
         else ensure(m.Type === "volume" && m.Name === named[m.Destination] && m.RW);
       }
       if (service === "postgres") ensure(c.Config.User === "70:70");
       owned.push({ container: c, service, active });
     }
+    if (config.RELEASE_CATALOG_CACHE_DIR)
+      assertExclusiveCatalogMounts(
+        containers,
+        owned.find((c) => c.service === "api")?.container.Id,
+      );
     ensure(owned.filter((c) => c.service === "postgres").length === 1);
     for (const n of Object.values(networks))
       for (const id of Object.keys(n.Containers ?? {}))

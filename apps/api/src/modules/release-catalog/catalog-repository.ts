@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { catalogPointerBytes } from "./catalog-receipts";
+import { publicCatalogRoute, type CatalogReadSnapshot } from "./catalog-read";
+import { createHash, randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
 import {
   channelChangeRequestSchema,
@@ -407,6 +409,86 @@ export class CatalogRepository {
       .from(events)
       .where(eq(events.id, parse(releaseOperationIdSchema, id)));
     return row ?? null;
+  }
+  async readSnapshot(path: string): Promise<CatalogReadSnapshot | null> {
+    const route = publicCatalogRoute(path);
+    if (!route) return null;
+    return this.db.transaction(
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL statement_timeout='15s'`);
+        const pinned = (row: typeof objects.$inferSelect): PinnedObject => ({
+          publicPath: row.publicPath,
+          bucket: row.bucket,
+          key: row.key,
+          versionId: row.versionId,
+          sha256: row.sha256,
+          sizeBytes: row.sizeBytes,
+          contentType: parse(
+            publicationRequestSchema.shape.files.element.shape.contentType,
+            row.contentType,
+          ),
+        });
+        if (route.kind === "immutable") {
+          const [row] = await tx
+            .select({ object: objects })
+            .from(objects)
+            .innerJoin(publications, eq(objects.publicationId, publications.id))
+            .where(eq(objects.publicPath, path));
+          return row ? { kind: "object", object: pinned(row.object), mutable: false } : null;
+        }
+        const [channel] = await tx
+          .select()
+          .from(channels)
+          .where(scopeWhere(channels, route.identity));
+        if (!channel || channel.revision === 0n) return null;
+        if (!channel.readable || !channel.publicationId) throw new CatalogFault("not_ready");
+        const [event] = await tx
+          .select()
+          .from(events)
+          .where(
+            and(
+              eq(events.product, route.identity.product),
+              eq(events.channel, route.identity.channel),
+              eq(events.revision, channel.revision),
+            ),
+          );
+        const [publication] = await tx
+          .select()
+          .from(publications)
+          .where(eq(publications.id, channel.publicationId));
+        if (
+          !event ||
+          !publication ||
+          event.publicationId !== publication.id ||
+          publication.product !== route.identity.product ||
+          publication.channel !== route.identity.channel ||
+          stableJson(event.pointer) !== stableJson(publication.metadata.pointer)
+        )
+          throw new CatalogFault("not_ready");
+        const files = await tx
+          .select()
+          .from(objects)
+          .where(eq(objects.publicationId, publication.id));
+        if (files.length !== publication.fileCount) throw new CatalogFault("not_ready");
+        if (route.kind === "pointer") {
+          const bytes = catalogPointerBytes(event.pointer);
+          if (bytes.length > 65536) throw new CatalogFault("not_ready");
+          return {
+            kind: "pointer",
+            bytes,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+          };
+        }
+        const name =
+          publication.product === "handheld"
+            ? `markiro-tsd-${publication.version}.apk`
+            : `markiro-${publication.product}-${publication.version}-windows-x86_64-setup.exe`;
+        const file = files.find((f) => f.name === name);
+        if (!file) throw new CatalogFault("not_ready");
+        return { kind: "object", object: pinned(file), mutable: true };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
   async readPath(path: string): Promise<PinnedObject | null> {
     const [row] = await this.db
