@@ -3,6 +3,7 @@ import { checkImageIds, verifyArtifact } from "./release-artifact.mjs";
 import { resolvePublishedDigest } from "./release-evidence.mjs";
 import { createPlatformManifest } from "./release-manifest.mjs";
 import { releaseIo } from "./release-io.mjs";
+import { validateRegistryManifest } from "./admission-registry.mjs";
 
 /** Fresh output directory prevents stale complete manifests from surviving a failed retry. */
 export async function publishImages(
@@ -40,6 +41,14 @@ export async function publishImages(
       );
       evidence.published[name].digest = digest;
       await io.writeJson(evidencePath, evidence);
+      // The publication is usable only if the same strict production admission
+      // accepts its single-platform manifest and exact captured config ID.
+      const reference = `${repository}@${digest}`;
+      validateRegistryManifest(
+        await io.run(["manifest", "inspect", "--verbose", reference]),
+        reference,
+        image.id,
+      );
     }
     await checkImageIds(verified, io);
     const manifest = createPlatformManifest({
