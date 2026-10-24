@@ -6,6 +6,8 @@ import { createPrivateDirectory, readPrivateFile, writePrivateFile } from "./fil
 import { activationHash, snapshotActivation } from "./recovery-activation-admission.mjs";
 import { validateUpgradeAdmission } from "./upgrade-admission.mjs";
 
+import { validateOldRuntime, validateUpgradePreparation } from "./upgrade-proofs.mjs";
+
 const upgradeCapabilities = new WeakMap();
 
 // Only a capability issued by this store can read upgrade authority. The host
@@ -138,6 +140,8 @@ export async function withUpgradeState(root, input, callback, { now = Date.now }
           phase: "admitted",
           status: "entered",
           backup: null,
+          oldRuntime: null,
+          preparation: null,
           migrationEntered: false,
         },
         true,
@@ -187,6 +191,7 @@ export async function withUpgradeState(root, input, callback, { now = Date.now }
           if (
             state.status !== "completed" ||
             !phases.includes(phase) ||
+            (phase === "old-stopped" && !state.oldRuntime) ||
             phases.indexOf(phase) !== phases.indexOf(state.phase) + 1
           )
             throw stateError();
@@ -196,11 +201,24 @@ export async function withUpgradeState(root, input, callback, { now = Date.now }
         guarded(async () => {
           if (state.phase !== phase || state.status !== "entered") throw stateError();
           let backup = state.backup;
-          if (phase === "backup-verified") {
+          let oldRuntime = state.oldRuntime;
+          let preparation = state.preparation;
+          if (phase === "admitted") {
             if (proof.length !== 1) throw stateError();
+            oldRuntime = validateOldRuntime(proof[0], admission);
+          } else if (phase === "backup-verified") {
+            if (proof.length !== 2 || !oldRuntime) throw stateError();
             backup = validateBackup(snapshotActivation(proof[0]), admission.identity);
+            preparation = validateUpgradePreparation(proof[1], admission, oldRuntime, backup);
           } else if (proof.length) throw stateError();
-          await save({ ...state, sequence: state.sequence + 1, status: "completed", backup });
+          await save({
+            ...state,
+            sequence: state.sequence + 1,
+            status: "completed",
+            backup,
+            oldRuntime,
+            preparation,
+          });
         }),
     });
     try {

@@ -30,6 +30,7 @@ export function createUpgradeObservers(input, dependencies = {}) {
       withHeldUpgradeState(capability, async (held) => {
         const { state, root, predecessor } = held;
         const admission = state.admission;
+        if (state.oldRuntime) same(state.oldRuntime.containers, predecessorContainers);
         const candidate = mode === "candidate";
         if (candidate)
           ensure(

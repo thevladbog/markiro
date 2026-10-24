@@ -7,16 +7,22 @@ import { connection, ensure, hash, keys, plain, runtime } from "../backup/schema
 import {
   readPrivateAbsolute,
   withRecoveryBackupRuntime,
+  withUpgradeBackupRuntime,
   readBackupRuntime,
 } from "../backup/local-runtime.mjs";
 import { createDatabaseBackup } from "../backup/archive.mjs";
 import { verifyDatabaseRestore } from "../backup/restore.mjs";
 import { assertBindFileSync, assertPrivateRootSync, readPrivateFile } from "./files.mjs";
 import { fingerprintHostConfiguration } from "./config.mjs";
-import { createHostObservers, validateObservationPolicy } from "./observe.mjs";
+import {
+  createHostObservers,
+  createAcceptedRecoveryObservers,
+  validateObservationPolicy,
+} from "./observe.mjs";
 import { observePostgresAdmin } from "./probe.mjs";
 import { runHostProcess } from "./process.mjs";
 import { withHostState } from "./state.mjs";
+import { snapshotActivation } from "./recovery-activation-admission.mjs";
 import { snapshot, sameTarget, validateIdentity } from "./state-validation.mjs";
 import { canonical } from "../backup/schemas.mjs";
 import { validateRecoveryAdmission } from "./recovery-admission.mjs";
@@ -123,6 +129,62 @@ export async function createHeldTargetRecoveryBackup(input, capability, admissio
   });
 }
 
+// The old source authority comes from the held accepted-recovery chain. The new
+// backup identity/runtime belongs to this upgrade; no old executor is relabeled.
+export async function createHeldUpgradeBackup(input, capability, admission, options = {}) {
+  const admitted = snapshotActivation(admission);
+  return withUpgradeBackupRuntime(capability, async (held, recoveryRuntime) => {
+    const { root, state, predecessor } = held;
+    ensure(root === input.operation.root);
+    ensure(canonical(admitted) === canonical(state.admission));
+    ensure(canonical(input.operation.identity) === canonical(admitted.identity));
+    ensure(canonical(input.observationPolicy) === canonical(predecessor.observationPolicy));
+    const oldOperation = {
+      root,
+      dockerConfig: input.operation.dockerConfig,
+      identity: admitted.predecessor.identity,
+      configuration: predecessor.operation.activation.configuration,
+    };
+    const check = async () => {
+      await held.verify();
+      ensure(
+        (await fingerprintHostConfiguration({ root, ...input.operation.configuration }))
+          .configurationSha256 === admitted.candidateConfigurationSha256,
+      );
+      ensure(
+        (await fingerprintHostConfiguration({ root, ...oldOperation.configuration }))
+          .configurationSha256 === admitted.oldConfigurationSha256,
+      );
+    };
+    await check();
+    return produceTargetBackup(
+      {
+        ...input,
+        recoveryRuntime,
+        verifySources: async () => {
+          await check();
+          await input.verifySources();
+          await check();
+        },
+      },
+      {
+        ...options,
+        runProcess: async (request) => {
+          await check();
+          const result = await (options.runProcess ?? runHostProcess)(request);
+          await check();
+          return result;
+        },
+      },
+      async (actualRoot, action) => {
+        ensure(actualRoot === root);
+        return action({ current: null });
+      },
+      { operation: oldOperation, containers: state.oldRuntime.containers },
+    );
+  });
+}
+
 async function produceTargetBackup(
   {
     operation,
@@ -136,6 +198,7 @@ async function produceTargetBackup(
   },
   options,
   withOwner,
+  upgradeSource,
 ) {
   let terminated = true,
     uncertain = false,
@@ -205,13 +268,18 @@ async function produceTargetBackup(
         ];
         validateConnectionFiles(serviceBytes, passwordBytes);
         stage = "observer-setup";
-        const observers = createHostObservers(op, policy, {
-          runProcess: run,
-          ...(options.signal ? { signal: options.signal } : {}),
-          ...(options.readMachineId ? { readMachineId: options.readMachineId } : {}),
-        });
+        const sourceOperation = upgradeSource?.operation ?? op;
+        const observers = (upgradeSource ? createAcceptedRecoveryObservers : createHostObservers)(
+          sourceOperation,
+          policy,
+          {
+            runProcess: run,
+            ...(options.signal ? { signal: options.signal } : {}),
+            ...(options.readMachineId ? { readMachineId: options.readMachineId } : {}),
+          },
+        );
         const context = {
-          ...op,
+          ...sourceOperation,
           allowedServices: ["postgres"],
           phase: "backup-verified",
           previousHealthy: journal.current,
@@ -221,8 +289,12 @@ async function produceTargetBackup(
           await verifySources();
           ensure(terminated && !uncertain);
           ensure(
-            (await fingerprintHostConfiguration({ root: op.root, ...op.configuration }))
-              .configurationSha256 === op.identity.configurationSha256,
+            (
+              await fingerprintHostConfiguration({
+                root: op.root,
+                ...sourceOperation.configuration,
+              })
+            ).configurationSha256 === sourceOperation.identity.configurationSha256,
           );
           ensure(
             (await readBackupRuntime(op.root, op.identity.operationId, recoveryRuntime)).equals(
@@ -233,6 +305,16 @@ async function produceTargetBackup(
             ensure((await readPrivateAbsolute(op.root, path)).equals(bytes));
           const c = { ...context, boundary };
           const state = await observers.inventory(c);
+          if (upgradeSource) {
+            ensure(state.owned.length === 3);
+            for (const service of ["postgres", "api", "edge"]) {
+              const rows = state.owned.filter((row) => row.service === service);
+              ensure(
+                rows.length === 1 && rows[0].container.Id === upgradeSource.containers[service],
+              );
+              if (service !== "postgres") ensure(!rows[0].active);
+            }
+          }
           const pg = state.owned.find((v) => v.service === "postgres").container;
           ensure(
             pg.Mounts.find((m) => m.Destination === "/etc/postgresql/pg_hba.conf")?.Source ===

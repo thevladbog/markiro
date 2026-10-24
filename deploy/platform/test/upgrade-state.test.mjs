@@ -8,7 +8,13 @@ import test from "node:test";
 import { withUpgradeState } from "../host/upgrade-state.mjs";
 import { withHostState, withHeldHostState } from "../host/state.mjs";
 import { privateFixture, backupProof } from "./host-fixtures.mjs";
-import { upgradeFixture, upgradeBytes, upgradeHash } from "./upgrade-fixture.mjs";
+import {
+  upgradeFixture,
+  upgradeBytes,
+  upgradeHash,
+  upgradeOldRuntime,
+  upgradePreparation,
+} from "./upgrade-fixture.mjs";
 
 async function fixture(t) {
   const { root: parent } = await privateFixture(t);
@@ -46,11 +52,12 @@ async function unchanged(f) {
     assert.deepEqual(await readFile(path), f.predecessorBytes[name]);
 }
 async function prepare(store, identity) {
-  await store.complete("admitted");
+  const input = (await store.read()).admission;
+  await store.complete("admitted", upgradeOldRuntime(input));
   await store.enter("old-stopped");
   await store.complete("old-stopped");
   await store.enter("backup-verified");
-  await store.complete("backup-verified", backupProof(identity));
+  await store.complete("backup-verified", backupProof(identity), upgradePreparation(input));
 }
 
 test("durable index and consumption precede first guarded action; predecessor stays exact", async (t) => {
@@ -100,7 +107,7 @@ for (const boundary of ["admitted", "old-stopped", "backup-verified"]) {
     await assert.rejects(
       run(f, async (store) => {
         if (boundary !== "admitted") {
-          await store.complete("admitted");
+          await store.complete("admitted", upgradeOldRuntime(f.input));
           await store.enter("old-stopped");
         }
         if (boundary === "backup-verified") {

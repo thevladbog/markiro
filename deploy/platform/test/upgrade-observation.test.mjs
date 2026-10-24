@@ -236,3 +236,16 @@ test("held upgrade verifier expires when its own guarded inspection finishes", a
     await assert.rejects(retained());
   });
 });
+
+test("observations reject a retained-ID set differing from the durable pre-stop record", async (t) => {
+  const { upgradeOldRuntime } = await import("./upgrade-fixture.mjs");
+  const f = await upgradeObservationFixture(t);
+  const value = upgradeOldRuntime(f.input);
+  value.containers.api = "7".repeat(64);
+  const o = observer(f);
+  await run(f, async (store) => {
+    await store.complete("admitted", value);
+    await assert.rejects(store.guard(o.inspectOld));
+  });
+  assert.equal(f.commands.length, 0);
+});

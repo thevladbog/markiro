@@ -7,8 +7,11 @@ import { upgradeFixture, upgradeBytes, upgradeHash } from "./upgrade-fixture.mjs
 import { canonical } from "../backup/schemas.mjs";
 
 export const legacyExecutor = "69f288e0a5299cabee229ce7dddf58bcba9fd22c";
-export async function upgradeObservationFixture(t, { candidatePatch = {} } = {}) {
-  const d = await dockerFixture(t);
+export async function upgradeObservationFixture(
+  t,
+  { candidatePatch = {}, daemonFixture, candidateOperationId } = {},
+) {
+  const d = daemonFixture ?? (await dockerFixture(t));
   const root = d.op.root;
   const oldEnv = { ...d.f.env };
   delete oldEnv.MARKIRO_RELEASES_DOMAIN;
@@ -48,10 +51,11 @@ export async function upgradeObservationFixture(t, { candidatePatch = {} } = {})
   const candidateEnv = { ...d.f.env, ...candidatePatch };
   const candidateConfig = await configuration(candidateEnv);
   const recovered = structuredClone(d.op.identity);
+  recovered.operationId = randomUUID();
   recovered.executorSha = legacyExecutor;
   recovered.configurationSha256 = oldConfig.sha256;
   const identity = structuredClone(d.op.identity);
-  identity.operationId = randomUUID();
+  identity.operationId = candidateOperationId ?? randomUUID();
   identity.configurationSha256 = candidateConfig.sha256;
   const f = upgradeFixture({
     prior: { ...recovered, operationId: randomUUID(), executorSha: "b".repeat(40) },
@@ -108,6 +112,7 @@ export async function upgradeObservationFixture(t, { candidatePatch = {} } = {})
       service === "api"
         ? { Entrypoint: ["/usr/bin/tini", "--"], Cmd: ["node", "dist/main.js"], Env: [] }
         : { Entrypoint: ["/usr/bin/edge-entrypoint"], Env: [] };
+    d.state.images = d.state.images.filter((image) => image.Id !== selected.imageId);
     d.state.images.push({
       Id: selected.imageId,
       Os: "linux",

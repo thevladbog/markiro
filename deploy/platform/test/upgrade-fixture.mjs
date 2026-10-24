@@ -173,3 +173,34 @@ export function rewriteUpgradePredecessor(fixture, name, mutate) {
   fixture.predecessorBytes[name] = upgradeBytes(value);
   fixture.input.predecessor.hashes[name] = upgradeHash(fixture.predecessorBytes[name]);
 }
+
+export function upgradeOldRuntime(input) {
+  return {
+    version: 1,
+    kind: "platform-upgrade-old-runtime",
+    operationId: input.identity.operationId,
+    configurationSha256: input.oldConfigurationSha256,
+    containers: { postgres: "3".repeat(64), api: "8".repeat(64), edge: "9".repeat(64) },
+    schema: {
+      systemId: input.identity.target.databaseId,
+      schemaSha256: "a".repeat(64),
+      migrationSha256: "b".repeat(64),
+      migrationCount: "12",
+    },
+  };
+}
+export function upgradePreparation(input, oldRuntime = upgradeOldRuntime(input)) {
+  return {
+    version: 1,
+    kind: "platform-upgrade-preparation",
+    operationId: input.identity.operationId,
+    oldRuntime,
+    backup: backupProof(input.identity),
+    sourceSchema: oldRuntime.schema,
+    fence: {
+      fenceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      beganAt: "2026-10-24T08:00:00.000Z",
+      enforcementSha256: "f".repeat(64),
+    },
+  };
+}
