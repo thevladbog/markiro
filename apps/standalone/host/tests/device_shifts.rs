@@ -816,8 +816,8 @@ async fn only_a_station_that_names_validation_enters_a_validation_shift() {
         );
     }
     // The list is bounded like the webview's: at most 32 names of 1-64
-    // UTF-16 code units (Zod's string length), so 33 astral characters (66
-    // units) are too long.
+    // UTF-16 code units (`utf16BoundedString`, a string's `length`), so 33
+    // astral characters (66 units) are too long.
     let field = (
         StatusCode::BAD_REQUEST,
         json!("validation_failed"),

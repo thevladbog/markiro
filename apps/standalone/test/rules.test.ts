@@ -1,6 +1,6 @@
 import { isValidGtin } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import type { z } from "zod";
 
 import i18n from "../src/i18n/index.js";
 import {
@@ -560,13 +560,13 @@ describe("shift rules", () => {
     }
   });
 
-  it("counts a close reason in characters as the host does, not in UTF-16 units as zod's min and max", () => {
-    // Two emoji are four UTF-16 units: zod's `min(3)` would take them, the host does not.
-    expect(z.string().min(3).safeParse("😀😀").success).toBe(true);
+  it("counts a close reason in characters as the host does, not in UTF-16 units", () => {
+    // Two emoji are four UTF-16 units: a `length` of 3 or more, but two characters to the host.
+    expect("😀😀".length).toBe(4);
     expect(message(closeReasonRule, "😀😀")).toBe("rules.closeReason");
     expect(message(closeReasonRule, "😀😀😀")).toBeUndefined();
-    // 500 emoji are 1000 UTF-16 units: zod's `max(500)` would refuse them, the host takes them.
-    expect(z.string().max(500).safeParse("😀".repeat(500)).success).toBe(false);
+    // 500 emoji are 1000 UTF-16 units, and the host takes them: 500 characters.
+    expect("😀".repeat(500).length).toBe(1000);
     expect(message(closeReasonRule, "😀".repeat(500))).toBeUndefined();
     expect(message(closeReasonRule, "😀".repeat(501))).toBe("rules.closeReason");
     expect(message(closeReasonRule, "я".repeat(500))).toBeUndefined();

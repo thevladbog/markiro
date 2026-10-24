@@ -52,8 +52,9 @@ export function isTransferable(text: string): boolean {
 
 /**
  * A free-text field of `min` (1 unless given) to `max` characters, counted as
- * the host counts them (`characters`: code points, where zod's own `min` and
- * `max` count UTF-16 units and an emoji twice); the value is trimmed. A wrong
+ * the host counts them (`characters`: code points, an emoji once, as
+ * `validate::clean_text` does; the rule keeps its own count rather than lean
+ * on Zod's, which has changed unit before). The value is trimmed. A wrong
  * length says `message`; a control character or an unpaired surrogate says
  * `rules.controlCharacter`, since a tab pasted from a spreadsheet is invisible
  * and a length message would not explain it.

@@ -46,9 +46,10 @@ function dottedPath(path: ReadonlyArray<PropertyKey>): string {
  * One warning per unknown key. Issues nested inside an `invalid_union` carry
  * paths RELATIVE to that union's input (Zod finalizes them when the union
  * fails and later prefixes only the union issue itself), so the union's
- * absolute path is carried down as `prefix`. A barcode's `data` is such a
- * union: `{ literal, foo }` fails both the enum branch and the strict-object
- * branch, and the unknown `foo` lives in the second branch's issues.
+ * absolute path is carried down as `prefix`. A barcode's `data` is a union
+ * (an enum or a strict object); since Zod 4.6 the branch `{ literal, foo }`
+ * matches reports its unknown `foo` directly, at the absolute path, so the
+ * nested form is kept for unions where no branch matches.
  */
 function collectUnknownProperties(
   issues: ReadonlyArray<z.core.$ZodIssue>,

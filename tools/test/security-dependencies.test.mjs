@@ -36,6 +36,7 @@ const patched = {
   // 15.0.1 also covers GHSA-253c-mchw-3w2r, 15.0.2 GHSA-r7fv-28h4-cvq7
   "markdown-it": "15.0.3", // GHSA-vfgh-jcmw-g37q, GHSA-gfr2-rv44-r23c
   "smol-toml": "1.9.0", // GHSA-r4xh-jqrq-34v2
+  zod: "4.6.6", // GHSA-mrhx-c7xc-m3w5
   // 2.18.0 also covers GHSA-x3q4-9hxx-gx8m, GHSA-cv27-6wvh-8x7j
   "sanitize-html": "2.18.0", // GHSA-374f-7chj-9948
   // 8.2.4 also covers GHSA-587h-7wmj-h5pm, r825-w8mm-5pxw (bundled launch-editor), rq7h-c2jc-7f22, 9jrq-w75r-8gcw
