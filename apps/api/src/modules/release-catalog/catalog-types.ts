@@ -26,3 +26,12 @@ export interface VerifiedReceipt {
   ledgerKey: string;
   ledgerVersionId: string;
 }
+
+export class CatalogFault extends Error {
+  constructor(
+    readonly code:
+      "invalid_request" | "forbidden" | "conflict" | "not_found" | "not_ready" | "unavailable",
+  ) {
+    super(`release catalog: ${code}`);
+  }
+}

@@ -17,7 +17,7 @@ import type {
   PlatformAuditService,
 } from "../../platform-auth/platform-audit.service";
 import { canonicalPublicationDigest, derivePublicPath, deriveUploadKey } from "./catalog-policy";
-import type { PinnedObject, VerifiedReceipt } from "./catalog-types";
+import { CatalogFault, type PinnedObject, type VerifiedReceipt } from "./catalog-types";
 
 const {
   releaseCatalogEpochs: epochs,
@@ -40,14 +40,6 @@ type Actor = Pick<PlatformAuditEvent, "actorPlatformUserId" | "actorRole" | "req
 export interface CatalogPublicationInput {
   metadata: Record<string, unknown>;
   objects: PinnedObject[];
-}
-export class CatalogFault extends Error {
-  constructor(
-    readonly code:
-      "invalid_request" | "forbidden" | "conflict" | "not_found" | "not_ready" | "unavailable",
-  ) {
-    super(`release catalog: ${code}`);
-  }
 }
 const channelChangeSchema = channelChangeRequestSchema.extend({
   identity: channelSnapshotSchema.shape.identity,
