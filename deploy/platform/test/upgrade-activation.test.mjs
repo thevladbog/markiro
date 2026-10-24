@@ -130,6 +130,12 @@ async function fixture(t, failAt) {
       containerId: null,
       status: "absent",
     }),
+    cleanupOwnedProbes: async (ctx, cap) =>
+      withHeldUpgradeState(cap, async (h) => {
+        assert.equal(h.cleanup, true);
+        assert.equal(h.state.status, "recovery-required");
+        await action("probe-cleanup");
+      }),
     cleanupOwnedWorkloads: async (ctx, cap) =>
       withHeldUpgradeState(cap, async (h) => {
         assert.equal(h.state.status, "recovery-required");
@@ -245,4 +251,14 @@ test("unreaped migration keeps lock without competing cleanup or later app start
     f.trace.some((r) => ["cleanup", "api", "edge"].includes(r[0])),
     false,
   );
+});
+
+test("known pre-migration release failure cleans probes under integrity-only recovery capability", async (t) => {
+  const f = await fixture(t, "release");
+  await assert.rejects(run(f));
+  assert.deepEqual(
+    f.trace.map((r) => r[0]),
+    ["release", "probe-cleanup"],
+  );
+  assert.equal((await f.state()).migrationEntered, false);
 });

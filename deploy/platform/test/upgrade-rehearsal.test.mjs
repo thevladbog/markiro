@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  validateRehearsalImage,
   rehearsalLabel,
   rehearsalStagingNetwork,
   assertFreshRehearsalName,
@@ -175,3 +176,29 @@ test("only one known staging bridge is detached and reused names are refused", (
       assertFreshRehearsalName(name, { containers: [], volumes: [], [key]: [name] }),
     );
 });
+
+for (const repository of ["docker", "docker.io/library/docker"]) {
+  test(`rehearsal accepts pinned daemon digest represented by ${repository}`, () => {
+    validateRehearsalImage({
+      Id: rehearsalImages.daemonId,
+      Architecture: "amd64",
+      Os: "linux",
+      RepoDigests: [rehearsalImages.daemon.replace("docker:28-dind", repository)],
+    });
+  });
+}
+for (const field of ["Id", "Architecture", "Os", "repository", "digest"]) {
+  test(`rehearsal rejects changed daemon ${field}`, () => {
+    const daemon = {
+      Id: rehearsalImages.daemonId,
+      Architecture: "amd64",
+      Os: "linux",
+      RepoDigests: [rehearsalImages.daemon.replace("docker:28-dind", "docker")],
+    };
+    if (field === "repository")
+      daemon.RepoDigests = [daemon.RepoDigests[0].replace("docker@", "foreign@")];
+    else if (field === "digest") daemon.RepoDigests = [`docker@sha256:${"0".repeat(64)}`];
+    else daemon[field] = "foreign";
+    assert.throws(() => validateRehearsalImage(daemon));
+  });
+}

@@ -17,6 +17,7 @@ const methods = [
   "inspectMigration",
   "smoke",
   "cleanupOwnedWorkloads",
+  "cleanupOwnedProbes",
 ];
 function failure(phase, error) {
   const e = new Error("Protected accepted-recovery upgrade activation failed.");
@@ -256,6 +257,7 @@ export async function executeUpgradeActivation(input, adapters, options) {
           if (error?.terminationConfirmed === false || error?.durabilityUncertain === true)
             throw error;
           await store.fail();
+          await store.cleanup((cap) => adapters.cleanupOwnedProbes(context("recovery"), cap));
           if (migrationAttempted)
             await store.cleanup((cap) => adapters.cleanupOwnedWorkloads(context("recovery"), cap));
           throw error;

@@ -27,6 +27,7 @@ import {
 import { executeUpgradePreparation } from "./host/upgrade-preparation.mjs";
 import { executeUpgradeReturn } from "./host/upgrade-return.mjs";
 import {
+  validateRehearsalImage,
   rehearsalLabel,
   rehearsalStagingNetwork,
   assertFreshRehearsalName,
@@ -146,13 +147,7 @@ export async function rehearseUpgrade(argv) {
   };
   try {
     const daemon = await inspectOuter("image", rehearsalImages.daemon);
-    assert.equal(daemon.Id, rehearsalImages.daemonId);
-    assert.equal(daemon.Architecture, "amd64");
-    assert.ok(
-      daemon.RepoDigests.includes(
-        rehearsalImages.daemon.replace("docker:28-dind", "docker.io/library/docker"),
-      ),
-    );
+    validateRehearsalImage(daemon);
     assertFreshRehearsalName(name, {
       containers: (await outer(["container", "ls", "--all", "--format", "{{.Names}}"])).stdout
         .trim()

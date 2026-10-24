@@ -81,6 +81,7 @@ test("installed activation adapters require a live phase capability before any D
     "inspectMigration",
     "smoke",
     "cleanupOwnedWorkloads",
+    "cleanupOwnedProbes",
   ])
     await assert.rejects(adapters[name]({}, {}));
   await assert.rejects(adapters.writerFence.observe({}, {}));
@@ -173,12 +174,12 @@ test("activation failure cleanup preserves retained old IDs", async (t) => {
   );
   assert.equal(calls, 0);
 });
-test("live activation capability reaches real image and backup-cleanup adapters with producer identity", async (t) => {
+async function activationFixture(t, wrap = (dependencies) => dependencies) {
   const { upgradeCommandFixture } = await import("./upgrade-command-fixture.mjs");
   const { createUpgradeActivationAdapters } =
     await import("../host/upgrade-activation-adapters.mjs");
   const { readVerifiedBackup } = await import("../host/backup-gate.mjs");
-  const { withUpgradeState, withUpgradePhaseState } = await import("../host/upgrade-state.mjs");
+  const { withUpgradeState } = await import("../host/upgrade-state.mjs");
   const { upgradeOldRuntime, upgradePreparation, upgradeHash } =
     await import("./upgrade-fixture.mjs");
   const { readFile } = await import("node:fs/promises");
@@ -243,8 +244,13 @@ test("live activation capability reaches real image and backup-cleanup adapters 
     f.oldOperation,
     async () => {},
     verified,
-    f.dependencies,
+    wrap(f.dependencies, f),
   );
+  return { f, op, adapters, verified, old };
+}
+test("live activation capability reaches real image and backup-cleanup adapters with producer identity", async (t) => {
+  const { f, op, adapters, verified } = await activationFixture(t);
+  const { withUpgradePhaseState } = await import("../host/upgrade-state.mjs");
   assert.deepEqual(adapters.workload.identity, { resources: verified.evidence.cleanup.resources });
   assert.equal(adapters.workload.executorSha, f.input.identity.executorSha);
   await withUpgradePhaseState(f.root, op.decision, async (s) => {
@@ -260,3 +266,144 @@ test("live activation capability reaches real image and backup-cleanup adapters 
     assert.deepEqual(absent.resources, verified.evidence.cleanup.resources);
   });
 });
+
+for (const mode of ["expired", "unreaped", "replaced probe", "changed predecessor"]) {
+  test(`actual activation role probe ${mode}: cleanup owns exact probe and fresh return stays guarded`, async (t) => {
+    const { readFile, writeFile, lstat } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { runHostProcess } = await import("../host/process.mjs");
+    const { withUpgradePhaseState, withHeldUpgradeState } =
+      await import("../host/upgrade-state.mjs");
+    const { createUpgradeObservers } = await import("../host/upgrade-observation.mjs");
+    const { executeUpgradeReturn } = await import("../host/upgrade-return.mjs");
+    const { upgradeHash } = await import("./upgrade-fixture.mjs");
+    let now = Date.now(),
+      started = false,
+      cleaned = false;
+    const { f, op, adapters, old } = await activationFixture(t, (dependencies, fixture) => ({
+      ...dependencies,
+      runProcess: async (request, recheck) => {
+        const args = request.args.slice(2);
+        const probe =
+          args[0] === "create" ||
+          args[0] === "start" ||
+          args.includes("{{.Names}}") ||
+          args.some((a) => a.startsWith("markiro-platform-probe-")) ||
+          (args[1] === "rm" && args.at(-1) === "7".repeat(64));
+        if (!probe) return dependencies.runProcess(request, recheck);
+        fixture.d.state.probeResult = {
+          postgresVersion: "17.11",
+          tls: fixture.base.record.observations.tls.value,
+        };
+        await fixture.d.publish();
+        const result = await runHostProcess({
+          ...request,
+          executable: process.execPath,
+          args: [
+            fileURLToPath(new URL("./fixtures/host-docker.mjs", import.meta.url)),
+            fixture.d.stateFile,
+            JSON.stringify(args),
+          ],
+        });
+        Object.assign(fixture.d.state, JSON.parse(await readFile(fixture.d.stateFile)));
+        if (args[0] === "start") {
+          started = true;
+          now = Date.parse(fixture.input.expiresAt) + 1;
+          if (mode === "unreaped")
+            throw Object.assign(Error("unknown termination"), { terminationConfirmed: false });
+        }
+        if (args[1] === "rm") cleaned = true;
+        return result;
+      },
+    }));
+    const context = {
+      ...f.candidateOperation,
+      phase: "activation-admitted",
+      boundary: "verifyRoles",
+      allowedServices: ["postgres"],
+    };
+    const execution = withUpgradePhaseState(
+      f.root,
+      op.decision,
+      async (s) => {
+        await assert.rejects(s.guard((cap) => adapters.verifyRoles(context, cap)));
+        assert.equal(started, true);
+        assert.equal(f.d.state.containers.length, 4);
+        if (mode === "unreaped")
+          throw Object.assign(Error("unknown termination"), { terminationConfirmed: false });
+        await s.fail();
+        if (mode === "replaced probe") f.d.state.containers.at(-1).Id = "8".repeat(64);
+        if (mode === "changed predecessor")
+          await writeFile(join(f.root, "recovery-state.json"), "changed");
+        await s.cleanup((cap) =>
+          adapters.cleanupOwnedProbes({ ...context, boundary: "recovery" }, cap),
+        );
+      },
+      { now: () => now },
+    );
+    if (mode !== "expired") {
+      await assert.rejects(execution);
+      assert.equal(cleaned, false);
+      assert.ok(await lstat(join(f.root, ".deploy.lock")));
+      return;
+    }
+    await execution;
+    assert.equal(cleaned, true);
+    assert.equal(f.d.state.containers.length, 3);
+    assert.deepEqual(
+      Object.fromEntries(
+        f.d.state.containers.map((c) => [c.Config.Labels["com.docker.compose.service"], c.Id]),
+      ),
+      old.containers,
+    );
+    const journal = join(f.root, "upgrade-operations", f.input.identity.operationId, "state.json");
+    const before = await readFile(journal),
+      state = JSON.parse(before);
+    assert.equal(state.migrationEntered, false);
+    const decision = {
+      ...op.decision,
+      phase: "return-old",
+      prior: { sequence: state.sequence, sha256: upgradeHash(before) },
+      dispatch: { ...op.decision.dispatch, runId: "987654334" },
+      expiresAt: new Date(now + 600000).toISOString(),
+    };
+    const observers = createUpgradeObservers(
+      {
+        admission: f.input,
+        oldOperation: f.oldOperation,
+        candidateOperation: f.candidateOperation,
+        predecessorContainers: f.predecessorContainers,
+        policy: f.policy,
+      },
+      f.dependencies,
+    );
+    const start = (service) => async (_ctx, cap) =>
+      withHeldUpgradeState(cap, async () => {
+        const c = f.d.state.containers.find((c) => c.Id === old.containers[service]);
+        c.State = {
+          Running: true,
+          Restarting: false,
+          Paused: false,
+          Status: "running",
+          Health: { Status: "healthy" },
+        };
+      });
+    const returned = await executeUpgradeReturn(
+      { root: f.root, decision },
+      {
+        verifyAdmission: async () => f.input.identity,
+        inspectReturnEligibility: (_ctx, cap) => observers.inspectReturnEligibility(cap),
+        inspectSchema: async () => old.schema,
+        startOldApi: start("api"),
+        startOldEdge: start("edge"),
+        verifyOldHealth: async () => {},
+        smoke: async () => {},
+        cleanupOwnedStarts: async () => assert.fail("No failed return expected"),
+      },
+      { now: () => now },
+    );
+    assert.deepEqual(returned, old);
+    assert.equal(JSON.parse(await readFile(journal)).phase, "returned-old");
+  });
+}

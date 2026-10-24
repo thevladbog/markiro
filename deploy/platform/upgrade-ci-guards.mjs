@@ -155,3 +155,14 @@ export function assertFreshRehearsalName(name, inventory) {
     );
   }
 }
+
+export function validateRehearsalImage(daemon) {
+  assert.equal(daemon.Id, rehearsalImages.daemonId);
+  assert.equal(daemon.Architecture, "amd64");
+  assert.equal(daemon.Os, "linux");
+  assert.ok(
+    ["docker", "docker.io/library/docker"].some((repository) =>
+      daemon.RepoDigests.includes(rehearsalImages.daemon.replace("docker:28-dind", repository)),
+    ),
+  );
+}

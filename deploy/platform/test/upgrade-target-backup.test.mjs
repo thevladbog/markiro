@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, writeFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
+import { upgradeBackupResult } from "../host/upgrade-command-runtime.mjs";
+import { validateBackup } from "../host/state-validation.mjs";
 import { createHeldUpgradeBackup } from "../host/target-backup.mjs";
 import { withUpgradeState } from "../host/upgrade-state.mjs";
 import { upgradeObservationFixture } from "./upgrade-observation-fixture.mjs";
 import { targetBackupFixture } from "./target-backup-fixture.mjs";
-import { upgradeOldRuntime } from "./upgrade-fixture.mjs";
+import { upgradeOldRuntime, upgradePreparation } from "./upgrade-fixture.mjs";
 
 async function fixture(t, mode) {
   const b = await targetBackupFixture(t, mode);
@@ -74,10 +76,21 @@ for (const mode of [
           const evidence = JSON.parse(await readFile(result.restoreEvidence.evidencePath));
           const inventory = JSON.parse(await readFile(result.backup.inventoryPath));
           assert.equal(evidence.status, "completed");
+          // The actual producer result must pass the installed adapter and journal gate.
+          const projected = upgradeBackupResult(f.input.identity, result);
+          const proof = validateBackup(projected.backup, f.input.identity);
+          assert.equal(proof.archiveSha256, result.backup.archiveSha256);
+          assert.equal(proof.restoreEvidenceSha256, result.restoreEvidence.evidenceSha256);
           assert.equal(inventory.executorSha, f.input.identity.executorSha);
           assert.equal(result.fence.fenceId, inventory.fence.before.fenceId);
           assert.equal(f.b.docker.containers.size + f.b.docker.volumes.size, 0);
           assert.equal(f.b.boundaries(), 4);
+          const preparation = upgradePreparation(f.input, upgradeOldRuntime(f.input));
+          preparation.backup = proof;
+          preparation.fence = projected.fence;
+          await store.complete("backup-verified", proof, preparation);
+          assert.equal((await store.read()).status, "completed");
+          assert.equal((await store.read()).sequence, 6);
           succeeded = true;
         }
       },

@@ -487,6 +487,7 @@ async function buildHostAdapters(loaded, options, createObservers) {
       command: observers.command,
       workerPath: join(record.installedRoot, "deploy/platform/host/probe-worker.mjs"),
       verifySources,
+      registerCleanup: options.registerProbeCleanup,
     });
     same(result.tls, op.preparedTarget.observations.tls.value);
     same(

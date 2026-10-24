@@ -24,11 +24,16 @@ export function createUpgradeActivationAdapters(
     preparedTarget: op.preparedTarget,
     preparedPolicy: op.preparedPolicy,
   };
+  const probeCleanups = new Set();
+  const registerProbeCleanup = (cleanup) => {
+    probeCleanups.add(cleanup);
+    return () => probeCleanups.delete(cleanup);
+  };
   let releaseVerified = false,
     terminated = true;
   const action = (context, cap, callback, cleanup = false) =>
     withHeldUpgradeState(cap, async (held) => {
-      ensure(terminated && (held.cleanup === true) === cleanup);
+      ensure(terminated && (held.cleanup === true) === Boolean(cleanup));
       same(held.state.admission, op.admission);
       same(held.state.decision, op.decision);
       same(held.state.oldRuntime.containers, op.predecessorContainers);
@@ -37,7 +42,10 @@ export function createUpgradeActivationAdapters(
       same(context.identity, candidate.identity);
       same(context.configuration, candidate.configuration);
       ensure(context.phase === held.state.phase && held.state.decision.phase === "activate");
-      if (cleanup) ensure(held.state.status === "recovery-required" && held.state.migrationEntered);
+      if (cleanup) {
+        ensure(held.state.status === "recovery-required");
+        if (cleanup === "workloads") ensure(held.state.migrationEntered);
+      }
       const verify = async () => {
         ensure(terminated);
         await held.verify();
@@ -57,7 +65,7 @@ export function createUpgradeActivationAdapters(
         }
       };
       await verify();
-      const dependencies = { ...options, runProcess };
+      const dependencies = { ...options, runProcess, registerProbeCleanup };
       let result;
       if (cleanup) {
         const observers = createUpgradeHostObservers(
@@ -121,6 +129,24 @@ export function createUpgradeActivationAdapters(
       inspect: (context, cap) =>
         action(context, cap, ({ adapters }) => adapters.workload.inspect(context)),
     },
+    cleanupOwnedProbes: async (context, cap) => {
+      try {
+        return await action(
+          context,
+          cap,
+          async ({ observers }) => {
+            for (const cleanup of probeCleanups) await cleanup(observers.command);
+            ensure(probeCleanups.size === 0);
+          },
+          "probes",
+        );
+      } catch (error) {
+        // No fresh phase may proceed while an owned probe could remain. A failed
+        // integrity check or uncertain cleanup retains the shared operation lock.
+        error.durabilityUncertain = true;
+        throw error;
+      }
+    },
     cleanupOwnedWorkloads: (context, cap) =>
       action(
         context,
@@ -146,7 +172,7 @@ export function createUpgradeActivationAdapters(
           const state = await observers.inventory(recovery);
           ensure(state.owned.every((r) => r.service === "postgres" || !r.active));
         },
-        true,
+        "workloads",
       ),
   });
 }

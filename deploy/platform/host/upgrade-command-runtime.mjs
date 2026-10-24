@@ -325,8 +325,21 @@ export async function executeUpgradeOperation(loaded, options = {}) {
           admission,
           dependencies,
         );
-        return { backup: result.backup, fence: result.fence };
+        return upgradeBackupResult(admission.identity, result);
       },
     },
   );
+}
+
+// Project the archive producer output into the journal proof contract.
+export function upgradeBackupResult(identity, result) {
+  return {
+    backup: {
+      operationId: identity.operationId,
+      target: identity.target,
+      archiveSha256: result.backup.archiveSha256,
+      restoreEvidenceSha256: result.restoreEvidence.evidenceSha256,
+    },
+    fence: result.fence,
+  };
 }
