@@ -28,6 +28,7 @@ export interface StandaloneReleaseStore {
   presignPut(key: string, contentType: string, expiresInSeconds: number): Promise<string>;
   /** The stored size, or `null` when there is no such object. */
   head(key: string): Promise<{ size: number } | null>;
+  headVersion(key: string): Promise<{ size: number; versionId: string } | null>;
   /** The whole object, or `null` when missing; above `maxBytes` throws `ReleaseObjectTooLargeError`. */
   read(key: string, maxBytes: number): Promise<Buffer | null>;
   /** SHA-256 and size of the object as streamed back, or `null` when missing. */
@@ -99,6 +100,22 @@ export class S3StandaloneReleaseStore implements StandaloneReleaseStore {
         new HeadObjectCommand({ Bucket: this.#bucket, Key: key }),
       );
       return { size: stored.ContentLength ?? 0 };
+    } catch (error) {
+      if (isMissingObjectError(error)) return null;
+      throw error;
+    }
+  }
+
+  async headVersion(key: string): Promise<{ size: number; versionId: string } | null> {
+    if (!/^standalone\/_uploads\/[0-9a-f-]{36}\/[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(key))
+      throw new Error("Invalid staged release key");
+    try {
+      const result = await this.#client.send(
+        new HeadObjectCommand({ Bucket: this.#bucket, Key: key }),
+      );
+      if (!result.VersionId || result.VersionId.toLowerCase() === "null")
+        throw new Error("Missing release object version");
+      return { size: result.ContentLength ?? 0, versionId: result.VersionId };
     } catch (error) {
       if (isMissingObjectError(error)) return null;
       throw error;

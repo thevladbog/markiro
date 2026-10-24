@@ -15,6 +15,8 @@ export const RELEASE_ORIGIN = "https://releases.markiro.app";
 export const BUCKET_ORIGIN = "https://storage.example.net";
 export const INSTALLER_SHA = "ab".repeat(32);
 export const MANIFEST_SHA = "cd".repeat(32);
+export const UPLOAD_INTENT = "11111111-1111-4111-8111-111111111111";
+export const PENDING_INTENT = "22222222-2222-4222-8222-222222222222";
 export const SOURCE_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 export function release(
@@ -54,14 +56,16 @@ export function release(
 
 export const STABLE_VIEW = {
   channel: "stable",
+  revision: "7",
   latest: "0.4.0",
   latestReadable: true,
   releases: [release("stable", "0.5.0"), release("stable", "0.4.0"), release("stable", "0.3.0")],
-  pending: ["0.6.0"],
+  pending: [{ version: "0.6.0", intentId: PENDING_INTENT }],
 } satisfies StandaloneReleaseChannelView;
 
 export const BETA_VIEW = {
   channel: "beta",
+  revision: "0",
   latest: null,
   latestReadable: true,
   releases: [],
@@ -104,6 +108,7 @@ export function installStandaloneReleasesApi({
   latestError?: string;
 } = {}) {
   const calls: ReleaseApiCall[] = [];
+  let uploaded = { channel: "stable" as StandaloneReleaseChannel, version: "0.7.0" };
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -116,8 +121,10 @@ export function installStandaloneReleasesApi({
     const target = (body ?? {}) as { channel: StandaloneReleaseChannel; version: string };
     if (path === `${BASE}/uploads` && method === "POST") {
       if (uploadStatus !== 200) return jsonResponse(uploadStatus, { code: uploadError });
-      const folder = `${BUCKET_ORIGIN}/markiro-releases/standalone/${target.channel}/${target.version}`;
+      uploaded = target;
+      const folder = `${BUCKET_ORIGIN}/markiro-releases/standalone/_uploads/${UPLOAD_INTENT}`;
       return jsonResponse(200, {
+        intentId: UPLOAD_INTENT,
         channel: target.channel,
         version: target.version,
         expiresAt: "2026-10-21T10:15:00.000Z",
@@ -137,7 +144,10 @@ export function installStandaloneReleasesApi({
       if (registerStatus !== 200) return jsonResponse(registerStatus, { code: registerError });
       return jsonResponse(200, {
         outcome: registerOutcome,
-        release: release(target.channel, target.version),
+        release:
+          (body as { intentId: string }).intentId === PENDING_INTENT
+            ? release("stable", "0.6.0")
+            : release(uploaded.channel, uploaded.version),
       });
     }
     const latest = /^\/api\/platform\/standalone-releases\/(stable|beta)\/latest$/.exec(path);
@@ -150,6 +160,7 @@ export function installStandaloneReleasesApi({
       return jsonResponse(200, {
         ...(view ?? { ...BETA_VIEW, channel }),
         latest: (body as { version: string }).version,
+        revision: (BigInt((body as { expectedRevision: string }).expectedRevision) + 1n).toString(),
       });
     }
     throw new Error(`Unexpected request: ${method} ${url}`);

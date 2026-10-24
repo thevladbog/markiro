@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { load } from "js-yaml";
 
@@ -74,7 +73,11 @@ test("stable signing and dual-origin publication use separate protected environm
   assert.equal(workflow.jobs.release.environment, "station-release");
   assert.equal(workflow.jobs.release["runs-on"], "windows-latest");
   assert.equal(workflow.jobs.release.needs, "build");
-  assert.deepEqual(workflow.jobs.release.permissions, { actions: "read", contents: "write" });
+  assert.deepEqual(workflow.jobs.release.permissions, {
+    "id-token": "write",
+    actions: "read",
+    contents: "write",
+  });
   assert.equal(workflow.jobs.build.env.VITE_STATION_API_URL, "https://admin.markiro.app");
   assert.equal(workflow.jobs.build.env.TAURI_SIGNING_PRIVATE_KEY, undefined);
   assert.equal(workflow.jobs.release.env.AWS_ACCESS_KEY_ID, undefined);
@@ -109,7 +112,7 @@ test("stable signing and dual-origin publication use separate protected environm
   assert.match(text, /refs\/heads\/main/);
   assert.match(text, /persist-credentials:\s*false/);
   assert.doesNotMatch(text, /--access-key|--secret-access-key|--credentials/i);
-  assert.doesNotMatch(text, /pull_request_target|self-hosted|id-token|continue-on-error/i);
+  assert.doesNotMatch(text, /pull_request_target|self-hosted|continue-on-error/i);
 });
 
 test("stable publication requires the repository owner, main, and the exact confirmation", async () => {
@@ -402,7 +405,7 @@ test("both public stable trees are proven before the complete mutable transactio
   assert.match(github.run, /github-public\.mjs[\s\\]*download-release stable "\$version"/);
   assert.match(
     yandex.run,
-    /yandex-publisher\.mjs publish-immutable[\s\\]*"\$RUNNER_TEMP\/station-stable-candidate\/yandex" stable "\$version"/,
+    /catalog-cli\.mjs publish-immutable[\s\\]*"\$RUNNER_TEMP\/station-stable-candidate\/yandex" stable "\$version"/,
   );
   assert.match(publicValidation.run, /station-stable-github-public/);
   assert.match(publicValidation.run, /station-stable-yandex-public/);
@@ -425,12 +428,12 @@ test("both public stable trees are proven before the complete mutable transactio
   );
   assert.match(
     publicValidation.run,
-    /yandex-publisher\.mjs validate-public[\s\\]*"\$yandex_public" stable "\$version"/,
+    /catalog-cli\.mjs validate-public[\s\\]*"\$yandex_public" stable "\$version"/,
   );
   assert.ok(
     steps.indexOf(publicValidation) < steps.indexOf(promote) &&
-      publicValidation.run.indexOf("yandex-publisher.mjs validate-public") >= 0 &&
-      promote.run.indexOf("yandex-publisher.mjs backup-mutables stable") >= 0,
+      publicValidation.run.indexOf("catalog-cli.mjs validate-public") >= 0 &&
+      promote.run.indexOf("catalog-cli.mjs backup-mutables stable") >= 0,
   );
   assert.match(resolve.run, /summary_source_beta_tag="\$source_beta_tag"/);
   assert.match(resolve.run, /summary_base_sha="\$base_sha"/);
@@ -454,59 +457,24 @@ test("both public stable trees are proven before the complete mutable transactio
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
 });
 
-test("stable mutables promote GitHub, Yandex manifest, then the default stable alias and roll back in reverse", async () => {
-  const workflow = load(await source());
-  const step = workflowStep(workflow, "release", "Promote stable mutable targets");
-  const run = step.run;
-  const githubBackup = run.indexOf(
-    '"$RUNNER_TEMP/station-stable-github-channel-backup/latest.json"',
-    run.indexOf("trap rollback_transaction EXIT"),
-  );
-  const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables stable");
-  const githubPromotion = run.indexOf(
+test("stable promotion retains snapshot then atomically changes catalog aliases without compensation", async () => {
+  const workflow = load(await source()),
+    run = workflowStep(workflow, "release", "Promote stable mutable targets").run;
+  const snapshot = run.indexOf("catalog-cli.mjs backup-mutables stable");
+  const github = run.indexOf(
     'gh release upload station-stable-channel --repo "$STATION_RELEASE_REPOSITORY"',
-    githubBackup + 1,
   );
-  const yandexPromotion = run.indexOf("yandex-publisher.mjs promote", yandexBackup + 1);
-  assert.ok(githubBackup >= 0 && githubBackup < yandexBackup);
-  assert.ok(yandexBackup < githubPromotion && githubPromotion < yandexPromotion);
-  assert.doesNotMatch(run.slice(githubBackup, yandexBackup), /\|\| true/);
-  assert.match(run, /trap rollback_transaction EXIT/);
-  assert.match(run, /github_may_have_changed=true[\s\S]*gh release upload station-stable-channel/);
-  assert.match(run, /yandex_may_have_changed=true[\s\S]*yandex-publisher\.mjs promote/);
-  const rollback = run.slice(
-    run.indexOf("rollback_transaction()"),
-    run.indexOf("trap rollback_transaction EXIT"),
-  );
-  assert.ok(
-    rollback.indexOf("yandex-publisher.mjs rollback stable") <
-      rollback.indexOf("station-stable-github-channel-backup/latest.json"),
-  );
-  assert.match(rollback, /station-stable-github-rollback-verify/);
-  assert.match(
-    rollback,
-    /github-public\.mjs[\s\\]*download-channel-exact stable[\s\\]*"\$RUNNER_TEMP\/station-stable-github-channel-backup\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-stable-github-rollback-verify\/latest\.json"/,
-  );
-  assert.doesNotMatch(rollback, /gh release download station-stable-channel/);
-  assert.match(rollback, /station release mutable restoration failed/);
-  assert.match(
-    rollback,
-    /github_channel_preexisting[\s\S]*gh release delete station-stable-channel/,
-  );
-  assert.match(run, /https:\/\/releases\.markiro\.app\/station\/stable\/latest\.json/);
+  const cas = run.indexOf("catalog-cli.mjs promote");
+  assert.ok(snapshot >= 0 && snapshot < github && github < cas);
+  assert.match(run, /download-channel-exact stable/);
+  assert.match(run, /catalog-cli\.mjs verify-channel/);
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/download/);
-  assert.match(run, /github-public\.mjs[\s\\]*download-channel stable/);
-  assert.match(
-    run,
-    /github-public\.mjs[\s\\]*download-channel-exact stable[\s\\]*"\$github_tree\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-stable-github-channel-verify\/latest\.json"/,
-  );
-  assert.doesNotMatch(run, /station\/beta\/download/);
-  assert.match(
-    run,
-    /if \[ "\$github_channel_preexisting" = false \]; then[\s\S]*gh release create station-stable-channel[\s\S]*else[\s\S]*gh release upload station-stable-channel/,
-  );
   assert.match(run, /test -z "\$previous_stable_tag"/);
-  assert.doesNotMatch(run, /delete-object|DeleteObject/);
+  assert.match(run, /trap cleanup_credentials EXIT/);
+  assert.doesNotMatch(
+    run,
+    /rollback_transaction|catalog-cli\.mjs rollback|gh release delete|DeleteObject|delete-object/,
+  );
 });
 
 test("one-time stable seed uses the latest legacy stable only while release DNS is disabled", async () => {
@@ -536,7 +504,7 @@ test("one-time stable seed uses the latest legacy stable only while release DNS 
   );
   assert.match(
     seed.run,
-    /yandex-publisher\.mjs seed-baseline[\s\S]* stable[\s\\]*[\s\S]*--confirm-empty-channel-bootstrap/,
+    /catalog-cli\.mjs seed-baseline[\s\S]* stable[\s\\]*[\s\S]*--confirm-empty-channel-bootstrap/,
   );
   assert.match(seed.run, /SEED_INFRASTRUCTURE_EVIDENCE/);
   assert.doesNotMatch(
@@ -552,7 +520,7 @@ test("one-time stable seed uses the latest legacy stable only while release DNS 
   assert.equal(promote.if, "inputs.mode == 'publish' || inputs.mode == 'promote-existing'");
 });
 
-test("always emits a bounded publication and compensation summary", async () => {
+test("always emits a bounded publication and reconciliation summary", async () => {
   const workflow = load(await source());
   const summary = workflowStep(workflow, "release", "Summarize stable release");
   const github = workflowStep(workflow, "release", "Publish immutable GitHub stable");
@@ -581,7 +549,7 @@ test("always emits a bounded publication and compensation summary", async () => 
   assert.ok(githubAssetsValidated < githubUndraftAttempted);
   assert.ok(githubUndraftAttempted < githubUndraft && githubUndraft < githubPublicValidated);
   const yandexAttempted = yandex.run.indexOf("yandex-publication-attempted");
-  const yandexPublish = yandex.run.indexOf("yandex-publisher.mjs publish-immutable");
+  const yandexPublish = yandex.run.indexOf("catalog-cli.mjs publish-immutable");
   const bothPublished = yandex.run.indexOf("both-origin-published");
   assert.ok(yandexAttempted >= 0 && yandexAttempted < yandexPublish);
   assert.ok(yandexPublish < bothPublished);
@@ -592,6 +560,5 @@ test("always emits a bounded publication and compensation summary", async () => 
   assert.match(publicValidation.run, /both-public-validated/);
   assert.match(promote.run, /github-promoted/);
   assert.match(promote.run, /all-promoted/);
-  assert.match(promote.run, /restored/);
-  assert.match(promote.run, /restoration-failed/);
+  assert.doesNotMatch(promote.run, /rollback_transaction|restoration-failed/);
 });

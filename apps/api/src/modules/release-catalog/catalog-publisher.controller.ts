@@ -88,10 +88,35 @@ export class CatalogPublisherController {
   commit(@Req() req: RequestWithPublisher, @Param("id") id: string, @Body() input: unknown) {
     return this.call(req, (service, caller) => service.commitIntent(caller, id, input));
   }
+  @Get("publications/:product/:channel/:version")
+  @CatalogPublisherRoute()
+  @ApiOperation({ summary: "Read accepted immutable bindings for a later protected promotion" })
+  @ApiZodResponse({ status: 200, schema: catalogPublicationResultSchema.nullable() })
+  publication(
+    @Req() req: RequestWithPublisher,
+    @Param("product") product: string,
+    @Param("channel") channel: string,
+    @Param("version") version: string,
+  ) {
+    return this.call(req, (service, caller) =>
+      service.getPublication(caller, { product, channel, version }),
+    );
+  }
+  @Get("channels/:product/:channel")
+  @CatalogPublisherRoute()
+  @ApiOperation({ summary: "Read the exact channel revision before a compare-and-swap" })
+  @ApiZodResponse({ status: 200, schema: channelSnapshotSchema })
+  channel(
+    @Req() req: RequestWithPublisher,
+    @Param("product") product: string,
+    @Param("channel") channel: string,
+  ) {
+    return this.call(req, (service, caller) => service.getChannel(caller, { product, channel }));
+  }
   @Put("channels/:product/:channel")
   @CatalogPublisherRoute()
   @ApiOperation({
-    summary: "Change a channel using its expected revision and an owned publication",
+    summary: "Change a channel using its expected revision and a verified product publication",
   })
   @ApiZodBody(channelChangeRequestSchema)
   @ApiZodResponse({ status: 200, schema: channelSnapshotSchema })

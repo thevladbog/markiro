@@ -1,6 +1,8 @@
 import { z } from "zod";
+import type { StandaloneUpdateKeyset } from "@markiro/domain";
 import {
   catalogIntentViewSchema,
+  releaseIdentitySchema,
   catalogPublicationResultSchema,
   channelChangeRequestSchema,
   channelSnapshotSchema,
@@ -37,6 +39,7 @@ export interface CatalogServiceOptions {
   /** Must reload mutable platform membership/capability, or recheck pinned machine identity. */
   authorize(caller: CatalogCaller, action: "read" | "publish" | "channel"): Promise<void>;
   now?: () => number;
+  standaloneKeys?: StandaloneUpdateKeyset;
 }
 const metadataSchema = z
   .object({
@@ -48,6 +51,7 @@ const metadataSchema = z
     protocol: z.number().int().positive().optional(),
     minProtocol: z.number().int().positive().optional(),
     minUpgradeFrom: z.string().optional(),
+    kid: z.string().min(1).max(128).optional(),
     evidence: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
@@ -75,6 +79,7 @@ function metadata(row: PublicationRow): ProductAcceptance {
     ...(m.versionCode === undefined ? {} : { versionCode: m.versionCode }),
     ...(m.protocol === undefined ? {} : { protocol: m.protocol }),
     ...(m.minProtocol === undefined ? {} : { minProtocol: m.minProtocol }),
+    ...(m.kid === undefined ? {} : { kid: m.kid }),
     ...(m.minUpgradeFrom === undefined ? {} : { minUpgradeFrom: m.minUpgradeFrom }),
     ...(m.evidence === undefined ? {} : { evidence: m.evidence }),
   };
@@ -135,6 +140,17 @@ export class CatalogService {
     this.live(caller, intent.product);
     return this.intentView(intent);
   }
+  async getChannel(caller: CatalogCaller, scope: unknown) {
+    const identity = parse(channelSnapshotSchema.shape.identity, scope);
+    await this.authorize(caller, identity.product, "read");
+    return this.options.repository.readChannel(identity);
+  }
+  async getPublication(caller: CatalogCaller, input: unknown) {
+    const identity = parse(releaseIdentitySchema, input);
+    await this.authorize(caller, identity.product, "read");
+    const found = await this.options.repository.publicationByIdentity(identity);
+    return found ? this.result(found.publication.id) : null;
+  }
   private async verify(request: PublicationRequest, objects: PinnedObject[]) {
     const leases: VerifiedFile[] = [],
       files = new Map<string, VerifiedInputFile>();
@@ -160,7 +176,7 @@ export class CatalogService {
           read: (maximum) => lease.read(maximum),
         });
       }
-      const accepted = await assertProductPublication(request, files);
+      const accepted = await assertProductPublication(request, files, this.options.standaloneKeys);
       if (request.identity.product === "station" && request.identity.channel === "stable") {
         const betaVersion = accepted.evidence?.betaVersion;
         if (typeof betaVersion !== "string") throw new CatalogFault("conflict");
@@ -314,7 +330,13 @@ export class CatalogService {
       target.publication.channel !== identity.channel
     )
       throw new CatalogFault("conflict");
-    if (caller.machine) await repository.getIntent(caller.principal, target.publication.intentId);
+    if (caller.machine)
+      await repository.authorizeChannelTarget(
+        caller.principal,
+        target.publication.id,
+        identity,
+        epoch,
+      );
     const previousEvent = await repository.channelEvent(change.operationId);
     if (previousEvent) {
       if (

@@ -74,6 +74,7 @@ jobs:
       group: station-${{ matrix.channel }}-release
       cancel-in-progress: false
     permissions:
+      id-token: write
       contents: read
     strategy:
       fail-fast: false
@@ -108,7 +109,9 @@ jobs:
 
       - name: Install locked publisher dependencies
         shell: bash
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @markiro/platform-contracts build
 
       - name: Download the accepted GitHub release
         env:
@@ -157,7 +160,7 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
           unset AWS_SESSION_TOKEN
-          node tools/station-release/yandex-publisher.mjs reseed-from-github \
+          node tools/station-release/catalog-cli.mjs reseed-from-github \
             "$work/github" "$RESEED_TAG" "$work/release.json" \
             "$work/github-channel-latest.json" "$CHANNEL" "$work/reseed-record.json" \
             --confirm-reseed-from-github
@@ -195,7 +198,7 @@ jobs:
             --output "$work/channel-latest.json" "https://releases.markiro.app/station/$CHANNEL/latest.json"
           curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
             --output "$work/channel-download.exe" "$download_url"
-          cmp "$work/channel-latest.json" "$public/latest.json"
+          node tools/station-release/catalog-cli.mjs verify-channel "$public" "$CHANNEL" "$version"
           cmp "$work/channel-download.exe" "$public/$installer"
 
       - name: Record the reseed
@@ -217,3 +220,12 @@ jobs:
           path: ${{ runner.temp }}/station-reseed-record/reseed-record.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Preserve catalog operation journal
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: station-catalog-${{ matrix.channel }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/station-catalog-*
+          if-no-files-found: warn
+          retention-days: 30

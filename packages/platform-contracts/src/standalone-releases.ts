@@ -27,6 +27,7 @@ export const STANDALONE_RELEASE_ERROR_CODES = [
   "standalone_release_immutable",
   "standalone_release_not_found",
   "standalone_release_integrity_failed",
+  "standalone_release_channel_conflict",
 ] as const;
 export type StandaloneReleaseErrorCode = (typeof STANDALONE_RELEASE_ERROR_CODES)[number];
 
@@ -63,6 +64,11 @@ export const standaloneReleaseObjectKey = (
 export const standaloneLatestObjectKey = (channel: StandaloneReleaseChannel) =>
   `${STANDALONE_RELEASE_PREFIX}/${channel}/latest.json`;
 
+const operationIdSchema = z.uuid().refine((value) => value === value.toLowerCase());
+const revisionSchema = z
+  .string()
+  .regex(/^(0|[1-9]\d{0,18})$/)
+  .refine((value) => /^(0|[1-9]\d{0,18})$/.test(value) && BigInt(value) <= 9223372036854775807n);
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const sizeSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const httpsUrlSchema = z.url({ protocol: /^https$/ }).max(2_048);
@@ -121,10 +127,13 @@ export const standaloneReleaseChannelViewSchema = z
     latest: standaloneReleaseVersionSchema.nullable(),
     /** `false` when a `latest.json` exists but is not one this API would write. */
     latestReadable: z.boolean(),
+    revision: revisionSchema,
     /** Registered versions, newest first. */
     releases: z.array(standaloneReleaseSchema),
     /** Version folders with files but no registration (an unfinished upload). */
-    pending: z.array(standaloneReleaseVersionSchema),
+    pending: z.array(
+      z.object({ version: standaloneReleaseVersionSchema, intentId: operationIdSchema }).strict(),
+    ),
   })
   .strict();
 export type StandaloneReleaseChannelView = z.infer<typeof standaloneReleaseChannelViewSchema>;
@@ -147,6 +156,40 @@ export const standaloneReleaseTargetSchema = z
   .strict();
 export type StandaloneReleaseTarget = z.infer<typeof standaloneReleaseTargetSchema>;
 
+export const standaloneReleaseUploadRequestSchema = standaloneReleaseTargetSchema
+  .extend({
+    idempotencyKey: operationIdSchema,
+    sourceSha: z.string().regex(/^[0-9a-f]{40}$/),
+    installer: z
+      .object({
+        sha256: sha256Schema,
+        sizeBytes: z
+          .number()
+          .int()
+          .positive()
+          .max(256 * 1024 * 1024),
+      })
+      .strict(),
+    manifest: z
+      .object({
+        sha256: sha256Schema,
+        sizeBytes: z
+          .number()
+          .int()
+          .positive()
+          .max(64 * 1024),
+      })
+      .strict(),
+  })
+  .strict();
+export type StandaloneReleaseUploadRequest = z.infer<typeof standaloneReleaseUploadRequestSchema>;
+export const standaloneReleaseRegisterRequestSchema = z
+  .object({ intentId: operationIdSchema })
+  .strict();
+export type StandaloneReleaseRegisterRequest = z.infer<
+  typeof standaloneReleaseRegisterRequestSchema
+>;
+
 export const standaloneReleaseUploadTargetSchema = z
   .object({
     name: z.string().min(1).max(128),
@@ -159,6 +202,7 @@ export const standaloneReleaseUploadSchema = z
     channel: standaloneReleaseChannelSchema,
     version: standaloneReleaseVersionSchema,
     expiresAt: platformTimestampSchema,
+    intentId: operationIdSchema,
     installer: standaloneReleaseUploadTargetSchema,
     manifest: standaloneReleaseUploadTargetSchema,
   })
@@ -178,7 +222,12 @@ export const standaloneReleaseChannelParamsSchema = z
   .object({ channel: standaloneReleaseChannelSchema })
   .strict();
 export const standaloneReleaseSetLatestSchema = z
-  .object({ version: standaloneReleaseVersionSchema })
+  .object({
+    version: standaloneReleaseVersionSchema,
+    operationId: operationIdSchema,
+    expectedRevision: revisionSchema,
+    kind: z.enum(["forward", "rollback"]),
+  })
   .strict();
 export type StandaloneReleaseSetLatest = z.infer<typeof standaloneReleaseSetLatestSchema>;
 
@@ -188,13 +237,13 @@ export const platformStandaloneReleaseContracts = {
   upload: {
     method: "POST",
     path: `${base}/uploads`,
-    body: standaloneReleaseTargetSchema,
+    body: standaloneReleaseUploadRequestSchema,
     response: standaloneReleaseUploadSchema,
   },
   register: {
     method: "POST",
     path: `${base}/registrations`,
-    body: standaloneReleaseTargetSchema,
+    body: standaloneReleaseRegisterRequestSchema,
     response: standaloneReleaseRegistrationSchema,
   },
   setLatest: {

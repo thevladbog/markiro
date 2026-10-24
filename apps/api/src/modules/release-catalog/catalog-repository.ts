@@ -523,6 +523,40 @@ export class CatalogRepository {
       readable: row?.readable ?? false,
     };
   }
+  private async bindChannelTarget(
+    tx: Tx,
+    principal: CatalogPrincipal,
+    targetId: string,
+    scope: Scope,
+    epoch: string,
+  ) {
+    const [row] = await tx
+      .select({ intent: intents, publication: publications })
+      .from(publications)
+      .innerJoin(intents, eq(publications.intentId, intents.id))
+      .where(eq(publications.id, targetId));
+    if (
+      !row ||
+      row.publication.product !== scope.product ||
+      row.publication.channel !== scope.channel
+    )
+      throw new CatalogFault("conflict");
+    if (row.intent.epochId !== epoch || row.intent.state !== "committed")
+      throw new CatalogFault("not_ready");
+    await this.bindToken(tx, principal, row.intent.id);
+  }
+  /** Channel authority is product-scoped; upload ownership remains enforced by get/commitIntent. */
+  async authorizeChannelTarget(
+    principal: CatalogPrincipal,
+    targetId: string,
+    scope: Scope,
+    epoch: string,
+  ) {
+    return this.transaction(async (tx) => {
+      await this.epoch(tx, scope, epoch);
+      await this.bindChannelTarget(tx, principal, targetId, scope, epoch);
+    });
+  }
   async commitChannelChange(
     input: unknown,
     receipt: VerifiedReceipt,
@@ -541,15 +575,13 @@ export class CatalogRepository {
       await this.epoch(tx, identity, change.epoch);
       const [previous] = await tx.select().from(events).where(eq(events.id, change.operationId));
       if (authority?.principal) {
-        const [targetIntent] = await tx
-          .select({ intent: intents })
-          .from(intents)
-          .innerJoin(publications, eq(publications.intentId, intents.id))
-          .where(eq(publications.id, change.targetPublicationId));
-        if (!targetIntent) throw new CatalogFault("conflict");
-        owner(authority.principal, targetIntent.intent);
-        if (targetIntent.intent.epochId !== change.epoch) throw new CatalogFault("not_ready");
-        await this.bindToken(tx, authority.principal, targetIntent.intent.id);
+        await this.bindChannelTarget(
+          tx,
+          authority.principal,
+          change.targetPublicationId,
+          identity,
+          change.epoch,
+        );
       }
       if (previous) {
         if (
@@ -617,6 +649,7 @@ export class CatalogRepository {
           revision: next.revision.toString(),
           publicationId: target.id,
           operationId: change.operationId,
+          ...(authority?.principal ? { principalHash: authority.principal.fingerprint } : {}),
         },
         requestId: actor.requestId,
       });

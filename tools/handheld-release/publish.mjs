@@ -7,7 +7,6 @@ import { readNotes } from "./changelog.mjs";
 import { assertSupersedes, buildHandheldManifest, handheldChannelBaseUrl } from "./manifest.mjs";
 import {
   contentTypeFor,
-  createHandheldObjectStore,
   handheldApkName,
   handheldManifestKey,
   handheldObjectKey,
@@ -130,14 +129,33 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\",
   }
   // Use curated notes when available, otherwise generate the release description.
   const notes = await readNotes(versionName);
-  const result = await publishHandheldRelease({
+  const { createCatalogClient } = await import("../release-catalog/client.mjs");
+  const { publishHandheldCatalogRelease } = await import("./catalog-publisher.mjs");
+  if (
+    !/^[1-9][0-9]*$/.test(process.env.GITHUB_RUN_ID ?? "") ||
+    !/^[1-9][0-9]*$/.test(process.env.GITHUB_RUN_ATTEMPT ?? "")
+  )
+    throw new Error("invalid handheld publication run identity");
+  const operation = createHash("sha256")
+    .update(
+      `handheld:${process.env.GITHUB_RUN_ID}:${process.env.GITHUB_RUN_ATTEMPT}:${channel || "stable"}:${versionName}:${sourceSha}`,
+    )
+    .digest("hex");
+  const operationId = `${operation.slice(0, 8)}-${operation.slice(8, 12)}-4${operation.slice(13, 16)}-8${operation.slice(17, 20)}-${operation.slice(20, 32)}`;
+  const result = await publishHandheldCatalogRelease({
     apkPath,
     versionName,
     versionCode: Number(versionCode),
     notes,
     sourceSha,
     channel: channel || "stable",
-    store: createHandheldObjectStore({}),
+    catalog: createCatalogClient(),
+    stateDirectory: process.env.RUNNER_TEMP
+      ? `${process.env.RUNNER_TEMP}/handheld-catalog`
+      : undefined,
+    operationId,
+    releasedAt: new Date().toISOString(),
+    emptyChannelConfirmation: process.env.EMPTY_CHANNEL_CONFIRMATION ?? "",
   });
   console.log(result.downloadUrl);
   console.log(result.apkUrl);

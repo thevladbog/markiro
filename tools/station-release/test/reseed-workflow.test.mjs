@@ -87,7 +87,7 @@ test("reseed writes only in the protected release environment and per-channel re
   const workflow = load(await source());
   const job = workflow.jobs.reseed;
   assert.equal(job.environment, "station-release");
-  assert.deepEqual(job.permissions, { contents: "read" });
+  assert.deepEqual(job.permissions, { contents: "read", "id-token": "write" });
   assert.deepEqual(job.concurrency, {
     group: "station-${{ matrix.channel }}-release",
     "cancel-in-progress": false,
@@ -129,7 +129,7 @@ test("reseed writes only in the protected release environment and per-channel re
   assert.match(reseed.run, /trap cleanup_credentials EXIT/u);
   assert.match(
     reseed.run,
-    /node tools\/station-release\/yandex-publisher\.mjs reseed-from-github \\\n\s+"\$work\/github" "\$RESEED_TAG" "\$work\/release\.json" \\\n\s+"\$work\/github-channel-latest\.json" "\$CHANNEL" "\$work\/reseed-record\.json" \\\n\s+--confirm-reseed-from-github/u,
+    /node tools\/station-release\/catalog-cli\.mjs reseed-from-github \\\n\s+"\$work\/github" "\$RESEED_TAG" "\$work\/release\.json" \\\n\s+"\$work\/github-channel-latest\.json" "\$CHANNEL" "\$work\/reseed-record\.json" \\\n\s+--confirm-reseed-from-github/u,
   );
 });
 
@@ -179,7 +179,7 @@ test("reseed takes its only input from the public GitHub mirror and reads the bu
   );
   assert.match(readBack.run, /https:\/\/releases\.markiro\.app\/station\/beta\/download/u);
   assert.match(readBack.run, /https:\/\/releases\.markiro\.app\/station\/download"/u);
-  assert.match(readBack.run, /cmp "\$work\/channel-latest\.json" "\$public\/latest\.json"/u);
+  assert.match(readBack.run, /catalog-cli\.mjs verify-channel "\$public" "\$CHANNEL" "\$version"/u);
 
   // Nothing here creates, edits or deletes GitHub releases, and nothing reaches
   // the bucket except the publisher.

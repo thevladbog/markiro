@@ -142,7 +142,7 @@ export class ReleaseCatalogModule {
           },
         },
       ],
-      exports: [CatalogService],
+      exports: [CatalogService, CatalogRepository, CatalogResolver],
     };
   }
 }

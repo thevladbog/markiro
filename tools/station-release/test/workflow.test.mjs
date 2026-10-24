@@ -58,7 +58,11 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.equal(workflow.jobs.release["runs-on"], "windows-latest");
   assert.equal(workflow.jobs.release.environment, "station-release");
   assert.equal(workflow.jobs.release.needs, "build");
-  assert.deepEqual(workflow.jobs.release.permissions, { actions: "read", contents: "write" });
+  assert.deepEqual(workflow.jobs.release.permissions, {
+    "id-token": "write",
+    actions: "read",
+    contents: "write",
+  });
   assert.match(text, /refs\/heads\/main/);
   assert.match(text, /VITE_STATION_API_URL:\s*https:\/\/admin\.markiro\.app/);
   assert.match(text, /Waiting for CI for \$GITHUB_SHA/);
@@ -134,7 +138,7 @@ test("station beta build and dual-origin publication use separate exact protecte
     assert.match(step.run, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);
   }
   assert.doesNotMatch(text, /--access-key|--secret-access-key|--credentials/i);
-  assert.doesNotMatch(text, /force|:latest\b|pull_request_target|self-hosted|id-token|curl .+\|/i);
+  assert.doesNotMatch(text, /force|:latest\b|pull_request_target|self-hosted|curl .+\|/i);
   assert.doesNotMatch(text, /continue-on-error/i);
 });
 
@@ -319,9 +323,9 @@ test("immutable publication and public dual-origin validation precede every mode
     yandex.run.indexOf("else"),
     yandex.run.lastIndexOf("fi"),
   );
-  assert.match(seedImmutableBranch, /yandex-publisher\.mjs prepare-seed-immutable/);
-  assert.doesNotMatch(seedImmutableBranch, /yandex-publisher\.mjs publish-immutable/);
-  assert.match(normalImmutableBranch, /yandex-publisher\.mjs publish-immutable/);
+  assert.match(seedImmutableBranch, /catalog-cli\.mjs prepare-seed-immutable/);
+  assert.doesNotMatch(seedImmutableBranch, /catalog-cli\.mjs publish-immutable/);
+  assert.match(normalImmutableBranch, /catalog-cli\.mjs publish-immutable/);
   assert.doesNotMatch(normalImmutableBranch, /prepare-seed-immutable/);
   assert.match(publicValidation.run, /station-github-public/);
   assert.match(publicValidation.run, /station-yandex-public/);
@@ -331,20 +335,8 @@ test("immutable publication and public dual-origin validation precede every mode
   );
   assert.doesNotMatch(publicValidation.run, /gh release download/);
   assert.equal(publicValidation.env.RELEASES_S3_BUCKET, "${{ vars.RELEASES_S3_BUCKET }}");
-  const seedPublicStart = publicValidation.run.lastIndexOf('"seed-baseline" ]; then');
-  const seedPublicElse = publicValidation.run.indexOf("else", seedPublicStart);
-  const seedPublicBranch = publicValidation.run.slice(seedPublicStart, seedPublicElse);
-  const normalPublicBranch = publicValidation.run.slice(
-    seedPublicElse,
-    publicValidation.run.indexOf("fi", seedPublicElse),
-  );
-  assert.match(
-    seedPublicBranch,
-    /https:\/\/s3\.twcstorage\.ru\/\$RELEASES_S3_BUCKET\/station\/beta\/releases/,
-  );
-  assert.doesNotMatch(seedPublicBranch, /https:\/\/releases\.markiro\.app/);
-  assert.match(normalPublicBranch, /https:\/\/releases\.markiro\.app\/station\/beta\/releases/);
-  assert.doesNotMatch(normalPublicBranch, /s3\.twcstorage\.ru/);
+  assert.match(publicValidation.run, /https:\/\/releases\.markiro\.app\/station\/beta\/releases/);
+  assert.doesNotMatch(publicValidation.run, /s3\.twcstorage\.ru/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin github beta/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin yandex beta/);
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
@@ -371,89 +363,25 @@ test("immutable publication and public dual-origin validation precede every mode
   );
 });
 
-test("one mutable transaction backs up completely, promotes in order and rolls back in reverse", async () => {
+test("catalog snapshot precedes GitHub promotion and CAS; ambiguous results never trigger compensation", async () => {
   const workflow = load(await source());
-  const step = workflow.jobs.release.steps.find(
-    (candidate) => candidate.name === "Promote beta mutable targets",
-  );
-  const run = step.run;
-  const githubBackup = run.indexOf(
-    '"$RUNNER_TEMP/station-github-channel-backup/latest.json"',
-    run.indexOf("trap rollback_transaction EXIT"),
-  );
-  const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables");
-  const seedPreflight = run.indexOf("yandex-publisher.mjs preflight-seed-mutables");
-  const githubPromotion = run.indexOf(
+  const run = workflow.jobs.release.steps.find(
+    (s) => s.name === "Promote beta mutable targets",
+  ).run;
+  const snapshot = run.indexOf("catalog-cli.mjs backup-mutables");
+  const github = run.indexOf(
     'gh release upload station-beta-channel --repo "$STATION_RELEASE_REPOSITORY"',
-    githubBackup + 1,
   );
-  const yandexPromotion = run.indexOf("yandex-publisher.mjs promote");
-  const yandexSeed = run.indexOf("yandex-publisher.mjs seed-baseline");
-  assert.ok(githubBackup >= 0 && githubBackup < yandexBackup);
-  assert.ok(yandexBackup < githubPromotion && githubPromotion < yandexPromotion);
-  assert.ok(githubBackup < seedPreflight && seedPreflight < githubPromotion);
-  assert.ok(githubPromotion < yandexSeed);
-  assert.doesNotMatch(run.slice(githubBackup, yandexBackup), /\|\| true/);
-  assert.match(run, /trap rollback_transaction EXIT/);
+  const cas = run.indexOf("catalog-cli.mjs promote");
+  assert.ok(snapshot >= 0 && snapshot < github && github < cas);
+  assert.match(run, /trap cleanup_credentials EXIT/);
   assert.match(run, /trap 'exit 129' HUP/);
-  assert.match(run, /github_may_have_changed=true[\s\S]*gh release upload station-beta-channel/);
-  assert.match(run, /yandex_may_have_changed=true[\s\S]*yandex-publisher\.mjs promote/);
-  const rollback = run.slice(
-    run.indexOf("rollback_transaction()"),
-    run.indexOf("trap rollback_transaction EXIT"),
-  );
-  assert.ok(rollback);
-  assert.ok(
-    rollback.indexOf("yandex-publisher.mjs rollback") <
-      rollback.indexOf("station-github-channel-backup/latest.json"),
-  );
-  assert.ok(
-    rollback.indexOf("yandex-publisher.mjs rollback") <
-      rollback.lastIndexOf("unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN"),
-  );
-  assert.match(rollback, /station-github-rollback-verify/);
-  assert.match(
-    rollback,
-    /download-channel-exact beta[\s\\]*"\$RUNNER_TEMP\/station-github-channel-backup\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-github-rollback-verify\/latest\.json"/,
-  );
-  assert.match(
-    rollback,
-    /if ! rm -rf "\$RUNNER_TEMP\/station-github-rollback-verify" \|\|[\s\S]*! mkdir "\$RUNNER_TEMP\/station-github-rollback-verify"/,
-  );
-  assert.match(rollback, /station release mutable restoration failed/);
-  assert.match(rollback, /github_channel_preexisting[\s\S]*gh release delete station-beta-channel/);
-  assert.match(run, /yandex-publisher\.mjs seed-baseline[\s\S]*--confirm-empty-channel-bootstrap/);
-  assert.match(run, /SEED_INFRASTRUCTURE_EVIDENCE/);
-  assert.match(run, /station-bootstrap-record\.json/);
-  assert.match(run, /station-yandex-seed-backup/);
-  assert.match(run, /station-beta-channel[\s\S]*latest\.json/);
-  assert.match(
-    run,
-    /gh release upload station-beta-channel[^\n]*[\s\S]*\$RUNNER_TEMP\/station-github-channel-upload\/latest\.json" --clobber/,
-  );
+  assert.match(run, /download-channel-exact beta/);
+  assert.match(run, /catalog-cli\.mjs verify-channel/);
+  assert.match(run, /cmp "\$RUNNER_TEMP\/station-yandex-channel-verify\/download"/);
   assert.doesNotMatch(
     run,
-    /gh release upload station-beta-channel[\s\S]*station-beta-latest\.json/,
-  );
-  assert.match(
-    run,
-    /if \[ "\$\{\{ inputs\.mode \}\}" = "seed-baseline" \]; then[\s\S]*gh release create station-beta-channel[\s\S]*else[\s\S]*gh release upload station-beta-channel/,
-  );
-  assert.doesNotMatch(run, /delete-object|DeleteObject/);
-  assert.equal((run.match(/download-channel beta/g) ?? []).length, 1);
-  assert.equal((run.match(/download-channel-exact beta/g) ?? []).length, 2);
-  assert.match(
-    run,
-    /download-channel-exact beta[\s\\]*"\$github_tree\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-github-channel-verify\/latest\.json"/,
-  );
-  assert.doesNotMatch(run, /gh release download station-beta-channel/);
-  assert.match(
-    run,
-    /beta-transition[\s\\]*"\$RUNNER_TEMP\/station-beta-release-summary\.json" restored/,
-  );
-  assert.match(
-    run,
-    /beta-transition[\s\\]*"\$RUNNER_TEMP\/station-beta-release-summary\.json" restoration-failed/,
+    /rollback_transaction|catalog-cli\.mjs rollback|gh release delete|DeleteObject|delete-object/,
   );
 });
 
@@ -512,8 +440,6 @@ test("beta terminal summary is initialized early, tracks every boundary, and alw
     "github-manifest-promoted",
     "yandex-manifest-promoted",
     "all-promoted",
-    "restored",
-    "restoration-failed",
   ]) {
     assert.match(promote.run, new RegExp(event));
   }
@@ -528,7 +454,7 @@ test("beta terminal summary is initialized early, tracks every boundary, and alw
   assert.ok(Buffer.byteLength(summary.run) < 8192);
 });
 
-test("seed and normal modes use disjoint publisher branches under one compensation trap", async () => {
+test("legacy seed is blocked before publication while normal mode uses catalog CAS", async () => {
   const workflow = load(await source());
   const step = workflow.jobs.release.steps.find(
     (candidate) => candidate.name === "Promote beta mutable targets",
@@ -541,7 +467,7 @@ test("seed and normal modes use disjoint publisher branches under one compensati
   const seedPreflightBranch = run.slice(branchStart, branchElse);
   const normalBackupBranch = run.slice(branchElse, branchEnd);
   assert.match(seedPreflightBranch, /preflight-seed-mutables/);
-  assert.doesNotMatch(seedPreflightBranch, /backup-mutables|yandex-publisher\.mjs promote/);
+  assert.doesNotMatch(seedPreflightBranch, /backup-mutables|catalog-cli\.mjs promote/);
   assert.match(normalBackupBranch, /backup-mutables/);
   assert.doesNotMatch(normalBackupBranch, /preflight-seed-mutables|seed-baseline/);
 
@@ -550,11 +476,17 @@ test("seed and normal modes use disjoint publisher branches under one compensati
   const seedPromotionEnd = run.indexOf("fi", seedPromotionElse);
   const seedPromotionBranch = run.slice(seedPromotionStart, seedPromotionElse);
   const normalPromotionBranch = run.slice(seedPromotionElse, seedPromotionEnd);
-  assert.match(seedPromotionBranch, /yandex-publisher\.mjs seed-baseline/);
-  assert.doesNotMatch(seedPromotionBranch, /yandex-publisher\.mjs promote\s/);
-  assert.match(normalPromotionBranch, /yandex-publisher\.mjs promote\s/);
-  assert.doesNotMatch(normalPromotionBranch, /yandex-publisher\.mjs seed-baseline/);
-  assert.ok(run.indexOf("trap rollback_transaction EXIT") < seedPromotionStart);
+  assert.match(seedPromotionBranch, /catalog-cli\.mjs seed-baseline/);
+  assert.doesNotMatch(seedPromotionBranch, /catalog-cli\.mjs promote\s/);
+  assert.match(normalPromotionBranch, /catalog-cli\.mjs promote\s/);
+  assert.doesNotMatch(normalPromotionBranch, /catalog-cli\.mjs seed-baseline/);
+  const guard = workflow.jobs.release.steps.find(
+    (s) => s.name === "Require reviewed catalog history for legacy baseline",
+  );
+  assert.equal(guard.if, "inputs.mode == 'seed-baseline'");
+  assert.match(guard.run, /exit 1/);
+  assert.ok(workflow.jobs.release.steps.indexOf(guard) < workflow.jobs.release.steps.indexOf(step));
+  assert.doesNotMatch(run, /rollback_transaction/);
 });
 
 test("validates raw and wrapped Tauri keys without rewriting them", async () => {

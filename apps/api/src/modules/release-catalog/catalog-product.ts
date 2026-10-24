@@ -27,6 +27,7 @@ export interface ProductAcceptance extends Record<string, unknown> {
   protocol?: number;
   minProtocol?: number;
   minUpgradeFrom?: string;
+  kid?: string;
   evidence?: Record<string, unknown>;
 }
 /** Inputs are full-hash verified leases, never caller-supplied metadata or current S3 heads. */
@@ -114,7 +115,15 @@ export async function assertProductPublication(
       (await text(manifestName)).trim(),
       keyset,
     );
-    if (!verification.ok) throw new CatalogFault("conflict");
+    if (!verification.ok) {
+      const detail =
+        verification.reason === "unknown_key"
+          ? "standalone_release_manifest_unknown_key"
+          : verification.reason === "bad_signature"
+            ? "standalone_release_manifest_bad_signature"
+            : "standalone_release_manifest_malformed";
+      throw new CatalogFault("conflict", detail);
+    }
     const { manifest } = verification;
     const installer = file(installerName);
     if (
@@ -122,12 +131,15 @@ export async function assertProductPublication(
       manifest.channel !== identity.channel ||
       manifest.version !== identity.version ||
       manifest.sourceSha !== request.sourceSha ||
-      manifest.installer.name !== installerName ||
-      manifest.installer.sha256 !== installer.sha256 ||
-      manifest.installer.sizeBytes !== installer.sizeBytes ||
-      installer.sizeBytes > 268435456
+      manifest.installer.name !== installerName
     )
-      fail();
+      throw new CatalogFault("conflict", "standalone_release_manifest_mismatch");
+    if (installer.sizeBytes > 268435456 || manifest.installer.sizeBytes > 268435456)
+      throw new CatalogFault("conflict", "standalone_release_installer_too_large");
+    if (manifest.installer.sizeBytes !== installer.sizeBytes)
+      throw new CatalogFault("conflict", "standalone_release_installer_size_mismatch");
+    if (manifest.installer.sha256 !== installer.sha256)
+      throw new CatalogFault("conflict", "standalone_release_installer_hash_mismatch");
     const url = (name: string) => `https://releases.markiro.app${derivePublicPath(identity, name)}`;
     const pointer = standaloneLatestPointerSchema.parse({
       v: 1,
@@ -147,6 +159,7 @@ export async function assertProductPublication(
       product: "standalone",
       version: identity.version,
       sourceSha: request.sourceSha,
+      kid: verification.kid,
       protocol: manifest.protocol,
       minProtocol: manifest.minProtocol,
       minUpgradeFrom: manifest.minUpgradeFrom,

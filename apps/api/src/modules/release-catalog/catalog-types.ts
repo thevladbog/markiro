@@ -1,4 +1,4 @@
-import type { ReleaseFileSpec } from "@markiro/platform-contracts";
+import type { StandaloneReleaseErrorCode, ReleaseFileSpec } from "@markiro/platform-contracts";
 
 export interface VerifiedInputFile {
   spec: ReleaseFileSpec;
@@ -31,6 +31,7 @@ export class CatalogFault extends Error {
   constructor(
     readonly code:
       "invalid_request" | "forbidden" | "conflict" | "not_found" | "not_ready" | "unavailable",
+    readonly detail?: StandaloneReleaseErrorCode,
   ) {
     super(`release catalog: ${code}`);
   }

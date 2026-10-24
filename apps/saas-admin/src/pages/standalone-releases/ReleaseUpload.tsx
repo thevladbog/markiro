@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { StandaloneReleaseChannel } from "@markiro/platform-contracts";
+import type {
+  StandaloneReleaseChannel,
+  StandaloneReleaseUpload,
+} from "@markiro/platform-contracts";
 import { Alert, Button, Card, DefinitionGrid, FileDropZone } from "@markiro/ui";
 
 import {
+  BucketUploadError,
   putToReleaseBucket,
   registerStandaloneRelease,
   requestStandaloneReleaseUpload,
@@ -47,6 +51,12 @@ export function ReleaseUpload({ onSettled }: { onSettled: () => void }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const abortRef = useRef<AbortController | null>(null);
   const readSequence = useRef(0);
+  const attemptRef = useRef<{
+    idempotencyKey: string;
+    upload?: StandaloneReleaseUpload;
+    manifestDone: boolean;
+    installerDone: boolean;
+  } | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -69,6 +79,7 @@ export function ReleaseUpload({ onSettled }: { onSettled: () => void }) {
     issues.every((issue) => !issue.blocking);
 
   const choose = (file: File) => {
+    attemptRef.current = null;
     setStage({ kind: "idle" });
     const name = file.name.toLowerCase();
     if (name.endsWith(".jws")) {
@@ -86,6 +97,7 @@ export function ReleaseUpload({ onSettled }: { onSettled: () => void }) {
   };
 
   const reset = () => {
+    attemptRef.current = null;
     readSequence.current += 1;
     setManifest(null);
     setInstaller(null);
@@ -109,26 +121,59 @@ export function ReleaseUpload({ onSettled }: { onSettled: () => void }) {
     let operation: ReleaseOperation = "upload";
     setStage({ kind: "working", step: "preparing", manifest: 0, installer: 0 });
     try {
-      const upload = await requestStandaloneReleaseUpload(target);
+      const attempt = attemptRef.current ?? {
+        idempotencyKey: crypto.randomUUID(),
+        manifestDone: false,
+        installerDone: false,
+      };
+      attemptRef.current = attempt;
+      if (!attempt.upload) {
+        const describe = async (file: File, max: number) => {
+          if (file.size < 1 || file.size > max) throw new Error("Release file exceeds limit");
+          const bytes = await file.arrayBuffer();
+          const digest = await crypto.subtle.digest("SHA-256", bytes);
+          return {
+            sizeBytes: file.size,
+            sha256: Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join(
+              "",
+            ),
+          };
+        };
+        const manifestDescriptor = await describe(manifest.file, 64 * 1024);
+        const installerDescriptor = await describe(installer, 256 * 1024 * 1024);
+        if (controller.signal.aborted) throw new BucketUploadError("aborted");
+        attempt.upload = await requestStandaloneReleaseUpload({
+          ...target,
+          idempotencyKey: attempt.idempotencyKey,
+          sourceSha: preview.sourceSha,
+          manifest: manifestDescriptor,
+          installer: installerDescriptor,
+        });
+      }
+      const upload = attempt.upload;
       setStage({ kind: "working", step: "manifest", manifest: 0, installer: 0 });
-      await putToReleaseBucket({
-        url: upload.manifest.uploadUrl,
-        contentType: upload.manifest.contentType,
-        file: manifest.file,
-        signal: controller.signal,
-        onProgress: progress("manifest"),
-      });
+      if (!attempt.manifestDone)
+        await putToReleaseBucket({
+          url: upload.manifest.uploadUrl,
+          contentType: upload.manifest.contentType,
+          file: manifest.file,
+          signal: controller.signal,
+          onProgress: progress("manifest"),
+        });
+      attempt.manifestDone = true;
       setStage({ kind: "working", step: "installer", manifest: 100, installer: 0 });
-      await putToReleaseBucket({
-        url: upload.installer.uploadUrl,
-        contentType: upload.installer.contentType,
-        file: installer,
-        signal: controller.signal,
-        onProgress: progress("installer"),
-      });
+      if (!attempt.installerDone)
+        await putToReleaseBucket({
+          url: upload.installer.uploadUrl,
+          contentType: upload.installer.contentType,
+          file: installer,
+          signal: controller.signal,
+          onProgress: progress("installer"),
+        });
+      attempt.installerDone = true;
       operation = "register";
       setStage({ kind: "working", step: "registering", manifest: 100, installer: 100 });
-      const result = await registerStandaloneRelease(target);
+      const result = await registerStandaloneRelease({ intentId: upload.intentId });
       setStage({ kind: "done", outcome: result.outcome, ...target });
     } catch (error) {
       setStage({

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +7,10 @@ import i18n from "../src/i18n/index.js";
 import { ACCOUNTANT_ME, renderSaasApp, SUPPORT_ME } from "./render.js";
 import {
   BETA_VIEW,
+  SOURCE_SHA,
+  UPLOAD_INTENT,
+  PENDING_INTENT,
+  INSTALLER_BYTES,
   type FakeXhr,
   installerFile,
   installFakeXhr,
@@ -155,7 +160,16 @@ describe("standalone releases pointer", () => {
     await user.click(within(dialog).getByRole("button", { name: "Сделать последней" }));
     await waitFor(() =>
       expect(api.writes()).toEqual([
-        { url: `${BASE}/stable/latest`, method: "PUT", body: { version: "0.5.0" } },
+        {
+          url: `${BASE}/stable/latest`,
+          method: "PUT",
+          body: {
+            version: "0.5.0",
+            operationId: expect.any(String),
+            expectedRevision: "7",
+            kind: "forward",
+          },
+        },
       ]),
     );
     expect(await screen.findByText("Последняя версия канала «Стабильный» — 0.5.0.")).toBeDefined();
@@ -177,9 +191,45 @@ describe("standalone releases pointer", () => {
 
     await waitFor(() =>
       expect(api.writes()).toEqual([
-        { url: `${BASE}/stable/latest`, method: "PUT", body: { version: "0.3.0" } },
+        {
+          url: `${BASE}/stable/latest`,
+          method: "PUT",
+          body: {
+            version: "0.3.0",
+            operationId: expect.any(String),
+            expectedRevision: "7",
+            kind: "rollback",
+          },
+        },
       ]),
     );
+  });
+
+  it("retries an ambiguous pointer response with exactly the same operation and revision", async () => {
+    const api = installStandaloneReleasesApi({
+      latestStatus: 503,
+      latestError: "standalone_releases_storage_unavailable",
+    });
+    const user = userEvent.setup();
+    await openPage();
+    const stable = await screen.findByRole("region", { name: "Стабильный канал" });
+    await user.click(
+      within(rowOf(stable, "0.5.0")).getByRole("button", { name: "Сделать последней" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: "Сделать последней" });
+    await user.click(confirm);
+    await within(dialog).findByText(/Хранилище выпусков сейчас недоступно/);
+    expect(api.writes()).toHaveLength(1);
+    const first = structuredClone(api.writes()[0]?.body);
+    await user.click(confirm);
+    await waitFor(() => expect(api.writes()).toHaveLength(2));
+    expect(first).toMatchObject({
+      expectedRevision: "7",
+      operationId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+      kind: "forward",
+    });
+    expect(api.writes()[1]?.body).toEqual(first);
   });
 
   it("keeps the dialog open with the integrity refusal", async () => {
@@ -215,7 +265,7 @@ describe("standalone releases pending versions", () => {
         {
           url: `${BASE}/registrations`,
           method: "POST",
-          body: { channel: "stable", version: "0.6.0" },
+          body: { intentId: PENDING_INTENT },
         },
       ]),
     );
@@ -243,7 +293,22 @@ describe("standalone release upload", () => {
       expect(api.writes()[0]).toEqual({
         url: `${BASE}/uploads`,
         method: "POST",
-        body: { channel: "stable", version: "0.7.0" },
+        body: {
+          channel: "stable",
+          version: "0.7.0",
+          sourceSha: SOURCE_SHA,
+          idempotencyKey: expect.stringMatching(/^[a-f0-9-]{36}$/),
+          installer: {
+            sha256: createHash("sha256").update(INSTALLER_BYTES).digest("hex"),
+            sizeBytes: INSTALLER_BYTES.length,
+          },
+          manifest: {
+            sha256: createHash("sha256")
+              .update(manifestJws() + "\n")
+              .digest("hex"),
+            sizeBytes: new TextEncoder().encode(manifestJws() + "\n").length,
+          },
+        },
       }),
     );
 
@@ -278,9 +343,34 @@ describe("standalone release upload", () => {
     expect(api.writes()[1]).toEqual({
       url: `${BASE}/registrations`,
       method: "POST",
-      body: { channel: "stable", version: "0.7.0" },
+      body: { intentId: UPLOAD_INTENT },
     });
     await waitFor(() => expect(api.lists().length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("retries ambiguous registration without repeating PUTs or allocating a new intent", async () => {
+    const api = installStandaloneReleasesApi({
+      registerStatus: 503,
+      registerError: "standalone_releases_storage_unavailable",
+    });
+    const xhr = installFakeXhr("auto");
+    const user = userEvent.setup();
+    await openPage();
+    await screen.findByRole("region", { name: "Стабильный канал" });
+    await chooseFiles(user, [manifestFile(), installerFile()]);
+    const submit = screen.getByRole("button", { name: "Загрузить и проверить" });
+    await user.click(submit);
+    await screen.findByText(/Хранилище выпусков сейчас недоступно/);
+    expect(xhr.instances).toHaveLength(2);
+    await user.click(submit);
+    await waitFor(() => expect(api.writes()).toHaveLength(3));
+    expect(api.writes().map((x) => x.url)).toEqual([
+      `${BASE}/uploads`,
+      `${BASE}/registrations`,
+      `${BASE}/registrations`,
+    ]);
+    expect(api.writes()[2]?.body).toEqual({ intentId: UPLOAD_INTENT });
+    expect(xhr.instances).toHaveLength(2);
   });
 
   it("reports an already registered identical version", async () => {
@@ -379,7 +469,7 @@ describe("standalone release upload", () => {
     await chooseFiles(user, [manifestFile(), installerFile()]);
     await user.click(await screen.findByRole("button", { name: "Загрузить и проверить" }));
     expect(await screen.findByText(message)).toBeDefined();
-    expect(screen.getByText(/Файлы этой попытки удалены из хранилища/)).toBeDefined();
+    expect(screen.getByText(/Файлы этой попытки сохранены/)).toBeDefined();
   });
 
   it.each([
@@ -474,7 +564,11 @@ describe("standalone release upload", () => {
     expect(within(preview).getByText("Бета")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Загрузить и проверить" }));
     await waitFor(() =>
-      expect(api.writes()[0]?.body).toEqual({ channel: "beta", version: "0.8.0" }),
+      expect(api.writes()[0]?.body).toMatchObject({
+        channel: "beta",
+        version: "0.8.0",
+        sourceSha: SOURCE_SHA,
+      }),
     );
   });
 });

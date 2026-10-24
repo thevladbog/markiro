@@ -8,6 +8,8 @@ const MACHINE_ROUTES: readonly string[] = [
   "GET /release-publisher/intents/:id (CatalogPublisherController.get)",
   "POST /release-publisher/intents/:id/commit (CatalogPublisherController.commit)",
   "PUT /release-publisher/channels/:product/:channel (CatalogPublisherController.change)",
+  "GET /release-publisher/publications/:product/:channel/:version (CatalogPublisherController.publication)",
+  "GET /release-publisher/channels/:product/:channel (CatalogPublisherController.channel)",
 ];
 import { PublicApiGuard, PUBLIC_API_SCOPE } from "../src/modules/public-api/public-api.guard";
 import type { Type } from "@nestjs/common";

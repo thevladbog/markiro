@@ -300,6 +300,16 @@ describe.skipIf(!url)("catalog publication with real DB, cache and durable journ
     const f = await setup();
     expect(await f.repo.readSnapshot("/handheld/download")).toBeNull();
     const pub = await f.service.commitIntent(f.caller, f.intent.id, { files: f.files });
+    const next = {
+      ...f.caller,
+      principal: { fingerprint: "9".repeat(64), tokenHash: "8".repeat(64) },
+    };
+    await expect(f.service.getIntent(next, f.intent.id)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(
+      f.service.commitIntent(next, f.intent.id, { files: f.files }),
+    ).rejects.toMatchObject({ code: "forbidden" });
     const scope = { product: "handheld", channel: "stable" };
     const change = {
       operationId: randomUUID(),
@@ -308,8 +318,8 @@ describe.skipIf(!url)("catalog publication with real DB, cache and durable journ
       kind: "forward",
     };
     const results = await Promise.allSettled([
-      f.service.changeChannel(f.caller, scope, change),
-      f.service.changeChannel(f.caller, scope, { ...change, operationId: randomUUID() }),
+      f.service.changeChannel(next, scope, change),
+      f.service.changeChannel(next, scope, { ...change, operationId: randomUUID() }),
     ]);
     expect(results.filter((v) => v.status === "fulfilled")).toHaveLength(1);
     expect(await f.repo.readChannel(scope)).toMatchObject({
@@ -319,15 +329,24 @@ describe.skipIf(!url)("catalog publication with real DB, cache and durable journ
     });
     const winner = results[0]?.status === "fulfilled" ? change : null;
     if (winner)
-      expect(await f.service.changeChannel(f.caller, scope, winner)).toMatchObject({
+      expect(await f.service.changeChannel(next, scope, winner)).toMatchObject({
         revision: "1",
       });
     await expect(
-      f.service.changeChannel(f.caller, scope, {
+      f.service.changeChannel(next, scope, {
         ...change,
         pointer: { url: "https://evil.invalid" },
       }),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      f.service.changeChannel({ ...next, product: "station" }, scope, change),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      f.service.createIntent(next, randomUUID(), {
+        ...f.request,
+        identity: { ...f.request.identity, version: "1.8.0" },
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
     const file = pub.files.find((v) => v.name.endsWith(".apk"));
     if (!file) throw new Error();
     expect(await f.repo.readSnapshot(file.publicPath)).toMatchObject({

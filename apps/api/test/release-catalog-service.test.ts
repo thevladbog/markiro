@@ -38,12 +38,14 @@ describe("publisher controllers fail closed without configured storage", () => {
   afterAll(async () => {
     await app?.close();
   });
-  it("all four actual routes require machine authentication and configured catalog", async () => {
+  it("all actual routes require machine authentication and configured catalog", async () => {
     for (const [method, path] of [
       ["post", "/release-publisher/intents"],
       ["post", `/release-publisher/intents/${randomUUID()}/commit`],
       ["get", `/release-publisher/intents/${randomUUID()}`],
       ["put", "/release-publisher/channels/station/stable"],
+      ["get", "/release-publisher/channels/station/stable"],
+      ["get", "/release-publisher/publications/station/stable/1.0.0"],
     ] as const) {
       await request(app.getHttpServer())[method](path).expect(403);
       await request(app.getHttpServer())
@@ -62,7 +64,7 @@ describe("publisher controllers fail closed without configured storage", () => {
         )
         .build(),
     );
-    expect(Object.keys(doc.paths)).toHaveLength(4);
+    expect(Object.keys(doc.paths)).toHaveLength(5);
     expect(doc.paths["/release-publisher/intents"]?.post?.security).toEqual([
       { releasePublisherOidc: [] },
     ]);
