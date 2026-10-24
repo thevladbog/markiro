@@ -191,7 +191,7 @@ it("Station accepts canonical full evidence and refuses forged product provenanc
   );
   const publication: PublicationRequest = {
     identity: { product: "station", channel: "beta", version },
-    sourceSha,
+    sourceSha: evidence.releaseSha,
     files: [...files.values()].map((f) => f.spec),
     evidence: {
       kind: "station",
@@ -201,6 +201,10 @@ it("Station accepts canonical full evidence and refuses forged product provenanc
   };
   const result = await assertProductPublication(publication, files);
   expect(result.pointer).toEqual(manifest);
+  expect(result.sourceSha).toBe(evidence.releaseSha);
+  await expect(
+    assertProductPublication({ ...publication, sourceSha: evidence.baseSha }, files),
+  ).rejects.toMatchObject({ code: "conflict" });
   await expect(
     assertProductPublication({ ...publication, sourceSha: "c".repeat(40) }, files),
   ).rejects.toMatchObject({ code: "conflict" });

@@ -97,7 +97,7 @@ export async function assertProductPublication(
         { channel: identity.channel, origin: "yandex", version: identity.version },
       );
       const evidence = record.parse(checked.evidence);
-      if (evidence.baseSha !== request.sourceSha) fail();
+      if (evidence.releaseSha !== request.sourceSha) fail();
       return {
         product: "station",
         version: identity.version,
