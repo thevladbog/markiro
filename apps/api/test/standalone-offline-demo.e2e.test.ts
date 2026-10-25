@@ -331,25 +331,27 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const f = await offlineSite();
       for (const termDays of [0, 46, 1.5, -3])
         for (const call of [
-          issuance.preview(f.admin, f.tenantId, f.site.id, {
-            graceDays: null,
-            offline: null,
-            demo: { termDays },
-          }),
-          issuance.confirm(f.admin, f.tenantId, f.site.id, {
-            requestId: randomUUID(),
-            graceDays: null,
-            offline: null,
-            demo: { termDays },
-            expected: {
-              entitlementRevision: "0",
-              previousSequence: 0,
-              boundaryAt: null,
-              termsDigest: "a".repeat(64),
-            },
-          }),
+          () =>
+            issuance.preview(f.admin, f.tenantId, f.site.id, {
+              graceDays: null,
+              offline: null,
+              demo: { termDays },
+            }),
+          () =>
+            issuance.confirm(f.admin, f.tenantId, f.site.id, {
+              requestId: randomUUID(),
+              graceDays: null,
+              offline: null,
+              demo: { termDays },
+              expected: {
+                entitlementRevision: "0",
+                previousSequence: 0,
+                boundaryAt: null,
+                termsDigest: "a".repeat(64),
+              },
+            }),
         ])
-          expect(await httpRefusal(call)).toEqual({
+          expect(await httpRefusal(call())).toEqual({
             status: 400,
             body: { code: "standalone_license_demo_term_invalid" },
           });

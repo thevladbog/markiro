@@ -201,6 +201,15 @@ export function rehearsalFailure(phase, error) {
   // Reduce private stderr to a fixed category; never publish any matching text.
   const stderr = typeof error.stderr === "string" ? error.stderr : "";
   const reasons = [
+    [/\bopen \/tmp\/forward-worker\.tar: no such file or directory\b/iu, "worker-archive-missing"],
+    [
+      /\bopen \/var\/lib\/docker\/tmp\/docker-import-[^\r\n]*: no such file or directory\b/iu,
+      "docker-import-file-missing",
+    ],
+    [
+      /\b(?:open|stat|lstat) \/var\/lib\/docker\/[^\r\n]*: no such file or directory\b/iu,
+      "docker-storage-file-missing",
+    ],
     [/\bno such file or directory\b/iu, "missing-path"],
     [/\b(?:operation not permitted|permission denied)\b/iu, "permission-denied"],
     [/\bread-only file system\b/iu, "read-only-filesystem"],

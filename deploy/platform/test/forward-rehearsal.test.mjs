@@ -327,3 +327,41 @@ test("synthetic wrapper never borrows cleanup proof for a later invocation witho
   );
   assert.match(result.stdout, /synthetic missing terminal result regression/u);
 });
+
+test("worker staging verifies the actual copied archive before its single load", async () => {
+  const { loadForwardWorkerArchive } = await import("../forward-ci-scenario.mjs");
+  const calls = [];
+  const sha256 = "a".repeat(64);
+  await loadForwardWorkerArchive({
+    archivePath: "/private/synthetic-worker.tar",
+    sha256,
+    containerId: "b".repeat(64),
+    outer: async (args) => calls.push(["outer", args]),
+    shell: async (args) => {
+      calls.push(["shell", args]);
+      return { stdout: `${sha256}  /tmp/forward-worker.tar\n` };
+    },
+    nested: async (args) => calls.push(["nested", args]),
+    progress: () => {},
+  });
+  assert.deepEqual(calls, [
+    ["outer", ["cp", "/private/synthetic-worker.tar", `${"b".repeat(64)}:/tmp/forward-worker.tar`]],
+    ["shell", ["sha256sum", "/tmp/forward-worker.tar"]],
+    ["nested", ["load", "--input", "/tmp/forward-worker.tar"]],
+  ]);
+  for (const result of ["", `${"c".repeat(64)}  /tmp/forward-worker.tar\n`]) {
+    let loads = 0;
+    await assert.rejects(
+      loadForwardWorkerArchive({
+        archivePath: "/private/synthetic-worker.tar",
+        sha256,
+        containerId: "b".repeat(64),
+        outer: async () => {},
+        shell: async () => ({ stdout: result }),
+        nested: async () => loads++,
+        progress: () => {},
+      }),
+    );
+    assert.equal(loads, 0);
+  }
+});

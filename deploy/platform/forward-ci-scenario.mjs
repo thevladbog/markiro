@@ -52,6 +52,24 @@ const put = async (path, value, mode = 0o600) => {
     { mode, flag: "wx" },
   );
 };
+/** Copy-readback is an independent boundary before Docker interprets any layers. */
+export async function loadForwardWorkerArchive({
+  archivePath,
+  sha256,
+  containerId,
+  outer,
+  shell,
+  nested,
+  progress,
+}) {
+  progress("copy current ICU worker archive");
+  await outer(["cp", archivePath, `${containerId}:/tmp/forward-worker.tar`], { timeout: 900000 });
+  progress("verify copied ICU worker archive");
+  const copied = await shell(["sha256sum", "/tmp/forward-worker.tar"]);
+  assert.equal(copied.stdout.trim(), `${sha256}  /tmp/forward-worker.tar`);
+  progress("load current ICU worker archive");
+  await nested(["load", "--input", "/tmp/forward-worker.tar"], { timeout: 900000 });
+}
 async function stage(context) {
   const {
     parent,
@@ -118,12 +136,15 @@ async function stage(context) {
   const archive = await hashArchive(exportRoot, join(exportRoot, "recovery-image.tar"));
   assert.equal(archive.sha256, manifest.archive.sha256);
   assert.equal(archive.bytes, manifest.archive.bytes);
-  progress("load current ICU worker archive");
-  await outer(
-    ["cp", join(exportRoot, "recovery-image.tar"), `${containerId}:/tmp/forward-worker.tar`],
-    { timeout: 900000 },
-  );
-  await nested(["load", "--input", "/tmp/forward-worker.tar"], { timeout: 900000 });
+  await loadForwardWorkerArchive({
+    archivePath: join(exportRoot, "recovery-image.tar"),
+    sha256: manifest.archive.sha256,
+    containerId,
+    outer,
+    shell,
+    nested,
+    progress,
+  });
   progress("verify current ICU worker image");
   const worker = await inspect("image", manifest.image.id);
   assert.equal(worker.Id, manifest.image.id);

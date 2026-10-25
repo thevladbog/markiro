@@ -18,6 +18,8 @@ const failurePhases = new Set([
   "partial creation requires exact inspection",
   "verify current ICU worker source closure",
   "verify current ICU worker archive",
+  "copy current ICU worker archive",
+  "verify copied ICU worker archive",
   "load current ICU worker archive",
   "verify current ICU worker image",
   "stage accepted API image",
@@ -82,6 +84,9 @@ const failureNames = new Set([
 const failureExecutables = new Set(["docker", "git", "openssl", "which", "tar"]);
 const failureReasons = new Set([
   "missing-path",
+  "worker-archive-missing",
+  "docker-import-file-missing",
+  "docker-storage-file-missing",
   "permission-denied",
   "read-only-filesystem",
   "capacity",

@@ -412,3 +412,30 @@ test("safe docker load diagnostics recognize native errors without publishing pr
   assert.equal(unknown.processReason, null);
   assert.doesNotMatch(JSON.stringify(unknown), /NEVER_PUBLISH|private/);
 });
+
+test("missing-path diagnostics distinguish fixed staging boundaries without exposing paths", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { forwardRehearsalFailure } = await import("../forward-ci.mjs");
+  for (const [stderr, expected] of [
+    ["open /tmp/forward-worker.tar: no such file or directory", "worker-archive-missing"],
+    [
+      "open /var/lib/docker/tmp/docker-import-123456789/blobs/sha256/PRIVATE/json: no such file or directory",
+      "docker-import-file-missing",
+    ],
+    [
+      "open /var/lib/docker/vfs/dir/PRIVATE: no such file or directory",
+      "docker-storage-file-missing",
+    ],
+    ["stat /private/NEVER_PUBLISH: no such file or directory", "missing-path"],
+  ]) {
+    const problem = rehearsalFailure("load current ICU worker archive", {
+      code: 1,
+      rehearsalCommand: "docker exec",
+      rehearsalExecutable: "docker",
+      stderr,
+    });
+    assert.equal(problem.processReason, expected);
+    assert.equal(forwardRehearsalFailure(problem).processReason, expected);
+    assert.ok(!JSON.stringify(problem).includes("PRIVATE"));
+  }
+});
