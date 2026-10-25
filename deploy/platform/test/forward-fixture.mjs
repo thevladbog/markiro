@@ -123,10 +123,14 @@ export function forwardFixture(options = {}) {
   const failedBytes = Object.fromEntries(
     Object.entries(records).map(([k, v]) => [k, upgradeBytes(v)]),
   );
-  const identity = structuredClone(u.input.identity);
-  identity.operationId = options.operationId ?? hostIdentity().operationId;
-  identity.executorSha = "f".repeat(40);
-  identity.configurationSha256 = options.candidateConfigurationSha256 ?? "d".repeat(64);
+  const identity = structuredClone(options.newIdentity ?? u.input.identity);
+  identity.operationId =
+    options.newIdentity?.operationId ?? options.operationId ?? hostIdentity().operationId;
+  identity.executorSha = options.newIdentity?.executorSha ?? "f".repeat(40);
+  identity.configurationSha256 =
+    options.newIdentity?.configurationSha256 ??
+    options.candidateConfigurationSha256 ??
+    "d".repeat(64);
   const productMigrationProof = buildProductMigrationProof({
     ...proofInput(),
     productSha: identity.admission.manifest.sourceSha,

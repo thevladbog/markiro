@@ -8,6 +8,9 @@ const confirmations = new WeakMap();
 const records = new WeakSet();
 const codes = new Set([
   "ERR_HOST_FAILURE",
+  "ERR_HOST_FORWARD_PRODUCT",
+  "ERR_HOST_FORWARD_ADMISSION",
+  "ERR_HOST_FORWARD_PREPARATION",
   "ERR_HOST_PROCESS",
   "ERR_HOST_OBSERVATION",
   "ERR_HOST_PRIVATE_FILE",
@@ -76,6 +79,10 @@ const boundaries = new Set([
   "verifyImages",
   "verifyRoles",
   "inspectTarget",
+  "verifyAdmission",
+  "inspectSource",
+  "createBackup",
+  "backup-verification",
   "inspectStoppedOld",
   "inspectCandidate",
   "inspectSchema",
