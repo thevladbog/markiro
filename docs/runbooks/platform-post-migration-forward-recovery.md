@@ -33,7 +33,11 @@ The worker archive is staged inside the captured daemon volume under
 `/var/lib/docker/markiro-forward-worker.tar`. Its SHA is read back through the live
 container namespace before the single image load. DinD mounts a private tmpfs at
 `/tmp`; the outer Docker archive API and live processes can see different files
-there.
+there. The generated private tree therefore uses canonical Linux
+`RUNNER_TEMP=/home/runner/work/_temp` (macOS diagnostic base `/private/tmp`),
+with a fresh mode-0700 child. Other bases are refused. A non-secret byte probe
+must pass archive upload, live exec read and archive download before the tree
+or applications are used; later backup input/output copies share that base.
 
 Before application processes, the staging network is disconnected, IPv4/IPv6
 default routes are absent, and actual TCP egress must fail. No host socket or

@@ -701,18 +701,27 @@ async function runScenario(c, mode, checks) {
   await executeForwardPreparation(
     { root, admission, configuration: forwardOperation.configuration },
     {
-      verifyAdmission: (_context, cap) =>
-        withHeldForwardState(cap, async (held) => {
+      verifyAdmission: (_context, cap) => {
+        c.progress("forward preparation: verifyAdmission");
+        return withHeldForwardState(cap, async (held) => {
           await held.verify();
           await captureForwardRetained(
             { root, admission, postgresImageId: policy.postgresImageId, runProcess },
             cap,
           );
           return forwardIdentity;
-        }),
-      inspectSource: (_context, cap) => observers.inspectSource(cap),
-      inspectSchema: (_context, cap) => observers.inspectSchema(cap),
-      createBackup: async (_context, cap) => {
+        });
+      },
+      inspectSource: (_context, cap) => {
+        c.progress("forward preparation: inspectSource");
+        return observers.inspectSource(cap);
+      },
+      inspectSchema: (_context, cap) => {
+        c.progress("forward preparation: inspectSchema");
+        return observers.inspectSchema(cap);
+      },
+      createBackup: async (_context, cap, persistFailure) => {
+        c.progress("forward preparation: createBackup");
         backupResult = await createHeldForwardBackup(
           {
             operation: forwardOperation,
@@ -725,7 +734,7 @@ async function runScenario(c, mode, checks) {
           },
           cap,
           admission,
-          { ...deps, productMigrationProof: proof },
+          { ...deps, productMigrationProof: proof, beforeFailureCleanup: persistFailure },
         );
         return {
           backup: backupResult.backup,

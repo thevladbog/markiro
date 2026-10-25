@@ -462,3 +462,15 @@ test("forward transport preserves absent stdin instead of creating an undeclared
   });
   assert.equal(observed, true);
 });
+
+test("safe evidence retains finite forward preparation boundaries without projecting private strings", async () => {
+  const { forwardRehearsalFailure } = await load();
+  for (const boundary of ["verifyAdmission", "inspectSource", "inspectSchema", "createBackup"]) {
+    const phase = `forward preparation: ${boundary}`;
+    assert.equal(forwardRehearsalFailure({ phase }).phase, phase);
+  }
+  assert.equal(
+    forwardRehearsalFailure({ phase: "forward preparation: PRIVATE" }).phase,
+    "isolated forward rehearsal",
+  );
+});

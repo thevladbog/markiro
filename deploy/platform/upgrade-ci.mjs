@@ -47,6 +47,7 @@ import {
   captureRehearsalResources,
   validateRehearsalDaemon,
   validateRehearsalEnvironment,
+  rehearsalTemporaryBase,
   cleanupRehearsalResources,
 } from "./upgrade-ci-guards.mjs";
 const run = promisify(execFile);
@@ -113,6 +114,26 @@ export async function stageRehearsalTree(root, io) {
   return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
 
+// Fail before applications if archive-copy and live exec disagree on this
+// invocation's private directory. Probe bytes contain no configuration/secrets.
+export async function verifyRehearsalArchiveTransfer(parent, io) {
+  const source = join(parent, "archive-probe"),
+    result = join(parent, "archive-probe-readback");
+  const bytes = randomBytes(32);
+  await writeFile(source, bytes, { mode: 0o600, flag: "wx" });
+  await io.upload(source);
+  assert.deepEqual(await io.readLive(source), bytes);
+  await io.download(source, result);
+  const metadata = await lstat(result);
+  assert.equal(metadata.isFile(), true);
+  assert.equal(metadata.isSymbolicLink(), false);
+  assert.equal(metadata.nlink, 1);
+  assert.equal(metadata.uid, process.getuid());
+  assert.equal(metadata.size, bytes.length);
+  await chmod(result, 0o600);
+  assert.deepEqual(await readFile(result), bytes);
+}
+
 /** Restore the generated old database including its database-level privileges.
  * A restore into a manually recreated database omits these ACLs, including the
  * migrator's CREATE grant required by Drizzle even for an existing schema. */
@@ -167,7 +188,11 @@ export async function rehearseUpgrade(
   );
   assert.equal(typeof writeResult, "function");
   assert.deepEqual(argv, ["--local-ci"]);
-  const parent = await mkdtemp(join(await realpath("/tmp"), "markiro-upgrade-ci-"));
+  const temporaryBase = rehearsalTemporaryBase(
+    process.platform,
+    await realpath(process.env.RUNNER_TEMP ?? (process.platform === "darwin" ? "/tmp" : "")),
+  );
+  const parent = await mkdtemp(join(temporaryBase, "markiro-upgrade-ci-"));
   await chmod(parent, 0o700);
   const repository = await realpath(resolve("."));
   const invocationId = randomUUID(),
@@ -529,7 +554,7 @@ export async function rehearseUpgrade(
     delete values.MARKIRO_RELEASES_DOMAIN;
     delete values.MARKIRO_RELEASES_BUCKET;
     const generated = Object.freeze({ ...values });
-    validateRehearsalEnvironment(values, generated, parent);
+    validateRehearsalEnvironment(values, generated, parent, temporaryBase);
     progress("write and verify generated private configuration snapshots");
     const migrationUrl = `postgresql://markiro_migrator:${migratorPassword}@db.private/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt`;
     const config = (value) => createRehearsalConfiguration(root, value, migrationUrl);
@@ -552,6 +577,12 @@ export async function rehearseUpgrade(
     // Stream only the private generated tree, never bind a host path/socket.
     progress("stream and verify generated private tree in the isolated daemon");
     await shell(["mkdir", "-p", parent]);
+    await verifyRehearsalArchiveTransfer(parent, {
+      upload: (path) => outer(["cp", path, `${containerId}:${path}`]),
+      readLive: async (path) =>
+        (await outer(["exec", containerId, "cat", path], { encoding: "buffer" })).stdout,
+      download: (path, out) => outer(["cp", `${containerId}:${path}`, out]),
+    });
     evidence.privateTreeTransfer = await stageRehearsalTree(parent, {
       archive: async (directory) =>
         (await command("tar", ["-C", directory, "-cf", "-", "."], { encoding: "buffer" })).stdout,
@@ -802,7 +833,7 @@ export async function rehearseUpgrade(
         await verifyIsolation();
         for (const [file, sha] of Object.entries(closure))
           assert.equal(digest(await readFile(join(parent, file))), sha);
-        validateRehearsalEnvironment(values, generated, parent);
+        validateRehearsalEnvironment(values, generated, parent, temporaryBase);
       },
       runProcess: async (request) => {
         await verifyIsolation();

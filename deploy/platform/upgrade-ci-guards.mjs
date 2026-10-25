@@ -1,6 +1,7 @@
 import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
 /** Rehearsal-only isolation. Never imported by an installed host executor. */
 import assert from "node:assert/strict";
+import { basename, dirname } from "node:path";
 import { canonical } from "./backup/schemas.mjs";
 export const rehearsalLabel = "io.markiro.upgrade-rehearsal";
 export const rehearsalImages = Object.freeze({
@@ -79,9 +80,18 @@ export function validateRehearsalDaemon(observation, expected) {
   assert.equal(routes.ipv6.trim(), "");
   return actual;
 }
-export function validateRehearsalEnvironment(value, generated, root) {
+export function rehearsalTemporaryBase(platform, canonicalPath) {
+  // DinD dynamically mounts /tmp. Docker's archive API can see the hidden
+  // rootfs there while exec sees tmpfs. Use only known regular-rootfs bases.
+  assert.equal(canonicalPath, platform === "linux" ? "/home/runner/work/_temp" : "/private/tmp");
+  assert.ok(["linux", "darwin"].includes(platform));
+  return canonicalPath;
+}
+export function validateRehearsalEnvironment(value, generated, root, base) {
   same(value, generated);
-  assert.match(root, /^\/(?:private\/)?tmp\/markiro-upgrade-ci-[a-zA-Z0-9_-]+$/u);
+  assert.ok(["/home/runner/work/_temp", "/private/tmp"].includes(base));
+  assert.equal(dirname(root), base);
+  assert.match(basename(root), /^markiro-upgrade-ci-[a-zA-Z0-9_-]+$/u);
   for (const [key, v] of Object.entries(value)) {
     assert.equal(typeof v, "string");
     assert.ok(!/[\r\n\0]/u.test(v));

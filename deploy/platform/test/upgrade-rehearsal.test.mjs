@@ -64,7 +64,12 @@ const generated = {
 };
 test("only generated private fixture environment can enter the rehearsal", () => {
   assert.doesNotThrow(() =>
-    validateRehearsalEnvironment(generated, generated, "/private/tmp/markiro-upgrade-ci-example"),
+    validateRehearsalEnvironment(
+      generated,
+      generated,
+      "/private/tmp/markiro-upgrade-ci-example",
+      "/private/tmp",
+    ),
   );
   for (const [key, value] of [
     ["DATABASE_URL", "postgresql://prod:secret@201.34.136.19/markiro"],
@@ -77,6 +82,7 @@ test("only generated private fixture environment can enter the rehearsal", () =>
         { ...generated, [key]: value },
         generated,
         "/private/tmp/markiro-upgrade-ci-example",
+        "/private/tmp",
       ),
     );
 });
@@ -517,4 +523,63 @@ test("synthetic old database restore rejects lost or broadened database grants",
       nested: async () => ({ stdout: "" }),
     }),
   );
+});
+
+test("rehearsal uses only canonical regular-rootfs temp bases", async () => {
+  const { rehearsalTemporaryBase } = await import("../upgrade-ci-guards.mjs");
+  assert.equal(
+    rehearsalTemporaryBase("linux", "/home/runner/work/_temp"),
+    "/home/runner/work/_temp",
+  );
+  assert.equal(rehearsalTemporaryBase("darwin", "/private/tmp"), "/private/tmp");
+  for (const path of [
+    undefined,
+    "/tmp",
+    "/tmp/child",
+    "/run/a",
+    "/proc/a",
+    "/sys/a",
+    "/dev/a",
+    "/var/lib/docker/a",
+    "/home/runner/work/_temp/../other",
+  ])
+    assert.throws(() => rehearsalTemporaryBase("linux", path));
+  assert.throws(() => rehearsalTemporaryBase("darwin", "/tmp"));
+  const base = "/home/runner/work/_temp",
+    root = `${base}/markiro-upgrade-ci-example`;
+  const values = { ...generated, MARKIRO_POSTGRES_CA_FILE: `${root}/state/pg/ca.crt` };
+  assert.doesNotThrow(() => validateRehearsalEnvironment(values, values, root, base));
+  for (const invalid of [
+    `${base}/foreign`,
+    `${base}/other/markiro-upgrade-ci-example`,
+    `${base}-other/markiro-upgrade-ci-example`,
+  ])
+    assert.throws(() => validateRehearsalEnvironment(values, values, invalid, base));
+});
+
+test("archive transfer probe rejects mount-namespace disagreement in either direction", async () => {
+  const { verifyRehearsalArchiveTransfer } = await import("../upgrade-ci.mjs");
+  const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "markiro-transfer-test-"));
+  for (const mode of ["good", "hidden-upload", "hidden-download"]) {
+    let live;
+    const directory = join(root, mode);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(directory, { mode: 0o700 });
+    const io = {
+      upload: async (p) => {
+        live = mode === "hidden-upload" ? Buffer.alloc(0) : await readFile(p);
+      },
+      readLive: async () => live,
+      download: async (_p, out) =>
+        writeFile(out, mode === "hidden-download" ? Buffer.alloc(0) : live, {
+          flag: "wx",
+          mode: 0o600,
+        }),
+    };
+    if (mode === "good") await verifyRehearsalArchiveTransfer(directory, io);
+    else await assert.rejects(verifyRehearsalArchiveTransfer(directory, io));
+  }
 });

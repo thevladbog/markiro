@@ -52,6 +52,11 @@ const failurePhases = new Set([
   "execute exact candidate migrations",
   "complete synthetic migration latch",
   "verify exact failed synthetic migration state",
+  "forward preparation performs actual source dump, isolated restore, cleanup and Linux index handoff",
+  "forward preparation: verifyAdmission",
+  "forward preparation: inspectSource",
+  "forward preparation: inspectSchema",
+  "forward preparation: createBackup",
 ]);
 const failureCodes = new Set([
   "FORWARD_REHEARSAL_FAILED",
