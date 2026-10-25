@@ -262,3 +262,59 @@ test("known pre-migration release failure cleans probes under integrity-only rec
   );
   assert.equal((await f.state()).migrationEntered, false);
 });
+
+function clockedObservations(t, f) {
+  const clock = { now: Date.now() };
+  t.mock.method(Date, "now", () => clock.now);
+  for (const [adapter, method] of [
+    [f.adapters.workload, "inspect"],
+    [f.adapters.writerFence, "observe"],
+  ]) {
+    const observe = adapter[method];
+    adapter[method] = async (...args) => ({
+      ...(await observe(...args)),
+      observedAt: new Date(clock.now).toISOString(),
+    });
+  }
+  return clock;
+}
+
+test("slow pre-command schema checks are followed by fresh cleanup and fence observations", async (t) => {
+  const f = await fixture(t);
+  const clock = clockedObservations(t, f);
+  let releaseVerified = false;
+  let delayed = false;
+  const release = f.adapters.verifyRelease;
+  f.adapters.verifyRelease = async (...args) => {
+    await release(...args);
+    releaseVerified = true;
+  };
+  const schema = f.adapters.inspectSchema;
+  f.adapters.inspectSchema = async (...args) => {
+    const value = await schema(...args);
+    if (releaseVerified && !delayed) {
+      clock.now += 31000;
+      delayed = true;
+    }
+    return value;
+  };
+  assert.deepEqual(await run(f), f.identity);
+  assert.equal(delayed, true);
+  assert.equal((await f.state()).phase, "healthy");
+  assert.equal((await f.state()).status, "completed");
+});
+
+test("activation rejects a cleanup observation that ages at actual process spawn", async (t) => {
+  const f = await fixture(t);
+  const clock = clockedObservations(t, f);
+  let started = false;
+  f.adapters.runProcess = async (_request, recheck) => {
+    clock.now += 31000;
+    recheck();
+    started = true;
+  };
+  await assert.rejects(run(f));
+  assert.equal(started, false);
+  assert.equal((await f.state()).migrationEntered, false);
+  assert.equal((await f.state()).status, "recovery-required");
+});
