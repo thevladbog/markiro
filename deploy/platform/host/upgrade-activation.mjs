@@ -151,7 +151,6 @@ export async function executeUpgradeActivation(input, adapters, options) {
         };
         const boundary = async (name) => {
           await store.read();
-          same(await shared.boundary(name), initial.backup);
           await observe();
           if (!migrationAttempted) same(await call("inspectSchema"), initial.oldRuntime.schema);
           same(
@@ -160,6 +159,9 @@ export async function executeUpgradeActivation(input, adapters, options) {
           );
           await shared.checkConfiguration();
           await store.read();
+          // Sample the short-lived cleanup/fence observations after the slower
+          // read-only integrity checks, immediately before the action recheck.
+          same(await shared.boundary(name), initial.backup);
           recheck();
         };
         const compose = async (args) => {
