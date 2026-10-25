@@ -8,22 +8,29 @@ import { dockerFixture } from "./host-observe-fixture.mjs";
 import { upgradeObservationFixture } from "./upgrade-observation-fixture.mjs";
 import { forwardFixture } from "./forward-fixture.mjs";
 import { forwardStateFixture } from "./forward-state-fixture.mjs";
-export async function forwardObservationFixture(t) {
-  const prepared = await preparedFixture(t, { nested: true });
-  prepared.identity.target.databaseId = "1234";
-  const u = await upgradeObservationFixture(t, {
-    daemonFixture: await dockerFixture(t, { fixture: prepared }),
-  });
+export async function forwardObservationFixture(t, { targetBackup, operationId } = {}) {
+  const prepared = targetBackup?.f ?? (await preparedFixture(t, { nested: true }));
+  if (!targetBackup) prepared.identity.target.databaseId = "1234";
+  const daemonFixture = targetBackup
+    ? {
+        f: prepared,
+        op: targetBackup.input.operation,
+        policy: targetBackup.input.observationPolicy,
+        state: targetBackup.daemon,
+      }
+    : await dockerFixture(t, { fixture: prepared });
+  const u = await upgradeObservationFixture(t, { daemonFixture });
   u.stop();
   u.d.state.containers[0].State.Health = { Status: "healthy" };
   const hba = await readFile(new URL("../postgres/pg_hba.conf", import.meta.url));
-  const hbaPath = join(u.root, "retained-hba.conf");
-  await writeFile(hbaPath, hba, { mode: 0o644 });
+  const hbaPath = targetBackup?.input.hbaPath ?? join(u.root, "retained-hba.conf");
+  if (!targetBackup) await writeFile(hbaPath, hba, { mode: 0o644 });
   u.d.state.containers[0].Mounts.find(
     (m) => m.Destination === "/etc/postgresql/pg_hba.conf",
   ).Source = hbaPath;
   const base = forwardFixture({
     root: u.root,
+    operationId,
     upgrade: u,
     retainedIds: u.predecessorContainers,
     failedConfiguration: u.candidateOperation.configuration,
@@ -31,7 +38,7 @@ export async function forwardObservationFixture(t) {
   });
   const f = await forwardStateFixture(t, {}, { ...base, root: u.root });
   validateForwardAdmission(f.input, f);
-  const admin = {
+  const admin = targetBackup?.daemon.adminResult ?? {
     system_id: "1234",
     version: "17.11",
     ssl: "on",

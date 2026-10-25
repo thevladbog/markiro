@@ -8,6 +8,7 @@ import {
   readPrivateAbsolute,
   withRecoveryBackupRuntime,
   withUpgradeBackupRuntime,
+  withForwardBackupRuntime,
   readBackupRuntime,
 } from "../backup/local-runtime.mjs";
 import { createDatabaseBackup } from "../backup/archive.mjs";
@@ -333,6 +334,7 @@ async function produceTargetBackup(
               images[0].Architecture === "amd64",
           );
           await observePostgresAdmin({ context: c, state, command: observers.command, hbaSha256 });
+          if (upgradeSource?.verify) await upgradeSource.verify();
           ensure(terminated && !uncertain);
         };
         stage = "entry-observation";
@@ -398,4 +400,86 @@ async function produceTargetBackup(
   } catch (error) {
     throw targetBackupError(error, terminated, stage);
   }
+}
+
+export async function createHeldForwardBackup(input, capability, admission, options = {}) {
+  const admitted = snapshotActivation(admission);
+  return withForwardBackupRuntime(capability, async (held, recoveryRuntime) => {
+    const { root, state } = held;
+    ensure(root === input.operation.root);
+    ensure(canonical(admitted) === canonical(state.admission));
+    ensure(canonical(input.operation.identity) === canonical(admitted.identity));
+    const { readUpgradePredecessor } = await import("./upgrade-state.mjs");
+    const predecessor = JSON.parse(
+      (await readUpgradePredecessor(root, admitted.originalPredecessor.identity))
+        .activationOperation,
+    );
+    ensure(canonical(input.observationPolicy) === canonical(predecessor.observationPolicy));
+    const oldOperation = {
+      root,
+      dockerConfig: input.operation.dockerConfig,
+      identity: admitted.originalPredecessor.identity,
+      configuration: predecessor.operation.activation.configuration,
+    };
+    const { createForwardBaselineVerifier } = await import("./forward-observation.mjs");
+    const verifyPhysical = createForwardBaselineVerifier(
+      {
+        oldOperation,
+        candidateOperation: input.operation,
+        retainedIds: state.sourceRuntime.containers,
+        baseline: admitted.baseline,
+        productMigrationProof: options.productMigrationProof,
+        policy: input.observationPolicy,
+      },
+      { ...options, hbaSha256: input.hbaSha256, verifySources: input.verifySources },
+    );
+    const check = async () => {
+      await held.verify();
+      for (const [op, expected] of [
+        [oldOperation, admitted.oldConfigurationSha256],
+        [input.operation, admitted.candidateConfigurationSha256],
+      ])
+        ensure(
+          (await fingerprintHostConfiguration({ root, ...op.configuration }))
+            .configurationSha256 === expected,
+        );
+    };
+    const sourceBoundary = async () => {
+      await check();
+      await verifyPhysical({ root, admission: admitted, state, cleanup: false });
+      await check();
+    };
+    await sourceBoundary();
+    const result = await produceTargetBackup(
+      {
+        ...input,
+        recoveryRuntime,
+        verifySources: async () => {
+          await check();
+          await input.verifySources();
+          await check();
+        },
+      },
+      {
+        ...options,
+        runProcess: async (request) => {
+          await check();
+          const value = await (options.runProcess ?? runHostProcess)(request);
+          await check();
+          return value;
+        },
+      },
+      async (actualRoot, action) => {
+        ensure(actualRoot === root);
+        return action({ current: null });
+      },
+      {
+        operation: oldOperation,
+        containers: state.sourceRuntime.containers,
+        verify: sourceBoundary,
+      },
+    );
+    await sourceBoundary();
+    return result;
+  });
 }

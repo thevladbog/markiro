@@ -124,7 +124,7 @@ export function forwardFixture(options = {}) {
     Object.entries(records).map(([k, v]) => [k, upgradeBytes(v)]),
   );
   const identity = structuredClone(u.input.identity);
-  identity.operationId = hostIdentity().operationId;
+  identity.operationId = options.operationId ?? hostIdentity().operationId;
   identity.executorSha = "f".repeat(40);
   identity.configurationSha256 = options.candidateConfigurationSha256 ?? "d".repeat(64);
   const productMigrationProof = buildProductMigrationProof({
