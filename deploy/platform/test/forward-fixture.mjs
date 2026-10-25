@@ -11,8 +11,11 @@ import { upgradePhaseReceipt } from "../host/upgrade-phase-admission.mjs";
 import { buildProductMigrationProof } from "../host/forward-ledger.mjs";
 import { proofInput } from "./forward-product-fixture.mjs";
 export function forwardFixture(options = {}) {
-  const u = upgradeFixture(options);
-  const oldRuntime = upgradeOldRuntime(u.input),
+  const u = options.upgrade ?? upgradeFixture(options);
+  const oldRuntime = {
+      ...upgradeOldRuntime(u.input),
+      ...(options.retainedIds ? { containers: options.retainedIds } : {}),
+    },
     preparation = upgradePreparation(u.input, oldRuntime);
   const prior = {
     version: 1,
@@ -56,7 +59,7 @@ export function forwardFixture(options = {}) {
     root,
     dockerConfig: `${root}/docker`,
     admission: u.input,
-    configuration: {
+    configuration: options.failedConfiguration ?? {
       candidateId: u.input.identity.operationId,
       runtimeSnapshot: {},
       migrationSnapshot: {},
@@ -68,7 +71,7 @@ export function forwardFixture(options = {}) {
     kind: "platform-upgrade-host-operation",
     installedRoot: `${dirname(root)}/upgrade-bootstrap/${u.input.identity.executorSha}`,
     authorization,
-    observationPolicy: {},
+    observationPolicy: options.policy ?? u.records.activationOperation.observationPolicy,
   };
   const records = {
     state,
@@ -120,10 +123,16 @@ export function forwardFixture(options = {}) {
   const failedBytes = Object.fromEntries(
     Object.entries(records).map(([k, v]) => [k, upgradeBytes(v)]),
   );
-  const identity = hostIdentity();
+  const identity = structuredClone(u.input.identity);
+  identity.operationId = hostIdentity().operationId;
   identity.executorSha = "f".repeat(40);
-  identity.configurationSha256 = "d".repeat(64);
-  const productMigrationProof = buildProductMigrationProof(proofInput());
+  identity.configurationSha256 = options.candidateConfigurationSha256 ?? "d".repeat(64);
+  const productMigrationProof = buildProductMigrationProof({
+    ...proofInput(),
+    productSha: identity.admission.manifest.sourceSha,
+    imageId: identity.admission.registry.api.imageId,
+    imageReference: identity.admission.manifest.api,
+  });
   const now = Date.parse("2026-10-25T09:30:00.000Z");
   const input = {
     version: 1,

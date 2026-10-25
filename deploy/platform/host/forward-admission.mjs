@@ -201,7 +201,7 @@ export function validateForwardAdmission(
       ensure(
         op.root === originalOperation.operation.root &&
           op.dockerConfig === `${op.root}/docker` &&
-          op.configuration.candidateId === state.admission.identity.operationId,
+          uuid(op.configuration.candidateId),
       );
       same(op.admission, state.admission);
       same(op.predecessorContainers, state.oldRuntime.containers);

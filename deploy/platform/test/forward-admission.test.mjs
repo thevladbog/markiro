@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, symlink, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { privateFixture } from "./host-fixtures.mjs";
@@ -170,4 +171,16 @@ test("failed predecessor reader preserves all exact bytes at fixed state and inp
   await unlink(paths.prepareConsumption);
   await symlink(paths.state, paths.prepareConsumption);
   await assert.rejects(readFailedUpgradePredecessor(directory.root, id));
+});
+
+test("configuration snapshot identity remains separate from deployment operation identity", () => {
+  const f = forwardFixture(),
+    candidateId = randomUUID();
+  for (const name of ["prepareOperation", "activateOperation"]) {
+    const record = JSON.parse(f.failedBytes[name]);
+    record.operation.configuration.candidateId = candidateId;
+    f.failedBytes[name] = upgradeBytes(record);
+    f.input.failed.hashes[name] = upgradeHash(f.failedBytes[name]);
+  }
+  assert.deepEqual(validate(f), f.input);
 });

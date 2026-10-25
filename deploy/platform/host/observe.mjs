@@ -492,7 +492,13 @@ function createObservers(operation, policyInput, options, legacyEdge, retained) 
     for (const n of Object.values(networks))
       for (const id of Object.keys(n.Containers ?? {}))
         ensure(owned.some((c) => c.container.Id === id));
-    return { owned, networks, volume, config };
+    return {
+      owned,
+      networks,
+      volume,
+      config,
+      containerNames: containers.map((container) => ({ id: container.Id, name: container.Name })),
+    };
   }
   return {
     command,
