@@ -22,6 +22,16 @@ export const UPGRADE_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/upgrade-activation-adapters.mjs",
   "deploy/platform/host/upgrade-return.mjs",
   "deploy/platform/host/upgrade-workloads.mjs",
+  "deploy/platform/host/forward-command-runtime.mjs",
+  "deploy/platform/host/forward-activation-adapters.mjs",
+  "deploy/platform/host/forward-activation.mjs",
+  "deploy/platform/host/forward-preparation.mjs",
+  "deploy/platform/host/forward-observation.mjs",
+  "deploy/platform/host/forward-state.mjs",
+  "deploy/platform/host/forward-admission.mjs",
+  "deploy/platform/host/forward-product.mjs",
+  "deploy/platform/host/forward-ledger.mjs",
+  "deploy/platform/host/forward-index-handoff.py",
 ]);
 const same = (a, b) => ensure(canonical(a) === canonical(b));
 const freeze = (value) => {
@@ -42,6 +52,7 @@ export async function loadUpgradeOperation(directory, options = {}) {
     assertPrivateRootSync(directory);
     const operationBytes = await readPrivateFile(directory, "operation.json");
     const record = JSON.parse(operationBytes);
+    const forward = record.kind === "platform-forward-recovery-host-operation";
     keys(record, [
       "version",
       "kind",
@@ -51,23 +62,28 @@ export async function loadUpgradeOperation(directory, options = {}) {
       "authorization",
       "operation",
       "observationPolicy",
+      ...(forward ? ["historicalSources"] : []),
     ]);
     ensure(
       record.version === 1 &&
-        record.kind === "platform-upgrade-host-operation" &&
-        ["prepare", "activate", "return-old"].includes(record.phase),
+        (forward
+          ? ["post-migration-prepare", "post-migration-activate"].includes(record.phase)
+          : record.kind === "platform-upgrade-host-operation" &&
+            ["prepare", "activate", "return-old"].includes(record.phase)),
     );
     validateUpgradeDispatch(record.dispatch);
     validateUpgradeAuthorization(record.authorization);
     const op = record.operation;
+    const preparation = record.phase === "prepare" || record.phase === "post-migration-prepare";
+    const activation = record.phase === "activate" || record.phase === "post-migration-activate";
     keys(op, [
       "root",
       "dockerConfig",
       "admission",
       "configuration",
       "predecessorContainers",
-      ...(record.phase === "prepare" ? ["connectionFile", "roleMapping"] : ["decision"]),
-      ...(record.phase === "activate" ? ["preparedTarget", "preparedPolicy"] : []),
+      ...(preparation ? ["connectionFile", "roleMapping"] : ["decision"]),
+      ...(activation ? ["preparedTarget", "preparedPolicy"] : []),
     ]);
     const identity = op.admission.identity;
     ensure(
@@ -85,10 +101,7 @@ export async function loadUpgradeOperation(directory, options = {}) {
     ensure(record.installedRoot === join(hostRoot, "upgrade-bootstrap", identity.executorSha));
     for (const path of [record.installedRoot, op.root, op.dockerConfig])
       assertPrivateRootSync(path);
-    same(
-      record.dispatch,
-      record.phase === "prepare" ? op.admission.dispatch : op.decision.dispatch,
-    );
+    same(record.dispatch, preparation ? op.admission.dispatch : op.decision.dispatch);
     const receiptName = `upgrade-installed-executor-${identity.operationId}.json`;
     const receiptBytes = await readPrivateFile(op.root, receiptName);
     const receipt = JSON.parse(receiptBytes);
@@ -134,12 +147,17 @@ export async function loadUpgradeOperation(directory, options = {}) {
     };
     await verifyBytes();
     const runtime = await import(
-      pathToFileURL(join(record.installedRoot, "deploy/platform/host/upgrade-command-runtime.mjs"))
-        .href
+      pathToFileURL(
+        join(
+          record.installedRoot,
+          `deploy/platform/host/${forward ? "forward" : "upgrade"}-command-runtime.mjs`,
+        ),
+      ).href
     );
     let verifyAuthority;
     const loaded = {
       operationDirectory: directory,
+      verifyInstalledSources: verifyBytes,
       record: freeze(record),
       receipt: freeze(receipt),
       verifySources: async () => {
@@ -148,7 +166,9 @@ export async function loadUpgradeOperation(directory, options = {}) {
         await verifyBytes();
       },
     };
-    verifyAuthority = await runtime.validateUpgradeOperation(loaded, options);
+    verifyAuthority = await runtime[
+      forward ? "validateForwardOperation" : "validateUpgradeOperation"
+    ](loaded, options);
     ensure(typeof verifyAuthority === "function");
     await loaded.verifySources();
     return Object.freeze(loaded);
@@ -162,25 +182,39 @@ export async function runUpgradeHostCommand(args, options = {}) {
     ensure(
       Array.isArray(args) &&
         args.length === 2 &&
-        ["prepare", "activate", "return-old"].includes(args[0]) &&
+        [
+          "prepare",
+          "activate",
+          "return-old",
+          "post-migration-prepare",
+          "post-migration-activate",
+        ].includes(args[0]) &&
         typeof args[1] === "string",
     );
     const loaded = await loadUpgradeOperation(args[1], options);
     ensure(loaded.record.phase === args[0]);
     await loaded.verifySources();
+    const forward = loaded.record.kind === "platform-forward-recovery-host-operation";
     const runtime = await import(
       pathToFileURL(
-        join(loaded.record.installedRoot, "deploy/platform/host/upgrade-command-runtime.mjs"),
+        join(
+          loaded.record.installedRoot,
+          `deploy/platform/host/${forward ? "forward" : "upgrade"}-command-runtime.mjs`,
+        ),
       ).href
     );
-    await runtime.executeUpgradeOperation(loaded, options);
+    await runtime[forward ? "executeForwardOperation" : "executeUpgradeOperation"](loaded, options);
     return Object.freeze({
       version: 1,
       kind: "platform-upgrade-host-outcome",
       phase: args[0],
-      status: { prepare: "backup-verified", activate: "healthy", "return-old": "returned-old" }[
-        args[0]
-      ],
+      status: {
+        prepare: "backup-verified",
+        activate: "healthy",
+        "return-old": "returned-old",
+        "post-migration-prepare": "backup-verified",
+        "post-migration-activate": "healthy",
+      }[args[0]],
     });
   } catch (error) {
     throw failure(error);

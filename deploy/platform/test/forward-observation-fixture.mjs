@@ -8,17 +8,23 @@ import { dockerFixture } from "./host-observe-fixture.mjs";
 import { upgradeObservationFixture } from "./upgrade-observation-fixture.mjs";
 import { forwardFixture } from "./forward-fixture.mjs";
 import { forwardStateFixture } from "./forward-state-fixture.mjs";
-export async function forwardObservationFixture(t, { targetBackup, operationId } = {}) {
-  const prepared = targetBackup?.f ?? (await preparedFixture(t, { nested: true }));
+export async function forwardObservationFixture(
+  t,
+  { targetBackup, operationId, suppliedDaemon } = {},
+) {
+  const prepared =
+    suppliedDaemon?.f ?? targetBackup?.f ?? (await preparedFixture(t, { nested: true }));
   if (!targetBackup) prepared.identity.target.databaseId = "1234";
-  const daemonFixture = targetBackup
-    ? {
-        f: prepared,
-        op: targetBackup.input.operation,
-        policy: targetBackup.input.observationPolicy,
-        state: targetBackup.daemon,
-      }
-    : await dockerFixture(t, { fixture: prepared });
+  const daemonFixture =
+    suppliedDaemon ??
+    (targetBackup
+      ? {
+          f: prepared,
+          op: targetBackup.input.operation,
+          policy: targetBackup.input.observationPolicy,
+          state: targetBackup.daemon,
+        }
+      : await dockerFixture(t, { fixture: prepared }));
   const u = await upgradeObservationFixture(t, { daemonFixture });
   u.stop();
   u.d.state.containers[0].State.Health = { Status: "healthy" };
