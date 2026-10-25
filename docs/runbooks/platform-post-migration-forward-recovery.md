@@ -29,6 +29,12 @@ healthy; another injects failure after actual API replacement and verifies exact
 owned cleanup. Each applies candidate migrations once to its generated database,
 fails canonically before API-up, then executes forward preparation on that same
 migrated physical database. There is no retry of a failed forward operation.
+The worker archive is staged inside the captured daemon volume under
+`/var/lib/docker/markiro-forward-worker.tar`. Its SHA is read back through the live
+container namespace before the single image load. DinD mounts a private tmpfs at
+`/tmp`; the outer Docker archive API and live processes can see different files
+there.
+
 Before application processes, the staging network is disconnected, IPv4/IPv6
 default routes are absent, and actual TCP egress must fail. No host socket or
 host-directory bind enters the outer daemon. Only generated private inputs and

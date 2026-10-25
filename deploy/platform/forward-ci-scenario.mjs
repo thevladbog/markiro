@@ -52,7 +52,8 @@ const put = async (path, value, mode = 0o600) => {
     { mode, flag: "wx" },
   );
 };
-/** Copy-readback is an independent boundary before Docker interprets any layers. */
+/** DinD dynamically mounts /tmp; stage on the captured daemon volume so the
+ * outer archive API and the live process namespace observe the same bytes. */
 export async function loadForwardWorkerArchive({
   archivePath,
   sha256,
@@ -63,12 +64,16 @@ export async function loadForwardWorkerArchive({
   progress,
 }) {
   progress("copy current ICU worker archive");
-  await outer(["cp", archivePath, `${containerId}:/tmp/forward-worker.tar`], { timeout: 900000 });
+  await outer(["cp", archivePath, `${containerId}:/var/lib/docker/markiro-forward-worker.tar`], {
+    timeout: 900000,
+  });
   progress("verify copied ICU worker archive");
-  const copied = await shell(["sha256sum", "/tmp/forward-worker.tar"]);
-  assert.equal(copied.stdout.trim(), `${sha256}  /tmp/forward-worker.tar`);
+  const copied = await shell(["sha256sum", "/var/lib/docker/markiro-forward-worker.tar"]);
+  assert.equal(copied.stdout.trim(), `${sha256}  /var/lib/docker/markiro-forward-worker.tar`);
   progress("load current ICU worker archive");
-  await nested(["load", "--input", "/tmp/forward-worker.tar"], { timeout: 900000 });
+  await nested(["load", "--input", "/var/lib/docker/markiro-forward-worker.tar"], {
+    timeout: 900000,
+  });
 }
 async function stage(context) {
   const {
