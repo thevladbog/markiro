@@ -1,3 +1,4 @@
+import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
 /** Rehearsal-only isolation. Never imported by an installed host executor. */
 import assert from "node:assert/strict";
 import { canonical } from "./backup/schemas.mjs";
@@ -192,12 +193,24 @@ export function rehearsalFailure(phase, error) {
   ]).has(error.name)
     ? error.name
     : "Error";
-  const exitStatus = Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : null;
+  const host =
+    error.code === "ERR_HOST_PROCESS"
+      ? sanitizeHostFailure(error, {
+          operationId: "11111111-1111-4111-8111-111111111111",
+          phase: "migration-entered",
+          boundary: "command",
+          commandCategory: "migration",
+        })
+      : null;
+  const exitStatus =
+    Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : (host?.exitStatus ?? null);
   const executable = ["docker", "git", "openssl", "which", "tar"].includes(
     error.rehearsalExecutable,
   )
     ? error.rehearsalExecutable
-    : null;
+    : host?.executable === "docker"
+      ? "docker"
+      : null;
   // Reduce private stderr to a fixed category; never publish any matching text.
   const stderr = typeof error.stderr === "string" ? error.stderr : "";
   const reasons = [
@@ -221,9 +234,17 @@ export function rehearsalFailure(phase, error) {
     [/\bcannot connect to the Docker daemon\b/iu, "daemon-unavailable"],
     [/OCI runtime exec failed:/u, "container-exec"],
   ];
-  const processReason =
-    command === "docker exec"
-      ? (reasons.find(([pattern]) => pattern.test(stderr))?.[1] ?? null)
+  const hostReason =
+    host &&
+    ["spawn", "exit", "stdin", "output-limit", "timeout", "aborted", "termination"].includes(
+      error.reason,
+    )
+      ? `host-${error.reason}`
       : null;
+  const processReason =
+    hostReason ??
+    (command === "docker exec"
+      ? (reasons.find(([pattern]) => pattern.test(stderr))?.[1] ?? null)
+      : null);
   return { phase, code, command, name, exitStatus, executable, processReason };
 }

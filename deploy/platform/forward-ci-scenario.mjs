@@ -406,8 +406,7 @@ export function createForwardRehearsalProcess(c, trace = []) {
         maxBuffer: 16 * 1024 * 1024,
         timeout: request.timeoutMs,
       });
-    } else
-      output = await c.stdinOuter(invocation, request.input ?? Buffer.alloc(0), request.timeoutMs);
+    } else output = await c.stdinOuter(invocation, request.input, request.timeoutMs);
     if (args[0] === "cp" && args[2] !== "-" && args[1].includes(":")) {
       const dest = privatePath(args[2]);
       const st = await lstat(dest).catch((e) => {

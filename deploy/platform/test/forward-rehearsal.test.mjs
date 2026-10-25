@@ -436,3 +436,29 @@ test("expected migration injection cannot hide wrapper durability or termination
     ),
   );
 });
+
+test("forward transport preserves absent stdin instead of creating an undeclared pipe", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { root } = await privateFixture(t);
+  let observed = false;
+  const run = createForwardRehearsalProcess({
+    root,
+    parent: root,
+    containerId: "a".repeat(64),
+    verifyIsolation: async () => {},
+    stdinOuter: async (args, input) => {
+      observed = true;
+      assert.equal(args.includes("-i"), false);
+      assert.equal(input, undefined);
+      return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+    },
+  });
+  await run({
+    executable: "/usr/bin/docker",
+    args: ["--host", "unix:///var/run/docker.sock", "info"],
+    env: { DOCKER_CONFIG: `${root}/docker` },
+    timeoutMs: 1000,
+    outputLimitBytes: 65536,
+  });
+  assert.equal(observed, true);
+});

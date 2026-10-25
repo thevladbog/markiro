@@ -439,3 +439,33 @@ test("missing-path diagnostics distinguish fixed staging boundaries without expo
     assert.ok(!JSON.stringify(problem).includes("PRIVATE"));
   }
 });
+
+test("rehearsal preserves trusted host-process exit metadata without output or argv", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { runHostProcess } = await import("../host/process.mjs");
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { root } = await privateFixture(t);
+  await mkdir(join(root, "bin"), { mode: 0o700 });
+  const executable = join(root, "bin", "docker");
+  await writeFile(executable, "#!/bin/sh\necho PRIVATE >&2\nexit 7\n", { mode: 0o700 });
+  await assert.rejects(
+    runHostProcess({
+      executable,
+      args: ["PRIVATE"],
+      cwd: root,
+      env: { PATH: process.env.PATH },
+      timeoutMs: 5000,
+      outputLimitBytes: 65536,
+    }),
+    (error) => {
+      const result = rehearsalFailure("execute exact candidate migrations", error);
+      assert.equal(result.exitStatus, 7);
+      assert.equal(result.executable, "docker");
+      assert.equal(result.processReason, "host-exit");
+      assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+      return true;
+    },
+  );
+});

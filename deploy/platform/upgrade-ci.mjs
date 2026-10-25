@@ -220,7 +220,7 @@ export async function rehearseUpgrade(
       env,
       timeoutMs,
       outputLimitBytes: 1048576,
-      input: Buffer.from(input),
+      ...(input === undefined ? {} : { input: Buffer.from(input) }),
     });
   const stdinNested = (args, input, timeout) =>
     stdinOuter(

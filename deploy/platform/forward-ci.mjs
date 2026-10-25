@@ -88,6 +88,13 @@ const failureNames = new Set([
 ]);
 const failureExecutables = new Set(["docker", "git", "openssl", "which", "tar"]);
 const failureReasons = new Set([
+  "host-spawn",
+  "host-exit",
+  "host-stdin",
+  "host-output-limit",
+  "host-timeout",
+  "host-aborted",
+  "host-termination",
   "missing-path",
   "worker-archive-missing",
   "docker-import-file-missing",
