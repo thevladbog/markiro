@@ -1,3 +1,4 @@
+import { carryHostFailure } from "../host/failure-diagnostic.mjs";
 import { join, dirname, relative } from "node:path";
 import { chmod, mkdir } from "node:fs/promises";
 import { assertPrivateRootSync, readPrivateFile } from "../host/files.mjs";
@@ -133,7 +134,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
       });
     } catch (error) {
       const action = args[0] === "exec" ? args[2] : args[0];
-      throw fail(`docker-${action}-${error.reason ?? "failed"}`);
+      throw carryHostFailure(error, fail(`docker-${action}-${error.reason ?? "failed"}`));
     }
   };
   const label = "markiro.backup-operation",
@@ -378,7 +379,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
           "/opt/backup/backup/postgres-worker.mjs",
           "restore",
         ]);
-      } catch {
+      } catch (error) {
         let stage = "worker";
         try {
           await command([
@@ -401,7 +402,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
         } catch {
           /* Only successful capture produces comparison diagnostics. */
         }
-        throw fail(stage);
+        throw carryHostFailure(error, fail(stage));
       }
     },
     async output(destination) {

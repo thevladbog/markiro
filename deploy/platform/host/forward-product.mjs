@@ -4,7 +4,7 @@ import { validateIdentity, snapshot } from "./state-validation.mjs";
 import { createPrivateDirectory, writePrivateFile } from "./files.mjs";
 import { createDockerCommand } from "./observe.mjs";
 import { runHostArchiveProcess } from "./process.mjs";
-import { buildProductMigrationProof } from "./forward-ledger.mjs";
+import { buildProductMigrationProof, productMigrationPaths } from "./forward-ledger.mjs";
 import { carryHostFailure } from "./failure-diagnostic.mjs";
 const archiveLimit = 16 * 1024 * 1024;
 const fileLimit = 2 * 1024 * 1024;
@@ -23,7 +23,7 @@ function octal(header, start, size) {
   ensure(Number.isSafeInteger(value) && value >= 0);
   return value;
 }
-export function readProductMigrationTar(bytes) {
+export function readProductMigrationTar(bytes, expectedPath) {
   ensure(
     Buffer.isBuffer(bytes) &&
       bytes.length >= 1024 &&
@@ -63,11 +63,15 @@ export function readProductMigrationTar(bytes) {
       );
     } else {
       ensure([0, 48].includes(type) && size > 0);
-      const relative = path.startsWith("migrations/")
+      let relative = path.startsWith("migrations/")
         ? path.slice(11)
         : path.startsWith("./")
           ? path.slice(2)
           : path;
+      if (expectedPath !== undefined) {
+        ensure(relative === expectedPath || relative === expectedPath.split("/").at(-1));
+        relative = expectedPath;
+      }
       ensure(
         (relative === "meta/_journal.json" || /^[0-9]{4}_[a-z0-9_]{1,100}\.sql$/u.test(relative)) &&
           !paths.has(relative),
@@ -202,33 +206,48 @@ export async function extractProductMigrationProof(input) {
     ).trim();
     await verifySources();
     await inspectOwned();
-    const request = {
-      executable: "/usr/bin/docker",
-      args: [
-        "--host",
-        "unix:///var/run/docker.sock",
-        "cp",
-        `${containerId}:/app/node_modules/@markiro/db/migrations/.`,
-        "-",
-      ],
-      cwd: root,
-      env: {
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        LANG: "C.UTF-8",
-        DOCKER_CONFIG: `${root}/docker`,
-      },
-      timeoutMs: 60000,
-      outputLimitBytes: archiveLimit,
+    const files = [];
+    let total = 0;
+    const copy = async (path) => {
+      await verifySources();
+      await inspectImage();
+      await inspectOwned();
+      const request = {
+        executable: "/usr/bin/docker",
+        args: [
+          "--host",
+          "unix:///var/run/docker.sock",
+          "cp",
+          `${containerId}:/app/node_modules/@markiro/db/migrations/${path}`,
+          "-",
+        ],
+        cwd: root,
+        env: {
+          PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          LANG: "C.UTF-8",
+          DOCKER_CONFIG: `${root}/docker`,
+        },
+        timeoutMs: 60000,
+        outputLimitBytes: archiveLimit,
+      };
+      const result = await (input.runProcess ?? runHostArchiveProcess)(request);
+      await verifySources();
+      await inspectImage();
+      await inspectOwned();
+      const extracted = readProductMigrationTar(result.stdout, path);
+      ensure(extracted.length === 1 && extracted[0].path === path);
+      total += extracted[0].bytes.length;
+      ensure(total <= archiveLimit);
+      files.push(extracted[0]);
+      return extracted[0].bytes;
     };
-    const result = await (input.runProcess ?? runHostArchiveProcess)(request);
-    await verifySources();
-    await inspectImage();
-    await inspectOwned();
+    const journal = await copy("meta/_journal.json");
+    for (const path of productMigrationPaths(journal)) await copy(path);
     const proof = buildProductMigrationProof({
       productSha: identity.admission.manifest.sourceSha,
       imageId: selected.imageId,
       imageReference: selected.reference,
-      files: readProductMigrationTar(result.stdout),
+      files,
     });
     await createPrivateDirectory(root, "product-migration-proofs", { exclusive: false });
     await writePrivateFile(

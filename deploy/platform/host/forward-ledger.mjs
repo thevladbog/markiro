@@ -11,6 +11,35 @@ const freeze = (value) => {
   }
   return value;
 };
+export function productMigrationPaths(bytes) {
+  ensure(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 2 * 1024 * 1024);
+  const journal = plain(JSON.parse(bytes.toString("utf8")));
+  keys(journal, ["version", "dialect", "entries"]);
+  ensure(
+    journal.version === "7" &&
+      journal.dialect === "postgresql" &&
+      Array.isArray(journal.entries) &&
+      journal.entries.length > 0 &&
+      journal.entries.length <= 4096,
+  );
+  let previous = 0;
+  const paths = journal.entries.map((entry, idx) => {
+    keys(entry, ["idx", "version", "when", "tag", "breakpoints"]);
+    ensure(
+      entry.idx === idx &&
+        entry.version === "7" &&
+        typeof entry.breakpoints === "boolean" &&
+        Number.isSafeInteger(entry.when) &&
+        entry.when > previous &&
+        typeof entry.tag === "string" &&
+        /^[0-9]{4}_[a-z0-9_]{1,100}$/u.test(entry.tag),
+    );
+    previous = entry.when;
+    return `${entry.tag}.sql`;
+  });
+  ensure(new Set(paths).size === paths.length);
+  return paths;
+}
 export function buildProductMigrationProof(input) {
   keys(input, ["productSha", "imageId", "imageReference", "files"]);
   const { productSha, imageId, imageReference, files } = input;
@@ -37,6 +66,7 @@ export function buildProductMigrationProof(input) {
     byPath.set(file.path, file.bytes);
   }
   ensure(byPath.has("meta/_journal.json"));
+  productMigrationPaths(byPath.get("meta/_journal.json"));
   const journal = plain(JSON.parse(byPath.get("meta/_journal.json").toString("utf8")));
   keys(journal, ["version", "dialect", "entries"]);
   ensure(

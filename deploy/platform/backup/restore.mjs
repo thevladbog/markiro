@@ -1,3 +1,4 @@
+import { carryHostFailure } from "../host/failure-diagnostic.mjs";
 import { validateCatalogBackup } from "./catalog.mjs";
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
@@ -75,7 +76,9 @@ export async function verifyDatabaseRestore({
   roleMapping,
   run,
   recoveryRuntime,
+  beforeFailureCleanup,
 }) {
+  ensure(beforeFailureCleanup === undefined || typeof beforeFailureCleanup === "function");
   identity(operationId, target);
   target = plain(target);
   backup = plain(backup);
@@ -134,20 +137,30 @@ export async function verifyDatabaseRestore({
         backup.inventorySha256,
     );
   } catch (error) {
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
     problem = error;
   }
+  if (
+    beforeFailureCleanup &&
+    (problem?.terminationConfirmed === false || problem?.durabilityUncertain === true)
+  )
+    throw problem;
   try {
     cleanup = runtime ? await runtime.cleanup() : { verified: true, resources: [] };
   } catch (error) {
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
     cleanup = error.cleanup;
-    problem = fail("cleanup");
+    if (problem && beforeFailureCleanup) problem.durabilityUncertain = true;
+    else problem = carryHostFailure(error, fail("cleanup"));
   }
-  await rm(input, { recursive: true, force: true }).catch(() => {
-    problem = fail("cleanup");
+  await rm(input, { recursive: true, force: true }).catch(async (error) => {
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
+    if (!beforeFailureCleanup || !problem) problem = carryHostFailure(error, fail("cleanup"));
     if (cleanup) cleanup.verified = false;
   });
-  await rm(output, { recursive: true, force: true }).catch(() => {
-    problem = fail("cleanup");
+  await rm(output, { recursive: true, force: true }).catch(async (error) => {
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
+    if (!beforeFailureCleanup || !problem) problem = carryHostFailure(error, fail("cleanup"));
     if (cleanup) cleanup.verified = false;
   });
   if (problem) {
@@ -163,7 +176,7 @@ export async function verifyDatabaseRestore({
       cleanup: cleanup ?? { verified: false, resources: [] },
     };
     await writePrivateFile(directory, "failure.json", Buffer.from(canonical(evidence) + "\n"));
-    throw fail(problem.stage ?? "restore");
+    throw carryHostFailure(problem, fail(problem.stage ?? "restore"));
   }
   const evidence = {
     version: 1,

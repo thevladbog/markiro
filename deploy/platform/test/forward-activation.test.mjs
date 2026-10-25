@@ -146,3 +146,38 @@ for (const method of ["migrate", "startOldApi", "stopPostgres"])
     await assert.rejects(run(f));
     assert.deepEqual(f.commands, []);
   });
+
+for (const diagnosticFails of [false, true])
+  test(`coordinator supplies a sticky first diagnostic before nested cleanup (diagnosticFails=${diagnosticFails})`, async (t) => {
+    const { noteHostProcessFailure } = await import("../host/failure-diagnostic.mjs");
+    const f = await forwardActivationFixture(t);
+    const path = join(f.directory, "failure.json");
+    if (diagnosticFails)
+      await (await import("node:fs/promises")).writeFile(path, "retained-first", { mode: 0o600 });
+    let cleanup = false;
+    f.adapters.verifyRoles = async (_context, _cap, persist) => {
+      const first = noteHostProcessFailure(
+        Object.assign(new Error("PRIVATE-FIRST"), { terminationConfirmed: true }),
+        "/usr/bin/docker",
+        42,
+      );
+      await persist(first);
+      const bytes = await readFile(path, "utf8");
+      assert.equal(JSON.parse(bytes).exitStatus, 42);
+      cleanup = true;
+      throw noteHostProcessFailure(
+        Object.assign(new Error("PRIVATE-SECOND"), { durabilityUncertain: true }),
+        "/usr/bin/docker",
+        43,
+      );
+    };
+    await assert.rejects(run(f));
+    assert.equal(cleanup, !diagnosticFails);
+    const bytes = await readFile(path, "utf8");
+    if (diagnosticFails) assert.equal(bytes, "retained-first");
+    else {
+      assert.equal(JSON.parse(bytes).exitStatus, 42);
+      assert.doesNotMatch(bytes, /PRIVATE-FIRST|PRIVATE-SECOND/u);
+    }
+    assert.ok(await lstat(join(f.root, ".deploy.lock")));
+  });

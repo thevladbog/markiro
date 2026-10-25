@@ -1,3 +1,4 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 import { randomUUID } from "node:crypto";
 import { readFile, rm, lstat } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -142,7 +143,9 @@ export async function runPostgresProbe({
   workerPath,
   verifySources,
   registerCleanup,
+  beforeFailureCleanup,
 }) {
+  ensure(beforeFailureCleanup === undefined || typeof beforeFailureCleanup === "function");
   let directory,
     created = false,
     terminated = true,
@@ -284,20 +287,23 @@ export async function runPostgresProbe({
     await verifySources();
   } catch (error) {
     problem = error;
-    terminated = error.terminationConfirmed !== false;
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
+    terminated = error.terminationConfirmed !== false && error.durabilityUncertain !== true;
   }
   if (created && terminated) {
     try {
       await cleanup(command);
     } catch (error) {
-      problem = error;
+      if (beforeFailureCleanup) await beforeFailureCleanup(error);
+      if (problem && beforeFailureCleanup) problem.durabilityUncertain = true;
+      else problem = error;
       terminated = error.terminationConfirmed !== false;
     }
   }
   // Preserve input for explicit reconciliation if any daemon/CLI state is uncertain.
   if (directory && terminated && !problem) await rm(directory, { recursive: true });
   if (problem) {
-    const error = observationError(problem);
+    const error = carryHostFailure(problem, observationError(problem));
     if (!terminated) error.terminationConfirmed = false;
     throw error;
   }

@@ -307,7 +307,7 @@ export async function validateForwardOperation(loaded, options = {}) {
             request.outputLimitBytes === 16 * 1024 * 1024 &&
             request.args.length === 5 &&
             request.args[2] === "cp" &&
-            /^[a-f0-9]{64}:\/app\/node_modules\/@markiro\/db\/migrations\/\.$/u.test(
+            /^[a-f0-9]{64}:\/app\/node_modules\/@markiro\/db\/migrations\/(?:meta\/_journal\.json|[0-9]{4}_[a-z0-9_]{1,100}\.sql)$/u.test(
               request.args[3],
             ) &&
             request.args[4] === "-";
@@ -494,7 +494,7 @@ export async function executeForwardOperation(loaded, options = {}) {
       },
       inspectSource: (_context, cap) => observers.inspectSource(cap),
       inspectSchema: (_context, cap) => observers.inspectSchema(cap),
-      createBackup: (_context, cap) =>
+      createBackup: (_context, cap, beforeFailureCleanup) =>
         withHeldForwardState(cap, async (held) => {
           await held.verify();
           const response = await runProcess({
@@ -538,7 +538,7 @@ export async function executeForwardOperation(loaded, options = {}) {
             },
             cap,
             admission,
-            { ...dependencies, productMigrationProof },
+            { ...dependencies, productMigrationProof, beforeFailureCleanup },
           );
           return {
             backup: result.backup,

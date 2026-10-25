@@ -119,3 +119,68 @@ for (const mode of [
     )
       assert.equal(f.b.workerCommands(), 0);
   });
+
+for (const purpose of ["archive", "restore"])
+  for (const diagnosticFails of [false, true])
+    test(`forward ${purpose} persists initiating failure before cleanup (diagnosticFails=${diagnosticFails})`, async (t) => {
+      const f = await fixture(t, "valid");
+      const original = f.backupOptions.runProcess;
+      const { noteHostProcessFailure, sanitizeHostFailure } =
+        await import("../host/failure-diagnostic.mjs");
+      const initiating = noteHostProcessFailure(
+        Object.assign(new Error("private-first-worker"), {
+          terminationConfirmed: true,
+        }),
+        "/usr/bin/docker",
+        42,
+      );
+      let failed = false,
+        recorded = false,
+        cleanup = 0,
+        first;
+      f.backupOptions.beforeFailureCleanup = async (error) => {
+        first ??= sanitizeHostFailure(error, {
+          operationId: f.input.identity.operationId,
+          phase: "backup-verified",
+          boundary: "createBackup",
+          commandCategory: "validation",
+        });
+        recorded = true;
+        if (diagnosticFails)
+          throw Object.assign(new Error("private-diagnostic"), { durabilityUncertain: true });
+      };
+      f.backupOptions.runProcess = async (request) => {
+        const args = request.args.slice(2);
+        if (args[0] === "start" && args.at(-1).endsWith(`-${purpose}-worker`)) {
+          failed = true;
+          throw initiating;
+        }
+        if (failed && ["stop", "rm"].includes(args[1])) {
+          cleanup++;
+          assert.equal(recorded, true, "first diagnostic must precede cleanup");
+          throw new Error("private-secondary-cleanup");
+        }
+        return original(request);
+      };
+      await assert.rejects(
+        withForwardPreparationState(
+          f.root,
+          f.input,
+          async (store) => {
+            await store.complete("admitted", forwardPrepared(f).sourceRuntime);
+            await store.enter("source-held");
+            await store.complete("source-held");
+            await store.enter("backup-verified");
+            await store.guard((cap) =>
+              createHeldForwardBackup(f.backupInput, cap, f.input, f.backupOptions),
+            );
+          },
+          f.options,
+        ),
+      );
+      assert.equal(failed, true);
+      assert.equal(recorded, true);
+      assert.equal(first.exitStatus, 42);
+      assert.equal(cleanup > 0, !diagnosticFails);
+      assert.ok(await lstat(join(f.root, ".deploy.lock")));
+    });

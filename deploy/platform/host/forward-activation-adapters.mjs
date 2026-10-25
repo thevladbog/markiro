@@ -31,7 +31,7 @@ export function createForwardActivationAdapters(
   };
   let releaseVerified = false,
     terminated = true;
-  const action = (context, cap, callback, cleanup = false) =>
+  const action = (context, cap, callback, cleanup = false, beforeFailureCleanup) =>
     withHeldForwardState(cap, async (held) => {
       ensure(terminated && (held.cleanup === true) === Boolean(cleanup));
       same(held.state.admission, op.admission);
@@ -67,7 +67,7 @@ export function createForwardActivationAdapters(
         }
       };
       await verify();
-      const dependencies = { ...options, runProcess, registerProbeCleanup };
+      const dependencies = { ...options, runProcess, registerProbeCleanup, beforeFailureCleanup };
       let result;
       if (cleanup) {
         const observers = createUpgradeHostObservers(
@@ -101,15 +101,21 @@ export function createForwardActivationAdapters(
       await verify();
       return result;
     });
-  const invoke = (name) => (context, cap) =>
-    action(context, cap, ({ adapters }) => adapters[name](context));
+  const invoke = (name) => (context, cap, beforeFailureCleanup) =>
+    action(context, cap, ({ adapters }) => adapters[name](context), false, beforeFailureCleanup);
   return Object.freeze({
-    verifyRelease: (context, cap) =>
-      action(context, cap, async ({ held, adapters }) => {
-        await verifyReleaseHeld(held);
-        await adapters.verifyRoles(context);
-        releaseVerified = true;
-      }),
+    verifyRelease: (context, cap, beforeFailureCleanup) =>
+      action(
+        context,
+        cap,
+        async ({ held, adapters }) => {
+          await verifyReleaseHeld(held);
+          await adapters.verifyRoles(context);
+          releaseVerified = true;
+        },
+        false,
+        beforeFailureCleanup,
+      ),
     verifyImages: invoke("verifyImages"),
     verifyRoles: invoke("verifyRoles"),
     inspectTarget: invoke("inspectTarget"),
@@ -117,11 +123,17 @@ export function createForwardActivationAdapters(
     writerFence: {
       producerId: observerProducer,
       executorSha: candidate.identity.executorSha,
-      observe: (context, cap) =>
-        action(context, cap, async ({ adapters }) => {
-          if (releaseVerified) await adapters.verifyRoles(context);
-          return adapters.writerFence.observe(context);
-        }),
+      observe: (context, cap, beforeFailureCleanup) =>
+        action(
+          context,
+          cap,
+          async ({ adapters }) => {
+            if (releaseVerified) await adapters.verifyRoles(context);
+            return adapters.writerFence.observe(context);
+          },
+          false,
+          beforeFailureCleanup,
+        ),
     },
     workload: {
       identity: structuredClone({ resources: verifiedBackup.evidence.cleanup.resources }),

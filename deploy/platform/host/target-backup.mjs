@@ -23,6 +23,7 @@ import {
 import { observePostgresAdmin } from "./probe.mjs";
 import { runHostProcess } from "./process.mjs";
 import { withHostState } from "./state.mjs";
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 import { snapshotActivation } from "./recovery-activation-admission.mjs";
 import { snapshot, sameTarget, validateIdentity } from "./state-validation.mjs";
 import { canonical } from "../backup/schemas.mjs";
@@ -37,7 +38,7 @@ function targetBackupError(error, terminated, stage) {
   if (!terminated || error?.terminationConfirmed === false) result.terminationConfirmed = false;
   if (error?.durabilityUncertain === true) result.durabilityUncertain = true;
   if (error?.lockRetirementUncertain === true) result.lockRetirementUncertain = true;
-  return result;
+  return carryHostFailure(error, result);
 }
 
 // Deliberately matches the worker's narrow libpq file contract, with the target
@@ -359,6 +360,7 @@ async function produceTargetBackup(
           catalogJournal: { path: join(CATALOG_ROOT, "journal"), uid: 1000, optional: true },
           run,
           recoveryRuntime,
+          beforeFailureCleanup: options.beforeFailureCleanup,
           writerFence: {
             observe: async ({ boundary }) => {
               await inspect(boundary);
@@ -384,6 +386,7 @@ async function produceTargetBackup(
           roleMapping: mapping,
           run,
           recoveryRuntime,
+          beforeFailureCleanup: options.beforeFailureCleanup,
         });
         producerInFlight = false;
         stage = "post-restore-observation";

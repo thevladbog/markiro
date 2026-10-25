@@ -25,10 +25,48 @@ export async function executeForwardPreparation(input, adapters, options) {
       root,
       admission,
       async (store) => {
+        let firstRecord, diagnosticError;
+        const persistFailure = async (error) => {
+          if (diagnosticError) throw diagnosticError;
+          if (firstRecord) return firstRecord;
+          let record;
+          try {
+            record = sanitizeHostFailure(error, {
+              operationId: admission.identity.operationId,
+              phase,
+              boundary,
+              commandCategory: "validation",
+            });
+            await writeHostFailure(
+              join(
+                dirname(root),
+                "upgrade-operations",
+                admission.identity.operationId,
+                "post-migration-prepare",
+              ),
+              record,
+            );
+          } catch {
+            const unresolved = carryHostFailure(
+              error,
+              new Error("Forward preparation diagnostic persistence failed."),
+            );
+            unresolved.code = "ERR_HOST_FORWARD_PREPARATION";
+            unresolved.durabilityUncertain = true;
+            diagnosticError = unresolved;
+            throw unresolved;
+          }
+          firstRecord = record;
+          return record;
+        };
         const call = (name, cleanup = false) => {
           boundary = name;
           const invoke = (cap) =>
-            adapters[name]({ ...context, phase, boundary: cleanup ? "recovery" : name }, cap);
+            adapters[name](
+              { ...context, phase, boundary: cleanup ? "recovery" : name },
+              cap,
+              persistFailure,
+            );
           return cleanup ? store.cleanup(invoke) : store.guard(invoke);
         };
         const checkConfiguration = async () => {
@@ -109,37 +147,17 @@ export async function executeForwardPreparation(input, adapters, options) {
           );
           return admission.identity;
         } catch (error) {
-          let record;
-          try {
-            record = sanitizeHostFailure(error, {
-              operationId: admission.identity.operationId,
-              phase,
-              boundary,
-              commandCategory: "validation",
-            });
-            await writeHostFailure(
-              join(
-                dirname(root),
-                "upgrade-operations",
-                admission.identity.operationId,
-                "post-migration-prepare",
-              ),
-              record,
-            );
-          } catch {
-            const unresolved = carryHostFailure(
-              error,
-              new Error("Forward preparation diagnostic persistence failed."),
-            );
-            unresolved.code = "ERR_HOST_FORWARD_PREPARATION";
-            unresolved.durabilityUncertain = true;
-            throw unresolved;
-          }
+          const record = await persistFailure(error);
           const descriptor =
             error && ["object", "function"].includes(typeof error)
               ? Object.getOwnPropertyDescriptor(error, "terminationConfirmed")
               : null;
-          if (record.durabilityUncertain || descriptor?.value === false) throw error;
+          if (
+            record.durabilityUncertain ||
+            error?.durabilityUncertain === true ||
+            descriptor?.value === false
+          )
+            throw error;
           await store.fail();
           try {
             await call("inspectSource", true);

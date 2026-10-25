@@ -94,7 +94,10 @@ The loader authenticates bytes/history/configuration without a token or process
 on receive. After delivery/fence/private stdin token publication, trusted runtime
 rechecks live GitHub authorization, product publisher/artifact and executor CI,
 then reads complete original migration SQL/journal bytes from an inert exact
-pinned API image. Full ordered migration hashes/timestamps, physical PG/system,
+pinned API image: copy the bounded journal first, validate its complete ordered
+SQL filenames, then copy only those SQL files from the same never-started owned
+container. Snapshot JSON is never copied, and per-file/cumulative limits remain
+in force. Full ordered migration hashes/timestamps, physical PG/system,
 schema and source recipes must match at protected boundaries. Neither row count
 nor an operator-supplied digest can replace that proof.
 

@@ -107,7 +107,13 @@ async function fixture(t, patch = {}) {
         throw Object.assign(new Error("private-copy-failure"), {
           terminationConfirmed: patch.copyFailure !== "unknown",
         });
-      stdout = tar();
+      const relative = args[1].split("/migrations/")[1];
+      // The real image also contains >126 MiB of meta/*_snapshot.json. A directory
+      // copy must never be requested; only one validated source file is returned.
+      assert.ok(relative && relative !== ".", "must not copy snapshot-bearing directory");
+      const file = (patch.files ?? productFiles()).find((file) => file.path === relative);
+      assert.ok(file, "only journal-selected SQL or the journal may be copied");
+      stdout = tar([{ ...file, path: relative.split("/").at(-1) }]);
     } else if (args[0] === "container" && args[1] === "inspect")
       stdout = JSON.stringify([container]);
     else if (args[0] === "container" && args[1] === "rm") {
@@ -207,4 +213,29 @@ test("archive producer has an explicit 16 MiB ceiling while ordinary process cei
   await assert.rejects(
     runHostArchiveProcess({ ...options, outputLimitBytes: 16 * 1024 * 1024 + 1 }),
   );
+});
+
+test("extractor copies journal first and only its SQL, leaving image snapshots unread", async (t) => {
+  const f = await fixture(t);
+  await extractProductMigrationProof(f);
+  assert.deepEqual(
+    f.commands.filter((a) => a[0] === "cp").map((a) => a[1].split("/migrations/")[1]),
+    [
+      "meta/_journal.json",
+      ...productFiles()
+        .filter((f) => f.path.endsWith(".sql"))
+        .map((f) => f.path),
+    ],
+  );
+});
+
+test("extractor rejects unsafe journal tags before requesting SQL or snapshots", async (t) => {
+  const files = productFiles();
+  const journal = files.find((file) => file.path === "meta/_journal.json");
+  const value = JSON.parse(journal.bytes);
+  value.entries[0].tag = "../meta/0000_snapshot";
+  journal.bytes = Buffer.from(JSON.stringify(value));
+  const f = await fixture(t, { files });
+  await assert.rejects(extractProductMigrationProof(f));
+  assert.equal(f.commands.filter((a) => a[0] === "cp").length, 1);
 });

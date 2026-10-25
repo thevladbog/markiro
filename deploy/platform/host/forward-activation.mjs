@@ -89,6 +89,40 @@ export async function executeForwardActivation(input, adapters, options) {
             ...(["edge-started", "healthy"].includes(phase) ? ["edge"] : []),
           ],
         });
+        let firstRecord, diagnosticError;
+        const persistFailure = async (error) => {
+          if (diagnosticError) throw diagnosticError;
+          if (firstRecord) return firstRecord;
+          let record;
+          try {
+            record = sanitizeHostFailure(error, {
+              operationId: identity.operationId,
+              phase,
+              boundary: lastBoundary,
+              commandCategory,
+            });
+            await writeHostFailure(
+              join(
+                dirname(root),
+                "upgrade-operations",
+                identity.operationId,
+                "post-migration-activate",
+              ),
+              record,
+            );
+          } catch {
+            const unresolved = carryHostFailure(
+              error,
+              new Error("Forward activation diagnostic persistence failed."),
+            );
+            unresolved.code = "ERR_HOST_FORWARD_ACTIVATION";
+            unresolved.durabilityUncertain = true;
+            diagnosticError = unresolved;
+            throw unresolved;
+          }
+          firstRecord = record;
+          return record;
+        };
         const call = (name, cleanup = false) => {
           lastBoundary = name;
           commandCategory =
@@ -99,7 +133,8 @@ export async function executeForwardActivation(input, adapters, options) {
                 : cleanup
                   ? "cleanup"
                   : "validation";
-          const invoke = (cap) => adapters[name](context(cleanup ? "recovery" : name), cap);
+          const invoke = (cap) =>
+            adapters[name](context(cleanup ? "recovery" : name), cap, persistFailure);
           return cleanup ? store.cleanup(invoke) : store.guard(invoke);
         };
         const shared = preparedHostBoundary({
@@ -112,17 +147,22 @@ export async function executeForwardActivation(input, adapters, options) {
           context,
           adapters: {
             ...adapters,
-            inspectTarget: (request) => store.guard((cap) => adapters.inspectTarget(request, cap)),
+            inspectTarget: (request) =>
+              store.guard((cap) => adapters.inspectTarget(request, cap, persistFailure)),
             writerFence: {
               ...adapters.writerFence,
               observe: (request) =>
-                store.guard((cap) => adapters.writerFence.observe(request, cap)),
+                store.guard((cap) => adapters.writerFence.observe(request, cap, persistFailure)),
             },
             workload: {
               ...adapters.workload,
               inspect: (request) =>
                 store.guard((cap) =>
-                  adapters.workload.inspect({ ...context("restore-cleanup"), ...request }, cap),
+                  adapters.workload.inspect(
+                    { ...context("restore-cleanup"), ...request },
+                    cap,
+                    persistFailure,
+                  ),
                 ),
             },
           },
@@ -280,37 +320,17 @@ export async function executeForwardActivation(input, adapters, options) {
             );
           return identity;
         } catch (error) {
-          let record;
-          try {
-            record = sanitizeHostFailure(error, {
-              operationId: identity.operationId,
-              phase,
-              boundary: lastBoundary,
-              commandCategory,
-            });
-            await writeHostFailure(
-              join(
-                dirname(root),
-                "upgrade-operations",
-                identity.operationId,
-                "post-migration-activate",
-              ),
-              record,
-            );
-          } catch {
-            const unresolved = carryHostFailure(
-              error,
-              new Error("Forward activation diagnostic persistence failed."),
-            );
-            unresolved.code = "ERR_HOST_FORWARD_ACTIVATION";
-            unresolved.durabilityUncertain = true;
-            throw unresolved;
-          }
+          const record = await persistFailure(error);
           const descriptor =
             error && ["object", "function"].includes(typeof error)
               ? Object.getOwnPropertyDescriptor(error, "terminationConfirmed")
               : null;
-          if (record.durabilityUncertain || descriptor?.value === false) throw error;
+          if (
+            record.durabilityUncertain ||
+            error?.durabilityUncertain === true ||
+            descriptor?.value === false
+          )
+            throw error;
           await store.fail();
           try {
             await call("cleanupOwnedProbes", true);

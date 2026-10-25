@@ -10,11 +10,11 @@ import { provisionForwardRuntimes } from "./forward-backup-fixture.mjs";
 import { UPGRADE_BUNDLE_FILES } from "../host/upgrade-command.mjs";
 import { digest } from "../backup/schemas.mjs";
 import { productFiles } from "./forward-product-fixture.mjs";
-function tar() {
+function tar(path) {
   const chunks = [];
-  for (const file of productFiles()) {
+  for (const file of productFiles().filter((file) => file.path === path)) {
     const h = Buffer.alloc(512);
-    h.write(`migrations/${file.path}`, 0, 100);
+    h.write(file.path.split("/").at(-1), 0, 100);
     h.write("0000600\0", 100, 8);
     h.write(`${file.bytes.length.toString(8).padStart(11, "0")}\0`, 124, 12);
     h.fill(32, 148, 156);
@@ -240,7 +240,7 @@ export async function forwardCommandFixture(t) {
           },
         };
         stdout = id;
-      } else if (args[0] === "cp") stdout = tar();
+      } else if (args[0] === "cp") stdout = tar(args[1].split("/migrations/")[1]);
       else if (args[0] === "container" && args[1] === "inspect")
         stdout = JSON.stringify([container]);
       else if (args[0] === "container" && args[1] === "rm") {
