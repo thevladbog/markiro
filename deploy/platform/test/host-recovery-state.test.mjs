@@ -300,3 +300,21 @@ test("unconfirmed stop process retains recovery lock even before backup starts",
   await lstat(join(f.root, ".deploy.lock"));
   assert.deepEqual(await readFile(join(f.root, "state.json")), f.bytes);
 });
+
+test("legacy recovery preparation denies forward ownership before consuming state", async (t) => {
+  const f = await fixture(t);
+  const before = await readFile(join(f.root, "state.json"));
+  await writeFile(
+    join(f.root, "upgrade-index.json"),
+    JSON.stringify({ version: 1, kind: "platform-forward-recovery-index" }),
+    { mode: 0o600 },
+  );
+  let called = false;
+  await assert.rejects(
+    run(f, () => {
+      called = true;
+    }),
+  );
+  assert.equal(called, false);
+  assert.deepEqual(await readFile(join(f.root, "state.json")), before);
+});

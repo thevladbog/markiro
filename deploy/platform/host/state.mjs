@@ -50,6 +50,19 @@ function lockReleaseError() {
   return error;
 }
 
+// Legacy mutation entry points must never overwrite forward ownership. The
+// shared lock and read-only held-host capability remain available to its store.
+export async function assertLegacyWriteOwnership(root) {
+  try {
+    await lstat(join(root, "upgrade-index.json"));
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  const value = JSON.parse(await readPrivateFile(root, "upgrade-index.json"));
+  if (value.kind !== "platform-upgrade-index") throw stateError();
+}
+
 // Lock names are deliberately fixed. The private root and cooperating operators
 // are the trust boundary, not protection against hostile root/current-UID peers.
 export async function withHostState(root, callback) {
@@ -122,6 +135,7 @@ export async function withHostState(root, callback) {
       return result;
     }
     async function save(next) {
+      await assertLegacyWriteOwnership(root);
       next.sequence = state.sequence + 1;
       validateState(next);
       await writePrivateFile(root, "state.json", Buffer.from(JSON.stringify(next) + "\n"), {

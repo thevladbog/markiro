@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { hostIdentity, backupProof } from "./host-fixtures.mjs";
 import {
   upgradeFixture,
@@ -9,8 +10,8 @@ import {
 import { upgradePhaseReceipt } from "../host/upgrade-phase-admission.mjs";
 import { buildProductMigrationProof } from "../host/forward-ledger.mjs";
 import { proofInput } from "./forward-product-fixture.mjs";
-export function forwardFixture() {
-  const u = upgradeFixture();
+export function forwardFixture(options = {}) {
+  const u = upgradeFixture(options);
   const oldRuntime = upgradeOldRuntime(u.input),
     preparation = upgradePreparation(u.input, oldRuntime);
   const prior = {
@@ -50,7 +51,7 @@ export function forwardFixture() {
     reviewerLogin: "reviewer",
     environmentId: "44",
   };
-  const root = "/opt/markiro-platform/state";
+  const root = options.root ?? "/opt/markiro-platform/state";
   const operation = {
     root,
     dockerConfig: `${root}/docker`,
@@ -65,7 +66,7 @@ export function forwardFixture() {
   const base = {
     version: 1,
     kind: "platform-upgrade-host-operation",
-    installedRoot: `/opt/markiro-platform/upgrade-bootstrap/${u.input.identity.executorSha}`,
+    installedRoot: `${dirname(root)}/upgrade-bootstrap/${u.input.identity.executorSha}`,
     authorization,
     observationPolicy: {},
   };
