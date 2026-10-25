@@ -113,7 +113,17 @@ export async function stageRehearsalTree(root, io) {
   return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
 
-export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {}) {
+export async function rehearseUpgrade(
+  argv,
+  { writeResult = async () => {}, forwardScenario } = {},
+) {
+  assert.ok(
+    forwardScenario === undefined ||
+      (forwardScenario.kind === "synthetic-forward" &&
+        ["stage", "values", "candidate", "run"].every(
+          (name) => typeof forwardScenario[name] === "function",
+        )),
+  );
   assert.equal(typeof writeResult, "function");
   assert.deepEqual(argv, ["--local-ci"]);
   const parent = await mkdtemp(join(await realpath("/tmp"), "markiro-upgrade-ci-"));
@@ -294,6 +304,21 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
       evidence.images ??= {};
       evidence.images[image] = { id: actual.Id, repoDigests: actual.RepoDigests };
     }
+    const forwardStage = forwardScenario
+      ? await forwardScenario.stage({
+          parent,
+          root,
+          repository,
+          command,
+          outer,
+          nested,
+          shell,
+          stdinOuter,
+          containerId,
+          inspect,
+          progress,
+        })
+      : null;
     assert.equal((await nested(["ps", "-aq"])).stdout.trim(), "");
     progress("remove every external network before application processes");
     const stagingNetwork = rehearsalStagingNetwork(await inspectOuter("container", containerId));
@@ -472,6 +497,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
         ...values,
         MARKIRO_RELEASES_DOMAIN: "releases.localhost",
         MARKIRO_RELEASES_BUCKET: "synthetic-releases",
+        ...(forwardScenario ? forwardScenario.values() : {}),
       });
     const interpolation = {
       ...values,
@@ -710,6 +736,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     candidate.operationId = randomUUID();
     candidate.executorSha = (await command("git", ["rev-parse", "HEAD"])).stdout.trim();
     candidate.configurationSha256 = candidateConfig.sha256;
+    if (forwardScenario) await forwardScenario.candidate(candidate, inspect);
     const prior = structuredClone(identity);
     prior.operationId = randomUUID();
     prior.executorSha = "b".repeat(40);
@@ -842,153 +869,200 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
           }),
       },
     );
-    // This harness does not substitute for fresh production backup/copy proof.
-    const journal = join(root, "upgrade-operations", candidate.operationId, "state.json");
-    const priorBytes = await readFile(journal),
-      priorState = JSON.parse(priorBytes);
-    const decision = {
-      version: 1,
-      kind: "platform-upgrade-phase",
-      phase: "return-old",
-      identity: candidate,
-      prior: { sequence: priorState.sequence, sha256: digest(priorBytes) },
-      executorCi: f.input.executorCi,
-      reviewedPlanSha256: f.input.reviewedPlanSha256,
-      dispatch: { toolingSha: candidate.executorSha, runId: "987654324", runAttempt: "1" },
-      expiresAt: new Date(Date.now() + 1800000).toISOString(),
-    };
-    progress("return exact retained containers through guarded return coordinator");
-    await executeUpgradeReturn(
-      { root, decision },
-      {
-        verifyAdmission: async () => candidate,
-        inspectReturnEligibility: (_, cap) => observers.inspectReturnEligibility(cap),
-        inspectSchema: (_, cap) => schema(cap),
-        startOldApi: (_, cap) => workloads.startOldApi(cap),
-        startOldEdge: (_, cap) => workloads.startOldEdge(cap),
-        verifyOldHealth: (_, cap) => workloads.verifyOldHealth(cap),
-        smoke: async (_, cap) =>
-          withHeldUpgradeState(cap, async (held) => {
-            await held.verify();
-            await smoke();
-            await held.verify();
-          }),
-        cleanupOwnedStarts: (_, cap) => workloads.cleanupOwnedStarts(cap),
-      },
-    );
-    const terminal = JSON.parse(await readFile(journal));
-    assert.equal(terminal.phase, "returned-old");
-    assert.equal(terminal.status, "completed");
-    assert.equal(terminal.migrationEntered, false);
-    assert.deepEqual(terminal.oldRuntime, prep.oldRuntime);
-    await verifyIsolation();
-    evidence.checks.push(
-      "strict old configuration and exact IDs before/after stop and return; unchanged catalog/migration schema; healthy API/PG and six strict TLS endpoints",
-    );
-    evidence.containers = predecessorContainers;
-    evidence.oldConfigurationSha256 = oldConfig.sha256;
-    evidence.schema = prep.oldRuntime.schema;
-    evidence.terminalSha256 = digest(await readFile(journal));
-    progress("prove migration latch rejects return before any start");
-    // A second synthetic state root has no mutation adapter. Even a failed spawn
-    // after its durable latch must reject the return coordinator before starts.
-    const faultParent = join(parent, "fault"),
-      faultRoot = join(faultParent, "state");
-    await mkdir(faultRoot, { recursive: true, mode: 0o700 });
-    const faultCandidate = structuredClone(candidate);
-    faultCandidate.operationId = randomUUID();
-    const fault = upgradeFixture({
-      prior,
-      recovered: identity,
-      identity: faultCandidate,
-      configuration: oldConfig.configuration,
-      root: faultRoot,
-      policy,
-    });
-    fault.input.expiresAt = new Date(Date.now() + 3600000).toISOString();
-    const faultActivation = join(
-      faultParent,
-      "recovery-operations",
-      identity.operationId,
-      "activate",
-    );
-    await mkdir(faultActivation, { recursive: true, mode: 0o700 });
-    for (const [key, path] of Object.entries({
-      original: join(faultRoot, "state.json"),
-      acceptedRecovery: join(faultRoot, "recovery-state.json"),
-      preparation: join(faultRoot, "recovery-preparation.json"),
-      consumption: join(faultRoot, `recovery-activation-${identity.operationId}.json`),
-      activationOperation: join(faultActivation, "operation.json"),
-    }))
-      await writeFile(path, fault.predecessorBytes[key], { mode: 0o600, flag: "wx" });
-    const faultOld = { ...prep.oldRuntime, operationId: faultCandidate.operationId },
-      faultBackup = { ...prep.backup, operationId: faultCandidate.operationId };
-    await withUpgradeState(faultRoot, fault.input, async (s) => {
-      await s.complete("admitted", faultOld);
-      await s.enter("old-stopped");
-      await s.complete("old-stopped");
-      await s.enter("backup-verified");
-      await s.complete("backup-verified", faultBackup, {
-        ...prep,
-        operationId: faultCandidate.operationId,
-        oldRuntime: faultOld,
-        backup: faultBackup,
+    if (forwardScenario) {
+      await forwardScenario.run({
+        root,
+        parent,
+        repository,
+        containerId,
+        invocationId,
+        evidence,
+        isolated,
+        owned,
+        forwardStage,
+        verifyIsolation,
+        command,
+        outer,
+        nested,
+        shell,
+        stdinOuter,
+        stdinNested,
+        inspect,
+        sql,
+        oldOperation,
+        candidateOperation,
+        candidate,
+        identity,
+        f,
+        prep,
+        predecessorContainers,
+        policy,
+        oldConfig,
+        candidateConfig,
+        deps,
+        values,
+        generated,
+        password,
+        appPassword,
+        migratorPassword,
+        migrationUrl,
+        ca,
+        tlsScript,
+        progress,
       });
-    });
-    const faultJournal = join(
-      faultRoot,
-      "upgrade-operations",
-      faultCandidate.operationId,
-      "state.json",
-    );
-    const faultDecision = async (phase, runId) => {
-      const bytes = await readFile(faultJournal);
-      return {
-        ...decision,
-        identity: faultCandidate,
-        phase,
-        prior: { sequence: JSON.parse(bytes).sequence, sha256: digest(bytes) },
-        dispatch: { ...decision.dispatch, runId },
+    } else {
+      // This harness does not substitute for fresh production backup/copy proof.
+      const journal = join(root, "upgrade-operations", candidate.operationId, "state.json");
+      const priorBytes = await readFile(journal),
+        priorState = JSON.parse(priorBytes);
+      const decision = {
+        version: 1,
+        kind: "platform-upgrade-phase",
+        phase: "return-old",
+        identity: candidate,
+        prior: { sequence: priorState.sequence, sha256: digest(priorBytes) },
+        executorCi: f.input.executorCi,
+        reviewedPlanSha256: f.input.reviewedPlanSha256,
+        dispatch: { toolingSha: candidate.executorSha, runId: "987654324", runAttempt: "1" },
+        expiresAt: new Date(Date.now() + 1800000).toISOString(),
       };
-    };
-    await assert.rejects(
-      withUpgradePhaseState(faultRoot, await faultDecision("activate", "987654325"), async (s) => {
-        await s.complete("activation-admitted");
-        await s.enter("migration-entered");
-        throw Error("synthetic pre-spawn failure after durable latch");
-      }),
-    );
-    assert.equal(JSON.parse(await readFile(faultJournal)).migrationEntered, true);
-    let called = false;
-    await assert.rejects(
-      executeUpgradeReturn(
-        { root: faultRoot, decision: await faultDecision("return-old", "987654326") },
-        Object.fromEntries(
-          [
-            "verifyAdmission",
-            "inspectReturnEligibility",
-            "inspectSchema",
-            "startOldApi",
-            "startOldEdge",
-            "verifyOldHealth",
-            "smoke",
-            "cleanupOwnedStarts",
-          ].map((k) => [
-            k,
-            async () => {
-              called = true;
-              throw Error("must not enter adapter");
-            },
-          ]),
+      progress("return exact retained containers through guarded return coordinator");
+      await executeUpgradeReturn(
+        { root, decision },
+        {
+          verifyAdmission: async () => candidate,
+          inspectReturnEligibility: (_, cap) => observers.inspectReturnEligibility(cap),
+          inspectSchema: (_, cap) => schema(cap),
+          startOldApi: (_, cap) => workloads.startOldApi(cap),
+          startOldEdge: (_, cap) => workloads.startOldEdge(cap),
+          verifyOldHealth: (_, cap) => workloads.verifyOldHealth(cap),
+          smoke: async (_, cap) =>
+            withHeldUpgradeState(cap, async (held) => {
+              await held.verify();
+              await smoke();
+              await held.verify();
+            }),
+          cleanupOwnedStarts: (_, cap) => workloads.cleanupOwnedStarts(cap),
+        },
+      );
+      const terminal = JSON.parse(await readFile(journal));
+      assert.equal(terminal.phase, "returned-old");
+      assert.equal(terminal.status, "completed");
+      assert.equal(terminal.migrationEntered, false);
+      assert.deepEqual(terminal.oldRuntime, prep.oldRuntime);
+      await verifyIsolation();
+      evidence.checks.push(
+        "strict old configuration and exact IDs before/after stop and return; unchanged catalog/migration schema; healthy API/PG and six strict TLS endpoints",
+      );
+      evidence.containers = predecessorContainers;
+      evidence.oldConfigurationSha256 = oldConfig.sha256;
+      evidence.schema = prep.oldRuntime.schema;
+      evidence.terminalSha256 = digest(await readFile(journal));
+      progress("prove migration latch rejects return before any start");
+      // A second synthetic state root has no mutation adapter. Even a failed spawn
+      // after its durable latch must reject the return coordinator before starts.
+      const faultParent = join(parent, "fault"),
+        faultRoot = join(faultParent, "state");
+      await mkdir(faultRoot, { recursive: true, mode: 0o700 });
+      const faultCandidate = structuredClone(candidate);
+      faultCandidate.operationId = randomUUID();
+      const fault = upgradeFixture({
+        prior,
+        recovered: identity,
+        identity: faultCandidate,
+        configuration: oldConfig.configuration,
+        root: faultRoot,
+        policy,
+      });
+      fault.input.expiresAt = new Date(Date.now() + 3600000).toISOString();
+      const faultActivation = join(
+        faultParent,
+        "recovery-operations",
+        identity.operationId,
+        "activate",
+      );
+      await mkdir(faultActivation, { recursive: true, mode: 0o700 });
+      for (const [key, path] of Object.entries({
+        original: join(faultRoot, "state.json"),
+        acceptedRecovery: join(faultRoot, "recovery-state.json"),
+        preparation: join(faultRoot, "recovery-preparation.json"),
+        consumption: join(faultRoot, `recovery-activation-${identity.operationId}.json`),
+        activationOperation: join(faultActivation, "operation.json"),
+      }))
+        await writeFile(path, fault.predecessorBytes[key], { mode: 0o600, flag: "wx" });
+      const faultOld = { ...prep.oldRuntime, operationId: faultCandidate.operationId },
+        faultBackup = { ...prep.backup, operationId: faultCandidate.operationId };
+      await withUpgradeState(faultRoot, fault.input, async (s) => {
+        await s.complete("admitted", faultOld);
+        await s.enter("old-stopped");
+        await s.complete("old-stopped");
+        await s.enter("backup-verified");
+        await s.complete("backup-verified", faultBackup, {
+          ...prep,
+          operationId: faultCandidate.operationId,
+          oldRuntime: faultOld,
+          backup: faultBackup,
+        });
+      });
+      const faultJournal = join(
+        faultRoot,
+        "upgrade-operations",
+        faultCandidate.operationId,
+        "state.json",
+      );
+      const faultDecision = async (phase, runId) => {
+        const bytes = await readFile(faultJournal);
+        return {
+          ...decision,
+          identity: faultCandidate,
+          phase,
+          prior: { sequence: JSON.parse(bytes).sequence, sha256: digest(bytes) },
+          dispatch: { ...decision.dispatch, runId },
+        };
+      };
+      await assert.rejects(
+        withUpgradePhaseState(
+          faultRoot,
+          await faultDecision("activate", "987654325"),
+          async (s) => {
+            await s.complete("activation-admitted");
+            await s.enter("migration-entered");
+            throw Error("synthetic pre-spawn failure after durable latch");
+          },
         ),
-      ),
-    );
-    assert.equal(called, false);
-    for (const [service, id] of Object.entries(predecessorContainers))
-      assert.equal((await inspect("container", `markiro-platform-${service}-1`)).Id, id);
-    evidence.checks.push(
-      "durable migration-entered latch and failed spawn intent reject return before every adapter; actual retained IDs unchanged",
-    );
+      );
+      assert.equal(JSON.parse(await readFile(faultJournal)).migrationEntered, true);
+      let called = false;
+      await assert.rejects(
+        executeUpgradeReturn(
+          { root: faultRoot, decision: await faultDecision("return-old", "987654326") },
+          Object.fromEntries(
+            [
+              "verifyAdmission",
+              "inspectReturnEligibility",
+              "inspectSchema",
+              "startOldApi",
+              "startOldEdge",
+              "verifyOldHealth",
+              "smoke",
+              "cleanupOwnedStarts",
+            ].map((k) => [
+              k,
+              async () => {
+                called = true;
+                throw Error("must not enter adapter");
+              },
+            ]),
+          ),
+        ),
+      );
+      assert.equal(called, false);
+      for (const [service, id] of Object.entries(predecessorContainers))
+        assert.equal((await inspect("container", `markiro-platform-${service}-1`)).Id, id);
+      evidence.checks.push(
+        "durable migration-entered latch and failed spawn intent reject return before every adapter; actual retained IDs unchanged",
+      );
+    }
     completed = true;
   } catch (error) {
     await save(
