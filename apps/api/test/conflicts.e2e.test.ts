@@ -15,6 +15,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { dropFixtureDatabase } from "./support/fixture-pool";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
@@ -59,8 +60,7 @@ describe.skipIf(!ready)("conflicts e2e", () => {
 
   afterAll(async () => {
     await app?.close();
-    if (databaseCreated)
-      await maintenance.pool.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    if (databaseCreated) await dropFixtureDatabase(maintenance.pool, databaseName);
     await maintenance.pool.end();
   });
 

@@ -201,10 +201,15 @@ export function rehearsalFailure(phase, error) {
   // Reduce private stderr to a fixed category; never publish any matching text.
   const stderr = typeof error.stderr === "string" ? error.stderr : "";
   const reasons = [
-    [/No such file or directory\s*$/mu, "missing-path"],
-    [/(?:Operation not permitted|Permission denied)\s*$/mu, "permission-denied"],
-    [/Read-only file system\s*$/mu, "read-only-filesystem"],
-    [/No space left on device\s*$/mu, "capacity"],
+    [/\bno such file or directory\b/iu, "missing-path"],
+    [/\b(?:operation not permitted|permission denied)\b/iu, "permission-denied"],
+    [/\bread-only file system\b/iu, "read-only-filesystem"],
+    [/\b(?:no space left on device|disk quota exceeded)\b/iu, "capacity"],
+    [/\boperation not supported\b/iu, "filesystem-not-supported"],
+    [/\b(?:invalid tar header|invalid manifest|unrecognized image format)\b/iu, "invalid-archive"],
+    [/\binvalid diffID for layer\b/iu, "layer-digest-mismatch"],
+    [/\bunexpected EOF\b/iu, "unexpected-eof"],
+    [/\bcannot connect to the Docker daemon\b/iu, "daemon-unavailable"],
     [/OCI runtime exec failed:/u, "container-exec"],
   ];
   const processReason =

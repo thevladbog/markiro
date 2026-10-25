@@ -370,3 +370,45 @@ test("safe rehearsal archive errors retain a fixed executable category without a
   assert.equal(value.exitStatus, 1);
   assert.ok(!JSON.stringify(value).includes("private"));
 });
+
+test("safe docker load diagnostics recognize native errors without publishing private text", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { forwardRehearsalFailure } = await import("../forward-ci.mjs");
+  // Representative native/load errors, not recovered text from the failed CI.
+  for (const [message, expected] of [
+    ["open /private/NEVER_PUBLISH: no such file or directory", "missing-path"],
+    ["write /private/NEVER_PUBLISH: no space left on device", "capacity"],
+    ["write /private/NEVER_PUBLISH: disk quota exceeded", "capacity"],
+    ["chmod /private/NEVER_PUBLISH: operation not permitted", "permission-denied"],
+    ["open /private/NEVER_PUBLISH: permission denied", "permission-denied"],
+    ["write /private/NEVER_PUBLISH: read-only file system", "read-only-filesystem"],
+    ["lsetxattr /private/NEVER_PUBLISH: operation not supported", "filesystem-not-supported"],
+    ["archive/tar: invalid tar header /private/NEVER_PUBLISH", "invalid-archive"],
+    [
+      'invalid diffID for layer 2: expected "NEVER_PUBLISH", got "NEVER_PUBLISH"',
+      "layer-digest-mismatch",
+    ],
+    ["open /private/NEVER_PUBLISH: unexpected EOF", "unexpected-eof"],
+    ["Cannot connect to the Docker daemon at unix:///private/NEVER_PUBLISH", "daemon-unavailable"],
+  ]) {
+    const problem = rehearsalFailure("load current ICU worker archive", {
+      name: "Error",
+      code: 1,
+      rehearsalExecutable: "docker",
+      rehearsalCommand: "docker exec",
+      stderr: `Error response from daemon: ${message}\n`,
+    });
+    assert.equal(problem.processReason, expected);
+    const safe = forwardRehearsalFailure(problem);
+    assert.equal(safe.processReason, expected);
+    assert.doesNotMatch(JSON.stringify(safe), /NEVER_PUBLISH|private/);
+  }
+  const unknown = rehearsalFailure("load current ICU worker archive", {
+    code: 1,
+    rehearsalExecutable: "docker",
+    rehearsalCommand: "docker exec",
+    stderr: "unrecognized NEVER_PUBLISH private child text",
+  });
+  assert.equal(unknown.processReason, null);
+  assert.doesNotMatch(JSON.stringify(unknown), /NEVER_PUBLISH|private/);
+});

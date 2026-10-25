@@ -86,6 +86,11 @@ const failureReasons = new Set([
   "read-only-filesystem",
   "capacity",
   "container-exec",
+  "filesystem-not-supported",
+  "invalid-archive",
+  "layer-digest-mismatch",
+  "unexpected-eof",
+  "daemon-unavailable",
 ]);
 const failureKeys = [
   "phase",
