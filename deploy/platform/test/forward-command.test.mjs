@@ -156,3 +156,42 @@ test("execution mints pinned product proof before any ownership or application a
     { code: "ENOENT" },
   );
 });
+
+test("compiled forward runtime selects the bounded archive reader for historical migration filenames", async () => {
+  const { forwardRuntimeProcess } = await import("../host/forward-command-runtime.mjs");
+  const { runHostProcess, runHostArchiveProcess } = await import("../host/process.mjs");
+  const request = {
+    executable: "/usr/bin/docker",
+    outputLimitBytes: 16 * 1024 * 1024,
+    args: [
+      "--host",
+      "unix:///var/run/docker.sock",
+      "cp",
+      `${"c".repeat(64)}:/app/node_modules/@markiro/db/migrations/0028_avatar-owner-integrity.sql`,
+      "-",
+    ],
+  };
+  assert.equal(forwardRuntimeProcess(request), runHostArchiveProcess);
+  for (const path of [
+    "../escape.sql",
+    "0028_nested/file.sql",
+    "0028_dot.name.sql",
+    "0028_encoded%2fpath.sql",
+  ])
+    assert.equal(
+      forwardRuntimeProcess({
+        ...request,
+        args: [
+          ...request.args.slice(0, 3),
+          `${"c".repeat(64)}:/app/node_modules/@markiro/db/migrations/${path}`,
+          "-",
+        ],
+      }),
+      runHostProcess,
+    );
+  assert.equal(forwardRuntimeProcess({ ...request, outputLimitBytes: 1048576 }), runHostProcess);
+  assert.equal(
+    forwardRuntimeProcess({ ...request, executable: "/private/other/docker" }),
+    runHostProcess,
+  );
+});

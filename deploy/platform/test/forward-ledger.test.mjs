@@ -3,6 +3,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import {
   buildProductMigrationProof,
+  productMigrationPaths,
   validateProductMigrationLedger,
   observeForwardMigrationLedger,
   forwardMigrationQuery,
@@ -110,3 +111,31 @@ test("ledger observation uses one read-only snapshot for full ledger, system ID 
   assert.equal(result.schema.systemId, "123");
   assert.equal(result.productProofSha256, proof.proofSha256);
 });
+
+test("product proof covers the complete packaged journal including historical hyphenated names", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const directory = new URL("../../../packages/db/migrations/", import.meta.url);
+  const journal = await readFile(new URL("meta/_journal.json", directory));
+  const paths = productMigrationPaths(journal);
+  assert.ok(paths.includes("0028_avatar-owner-integrity.sql"));
+  const files = [{ path: "meta/_journal.json", bytes: journal }];
+  for (const path of paths) files.push({ path, bytes: await readFile(new URL(path, directory)) });
+  const proof = buildProductMigrationProof({ ...proofInput(), files });
+  assert.equal(proof.entries.length, paths.length);
+  assert.equal(proof.entries[28].tag, "0028_avatar-owner-integrity");
+});
+
+for (const unsafe of [
+  "0028_../escape",
+  "0028_nested/file",
+  "0028_back\\slash",
+  "0028_encoded%2fpath",
+  "0028_dot.name",
+  "0028_null\0byte",
+])
+  test(`journal rejects an unsafe filename ${JSON.stringify(unsafe)}`, () => {
+    const input = proofInput();
+    const journal = JSON.parse(input.files[0].bytes);
+    journal.entries[0].tag = unsafe;
+    assert.throws(() => productMigrationPaths(Buffer.from(JSON.stringify(journal))));
+  });

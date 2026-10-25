@@ -32,7 +32,7 @@ export function productMigrationPaths(bytes) {
         Number.isSafeInteger(entry.when) &&
         entry.when > previous &&
         typeof entry.tag === "string" &&
-        /^[0-9]{4}_[a-z0-9_]{1,100}$/u.test(entry.tag),
+        /^[0-9]{4}_[a-z0-9_-]{1,100}$/u.test(entry.tag),
     );
     previous = entry.when;
     return `${entry.tag}.sql`;
@@ -56,7 +56,8 @@ export function buildProductMigrationProof(input) {
     keys(file, ["path", "bytes"]);
     ensure(
       typeof file.path === "string" &&
-        (file.path === "meta/_journal.json" || /^[0-9]{4}_[a-z0-9_]{1,100}\.sql$/u.test(file.path)),
+        (file.path === "meta/_journal.json" ||
+          /^[0-9]{4}_[a-z0-9_-]{1,100}\.sql$/u.test(file.path)),
     );
     ensure(
       Buffer.isBuffer(file.bytes) && file.bytes.length > 0 && file.bytes.length <= 2 * 1024 * 1024,
@@ -85,7 +86,7 @@ export function buildProductMigrationProof(input) {
         Number.isSafeInteger(entry.when) &&
         entry.when > previous &&
         typeof entry.tag === "string" &&
-        /^[0-9]{4}_[a-z0-9_]{1,100}$/u.test(entry.tag),
+        /^[0-9]{4}_[a-z0-9_-]{1,100}$/u.test(entry.tag),
     );
     previous = entry.when;
     const bytes = byPath.get(`${entry.tag}.sql`);

@@ -239,3 +239,9 @@ test("extractor rejects unsafe journal tags before requesting SQL or snapshots",
   await assert.rejects(extractProductMigrationProof(f));
   assert.equal(f.commands.filter((a) => a[0] === "cp").length, 1);
 });
+
+test("tar parser accepts a journal-declared historical hyphenated SQL basename", () => {
+  const path = "0028_avatar-owner-integrity.sql";
+  const files = [{ path, bytes: Buffer.from("SELECT 28;\n") }];
+  assert.deepEqual(readProductMigrationTar(tar(files), path), files);
+});

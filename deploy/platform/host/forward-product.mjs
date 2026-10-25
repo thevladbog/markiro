@@ -73,7 +73,8 @@ export function readProductMigrationTar(bytes, expectedPath) {
         relative = expectedPath;
       }
       ensure(
-        (relative === "meta/_journal.json" || /^[0-9]{4}_[a-z0-9_]{1,100}\.sql$/u.test(relative)) &&
+        (relative === "meta/_journal.json" ||
+          /^[0-9]{4}_[a-z0-9_-]{1,100}\.sql$/u.test(relative)) &&
           !paths.has(relative),
       );
       paths.add(relative);

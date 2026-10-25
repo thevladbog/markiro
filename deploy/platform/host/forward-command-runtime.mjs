@@ -30,6 +30,19 @@ import { runHostProcess, runHostArchiveProcess } from "./process.mjs";
 const validated = new WeakMap();
 const same = (a, b) => ensure(canonical(a) === canonical(b));
 const hash = (v) => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v);
+/** Select the bounded archive reader only for an exact pinned migration-file copy. */
+export function forwardRuntimeProcess(request) {
+  const archive =
+    request.executable === "/usr/bin/docker" &&
+    request.outputLimitBytes === 16 * 1024 * 1024 &&
+    request.args.length === 5 &&
+    request.args[2] === "cp" &&
+    /^[a-f0-9]{64}:\/app\/node_modules\/@markiro\/db\/migrations\/(?:meta\/_journal\.json|[0-9]{4}_[a-z0-9_-]{1,100}\.sql)$/u.test(
+      request.args[3],
+    ) &&
+    request.args[4] === "-";
+  return archive ? runHostArchiveProcess : runHostProcess;
+}
 const preparing = (r) => r.phase === "post-migration-prepare";
 async function failedHistory(root, admission) {
   const result = await readFailedUpgradePredecessor(root, admission.failed.identity.operationId);
@@ -302,18 +315,10 @@ export async function validateForwardOperation(loaded, options = {}) {
         await verify();
         recheck?.();
         try {
-          const archive =
-            request.executable === "/usr/bin/docker" &&
-            request.outputLimitBytes === 16 * 1024 * 1024 &&
-            request.args.length === 5 &&
-            request.args[2] === "cp" &&
-            /^[a-f0-9]{64}:\/app\/node_modules\/@markiro\/db\/migrations\/(?:meta\/_journal\.json|[0-9]{4}_[a-z0-9_]{1,100}\.sql)$/u.test(
-              request.args[3],
-            ) &&
-            request.args[4] === "-";
-          const result = await (
-            options.runProcess ?? (archive ? runHostArchiveProcess : runHostProcess)
-          )(request, recheck);
+          const result = await (options.runProcess ?? forwardRuntimeProcess(request))(
+            request,
+            recheck,
+          );
           ensure(terminated);
           await verify();
           return result;
