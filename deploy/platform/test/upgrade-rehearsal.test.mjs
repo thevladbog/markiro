@@ -583,3 +583,23 @@ test("archive transfer probe rejects mount-namespace disagreement in either dire
     else await assert.rejects(verifyRehearsalArchiveTransfer(directory, io));
   }
 });
+
+test("rehearsal retains trusted child metadata through preparation error wrappers", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { noteHostProcessFailure, carryHostFailure } =
+    await import("../host/failure-diagnostic.mjs");
+  const origin = noteHostProcessFailure(
+    Object.assign(new Error("PRIVATE"), { code: "ERR_HOST_PROCESS" }),
+    "/usr/bin/docker",
+    19,
+  );
+  const wrapped = carryHostFailure(
+    origin,
+    Object.assign(new Error("PRIVATE-WRAPPER"), { code: "ERR_HOST_FORWARD_PREPARATION" }),
+  );
+  const result = rehearsalFailure("forward preparation: createBackup", wrapped);
+  assert.equal(result.code, "ERR_HOST_FORWARD_PREPARATION");
+  assert.equal(result.exitStatus, 19);
+  assert.equal(result.executable, "docker");
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE/u);
+});

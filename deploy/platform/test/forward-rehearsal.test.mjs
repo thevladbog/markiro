@@ -539,3 +539,55 @@ test("compiled prepare adapters enter each single-use capability only once", asy
     f.options,
   );
 });
+
+test("backup diagnostic exposes only finite stage and first trusted origin before wrapping", async () => {
+  const { forwardBackupFailure } = await import("../forward-ci-scenario.mjs");
+  const { noteHostProcessFailure, carryHostFailure } =
+    await import("../host/failure-diagnostic.mjs");
+  const origin = noteHostProcessFailure(
+    Object.assign(new Error("PRIVATE"), { code: "ERR_HOST_PROCESS" }),
+    "/usr/bin/docker",
+    23,
+  );
+  const wrapped = carryHostFailure(
+    origin,
+    Object.assign(new Error("PRIVATE-WRAPPER"), {
+      code: "ERR_TARGET_BACKUP",
+      targetBackupStage: "archive-production",
+    }),
+  );
+  const result = forwardBackupFailure(wrapped);
+  assert.equal(result.stage, "archive-production");
+  assert.equal(result.code, "ERR_HOST_PROCESS");
+  assert.equal(result.exitStatus, 23);
+  assert.equal(result.executable, "docker");
+  assert.equal(result.durabilityUncertain, false);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE/u);
+  assert.equal(
+    forwardBackupFailure({ targetBackupStage: "PRIVATE", stdout: "PRIVATE", argv: ["PRIVATE"] })
+      .stage,
+    "unclassified",
+  );
+});
+
+test("backup stages are compiled safe labels and hostile getters cannot enter diagnostics", async () => {
+  const { forwardBackupStages, forwardBackupFailure } = await import("../forward-ci-scenario.mjs");
+  const { forwardRehearsalFailure } = await load();
+  for (const stage of [...forwardBackupStages, "unclassified"]) {
+    const phase = `forward preparation backup: ${stage}`;
+    assert.equal(forwardRehearsalFailure({ phase }).phase, phase);
+  }
+  let called = false;
+  const hostile = Object.defineProperty({}, "targetBackupStage", {
+    get() {
+      called = true;
+      throw new Error("PRIVATE");
+    },
+  });
+  assert.equal(forwardBackupFailure(hostile).stage, "unclassified");
+  assert.equal(called, false);
+  assert.equal(
+    forwardRehearsalFailure({ phase: "forward preparation backup: PRIVATE" }).phase,
+    "isolated forward rehearsal",
+  );
+});

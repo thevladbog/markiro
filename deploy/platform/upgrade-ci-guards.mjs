@@ -203,15 +203,12 @@ export function rehearsalFailure(phase, error) {
   ]).has(error.name)
     ? error.name
     : "Error";
-  const host =
-    error.code === "ERR_HOST_PROCESS"
-      ? sanitizeHostFailure(error, {
-          operationId: "11111111-1111-4111-8111-111111111111",
-          phase: "migration-entered",
-          boundary: "command",
-          commandCategory: "migration",
-        })
-      : null;
+  const host = sanitizeHostFailure(error, {
+    operationId: "11111111-1111-4111-8111-111111111111",
+    phase: "migration-entered",
+    boundary: "command",
+    commandCategory: "migration",
+  });
   const exitStatus =
     Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : (host?.exitStatus ?? null);
   const executable = ["docker", "git", "openssl", "which", "tar"].includes(

@@ -27,6 +27,39 @@ import { observerProducer } from "./host/observe.mjs";
 import { measureActivationProjection } from "./host/command.mjs";
 import { productionAuthorization } from "./test/production-activation-fixture.mjs";
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
+import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
+export const forwardBackupStages = Object.freeze([
+  "input-validation",
+  "host-state",
+  "private-inputs",
+  "observer-setup",
+  "entry-observation",
+  "writer-fence",
+  "archive-production",
+  "isolated-restore",
+  "post-restore-observation",
+]);
+export function forwardBackupFailure(error) {
+  const stage =
+    error && typeof error === "object"
+      ? Object.getOwnPropertyDescriptor(error, "targetBackupStage")?.value
+      : undefined;
+  const safe = sanitizeHostFailure(error, {
+    operationId: "11111111-1111-4111-8111-111111111111",
+    phase: "backup-verified",
+    boundary: "createBackup",
+    commandCategory: "validation",
+  });
+  return {
+    stage: forwardBackupStages.includes(stage) ? stage : "unclassified",
+    code: safe.code,
+    errorName: safe.errorName,
+    exitStatus: safe.exitStatus,
+    executable: safe.executable,
+    terminationConfirmed: safe.terminationConfirmed,
+    durabilityUncertain: safe.durabilityUncertain,
+  };
+}
 export const forwardProduct = "6e32b3bf5970ed8793293bcc7e80aef342836e53";
 const images = Object.freeze({
   api: {
@@ -719,20 +752,27 @@ async function runScenario(c, mode, checks) {
       },
       createBackup: async (_context, cap, persistFailure) => {
         c.progress("forward preparation: createBackup");
-        backupResult = await createHeldForwardBackup(
-          {
-            operation: forwardOperation,
-            observationPolicy: policy,
-            hbaPath: join(parent, "postgres/pg_hba.conf"),
-            hbaSha256,
-            connectionFile,
-            roleMapping,
-            verifySources: c.deps.verifySources,
-          },
-          cap,
-          admission,
-          { ...deps, productMigrationProof: proof, beforeFailureCleanup: persistFailure },
-        );
+        try {
+          backupResult = await createHeldForwardBackup(
+            {
+              operation: forwardOperation,
+              observationPolicy: policy,
+              hbaPath: join(parent, "postgres/pg_hba.conf"),
+              hbaSha256,
+              connectionFile,
+              roleMapping,
+              verifySources: c.deps.verifySources,
+            },
+            cap,
+            admission,
+            { ...deps, productMigrationProof: proof, beforeFailureCleanup: persistFailure },
+          );
+        } catch (error) {
+          const diagnostic = forwardBackupFailure(error);
+          c.progress(`forward preparation backup: ${diagnostic.stage}`);
+          process.stderr.write(`Rehearsal backup failure: ${JSON.stringify(diagnostic)}\n`);
+          throw error;
+        }
         return {
           backup: backupResult.backup,
           restoreEvidence: backupResult.restoreEvidence,

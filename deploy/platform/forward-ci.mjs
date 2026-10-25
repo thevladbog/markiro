@@ -5,7 +5,11 @@ import { isMainModule } from "../production/cli-main.mjs";
 import { keys } from "./backup/schemas.mjs";
 import { rehearseUpgrade } from "./upgrade-ci.mjs";
 import { rehearsalFailure } from "./upgrade-ci-guards.mjs";
-import { createForwardScenario, forwardProduct } from "./forward-ci-scenario.mjs";
+import {
+  createForwardScenario,
+  forwardProduct,
+  forwardBackupStages,
+} from "./forward-ci-scenario.mjs";
 // The shared engine invokes these actual guards before every nested command and
 // re-inspects exact ownership through cleanupRehearsalResources in its finally.
 export { validateRehearsalDaemon, cleanupRehearsalResources } from "./upgrade-ci-guards.mjs";
@@ -57,6 +61,9 @@ const failurePhases = new Set([
   "forward preparation: inspectSource",
   "forward preparation: inspectSchema",
   "forward preparation: createBackup",
+  ...[...forwardBackupStages, "unclassified"].map(
+    (stage) => `forward preparation backup: ${stage}`,
+  ),
 ]);
 const failureCodes = new Set([
   "FORWARD_REHEARSAL_FAILED",
