@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { privateFixture } from "./host-fixtures.mjs";
 const forwardFiles = [
   "forward-command-runtime.mjs",
+  "forward-retained.mjs",
   "forward-activation-adapters.mjs",
   "forward-activation.mjs",
   "forward-preparation.mjs",

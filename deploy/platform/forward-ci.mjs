@@ -19,6 +19,44 @@ const checkNames = Object.freeze([
   "replacementFailureCleanup",
   "externalTls",
 ]);
+const namespaceKeys = Object.freeze([
+  "mode",
+  "operationId",
+  "failedOperationId",
+  "productSha",
+  "executorSha",
+  "postgresId",
+  "schema",
+  "productMigrationProofSha256",
+  "archiveSha256",
+  "restoreEvidenceSha256",
+  "terminalSha256",
+]);
+const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+function namespace(value) {
+  keys(value, namespaceKeys);
+  assert.ok(["healthy", "replacement-failure"].includes(value.mode));
+  for (const key of ["operationId", "failedOperationId"]) assert.match(value[key], uuid);
+  assert.notEqual(value.operationId, value.failedOperationId);
+  assert.equal(value.productSha, forwardProduct);
+  assert.match(value.executorSha, /^[a-f0-9]{40}$/u);
+  for (const key of [
+    "postgresId",
+    "productMigrationProofSha256",
+    "archiveSha256",
+    "restoreEvidenceSha256",
+    "terminalSha256",
+  ])
+    assert.match(value[key], /^[a-f0-9]{64}$/u);
+  keys(value.schema, ["systemId", "schemaSha256", "migrationSha256", "migrationCount"]);
+  for (const key of ["systemId", "migrationCount"])
+    assert.match(value.schema[key], /^[1-9][0-9]*$/u);
+  for (const key of ["schemaSha256", "migrationSha256"])
+    assert.match(value.schema[key], /^[a-f0-9]{64}$/u);
+  return structuredClone(value);
+}
+const safeNamespace = (value) =>
+  namespace(Object.fromEntries(namespaceKeys.map((key) => [key, value[key]])));
 export function validateForwardRehearsalEvidence(value) {
   keys(value, [
     "version",
@@ -31,6 +69,7 @@ export function validateForwardRehearsalEvidence(value) {
     "cleanup",
     "checks",
     "problem",
+    "runs",
   ]);
   assert.equal(value.version, 1);
   assert.equal(value.kind, "synthetic-only-forward-recovery-rehearsal");
@@ -44,7 +83,17 @@ export function validateForwardRehearsalEvidence(value) {
     assert.equal(typeof value[name], "boolean");
   keys(value.checks, checkNames);
   for (const flag of Object.values(value.checks)) assert.equal(typeof flag, "boolean");
+  assert.ok(Array.isArray(value.runs) && value.runs.length <= 2);
+  value.runs.forEach(namespace);
+  assert.equal(
+    new Set(value.runs.flatMap((run) => [run.operationId, run.failedOperationId])).size,
+    value.runs.length * 2,
+  );
   if (value.completed) {
+    assert.deepEqual(
+      value.runs.map((run) => run.mode),
+      ["healthy", "replacement-failure"],
+    );
     assert.equal(value.problem, null);
     assert.equal(value.isolated, true);
     assert.equal(value.cleanup, true);
@@ -73,6 +122,7 @@ export async function rehearseForwardRecovery(args, options = {}) {
     cleanup: false,
     checks: Object.fromEntries(checkNames.map((name) => [name, false])),
     problem: null,
+    runs: [],
   };
   try {
     assert.equal(
@@ -83,7 +133,9 @@ export async function rehearseForwardRecovery(args, options = {}) {
     const success = createForwardScenario("healthy"),
       failure = createForwardScenario("replacement-failure");
     const a = await rehearseUpgrade(args, { forwardScenario: success });
+    result.runs.push(safeNamespace(a.forward));
     const b = await rehearseUpgrade(args, { forwardScenario: failure });
+    result.runs.push(safeNamespace(b.forward));
     result.isolated = a.isolated && b.isolated;
     result.cleanup = a.cleanup && b.cleanup;
     for (const name of checkNames)

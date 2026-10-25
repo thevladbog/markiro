@@ -41,6 +41,7 @@ const names = new Set([
 ]);
 const executables = new Set([
   "docker",
+  "python3",
   "node",
   "psql",
   "pg_dump",

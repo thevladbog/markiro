@@ -196,3 +196,14 @@ reconciliation. Known-outcome cleanup can stop only fully observed candidate
 workloads and the owned migrator; retained old IDs are excluded. Unknown outcomes
 retain the lock and prohibit competing cleanup. A lost success response is
 resolved from the immutable terminal evidence, not by executing the phase again.
+
+## Failure after the migration latch
+
+A terminal `api-started/recovery-required` failure with `migrationEntered=true`
+cannot use return-old or repeat the failed activation. Preserve the migrated
+physical database and every historical authority. The separately reviewed
+[post-migration forward recovery](platform-post-migration-forward-recovery.md)
+uses new protected prepare/activate phases, a fresh actual backup/isolated restore
+and independent copies, full ordered product migration proof and no second
+migrator. Its isolated Linux rehearsal is a required additional CI gate; ordinary
+old-return rehearsal alone is insufficient.

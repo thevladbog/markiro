@@ -19,6 +19,7 @@ import {
 import { executeForwardPreparation } from "./host/forward-preparation.mjs";
 import { executeForwardActivation } from "./host/forward-activation.mjs";
 import { createForwardActivationAdapters } from "./host/forward-activation-adapters.mjs";
+import { captureForwardRetained } from "./host/forward-retained.mjs";
 import { withHeldForwardState } from "./host/forward-state.mjs";
 import { createHeldForwardBackup } from "./host/target-backup.mjs";
 import { readVerifiedBackup } from "./host/backup-gate.mjs";
@@ -645,6 +646,10 @@ async function runScenario(c, mode, checks) {
       verifyAdmission: (_context, cap) =>
         withHeldForwardState(cap, async (held) => {
           await held.verify();
+          await captureForwardRetained(
+            { root, admission, postgresImageId: policy.postgresImageId, runProcess },
+            cap,
+          );
           return forwardIdentity;
         }),
       inspectSource: (_context, cap) => observers.inspectSource(cap),

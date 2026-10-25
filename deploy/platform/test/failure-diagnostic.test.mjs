@@ -5,7 +5,11 @@ import test from "node:test";
 import { privateFixture } from "./host-fixtures.mjs";
 import { runHostProcess } from "../host/process.mjs";
 import { observationError } from "../host/observe.mjs";
-import { sanitizeHostFailure, writeHostFailure } from "../host/failure-diagnostic.mjs";
+import {
+  noteHostProcessFailure,
+  sanitizeHostFailure,
+  writeHostFailure,
+} from "../host/failure-diagnostic.mjs";
 const context = {
   operationId: "b793db93-0e6b-4b1c-bb5e-5afc3a16230a",
   phase: "api-started",
@@ -122,4 +126,23 @@ test("diagnostic rejects a root owned by a different effective operator", async 
   } finally {
     mock.mock.restore();
   }
+});
+
+test("fixed Python ZIP verifier origin records only basename and numeric status", () => {
+  const error = Object.assign(new Error(secret), {
+    code: "ERR_HOST_PROCESS",
+    stdout: secret,
+    stderr: secret,
+    argv: [secret],
+    terminationConfirmed: true,
+  });
+  noteHostProcessFailure(error, "/usr/bin/python3", 7);
+  const record = sanitizeHostFailure(error, {
+    ...context,
+    boundary: "verifyRelease",
+    commandCategory: "validation",
+  });
+  assert.equal(record.executable, "python3");
+  assert.equal(record.exitStatus, 7);
+  assert.doesNotMatch(JSON.stringify(record), new RegExp(secret, "u"));
 });

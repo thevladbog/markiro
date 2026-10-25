@@ -483,6 +483,25 @@ jobs:
           if-no-files-found: error
           overwrite: false
           retention-days: 7
+      - name: Rehearse post-migration forward recovery without a second migrator
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          import { join } from "node:path";
+          import { rehearseForwardRecovery } from "./deploy/platform/forward-ci.mjs";
+          await rehearseForwardRecovery(["--local-ci"], {
+            writeResult: (result) => writeFile(join(process.env.RUNNER_TEMP, "platform-forward-recovery.json"), JSON.stringify(result) + "\n", { mode: 0o600, flag: "wx" }),
+          });
+          NODE
+      - name: Preserve safe isolated forward evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-forward-recovery-evidence
+          path: ${{ runner.temp }}/platform-forward-recovery.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
       - name: Verify isolated platform-only preparation stack
         env:
           MARKIRO_SOURCE_SHA: ${{ github.sha }}

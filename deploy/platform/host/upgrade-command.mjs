@@ -27,6 +27,7 @@ export const UPGRADE_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/upgrade-return.mjs",
   "deploy/platform/host/upgrade-workloads.mjs",
   "deploy/platform/host/forward-command-runtime.mjs",
+  "deploy/platform/host/forward-retained.mjs",
   "deploy/platform/host/forward-activation-adapters.mjs",
   "deploy/platform/host/forward-activation.mjs",
   "deploy/platform/host/forward-preparation.mjs",

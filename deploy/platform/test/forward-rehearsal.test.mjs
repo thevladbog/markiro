@@ -36,6 +36,24 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       externalTls: true,
     },
     problem: null,
+    runs: ["healthy", "replacement-failure"].map((mode, i) => ({
+      mode,
+      operationId: `${i + 1}1111111-1111-4111-8111-111111111111`,
+      failedOperationId: `${i + 3}1111111-1111-4111-8111-111111111111`,
+      productSha: "6e32b3bf5970ed8793293bcc7e80aef342836e53",
+      executorSha: "a".repeat(40),
+      postgresId: String(i + 1).repeat(64),
+      schema: {
+        systemId: "1234",
+        schemaSha256: "b".repeat(64),
+        migrationSha256: "c".repeat(64),
+        migrationCount: "202",
+      },
+      productMigrationProofSha256: "d".repeat(64),
+      archiveSha256: "e".repeat(64),
+      restoreEvidenceSha256: "f".repeat(64),
+      terminalSha256: "a".repeat(64),
+    })),
   };
   assert.deepEqual(validateForwardRehearsalEvidence(value), value);
   for (const mutate of [
@@ -45,6 +63,9 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.checks.realBackupRestore = false),
     (v) => (v.cleanup = false),
     (v) => (v.productSha = "a".repeat(40)),
+    (v) => (v.runs[0].privateRoot = "/tmp/private"),
+    (v) => (v.runs[0].schema.migrationSha256 = "unknown"),
+    (v) => (v.runs[1].operationId = v.runs[0].operationId),
   ]) {
     const bad = structuredClone(value);
     mutate(bad);

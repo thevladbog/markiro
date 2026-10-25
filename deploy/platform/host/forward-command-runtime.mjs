@@ -11,6 +11,7 @@ import {
   validateForwardDecision,
 } from "./forward-admission.mjs";
 import { validateForwardJournal, withHeldForwardState } from "./forward-state.mjs";
+import { captureForwardRetained, readForwardRetained } from "./forward-retained.mjs";
 import { extractProductMigrationProof } from "./forward-product.mjs";
 import { createForwardObservers, createForwardBaselineVerifier } from "./forward-observation.mjs";
 import { validateObservationPolicy } from "./observe.mjs";
@@ -23,6 +24,8 @@ import { executeForwardActivation } from "./forward-activation.mjs";
 import { createForwardActivationAdapters } from "./forward-activation-adapters.mjs";
 import { createHeldForwardBackup } from "./target-backup.mjs";
 import { readVerifiedBackup } from "./backup-gate.mjs";
+import { withHostState } from "./state.mjs";
+import { carryHostFailure, sanitizeHostFailure, writeHostFailure } from "./failure-diagnostic.mjs";
 import { runHostProcess, runHostArchiveProcess } from "./process.mjs";
 const validated = new WeakMap();
 const same = (a, b) => ensure(canonical(a) === canonical(b));
@@ -163,7 +166,7 @@ export async function validateForwardOperation(loaded, options = {}) {
         config.endpoint === "unix:///var/run/docker.sock",
     );
   }
-  let prior, priorBytes;
+  let prior, priorBytes, retainedRuntime;
   if (preparing(record)) {
     ensure(typeof op.connectionFile === "string" && op.connectionFile.startsWith(`${op.root}/`));
     await retain(op.connectionFile.slice(op.root.length + 1));
@@ -176,6 +179,7 @@ export async function validateForwardOperation(loaded, options = {}) {
     for (const r of op.roleMapping.roles) keys(r, ["source", "target"]);
     ensure(admission.phase === record.phase && Date.parse(admission.expiresAt) > Date.now());
   } else {
+    retainedRuntime = (await readForwardRetained(op.root, admission)).bytes;
     priorBytes = await readPrivateFile(
       op.root,
       `forward-recovery-operations/${admission.identity.operationId}/state.json`,
@@ -203,6 +207,8 @@ export async function validateForwardOperation(loaded, options = {}) {
   }
   const verify = async () => {
     await loaded.verifyInstalledSources();
+    if (retainedRuntime)
+      ensure((await readForwardRetained(op.root, admission)).bytes.equals(retainedRuntime));
     const currentOriginal = await readUpgradePredecessor(
         op.root,
         admission.originalPredecessor.identity,
@@ -284,83 +290,104 @@ export async function validateForwardOperation(loaded, options = {}) {
     await verify();
     return admission.identity;
   };
-  const initialize = async () => {
-    await authorize();
-    let terminated = true;
-    const runProcess = async (request, recheck) => {
-      ensure(terminated);
-      await verify();
-      recheck?.();
-      try {
-        const archive =
-          request.executable === "/usr/bin/docker" &&
-          request.outputLimitBytes === 16 * 1024 * 1024 &&
-          request.args.length === 5 &&
-          request.args[2] === "cp" &&
-          /^[a-f0-9]{64}:\/app\/node_modules\/@markiro\/db\/migrations\/\.$/u.test(
-            request.args[3],
-          ) &&
-          request.args[4] === "-";
-        const result = await (
-          options.runProcess ?? (archive ? runHostArchiveProcess : runHostProcess)
-        )(request, recheck);
+  const initialize = async (recordFailure) => {
+    ensure(typeof recordFailure === "function");
+    let boundary = "verifyRelease",
+      category = "validation";
+    try {
+      await authorize();
+      let terminated = true;
+      const runProcess = async (request, recheck) => {
         ensure(terminated);
         await verify();
-        return result;
-      } catch (e) {
-        if (e?.terminationConfirmed === false) terminated = false;
-        throw e;
-      }
-    };
-    const productMigrationProof = await extractProductMigrationProof({
-      root: op.root,
-      identity: admission.identity,
-      verifySources: verify,
-      runProcess,
-    });
-    validateForwardAdmission(admission, {
-      failedBytes: failed,
-      originalPredecessorBytes: original,
-      productMigrationProof,
-      now: preparing(record) ? Date.now() : Date.parse(admission.expiresAt) - 1,
-    });
-    await verify();
-    const oldOperation = {
-      root: op.root,
-      dockerConfig: op.dockerConfig,
-      identity: admission.originalPredecessor.identity,
-      configuration: predecessor.operation.activation.configuration,
-    };
-    const candidateOperation = {
-      root: op.root,
-      dockerConfig: op.dockerConfig,
-      identity: admission.identity,
-      configuration: op.configuration,
-    };
-    const authority = {
-      oldOperation,
-      candidateOperation,
-      retainedIds: admission.baseline.containers,
-      baseline: admission.baseline,
-      productMigrationProof,
-      policy,
-    };
-    const dependencies = {
-      runProcess,
-      verifySources: verify,
-      hbaSha256: loaded.receipt.files["deploy/platform/postgres/pg_hba.conf"],
-    };
-    const verifyBaseline = createForwardBaselineVerifier(authority, dependencies);
-    return {
-      productMigrationProof,
-      verifyBaseline,
-      oldOperation,
-      candidateOperation,
-      authority,
-      dependencies,
-      authorize,
-      runProcess,
-    };
+        recheck?.();
+        try {
+          const archive =
+            request.executable === "/usr/bin/docker" &&
+            request.outputLimitBytes === 16 * 1024 * 1024 &&
+            request.args.length === 5 &&
+            request.args[2] === "cp" &&
+            /^[a-f0-9]{64}:\/app\/node_modules\/@markiro\/db\/migrations\/\.$/u.test(
+              request.args[3],
+            ) &&
+            request.args[4] === "-";
+          const result = await (
+            options.runProcess ?? (archive ? runHostArchiveProcess : runHostProcess)
+          )(request, recheck);
+          ensure(terminated);
+          await verify();
+          return result;
+        } catch (e) {
+          if (e?.terminationConfirmed === false) terminated = false;
+          throw e;
+        }
+      };
+      boundary = "verifyImages";
+      category = "image-check";
+      const productMigrationProof = await extractProductMigrationProof({
+        root: op.root,
+        identity: admission.identity,
+        verifySources: verify,
+        runProcess,
+        beforeFailureCleanup: (error) => recordFailure(error, boundary, category),
+      });
+      boundary = "validation";
+      category = "validation";
+      validateForwardAdmission(admission, {
+        failedBytes: failed,
+        originalPredecessorBytes: original,
+        productMigrationProof,
+        now: preparing(record) ? Date.now() : Date.parse(admission.expiresAt) - 1,
+      });
+      await verify();
+      const oldOperation = {
+        root: op.root,
+        dockerConfig: op.dockerConfig,
+        identity: admission.originalPredecessor.identity,
+        configuration: predecessor.operation.activation.configuration,
+      };
+      const candidateOperation = {
+        root: op.root,
+        dockerConfig: op.dockerConfig,
+        identity: admission.identity,
+        configuration: op.configuration,
+      };
+      const authority = {
+        oldOperation,
+        candidateOperation,
+        retainedIds: admission.baseline.containers,
+        baseline: admission.baseline,
+        productMigrationProof,
+        policy,
+      };
+      const dependencies = {
+        runProcess,
+        verifySources: verify,
+        hbaSha256: loaded.receipt.files["deploy/platform/postgres/pg_hba.conf"],
+      };
+      const verifyBaseline = createForwardBaselineVerifier(authority, dependencies);
+      return {
+        productMigrationProof,
+        verifyBaseline,
+        oldOperation,
+        candidateOperation,
+        authority,
+        dependencies,
+        authorize,
+        runProcess,
+        captureRetained: async (cap) => {
+          const result = await captureForwardRetained(
+            { root: op.root, admission, postgresImageId: policy.postgresImageId, runProcess },
+            cap,
+          );
+          retainedRuntime = result.bytes;
+          await verify();
+        },
+      };
+    } catch (error) {
+      await recordFailure(error, boundary, category);
+      throw error;
+    }
   };
   validated.set(loaded, initialize);
   return verify;
@@ -368,11 +395,45 @@ export async function validateForwardOperation(loaded, options = {}) {
 export async function executeForwardOperation(loaded, options = {}) {
   const initialize = validated.get(loaded);
   ensure(typeof initialize === "function");
-  // Delivery/fence/token publication happens before any product extraction.
-  const trusted = await initialize();
   const { record } = loaded,
     op = record.operation,
     admission = op.admission;
+  let diagnosticAttempted = false;
+  const recordFailure = async (error, boundary, commandCategory) => {
+    if (diagnosticAttempted) return;
+    diagnosticAttempted = true;
+    try {
+      await writeHostFailure(
+        loaded.operationDirectory,
+        sanitizeHostFailure(error, {
+          operationId: admission.identity.operationId,
+          phase: preparing(record) ? "admitted" : "activation-admitted",
+          boundary,
+          commandCategory,
+        }),
+      );
+    } catch {
+      const failure = carryHostFailure(
+        error,
+        new Error("Forward initializer diagnostic publication failed."),
+      );
+      failure.code = "ERR_UPGRADE_COMMAND";
+      failure.durabilityUncertain = true;
+      throw failure;
+    }
+  };
+  // Delivery/fence/token publication precedes initialization. The common lock
+  // covers all admission/image children; uncertain exit or diagnostics retain it.
+  // Release it before the typed store takes the same lock and rechecks baseline.
+  const trusted = await withHostState(op.root, async () => {
+    try {
+      await loaded.verifySources();
+      return await initialize(recordFailure);
+    } catch (error) {
+      await recordFailure(error, "validation", "validation");
+      throw error;
+    }
+  });
   await loaded.verifySources();
   const {
     productMigrationProof,
@@ -426,7 +487,11 @@ export async function executeForwardOperation(loaded, options = {}) {
   return executeForwardPreparation(
     { root: op.root, admission, configuration: op.configuration },
     {
-      verifyAdmission: (_context, cap) => withHeldForwardState(cap, verifyReleaseHeld),
+      verifyAdmission: async (_context, cap) => {
+        const identity = await withHeldForwardState(cap, verifyReleaseHeld);
+        await trusted.captureRetained(cap);
+        return identity;
+      },
       inspectSource: (_context, cap) => observers.inspectSource(cap),
       inspectSchema: (_context, cap) => observers.inspectSchema(cap),
       createBackup: (_context, cap) =>

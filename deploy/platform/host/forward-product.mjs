@@ -91,6 +91,9 @@ export async function extractProductMigrationProof(input) {
   const identity = snapshot(input.identity);
   validateIdentity(identity);
   const { root, verifySources } = input;
+  ensure(
+    input.beforeFailureCleanup === undefined || typeof input.beforeFailureCleanup === "function",
+  );
   ensure(typeof verifySources === "function");
   const selected = identity.admission.registry.api;
   ensure(selected.reference === identity.admission.manifest.api);
@@ -237,8 +240,16 @@ export async function extractProductMigrationProof(input) {
     return proof;
   } catch (error) {
     const uncertain = error?.terminationConfirmed === false || error?.durabilityUncertain === true;
-    let cleanupFailed = false;
-    if (created && !removed && !uncertain && !cleanupAttempted) {
+    let cleanupFailed = false,
+      diagnosticFailed = false;
+    if (input.beforeFailureCleanup) {
+      try {
+        await input.beforeFailureCleanup(error);
+      } catch {
+        diagnosticFailed = true;
+      }
+    }
+    if (created && !removed && !uncertain && !diagnosticFailed && !cleanupAttempted) {
       try {
         await cleanup();
       } catch {
@@ -250,7 +261,8 @@ export async function extractProductMigrationProof(input) {
       new Error("Pinned product migration extraction failed."),
     );
     failure.code = "ERR_HOST_FORWARD_PRODUCT";
-    if (uncertain || cleanupFailed || (created && !removed)) failure.durabilityUncertain = true;
+    if (uncertain || diagnosticFailed || cleanupFailed || (created && !removed))
+      failure.durabilityUncertain = true;
     throw failure;
   }
 }
