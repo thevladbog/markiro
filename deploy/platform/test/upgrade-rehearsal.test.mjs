@@ -469,3 +469,52 @@ test("rehearsal preserves trusted host-process exit metadata without output or a
     },
   );
 });
+
+test("synthetic old database restore preserves database owner and complete ACL", async () => {
+  const { restoreRehearsalDatabase } = await import("../upgrade-ci.mjs");
+  const postgresId = "d".repeat(64);
+  const calls = [];
+  const before = { stdout: Buffer.from('{"owner":"10","acl":[["10","20","CREATE",false]]}\n') };
+  const sql = async (text, database) => {
+    calls.push(["sql", text, database]);
+    return before;
+  };
+  const nested = async (args) => {
+    calls.push(["docker", args]);
+    return { stdout: "" };
+  };
+  await restoreRehearsalDatabase({ postgresId, sql, nested });
+  assert.equal(calls.length, 4);
+  assert.equal(calls[1][1], "DROP DATABASE markiro;");
+  assert.equal(calls[1][2], "postgres");
+  assert.deepEqual(calls[2][1], [
+    "exec",
+    "--user",
+    "70:70",
+    postgresId,
+    "pg_restore",
+    "--exit-on-error",
+    "--create",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "/tmp/rehearsal.dump",
+  ]);
+  assert.equal(calls[0][1], calls[3][1]);
+  assert.match(calls[0][1], /aclexplode/u);
+  assert.match(calls[0][1], /datdba/u);
+  assert.match(calls[0][1], /is_grantable/u);
+});
+
+test("synthetic old database restore rejects lost or broadened database grants", async () => {
+  const { restoreRehearsalDatabase } = await import("../upgrade-ci.mjs");
+  let reads = 0;
+  await assert.rejects(
+    restoreRehearsalDatabase({
+      postgresId: "d".repeat(64),
+      sql: async () => ({ stdout: ++reads === 1 ? "original ACL\n" : "changed ACL\n" }),
+      nested: async () => ({ stdout: "" }),
+    }),
+  );
+});

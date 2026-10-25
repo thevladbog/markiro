@@ -113,6 +113,47 @@ export async function stageRehearsalTree(root, io) {
   return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
 
+/** Restore the generated old database including its database-level privileges.
+ * A restore into a manually recreated database omits these ACLs, including the
+ * migrator's CREATE grant required by Drizzle even for an existing schema. */
+export async function restoreRehearsalDatabase({ postgresId, sql, nested }) {
+  assert.match(postgresId, /^[a-f0-9]{64}$/u);
+  const databaseAuthority = `SELECT json_build_object(
+    'owner', d.datdba::text,
+    'acl', (SELECT json_agg(json_build_array(a.grantor::text, a.grantee::text,
+      a.privilege_type, a.is_grantable) ORDER BY a.grantor, a.grantee,
+      a.privilege_type, a.is_grantable)
+      FROM aclexplode(COALESCE(d.datacl, acldefault('d', d.datdba))) a)
+    )::text FROM pg_database d WHERE d.datname = 'markiro';`;
+  const authority = async () => {
+    const { stdout } = await sql(databaseAuthority);
+    assert.ok(typeof stdout === "string" || Buffer.isBuffer(stdout));
+    const text = stdout.toString("utf8");
+    assert.ok(text.trim() !== "");
+    return text;
+  };
+  const before = await authority();
+  await sql("DROP DATABASE markiro;", "postgres");
+  await nested(
+    [
+      "exec",
+      "--user",
+      "70:70",
+      postgresId,
+      "pg_restore",
+      "--exit-on-error",
+      "--create",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "/tmp/rehearsal.dump",
+    ],
+    { timeout: 180000 },
+  );
+  assert.equal(await authority(), before);
+}
+
 export async function rehearseUpgrade(
   argv,
   { writeResult = async () => {}, forwardScenario } = {},
@@ -675,23 +716,7 @@ export async function rehearseUpgrade(
     assert.equal(archive.subarray(0, 5).toString("ascii"), "PGDMP");
     await writeFile(join(parent, "synthetic.dump"), archive, { mode: 0o600, flag: "wx" });
     evidence.archive = { sha256: digest(archive), bytes: archive.length, syntheticOnly: true };
-    await sql("DROP DATABASE markiro; CREATE DATABASE markiro TEMPLATE template0;", "postgres");
-    await nested(
-      [
-        "exec",
-        "--user",
-        "70:70",
-        pg,
-        "pg_restore",
-        "--exit-on-error",
-        "-U",
-        "postgres",
-        "-d",
-        "markiro",
-        "/tmp/rehearsal.dump",
-      ],
-      { timeout: 180000 },
-    );
+    await restoreRehearsalDatabase({ postgresId: pg, sql, nested });
     evidence.checks.push(
       "old image migrated generated DB; full custom archive restored before app launch",
     );
