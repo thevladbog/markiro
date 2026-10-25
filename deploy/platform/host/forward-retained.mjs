@@ -57,7 +57,9 @@ export async function readForwardRetained(root, admission) {
   );
   return { bytes, record: validate(JSON.parse(bytes), admission) };
 }
-export async function captureForwardRetained(input, capability) {
+export async function captureForwardRetained(input, capability, options = {}) {
+  keys(options, Object.hasOwn(options, "verifyAdmission") ? ["verifyAdmission"] : []);
+  ensure(options.verifyAdmission === undefined || typeof options.verifyAdmission === "function");
   return withHeldForwardState(capability, async (held) => {
     ensure(
       !held.cleanup &&
@@ -69,6 +71,11 @@ export async function captureForwardRetained(input, capability) {
     ensure(held.root === input.root);
     same(held.state.admission, input.admission);
     const { root, admission } = input;
+    if (options.verifyAdmission) {
+      await held.verify();
+      same(await options.verifyAdmission(held), admission.identity);
+      await held.verify();
+    }
     const one = async (kind, id) => {
       await held.verify();
       const result = await (input.runProcess ?? runHostProcess)({

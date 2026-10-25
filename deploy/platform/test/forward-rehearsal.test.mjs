@@ -474,3 +474,68 @@ test("safe evidence retains finite forward preparation boundaries without projec
     "isolated forward rehearsal",
   );
 });
+
+test("compiled prepare adapters enter each single-use capability only once", async (t) => {
+  const { forwardPreparationAdapters } = await import("../host/forward-command-runtime.mjs");
+  const { forwardRetainedFixture } = await import("./forward-retained-fixture.mjs");
+  const { withForwardPreparationState } = await import("../host/forward-state.mjs");
+  const { captureForwardRetained } = await import("../host/forward-retained.mjs");
+  const { withForwardBackupRuntime } = await import("../backup/local-runtime.mjs");
+  const { provisionForwardRuntimes } = await import("./forward-backup-fixture.mjs");
+  const { forwardPrepared } = await import("./forward-fixture.mjs");
+  const f = await forwardRetainedFixture(t);
+  await provisionForwardRuntimes(f);
+  let authorized = 0,
+    inspected = 0,
+    backedUp = 0;
+  const adapters = forwardPreparationAdapters({
+    verifyReleaseHeld: async (held) => {
+      await held.verify();
+      authorized++;
+      return f.input.identity;
+    },
+    captureRetained: async (cap, verifyAdmission) => {
+      await captureForwardRetained(
+        {
+          ...f.inputCapture,
+          runProcess: (request) => {
+            inspected++;
+            return f.inputCapture.runProcess(request);
+          },
+        },
+        cap,
+        { verifyAdmission },
+      );
+      return f.input.identity;
+    },
+    observers: {},
+    backup: (cap) =>
+      withForwardBackupRuntime(cap, async (held) => {
+        await held.verify();
+        backedUp++;
+        return "verified-backup-boundary";
+      }),
+  });
+  await withForwardPreparationState(
+    f.root,
+    f.input,
+    async (store) => {
+      assert.deepEqual(
+        await store.guard((cap) => adapters.verifyAdmission({}, cap)),
+        f.input.identity,
+      );
+      assert.equal(authorized, 1);
+      assert.equal(inspected, 6);
+      await store.complete("admitted", forwardPrepared(f).sourceRuntime);
+      await store.enter("source-held");
+      await store.complete("source-held");
+      await store.enter("backup-verified");
+      assert.equal(
+        await store.guard((cap) => adapters.createBackup({}, cap)),
+        "verified-backup-boundary",
+      );
+      assert.equal(backedUp, 1);
+    },
+    f.options,
+  );
+});

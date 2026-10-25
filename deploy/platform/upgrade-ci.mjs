@@ -1143,7 +1143,17 @@ export async function rehearseUpgrade(
           removeVolume: (n) => outer(["volume", "rm", n]),
         });
         evidence.cleanup = true;
-      } catch {
+      } catch (error) {
+        const diagnostic = rehearsalFailure("owned cleanup", error);
+        process.stderr.write(
+          `Rehearsal cleanup failure: ${JSON.stringify({
+            exitStatus: diagnostic.exitStatus,
+            executable: diagnostic.executable,
+            processReason: diagnostic.processReason,
+            childKilled: error.killed === true,
+            signal: ["SIGTERM", "SIGKILL"].includes(error.signal) ? error.signal : null,
+          })}\n`,
+        );
         evidence.cleanup = false;
         problem ??= { phase: "owned cleanup", code: "CLEANUP_FAILED" };
       }

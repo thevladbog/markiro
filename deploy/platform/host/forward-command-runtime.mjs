@@ -10,7 +10,7 @@ import {
   validateForwardAdmission,
   validateForwardDecision,
 } from "./forward-admission.mjs";
-import { validateForwardJournal, withHeldForwardState } from "./forward-state.mjs";
+import { validateForwardJournal } from "./forward-state.mjs";
 import { captureForwardRetained, readForwardRetained } from "./forward-retained.mjs";
 import { extractProductMigrationProof } from "./forward-product.mjs";
 import { createForwardObservers, createForwardBaselineVerifier } from "./forward-observation.mjs";
@@ -179,7 +179,7 @@ export async function validateForwardOperation(loaded, options = {}) {
         config.endpoint === "unix:///var/run/docker.sock",
     );
   }
-  let prior, priorBytes, retainedRuntime;
+  let prior, priorBytes, retainedRuntime, retainedHbaPath;
   if (preparing(record)) {
     ensure(typeof op.connectionFile === "string" && op.connectionFile.startsWith(`${op.root}/`));
     await retain(op.connectionFile.slice(op.root.length + 1));
@@ -380,13 +380,26 @@ export async function validateForwardOperation(loaded, options = {}) {
         dependencies,
         authorize,
         runProcess,
-        captureRetained: async (cap) => {
+        captureRetained: async (cap, verifyAdmission) => {
+          ensure(typeof verifyAdmission === "function");
           const result = await captureForwardRetained(
             { root: op.root, admission, postgresImageId: policy.postgresImageId, runProcess },
             cap,
+            { verifyAdmission },
           );
           retainedRuntime = result.bytes;
+          const mounts = result.record.containers.postgres.Mounts.filter(
+            (m) => m.Destination === "/etc/postgresql/pg_hba.conf",
+          );
+          ensure(mounts.length === 1 && typeof mounts[0].Source === "string");
+          assertBindFileSync(mounts[0].Source);
+          retainedHbaPath = mounts[0].Source;
           await verify();
+          return admission.identity;
+        },
+        backupHbaPath: () => {
+          ensure(typeof retainedHbaPath === "string" && retainedRuntime);
+          return retainedHbaPath;
         },
       };
     } catch (error) {
@@ -397,6 +410,21 @@ export async function validateForwardOperation(loaded, options = {}) {
   validated.set(loaded, initialize);
   return verify;
 }
+// Compiled preparation entry points, also exercised with genuine fixture tokens.
+export function forwardPreparationAdapters({
+  verifyReleaseHeld,
+  captureRetained,
+  observers,
+  backup,
+}) {
+  return {
+    verifyAdmission: (_context, cap) => captureRetained(cap, verifyReleaseHeld),
+    inspectSource: (_context, cap) => observers.inspectSource(cap),
+    inspectSchema: (_context, cap) => observers.inspectSchema(cap),
+    createBackup: (_context, cap, beforeFailureCleanup) => backup(cap, beforeFailureCleanup),
+  };
+}
+
 export async function executeForwardOperation(loaded, options = {}) {
   const initialize = validated.get(loaded);
   ensure(typeof initialize === "function");
@@ -491,67 +519,32 @@ export async function executeForwardOperation(loaded, options = {}) {
     );
   return executeForwardPreparation(
     { root: op.root, admission, configuration: op.configuration },
-    {
-      verifyAdmission: async (_context, cap) => {
-        const identity = await withHeldForwardState(cap, verifyReleaseHeld);
-        await trusted.captureRetained(cap);
-        return identity;
+    forwardPreparationAdapters({
+      verifyReleaseHeld,
+      captureRetained: trusted.captureRetained,
+      observers,
+      backup: async (cap, beforeFailureCleanup) => {
+        const result = await createHeldForwardBackup(
+          {
+            operation: candidateOperation,
+            observationPolicy: record.observationPolicy,
+            hbaPath: trusted.backupHbaPath(),
+            hbaSha256: dependencies.hbaSha256,
+            connectionFile: op.connectionFile,
+            roleMapping: op.roleMapping,
+            verifySources: loaded.verifySources,
+          },
+          cap,
+          admission,
+          { ...dependencies, productMigrationProof, beforeFailureCleanup },
+        );
+        return {
+          backup: result.backup,
+          restoreEvidence: result.restoreEvidence,
+          fence: result.fence,
+        };
       },
-      inspectSource: (_context, cap) => observers.inspectSource(cap),
-      inspectSchema: (_context, cap) => observers.inspectSchema(cap),
-      createBackup: (_context, cap, beforeFailureCleanup) =>
-        withHeldForwardState(cap, async (held) => {
-          await held.verify();
-          const response = await runProcess({
-            executable: "/usr/bin/docker",
-            args: [
-              "--host",
-              "unix:///var/run/docker.sock",
-              "container",
-              "inspect",
-              admission.baseline.containers.postgres,
-            ],
-            cwd: op.root,
-            env: {
-              PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-              LANG: "C.UTF-8",
-              DOCKER_CONFIG: op.dockerConfig,
-            },
-            timeoutMs: 30000,
-            outputLimitBytes: 1048576,
-          });
-          const rows = JSON.parse(String(response.stdout));
-          ensure(
-            Array.isArray(rows) &&
-              rows.length === 1 &&
-              rows[0].Id === admission.baseline.containers.postgres,
-          );
-          const mounts = rows[0].Mounts.filter(
-            (m) => m.Destination === "/etc/postgresql/pg_hba.conf",
-          );
-          ensure(mounts.length === 1 && typeof mounts[0].Source === "string");
-          await held.verify();
-          const result = await createHeldForwardBackup(
-            {
-              operation: candidateOperation,
-              observationPolicy: record.observationPolicy,
-              hbaPath: mounts[0].Source,
-              hbaSha256: dependencies.hbaSha256,
-              connectionFile: op.connectionFile,
-              roleMapping: op.roleMapping,
-              verifySources: loaded.verifySources,
-            },
-            cap,
-            admission,
-            { ...dependencies, productMigrationProof, beforeFailureCleanup },
-          );
-          return {
-            backup: result.backup,
-            restoreEvidence: result.restoreEvidence,
-            fence: result.fence,
-          };
-        }),
-    },
+    }),
     storeOptions,
   );
 }
