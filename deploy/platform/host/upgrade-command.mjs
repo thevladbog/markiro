@@ -6,7 +6,11 @@ import { pathToFileURL } from "node:url";
 import { readFile, lstat } from "node:fs/promises";
 import { canonical, digest, ensure, keys } from "../backup/schemas.mjs";
 import { canonicalId } from "../release-admission.mjs";
-import { validateUpgradeDispatch, validateUpgradeAuthorization } from "../upgrade-dispatch.mjs";
+import {
+  upgradePhase,
+  validateUpgradeDispatch,
+  validateUpgradeAuthorization,
+} from "../upgrade-dispatch.mjs";
 import { assertPrivateRootSync, assertBindFileSync, readPrivateFile } from "./files.mjs";
 import { RECOVERY_BUNDLE_FILES } from "./recovery-command.mjs";
 export const UPGRADE_BUNDLE_FILES = Object.freeze([
@@ -64,13 +68,7 @@ export async function loadUpgradeOperation(directory, options = {}) {
       "observationPolicy",
       ...(forward ? ["historicalSources"] : []),
     ]);
-    ensure(
-      record.version === 1 &&
-        (forward
-          ? ["post-migration-prepare", "post-migration-activate"].includes(record.phase)
-          : record.kind === "platform-upgrade-host-operation" &&
-            ["prepare", "activate", "return-old"].includes(record.phase)),
-    );
+    ensure(record.version === 1 && record.kind === upgradePhase(record.phase).kind);
     validateUpgradeDispatch(record.dispatch);
     validateUpgradeAuthorization(record.authorization);
     const op = record.operation;
@@ -182,13 +180,7 @@ export async function runUpgradeHostCommand(args, options = {}) {
     ensure(
       Array.isArray(args) &&
         args.length === 2 &&
-        [
-          "prepare",
-          "activate",
-          "return-old",
-          "post-migration-prepare",
-          "post-migration-activate",
-        ].includes(args[0]) &&
+        upgradePhase(args[0]) &&
         typeof args[1] === "string",
     );
     const loaded = await loadUpgradeOperation(args[1], options);
@@ -208,13 +200,7 @@ export async function runUpgradeHostCommand(args, options = {}) {
       version: 1,
       kind: "platform-upgrade-host-outcome",
       phase: args[0],
-      status: {
-        prepare: "backup-verified",
-        activate: "healthy",
-        "return-old": "returned-old",
-        "post-migration-prepare": "backup-verified",
-        "post-migration-activate": "healthy",
-      }[args[0]],
+      status: upgradePhase(args[0]).status,
     });
   } catch (error) {
     throw failure(error);

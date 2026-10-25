@@ -7,7 +7,7 @@ on:
         description: Separately approved upgrade phase; new run only
         required: true
         type: choice
-        options: [prepare, activate, return-old]
+        options: [prepare, activate, return-old, post-migration-prepare, post-migration-activate]
       executor_sha:
         description: Pinned reviewed upgrade executor, identical for all phases
         required: true
