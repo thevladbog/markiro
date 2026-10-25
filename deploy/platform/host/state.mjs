@@ -1,3 +1,4 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, unlink } from "node:fs/promises";
@@ -66,7 +67,7 @@ export async function withHostState(root, callback) {
     // The producer drain can reject after the guarded action has returned.
     // Unreaped work is uncertain regardless of which rejection path reaches us.
     uncertain ||= error?.durabilityUncertain === true || error?.terminationConfirmed === false;
-    return stateError(uncertain);
+    return carryHostFailure(error, stateError(uncertain));
   };
   try {
     await assertPrivateRoot(root);
@@ -221,7 +222,7 @@ export async function withHostState(root, callback) {
       active = false;
       await pending?.catch(() => {});
     }
-    if (callbackError || uncertain) throw stateError(uncertain);
+    if (callbackError || uncertain) throw carryHostFailure(callbackError, stateError(uncertain));
   } catch (error) {
     failure = latch(error);
   } finally {
@@ -241,7 +242,7 @@ export async function withHostState(root, callback) {
       }
     }
   }
-  if (uncertain) throw stateError(true);
+  if (uncertain) throw carryHostFailure(failure, stateError(true));
   if (retirementFailed) throw lockReleaseError();
   if (failure) throw failure;
   return outcome;

@@ -1,3 +1,4 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 // Separate immutable loader. Runtime imports happen only after full byte closure
 // verification; operation JSON is data and never supplies executable adapters.
 import { join } from "node:path";
@@ -34,9 +35,7 @@ const failure = (error) => {
   const result = new Error("Platform upgrade host command rejected.");
   result.code = "ERR_UPGRADE_COMMAND";
   result.recoveryRequired = true;
-  if (error?.terminationConfirmed === false) result.terminationConfirmed = false;
-  if (error?.durabilityUncertain === true) result.durabilityUncertain = true;
-  return result;
+  return carryHostFailure(error, result);
 };
 export async function loadUpgradeOperation(directory, options = {}) {
   try {

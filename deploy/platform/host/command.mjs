@@ -129,6 +129,7 @@ export async function measureActivationProjection(
 }
 
 export const HOST_BUNDLE_FILES = Object.freeze([
+  "deploy/platform/host/failure-diagnostic.mjs",
   "deploy/platform/host/upgrade-state.mjs",
   "deploy/platform/host/upgrade-admission.mjs",
   "deploy/platform/host/upgrade-phase-admission.mjs",

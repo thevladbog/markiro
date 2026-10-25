@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { carryHostFailure, sanitizeHostFailure, writeHostFailure } from "./failure-diagnostic.mjs";
 import { canonical, ensure, keys } from "../backup/schemas.mjs";
 import { catalogComposeFiles } from "../catalog-config.mjs";
 import { snapshotActivation } from "./recovery-activation-admission.mjs";
@@ -24,9 +26,8 @@ function failure(phase, error) {
   e.code = "ERR_HOST_UPGRADE_ACTIVATION";
   e.phase = phase;
   e.recoveryRequired = true;
-  e.durabilityUncertain = error?.durabilityUncertain === true;
-  if (error?.terminationConfirmed === false) e.terminationConfirmed = false;
-  return e;
+  e.durabilityUncertain = false;
+  return carryHostFailure(error, e);
 }
 export async function executeUpgradeActivation(input, adapters, options) {
   let phase = "activation-admitted";
@@ -88,8 +89,14 @@ export async function executeUpgradeActivation(input, adapters, options) {
             ...(["edge-started", "healthy"].includes(phase) ? ["edge"] : []),
           ],
         });
-        const call = (name, boundary = name) =>
-          store.guard((cap) => adapters[name](context(boundary), cap));
+        let lastBoundary = "entry",
+          commandCategory = "validation";
+        const call = (name, boundary = name) => {
+          lastBoundary = boundary;
+          commandCategory =
+            name === "smoke" ? "smoke" : name === "verifyImages" ? "image-check" : "validation";
+          return store.guard((cap) => adapters[name](context(boundary), cap));
+        };
         const shared = preparedHostBoundary({
           root,
           identity,
@@ -167,6 +174,15 @@ export async function executeUpgradeActivation(input, adapters, options) {
         const compose = async (args) => {
           await boundary("command");
           if (args[0] === "run") migrationAttempted = true;
+          lastBoundary = "command";
+          commandCategory =
+            args[0] === "run"
+              ? "migration"
+              : args[0] === "pull"
+                ? "image-check"
+                : args.at(-1) === "api"
+                  ? "api-up"
+                  : "edge-up";
           return store.guard(() => {
             recheck();
             return (adapters.runProcess ?? runHostProcess)(
@@ -256,6 +272,27 @@ export async function executeUpgradeActivation(input, adapters, options) {
           await complete();
           return identity;
         } catch (error) {
+          // Capture the initiating failure before fail/cleanup can throw another.
+          // Failure to durably preserve it is unresolved state: retain the lock.
+          try {
+            await writeHostFailure(
+              join(dirname(root), "upgrade-operations", identity.operationId, "activate"),
+              sanitizeHostFailure(error, {
+                operationId: identity.operationId,
+                phase,
+                boundary: lastBoundary,
+                commandCategory,
+              }),
+            );
+          } catch {
+            const unresolved = carryHostFailure(
+              error,
+              new Error("Host failure diagnostic could not be persisted."),
+            );
+            unresolved.code = "ERR_HOST_PRIVATE_FILE";
+            unresolved.durabilityUncertain = true;
+            throw unresolved;
+          }
           if (error?.terminationConfirmed === false || error?.durabilityUncertain === true)
             throw error;
           await store.fail();

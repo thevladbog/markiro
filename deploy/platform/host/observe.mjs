@@ -1,3 +1,4 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 import { catalogMountBindings, assertExclusiveCatalogMounts } from "../catalog-config.mjs";
 import { readFile } from "node:fs/promises";
 import { canonical, digest, ensure, keys, plain } from "../backup/schemas.mjs";
@@ -33,8 +34,7 @@ const same = (a, b) => ensure(canonical(a) === canonical(b));
 export function observationError(error) {
   const result = new Error("Host observation failed.");
   result.code = "ERR_HOST_OBSERVATION";
-  if (error?.terminationConfirmed === false) result.terminationConfirmed = false;
-  return result;
+  return carryHostFailure(error, result);
 }
 export async function guarded(action) {
   try {

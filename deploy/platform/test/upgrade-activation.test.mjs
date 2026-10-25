@@ -57,6 +57,10 @@ async function fixture(t, failAt) {
     await s.enter("backup-verified");
     await s.complete("backup-verified", proof.backup, proof);
   });
+  await mkdir(join(dirname(f.root), "upgrade-operations", f.identity.operationId, "activate"), {
+    recursive: true,
+    mode: 0o700,
+  });
   const journal = join(f.root, "upgrade-operations", f.identity.operationId, "state.json");
   const before = await readFile(journal);
   const decision = {
@@ -335,4 +339,53 @@ test("activation measures fresh cleanup after a slow writer fence before proceed
   assert.deepEqual(await run(f), f.identity);
   assert.equal((await f.state()).phase, "healthy");
   assert.equal((await f.state()).status, "completed");
+});
+
+test("activation records the first failure before cleanup without private error text", async (t) => {
+  const f = await fixture(t, "smoke");
+  await assert.rejects(run(f));
+  const path = join(
+    dirname(f.input.root),
+    "upgrade-operations",
+    f.input.decision.identity.operationId,
+    "activate",
+    "failure.json",
+  );
+  const bytes = await readFile(path);
+  const record = JSON.parse(bytes);
+  assert.equal(record.phase, "healthy");
+  assert.equal(record.boundary, "smoke");
+  assert.equal(record.commandCategory, "smoke");
+  assert.equal(record.code, "ERR_HOST_FAILURE");
+  assert.doesNotMatch(bytes.toString(), /private failure/u);
+});
+
+test("diagnostic publication failure retains lock and does not run cleanup", async (t) => {
+  const f = await fixture(t, "smoke");
+  const directory = join(dirname(f.root), "upgrade-operations", f.identity.operationId, "activate");
+  await writeFile(join(directory, "failure.json"), "retained-first-diagnostic", { mode: 0o600 });
+  await assert.rejects(run(f), (error) => error.durabilityUncertain === true);
+  assert.equal(
+    await readFile(join(directory, "failure.json"), "utf8"),
+    "retained-first-diagnostic",
+  );
+  assert.ok(await lstat(join(f.root, ".deploy.lock")));
+  assert.equal(
+    f.trace.some(([name]) => ["cleanup", "probe-cleanup"].includes(name)),
+    false,
+  );
+});
+test("cleanup failure cannot replace the initiating child diagnostic", async (t) => {
+  const f = await fixture(t, "smoke");
+  f.adapters.cleanupOwnedProbes = async () => {
+    throw new TypeError("cleanup-private-sentinel");
+  };
+  await assert.rejects(run(f));
+  const bytes = await readFile(
+    join(dirname(f.root), "upgrade-operations", f.identity.operationId, "activate", "failure.json"),
+    "utf8",
+  );
+  assert.equal(JSON.parse(bytes).boundary, "smoke");
+  assert.equal(JSON.parse(bytes).errorName, "Error");
+  assert.doesNotMatch(bytes, /private failure|cleanup-private-sentinel/u);
 });

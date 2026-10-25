@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { assertPrivateRootSync } from "./files.mjs";
 
+import { noteHostProcessFailure } from "./failure-diagnostic.mjs";
+
 const termGraceMs = 2000;
 const killReapMs = 2000;
 
@@ -73,6 +75,7 @@ export async function runHostProcess(options) {
 
   return new Promise((resolve, reject) => {
     let child;
+    let exitStatus = null;
     let closed = false;
     let settled = false;
     let reason;
@@ -110,7 +113,13 @@ export async function runHostProcess(options) {
       if (reason || !confirmed) {
         output.stdout.length = 0;
         output.stderr.length = 0;
-        reject(processError(confirmed ? reason : "termination", confirmed));
+        reject(
+          noteHostProcessFailure(
+            processError(confirmed ? reason : "termination", confirmed),
+            executable,
+            exitStatus,
+          ),
+        );
       } else {
         resolve({ stdout: Buffer.concat(output.stdout), stderr: Buffer.concat(output.stderr) });
       }
@@ -175,6 +184,7 @@ export async function runHostProcess(options) {
     }
     child.on("error", () => stop("spawn"));
     child.on("exit", (code, exitSignal) => {
+      exitStatus = code;
       if (code !== 0 || exitSignal !== null) stop("exit");
     });
     child.on("close", () => {
