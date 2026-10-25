@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 const load = () => import("../forward-ci.mjs");
@@ -371,4 +372,67 @@ test("worker staging verifies the actual copied archive before its single load",
     );
     assert.equal(loads, 0);
   }
+});
+
+test("synthetic migration failure passes through the actual state wrapper without hiding earlier errors", async (t) => {
+  const { expectSyntheticMigrationFailure } = await import("../forward-ci-scenario.mjs");
+  const { phaseFixture } = await import("./upgrade-phase-fixture.mjs");
+  const { withUpgradePhaseState } = await import("../host/upgrade-state.mjs");
+  for (const code of [null, "ERR_HOST_STATE", "PROCESS_EXIT_1"]) {
+    const f = await phaseFixture(t);
+    const decision = await f.phaseInput("activate");
+    const original = Object.assign(new Error("private diagnostic"), { code });
+    const result = expectSyntheticMigrationFailure(
+      (callback) => withUpgradePhaseState(f.root, decision, callback, { now: () => f.phaseNow }),
+      async (store, expected) => {
+        await store.complete("activation-admitted");
+        await store.enter("migration-entered");
+        if (code) throw original;
+        await store.complete("migration-entered");
+        await store.enter("migrated");
+        await store.complete("migrated");
+        await store.enter("api-started");
+        throw expected;
+      },
+    );
+    if (code) await assert.rejects(result, (error) => error === original);
+    else {
+      await result;
+      const state = JSON.parse(await readFile(f.journal));
+      assert.equal(state.sequence, 14);
+      assert.equal(state.phase, "api-started");
+      assert.equal(state.status, "recovery-required");
+    }
+  }
+});
+
+test("expected migration injection cannot hide wrapper durability or termination uncertainty", async () => {
+  const { expectSyntheticMigrationFailure } = await import("../forward-ci-scenario.mjs");
+  for (const properties of [
+    { durabilityUncertain: true },
+    { durabilityUncertain: false, terminationConfirmed: false },
+  ]) {
+    const outer = Object.assign(new Error("wrapper uncertainty"), properties);
+    await assert.rejects(
+      expectSyntheticMigrationFailure(
+        async (callback) => {
+          try {
+            await callback({});
+          } catch {
+            throw outer;
+          }
+        },
+        async (_, expected) => {
+          throw expected;
+        },
+      ),
+      (error) => error === outer,
+    );
+  }
+  await assert.rejects(
+    expectSyntheticMigrationFailure(
+      async (callback) => callback({}),
+      async () => {},
+    ),
+  );
 });

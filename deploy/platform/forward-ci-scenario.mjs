@@ -424,6 +424,26 @@ export function createForwardRehearsalProcess(c, trace = []) {
     return output;
   };
 }
+// Accept only our exact injected failure; earlier runtime errors must survive.
+export async function expectSyntheticMigrationFailure(withState, action) {
+  const expected = new Error("synthetic failure after actual migrations before API-up");
+  let initiating;
+  try {
+    await withState(async (store) => {
+      try {
+        await action(store, expected);
+      } catch (error) {
+        initiating = error;
+        throw error;
+      }
+    });
+  } catch (error) {
+    if (error?.durabilityUncertain !== false || error?.terminationConfirmed === false) throw error;
+    if (initiating !== expected) throw initiating ?? error;
+    return;
+  }
+  assert.fail("The synthetic migration failure was not reached.");
+}
 async function runScenario(c, mode, checks) {
   const {
     root,
@@ -526,11 +546,15 @@ async function runScenario(c, mode, checks) {
     });
   c.progress("apply candidate migrations once, then fail canonically before API-up");
   let migrations = 0;
-  await assert.rejects(
-    withUpgradePhaseState(root, failedDecision, async (store) => {
+  await expectSyntheticMigrationFailure(
+    (callback) => withUpgradePhaseState(root, failedDecision, callback),
+    async (store, expected) => {
+      c.progress("complete synthetic activation admission");
       await store.complete("activation-admitted");
+      c.progress("enter synthetic migration latch");
       await store.enter("migration-entered");
       migrations++;
+      c.progress("execute exact candidate migrations");
       await runProcess({
         executable: "/usr/bin/docker",
         args: [
@@ -550,13 +574,15 @@ async function runScenario(c, mode, checks) {
         timeoutMs: 300000,
         outputLimitBytes: 65536,
       });
+      c.progress("complete synthetic migration latch");
       await store.complete("migration-entered");
       await store.enter("migrated");
       await store.complete("migrated");
       await store.enter("api-started");
-      throw Error("synthetic failure after actual migrations before API-up");
-    }),
+      throw expected;
+    },
   );
+  c.progress("verify exact failed synthetic migration state");
   const failedState = JSON.parse(await readFile(journal));
   assert.equal(failedState.sequence, 14);
   assert.equal(failedState.migrationEntered, true);

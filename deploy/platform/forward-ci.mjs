@@ -47,6 +47,11 @@ const failurePhases = new Set([
   "return exact retained containers through guarded return coordinator",
   "prove migration latch rejects return before any start",
   "apply candidate migrations once, then fail canonically before API-up",
+  "complete synthetic activation admission",
+  "enter synthetic migration latch",
+  "execute exact candidate migrations",
+  "complete synthetic migration latch",
+  "verify exact failed synthetic migration state",
 ]);
 const failureCodes = new Set([
   "FORWARD_REHEARSAL_FAILED",
