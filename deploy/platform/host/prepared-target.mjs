@@ -322,46 +322,55 @@ export async function validatePreparedTarget(input, expected) {
   ensure(offhost.independentKeyAvailable === true);
   // Observe after byte checks. v2 binds fresh absence to the actual restore
   // producer's complete cleanup inventory; v1 retains stopped-worker compatibility.
-  const workload = plain(
-    await expected.workload.inspect({ operationId: identity.operationId, target: identity.target }),
-  );
-  const common = [
-    "version",
-    "kind",
-    "operationId",
-    "target",
-    "producerId",
-    "executorSha",
-    "observedAt",
-    "status",
-  ];
-  if (workload.version === 2) {
-    keys(workload, [...common, "resources", "present", "operationResources"]);
-    keys(expected.workload.identity, ["resources"]);
-    ensure(workload.kind === "platform-restore-cleanup" && workload.status === "absent");
-    same(expected.workload.identity.resources, evidence.cleanup.resources);
-    same(workload.resources, evidence.cleanup.resources);
-    same(workload.present, []);
-    same(workload.operationResources, []);
-  } else {
-    keys(workload, [...common, "containerId", "name", "ownerOperationId"]);
-    keys(expected.workload.identity, ["containerId", "name"]);
-    ensure(
-      workload.version === 1 &&
-        workload.kind === "platform-owned-workload" &&
-        workload.status === "exited" &&
-        /^[a-f0-9]{64}$/u.test(workload.containerId),
+  const inspectWorkload = async () => {
+    const workload = plain(
+      await expected.workload.inspect({
+        operationId: identity.operationId,
+        target: identity.target,
+      }),
     );
-    same(workload.ownerOperationId, identity.operationId);
-    for (const key of ["containerId", "name"]) same(workload[key], expected.workload.identity[key]);
-    label(workload.name);
-  }
-  same(workload.operationId, identity.operationId);
-  same(workload.target, identity.target);
-  label(expected.workload.producerId);
-  same(workload.producerId, expected.workload.producerId);
-  same(workload.executorSha, identity.executorSha);
-  same(expected.workload.executorSha, identity.executorSha);
+    const common = [
+      "version",
+      "kind",
+      "operationId",
+      "target",
+      "producerId",
+      "executorSha",
+      "observedAt",
+      "status",
+    ];
+    if (workload.version === 2) {
+      keys(workload, [...common, "resources", "present", "operationResources"]);
+      keys(expected.workload.identity, ["resources"]);
+      ensure(workload.kind === "platform-restore-cleanup" && workload.status === "absent");
+      same(expected.workload.identity.resources, evidence.cleanup.resources);
+      same(workload.resources, evidence.cleanup.resources);
+      same(workload.present, []);
+      same(workload.operationResources, []);
+    } else {
+      keys(workload, [...common, "containerId", "name", "ownerOperationId"]);
+      keys(expected.workload.identity, ["containerId", "name"]);
+      ensure(
+        workload.version === 1 &&
+          workload.kind === "platform-owned-workload" &&
+          workload.status === "exited" &&
+          /^[a-f0-9]{64}$/u.test(workload.containerId),
+      );
+      same(workload.ownerOperationId, identity.operationId);
+      for (const key of ["containerId", "name"])
+        same(workload[key], expected.workload.identity[key]);
+      label(workload.name);
+    }
+    same(workload.operationId, identity.operationId);
+    same(workload.target, identity.target);
+    label(expected.workload.producerId);
+    same(workload.producerId, expected.workload.producerId);
+    same(workload.executorSha, identity.executorSha);
+    same(expected.workload.executorSha, identity.executorSha);
+    fresh(workload.observedAt, record.fence.beganAt, 30000, Date.now());
+    return workload;
+  };
+  await inspectWorkload();
   const observation = plain(
     await expected.writerFence.observe({
       operationId: identity.operationId,
@@ -382,6 +391,9 @@ export async function validatePreparedTarget(input, expected) {
       .configurationSha256,
     identity.configurationSha256,
   );
+  // A role/TLS probe inside the fence adapter can outlive the first cleanup sample.
+  // Measure absence again; the final recheck still limits both real observations.
+  const workload = await inspectWorkload();
   const recheckFreshness = preparedTargetFreshness({
     record,
     document,

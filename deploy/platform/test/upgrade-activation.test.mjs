@@ -318,3 +318,21 @@ test("activation rejects a cleanup observation that ages at actual process spawn
   assert.equal((await f.state()).migrationEntered, false);
   assert.equal((await f.state()).status, "recovery-required");
 });
+
+test("activation measures fresh cleanup after a slow writer fence before proceeding", async (t) => {
+  const f = await fixture(t);
+  const clock = clockedObservations(t, f);
+  const observe = f.adapters.writerFence.observe;
+  let delayed = false;
+  f.adapters.writerFence.observe = async (...args) => {
+    const value = await observe(...args);
+    if (!delayed) {
+      delayed = true;
+      clock.now += 31000;
+    }
+    return { ...value, observedAt: new Date(clock.now).toISOString() };
+  };
+  assert.deepEqual(await run(f), f.identity);
+  assert.equal((await f.state()).phase, "healthy");
+  assert.equal((await f.state()).status, "completed");
+});
