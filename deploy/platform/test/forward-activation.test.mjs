@@ -1,0 +1,148 @@
+import assert from "node:assert/strict";
+import { appendFile, readFile, lstat } from "node:fs/promises";
+import { join } from "node:path";
+import test from "node:test";
+import { executeForwardActivation } from "../host/forward-activation.mjs";
+import { forwardActivationFixture } from "./forward-activation-fixture.mjs";
+const run = (f) => executeForwardActivation(f.input, f.adapters, f.options);
+test("forward activation reaches seq14 using only API-up, edge-up and smoke with unchanged migrated DB", async (t) => {
+  const f = await forwardActivationFixture(t);
+  assert.deepEqual(await run(f), f.input.decision.identity);
+  assert.deepEqual(f.commands, ["api", "edge"]);
+  assert.equal(f.trace.at(-1), "inspectCandidate");
+  assert.ok(f.projectionChecks() >= 2);
+  const state = JSON.parse(await readFile(f.journal));
+  assert.equal(state.sequence, 14);
+  assert.equal(state.phase, "healthy");
+  assert.equal(state.status, "completed");
+  assert.equal(state.migrationEntered, true);
+  assert.equal(f.ids.postgres, f.old.postgres);
+});
+for (const kind of [
+  "migration",
+  "schema",
+  "pg",
+  "config",
+  "inspectCandidate",
+  "copies",
+  "key",
+  "fence",
+  "projection",
+  "approval",
+  "verifyRelease",
+  "verifyImages",
+])
+  test(`forward activation rejects ${kind} before candidate start`, async (t) => {
+    const f = await forwardActivationFixture(t, kind);
+    if (kind === "migration") f.ledger.rows[0].hash = "f".repeat(64);
+    if (kind === "schema") f.ledger.schema.schemaSha256 = "f".repeat(64);
+    if (kind === "pg") f.ids.postgres = "f".repeat(64);
+    if (kind === "config")
+      await appendFile(f.input.configuration.runtimeSnapshot.path, "#changed\n");
+    if (kind === "copies")
+      f.input.preparedTarget.observations.offHostRecovery.value.independentKeyAvailable = false;
+    if (kind === "key")
+      f.input.preparedTarget.observations.keyContinuity.value.signingContinuityVerified = false;
+    if (kind === "fence") {
+      const original = f.adapters.writerFence.observe;
+      f.adapters.writerFence.observe = async (...args) => ({
+        ...(await original(...args)),
+        held: false,
+      });
+    }
+    if (kind === "approval") f.input.preparedTarget.observations.egress.value.approved = false;
+    await assert.rejects(run(f));
+    assert.deepEqual(f.commands, []);
+    assert.doesNotMatch(
+      await readFile(join(f.directory, "failure.json"), "utf8"),
+      /PRIVATE-|projection changed/u,
+    );
+  });
+for (const where of ["api", "edge", "smoke"])
+  test(`known failure after ${where} replacement cleans only exact new candidates`, async (t) => {
+    const f = await forwardActivationFixture(t, where);
+    await assert.rejects(run(f));
+    const state = JSON.parse(await readFile(f.journal));
+    assert.equal(state.status, "recovery-required");
+    assert.equal(state.migrationEntered, true);
+    assert.ok(f.cleanupIds.length >= 1);
+    assert.ok(f.cleanupIds.every((id) => !Object.values(f.old).includes(id)));
+    assert.equal(f.ids.postgres, f.old.postgres);
+  });
+function clocked(t, f) {
+  const clock = { now: Date.now() };
+  t.mock.method(Date, "now", () => clock.now);
+  for (const [object, method] of [
+    [f.adapters.writerFence, "observe"],
+    [f.adapters.workload, "inspect"],
+  ]) {
+    const original = object[method];
+    object[method] = async (...args) => ({
+      ...(await original(...args)),
+      observedAt: new Date(clock.now).toISOString(),
+    });
+  }
+  return clock;
+}
+test("slow fence receives a new real cleanup observation without extending freshness", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f),
+    original = f.adapters.writerFence.observe;
+  let delayed = false;
+  f.adapters.writerFence.observe = async (...args) => {
+    const result = await original(...args);
+    if (!delayed) {
+      clock.now += 31000;
+      delayed = true;
+    }
+    return { ...result, observedAt: new Date(clock.now).toISOString() };
+  };
+  await run(f);
+  assert.deepEqual(f.commands, ["api", "edge"]);
+});
+test("slow final cleanup cannot refresh an already stale fence", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f),
+    original = f.adapters.workload.inspect;
+  let inspections = 0;
+  f.adapters.workload.inspect = async (...args) => {
+    const result = await original(...args);
+    if (++inspections === 2) clock.now += 31000;
+    return { ...result, observedAt: new Date(clock.now).toISOString() };
+  };
+  await assert.rejects(run(f));
+  assert.deepEqual(f.commands, []);
+});
+test("actual spawn recheck denies decision expiry after the final observation", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f),
+    original = f.adapters.runProcess;
+  let attempted = false;
+  f.adapters.runProcess = async (...args) => {
+    attempted = true;
+    clock.now = Date.parse(f.decision.expiresAt);
+    return original(...args);
+  };
+  await assert.rejects(run(f));
+  assert.equal(attempted, true);
+  assert.deepEqual(f.commands, []);
+});
+test("unknown child termination retains lock and never competes with cleanup", async (t) => {
+  const f = await forwardActivationFixture(t);
+  f.adapters.runProcess = async () => {
+    throw Object.assign(new Error("PRIVATE-UNREAPED"), { terminationConfirmed: false });
+  };
+  await assert.rejects(run(f), (e) => e.durabilityUncertain === true);
+  assert.ok(await lstat(join(f.root, ".deploy.lock")));
+  assert.equal(
+    f.trace.some((n) => n.startsWith("cleanup")),
+    false,
+  );
+});
+for (const method of ["migrate", "startOldApi", "stopPostgres"])
+  test(`activation refuses injected ${method} adapter`, async (t) => {
+    const f = await forwardActivationFixture(t);
+    f.adapters[method] = () => assert.fail("forbidden action");
+    await assert.rejects(run(f));
+    assert.deepEqual(f.commands, []);
+  });
