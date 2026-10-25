@@ -64,7 +64,9 @@ async function stage(context) {
     shell,
     stdinOuter,
     inspect,
+    progress,
   } = context;
+  progress("verify current ICU worker source closure");
   assert.ok(
     process.env.RUNNER_TEMP && process.env.GITHUB_SHA,
     "Exact current ICU worker export is required",
@@ -112,20 +114,24 @@ async function stage(context) {
     digest(await readFile(join(repository, manifest.sources.generated.path))),
     manifest.sources.generated.sha256,
   );
+  progress("verify current ICU worker archive");
   const archive = await hashArchive(exportRoot, join(exportRoot, "recovery-image.tar"));
   assert.equal(archive.sha256, manifest.archive.sha256);
   assert.equal(archive.bytes, manifest.archive.bytes);
+  progress("load current ICU worker archive");
   await outer(
     ["cp", join(exportRoot, "recovery-image.tar"), `${containerId}:/tmp/forward-worker.tar`],
     { timeout: 900000 },
   );
   await nested(["load", "--input", "/tmp/forward-worker.tar"], { timeout: 900000 });
+  progress("verify current ICU worker image");
   const worker = await inspect("image", manifest.image.id);
   assert.equal(worker.Id, manifest.image.id);
   assert.equal(worker.Os, "linux");
   assert.equal(worker.Architecture, "amd64");
   assert.equal(worker.Config.User, "postgres");
-  for (const selected of Object.values(images)) {
+  for (const [service, selected] of Object.entries(images)) {
+    progress(service === "api" ? "stage accepted API image" : "stage accepted edge image");
     await nested(["pull", "--platform", "linux/amd64", selected.reference], { timeout: 900000 });
     const actual = await inspect("image", selected.reference);
     assert.equal(actual.Id, selected.id);
@@ -134,6 +140,7 @@ async function stage(context) {
     assert.ok(actual.RepoDigests.includes(selected.reference));
   }
   // Only declared source bytes enter the nested namespace, never host bind mounts.
+  progress("stage current executor source closure");
   const current = join(parent, "current-sources");
   await mkdir(current, { mode: 0o700 });
   for (const path of UPGRADE_BUNDLE_FILES)

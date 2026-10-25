@@ -4,10 +4,131 @@ import { randomUUID } from "node:crypto";
 import { isMainModule } from "../production/cli-main.mjs";
 import { keys } from "./backup/schemas.mjs";
 import { rehearseUpgrade } from "./upgrade-ci.mjs";
+import { rehearsalFailure } from "./upgrade-ci-guards.mjs";
 import { createForwardScenario, forwardProduct } from "./forward-ci-scenario.mjs";
 // The shared engine invokes these actual guards before every nested command and
 // re-inspects exact ownership through cleanupRehearsalResources in its finally.
 export { validateRehearsalDaemon, cleanupRehearsalResources } from "./upgrade-ci-guards.mjs";
+// Compiled stage labels and fixed child metadata only. Never project error text,
+// private paths, argv, output or environment into the uploaded CI evidence.
+const failurePhases = new Set([
+  "isolated forward rehearsal",
+  "stage isolated daemon",
+  "owned cleanup",
+  "partial creation requires exact inspection",
+  "verify current ICU worker source closure",
+  "verify current ICU worker archive",
+  "load current ICU worker archive",
+  "verify current ICU worker image",
+  "stage accepted API image",
+  "stage accepted edge image",
+  "stage current executor source closure",
+  "pull exact accepted product images before disconnect",
+  "remove every external network before application processes",
+  "create private old source closure and generated configuration",
+  "read exact old Git source closure",
+  "hash current executable source closure",
+  "generate private rehearsal TLS files",
+  "write and verify generated private configuration snapshots",
+  "stream and verify generated private tree in the isolated daemon",
+  "verify copied private PostgreSQL TLS file metadata",
+  "assign generated private PostgreSQL TLS file ownership",
+  "verify pinned API runtime user",
+  "assign generated private client CA file ownership",
+  "bootstrap only synthetic PostgreSQL roles and old-image schema",
+  "initialize exact private PostgreSQL volume ownership",
+  "start isolated PostgreSQL and await health",
+  "provision generated PostgreSQL roles",
+  "apply exact old image migrations to synthetic database",
+  "dump and restore the synthetic old schema before retaining applications",
+  "verify old health/TLS, then stop and retain exact IDs",
+  "return exact retained containers through guarded return coordinator",
+  "prove migration latch rejects return before any start",
+  "apply candidate migrations once, then fail canonically before API-up",
+]);
+const failureCodes = new Set([
+  "FORWARD_REHEARSAL_FAILED",
+  "REHEARSAL_FAILED",
+  "CLEANUP_FAILED",
+  "PARTIAL_RESOURCES_RETAINED",
+  "ERR_ASSERTION",
+  "ERR_HOST_PROCESS",
+  "ERR_HOST_OBSERVATION",
+  "ERR_HOST_PRIVATE_FILE",
+  "ERR_HOST_STATE",
+  "ERR_DATABASE_BACKUP",
+  "ERR_TARGET_BACKUP",
+  "ERR_UPGRADE_COMMAND",
+  "ERR_HOST_FORWARD_PRODUCT",
+  "ERR_HOST_FORWARD_ADMISSION",
+  "ERR_HOST_FORWARD_PREPARATION",
+  "ERR_HOST_FORWARD_ACTIVATION",
+  "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+  "ENOENT",
+  "EACCES",
+  "EPERM",
+  "ENOSPC",
+  "ETIMEDOUT",
+]);
+const failureNames = new Set([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "AssertionError",
+  "AbortError",
+  "AggregateError",
+]);
+const failureExecutables = new Set(["docker", "git", "openssl", "which", "tar"]);
+const failureReasons = new Set([
+  "missing-path",
+  "permission-denied",
+  "read-only-filesystem",
+  "capacity",
+  "container-exec",
+]);
+const failureKeys = [
+  "phase",
+  "code",
+  "command",
+  "name",
+  "exitStatus",
+  "executable",
+  "processReason",
+];
+const own = (value, key) =>
+  value && typeof value === "object"
+    ? Object.getOwnPropertyDescriptor(value, key)?.value
+    : undefined;
+export function forwardRehearsalFailure(problem) {
+  const phase = own(problem, "phase"),
+    code = own(problem, "code"),
+    command = own(problem, "command"),
+    name = own(problem, "name"),
+    exitStatus = own(problem, "exitStatus"),
+    executable = own(problem, "executable"),
+    processReason = own(problem, "processReason");
+  const numericCode =
+    typeof code === "string" &&
+    /^PROCESS_EXIT_[0-9]{1,3}$/u.test(code) &&
+    Number(code.slice(13)) <= 255;
+  return {
+    phase: failurePhases.has(phase) ? phase : "isolated forward rehearsal",
+    code: failureCodes.has(code) || numericCode ? code : "FORWARD_REHEARSAL_FAILED",
+    command:
+      typeof command === "string" &&
+      /^(?:git (?:show|ls-files|rev-parse)|openssl (?:req|x509)|tar archive|docker (?:cp|exec|network|image|container|volume|pull|run|inspect|info|context))$/u.test(
+        command,
+      )
+        ? command
+        : null,
+    name: failureNames.has(name) ? name : "Error",
+    exitStatus:
+      Number.isSafeInteger(exitStatus) && exitStatus >= 0 && exitStatus <= 255 ? exitStatus : null,
+    executable: failureExecutables.has(executable) ? executable : null,
+    processReason: failureReasons.has(processReason) ? processReason : null,
+  };
+}
 const checkNames = Object.freeze([
   "migrationAppliedOnce",
   "fullLedger",
@@ -99,10 +220,16 @@ export function validateForwardRehearsalEvidence(value) {
     assert.equal(value.cleanup, true);
     assert.ok(Object.values(value.checks).every(Boolean));
   } else {
-    assert.deepEqual(value.problem, {
-      phase: "isolated forward rehearsal",
-      code: "FORWARD_REHEARSAL_FAILED",
-    });
+    if (Object.keys(value.problem ?? {}).length === 2) {
+      // Historical failed artifacts contained only this conservative fallback.
+      assert.deepEqual(value.problem, {
+        phase: "isolated forward rehearsal",
+        code: "FORWARD_REHEARSAL_FAILED",
+      });
+    } else {
+      keys(value.problem, failureKeys);
+      assert.deepEqual(value.problem, forwardRehearsalFailure(value.problem));
+    }
   }
   return structuredClone(value);
 }
@@ -124,6 +251,23 @@ export async function rehearseForwardRecovery(args, options = {}) {
     problem: null,
     runs: [],
   };
+  const innerResults = [];
+  const runInner = async (forwardScenario) => {
+    // Allocate before starting: an invocation without a terminal callback has
+    // unknown isolation/cleanup, even if an earlier namespace completed safely.
+    const observed = { isolated: false, cleanup: false, problem: null };
+    innerResults.push(observed);
+    return rehearseUpgrade(args, {
+      forwardScenario,
+      writeResult: async (evidence) => {
+        // Only fixed metadata survives the compiled harness callback.
+        observed.isolated = evidence.isolated === true;
+        observed.cleanup = evidence.cleanup === true;
+        observed.problem =
+          evidence.problem === null ? null : forwardRehearsalFailure(evidence.problem);
+      },
+    });
+  };
   try {
     assert.equal(
       process.platform,
@@ -132,9 +276,9 @@ export async function rehearseForwardRecovery(args, options = {}) {
     );
     const success = createForwardScenario("healthy"),
       failure = createForwardScenario("replacement-failure");
-    const a = await rehearseUpgrade(args, { forwardScenario: success });
+    const a = await runInner(success);
     result.runs.push(safeNamespace(a.forward));
-    const b = await rehearseUpgrade(args, { forwardScenario: failure });
+    const b = await runInner(failure);
     result.runs.push(safeNamespace(b.forward));
     result.isolated = a.isolated && b.isolated;
     result.cleanup = a.cleanup && b.cleanup;
@@ -142,9 +286,13 @@ export async function rehearseForwardRecovery(args, options = {}) {
       result.checks[name] = success.checks[name] === true || failure.checks[name] === true;
     result.completed = a.completed && b.completed;
     validateForwardRehearsalEvidence(result);
-  } catch {
+  } catch (error) {
     result.completed = false;
-    result.problem = { phase: "isolated forward rehearsal", code: "FORWARD_REHEARSAL_FAILED" };
+    result.isolated = innerResults.length > 0 && innerResults.every((value) => value.isolated);
+    result.cleanup = innerResults.length > 0 && innerResults.every((value) => value.cleanup);
+    result.problem =
+      innerResults.at(-1)?.problem ??
+      forwardRehearsalFailure(rehearsalFailure("isolated forward rehearsal", error));
     await writeResult(validateForwardRehearsalEvidence(result));
     throw Object.assign(
       new Error(

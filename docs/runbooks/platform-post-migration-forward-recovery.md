@@ -38,8 +38,13 @@ refer only to these isolated generated files.
 `platform-forward-recovery-evidence` contains only the safe result JSON. Require
 `completed`, `isolated`, `cleanup` and every required check to be true. Inspect
 both namespace outcomes, exact image/source/migration identities and private
-failure stage when a check fails. Private directories, generated keys, database
-archives, retained container metadata and raw diagnostics are never CI artifacts.
+safe failure stage when a check fails. Failure evidence preserves only allowlisted
+compiled stage, error code/class, numeric exit status, executable basename,
+command category and finite process-reason category from the shared harness.
+Confirmed isolation/cleanup observations remain visible even when acceptance
+fails; they never substitute for the complete successful proof. Private directories,
+generated keys, database archives, retained container metadata, argv, environment
+and raw stdout/stderr are never CI artifacts.
 Synthetic GitHub approval, key-custody and offhost attestations are explicitly test
 inputs; they do not authorize production or prove real Mac/Timeweb copies. Test
 TLS uses a private CA and `.localhost`; it does not verify production DNS/ACME.

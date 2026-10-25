@@ -14,7 +14,7 @@ test("forward rehearsal refuses alternate argv and caller-supplied production ad
   );
 });
 test("safe forward evidence rejects private output and incomplete acceptance claims", async () => {
-  const { validateForwardRehearsalEvidence } = await load();
+  const { validateForwardRehearsalEvidence, forwardRehearsalFailure } = await load();
   const value = {
     version: 1,
     kind: "synthetic-only-forward-recovery-rehearsal",
@@ -56,6 +56,31 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     })),
   };
   assert.deepEqual(validateForwardRehearsalEvidence(value), value);
+  const failed = structuredClone(value);
+  failed.completed = false;
+  failed.isolated = false;
+  failed.runs = [];
+  failed.problem = forwardRehearsalFailure({
+    phase: "verify current ICU worker source closure",
+    code: "ERR_ASSERTION",
+    name: "AssertionError",
+  });
+  assert.deepEqual(validateForwardRehearsalEvidence(failed), failed);
+  for (const patch of [
+    { stdout: "PRIVATE" },
+    { argv: ["PRIVATE"] },
+    { privateRoot: "/private/root" },
+    { phase: "PRIVATE" },
+    { code: "PRIVATE" },
+    { executable: "/private/bin" },
+    { name: "PRIVATE" },
+    { exitStatus: 256 },
+    { processReason: "PRIVATE" },
+  ])
+    assert.throws(() =>
+      validateForwardRehearsalEvidence({ ...failed, problem: { ...failed.problem, ...patch } }),
+    );
+
   for (const mutate of [
     (v) => (v.privateRoot = "/tmp/private"),
     (v) => (v.stdout = "secret"),
@@ -159,4 +184,146 @@ test("fixed forward product and runtime agree on both product SHAs and exact ima
   assert.equal(env.MARKIRO_SOURCE_SHA, forwardProduct);
   assert.equal(env.MARKIRO_TOOLING_SHA, forwardProduct);
   assert.notEqual(candidate.executorSha, forwardProduct);
+});
+
+test("forward failure evidence preserves only allowlisted inner phase and child metadata", async () => {
+  const { forwardRehearsalFailure } = await load();
+  assert.equal(typeof forwardRehearsalFailure, "function");
+  const expected = {
+    phase: "verify current ICU worker source closure",
+    code: "PROCESS_EXIT_17",
+    command: "git show",
+    name: "Error",
+    exitStatus: 17,
+    executable: "git",
+    processReason: null,
+  };
+  assert.deepEqual(
+    forwardRehearsalFailure({
+      ...expected,
+      stdout: "PRIVATE-STDOUT",
+      stderr: "PRIVATE-STDERR",
+      argv: ["PRIVATE-ARGV"],
+      env: { SECRET: "PRIVATE-ENV" },
+      privateRoot: "/private/evidence",
+    }),
+    expected,
+  );
+  const unknown = forwardRehearsalFailure({
+    phase: "PRIVATE-PHASE",
+    code: "PRIVATE-CODE",
+    command: "PRIVATE-COMMAND",
+    name: "PRIVATE-NAME",
+    exitStatus: "PRIVATE-STATUS",
+    executable: "/private/executable",
+    processReason: "PRIVATE-REASON",
+  });
+  assert.equal(unknown.phase, "isolated forward rehearsal");
+  assert.equal(unknown.code, "FORWARD_REHEARSAL_FAILED");
+  assert.doesNotMatch(JSON.stringify(unknown), /PRIVATE/u);
+  let getters = 0;
+  const hostile = Object.fromEntries(Object.keys(expected).map((key) => [key, null]));
+  for (const key of Object.keys(expected))
+    Object.defineProperty(hostile, key, {
+      get() {
+        getters++;
+        throw Error("PRIVATE-GETTER");
+      },
+    });
+  assert.doesNotThrow(() => forwardRehearsalFailure(hostile));
+  assert.equal(getters, 0);
+});
+
+test("synthetic wrapper unit retains delegated failure and cleanup without executing Docker", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const engine = new URL("../upgrade-ci.mjs", import.meta.url).href;
+  const target = new URL("../forward-ci.mjs", import.meta.url).href;
+  const script = `
+    import assert from "node:assert/strict";
+    import { mock } from "node:test";
+    let calls = 0;
+    mock.module(${JSON.stringify(engine)}, { namedExports: { stageRehearsalTree: () => { throw new Error("Unexpected staging in synthetic wrapper unit"); }, rehearseUpgrade: async (_args, options) => {
+      calls++;
+      await options.writeResult?.({ completed: false, isolated: false, cleanup: true,
+        privateRoot: "PRIVATE-ROOT", problem: {
+          phase: "verify current ICU worker source closure", code: "PROCESS_EXIT_17",
+          command: "git show", name: "Error", exitStatus: 17, executable: "git", processReason: null,
+          stdout: "PRIVATE-OUTPUT"
+        } });
+      throw new Error("PRIVATE-INNER-ERROR");
+    } } });
+    // Only the OS prerequisite is mocked in this isolated unit process. The
+    // delegated engine above cannot create processes, containers or a Linux proof.
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const { rehearseForwardRecovery } = await import(${JSON.stringify(target)});
+    let result;
+    await assert.rejects(rehearseForwardRecovery(["--local-ci"], { writeResult: async value => { result = value; } }));
+    assert.equal(calls, 1);
+    assert.equal(result.completed, false);
+    assert.equal(result.productionAdmission, false);
+    assert.equal(result.cleanup, true);
+    assert.equal(result.isolated, false);
+    assert.deepEqual(result.problem, { phase: "verify current ICU worker source closure", code: "PROCESS_EXIT_17", command: "git show", name: "Error", exitStatus: 17, executable: "git", processReason: null });
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+    console.log("synthetic wrapper unit only; no Docker or Linux acceptance");
+  `;
+  const result = await promisify(execFile)(
+    process.execPath,
+    ["--experimental-test-module-mocks", "--input-type=module", "--eval", script],
+    {
+      timeout: 15000,
+      maxBuffer: 65536,
+      env: { PATH: process.env.PATH },
+    },
+  );
+  assert.match(result.stdout, /synthetic wrapper unit only/u);
+});
+
+test("synthetic wrapper never borrows cleanup proof for a later invocation without a result", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const engine = new URL("../upgrade-ci.mjs", import.meta.url).href;
+  const target = new URL("../forward-ci.mjs", import.meta.url).href;
+  const script = `
+    import assert from "node:assert/strict";
+    import { mock } from "node:test";
+    let calls = 0;
+    mock.module(${JSON.stringify(engine)}, { namedExports: {
+      stageRehearsalTree: () => { throw Error("Unexpected staging"); },
+      rehearseUpgrade: async (_args, options) => {
+        calls++;
+        if (calls === 2) throw Error("PRIVATE unsaved terminal result");
+        const result = { completed: true, isolated: true, cleanup: true, problem: null,
+          forward: { mode: "healthy", operationId: "11111111-1111-4111-8111-111111111111",
+            failedOperationId: "22222222-2222-4222-8222-222222222222",
+            productSha: "6e32b3bf5970ed8793293bcc7e80aef342836e53", executorSha: "a".repeat(40),
+            postgresId: "b".repeat(64), schema: { systemId: "1234", migrationCount: "202",
+              schemaSha256: "c".repeat(64), migrationSha256: "d".repeat(64) },
+            productMigrationProofSha256: "e".repeat(64), archiveSha256: "f".repeat(64),
+            restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64) } };
+        await options.writeResult(result);
+        return result;
+      }
+    } });
+    // Synthetic wrapper unit only: the mocked engine cannot execute Docker.
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const { rehearseForwardRecovery } = await import(${JSON.stringify(target)});
+    let result;
+    await assert.rejects(rehearseForwardRecovery(["--local-ci"], { writeResult: async value => { result = value; } }));
+    assert.equal(calls, 2);
+    assert.equal(result.completed, false);
+    assert.equal(result.cleanup, false);
+    assert.equal(result.isolated, false);
+    assert.equal(result.runs.length, 1);
+    assert.equal(result.productionAdmission, false);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+    console.log("synthetic missing terminal result regression");
+  `;
+  const result = await promisify(execFile)(
+    process.execPath,
+    ["--experimental-test-module-mocks", "--input-type=module", "--eval", script],
+    { timeout: 15000, maxBuffer: 65536, env: { PATH: process.env.PATH } },
+  );
+  assert.match(result.stdout, /synthetic missing terminal result regression/u);
 });
