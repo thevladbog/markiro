@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { inspect } from "node:util";
+import { Script } from "node:vm";
+import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import * as fixture from "./support/us-demo-viewer-browser-fixture";
 
@@ -14,7 +16,520 @@ const task10OriginalBranch = '  )\n    throw new Error("us_demo_viewer_ci_only")
 const task10OriginalSha256 = "114ad0e525972a1d7429ba730a153edff1156e3ef6f4bddb71f99f5456121039";
 const task10Source = () =>
   readFileSync(resolve(__dirname, "support/us-demo-viewer-browser-fixture.ts"), "utf8");
+
+const task15FixturePairs: readonly (readonly [string, string])[] = [
+  [
+    "",
+    '/** Failure-only finite recorder. Stderr bytes are compared, never retained or decoded. */\nexport function createViewerProvisionObservation() {\n  const refusal =\n    "US synthetic viewer command refused. Check exact arguments, isolated migrated database, trusted owner/profile and password input. Existing identities are never repaired or reset.";\n  const prefix = "US_VIEWER_PROVISION_OBSERVATION ";\n  let stage = 0,\n    mask = 0,\n    exit = 0,\n    native = 0,\n    cleanup = 0;\n  let line = 0,\n    offset = 0,\n    stderrBytes = 0;\n  let carriage = false,\n    invalid = false,\n    attempted = false;\n  return {\n    enter(value: unknown) {\n      stage =\n        value === 1 ||\n        value === 2 ||\n        value === 3 ||\n        value === 4 ||\n        value === 5 ||\n        value === 6 ||\n        value === 7\n          ? value\n          : 0;\n    },\n    mark(value: unknown) {\n      if (\n        value === 1 ||\n        value === 2 ||\n        value === 4 ||\n        value === 8 ||\n        value === 16 ||\n        value === 32 ||\n        value === 64 ||\n        value === 128\n      )\n        mask |= value;\n    },\n    closed(code: unknown) {\n      mask |= 128;\n      exit = code === 0 ? 1 : typeof code === "number" && Number.isSafeInteger(code) ? 2 : 3;\n    },\n    overflow() {\n      invalid = true;\n    },\n    stderr(bytes: Uint8Array) {\n      try {\n        if (invalid) return;\n        for (const byte of bytes) {\n          if (++stderrBytes > 4096 || line > 1) {\n            invalid = true;\n            return;\n          }\n          const length = line === 0 ? refusal.length : prefix.length + 3;\n          if (carriage) {\n            if (byte !== 10) {\n              invalid = true;\n              return;\n            }\n            carriage = false;\n            line++;\n            offset = 0;\n          } else if (offset === length) {\n            if (byte === 13) carriage = true;\n            else if (byte === 10) {\n              line++;\n              offset = 0;\n            } else {\n              invalid = true;\n              return;\n            }\n          } else if (line === 1 && offset === prefix.length) {\n            if (byte < 48 || byte > 55) {\n              invalid = true;\n              return;\n            }\n            native = byte - 48;\n            offset++;\n          } else if (line === 1 && offset === prefix.length + 2) {\n            if (byte !== 48 && byte !== 49) {\n              invalid = true;\n              return;\n            }\n            cleanup = byte - 48;\n            offset++;\n          } else {\n            const expected =\n              line === 0\n                ? refusal.charCodeAt(offset)\n                : offset === prefix.length + 1\n                  ? 32\n                  : prefix.charCodeAt(offset);\n            if (byte !== expected) {\n              invalid = true;\n              return;\n            }\n            offset++;\n          }\n        }\n      } catch {\n        invalid = true;\n      }\n    },\n    emitFailure(sink: (value: string) => void) {\n      if (attempted) return;\n      attempted = true;\n      try {\n        const recognized = !invalid && line === 2 && !carriage && (mask & 128) !== 0 && exit !== 0;\n        sink(\n          `US_DEMO_VIEWER_PROVISION_OBSERVATION ${stage} ${mask} ${exit} ${recognized ? native : 0} ${recognized ? cleanup : 0}`,\n        );\n      } catch {\n        // The original failure and cleanup result always win.\n      }\n    },\n  };\n}\n\n',
+  ],
+  ["", "  observation: ReturnType<typeof createViewerProvisionObservation>,\n"],
+  ["", "  observation.enter(1);\n"],
+  ["", "  observation.mark(1);\n"],
+  ["", "  observation.enter(2);\n"],
+  [
+    "  const timer = setTimeout(stop, Math.max(1, cap - 1000));\n",
+    "  const timer = setTimeout(\n    () => {\n      observation.mark(32);\n      stop();\n    },\n    Math.max(1, cap - 1000),\n  );\n",
+  ],
+  ["", "    observation.mark(64);\n"],
+  ["", "    observation.mark(2);\n"],
+  [
+    '  child.stdin.on("error", stop);\n',
+    '  child.stdin.on("error", () => {\n    observation.mark(4);\n    stop();\n  });\n',
+  ],
+  [
+    "    if (count > 4096) stop();\n    else stdout = Buffer.concat([stdout, bytes]);\n",
+    "    if (count > 4096) {\n      observation.mark(16);\n      observation.overflow();\n      stop();\n    } else stdout = Buffer.concat([stdout, bytes]);\n",
+  ],
+  [
+    "    if (count > 4096) stop();\n",
+    "    observation.mark(8);\n    if (count > 4096) {\n      observation.mark(16);\n      observation.overflow();\n      stop();\n    } else observation.stderr(bytes);\n",
+  ],
+  ["", "  observation.enter(3);\n"],
+  [
+    '  const code = await new Promise<number | null>((done) => child.once("close", done));\n',
+    '  observation.enter(4);\n  const code = await new Promise<number | null>((done) =>\n    child.once("close", (code) => {\n      observation.closed(code);\n      done(code);\n    }),\n  );\n',
+  ],
+  [
+    '  const result = viewerResult.parse(JSON.parse(stdout.toString("utf8")) as unknown);\n',
+    '  observation.enter(5);\n  const parsed: unknown = JSON.parse(stdout.toString("utf8"));\n  observation.enter(6);\n  const result = viewerResult.parse(parsed);\n  observation.enter(7);\n',
+  ],
+  ["", "  const provisionObservation = createViewerProvisionObservation();\n"],
+  ["", "        provisionObservation,\n"],
+  [
+    "",
+    '    } finally {\n      if (phase === "provision") provisionObservation.emitFailure((line) => console.error(line));\n',
+  ],
+];
+function task15ExactInverse(source: string, pairs: readonly (readonly [string, string])[]) {
+  for (const [, after] of pairs) expect(source.split(after)).toHaveLength(2);
+  for (const [before, after] of pairs) source = source.replace(after, before);
+  return source;
+}
+function task15AssertFixturePlacement(source: string) {
+  // Bind additions to original operations, guard, event owners and cleanup before erasure.
+  for (const anchor of [
+    "  .strict();\n/** Failure-only finite recorder. Stderr bytes are compared, never retained or decoded. */\nexport function createViewerProvisionObservation() {",
+    "        // The original failure and cleanup result always win.\n      }\n    },\n  };\n}\n\n/** Actual compiled process; bounded private stdin and closed diagnostics, never a shell. */",
+    "async function provision(\n  installation: Installation,\n  password: string,\n  cap: number,\n  register: (close: () => Promise<void>) => void,\n  deadline: () => number,\n  observation: ReturnType<typeof createViewerProvisionObservation>,\n) {\n  observation.enter(1);\n  const child = spawn(",
+    "  );\n  observation.mark(1);\n  const drained = childDrain(child);\n  observation.enter(2);\n  register(\n    viewerOwnedShutdown(",
+    '  const timer = setTimeout(\n    () => {\n      observation.mark(32);\n      stop();\n    },\n    Math.max(1, cap - 1000),\n  );\n  const kill = setTimeout(() => {\n    observation.mark(64);\n    failed = true;\n    child.kill("SIGKILL");\n  }, cap);',
+    '  child.on("error", () => {\n    observation.mark(2);\n    failed = true;\n  });\n  child.stdin.on("error", () => {\n    observation.mark(4);\n    stop();\n  });',
+    '  child.stdout.on("data", (bytes: Buffer) => {\n    count += bytes.length;\n    if (count > 4096) {\n      observation.mark(16);\n      observation.overflow();\n      stop();\n    } else stdout = Buffer.concat([stdout, bytes]);\n  });',
+    '  child.stderr.on("data", (bytes: Buffer) => {\n    count += bytes.length;\n    failed = true;\n    observation.mark(8);\n    if (count > 4096) {\n      observation.mark(16);\n      observation.overflow();\n      stop();\n    } else observation.stderr(bytes);\n  });\n  observation.enter(3);\n  child.stdin.end(`${password}\\n`);\n  observation.enter(4);\n  const code = await new Promise<number | null>((done) =>\n    child.once("close", (code) => {\n      observation.closed(code);\n      done(code);\n    }),\n  );\n  clearTimeout(timer);',
+    '  if (failed || code !== 0) throw viewerBrowserFailure("provision");\n  observation.enter(5);\n  const parsed: unknown = JSON.parse(stdout.toString("utf8"));\n  observation.enter(6);\n  const result = viewerResult.parse(parsed);\n  observation.enter(7);\n  if (\n    result.tenantId !== installation.identity.tenantId ||\n    result.viewerUserId === installation.identity.userId',
+    '    throw new Error("us_demo_viewer_ci_only");\n  }\n  let installation: Installation | undefined, app: OwnedServer | undefined;\n  let vite: OwnedServer | undefined;\n  let browser: ViewerBrowser | undefined, context: ViewerContext | undefined;\n  let browserOwner: (() => Promise<void>) | undefined,\n    provisionOwner: (() => Promise<void>) | undefined;\n  let plans: UsPlanArtifactStore | undefined, packages: UsRequestPackageArtifactStore | undefined;\n  let closing: Promise<void> | undefined,\n    phase: Phase = "installation";\n  const provisionObservation = createViewerProvisionObservation();\n  let disposalDeadline: number | undefined;',
+    '    const viewer = await setup.run("provision", () =>\n      provision(\n        owned,\n        password,\n        remaining(),\n        (close) => {\n          provisionOwner = close;\n        },\n        cleanupDeadline,\n        provisionObservation,\n      ),\n    );\n    phase = "descriptors";',
+    '  } catch {\n    try {\n      await close();\n    } catch {\n      throw new Error(\n        `Viewer browser failed: ${phase}; disposal incomplete: pending-setup=${setup.pendingCount()}`,\n      );\n    } finally {\n      if (phase === "provision") provisionObservation.emitFailure((line) => console.error(line));\n    }\n    throw viewerBrowserFailure(phase);',
+  ])
+    expect(source.split(anchor)).toHaveLength(2);
+}
+function task15RestoreFixture(source: string) {
+  task15AssertFixturePlacement(source);
+  const restored = task15ExactInverse(source, task15FixturePairs);
+  expect(createHash("sha256").update(restored).digest("hex")).toBe(
+    "17be6ad8060e214aae23c255d279d420c44e086fd73c511da78aee67f7c4ce9f",
+  );
+  return restored;
+}
+
+function task15StderrCallback() {
+  const source = ts.createSourceFile("fixture.ts", task10Source(), ts.ScriptTarget.Latest, true);
+  const found: ts.ArrowFunction[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === "child.stderr.on" &&
+      node.arguments[0]?.getText(source) === '"data"'
+    ) {
+      const callback = node.arguments[1];
+      if (callback && ts.isArrowFunction(callback)) found.push(callback);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  expect(found).toHaveLength(1);
+  const callback = found[0];
+  if (!callback) throw new Error("Missing actual stderr callback");
+  return callback.getText(source);
+}
+
+function task15RunStderr(
+  bytes: Uint8Array,
+  observation: unknown,
+  stop: () => void,
+  count = 0,
+): unknown {
+  const code = `let count = initialCount, failed = false;
+    (${task15StderrCallback()})(bytes); ({count, failed});`;
+  const compiled = ts.transpileModule(code, {
+    compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  return new Script(compiled).runInNewContext(
+    { bytes, observation, stop, initialCount: count },
+    { timeout: 1000 },
+  );
+}
+
+function task15PureCode(code: string, context: Record<string, unknown>): unknown {
+  return new Script(
+    ts.transpileModule(code, {
+      compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.CommonJS },
+    }).outputText,
+  ).runInNewContext(context, { timeout: 1000 });
+}
+
+function task15ProvisionCallback(kind: "timer" | "kill" | "stdin" | "error" | "close" | "stdout") {
+  const source = ts.createSourceFile("fixture.ts", task10Source(), ts.ScriptTarget.Latest, true);
+  const provision = source.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === "provision",
+  );
+  if (!provision) throw new Error("Missing actual provision function");
+  const callbacks: ts.ArrowFunction[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (kind === "timer" || kind === "kill") &&
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(source) === kind &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer)
+    ) {
+      const callback = node.initializer.arguments[0];
+      if (callback && ts.isArrowFunction(callback)) callbacks.push(callback);
+    } else if (ts.isCallExpression(node)) {
+      const expression = node.expression.getText(source);
+      const event = node.arguments[0]?.getText(source);
+      if (
+        (kind === "stdin" && expression === "child.stdin.on" && event === '"error"') ||
+        (kind === "error" && expression === "child.on" && event === '"error"') ||
+        (kind === "close" && expression === "child.once" && event === '"close"') ||
+        (kind === "stdout" && expression === "child.stdout.on" && event === '"data"')
+      ) {
+        const callback = node.arguments[1];
+        if (callback && ts.isArrowFunction(callback)) callbacks.push(callback);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(provision);
+  expect(callbacks).toHaveLength(1);
+  const callback = callbacks[0];
+  if (!callback) throw new Error("Missing actual provision callback");
+  return callback.getText(source);
+}
+
+describe("Task15 provision observation", () => {
+  it("checks every new fragment before restoring the complete Task10 predecessor and old proof", () => {
+    const source = task10Source();
+    assertTask10Preserved(source);
+    const stdinStage = "  observation.enter(3);\n";
+    const stdinWrite = "  child.stdin.end(`${password}\\n`);\n";
+    expect(source.split(stdinStage)).toHaveLength(2);
+    expect(source.split(stdinWrite)).toHaveLength(2);
+    expect(() =>
+      assertTask10Preserved(
+        source.replace(stdinStage, "").replace(stdinWrite, stdinWrite + stdinStage),
+      ),
+    ).toThrow();
+    for (const [, after] of task15FixturePairs) {
+      expect(() => assertTask10Preserved(source.replace(after, ""))).toThrow();
+      expect(() => assertTask10Preserved(source.replace(after, after + after))).toThrow();
+    }
+    for (const [before, after] of [
+      ["observation.mark(32);", "observation.mark(64);"],
+      ["observation.mark(1);", "observation.mark(2);"],
+      [
+        "    failed = true;\n    observation.mark(8);",
+        "    failed = false;\n    observation.mark(8);",
+      ],
+      ["    Math.max(1, cap - 1000),", "    Math.max(1, cap + 1000),"],
+      ["  }, cap);", "  }, cap + 1000);"],
+      ["if (failed || code !== 0)", "if (false)"],
+      ["result.viewerUserId === installation.identity.userId", "false"],
+      ["        provisionObservation,", "        createViewerProvisionObservation(),"],
+      ["    observation.closed(code);", "    observation.closed(0);"],
+      [
+        "    } else observation.stderr(bytes);",
+        '    } else console.error(bytes.toString("utf8"));',
+      ],
+      ["if (++stderrBytes > 4096 || line > 1)", "if (++stderrBytes > 8192 || line > 2)"],
+      ["      attempted = true;", "      attempted = false;"],
+      [
+        'if (phase === "provision") provisionObservation.emitFailure((line) => console.error(line));',
+        "provisionObservation.emitFailure((line) => console.log(line));",
+      ],
+    ] as const) {
+      expect(source.split(before)).toHaveLength(2);
+      expect(() => assertTask10Preserved(source.replace(before, after))).toThrow();
+    }
+  });
+  it("rejects parent construction stages event owners and recorder displacement before erasure", () => {
+    const source = task10Source();
+    task15AssertFixturePlacement(source);
+    for (const [addition, later] of [
+      [
+        "  observation: ReturnType<typeof createViewerProvisionObservation>,\n",
+        "  installation: Installation,\n",
+      ],
+      [
+        "  observation.enter(1);\n",
+        "  const drained = childDrain(child);\n  observation.enter(2);\n",
+      ],
+      [
+        "  observation.mark(1);\n",
+        "  const drained = childDrain(child);\n  observation.enter(2);\n",
+      ],
+      ["  observation.enter(2);\n", "    failed = false;\n"],
+      ["      observation.mark(32);\n", '  child.stdin.on("error", () => {\n'],
+      ["    observation.mark(64);\n", '  child.on("error", () => {\n'],
+      ["    observation.mark(2);\n", '  child.stdin.on("error", () => {\n'],
+      ["    observation.mark(4);\n", '  child.on("error", () => {\n'],
+      ["    observation.mark(8);\n", '  child.stdout.on("data", (bytes: Buffer) => {\n'],
+      ["  observation.enter(3);\n", "  child.stdin.end(`${password}\\n`);\n"],
+      ["  observation.enter(4);\n", "  clearTimeout(timer);\n  clearTimeout(kill);\n"],
+      [
+        "  observation.enter(5);\n",
+        '  const parsed: unknown = JSON.parse(stdout.toString("utf8"));\n',
+      ],
+      ["  observation.enter(6);\n", "  const result = viewerResult.parse(parsed);\n"],
+      [
+        "  observation.enter(7);\n",
+        '    throw viewerBrowserFailure("provision");\n  return result;\n',
+      ],
+      [
+        "  const provisionObservation = createViewerProvisionObservation();\n",
+        "export async function startUsDemoViewerBrowserFixture() {\n",
+      ],
+      ["        provisionObservation,\n", "        owned,\n"],
+    ] as const) {
+      expect(source.split(addition)).toHaveLength(2);
+      expect(source.split(later)).toHaveLength(2);
+      const displaced = source.replace(addition, "").replace(later, later + addition);
+      // Assert the placement gate itself rejects, before any inverse/hash can hide a move.
+      expect(() => task15AssertFixturePlacement(displaced)).toThrow();
+    }
+  });
+  it("actual stderr handler forwards bounded bytes without changing failure or stop behavior", () => {
+    const bytes = Buffer.from("US_VIEWER_PROVISION_OBSERVATION 1 0\n");
+    const received: Uint8Array[] = [];
+    const stop = vi.fn();
+    expect(
+      task15RunStderr(
+        bytes,
+        {
+          mark() {},
+          stderr(chunk: Uint8Array) {
+            received.push(chunk);
+          },
+        },
+        stop,
+      ),
+    ).toEqual({ count: bytes.length, failed: true });
+    expect(received).toEqual([bytes]);
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  const refusal =
+    "US synthetic viewer command refused. Check exact arguments, isolated migrated database, trusted owner/profile and password input. Existing identities are never repaired or reset.";
+  const wire = `${refusal}\nUS_VIEWER_PROVISION_OBSERVATION 5 1\n`;
+  const emitted = (observation: ReturnType<typeof fixture.createViewerProvisionObservation>) => {
+    const lines: string[] = [];
+    observation.emitFailure((line) => lines.push(line));
+    observation.emitFailure(() => {
+      throw new Error("must not retry");
+    });
+    expect(lines).toHaveLength(1);
+    return lines[0];
+  };
+
+  it("recognizes only two complete lines across every split and one-byte chunks", () => {
+    for (const ending of ["\n", "\r\n"]) {
+      const bytes = Buffer.from(wire.replaceAll("\n", ending));
+      for (let split = 0; split <= bytes.length; split++) {
+        const observation = fixture.createViewerProvisionObservation();
+        observation.stderr(bytes.subarray(0, split));
+        observation.stderr(bytes.subarray(split));
+        observation.closed(1);
+        expect(emitted(observation)).toBe("US_DEMO_VIEWER_PROVISION_OBSERVATION 0 128 2 5 1");
+      }
+      const observation = fixture.createViewerProvisionObservation();
+      for (const byte of bytes) observation.stderr(Uint8Array.of(byte));
+      observation.closed(null);
+      expect(emitted(observation)).toBe("US_DEMO_VIEWER_PROVISION_OBSERVATION 0 128 3 5 1");
+    }
+  });
+
+  it("invalidates malformed, duplicate, extra, incomplete, secret or overflowing stderr forever", () => {
+    const secret = "private-password-factor-token-sentinel";
+    for (const text of [
+      "",
+      wire.slice(0, -1),
+      wire + wire,
+      wire + "\n",
+      "\n" + wire,
+      wire.replace("5 1", "8 1"),
+      wire.replace("5 1", "5 2"),
+      wire.replace("5 1", "05 1"),
+      wire.replace("5 1", "5 1 "),
+      wire.replace("\n", "\r"),
+      wire.split("\n").reverse().join("\n"),
+      "\u001b[31m" + wire,
+      "é" + wire,
+      secret,
+      wire + secret,
+      secret + wire,
+      "x".repeat(4096),
+      "x".repeat(4097),
+    ]) {
+      const observation = fixture.createViewerProvisionObservation();
+      observation.stderr(Buffer.from(text));
+      observation.closed(1);
+      const line = emitted(observation);
+      expect(line).toBe("US_DEMO_VIEWER_PROVISION_OBSERVATION 0 128 2 0 0");
+      expect(inspect(observation, { depth: 10 })).not.toContain(secret);
+    }
+    const overflow = fixture.createViewerProvisionObservation();
+    overflow.stderr(Buffer.from(wire));
+    overflow.overflow();
+    overflow.stderr(Buffer.from(wire));
+    overflow.closed(1);
+    expect(emitted(overflow)).toBe("US_DEMO_VIEWER_PROVISION_OBSERVATION 0 128 2 0 0");
+    const unclosed = fixture.createViewerProvisionObservation();
+    unclosed.stderr(Buffer.from(wire));
+    expect(emitted(unclosed)).toBe("US_DEMO_VIEWER_PROVISION_OBSERVATION 0 0 0 0 0");
+  });
+
+  it("does not retain caller chunks and maps only finite stages flags and close categories", () => {
+    for (const stage of [0, 1, 2, 3, 4, 5, 6, 7]) {
+      const observation = fixture.createViewerProvisionObservation();
+      observation.enter(stage);
+      for (const bit of [1, 2, 4, 8, 16, 32, 64]) observation.mark(bit);
+      const bytes = Buffer.from(wire);
+      observation.stderr(bytes);
+      bytes.fill(0);
+      observation.closed(0);
+      expect(emitted(observation)).toBe(`US_DEMO_VIEWER_PROVISION_OBSERVATION ${stage} 255 1 5 1`);
+    }
+    for (const [code, expected] of [
+      [0, 1],
+      [1, 2],
+      [-1, 2],
+      [null, 3],
+      [NaN, 3],
+      [undefined, 3],
+    ] as const) {
+      const observation = fixture.createViewerProvisionObservation();
+      const hostile = new Proxy(
+        {},
+        {
+          get() {
+            throw new Error("private");
+          },
+          ownKeys() {
+            throw new Error("private");
+          },
+        },
+      );
+      observation.enter(hostile);
+      observation.mark(hostile);
+      observation.mark(255);
+      observation.closed(code);
+      expect(emitted(observation)).toBe(
+        `US_DEMO_VIEWER_PROVISION_OBSERVATION 0 128 ${expected} 0 0`,
+      );
+    }
+  });
+
+  it("actual stderr handler keeps combined cap and exact stop counts with a real recorder", () => {
+    for (const count of [4095, 4096]) {
+      const observation = fixture.createViewerProvisionObservation();
+      const stop = vi.fn();
+      expect(task15RunStderr(Uint8Array.of(85), observation, stop, count)).toEqual({
+        count: count + 1,
+        failed: true,
+      });
+      expect(stop).toHaveBeenCalledTimes(count === 4096 ? 1 : 0);
+      expect(emitted(observation)).toBe(
+        `US_DEMO_VIEWER_PROVISION_OBSERVATION 0 ${count === 4096 ? 24 : 8} 0 0 0`,
+      );
+    }
+  });
+
+  it("latches its sole failure emission attempt even when the output sink throws", () => {
+    const observation = fixture.createViewerProvisionObservation();
+    let calls = 0;
+    expect(() =>
+      observation.emitFailure(() => {
+        calls++;
+        throw new Error("private");
+      }),
+    ).not.toThrow();
+    observation.emitFailure(() => {
+      calls++;
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("requires an observed close category as well as the close bit for native recognition", () => {
+    const observation = fixture.createViewerProvisionObservation();
+    observation.stderr(Buffer.from(wire));
+    observation.mark(128);
+    expect(emitted(observation)).toBe("US_DEMO_VIEWER_PROVISION_OBSERVATION 0 128 0 0 0");
+  });
+
+  it("actual timer error and close callbacks preserve stop signal and completion counts", () => {
+    for (const [kind, expectedMask, expectedStops, signal, expectedFailed] of [
+      ["timer", 32, 1, null, false],
+      ["kill", 64, 0, "SIGKILL", true],
+      ["stdin", 4, 1, null, false],
+      ["error", 2, 0, null, true],
+      ["close", 128, 0, null, false],
+    ] as const) {
+      const observation = fixture.createViewerProvisionObservation();
+      const stop = vi.fn(),
+        kill = vi.fn(),
+        done = vi.fn();
+      const failed = task15PureCode(
+        `let failed = false; (${task15ProvisionCallback(kind)})(1); failed`,
+        { observation, stop, child: { kill }, done },
+      );
+      expect(failed).toBe(expectedFailed);
+      expect(stop).toHaveBeenCalledTimes(expectedStops);
+      expect(kill.mock.calls).toEqual(signal ? [[signal]] : []);
+      expect(done.mock.calls).toEqual(kind === "close" ? [[1]] : []);
+      expect(emitted(observation)).toBe(
+        `US_DEMO_VIEWER_PROVISION_OBSERVATION 0 ${expectedMask} ${kind === "close" ? 2 : 0} 0 0`,
+      );
+    }
+    for (const initialCount of [4095, 4096]) {
+      const observation = fixture.createViewerProvisionObservation();
+      const stop = vi.fn();
+      const result = task15PureCode(
+        `let count = initialCount, stdout = Buffer.alloc(0);
+        (${task15ProvisionCallback("stdout")})(Uint8Array.of(1)); ({count, length: stdout.length})`,
+        { observation, stop, Buffer, Uint8Array, initialCount },
+      );
+      expect(result).toEqual({ count: initialCount + 1, length: initialCount === 4095 ? 1 : 0 });
+      expect(stop).toHaveBeenCalledTimes(initialCount === 4096 ? 1 : 0);
+    }
+  });
+
+  it("actual outer failure emits only after close settles and preserves both original final errors", async () => {
+    const source = ts.createSourceFile("fixture.ts", task10Source(), ts.ScriptTarget.Latest, true);
+    const start = source.statements.find(
+      (node): node is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(node) && node.name?.text === "startUsDemoViewerBrowserFixture",
+    );
+    const regions = start?.body?.statements.filter(ts.isTryStatement) ?? [];
+    expect(regions).toHaveLength(1);
+    const body = regions[0]?.catchClause?.block.getText(source);
+    if (!body) throw new Error("Missing actual outer catch");
+    for (const failedClose of [false, true])
+      for (const phase of ["provision", "initialize", "descriptors"]) {
+        const order: string[] = [];
+        const provisionObservation = fixture.createViewerProvisionObservation();
+        let message = "";
+        try {
+          await task15PureCode(`(async () => ${body})()`, {
+            phase,
+            provisionObservation,
+            viewerBrowserFailure: fixture.viewerBrowserFailure,
+            setup: { pendingCount: () => 1 },
+            close: async () => {
+              order.push("close");
+              await Promise.resolve();
+              order.push("settled");
+              if (failedClose) throw false;
+            },
+            console: {
+              error(line: string) {
+                order.push(line);
+                throw new Error("private");
+              },
+            },
+          });
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
+          )
+            message = error.message;
+        }
+        expect(order).toEqual(
+          phase === "provision"
+            ? ["close", "settled", "US_DEMO_VIEWER_PROVISION_OBSERVATION 0 0 0 0 0"]
+            : ["close", "settled"],
+        );
+        expect(message).toBe(
+          `Viewer browser failed: ${phase}${failedClose ? "; disposal incomplete: pending-setup=1" : ""}`,
+        );
+      }
+  });
+});
 function assertTask10Preserved(source: string) {
+  source = task15RestoreFixture(source);
   // Validate the entire introduced structure/wiring before any exact inverse erasure.
   expect(source.split(task10Helper)).toHaveLength(2);
   expect(source.split(task10Branch)).toHaveLength(2);

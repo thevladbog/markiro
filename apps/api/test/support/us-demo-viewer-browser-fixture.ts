@@ -548,6 +548,128 @@ const viewerResult = z
     mfaRequired: z.literal(true),
   })
   .strict();
+/** Failure-only finite recorder. Stderr bytes are compared, never retained or decoded. */
+export function createViewerProvisionObservation() {
+  const refusal =
+    "US synthetic viewer command refused. Check exact arguments, isolated migrated database, trusted owner/profile and password input. Existing identities are never repaired or reset.";
+  const prefix = "US_VIEWER_PROVISION_OBSERVATION ";
+  let stage = 0,
+    mask = 0,
+    exit = 0,
+    native = 0,
+    cleanup = 0;
+  let line = 0,
+    offset = 0,
+    stderrBytes = 0;
+  let carriage = false,
+    invalid = false,
+    attempted = false;
+  return {
+    enter(value: unknown) {
+      stage =
+        value === 1 ||
+        value === 2 ||
+        value === 3 ||
+        value === 4 ||
+        value === 5 ||
+        value === 6 ||
+        value === 7
+          ? value
+          : 0;
+    },
+    mark(value: unknown) {
+      if (
+        value === 1 ||
+        value === 2 ||
+        value === 4 ||
+        value === 8 ||
+        value === 16 ||
+        value === 32 ||
+        value === 64 ||
+        value === 128
+      )
+        mask |= value;
+    },
+    closed(code: unknown) {
+      mask |= 128;
+      exit = code === 0 ? 1 : typeof code === "number" && Number.isSafeInteger(code) ? 2 : 3;
+    },
+    overflow() {
+      invalid = true;
+    },
+    stderr(bytes: Uint8Array) {
+      try {
+        if (invalid) return;
+        for (const byte of bytes) {
+          if (++stderrBytes > 4096 || line > 1) {
+            invalid = true;
+            return;
+          }
+          const length = line === 0 ? refusal.length : prefix.length + 3;
+          if (carriage) {
+            if (byte !== 10) {
+              invalid = true;
+              return;
+            }
+            carriage = false;
+            line++;
+            offset = 0;
+          } else if (offset === length) {
+            if (byte === 13) carriage = true;
+            else if (byte === 10) {
+              line++;
+              offset = 0;
+            } else {
+              invalid = true;
+              return;
+            }
+          } else if (line === 1 && offset === prefix.length) {
+            if (byte < 48 || byte > 55) {
+              invalid = true;
+              return;
+            }
+            native = byte - 48;
+            offset++;
+          } else if (line === 1 && offset === prefix.length + 2) {
+            if (byte !== 48 && byte !== 49) {
+              invalid = true;
+              return;
+            }
+            cleanup = byte - 48;
+            offset++;
+          } else {
+            const expected =
+              line === 0
+                ? refusal.charCodeAt(offset)
+                : offset === prefix.length + 1
+                  ? 32
+                  : prefix.charCodeAt(offset);
+            if (byte !== expected) {
+              invalid = true;
+              return;
+            }
+            offset++;
+          }
+        }
+      } catch {
+        invalid = true;
+      }
+    },
+    emitFailure(sink: (value: string) => void) {
+      if (attempted) return;
+      attempted = true;
+      try {
+        const recognized = !invalid && line === 2 && !carriage && (mask & 128) !== 0 && exit !== 0;
+        sink(
+          `US_DEMO_VIEWER_PROVISION_OBSERVATION ${stage} ${mask} ${exit} ${recognized ? native : 0} ${recognized ? cleanup : 0}`,
+        );
+      } catch {
+        // The original failure and cleanup result always win.
+      }
+    },
+  };
+}
+
 /** Actual compiled process; bounded private stdin and closed diagnostics, never a shell. */
 async function provision(
   installation: Installation,
@@ -555,7 +677,9 @@ async function provision(
   cap: number,
   register: (close: () => Promise<void>) => void,
   deadline: () => number,
+  observation: ReturnType<typeof createViewerProvisionObservation>,
 ) {
+  observation.enter(1);
   const child = spawn(
     process.execPath,
     [
@@ -569,7 +693,9 @@ async function provision(
     ],
     { cwd: root, env: installation.environment, stdio: ["pipe", "pipe", "pipe"] },
   );
+  observation.mark(1);
   const drained = childDrain(child);
+  observation.enter(2);
   register(
     viewerOwnedShutdown(
       {
@@ -594,31 +720,61 @@ async function provision(
     failed = true;
     child.kill("SIGTERM");
   };
-  const timer = setTimeout(stop, Math.max(1, cap - 1000));
+  const timer = setTimeout(
+    () => {
+      observation.mark(32);
+      stop();
+    },
+    Math.max(1, cap - 1000),
+  );
   const kill = setTimeout(() => {
+    observation.mark(64);
     failed = true;
     child.kill("SIGKILL");
   }, cap);
   child.on("error", () => {
+    observation.mark(2);
     failed = true;
   });
-  child.stdin.on("error", stop);
+  child.stdin.on("error", () => {
+    observation.mark(4);
+    stop();
+  });
   child.stdout.on("data", (bytes: Buffer) => {
     count += bytes.length;
-    if (count > 4096) stop();
-    else stdout = Buffer.concat([stdout, bytes]);
+    if (count > 4096) {
+      observation.mark(16);
+      observation.overflow();
+      stop();
+    } else stdout = Buffer.concat([stdout, bytes]);
   });
   child.stderr.on("data", (bytes: Buffer) => {
     count += bytes.length;
     failed = true;
-    if (count > 4096) stop();
+    observation.mark(8);
+    if (count > 4096) {
+      observation.mark(16);
+      observation.overflow();
+      stop();
+    } else observation.stderr(bytes);
   });
+  observation.enter(3);
   child.stdin.end(`${password}\n`);
-  const code = await new Promise<number | null>((done) => child.once("close", done));
+  observation.enter(4);
+  const code = await new Promise<number | null>((done) =>
+    child.once("close", (code) => {
+      observation.closed(code);
+      done(code);
+    }),
+  );
   clearTimeout(timer);
   clearTimeout(kill);
   if (failed || code !== 0) throw viewerBrowserFailure("provision");
-  const result = viewerResult.parse(JSON.parse(stdout.toString("utf8")) as unknown);
+  observation.enter(5);
+  const parsed: unknown = JSON.parse(stdout.toString("utf8"));
+  observation.enter(6);
+  const result = viewerResult.parse(parsed);
+  observation.enter(7);
   if (
     result.tenantId !== installation.identity.tenantId ||
     result.viewerUserId === installation.identity.userId
@@ -694,6 +850,7 @@ export async function startUsDemoViewerBrowserFixture() {
   let plans: UsPlanArtifactStore | undefined, packages: UsRequestPackageArtifactStore | undefined;
   let closing: Promise<void> | undefined,
     phase: Phase = "installation";
+  const provisionObservation = createViewerProvisionObservation();
   let disposalDeadline: number | undefined;
   const cleanupDeadline = () => (disposalDeadline ??= performance.now() + 60_000);
   const setup = new ViewerSetupDeadline(() => {
@@ -783,6 +940,7 @@ export async function startUsDemoViewerBrowserFixture() {
           provisionOwner = close;
         },
         cleanupDeadline,
+        provisionObservation,
       ),
     );
     phase = "descriptors";
@@ -1152,6 +1310,8 @@ export async function startUsDemoViewerBrowserFixture() {
       throw new Error(
         `Viewer browser failed: ${phase}; disposal incomplete: pending-setup=${setup.pendingCount()}`,
       );
+    } finally {
+      if (phase === "provision") provisionObservation.emitFailure((line) => console.error(line));
     }
     throw viewerBrowserFailure(phase);
   }

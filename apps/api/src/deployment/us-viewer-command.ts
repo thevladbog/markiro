@@ -33,3 +33,52 @@ export function viewerCommandEnvironment(args: readonly string[], raw: NodeJS.Pr
     throw new Error("us_viewer_environment_invalid");
   }
 }
+
+/** Failure-only scalar observation; never receives an exception or command input. */
+export function createUsViewerCommandObservation() {
+  let phase = 0,
+    first = 0,
+    hasFailure = false,
+    cleanupFailed = false,
+    attempted = false;
+  const fail = () => {
+    if (!hasFailure) {
+      hasFailure = true;
+      first = phase;
+    }
+  };
+  return {
+    enter(value: unknown) {
+      phase =
+        value === "arguments"
+          ? 1
+          : value === "stdin"
+            ? 2
+            : value === "connect"
+              ? 3
+              : value === "database_identity"
+                ? 4
+                : value === "store"
+                  ? 5
+                  : value === "result_output"
+                    ? 6
+                    : value === "pool_close"
+                      ? 7
+                      : 0;
+    },
+    fail,
+    closeFailed() {
+      fail();
+      cleanupFailed = true;
+    },
+    emitFailure(sink: (line: string) => void) {
+      if (!hasFailure || attempted) return;
+      attempted = true;
+      try {
+        sink(`US_VIEWER_PROVISION_OBSERVATION ${first} ${cleanupFailed ? 1 : 0}`);
+      } catch {
+        // Observation must not mask the original refusal or finally precedence.
+      }
+    },
+  };
+}
