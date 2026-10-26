@@ -158,7 +158,12 @@ All source/config/image/physical PG/schema/full ledger/backup/copy/key/fence/
 projection/approval gates remain. Slow read-only checks precede the final actual
 fence and cleanup observations; both retain the strict 30-second limit and the
 synchronous check at actual spawn. No timestamp substitution or TTL extension is
-allowed. Compare retained job projection immediately before API-up, not after
+allowed. After the command guard's physical baseline, one compiled held action
+repeats the complete prepared-target boundary through its inner adapters. It
+verifies source authority again, then invokes only the coordinator's fixed Compose
+callback with the newly checked environment and freshness closure. The outer
+guard's post-command physical check remains unchanged. Compare retained job
+projection immediately before API-up, not after
 accepted candidate writers have started; later checks still verify all remaining
 authorities.
 

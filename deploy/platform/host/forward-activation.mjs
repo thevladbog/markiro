@@ -17,6 +17,7 @@ const methods = [
   "inspectCandidate",
   "inspectSchema",
   "smoke",
+  "withPreparedCommand",
   "cleanupOwnedProbes",
   "cleanupOwnedWorkloads",
 ];
@@ -171,8 +172,10 @@ export async function executeForwardActivation(input, adapters, options) {
             composeFiles = files;
           },
         });
-        const recheck = () => {
+        const checkDecision = () =>
           ensure(!adapters.signal?.aborted && Date.parse(decision.expiresAt) > Date.now());
+        const recheck = () => {
+          checkDecision();
           shared.checkPreparedFreshness();
           shared.checkActivationDeadline();
         };
@@ -257,34 +260,49 @@ export async function executeForwardActivation(input, adapters, options) {
           await boundary("command");
           lastBoundary = "command";
           commandCategory = service === "api" ? "api-up" : "edge-up";
-          await store.guard(() => {
-            recheck();
-            applicationAttempted = true;
-            return (adapters.runProcess ?? runHostProcess)(
-              {
-                executable: "/usr/bin/docker",
-                args: [
-                  "--host",
-                  "unix:///var/run/docker.sock",
-                  "compose",
-                  "--project-name",
-                  "markiro-platform",
-                  ...composeFiles.flatMap((path) => ["--file", path]),
-                  "up",
-                  "-d",
-                  ...(service === "api" ? ["--wait"] : []),
-                  "--no-deps",
-                  service,
-                ],
-                cwd: root,
-                env: environment,
-                timeoutMs: 300000,
-                outputLimitBytes: 65536,
-                ...(adapters.signal ? { signal: adapters.signal } : {}),
+          await store.guard((cap) =>
+            adapters.withPreparedCommand(
+              context("command"),
+              cap,
+              ({
+                environment: commandEnvironment,
+                composeFiles: commandFiles,
+                recheckPrepared,
+              }) => {
+                const recheckCommand = () => {
+                  checkDecision();
+                  recheckPrepared();
+                };
+                recheckCommand();
+                applicationAttempted = true;
+                return (adapters.runProcess ?? runHostProcess)(
+                  {
+                    executable: "/usr/bin/docker",
+                    args: [
+                      "--host",
+                      "unix:///var/run/docker.sock",
+                      "compose",
+                      "--project-name",
+                      "markiro-platform",
+                      ...commandFiles.flatMap((path) => ["--file", path]),
+                      "up",
+                      "-d",
+                      ...(service === "api" ? ["--wait"] : []),
+                      "--no-deps",
+                      service,
+                    ],
+                    cwd: root,
+                    env: commandEnvironment,
+                    timeoutMs: 300000,
+                    outputLimitBytes: 65536,
+                    ...(adapters.signal ? { signal: adapters.signal } : {}),
+                  },
+                  recheckCommand,
+                );
               },
-              recheck,
-            );
-          });
+              persistFailure,
+            ),
+          );
           if (service === "api") apiStarted = true;
           const value = await observe();
           ensure(

@@ -31,6 +31,7 @@ for (const kind of [
   "approval",
   "verifyRelease",
   "verifyImages",
+  "withPreparedCommand",
 ])
   test(`forward activation rejects ${kind} before candidate start`, async (t) => {
     const f = await forwardActivationFixture(t, kind);
@@ -248,3 +249,89 @@ for (const transport of ["serial", "batched"])
       assert.deepEqual(f.commands, ["api", "edge"]);
     }
   });
+
+test("command refreshes prepared observations after the physical guard before API-up", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f);
+  f.input.preparedPolicy.maxAgeMs = 3600000;
+  f.options.verifyBaseline = async () => {
+    clock.now += 8000;
+  };
+  await run(f);
+  assert.deepEqual(f.commands, ["api", "edge"]);
+});
+
+test("late command callback cannot extend the newly sampled fence deadline", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f),
+    original = f.adapters.withPreparedCommand;
+  f.adapters.withPreparedCommand = (context, cap, command, persistFailure) =>
+    original(
+      context,
+      cap,
+      (prepared) => {
+        clock.now += 31000;
+        return command(prepared);
+      },
+      persistFailure,
+    );
+  await assert.rejects(run(f));
+  assert.deepEqual(f.commands, []);
+  const failure = JSON.parse(await readFile(join(f.directory, "failure.json")));
+  assert.equal(failure.phase, "api-started");
+  assert.equal(failure.boundary, "command");
+  assert.equal(failure.commandCategory, "api-up");
+  assert.equal(failure.code, "ERR_DATABASE_BACKUP");
+});
+
+test("compiled prepared-command adapter rejects forged, used and expired capabilities", async (t) => {
+  const { createForwardActivationAdapters } =
+    await import("../host/forward-activation-adapters.mjs");
+  const { withForwardActivationState, withHeldForwardState } =
+    await import("../host/forward-state.mjs");
+  const f = await forwardActivationFixture(t);
+  let commands = 0,
+    docker = 0;
+  const adapter = createForwardActivationAdapters(
+    {
+      record: {
+        operation: { ...f.input, admission: f.prior.admission, predecessorContainers: f.old },
+        observationPolicy: {},
+      },
+      verifySources: async () => {},
+    },
+    { identity: f.prior.admission.originalPredecessor.identity },
+    async () => {},
+    { evidence: { cleanup: { resources: [] } } },
+    {
+      runProcess: async () => {
+        docker++;
+        assert.fail("No Docker without a live unused capability");
+      },
+    },
+  );
+  const command = () => {
+    commands++;
+    assert.fail("No unguarded command callback");
+  };
+  await assert.rejects(adapter.withPreparedCommand({}, {}, command));
+  let expired;
+  await withForwardActivationState(
+    f.root,
+    f.input.decision,
+    async (store) => {
+      await store.guard(async (cap) => {
+        expired = cap;
+        await withHeldForwardState(cap, async (held) => {
+          await held.verify();
+        });
+        await assert.rejects(adapter.withPreparedCommand({}, cap, command));
+      });
+      await assert.rejects(adapter.withPreparedCommand({}, expired, command));
+    },
+    f.options,
+  );
+  await assert.rejects(adapter.withPreparedCommand({}, expired, command));
+  assert.equal(commands, 0);
+  assert.equal(docker, 0);
+});

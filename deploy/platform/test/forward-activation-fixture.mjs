@@ -5,6 +5,7 @@ import { forwardPreparationFixture } from "./forward-preparation-fixture.mjs";
 import { executeForwardPreparation } from "../host/forward-preparation.mjs";
 import { forwardDecision } from "./forward-fixture.mjs";
 import { withHeldForwardState } from "../host/forward-state.mjs";
+import { runPreparedForwardCommand } from "../host/forward-activation-adapters.mjs";
 export async function forwardActivationFixture(t, failAt) {
   const f = await forwardPreparationFixture(t);
   await executeForwardPreparation(f.context, f.adapters, f.options);
@@ -54,6 +55,25 @@ export async function forwardActivationFixture(t, failAt) {
       if (name === failAt) throw new Error("PRIVATE-FORWARD-ACTIVATION-FAILURE");
       return fn(held);
     });
+  const inspectTarget = (ctx) => {
+    if (ctx.phase === "api-started" && ["entry", "command"].includes(ctx.boundary)) {
+      assert.equal(
+        active.api,
+        false,
+        "retained projection must not be compared after candidate writers start",
+      );
+      projectionChecks++;
+      if (failAt === "projection") throw new Error("projection changed");
+    }
+    return {
+      target: identity.target,
+      project: "markiro-platform",
+      serverProfile: "platform-only",
+      uiProfile: "platform-only",
+      os: "linux",
+      architecture: "amd64",
+    };
+  };
   const adapters = {
     verifyRelease: (ctx, cap) => action("verifyRelease", ctx, cap, () => {}),
     verifyImages: (ctx, cap) => action("verifyImages", ctx, cap, () => {}),
@@ -71,26 +91,7 @@ export async function forwardActivationFixture(t, failAt) {
         schema: f.input.baseline.schema,
         productMigrationProofSha256: f.productMigrationProof.proofSha256,
       })),
-    inspectTarget: (ctx, cap) =>
-      action("inspectTarget", ctx, cap, () => {
-        if (ctx.phase === "api-started" && ["entry", "command"].includes(ctx.boundary)) {
-          assert.equal(
-            active.api,
-            false,
-            "retained projection must not be compared after candidate writers start",
-          );
-          projectionChecks++;
-          if (failAt === "projection") throw new Error("projection changed");
-        }
-        return {
-          target: identity.target,
-          project: "markiro-platform",
-          serverProfile: "platform-only",
-          uiProfile: "platform-only",
-          os: "linux",
-          architecture: "amd64",
-        };
-      }),
+    inspectTarget: (ctx, cap) => action("inspectTarget", ctx, cap, () => inspectTarget(ctx)),
     smoke: (ctx, cap) => action("smoke", ctx, cap, () => {}),
     writerFence: {
       ...writerFence,
@@ -100,6 +101,32 @@ export async function forwardActivationFixture(t, failAt) {
       ...workload,
       inspect: (ctx, cap) => action("workload", ctx, cap, () => workload.inspect(ctx)),
     },
+    withPreparedCommand: (ctx, cap, command) =>
+      action("withPreparedCommand", ctx, cap, (held) =>
+        runPreparedForwardCommand(
+          { ...input, identity },
+          ctx,
+          {
+            inspectTarget,
+            writerFence: {
+              ...writerFence,
+              observe: async (request) => ({
+                ...(await writerFence.observe(request)),
+                observedAt: new Date(Date.now()).toISOString(),
+              }),
+            },
+            workload: {
+              ...workload,
+              inspect: async (request) => ({
+                ...(await workload.inspect(request)),
+                observedAt: new Date(Date.now()).toISOString(),
+              }),
+            },
+          },
+          held.verify,
+          command,
+        ),
+      ),
     cleanupOwnedProbes: (ctx, cap) =>
       action("cleanupOwnedProbes", ctx, cap, (held) => {
         assert.equal(held.cleanup, true);

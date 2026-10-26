@@ -4,7 +4,36 @@ import { createUpgradeHostAdapters } from "./command.mjs";
 import { createUpgradeHostObservers, observerProducer } from "./observe.mjs";
 import { readVerifiedBackup } from "./backup-gate.mjs";
 import { runHostProcess } from "./process.mjs";
+import { preparedHostBoundary } from "./deployment-boundary.mjs";
 const same = (a, b) => ensure(canonical(a) === canonical(b));
+// The compiled coordinator owns the callback. Capability admission stays in action;
+// this shared sequence never acquires a capability or constructs a command.
+export async function runPreparedForwardCommand(candidate, context, adapters, verify, command) {
+  ensure(
+    context.boundary === "command" &&
+      ["api-started", "edge-started"].includes(context.phase) &&
+      typeof verify === "function" &&
+      typeof command === "function",
+  );
+  let environment, composeFiles;
+  const prepared = preparedHostBoundary({
+    ...candidate,
+    adapters,
+    context: () => context,
+    onEnvironment: (value, files) => {
+      environment = value;
+      composeFiles = files;
+    },
+  });
+  await prepared.boundary("command");
+  await verify();
+  const recheckPrepared = () => {
+    prepared.checkPreparedFreshness();
+    prepared.checkActivationDeadline();
+  };
+  recheckPrepared();
+  return command({ environment, composeFiles, recheckPrepared });
+}
 // Trusted installed constructors only. Each method consumes a different guarded
 // capability; no JSON callback, ambient capability or reusable held token exists.
 export function createForwardActivationAdapters(
@@ -142,6 +171,30 @@ export function createForwardActivationAdapters(
       inspect: (context, cap) =>
         action(context, cap, ({ adapters }) => adapters.workload.inspect(context)),
     },
+    withPreparedCommand: (context, cap, command, beforeFailureCleanup) =>
+      action(
+        context,
+        cap,
+        ({ verify, adapters }) =>
+          runPreparedForwardCommand(
+            candidate,
+            context,
+            {
+              ...adapters,
+              writerFence: {
+                ...adapters.writerFence,
+                observe: async (request) => {
+                  if (releaseVerified) await adapters.verifyRoles(request);
+                  return adapters.writerFence.observe(request);
+                },
+              },
+            },
+            verify,
+            command,
+          ),
+        false,
+        beforeFailureCleanup,
+      ),
     cleanupOwnedProbes: async (context, cap) => {
       try {
         return await action(
