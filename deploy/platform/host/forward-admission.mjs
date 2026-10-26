@@ -302,7 +302,9 @@ export function validateForwardDecision(input, { priorBytes, prior, now }) {
     keys(value.prior, ["sequence", "sha256"]);
     ensure(
       prior.version === 1 &&
-        prior.admission.kind === "platform-upgrade-forward-recovery" &&
+        ["platform-upgrade-forward-recovery", "platform-forward-admission-successor"].includes(
+          prior.admission.kind,
+        ) &&
         prior.admission.phase === "post-migration-prepare" &&
         !prior.decision &&
         prior.sequence === 6 &&

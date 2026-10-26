@@ -6,12 +6,12 @@ import { withHostState, withHeldHostState } from "./state.mjs";
 import { stateError, validateIdentity, validateBackup } from "./state-validation.mjs";
 import { snapshotActivation, activationHash } from "./recovery-activation-admission.mjs";
 import { createPrivateDirectory, readPrivateFile, writePrivateFile } from "./files.mjs";
-import { readUpgradePredecessor } from "./upgrade-state.mjs";
+import { validateForwardDecision } from "./forward-admission.mjs";
 import {
-  validateForwardAdmission,
-  validateForwardDecision,
-  readFailedUpgradePredecessor,
-} from "./forward-admission.mjs";
+  readForwardHistory,
+  validateForwardHistory,
+  forwardImmediatePredecessor,
+} from "./forward-history.mjs";
 import { runHostProcess } from "./process.mjs";
 import { carryHostFailure } from "./failure-diagnostic.mjs";
 
@@ -34,7 +34,7 @@ export const forwardPhaseReceipt = (decision) => ({
   phase: decision.phase,
   priorSha256:
     decision.phase === "post-migration-prepare"
-      ? decision.failed.hashes.state
+      ? forwardImmediatePredecessor(decision).hashes.state
       : decision.prior.sha256,
   admissionSha256: activationHash(bytes(decision)),
   dispatch: decision.dispatch,
@@ -110,7 +110,9 @@ export function validateForwardJournal(input, prior = null) {
   validateIdentity(s.admission.identity);
   ensure(
     s.version === 1 &&
-      s.admission.kind === "platform-upgrade-forward-recovery" &&
+      ["platform-upgrade-forward-recovery", "platform-forward-admission-successor"].includes(
+        s.admission.kind,
+      ) &&
       s.admission.phase === "post-migration-prepare" &&
       s.migrationEntered === true &&
       Number.isSafeInteger(s.sequence) &&
@@ -242,19 +244,13 @@ async function withForwardState(root, input, action, options, activation) {
       return value;
     };
     const readHistory = async (historical = false) => {
-      const failed = await readFailedUpgradePredecessor(
-        root,
-        admission.failed.identity.operationId,
-      );
-      if (ownership) failed.index = await retain(archive);
-      const original = await readUpgradePredecessor(root, admission.originalPredecessor.identity);
-      validateForwardAdmission(admission, {
-        failedBytes: failed,
-        originalPredecessorBytes: original,
+      const history = await readForwardHistory(root, admission, { ownIndexArchive: ownership });
+      if (ownership) await retain(archive);
+      validateForwardHistory(admission, history, {
         productMigrationProof,
         now: historical ? Date.parse(admission.expiresAt) - 1 : now(),
       });
-      return { failed, original };
+      return history;
     };
     const check = async (cleanup = false, physical = true) => {
       if (!active) throw stateError();
@@ -312,15 +308,16 @@ async function withForwardState(root, input, action, options, activation) {
           intent.version === 1 &&
             intent.kind === "platform-forward-index-handoff" &&
             intent.operationId === id &&
-            intent.failedOperationId === admission.failed.identity.operationId &&
-            intent.expectedSha256 === admission.failed.hashes.index &&
+            intent.failedOperationId ===
+              forwardImmediatePredecessor(admission).identity.operationId &&
+            intent.expectedSha256 === forwardImmediatePredecessor(admission).hashes.index &&
             intent.admissionSha256 === activationHash(bytes(admission)),
         );
         ensure(
           success.version === 1 &&
             success.kind === "platform-forward-index-handoff-completed" &&
             success.operationId === id &&
-            success.archivedSha256 === admission.failed.hashes.index &&
+            success.archivedSha256 === forwardImmediatePredecessor(admission).hashes.index &&
             success.intentSha256 === activationHash(intentBytes),
         );
         same(success.originalMetadata, intent.originalMetadata);
@@ -336,7 +333,7 @@ async function withForwardState(root, input, action, options, activation) {
       kind: "platform-forward-recovery-index",
       operationId: id,
       stateSha256: activationHash(bytes(s)),
-      predecessorIndexSha256: admission.failed.hashes.index,
+      predecessorIndexSha256: forwardImmediatePredecessor(admission).hashes.index,
       admissionSha256: activationHash(bytes(admission)),
     });
     const save = async (next, first = false) => {
@@ -397,7 +394,7 @@ async function withForwardState(root, input, action, options, activation) {
         await readHistory(false);
         const oldIndex = await readPrivateFile(root, "upgrade-index.json"),
           beforeMetadata = await metadata(join(root, "upgrade-index.json"));
-        ensure(activationHash(oldIndex) === admission.failed.hashes.index);
+        ensure(activationHash(oldIndex) === forwardImmediatePredecessor(admission).hashes.index);
         await createPrivateDirectory(root, "forward-recovery-operations", { exclusive: false });
         await createPrivateDirectory(root, directory);
         await absent(join(root, archive));
@@ -405,8 +402,8 @@ async function withForwardState(root, input, action, options, activation) {
           version: 1,
           kind: "platform-forward-index-handoff",
           operationId: id,
-          failedOperationId: admission.failed.identity.operationId,
-          expectedSha256: admission.failed.hashes.index,
+          failedOperationId: forwardImmediatePredecessor(admission).identity.operationId,
+          expectedSha256: forwardImmediatePredecessor(admission).hashes.index,
           originalMetadata: beforeMetadata,
           admissionSha256: activationHash(bytes(admission)),
         };
@@ -420,7 +417,7 @@ async function withForwardState(root, input, action, options, activation) {
             root,
             destination: archive,
             expected: beforeMetadata,
-            sha256: admission.failed.hashes.index,
+            sha256: forwardImmediatePredecessor(admission).hashes.index,
             checkpoint,
           });
           const archived = await metadata(join(root, archive));

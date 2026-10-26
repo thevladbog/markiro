@@ -412,9 +412,9 @@ export async function createHeldForwardBackup(input, capability, admission, opti
     ensure(root === input.operation.root);
     ensure(canonical(admitted) === canonical(state.admission));
     ensure(canonical(input.operation.identity) === canonical(admitted.identity));
-    const { readUpgradePredecessor } = await import("./upgrade-state.mjs");
+    const { readForwardHistory } = await import("./forward-history.mjs");
     const predecessor = JSON.parse(
-      (await readUpgradePredecessor(root, admitted.originalPredecessor.identity))
+      (await readForwardHistory(root, admitted, { ownIndexArchive: true })).original
         .activationOperation,
     );
     ensure(canonical(input.observationPolicy) === canonical(predecessor.observationPolicy));
