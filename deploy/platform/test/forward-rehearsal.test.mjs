@@ -757,3 +757,54 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
   assert.deepEqual(result.preparedTarget.observations.egress.value.review.projection, projection);
   assert.equal(c.evidence.differences.length, 1);
 });
+
+test("projection transport uses the pinned absolute DinD CLI without widening the host PATH", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { measureActivationProjection } = await import("../host/command.mjs");
+  const { activationTables } = await import("../host/prepared-target.mjs");
+  const { digest } = await import("../backup/schemas.mjs");
+  const f = await privateFixture(t, { nested: true });
+  const id = "a".repeat(64);
+  const rows = activationTables.map((table) => ({
+    table,
+    rows: 0,
+    pending: 0,
+    expired: 0,
+    sha256: digest(""),
+  }));
+  let commands = 0,
+    isolationChecks = 0;
+  const run = createForwardRehearsalProcess({
+    root: f.root,
+    parent: f.root,
+    repository: f.root,
+    containerId: id,
+    verifyIsolation: async () => {
+      isolationChecks++;
+    },
+    stdinOuter: async (args, input) => {
+      commands++;
+      const envFile = args[args.indexOf("--env-file") + 1];
+      const env = await readFile(envFile, "utf8");
+      assert.ok(env.split("\n").includes("PATH=/usr/bin:/bin"));
+      assert.equal(args[args.indexOf(id) + 1], "/usr/local/bin/docker");
+      assert.ok(Buffer.isBuffer(input));
+      assert.ok(input.toString().startsWith("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;"));
+      return {
+        stdout: Buffer.from(rows.map((row) => JSON.stringify(row)).join("\n")),
+        stderr: Buffer.alloc(0),
+      };
+    },
+  });
+  assert.deepEqual(
+    await measureActivationProjection(
+      { root: f.root, dockerConfig: f.dockerConfig },
+      "b".repeat(64),
+      new Date().toISOString(),
+      run,
+    ),
+    rows,
+  );
+  assert.equal(commands, 1);
+  assert.equal(isolationChecks, 2);
+});

@@ -431,7 +431,9 @@ export function createForwardRehearsalProcess(c, trace = []) {
       "--env-file",
       envFile,
       c.containerId,
-      "docker",
+      // The logical host PATH is forwarded unchanged; the pinned DinD image
+      // installs its transport CLI outside some callers' restricted PATHs.
+      "/usr/local/bin/docker",
       ...request.args,
     ];
     recheck?.();
