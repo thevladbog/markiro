@@ -17,6 +17,7 @@ const methods = [
   "inspectCandidate",
   "inspectSchema",
   "smoke",
+  "withPreparedBoundary",
   "withPreparedCommand",
   "cleanupOwnedProbes",
   "cleanupOwnedWorkloads",
@@ -67,6 +68,7 @@ export async function executeForwardActivation(input, adapters, options) {
         for (const key of ["operationId", "target", "executorSha", "configurationSha256"])
           same(preparedTarget[key], identity[key]);
         let environment,
+          recheckBoundary,
           composeFiles = catalogComposeFiles({}),
           apiStarted = false,
           applicationAttempted = false;
@@ -138,7 +140,9 @@ export async function executeForwardActivation(input, adapters, options) {
             adapters[name](context(cleanup ? "recovery" : name), cap, persistFailure);
           return cleanup ? store.cleanup(invoke) : store.guard(invoke);
         };
-        const shared = preparedHostBoundary({
+        // Prepared observations use one held action below; only immutable
+        // configuration/deadline checks are needed outside that action.
+        const { checkConfiguration, checkActivationDeadline } = preparedHostBoundary({
           root,
           identity,
           configuration,
@@ -146,27 +150,7 @@ export async function executeForwardActivation(input, adapters, options) {
           preparedTarget,
           preparedPolicy,
           context,
-          adapters: {
-            ...adapters,
-            inspectTarget: (request) =>
-              store.guard((cap) => adapters.inspectTarget(request, cap, persistFailure)),
-            writerFence: {
-              ...adapters.writerFence,
-              observe: (request) =>
-                store.guard((cap) => adapters.writerFence.observe(request, cap, persistFailure)),
-            },
-            workload: {
-              ...adapters.workload,
-              inspect: (request) =>
-                store.guard((cap) =>
-                  adapters.workload.inspect(
-                    { ...context("restore-cleanup"), ...request },
-                    cap,
-                    persistFailure,
-                  ),
-                ),
-            },
-          },
+          adapters,
           onEnvironment: (env, files) => {
             environment = env;
             composeFiles = files;
@@ -176,8 +160,9 @@ export async function executeForwardActivation(input, adapters, options) {
           ensure(!adapters.signal?.aborted && Date.parse(decision.expiresAt) > Date.now());
         const recheck = () => {
           checkDecision();
-          shared.checkPreparedFreshness();
-          shared.checkActivationDeadline();
+          ensure(typeof recheckBoundary === "function");
+          recheckBoundary();
+          checkActivationDeadline();
         };
         const observe = async () => {
           const value = snapshotActivation(await call("inspectCandidate"));
@@ -236,13 +221,28 @@ export async function executeForwardActivation(input, adapters, options) {
             (await readVerifiedBackup({ root, identity, ...preparedPolicy })).backupProof,
             initial.backup,
           );
-          await shared.checkConfiguration();
+          await checkConfiguration();
           await store.read();
           // Before API-up this includes the retained-job projection. Afterwards
           // phase/boundary routing never compares a now-mutable data projection.
           if (apiStarted && phase === "api-started") ensure(name === "completion");
           lastBoundary = name;
-          same(await shared.boundary(name), initial.backup);
+          same(
+            await store.guard((cap) =>
+              adapters.withPreparedBoundary(
+                context(name),
+                cap,
+                (prepared) => {
+                  environment = prepared.environment;
+                  composeFiles = prepared.composeFiles;
+                  recheckBoundary = prepared.recheckPrepared;
+                  return prepared.backupProof;
+                },
+                persistFailure,
+              ),
+            ),
+            initial.backup,
+          );
           recheck();
         };
         const enter = async (next) => {

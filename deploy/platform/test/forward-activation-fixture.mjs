@@ -5,7 +5,10 @@ import { forwardPreparationFixture } from "./forward-preparation-fixture.mjs";
 import { executeForwardPreparation } from "../host/forward-preparation.mjs";
 import { forwardDecision } from "./forward-fixture.mjs";
 import { withHeldForwardState } from "../host/forward-state.mjs";
-import { runPreparedForwardCommand } from "../host/forward-activation-adapters.mjs";
+import {
+  runPreparedForwardCommand,
+  runPreparedForwardBoundary,
+} from "../host/forward-activation-adapters.mjs";
 export async function forwardActivationFixture(t, failAt) {
   const f = await forwardPreparationFixture(t);
   await executeForwardPreparation(f.context, f.adapters, f.options);
@@ -74,6 +77,23 @@ export async function forwardActivationFixture(t, failAt) {
       architecture: "amd64",
     };
   };
+  const observers = {
+    inspectTarget,
+    writerFence: {
+      ...writerFence,
+      observe: async (request) => ({
+        ...(await writerFence.observe(request)),
+        observedAt: new Date(Date.now()).toISOString(),
+      }),
+    },
+    workload: {
+      ...workload,
+      inspect: async (request) => ({
+        ...(await workload.inspect(request)),
+        observedAt: new Date(Date.now()).toISOString(),
+      }),
+    },
+  };
   const adapters = {
     verifyRelease: (ctx, cap) => action("verifyRelease", ctx, cap, () => {}),
     verifyImages: (ctx, cap) => action("verifyImages", ctx, cap, () => {}),
@@ -101,31 +121,13 @@ export async function forwardActivationFixture(t, failAt) {
       ...workload,
       inspect: (ctx, cap) => action("workload", ctx, cap, () => workload.inspect(ctx)),
     },
+    withPreparedBoundary: (ctx, cap, callback) =>
+      action("withPreparedBoundary", ctx, cap, (held) =>
+        runPreparedForwardBoundary({ ...input, identity }, ctx, observers, held.verify, callback),
+      ),
     withPreparedCommand: (ctx, cap, command) =>
       action("withPreparedCommand", ctx, cap, (held) =>
-        runPreparedForwardCommand(
-          { ...input, identity },
-          ctx,
-          {
-            inspectTarget,
-            writerFence: {
-              ...writerFence,
-              observe: async (request) => ({
-                ...(await writerFence.observe(request)),
-                observedAt: new Date(Date.now()).toISOString(),
-              }),
-            },
-            workload: {
-              ...workload,
-              inspect: async (request) => ({
-                ...(await workload.inspect(request)),
-                observedAt: new Date(Date.now()).toISOString(),
-              }),
-            },
-          },
-          held.verify,
-          command,
-        ),
+        runPreparedForwardCommand({ ...input, identity }, ctx, observers, held.verify, command),
       ),
     cleanupOwnedProbes: (ctx, cap) =>
       action("cleanupOwnedProbes", ctx, cap, (held) => {
@@ -169,6 +171,7 @@ export async function forwardActivationFixture(t, failAt) {
     journal,
     directory,
     adapters,
+    observers,
     ids,
     old,
     active,

@@ -158,7 +158,12 @@ All source/config/image/physical PG/schema/full ledger/backup/copy/key/fence/
 projection/approval gates remain. Slow read-only checks precede the final actual
 fence and cleanup observations; both retain the strict 30-second limit and the
 synchronous check at actual spawn. No timestamp substitution or TTL extension is
-allowed. After the command guard's physical baseline, one compiled held action
+allowed. Each prepared-target boundary samples fence and cleanup together inside
+one compiled held action after physical admission; no separate store baseline is
+inserted between those observations. Source/held authority is verified before
+returning its checked proof, environment/files and freshness closure. Cached
+freshness is rechecked immediately after the outer post-baseline; it never grants
+spawn authority. After the command guard's physical baseline, a new held action
 repeats the complete prepared-target boundary through its inner adapters. It
 verifies source authority again, then invokes only the coordinator's fixed Compose
 callback with the newly checked environment and freshness closure. The outer

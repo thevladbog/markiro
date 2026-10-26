@@ -31,6 +31,7 @@ for (const kind of [
   "approval",
   "verifyRelease",
   "verifyImages",
+  "withPreparedBoundary",
   "withPreparedCommand",
 ])
   test(`forward activation rejects ${kind} before candidate start`, async (t) => {
@@ -45,8 +46,8 @@ for (const kind of [
     if (kind === "key")
       f.input.preparedTarget.observations.keyContinuity.value.signingContinuityVerified = false;
     if (kind === "fence") {
-      const original = f.adapters.writerFence.observe;
-      f.adapters.writerFence.observe = async (...args) => ({
+      const original = f.observers.writerFence.observe;
+      f.observers.writerFence.observe = async (...args) => ({
         ...(await original(...args)),
         held: false,
       });
@@ -74,8 +75,8 @@ function clocked(t, f) {
   const clock = { now: Date.now() };
   t.mock.method(Date, "now", () => clock.now);
   for (const [object, method] of [
-    [f.adapters.writerFence, "observe"],
-    [f.adapters.workload, "inspect"],
+    [f.observers.writerFence, "observe"],
+    [f.observers.workload, "inspect"],
   ]) {
     const original = object[method];
     object[method] = async (...args) => ({
@@ -88,9 +89,9 @@ function clocked(t, f) {
 test("slow fence receives a new real cleanup observation without extending freshness", async (t) => {
   const f = await forwardActivationFixture(t),
     clock = clocked(t, f),
-    original = f.adapters.writerFence.observe;
+    original = f.observers.writerFence.observe;
   let delayed = false;
-  f.adapters.writerFence.observe = async (...args) => {
+  f.observers.writerFence.observe = async (...args) => {
     const result = await original(...args);
     if (!delayed) {
       clock.now += 31000;
@@ -104,9 +105,9 @@ test("slow fence receives a new real cleanup observation without extending fresh
 test("slow final cleanup cannot refresh an already stale fence", async (t) => {
   const f = await forwardActivationFixture(t),
     clock = clocked(t, f),
-    original = f.adapters.workload.inspect;
+    original = f.observers.workload.inspect;
   let inspections = 0;
-  f.adapters.workload.inspect = async (...args) => {
+  f.observers.workload.inspect = async (...args) => {
     const result = await original(...args);
     if (++inspections === 2) clock.now += 31000;
     return { ...result, observedAt: new Date(clock.now).toISOString() };
@@ -196,8 +197,8 @@ for (const transport of ["serial", "batched"])
     f.input.preparedPolicy.maxAgeMs = 3600000;
     const samples = [];
     for (const [name, object, method] of [
-      ["fence", f.adapters.writerFence, "observe"],
-      ["cleanup", f.adapters.workload, "inspect"],
+      ["fence", f.observers.writerFence, "observe"],
+      ["cleanup", f.observers.workload, "inspect"],
     ]) {
       const original = object[method];
       object[method] = async (...args) => {
@@ -209,7 +210,9 @@ for (const transport of ["serial", "batched"])
     const read = async (value) => {
       const began = clock.now;
       await Promise.resolve();
-      clock.now = Math.max(clock.now, began + 4000);
+      // The same eight-second facts make a serial baseline exceed30s;
+      // the bounded batch remains within the unchanged deadline.
+      clock.now = Math.max(clock.now, began + 8000);
       return value;
     };
     f.options.verifyBaseline = async () => {
@@ -243,7 +246,7 @@ for (const transport of ["serial", "batched"])
         samples.map(({ name }) => name),
         ["cleanup", "fence", "cleanup"],
       );
-      assert.ok(samples[2].at - samples[1].at > 30000);
+      assert.ok(clock.now - samples[1].at > 30000);
     } else {
       await run(f);
       assert.deepEqual(f.commands, ["api", "edge"]);
@@ -314,7 +317,8 @@ test("compiled prepared-command adapter rejects forged, used and expired capabil
     commands++;
     assert.fail("No unguarded command callback");
   };
-  await assert.rejects(adapter.withPreparedCommand({}, {}, command));
+  for (const method of ["withPreparedBoundary", "withPreparedCommand"])
+    await assert.rejects(adapter[method]({}, {}, command));
   let expired;
   await withForwardActivationState(
     f.root,
@@ -325,13 +329,42 @@ test("compiled prepared-command adapter rejects forged, used and expired capabil
         await withHeldForwardState(cap, async (held) => {
           await held.verify();
         });
-        await assert.rejects(adapter.withPreparedCommand({}, cap, command));
+        for (const method of ["withPreparedBoundary", "withPreparedCommand"])
+          await assert.rejects(adapter[method]({}, cap, command));
       });
-      await assert.rejects(adapter.withPreparedCommand({}, expired, command));
+      for (const method of ["withPreparedBoundary", "withPreparedCommand"])
+        await assert.rejects(adapter[method]({}, expired, command));
     },
     f.options,
   );
-  await assert.rejects(adapter.withPreparedCommand({}, expired, command));
+  for (const method of ["withPreparedBoundary", "withPreparedCommand"])
+    await assert.rejects(adapter[method]({}, expired, command));
   assert.equal(commands, 0);
   assert.equal(docker, 0);
+});
+
+test("prepared boundary samples fence and cleanup inside one physical admission", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f);
+  f.input.preparedPolicy.maxAgeMs = 3600000;
+  f.options.verifyBaseline = async () => {
+    clock.now += 11000;
+  };
+  await run(f);
+  assert.deepEqual(f.commands, ["api", "edge"]);
+});
+
+test("post-guard physical verification cannot extend the paired observation deadline", async (t) => {
+  const f = await forwardActivationFixture(t),
+    clock = clocked(t, f);
+  f.input.preparedPolicy.maxAgeMs = 3600000;
+  f.options.verifyBaseline = async () => {
+    clock.now += 31000;
+  };
+  await assert.rejects(run(f));
+  assert.deepEqual(f.commands, []);
+  const failure = JSON.parse(await readFile(join(f.directory, "failure.json")));
+  assert.equal(failure.phase, "activation-admitted");
+  assert.equal(failure.boundary, "entry");
+  assert.equal(failure.code, "ERR_DATABASE_BACKUP");
 });

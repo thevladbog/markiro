@@ -8,12 +8,12 @@ import { preparedHostBoundary } from "./deployment-boundary.mjs";
 const same = (a, b) => ensure(canonical(a) === canonical(b));
 // The compiled coordinator owns the callback. Capability admission stays in action;
 // this shared sequence never acquires a capability or constructs a command.
-export async function runPreparedForwardCommand(candidate, context, adapters, verify, command) {
+export async function runPreparedForwardBoundary(candidate, context, adapters, verify, callback) {
   ensure(
-    context.boundary === "command" &&
-      ["api-started", "edge-started"].includes(context.phase) &&
+    ["entry", "command", "completion"].includes(context.boundary) &&
+      ["activation-admitted", "api-started", "edge-started", "healthy"].includes(context.phase) &&
       typeof verify === "function" &&
-      typeof command === "function",
+      typeof callback === "function",
   );
   let environment, composeFiles;
   const prepared = preparedHostBoundary({
@@ -25,14 +25,18 @@ export async function runPreparedForwardCommand(candidate, context, adapters, ve
       composeFiles = files;
     },
   });
-  await prepared.boundary("command");
+  const backupProof = await prepared.boundary(context.boundary);
   await verify();
   const recheckPrepared = () => {
     prepared.checkPreparedFreshness();
     prepared.checkActivationDeadline();
   };
   recheckPrepared();
-  return command({ environment, composeFiles, recheckPrepared });
+  return callback({ environment, composeFiles, recheckPrepared, backupProof });
+}
+export function runPreparedForwardCommand(candidate, context, adapters, verify, command) {
+  ensure(context.boundary === "command" && ["api-started", "edge-started"].includes(context.phase));
+  return runPreparedForwardBoundary(candidate, context, adapters, verify, command);
 }
 // Trusted installed constructors only. Each method consumes a different guarded
 // capability; no JSON callback, ambient capability or reusable held token exists.
@@ -132,6 +136,30 @@ export function createForwardActivationAdapters(
     });
   const invoke = (name) => (context, cap, beforeFailureCleanup) =>
     action(context, cap, ({ adapters }) => adapters[name](context), false, beforeFailureCleanup);
+  const preparedAction = (context, cap, callback, beforeFailureCleanup, command) =>
+    action(
+      context,
+      cap,
+      ({ verify, adapters }) =>
+        (command ? runPreparedForwardCommand : runPreparedForwardBoundary)(
+          candidate,
+          context,
+          {
+            ...adapters,
+            writerFence: {
+              ...adapters.writerFence,
+              observe: async (request) => {
+                if (releaseVerified) await adapters.verifyRoles(request);
+                return adapters.writerFence.observe(request);
+              },
+            },
+          },
+          verify,
+          callback,
+        ),
+      false,
+      beforeFailureCleanup,
+    );
   return Object.freeze({
     verifyRelease: (context, cap, beforeFailureCleanup) =>
       action(
@@ -171,30 +199,10 @@ export function createForwardActivationAdapters(
       inspect: (context, cap) =>
         action(context, cap, ({ adapters }) => adapters.workload.inspect(context)),
     },
+    withPreparedBoundary: (context, cap, callback, beforeFailureCleanup) =>
+      preparedAction(context, cap, callback, beforeFailureCleanup, false),
     withPreparedCommand: (context, cap, command, beforeFailureCleanup) =>
-      action(
-        context,
-        cap,
-        ({ verify, adapters }) =>
-          runPreparedForwardCommand(
-            candidate,
-            context,
-            {
-              ...adapters,
-              writerFence: {
-                ...adapters.writerFence,
-                observe: async (request) => {
-                  if (releaseVerified) await adapters.verifyRoles(request);
-                  return adapters.writerFence.observe(request);
-                },
-              },
-            },
-            verify,
-            command,
-          ),
-        false,
-        beforeFailureCleanup,
-      ),
+      preparedAction(context, cap, command, beforeFailureCleanup, true),
     cleanupOwnedProbes: async (context, cap) => {
       try {
         return await action(
