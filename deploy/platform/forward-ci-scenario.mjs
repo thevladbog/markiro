@@ -28,6 +28,35 @@ import { measureActivationProjection } from "./host/command.mjs";
 import { productionAuthorization } from "./test/production-activation-fixture.mjs";
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
 import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
+export const forwardActivationPhases = Object.freeze([
+  "activation-admitted",
+  "api-started",
+  "edge-started",
+  "healthy",
+]);
+export function forwardActivationFailure(error, operationId, record) {
+  const own = (key) =>
+    record && typeof record === "object"
+      ? Object.getOwnPropertyDescriptor(record, key)?.value
+      : undefined;
+  const fallback = {
+    operationId,
+    phase: "activation-admitted",
+    boundary: "validation",
+    commandCategory: "validation",
+  };
+  try {
+    assert.ok(forwardActivationPhases.includes(own("phase")));
+    return sanitizeHostFailure(error, {
+      operationId,
+      phase: own("phase"),
+      boundary: own("boundary"),
+      commandCategory: own("commandCategory"),
+    });
+  } catch {
+    return sanitizeHostFailure(error, fallback);
+  }
+}
 export const forwardBackupStages = Object.freeze([
   "input-validation",
   "host-state",
@@ -895,30 +924,44 @@ async function runScenario(c, mode, checks) {
     checks.externalTls = true;
   };
   c.progress(`forward activation ${mode}, never a second migrator or old-ID start`);
-  const activate = () =>
-    executeForwardActivation(
-      {
-        root,
-        dockerConfig: join(root, "docker"),
-        decision,
-        configuration: forwardOperation.configuration,
-        preparedTarget,
-        preparedPolicy,
-      },
-      {
-        ...adapters,
-        runProcess: start,
-        inspectCandidate: (_context, cap) => observers.inspectCandidate(cap),
-        inspectSchema: (_context, cap) => observers.inspectSchema(cap),
-        smoke: (_context, cap) =>
-          withHeldForwardState(cap, async (held) => {
-            await held.verify();
-            await smoke();
-            await held.verify();
-          }),
-      },
-      options,
-    );
+  const activate = async () => {
+    try {
+      return await executeForwardActivation(
+        {
+          root,
+          dockerConfig: join(root, "docker"),
+          decision,
+          configuration: forwardOperation.configuration,
+          preparedTarget,
+          preparedPolicy,
+        },
+        {
+          ...adapters,
+          runProcess: start,
+          inspectCandidate: (_context, cap) => observers.inspectCandidate(cap),
+          inspectSchema: (_context, cap) => observers.inspectSchema(cap),
+          smoke: (_context, cap) =>
+            withHeldForwardState(cap, async (held) => {
+              await held.verify();
+              await smoke();
+              await held.verify();
+            }),
+        },
+        options,
+      );
+    } catch (error) {
+      let record;
+      try {
+        record = JSON.parse(await readFile(join(activationDirectory, "failure.json")));
+      } catch {
+        /* Missing private evidence still reports the fixed admission boundary. */
+      }
+      const diagnostic = forwardActivationFailure(error, forwardIdentity.operationId, record);
+      c.progress(`forward activation failure: ${diagnostic.phase}`);
+      process.stderr.write(`Rehearsal activation failure: ${JSON.stringify(diagnostic)}\n`);
+      throw error;
+    }
+  };
   if (mode === "healthy") {
     await activate();
     const terminal = JSON.parse(await readFile(statePath));

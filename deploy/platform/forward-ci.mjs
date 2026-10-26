@@ -9,6 +9,7 @@ import {
   createForwardScenario,
   forwardProduct,
   forwardBackupStages,
+  forwardActivationPhases,
 } from "./forward-ci-scenario.mjs";
 // The shared engine invokes these actual guards before every nested command and
 // re-inspects exact ownership through cleanupRehearsalResources in its finally.
@@ -61,6 +62,7 @@ const failurePhases = new Set([
   "forward preparation: inspectSource",
   "forward preparation: inspectSchema",
   "forward preparation: createBackup",
+  ...forwardActivationPhases.map((phase) => `forward activation failure: ${phase}`),
   ...[...forwardBackupStages, "unclassified"].map(
     (stage) => `forward preparation backup: ${stage}`,
   ),

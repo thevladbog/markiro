@@ -34,6 +34,8 @@ const exec: SqlExecutor = {
   },
 };
 await applyMigrations(exec);
+// Test-data setup is separate from the UI readiness assertion.
+document.documentElement.dataset.fixtureDatabaseReady = "true";
 const client = createStationClient(
   { machineId: "browser-fixture", serverUrl: `${location.origin}/api`, apiKey: "browser-test-key" },
   { palletSheetSupported: true },

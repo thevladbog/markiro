@@ -25,10 +25,10 @@ for (const presetIndex of [0, 1, 2]) {
       await page.addInitScript(() =>
         Object.defineProperty(window, "__TAURI_INTERNALS__", {
           value: {
-            invoke: async (command: string, args: { pageOptions?: { orientation: string } }) => {
+            invoke: (command: string, args: { pageOptions?: { orientation: string } }) => {
               if (command === "get_windows_page_geometry") {
                 const landscape = args.pageOptions?.orientation === "landscape";
-                return {
+                return Promise.resolve({
                   widthMm: landscape ? 297 : 210,
                   heightMm: landscape ? 210 : 297,
                   printableBoundsMm: {
@@ -41,9 +41,9 @@ for (const presetIndex of [0, 1, 2]) {
                   deviceDpiX: 600,
                   deviceDpiY: 600,
                   fingerprint: "simulated-office-a4",
-                };
+                });
               }
-              return true;
+              return Promise.resolve(true);
             },
           },
         }),
@@ -115,6 +115,13 @@ for (const presetIndex of [0, 1, 2]) {
       });
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto(`/test/browser/pallet-sheet.html?id=${randomUUID()}`);
+      // Complete the disposable schema bootstrap within the existing navigation setup
+      // budget; the UI assertions below retain their original 10-second deadline.
+      await page.waitForFunction(
+        () => document.documentElement.dataset.fixtureDatabaseReady === "true",
+        undefined,
+        { timeout: 30000 },
+      );
       await expect(page.locator("html")).toHaveAttribute("data-ready", "true");
       await page.getByRole("button", { name: "Агрегация", exact: true }).click();
       await page.getByRole("button", { name: "С паллетами", exact: true }).click();
@@ -229,6 +236,13 @@ test("A4 setup sends a real-font test sheet through the sheet transport", async 
   );
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto(`/test/browser/pallet-sheet.html?id=${randomUUID()}&setup`);
+  // Complete the disposable schema bootstrap within the existing navigation setup
+  // budget; the UI assertions below retain their original 10-second deadline.
+  await page.waitForFunction(
+    () => document.documentElement.dataset.fixtureDatabaseReady === "true",
+    undefined,
+    { timeout: 30000 },
+  );
   await expect(page.locator("html")).toHaveAttribute("data-ready", "true");
   await page.getByRole("button", { name: "Настроить Office A4", exact: true }).click();
   await page.getByRole("button", { name: "Тестовая печать", exact: true }).click();

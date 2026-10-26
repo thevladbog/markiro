@@ -194,6 +194,13 @@ for (const scenario of scenarios)
     await page.goto(
       `/test/browser/pallet-reprint.html?id=${randomUUID()}&lang=${scenario.lang}&theme=${scenario.theme}`,
     );
+    // Complete the disposable schema bootstrap within the existing navigation setup
+    // budget; the UI assertions below retain their original 10-second deadline.
+    await page.waitForFunction(
+      () => document.documentElement.dataset.fixtureDatabaseReady === "true",
+      undefined,
+      { timeout: 30000 },
+    );
     await expect(page.locator("html")).toHaveAttribute("data-ready", "true");
     const ru = scenario.lang === "ru";
     const main = page.getByTestId("warehouse-reprint-screen");

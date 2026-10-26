@@ -808,3 +808,47 @@ test("projection transport uses the pinned absolute DinD CLI without widening th
   assert.equal(commands, 1);
   assert.equal(isolationChecks, 2);
 });
+
+test("forward activation failure retains only validated first-record context and trusted origin", async () => {
+  const { forwardActivationFailure } = await import("../forward-ci-scenario.mjs");
+  const { noteHostProcessFailure, carryHostFailure } =
+    await import("../host/failure-diagnostic.mjs");
+  const id = "11111111-1111-4111-8111-111111111111";
+  const first = Object.assign(Error("PRIVATE"), {
+    code: "ERR_HOST_PROCESS",
+    stdout: "PRIVATE",
+    argv: ["PRIVATE"],
+  });
+  noteHostProcessFailure(first, "/usr/bin/docker", 125);
+  const error = carryHostFailure(
+    first,
+    Object.assign(Error("PRIVATE"), { code: "ERR_HOST_FORWARD_ACTIVATION" }),
+  );
+  const result = forwardActivationFailure(error, id, {
+    phase: "api-started",
+    boundary: "verifyRoles",
+    commandCategory: "validation",
+    stdout: "PRIVATE",
+  });
+  assert.equal(result.phase, "api-started");
+  assert.equal(result.boundary, "verifyRoles");
+  assert.equal(result.code, "ERR_HOST_PROCESS");
+  assert.equal(result.exitStatus, 125);
+  assert.equal(result.executable, "docker");
+  assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+  const hostile = Object.defineProperty({}, "phase", {
+    get() {
+      throw Error("PRIVATE");
+    },
+  });
+  for (const record of [
+    undefined,
+    hostile,
+    { phase: "PRIVATE", boundary: "PRIVATE", commandCategory: "PRIVATE" },
+  ]) {
+    const fallback = forwardActivationFailure(error, id, record);
+    assert.equal(fallback.phase, "activation-admitted");
+    assert.equal(fallback.boundary, "validation");
+    assert.ok(!JSON.stringify(fallback).includes("PRIVATE"));
+  }
+});
