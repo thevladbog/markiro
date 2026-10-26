@@ -630,3 +630,108 @@ for (const mode of [
       );
   });
 }
+
+for (const diagnosticFails of [false, true])
+  test(`compiled PostgreSQL probe publishes first failure before failed cleanup (diagnosticFails=${diagnosticFails})`, async (t) => {
+    const { runPostgresProbe } = await import("../host/probe.mjs");
+    const { noteHostProcessFailure, sanitizeHostFailure } =
+      await import("../host/failure-diagnostic.mjs");
+    const { commandIntegrationFixture, integrationOptions } =
+      await import("./host-command-integration-fixture.mjs");
+    const { createDockerCommand } = await import("../host/observe.mjs");
+    const base = await commandIntegrationFixture(t);
+    const external = await integrationOptions(base.root);
+    const f = {
+      f: base,
+      context: base.record.deployment,
+      policy: base.record.observationPolicy,
+      observers: {
+        command: createDockerCommand(
+          { root: base.root, dockerConfig: `${base.root}/docker` },
+          external.runProcess,
+        ),
+      },
+    };
+    const workerPath = join(f.f.root, "worker.mjs");
+    await writeFile(workerPath, "// fixed probe", { mode: 0o600 });
+    const initiating = noteHostProcessFailure(
+      Object.assign(new Error("private-first"), { terminationConfirmed: true }),
+      "/usr/bin/docker",
+      42,
+    );
+    let first,
+      cleanup = 0;
+    await assert.rejects(
+      runPostgresProbe({
+        context: f.context,
+        policy: f.policy,
+        workerPath,
+        verifySources: async () => {},
+        beforeFailureCleanup: async (error) => {
+          first ??= sanitizeHostFailure(error, {
+            operationId: f.f.identity.operationId,
+            phase: "activation-admitted",
+            boundary: "verifyRoles",
+            commandCategory: "validation",
+          });
+          if (diagnosticFails)
+            throw Object.assign(new Error("private-diagnostic"), { durabilityUncertain: true });
+        },
+        command: async (args, ...rest) => {
+          if (args[0] === "start") throw initiating;
+          if (args[0] === "container" && ["stop", "rm"].includes(args[1])) {
+            cleanup++;
+            assert.equal(first?.exitStatus, 42);
+            throw new Error("private-secondary-cleanup");
+          }
+          return f.observers.command(args, ...rest);
+        },
+      }),
+    );
+    assert.equal(first?.exitStatus, 42);
+    assert.equal(cleanup > 0, !diagnosticFails);
+  });
+
+test("compiled host role adapter forwards the trusted first-failure callback into its probe", async (t) => {
+  const { commandIntegrationFixture, integrationOptions } =
+    await import("./host-command-integration-fixture.mjs");
+  const { createHostAdapters } = await import("../host/command.mjs");
+  const { readVerifiedBackup } = await import("../host/backup-gate.mjs");
+  const f = await commandIntegrationFixture(t);
+  const options = await integrationOptions(f.root);
+  const original = options.runProcess;
+  let recorded = false,
+    cleanup = 0;
+  options.beforeFailureCleanup = async () => {
+    recorded = true;
+  };
+  options.runProcess = async (request, recheck) => {
+    const args = request.args.slice(2);
+    if (args[0] === "start")
+      throw Object.assign(new Error("private-initiating-probe"), { terminationConfirmed: true });
+    if (args[0] === "container" && args[1] === "rm") {
+      assert.equal(recorded, true);
+      cleanup++;
+      throw new Error("private-secondary-cleanup");
+    }
+    return original(request, recheck);
+  };
+  const adapters = await createHostAdapters(
+    {
+      record: f.record,
+      receipt: f.receipt,
+      verified: await readVerifiedBackup(f.expected),
+      verifySources: async () => {},
+    },
+    options,
+  );
+  await assert.rejects(
+    adapters.verifyRoles({
+      ...f.record.deployment,
+      phase: "activation-admitted",
+      boundary: "verifyRoles",
+    }),
+  );
+  assert.equal(recorded, true);
+  assert.equal(cleanup, 1);
+});

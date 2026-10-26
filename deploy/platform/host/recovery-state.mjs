@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { readPrivateFile, writePrivateFile } from "./files.mjs";
-import { withHostState } from "./state.mjs";
+import { withHostState, assertLegacyWriteOwnership } from "./state.mjs";
 import { snapshot, stateError, validateBackup } from "./state-validation.mjs";
 import { validateRecoveryAdmission } from "./recovery-admission.mjs";
 
@@ -11,6 +11,7 @@ const phases = ["admitted", "target-stopped", "backup-verified"];
 export async function withRecoveryState(root, input, callback, { now = Date.now } = {}) {
   const admittedInput = snapshot(input);
   return withHostState(root, async (host) => {
+    await assertLegacyWriteOwnership(root);
     let active = true;
     let state;
     let producerUsed = false;
@@ -26,6 +27,7 @@ export async function withRecoveryState(root, input, callback, { now = Date.now 
         return action(capability);
       });
     const save = async (next) => {
+      await assertLegacyWriteOwnership(root);
       await writePrivateFile(
         root,
         "recovery-state.json",

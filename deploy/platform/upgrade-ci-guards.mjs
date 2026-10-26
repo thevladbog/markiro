@@ -1,5 +1,7 @@
+import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
 /** Rehearsal-only isolation. Never imported by an installed host executor. */
 import assert from "node:assert/strict";
+import { basename, dirname } from "node:path";
 import { canonical } from "./backup/schemas.mjs";
 export const rehearsalLabel = "io.markiro.upgrade-rehearsal";
 export const rehearsalImages = Object.freeze({
@@ -78,9 +80,18 @@ export function validateRehearsalDaemon(observation, expected) {
   assert.equal(routes.ipv6.trim(), "");
   return actual;
 }
-export function validateRehearsalEnvironment(value, generated, root) {
+export function rehearsalTemporaryBase(platform, canonicalPath) {
+  // DinD dynamically mounts /tmp. Docker's archive API can see the hidden
+  // rootfs there while exec sees tmpfs. Use only known regular-rootfs bases.
+  assert.equal(canonicalPath, platform === "linux" ? "/home/runner/work/_temp" : "/private/tmp");
+  assert.ok(["linux", "darwin"].includes(platform));
+  return canonicalPath;
+}
+export function validateRehearsalEnvironment(value, generated, root, base) {
   same(value, generated);
-  assert.match(root, /^\/(?:private\/)?tmp\/markiro-upgrade-ci-[a-zA-Z0-9_-]+$/u);
+  assert.ok(["/home/runner/work/_temp", "/private/tmp"].includes(base));
+  assert.equal(dirname(root), base);
+  assert.match(basename(root), /^markiro-upgrade-ci-[a-zA-Z0-9_-]+$/u);
   for (const [key, v] of Object.entries(value)) {
     assert.equal(typeof v, "string");
     assert.ok(!/[\r\n\0]/u.test(v));
@@ -100,35 +111,50 @@ export function validateRehearsalEnvironment(value, generated, root) {
     }
   }
 }
+// Fixed local step names only; caller-owned error fields are never consulted.
+const cleanupSteps = new WeakMap();
+export const rehearsalCleanupStep = (error) => cleanupSteps.get(error) ?? null;
 export async function cleanupRehearsalResources(expected, io) {
-  // Inspect both before removing either. Name alone never authorizes cleanup.
-  const container = await io.inspectContainer(expected.id),
-    volume = await io.inspectVolume(expected.name);
-  same(
-    captureRehearsalResources({ invocationId: expected.invocationId, container, volume }),
-    expected,
-  );
-  await io.removeContainer(expected.id);
-  const after = await io.inspectVolume(expected.name);
-  same(
-    {
-      name: after.Name,
-      createdAt: after.CreatedAt,
-      mountpoint: after.Mountpoint,
-      labels: after.Labels,
-      options: after.Options ?? {},
-      driver: after.Driver,
-    },
-    {
-      name: volume.Name,
-      createdAt: volume.CreatedAt,
-      mountpoint: volume.Mountpoint,
-      labels: volume.Labels,
-      options: volume.Options ?? {},
-      driver: volume.Driver,
-    },
-  );
-  await io.removeVolume(expected.name);
+  let step = "inspect-container";
+  try {
+    // Inspect both before removing either. Name alone never authorizes cleanup.
+    const container = await io.inspectContainer(expected.id);
+    step = "inspect-volume";
+    const volume = await io.inspectVolume(expected.name);
+    step = "verify-ownership";
+    same(
+      captureRehearsalResources({ invocationId: expected.invocationId, container, volume }),
+      expected,
+    );
+    step = "remove-container";
+    await io.removeContainer(expected.id);
+    step = "verify-volume";
+    const after = await io.inspectVolume(expected.name);
+    same(
+      {
+        name: after.Name,
+        createdAt: after.CreatedAt,
+        mountpoint: after.Mountpoint,
+        labels: after.Labels,
+        options: after.Options ?? {},
+        driver: after.Driver,
+      },
+      {
+        name: volume.Name,
+        createdAt: volume.CreatedAt,
+        mountpoint: volume.Mountpoint,
+        labels: volume.Labels,
+        options: volume.Options ?? {},
+        driver: volume.Driver,
+      },
+    );
+    step = "remove-volume";
+    await io.removeVolume(expected.name);
+  } catch (error) {
+    if (error !== null && ["object", "function"].includes(typeof error))
+      cleanupSteps.set(error, step);
+    throw error;
+  }
 }
 
 export function rehearsalStagingNetwork(container) {
@@ -192,24 +218,55 @@ export function rehearsalFailure(phase, error) {
   ]).has(error.name)
     ? error.name
     : "Error";
-  const exitStatus = Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : null;
+  const host = sanitizeHostFailure(error, {
+    operationId: "11111111-1111-4111-8111-111111111111",
+    phase: "migration-entered",
+    boundary: "command",
+    commandCategory: "migration",
+  });
+  const exitStatus =
+    Number.isSafeInteger(error.code) && error.code >= 0 ? error.code : (host?.exitStatus ?? null);
   const executable = ["docker", "git", "openssl", "which", "tar"].includes(
     error.rehearsalExecutable,
   )
     ? error.rehearsalExecutable
-    : null;
+    : host?.executable === "docker"
+      ? "docker"
+      : null;
   // Reduce private stderr to a fixed category; never publish any matching text.
   const stderr = typeof error.stderr === "string" ? error.stderr : "";
   const reasons = [
-    [/No such file or directory\s*$/mu, "missing-path"],
-    [/(?:Operation not permitted|Permission denied)\s*$/mu, "permission-denied"],
-    [/Read-only file system\s*$/mu, "read-only-filesystem"],
-    [/No space left on device\s*$/mu, "capacity"],
+    [/\bopen \/tmp\/forward-worker\.tar: no such file or directory\b/iu, "worker-archive-missing"],
+    [
+      /\bopen \/var\/lib\/docker\/tmp\/docker-import-[^\r\n]*: no such file or directory\b/iu,
+      "docker-import-file-missing",
+    ],
+    [
+      /\b(?:open|stat|lstat) \/var\/lib\/docker\/[^\r\n]*: no such file or directory\b/iu,
+      "docker-storage-file-missing",
+    ],
+    [/\bno such file or directory\b/iu, "missing-path"],
+    [/\b(?:operation not permitted|permission denied)\b/iu, "permission-denied"],
+    [/\bread-only file system\b/iu, "read-only-filesystem"],
+    [/\b(?:no space left on device|disk quota exceeded)\b/iu, "capacity"],
+    [/\boperation not supported\b/iu, "filesystem-not-supported"],
+    [/\b(?:invalid tar header|invalid manifest|unrecognized image format)\b/iu, "invalid-archive"],
+    [/\binvalid diffID for layer\b/iu, "layer-digest-mismatch"],
+    [/\bunexpected EOF\b/iu, "unexpected-eof"],
+    [/\bcannot connect to the Docker daemon\b/iu, "daemon-unavailable"],
     [/OCI runtime exec failed:/u, "container-exec"],
   ];
-  const processReason =
-    command === "docker exec"
-      ? (reasons.find(([pattern]) => pattern.test(stderr))?.[1] ?? null)
+  const hostReason =
+    host &&
+    ["spawn", "exit", "stdin", "output-limit", "timeout", "aborted", "termination"].includes(
+      error.reason,
+    )
+      ? `host-${error.reason}`
       : null;
+  const processReason =
+    hostReason ??
+    (command === "docker exec"
+      ? (reasons.find(([pattern]) => pattern.test(stderr))?.[1] ?? null)
+      : null);
   return { phase, code, command, name, exitStatus, executable, processReason };
 }

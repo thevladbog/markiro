@@ -62,7 +62,7 @@ export async function targetBackupFixture(t, mode, fixtureOptions) {
   };
   const docker = fakeDocker({
     root: f.root,
-    operationId: f.identity.operationId,
+    operationId: fixtureOptions?.workerOperationId ?? f.identity.operationId,
     image,
     restored: { postgresVersion: "17.11", inventory: f.document.inventory },
     failCleanup: mode === "cleanup",

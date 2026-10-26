@@ -1,3 +1,4 @@
+import { carryHostFailure } from "../host/failure-diagnostic.mjs";
 import { join, dirname, relative } from "node:path";
 import { chmod, mkdir } from "node:fs/promises";
 import { assertPrivateRootSync, readPrivateFile } from "../host/files.mjs";
@@ -100,6 +101,9 @@ export async function readBackupRuntime(root, operationId, recoveryRuntime) {
   const bound = recoveryRuntimes.get(recoveryRuntime);
   ensure(bound && bound.root === root && bound.operationId === operationId);
   if (bound.verify) await bound.verify();
+  if (bound.retained)
+    for (const [path, before] of bound.retained)
+      ensure((await readPrivateFile(root, path)).equals(before));
   if (bound.priorName)
     ensure((await readPrivateFile(root, bound.priorName)).equals(bound.priorBytes));
   ensure((await readPrivateFile(root, "backup-runtime.json")).equals(bound.original));
@@ -130,7 +134,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
       });
     } catch (error) {
       const action = args[0] === "exec" ? args[2] : args[0];
-      throw fail(`docker-${action}-${error.reason ?? "failed"}`);
+      throw carryHostFailure(error, fail(`docker-${action}-${error.reason ?? "failed"}`));
     }
   };
   const label = "markiro.backup-operation",
@@ -375,7 +379,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
           "/opt/backup/backup/postgres-worker.mjs",
           "restore",
         ]);
-      } catch {
+      } catch (error) {
         let stage = "worker";
         try {
           await command([
@@ -398,7 +402,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
         } catch {
           /* Only successful capture produces comparison diagnostics. */
         }
-        throw fail(stage);
+        throw carryHostFailure(error, fail(stage));
       }
     },
     async output(destination) {
@@ -435,4 +439,82 @@ export async function privateCopy(root, path, destination) {
   assertPrivateRootSync(dirname(destination));
   await writeFile(destination, bytes, { mode: 0o600, flag: "wx" });
   await chmod(destination, 0o600);
+}
+
+// Separate post-migration capability. Dynamic import keeps historical installed
+// ordinary/recovery closures unchanged until the new forward factory is used.
+export async function withForwardBackupRuntime(capability, action) {
+  const { withHeldForwardState, validateForwardSourceRuntime } =
+    await import("../host/forward-state.mjs");
+  return withHeldForwardState(capability, async (held) => {
+    const { root, state } = held,
+      admission = state.admission;
+    ensure(
+      held.cleanup === false &&
+        !state.decision &&
+        state.migrationEntered === true &&
+        state.phase === "backup-verified" &&
+        state.sequence === 5 &&
+        state.status === "entered" &&
+        typeof action === "function",
+    );
+    validateForwardSourceRuntime(state.sourceRuntime, admission);
+    const originalState = JSON.parse(await readPrivateFile(root, "state.json"));
+    const descriptors = [
+      ["backup-runtime.json", originalState.current.identity.executorSha],
+      [
+        `recovery-backup-runtime-${admission.originalPredecessor.identity.operationId}.json`,
+        admission.originalPredecessor.identity.executorSha,
+      ],
+      [
+        `upgrade-backup-runtime-${admission.failed.identity.operationId}.json`,
+        admission.failed.identity.executorSha,
+      ],
+    ];
+    const retained = [];
+    for (const [name, executorSha] of descriptors) {
+      const bytes = await readPrivateFile(root, name);
+      const config = runtime(JSON.parse(bytes));
+      ensure(
+        config.executorSha === executorSha &&
+          config.provenance === "live-source" &&
+          config.dockerExecutable === "/usr/bin/docker" &&
+          config.endpoint === "unix:///var/run/docker.sock",
+      );
+      retained.push([name, bytes]);
+    }
+    const name = `forward-backup-runtime-${admission.identity.operationId}.json`;
+    const bytes = await readPrivateFile(root, name),
+      config = runtime(JSON.parse(bytes));
+    ensure(
+      config.executorSha === admission.identity.executorSha &&
+        config.provenance === "live-source" &&
+        config.dockerExecutable === "/usr/bin/docker" &&
+        config.endpoint === "unix:///var/run/docker.sock",
+    );
+    const verify = async () => {
+      await held.verify();
+      for (const [path, before] of retained)
+        ensure((await readPrivateFile(root, path)).equals(before));
+      ensure((await readPrivateFile(root, name)).equals(bytes));
+    };
+    await verify();
+    const context = Object.freeze({});
+    recoveryRuntimes.set(context, {
+      root,
+      operationId: admission.identity.operationId,
+      name,
+      bytes,
+      original: retained[0][1],
+      retained,
+      verify,
+    });
+    try {
+      const result = await action(held, context);
+      await verify();
+      return result;
+    } finally {
+      recoveryRuntimes.delete(context);
+    }
+  });
 }

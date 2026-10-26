@@ -418,3 +418,21 @@ test("caught durable uncertainty prevents terminal transition", async (t) => {
   await lstat(join(f.root, ".deploy.lock"));
   assert.equal(JSON.parse(await readFile(join(f.root, "recovery-state.json"))).status, "entered");
 });
+
+test("legacy recovery activation denies forward ownership before consuming state", async (t) => {
+  const f = await fixture(t);
+  const before = await readFile(join(f.root, "state.json"));
+  await writeFile(
+    join(f.root, "upgrade-index.json"),
+    JSON.stringify({ version: 1, kind: "platform-forward-recovery-index" }),
+    { mode: 0o600 },
+  );
+  let called = false;
+  await assert.rejects(
+    run(f, () => {
+      called = true;
+    }),
+  );
+  assert.equal(called, false);
+  assert.deepEqual(await readFile(join(f.root, "state.json")), before);
+});

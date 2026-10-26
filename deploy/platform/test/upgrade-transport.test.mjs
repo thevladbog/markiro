@@ -19,7 +19,13 @@ const target = {
   identityFile: "/tmp/private/key",
   knownHostsFile: "/tmp/private/hosts",
 };
-for (const phase of ["prepare", "activate", "return-old"])
+for (const phase of [
+  "prepare",
+  "activate",
+  "return-old",
+  "post-migration-prepare",
+  "post-migration-activate",
+])
   test(`upgrade ${phase} uses only fixed receiver and exact outcome`, () => {
     const args = upgradeSshArguments(target, "execute", id, phase, sha, dispatch);
     assert.ok(
@@ -34,6 +40,8 @@ for (const phase of ["prepare", "activate", "return-old"])
       prepare: "backup-verified",
       activate: "healthy",
       "return-old": "returned-old",
+      "post-migration-prepare": "backup-verified",
+      "post-migration-activate": "healthy",
     }[phase];
     const result = {
       exitCode: 0,
@@ -160,63 +168,71 @@ function approvedRequest(f, patch = {}) {
         : run,
   });
 }
-for (const scenario of ["success", "unconfirmed", "wrong approval"])
-  test(`host execution ${scenario} cannot replay or expose token in argv`, async (t) => {
-    const { executeUpgradeHost } = await import("../upgrade-transport.mjs");
-    const f = await upgradeCommandFixture(t),
-      b = await bundle(f);
-    await receiveUpgradeBundle(
-      f.input.identity.operationId,
-      "prepare",
-      f.input.identity.executorSha,
-      f.input.dispatch,
-      Buffer.from(JSON.stringify({ bundle: b, phase: "prepare", dispatch: f.input.dispatch })),
-      f.options,
-    );
-    let runs = 0;
-    const options = {
-      ...f.options,
-      request: approvedRequest(
-        f,
-        scenario === "wrong approval"
-          ? { triggering_actor: { id: 12, login: "reviewer", type: "User" } }
-          : {},
-      ),
-      runProcess: async (request) => {
-        runs++;
-        assert.equal(request.executable, "/usr/bin/node");
-        assert.ok(!JSON.stringify(request).includes("test-secret-token"));
-        assert.equal(request.env.HOME, "/nonexistent");
-        if (scenario === "unconfirmed")
-          throw Object.assign(new Error("unknown exit"), { terminationConfirmed: false });
-        return {
-          stdout: Buffer.from("Platform upgrade prepare backup-verified.\n"),
-          stderr: Buffer.alloc(0),
-          exitCode: 0,
-        };
-      },
-    };
-    const execute = () =>
-      executeUpgradeHost(
-        f.input.identity.operationId,
-        "prepare",
-        f.input.identity.executorSha,
-        f.input.dispatch,
-        Buffer.from("test-secret-token"),
-        options,
-      );
-    if (scenario === "success") await execute();
-    else await assert.rejects(execute());
-    if (scenario === "wrong approval") {
-      assert.equal(runs, 0);
-      await assert.rejects(readFile(join(f.directory, "execution-fence.json")));
-    } else {
-      assert.equal(runs, 1);
-      assert.ok(await readFile(join(f.directory, "execution-fence.json")));
-      await assert.rejects(execute());
-      assert.equal(runs, 1);
-    }
-  });
+for (const executionPhase of ["prepare", "post-migration-prepare"])
+  for (const scenario of ["success", "unconfirmed", "wrong approval", "missing delivery"])
+    test(`host execution ${executionPhase} ${scenario} cannot replay or expose token in argv`, async (t) => {
+      const { executeUpgradeHost } = await import("../upgrade-transport.mjs");
+      const f =
+          executionPhase === "prepare"
+            ? await upgradeCommandFixture(t)
+            : await forwardCommandFixture(t),
+        b = await bundle(f);
+      if (executionPhase !== "prepare") await unlink(join(f.directory, "github-token"));
+      if (scenario !== "missing delivery")
+        await receiveUpgradeBundle(
+          f.input.identity.operationId,
+          executionPhase,
+          f.input.identity.executorSha,
+          f.input.dispatch,
+          Buffer.from(
+            JSON.stringify({ bundle: b, phase: executionPhase, dispatch: f.input.dispatch }),
+          ),
+          f.options,
+        );
+      let runs = 0;
+      const options = {
+        ...f.options,
+        request: approvedRequest(
+          f,
+          scenario === "wrong approval"
+            ? { triggering_actor: { id: 12, login: "reviewer", type: "User" } }
+            : {},
+        ),
+        runProcess: async (request) => {
+          runs++;
+          assert.equal(request.executable, "/usr/bin/node");
+          assert.ok(!JSON.stringify(request).includes("test-secret-token"));
+          assert.equal(request.env.HOME, "/nonexistent");
+          if (scenario === "unconfirmed")
+            throw Object.assign(new Error("unknown exit"), { terminationConfirmed: false });
+          return {
+            stdout: Buffer.from(`Platform upgrade ${executionPhase} backup-verified.\n`),
+            stderr: Buffer.alloc(0),
+            exitCode: 0,
+          };
+        },
+      };
+      const execute = () =>
+        executeUpgradeHost(
+          f.input.identity.operationId,
+          executionPhase,
+          f.input.identity.executorSha,
+          f.input.dispatch,
+          Buffer.from("test-secret-token"),
+          options,
+        );
+      if (scenario === "success") await execute();
+      else await assert.rejects(execute());
+      if (scenario === "wrong approval" || scenario === "missing delivery") {
+        assert.equal(runs, 0);
+        await assert.rejects(readFile(join(f.directory, "execution-fence.json")));
+      } else {
+        assert.equal(runs, 1);
+        assert.ok(await readFile(join(f.directory, "execution-fence.json")));
+        await assert.rejects(execute());
+        assert.equal(runs, 1);
+      }
+    });
 test("Git source builder selects exact commit blobs and complete upgrade closure", async (t) => {
   const { buildSourceBundle } = await import("../upgrade-transport.mjs");
   const { mkdtemp, chmod, rm, realpath } = await import("node:fs/promises");
@@ -239,4 +255,42 @@ test("Git source builder selects exact commit blobs and complete upgrade closure
   assert.deepEqual(built.bundle, b);
   assert.equal(commands.length, Object.keys(b.files).length);
   assert.ok(Buffer.byteLength(JSON.stringify(built.bundle)) < 1048576);
+});
+
+import { forwardCommandFixture } from "./forward-command-fixture.mjs";
+import { unlink } from "node:fs/promises";
+test("forward receive consumes the same create-only delivery marker without token, extraction or application action", async (t) => {
+  const f = await forwardCommandFixture(t);
+  await unlink(join(f.directory, "github-token"));
+  const bytes = Buffer.from(
+    JSON.stringify({ bundle: await bundle(f), phase: f.record.phase, dispatch: f.input.dispatch }),
+  );
+  const args = [
+    f.input.identity.operationId,
+    f.record.phase,
+    f.input.identity.executorSha,
+    f.input.dispatch,
+    bytes,
+    f.options,
+  ];
+  assert.equal(await receiveUpgradeBundle(...args), "Platform upgrade executor bundle received.\n");
+  await assert.rejects(receiveUpgradeBundle(...args));
+  assert.deepEqual(f.commands, []);
+  const marker = JSON.parse(await readFile(join(f.directory, "delivery.json")));
+  assert.equal(marker.phase, "post-migration-prepare");
+  assert.deepEqual(marker.dispatch, f.input.dispatch);
+});
+test("forward phases remain in the existing protected workflow with no rerun or concurrent cancellation", async () => {
+  const workflow = await readFile(
+    new URL("../../../.github/workflows/upgrade-platform.yml", import.meta.url),
+    "utf8",
+  );
+  for (const phase of ["post-migration-prepare", "post-migration-activate"])
+    assert.ok(workflow.includes(phase));
+  assert.match(workflow, /environment: production-deploy/u);
+  assert.match(workflow, /group: timeweb-platform-production/u);
+  assert.match(workflow, /cancel-in-progress: false/u);
+  assert.match(workflow, /github.run_attempt == 1/u);
+  assert.match(workflow, /github.ref == 'refs\/heads\/main'/u);
+  assert.match(workflow, /upgrade-transport.mjs run/u);
 });

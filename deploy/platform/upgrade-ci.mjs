@@ -47,10 +47,27 @@ import {
   captureRehearsalResources,
   validateRehearsalDaemon,
   validateRehearsalEnvironment,
+  rehearsalTemporaryBase,
   cleanupRehearsalResources,
+  rehearsalCleanupStep,
 } from "./upgrade-ci-guards.mjs";
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// These four independent read-only facts are still checked before and after
+// every protected command. Drain all reads even after a refusal: no background
+// inspector may overlap a subsequent command or namespace cleanup.
+export async function verifyRehearsalIsolation(invocationId, readers, expected) {
+  const names = ["container", "volume", "ipv4", "ipv6"];
+  assert.ok(names.every((name) => typeof readers[name] === "function"));
+  const results = await Promise.allSettled(
+    names.map((name) => Promise.resolve().then(readers[name])),
+  );
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) throw failed.reason;
+  const [container, volume, ipv4, ipv6] = results.map((result) => result.value);
+  validateRehearsalDaemon({ invocationId, container, volume, routes: { ipv4, ipv6 } }, expected);
+}
+
 // Hash the read-back private files as configuration integrity evidence. These
 // SHA256 values are file identities, never password authentication verifiers.
 export async function createRehearsalConfiguration(root, values, migrationUrl) {
@@ -80,10 +97,21 @@ export async function createRehearsalConfiguration(root, values, migrationUrl) {
   };
 }
 
-// Stream the generated private tree through the container process rather than
-// relying on daemon archive-copy mount resolution. Verify every received file.
+// Transfer a validated private tree, then verify every received file. The caller
+// selects stdin extraction or a separately probed regular-rootfs archive copy.
 export async function stageRehearsalTree(root, io) {
-  const files = [];
+  const copy = Object.hasOwn(io, "copyDirectory");
+  if (copy) {
+    assert.equal(typeof io.copyDirectory, "function");
+    assert.equal(typeof io.inspectDirectory, "function");
+    assert.equal(Object.hasOwn(io, "archive"), false);
+    assert.equal(Object.hasOwn(io, "extract"), false);
+  } else {
+    assert.equal(typeof io.archive, "function");
+    assert.equal(typeof io.extract, "function");
+  }
+  const files = [],
+    directories = [];
   async function walk(relative) {
     const path = join(root, relative),
       metadata = await lstat(path);
@@ -91,6 +119,7 @@ export async function stageRehearsalTree(root, io) {
     assert.equal(metadata.isSymbolicLink(), false);
     if (metadata.isDirectory()) {
       assert.equal(metadata.mode & 0o777, 0o700);
+      directories.push(relative);
       for (const name of (await readdir(path)).sort()) {
         assert.match(name, /^[a-zA-Z0-9_.-]+$/u);
         await walk(join(relative, name));
@@ -105,18 +134,99 @@ export async function stageRehearsalTree(root, io) {
   }
   await walk("");
   assert.ok(files.length > 0);
-  const archive = await io.archive(root);
-  assert.ok(Buffer.isBuffer(archive));
-  await io.extract(archive);
+  if (copy) {
+    await io.copyDirectory(root);
+    for (const relative of directories)
+      assert.deepEqual(await io.inspectDirectory(relative), { mode: 0o700, type: "directory" });
+  } else {
+    const archive = await io.archive(root);
+    assert.ok(Buffer.isBuffer(archive));
+    await io.extract(archive);
+  }
   for (const { relative, ...expected } of files)
     assert.deepEqual(await io.inspectFile(relative), expected);
   return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
 
-export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {}) {
+// Fail before applications if archive-copy and live exec disagree on this
+// invocation's private directory. Probe bytes contain no configuration/secrets.
+export async function verifyRehearsalArchiveTransfer(parent, io) {
+  const source = join(parent, "archive-probe"),
+    result = join(parent, "archive-probe-readback");
+  const bytes = randomBytes(32);
+  await writeFile(source, bytes, { mode: 0o600, flag: "wx" });
+  await io.upload(source);
+  assert.deepEqual(await io.readLive(source), bytes);
+  await io.download(source, result);
+  const metadata = await lstat(result);
+  assert.equal(metadata.isFile(), true);
+  assert.equal(metadata.isSymbolicLink(), false);
+  assert.equal(metadata.nlink, 1);
+  assert.equal(metadata.uid, process.getuid());
+  assert.equal(metadata.size, bytes.length);
+  await chmod(result, 0o600);
+  assert.deepEqual(await readFile(result), bytes);
+}
+
+/** Restore the generated old database including its database-level privileges.
+ * A restore into a manually recreated database omits these ACLs, including the
+ * migrator's CREATE grant required by Drizzle even for an existing schema. */
+export async function restoreRehearsalDatabase({ postgresId, sql, nested }) {
+  assert.match(postgresId, /^[a-f0-9]{64}$/u);
+  const databaseAuthority = `SELECT json_build_object(
+    'owner', d.datdba::text,
+    'acl', (SELECT json_agg(json_build_array(a.grantor::text, a.grantee::text,
+      a.privilege_type, a.is_grantable) ORDER BY a.grantor, a.grantee,
+      a.privilege_type, a.is_grantable)
+      FROM aclexplode(COALESCE(d.datacl, acldefault('d', d.datdba))) a)
+    )::text FROM pg_database d WHERE d.datname = 'markiro';`;
+  const authority = async () => {
+    const { stdout } = await sql(databaseAuthority);
+    assert.ok(typeof stdout === "string" || Buffer.isBuffer(stdout));
+    const text = stdout.toString("utf8");
+    assert.ok(text.trim() !== "");
+    return text;
+  };
+  const before = await authority();
+  await sql("DROP DATABASE markiro;", "postgres");
+  await nested(
+    [
+      "exec",
+      "--user",
+      "70:70",
+      postgresId,
+      "pg_restore",
+      "--exit-on-error",
+      "--create",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "/tmp/rehearsal.dump",
+    ],
+    { timeout: 180000 },
+  );
+  assert.equal(await authority(), before);
+}
+
+export async function rehearseUpgrade(
+  argv,
+  { writeResult = async () => {}, forwardScenario } = {},
+) {
+  assert.ok(
+    forwardScenario === undefined ||
+      (forwardScenario.kind === "synthetic-forward" &&
+        ["stage", "values", "candidate", "run"].every(
+          (name) => typeof forwardScenario[name] === "function",
+        )),
+  );
   assert.equal(typeof writeResult, "function");
   assert.deepEqual(argv, ["--local-ci"]);
-  const parent = await mkdtemp(join(await realpath("/tmp"), "markiro-upgrade-ci-"));
+  const temporaryBase = rehearsalTemporaryBase(
+    process.platform,
+    await realpath(process.env.RUNNER_TEMP ?? (process.platform === "darwin" ? "/tmp" : "")),
+  );
+  const parent = await mkdtemp(join(temporaryBase, "markiro-upgrade-ci-"));
   await chmod(parent, 0o700);
   const repository = await realpath(resolve("."));
   const invocationId = randomUUID(),
@@ -210,7 +320,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
       env,
       timeoutMs,
       outputLimitBytes: 1048576,
-      input: Buffer.from(input),
+      ...(input === undefined ? {} : { input: Buffer.from(input) }),
     });
   const stdinNested = (args, input, timeout) =>
     stdinOuter(
@@ -220,15 +330,17 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     );
   const inspect = async (kind, id) => JSON.parse((await nested([kind, "inspect", id])).stdout)[0];
   const shell = (args) => outer(["exec", containerId, ...args]);
-  const verifyIsolation = async () => {
-    const container = await inspectOuter("container", containerId),
-      volume = await inspectOuter("volume", name);
-    const routes = {
-      ipv4: (await shell(["ip", "-4", "route", "show", "default"])).stdout,
-      ipv6: (await shell(["ip", "-6", "route", "show", "default"])).stdout,
-    };
-    validateRehearsalDaemon({ invocationId, container, volume, routes }, owned);
-  };
+  const verifyIsolation = () =>
+    verifyRehearsalIsolation(
+      invocationId,
+      {
+        container: () => inspectOuter("container", containerId),
+        volume: () => inspectOuter("volume", name),
+        ipv4: async () => (await shell(["ip", "-4", "route", "show", "default"])).stdout,
+        ipv6: async () => (await shell(["ip", "-6", "route", "show", "default"])).stdout,
+      },
+      owned,
+    );
   try {
     const daemon = await inspectOuter("image", rehearsalImages.daemon);
     validateRehearsalImage(daemon);
@@ -294,6 +406,21 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
       evidence.images ??= {};
       evidence.images[image] = { id: actual.Id, repoDigests: actual.RepoDigests };
     }
+    const forwardStage = forwardScenario
+      ? await forwardScenario.stage({
+          parent,
+          root,
+          repository,
+          command,
+          outer,
+          nested,
+          shell,
+          stdinOuter,
+          containerId,
+          inspect,
+          progress,
+        })
+      : null;
     assert.equal((await nested(["ps", "-aq"])).stdout.trim(), "");
     progress("remove every external network before application processes");
     const stagingNetwork = rehearsalStagingNetwork(await inspectOuter("container", containerId));
@@ -463,7 +590,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     delete values.MARKIRO_RELEASES_DOMAIN;
     delete values.MARKIRO_RELEASES_BUCKET;
     const generated = Object.freeze({ ...values });
-    validateRehearsalEnvironment(values, generated, parent);
+    validateRehearsalEnvironment(values, generated, parent, temporaryBase);
     progress("write and verify generated private configuration snapshots");
     const migrationUrl = `postgresql://markiro_migrator:${migratorPassword}@db.private/markiro?sslmode=verify-full&sslrootcert=/run/markiro-postgres/ca.crt`;
     const config = (value) => createRehearsalConfiguration(root, value, migrationUrl);
@@ -472,6 +599,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
         ...values,
         MARKIRO_RELEASES_DOMAIN: "releases.localhost",
         MARKIRO_RELEASES_BUCKET: "synthetic-releases",
+        ...(forwardScenario ? forwardScenario.values() : {}),
       });
     const interpolation = {
       ...values,
@@ -485,6 +613,12 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     // Stream only the private generated tree, never bind a host path/socket.
     progress("stream and verify generated private tree in the isolated daemon");
     await shell(["mkdir", "-p", parent]);
+    await verifyRehearsalArchiveTransfer(parent, {
+      upload: (path) => outer(["cp", path, `${containerId}:${path}`]),
+      readLive: async (path) =>
+        (await outer(["exec", containerId, "cat", path], { encoding: "buffer" })).stdout,
+      download: (path, out) => outer(["cp", `${containerId}:${path}`, out]),
+    });
     evidence.privateTreeTransfer = await stageRehearsalTree(parent, {
       archive: async (directory) =>
         (await command("tar", ["-C", directory, "-cf", "-", "."], { encoding: "buffer" })).stdout,
@@ -649,23 +783,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     assert.equal(archive.subarray(0, 5).toString("ascii"), "PGDMP");
     await writeFile(join(parent, "synthetic.dump"), archive, { mode: 0o600, flag: "wx" });
     evidence.archive = { sha256: digest(archive), bytes: archive.length, syntheticOnly: true };
-    await sql("DROP DATABASE markiro; CREATE DATABASE markiro TEMPLATE template0;", "postgres");
-    await nested(
-      [
-        "exec",
-        "--user",
-        "70:70",
-        pg,
-        "pg_restore",
-        "--exit-on-error",
-        "-U",
-        "postgres",
-        "-d",
-        "markiro",
-        "/tmp/rehearsal.dump",
-      ],
-      { timeout: 180000 },
-    );
+    await restoreRehearsalDatabase({ postgresId: pg, sql, nested });
     evidence.checks.push(
       "old image migrated generated DB; full custom archive restored before app launch",
     );
@@ -710,6 +828,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
     candidate.operationId = randomUUID();
     candidate.executorSha = (await command("git", ["rev-parse", "HEAD"])).stdout.trim();
     candidate.configurationSha256 = candidateConfig.sha256;
+    if (forwardScenario) await forwardScenario.candidate(candidate, inspect);
     const prior = structuredClone(identity);
     prior.operationId = randomUUID();
     prior.executorSha = "b".repeat(40);
@@ -750,7 +869,7 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
         await verifyIsolation();
         for (const [file, sha] of Object.entries(closure))
           assert.equal(digest(await readFile(join(parent, file))), sha);
-        validateRehearsalEnvironment(values, generated, parent);
+        validateRehearsalEnvironment(values, generated, parent, temporaryBase);
       },
       runProcess: async (request) => {
         await verifyIsolation();
@@ -842,153 +961,200 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
           }),
       },
     );
-    // This harness does not substitute for fresh production backup/copy proof.
-    const journal = join(root, "upgrade-operations", candidate.operationId, "state.json");
-    const priorBytes = await readFile(journal),
-      priorState = JSON.parse(priorBytes);
-    const decision = {
-      version: 1,
-      kind: "platform-upgrade-phase",
-      phase: "return-old",
-      identity: candidate,
-      prior: { sequence: priorState.sequence, sha256: digest(priorBytes) },
-      executorCi: f.input.executorCi,
-      reviewedPlanSha256: f.input.reviewedPlanSha256,
-      dispatch: { toolingSha: candidate.executorSha, runId: "987654324", runAttempt: "1" },
-      expiresAt: new Date(Date.now() + 1800000).toISOString(),
-    };
-    progress("return exact retained containers through guarded return coordinator");
-    await executeUpgradeReturn(
-      { root, decision },
-      {
-        verifyAdmission: async () => candidate,
-        inspectReturnEligibility: (_, cap) => observers.inspectReturnEligibility(cap),
-        inspectSchema: (_, cap) => schema(cap),
-        startOldApi: (_, cap) => workloads.startOldApi(cap),
-        startOldEdge: (_, cap) => workloads.startOldEdge(cap),
-        verifyOldHealth: (_, cap) => workloads.verifyOldHealth(cap),
-        smoke: async (_, cap) =>
-          withHeldUpgradeState(cap, async (held) => {
-            await held.verify();
-            await smoke();
-            await held.verify();
-          }),
-        cleanupOwnedStarts: (_, cap) => workloads.cleanupOwnedStarts(cap),
-      },
-    );
-    const terminal = JSON.parse(await readFile(journal));
-    assert.equal(terminal.phase, "returned-old");
-    assert.equal(terminal.status, "completed");
-    assert.equal(terminal.migrationEntered, false);
-    assert.deepEqual(terminal.oldRuntime, prep.oldRuntime);
-    await verifyIsolation();
-    evidence.checks.push(
-      "strict old configuration and exact IDs before/after stop and return; unchanged catalog/migration schema; healthy API/PG and six strict TLS endpoints",
-    );
-    evidence.containers = predecessorContainers;
-    evidence.oldConfigurationSha256 = oldConfig.sha256;
-    evidence.schema = prep.oldRuntime.schema;
-    evidence.terminalSha256 = digest(await readFile(journal));
-    progress("prove migration latch rejects return before any start");
-    // A second synthetic state root has no mutation adapter. Even a failed spawn
-    // after its durable latch must reject the return coordinator before starts.
-    const faultParent = join(parent, "fault"),
-      faultRoot = join(faultParent, "state");
-    await mkdir(faultRoot, { recursive: true, mode: 0o700 });
-    const faultCandidate = structuredClone(candidate);
-    faultCandidate.operationId = randomUUID();
-    const fault = upgradeFixture({
-      prior,
-      recovered: identity,
-      identity: faultCandidate,
-      configuration: oldConfig.configuration,
-      root: faultRoot,
-      policy,
-    });
-    fault.input.expiresAt = new Date(Date.now() + 3600000).toISOString();
-    const faultActivation = join(
-      faultParent,
-      "recovery-operations",
-      identity.operationId,
-      "activate",
-    );
-    await mkdir(faultActivation, { recursive: true, mode: 0o700 });
-    for (const [key, path] of Object.entries({
-      original: join(faultRoot, "state.json"),
-      acceptedRecovery: join(faultRoot, "recovery-state.json"),
-      preparation: join(faultRoot, "recovery-preparation.json"),
-      consumption: join(faultRoot, `recovery-activation-${identity.operationId}.json`),
-      activationOperation: join(faultActivation, "operation.json"),
-    }))
-      await writeFile(path, fault.predecessorBytes[key], { mode: 0o600, flag: "wx" });
-    const faultOld = { ...prep.oldRuntime, operationId: faultCandidate.operationId },
-      faultBackup = { ...prep.backup, operationId: faultCandidate.operationId };
-    await withUpgradeState(faultRoot, fault.input, async (s) => {
-      await s.complete("admitted", faultOld);
-      await s.enter("old-stopped");
-      await s.complete("old-stopped");
-      await s.enter("backup-verified");
-      await s.complete("backup-verified", faultBackup, {
-        ...prep,
-        operationId: faultCandidate.operationId,
-        oldRuntime: faultOld,
-        backup: faultBackup,
+    if (forwardScenario) {
+      await forwardScenario.run({
+        root,
+        parent,
+        repository,
+        containerId,
+        invocationId,
+        evidence,
+        isolated,
+        owned,
+        forwardStage,
+        verifyIsolation,
+        command,
+        outer,
+        nested,
+        shell,
+        stdinOuter,
+        stdinNested,
+        inspect,
+        sql,
+        oldOperation,
+        candidateOperation,
+        candidate,
+        identity,
+        f,
+        prep,
+        predecessorContainers,
+        policy,
+        oldConfig,
+        candidateConfig,
+        deps,
+        values,
+        generated,
+        password,
+        appPassword,
+        migratorPassword,
+        migrationUrl,
+        ca,
+        tlsScript,
+        progress,
       });
-    });
-    const faultJournal = join(
-      faultRoot,
-      "upgrade-operations",
-      faultCandidate.operationId,
-      "state.json",
-    );
-    const faultDecision = async (phase, runId) => {
-      const bytes = await readFile(faultJournal);
-      return {
-        ...decision,
-        identity: faultCandidate,
-        phase,
-        prior: { sequence: JSON.parse(bytes).sequence, sha256: digest(bytes) },
-        dispatch: { ...decision.dispatch, runId },
+    } else {
+      // This harness does not substitute for fresh production backup/copy proof.
+      const journal = join(root, "upgrade-operations", candidate.operationId, "state.json");
+      const priorBytes = await readFile(journal),
+        priorState = JSON.parse(priorBytes);
+      const decision = {
+        version: 1,
+        kind: "platform-upgrade-phase",
+        phase: "return-old",
+        identity: candidate,
+        prior: { sequence: priorState.sequence, sha256: digest(priorBytes) },
+        executorCi: f.input.executorCi,
+        reviewedPlanSha256: f.input.reviewedPlanSha256,
+        dispatch: { toolingSha: candidate.executorSha, runId: "987654324", runAttempt: "1" },
+        expiresAt: new Date(Date.now() + 1800000).toISOString(),
       };
-    };
-    await assert.rejects(
-      withUpgradePhaseState(faultRoot, await faultDecision("activate", "987654325"), async (s) => {
-        await s.complete("activation-admitted");
-        await s.enter("migration-entered");
-        throw Error("synthetic pre-spawn failure after durable latch");
-      }),
-    );
-    assert.equal(JSON.parse(await readFile(faultJournal)).migrationEntered, true);
-    let called = false;
-    await assert.rejects(
-      executeUpgradeReturn(
-        { root: faultRoot, decision: await faultDecision("return-old", "987654326") },
-        Object.fromEntries(
-          [
-            "verifyAdmission",
-            "inspectReturnEligibility",
-            "inspectSchema",
-            "startOldApi",
-            "startOldEdge",
-            "verifyOldHealth",
-            "smoke",
-            "cleanupOwnedStarts",
-          ].map((k) => [
-            k,
-            async () => {
-              called = true;
-              throw Error("must not enter adapter");
-            },
-          ]),
+      progress("return exact retained containers through guarded return coordinator");
+      await executeUpgradeReturn(
+        { root, decision },
+        {
+          verifyAdmission: async () => candidate,
+          inspectReturnEligibility: (_, cap) => observers.inspectReturnEligibility(cap),
+          inspectSchema: (_, cap) => schema(cap),
+          startOldApi: (_, cap) => workloads.startOldApi(cap),
+          startOldEdge: (_, cap) => workloads.startOldEdge(cap),
+          verifyOldHealth: (_, cap) => workloads.verifyOldHealth(cap),
+          smoke: async (_, cap) =>
+            withHeldUpgradeState(cap, async (held) => {
+              await held.verify();
+              await smoke();
+              await held.verify();
+            }),
+          cleanupOwnedStarts: (_, cap) => workloads.cleanupOwnedStarts(cap),
+        },
+      );
+      const terminal = JSON.parse(await readFile(journal));
+      assert.equal(terminal.phase, "returned-old");
+      assert.equal(terminal.status, "completed");
+      assert.equal(terminal.migrationEntered, false);
+      assert.deepEqual(terminal.oldRuntime, prep.oldRuntime);
+      await verifyIsolation();
+      evidence.checks.push(
+        "strict old configuration and exact IDs before/after stop and return; unchanged catalog/migration schema; healthy API/PG and six strict TLS endpoints",
+      );
+      evidence.containers = predecessorContainers;
+      evidence.oldConfigurationSha256 = oldConfig.sha256;
+      evidence.schema = prep.oldRuntime.schema;
+      evidence.terminalSha256 = digest(await readFile(journal));
+      progress("prove migration latch rejects return before any start");
+      // A second synthetic state root has no mutation adapter. Even a failed spawn
+      // after its durable latch must reject the return coordinator before starts.
+      const faultParent = join(parent, "fault"),
+        faultRoot = join(faultParent, "state");
+      await mkdir(faultRoot, { recursive: true, mode: 0o700 });
+      const faultCandidate = structuredClone(candidate);
+      faultCandidate.operationId = randomUUID();
+      const fault = upgradeFixture({
+        prior,
+        recovered: identity,
+        identity: faultCandidate,
+        configuration: oldConfig.configuration,
+        root: faultRoot,
+        policy,
+      });
+      fault.input.expiresAt = new Date(Date.now() + 3600000).toISOString();
+      const faultActivation = join(
+        faultParent,
+        "recovery-operations",
+        identity.operationId,
+        "activate",
+      );
+      await mkdir(faultActivation, { recursive: true, mode: 0o700 });
+      for (const [key, path] of Object.entries({
+        original: join(faultRoot, "state.json"),
+        acceptedRecovery: join(faultRoot, "recovery-state.json"),
+        preparation: join(faultRoot, "recovery-preparation.json"),
+        consumption: join(faultRoot, `recovery-activation-${identity.operationId}.json`),
+        activationOperation: join(faultActivation, "operation.json"),
+      }))
+        await writeFile(path, fault.predecessorBytes[key], { mode: 0o600, flag: "wx" });
+      const faultOld = { ...prep.oldRuntime, operationId: faultCandidate.operationId },
+        faultBackup = { ...prep.backup, operationId: faultCandidate.operationId };
+      await withUpgradeState(faultRoot, fault.input, async (s) => {
+        await s.complete("admitted", faultOld);
+        await s.enter("old-stopped");
+        await s.complete("old-stopped");
+        await s.enter("backup-verified");
+        await s.complete("backup-verified", faultBackup, {
+          ...prep,
+          operationId: faultCandidate.operationId,
+          oldRuntime: faultOld,
+          backup: faultBackup,
+        });
+      });
+      const faultJournal = join(
+        faultRoot,
+        "upgrade-operations",
+        faultCandidate.operationId,
+        "state.json",
+      );
+      const faultDecision = async (phase, runId) => {
+        const bytes = await readFile(faultJournal);
+        return {
+          ...decision,
+          identity: faultCandidate,
+          phase,
+          prior: { sequence: JSON.parse(bytes).sequence, sha256: digest(bytes) },
+          dispatch: { ...decision.dispatch, runId },
+        };
+      };
+      await assert.rejects(
+        withUpgradePhaseState(
+          faultRoot,
+          await faultDecision("activate", "987654325"),
+          async (s) => {
+            await s.complete("activation-admitted");
+            await s.enter("migration-entered");
+            throw Error("synthetic pre-spawn failure after durable latch");
+          },
         ),
-      ),
-    );
-    assert.equal(called, false);
-    for (const [service, id] of Object.entries(predecessorContainers))
-      assert.equal((await inspect("container", `markiro-platform-${service}-1`)).Id, id);
-    evidence.checks.push(
-      "durable migration-entered latch and failed spawn intent reject return before every adapter; actual retained IDs unchanged",
-    );
+      );
+      assert.equal(JSON.parse(await readFile(faultJournal)).migrationEntered, true);
+      let called = false;
+      await assert.rejects(
+        executeUpgradeReturn(
+          { root: faultRoot, decision: await faultDecision("return-old", "987654326") },
+          Object.fromEntries(
+            [
+              "verifyAdmission",
+              "inspectReturnEligibility",
+              "inspectSchema",
+              "startOldApi",
+              "startOldEdge",
+              "verifyOldHealth",
+              "smoke",
+              "cleanupOwnedStarts",
+            ].map((k) => [
+              k,
+              async () => {
+                called = true;
+                throw Error("must not enter adapter");
+              },
+            ]),
+          ),
+        ),
+      );
+      assert.equal(called, false);
+      for (const [service, id] of Object.entries(predecessorContainers))
+        assert.equal((await inspect("container", `markiro-platform-${service}-1`)).Id, id);
+      evidence.checks.push(
+        "durable migration-entered latch and failed spawn intent reject return before every adapter; actual retained IDs unchanged",
+      );
+    }
     completed = true;
   } catch (error) {
     await save(
@@ -1013,7 +1179,18 @@ export async function rehearseUpgrade(argv, { writeResult = async () => {} } = {
           removeVolume: (n) => outer(["volume", "rm", n]),
         });
         evidence.cleanup = true;
-      } catch {
+      } catch (error) {
+        const diagnostic = rehearsalFailure("owned cleanup", error);
+        process.stderr.write(
+          `Rehearsal cleanup failure: ${JSON.stringify({
+            step: rehearsalCleanupStep(error),
+            exitStatus: diagnostic.exitStatus,
+            executable: diagnostic.executable,
+            processReason: diagnostic.processReason,
+            childKilled: error.killed === true,
+            signal: ["SIGTERM", "SIGKILL"].includes(error.signal) ? error.signal : null,
+          })}\n`,
+        );
         evidence.cleanup = false;
         problem ??= { phase: "owned cleanup", code: "CLEANUP_FAILED" };
       }

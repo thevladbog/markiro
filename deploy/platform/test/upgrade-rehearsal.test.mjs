@@ -13,42 +13,8 @@ import {
 } from "../upgrade-ci-guards.mjs";
 const invocationId = "12345678-1234-4234-8234-123456789012";
 const name = `markiro-upgrade-ci-${invocationId}`;
-function fixture() {
-  const volume = {
-    Name: name,
-    Driver: "local",
-    Options: {},
-    Labels: { [rehearsalLabel]: invocationId },
-    CreatedAt: "2026-10-24T00:00:00Z",
-    Mountpoint: `/var/lib/docker/volumes/${name}/_data`,
-  };
-  const container = {
-    Id: "a".repeat(64),
-    Name: `/${name}`,
-    Image: rehearsalImages.daemonId,
-    Config: { Labels: { [rehearsalLabel]: invocationId } },
-    State: { Running: true, Paused: false, Restarting: false },
-    HostConfig: {
-      Privileged: true,
-      Binds: null,
-      PortBindings: {},
-      NetworkMode: "bridge",
-      PidMode: "",
-      IpcMode: "private",
-    },
-    Mounts: [
-      {
-        Type: "volume",
-        Name: name,
-        Source: volume.Mountpoint,
-        Destination: "/var/lib/docker",
-        RW: true,
-      },
-    ],
-    NetworkSettings: { Networks: {}, Ports: {} },
-  };
-  return { invocationId, container, volume, routes: { ipv4: "", ipv6: "" } };
-}
+import { rehearsalFixture as fixture } from "./rehearsal-fixture.mjs";
+
 test("rehearsal daemon requires exact owned isolated namespace before any application launch", () => {
   assert.doesNotThrow(() => validateRehearsalDaemon(fixture()));
 });
@@ -98,7 +64,12 @@ const generated = {
 };
 test("only generated private fixture environment can enter the rehearsal", () => {
   assert.doesNotThrow(() =>
-    validateRehearsalEnvironment(generated, generated, "/private/tmp/markiro-upgrade-ci-example"),
+    validateRehearsalEnvironment(
+      generated,
+      generated,
+      "/private/tmp/markiro-upgrade-ci-example",
+      "/private/tmp",
+    ),
   );
   for (const [key, value] of [
     ["DATABASE_URL", "postgresql://prod:secret@201.34.136.19/markiro"],
@@ -111,6 +82,7 @@ test("only generated private fixture environment can enter the rehearsal", () =>
         { ...generated, [key]: value },
         generated,
         "/private/tmp/markiro-upgrade-ci-example",
+        "/private/tmp",
       ),
     );
 });
@@ -379,6 +351,9 @@ test("private rehearsal staging rejects linked source files before transmission"
       transmitted = true;
       throw Error("must not archive");
     },
+    extract: async () => {
+      throw Error("must not extract");
+    },
   };
   const path = join(source.root, "linked");
   await symlink("pg/ca.crt", path);
@@ -403,4 +378,393 @@ test("safe rehearsal archive errors retain a fixed executable category without a
   assert.equal(value.command, "tar archive");
   assert.equal(value.exitStatus, 1);
   assert.ok(!JSON.stringify(value).includes("private"));
+});
+
+test("safe docker load diagnostics recognize native errors without publishing private text", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { forwardRehearsalFailure } = await import("../forward-ci.mjs");
+  // Representative native/load errors, not recovered text from the failed CI.
+  for (const [message, expected] of [
+    ["open /private/NEVER_PUBLISH: no such file or directory", "missing-path"],
+    ["write /private/NEVER_PUBLISH: no space left on device", "capacity"],
+    ["write /private/NEVER_PUBLISH: disk quota exceeded", "capacity"],
+    ["chmod /private/NEVER_PUBLISH: operation not permitted", "permission-denied"],
+    ["open /private/NEVER_PUBLISH: permission denied", "permission-denied"],
+    ["write /private/NEVER_PUBLISH: read-only file system", "read-only-filesystem"],
+    ["lsetxattr /private/NEVER_PUBLISH: operation not supported", "filesystem-not-supported"],
+    ["archive/tar: invalid tar header /private/NEVER_PUBLISH", "invalid-archive"],
+    [
+      'invalid diffID for layer 2: expected "NEVER_PUBLISH", got "NEVER_PUBLISH"',
+      "layer-digest-mismatch",
+    ],
+    ["open /private/NEVER_PUBLISH: unexpected EOF", "unexpected-eof"],
+    ["Cannot connect to the Docker daemon at unix:///private/NEVER_PUBLISH", "daemon-unavailable"],
+  ]) {
+    const problem = rehearsalFailure("load current ICU worker archive", {
+      name: "Error",
+      code: 1,
+      rehearsalExecutable: "docker",
+      rehearsalCommand: "docker exec",
+      stderr: `Error response from daemon: ${message}\n`,
+    });
+    assert.equal(problem.processReason, expected);
+    const safe = forwardRehearsalFailure(problem);
+    assert.equal(safe.processReason, expected);
+    assert.doesNotMatch(JSON.stringify(safe), /NEVER_PUBLISH|private/);
+  }
+  const unknown = rehearsalFailure("load current ICU worker archive", {
+    code: 1,
+    rehearsalExecutable: "docker",
+    rehearsalCommand: "docker exec",
+    stderr: "unrecognized NEVER_PUBLISH private child text",
+  });
+  assert.equal(unknown.processReason, null);
+  assert.doesNotMatch(JSON.stringify(unknown), /NEVER_PUBLISH|private/);
+});
+
+test("missing-path diagnostics distinguish fixed staging boundaries without exposing paths", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { forwardRehearsalFailure } = await import("../forward-ci.mjs");
+  for (const [stderr, expected] of [
+    ["open /tmp/forward-worker.tar: no such file or directory", "worker-archive-missing"],
+    [
+      "open /var/lib/docker/tmp/docker-import-123456789/blobs/sha256/PRIVATE/json: no such file or directory",
+      "docker-import-file-missing",
+    ],
+    [
+      "open /var/lib/docker/vfs/dir/PRIVATE: no such file or directory",
+      "docker-storage-file-missing",
+    ],
+    ["stat /private/NEVER_PUBLISH: no such file or directory", "missing-path"],
+  ]) {
+    const problem = rehearsalFailure("load current ICU worker archive", {
+      code: 1,
+      rehearsalCommand: "docker exec",
+      rehearsalExecutable: "docker",
+      stderr,
+    });
+    assert.equal(problem.processReason, expected);
+    assert.equal(forwardRehearsalFailure(problem).processReason, expected);
+    assert.ok(!JSON.stringify(problem).includes("PRIVATE"));
+  }
+});
+
+test("rehearsal preserves trusted host-process exit metadata without output or argv", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { runHostProcess } = await import("../host/process.mjs");
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { root } = await privateFixture(t);
+  await mkdir(join(root, "bin"), { mode: 0o700 });
+  const executable = join(root, "bin", "docker");
+  await writeFile(executable, "#!/bin/sh\necho PRIVATE >&2\nexit 7\n", { mode: 0o700 });
+  await assert.rejects(
+    runHostProcess({
+      executable,
+      args: ["PRIVATE"],
+      cwd: root,
+      env: { PATH: process.env.PATH },
+      timeoutMs: 5000,
+      outputLimitBytes: 65536,
+    }),
+    (error) => {
+      const result = rehearsalFailure("execute exact candidate migrations", error);
+      assert.equal(result.exitStatus, 7);
+      assert.equal(result.executable, "docker");
+      assert.equal(result.processReason, "host-exit");
+      assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+      return true;
+    },
+  );
+});
+
+test("synthetic old database restore preserves database owner and complete ACL", async () => {
+  const { restoreRehearsalDatabase } = await import("../upgrade-ci.mjs");
+  const postgresId = "d".repeat(64);
+  const calls = [];
+  const before = { stdout: Buffer.from('{"owner":"10","acl":[["10","20","CREATE",false]]}\n') };
+  const sql = async (text, database) => {
+    calls.push(["sql", text, database]);
+    return before;
+  };
+  const nested = async (args) => {
+    calls.push(["docker", args]);
+    return { stdout: "" };
+  };
+  await restoreRehearsalDatabase({ postgresId, sql, nested });
+  assert.equal(calls.length, 4);
+  assert.equal(calls[1][1], "DROP DATABASE markiro;");
+  assert.equal(calls[1][2], "postgres");
+  assert.deepEqual(calls[2][1], [
+    "exec",
+    "--user",
+    "70:70",
+    postgresId,
+    "pg_restore",
+    "--exit-on-error",
+    "--create",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "/tmp/rehearsal.dump",
+  ]);
+  assert.equal(calls[0][1], calls[3][1]);
+  assert.match(calls[0][1], /aclexplode/u);
+  assert.match(calls[0][1], /datdba/u);
+  assert.match(calls[0][1], /is_grantable/u);
+});
+
+test("synthetic old database restore rejects lost or broadened database grants", async () => {
+  const { restoreRehearsalDatabase } = await import("../upgrade-ci.mjs");
+  let reads = 0;
+  await assert.rejects(
+    restoreRehearsalDatabase({
+      postgresId: "d".repeat(64),
+      sql: async () => ({ stdout: ++reads === 1 ? "original ACL\n" : "changed ACL\n" }),
+      nested: async () => ({ stdout: "" }),
+    }),
+  );
+});
+
+test("rehearsal uses only canonical regular-rootfs temp bases", async () => {
+  const { rehearsalTemporaryBase } = await import("../upgrade-ci-guards.mjs");
+  assert.equal(
+    rehearsalTemporaryBase("linux", "/home/runner/work/_temp"),
+    "/home/runner/work/_temp",
+  );
+  assert.equal(rehearsalTemporaryBase("darwin", "/private/tmp"), "/private/tmp");
+  for (const path of [
+    undefined,
+    "/tmp",
+    "/tmp/child",
+    "/run/a",
+    "/proc/a",
+    "/sys/a",
+    "/dev/a",
+    "/var/lib/docker/a",
+    "/home/runner/work/_temp/../other",
+  ])
+    assert.throws(() => rehearsalTemporaryBase("linux", path));
+  assert.throws(() => rehearsalTemporaryBase("darwin", "/tmp"));
+  const base = "/home/runner/work/_temp",
+    root = `${base}/markiro-upgrade-ci-example`;
+  const values = { ...generated, MARKIRO_POSTGRES_CA_FILE: `${root}/state/pg/ca.crt` };
+  assert.doesNotThrow(() => validateRehearsalEnvironment(values, values, root, base));
+  for (const invalid of [
+    `${base}/foreign`,
+    `${base}/other/markiro-upgrade-ci-example`,
+    `${base}-other/markiro-upgrade-ci-example`,
+  ])
+    assert.throws(() => validateRehearsalEnvironment(values, values, invalid, base));
+});
+
+test("archive transfer probe rejects mount-namespace disagreement in either direction", async () => {
+  const { verifyRehearsalArchiveTransfer } = await import("../upgrade-ci.mjs");
+  const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "markiro-transfer-test-"));
+  for (const mode of ["good", "hidden-upload", "hidden-download"]) {
+    let live;
+    const directory = join(root, mode);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(directory, { mode: 0o700 });
+    const io = {
+      upload: async (p) => {
+        live = mode === "hidden-upload" ? Buffer.alloc(0) : await readFile(p);
+      },
+      readLive: async () => live,
+      download: async (_p, out) =>
+        writeFile(out, mode === "hidden-download" ? Buffer.alloc(0) : live, {
+          flag: "wx",
+          mode: 0o600,
+        }),
+    };
+    if (mode === "good") await verifyRehearsalArchiveTransfer(directory, io);
+    else await assert.rejects(verifyRehearsalArchiveTransfer(directory, io));
+  }
+});
+
+test("rehearsal retains trusted child metadata through preparation error wrappers", async () => {
+  const { rehearsalFailure } = await import("../upgrade-ci-guards.mjs");
+  const { noteHostProcessFailure, carryHostFailure } =
+    await import("../host/failure-diagnostic.mjs");
+  const origin = noteHostProcessFailure(
+    Object.assign(new Error("PRIVATE"), { code: "ERR_HOST_PROCESS" }),
+    "/usr/bin/docker",
+    19,
+  );
+  const wrapped = carryHostFailure(
+    origin,
+    Object.assign(new Error("PRIVATE-WRAPPER"), { code: "ERR_HOST_FORWARD_PREPARATION" }),
+  );
+  const result = rehearsalFailure("forward preparation: createBackup", wrapped);
+  assert.equal(result.code, "ERR_HOST_FORWARD_PREPARATION");
+  assert.equal(result.exitStatus, 19);
+  assert.equal(result.executable, "docker");
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE/u);
+});
+
+test("rehearsal directory-copy rejects mixed transport and linked inputs before transfer", async (t) => {
+  const { stageRehearsalTree } = await import("../upgrade-ci.mjs");
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { symlink, unlink, link } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const source = await privateFixture(t, { nested: true });
+  let copies = 0;
+  const io = {
+    copyDirectory: async () => {
+      copies++;
+    },
+    inspectDirectory: async () => ({ mode: 0o700, type: "directory" }),
+  };
+  for (const key of ["archive", "extract"])
+    await assert.rejects(stageRehearsalTree(source.root, { ...io, [key]: () => {} }));
+  const path = join(source.root, "linked");
+  await symlink("pg/ca.crt", path);
+  await assert.rejects(stageRehearsalTree(source.root, io));
+  await unlink(path);
+  await link(join(source.root, "pg/ca.crt"), path);
+  await assert.rejects(stageRehearsalTree(source.root, io));
+  assert.equal(copies, 0);
+});
+
+test("isolation reads all four facts together and drains every read before rejection", async () => {
+  const { verifyRehearsalIsolation } = await import("../upgrade-ci.mjs");
+  const f = fixture(),
+    expected = captureRehearsalResources(f);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = [],
+    completed = [];
+  const readers = Object.fromEntries(
+    Object.entries({ container: f.container, volume: f.volume, ...f.routes }).map(
+      ([key, value]) => [
+        key,
+        async () => {
+          started.push(key);
+          await gate;
+          completed.push(key);
+          return value;
+        },
+      ],
+    ),
+  );
+  const result = verifyRehearsalIsolation(f.invocationId, readers, expected);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started.sort(), ["container", "ipv4", "ipv6", "volume"]);
+  assert.deepEqual(completed, []);
+  release();
+  await result;
+  assert.equal(completed.length, 4);
+
+  for (const kind of ["sync", "async"]) {
+    let finish;
+    const pending = new Promise((resolve) => {
+      finish = resolve;
+    });
+    let settled = false,
+      drained = false;
+    const failure = new Error("PRIVATE-READ-FAILURE");
+    const failed = verifyRehearsalIsolation(
+      f.invocationId,
+      {
+        container:
+          kind === "sync"
+            ? () => {
+                throw failure;
+              }
+            : async () => {
+                throw failure;
+              },
+        volume: async () => f.volume,
+        ipv4: async () => {
+          await pending;
+          drained = true;
+          return f.routes.ipv4;
+        },
+        ipv6: async () => f.routes.ipv6,
+      },
+      expected,
+    );
+    const observed = failed.then(
+      () => {
+        settled = true;
+      },
+      (error) => {
+        settled = true;
+        assert.equal(error, failure);
+      },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    finish();
+    await observed;
+    assert.equal(drained, true);
+  }
+});
+
+for (const field of ["container", "volume", "ipv4", "ipv6"])
+  test(`batched isolation refuses changed ${field} before accepting the namespace`, async () => {
+    const { verifyRehearsalIsolation } = await import("../upgrade-ci.mjs");
+    const f = fixture(),
+      expected = captureRehearsalResources(f);
+    const readers = {
+      container: async () => f.container,
+      volume: async () => f.volume,
+      ipv4: async () => f.routes.ipv4,
+      ipv6: async () => f.routes.ipv6,
+    };
+    readers[field] = async () => (field.startsWith("ipv") ? "default via foreign" : {});
+    await assert.rejects(verifyRehearsalIsolation(f.invocationId, readers, expected));
+  });
+
+test("cleanup records only its exact owned step without reading caller diagnostics", async () => {
+  const { rehearsalCleanupStep } = await import("../upgrade-ci-guards.mjs");
+  for (const step of [
+    "inspect-container",
+    "inspect-volume",
+    "verify-ownership",
+    "remove-container",
+    "verify-volume",
+    "remove-volume",
+  ]) {
+    const f = fixture(),
+      expected = captureRehearsalResources(f);
+    const original = new Error("PRIVATE-CLEANUP-OUTPUT");
+    Object.defineProperty(original, "cleanupStep", {
+      get() {
+        throw new Error("Do not read caller metadata");
+      },
+    });
+    let volumes = 0;
+    const io = {
+      inspectContainer: async () => {
+        if (step === "inspect-container") throw original;
+        return step === "verify-ownership" ? { ...f.container, Id: "b".repeat(64) } : f.container;
+      },
+      inspectVolume: async () => {
+        if (++volumes === 1 && step === "inspect-volume") throw original;
+        if (volumes === 2 && step === "verify-volume")
+          return { ...f.volume, CreatedAt: "2026-10-24T01:00:00Z" };
+        return f.volume;
+      },
+      removeContainer: async () => {
+        if (step === "remove-container") throw original;
+      },
+      removeVolume: async () => {
+        if (step === "remove-volume") throw original;
+      },
+    };
+    await assert.rejects(cleanupRehearsalResources(expected, io), (error) => {
+      assert.equal(rehearsalCleanupStep(error), step);
+      if (!["verify-ownership", "verify-volume"].includes(step)) assert.equal(error, original);
+      return true;
+    });
+  }
+  assert.equal(rehearsalCleanupStep({ cleanupStep: "remove-volume" }), null);
 });

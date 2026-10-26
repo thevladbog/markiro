@@ -104,9 +104,16 @@ describe.skipIf(!ready)("private support chat access", () => {
     await fixture.platform.get("/support-chat/episodes").expect(401);
   });
 
-  it("allows chat creation and send during a read-only subscription", async () => {
-    const readOnly = await createSupportChatFixture();
-    try {
+  describe("read-only subscription", () => {
+    let readOnly: Awaited<ReturnType<typeof createSupportChatFixture>>;
+    beforeAll(async () => {
+      readOnly = await createSupportChatFixture();
+    }, 120_000);
+    afterAll(async () => {
+      await readOnly?.cleanup();
+    });
+
+    it("allows chat creation and send during a read-only subscription", async () => {
       await createManagedSubscription(readOnly.db, {
         tenantId: readOnly.tenantId,
         status: "active",
@@ -126,9 +133,7 @@ describe.skipIf(!ready)("private support chat access", () => {
         .send({ text: "Help while read only", idempotencyKey: randomUUID() })
         .expect(201);
       expect(sent.body.delivery).toBe("sent");
-    } finally {
-      await readOnly.cleanup();
-    }
+    });
   });
 
   it("keeps the route closed by default without contacting Chatwoot", async () => {

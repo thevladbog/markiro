@@ -1,3 +1,4 @@
+import { carryHostFailure } from "../host/failure-diagnostic.mjs";
 import { captureCatalogJournal, validateCatalogBackup } from "./catalog.mjs";
 import { join } from "node:path";
 import { rm, lstat } from "node:fs/promises";
@@ -29,8 +30,10 @@ export async function createDatabaseBackup({
   writerFence,
   run,
   recoveryRuntime,
+  beforeFailureCleanup,
   catalogJournal,
 }) {
+  ensure(beforeFailureCleanup === undefined || typeof beforeFailureCleanup === "function");
   identity(operationId, target);
   target = plain(target);
   ensure(typeof run === "function" && typeof writerFence?.observe === "function");
@@ -97,17 +100,29 @@ export async function createDatabaseBackup({
     validateCatalogBackup(catalogBackup, captured.inventory);
     result = { captured, dump, catalogBackup, journal };
   } catch (error) {
-    problem = error.stage && error.stage !== "validation" ? error : fail(`${phase}-validation`);
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
+    problem =
+      error.stage && error.stage !== "validation"
+        ? error
+        : carryHostFailure(error, fail(`${phase}-validation`));
   }
+  if (
+    beforeFailureCleanup &&
+    (problem?.terminationConfirmed === false || problem?.durabilityUncertain === true)
+  )
+    throw problem;
   try {
     cleanup = runtime ? await runtime.cleanup() : { verified: true, resources: [] };
   } catch (error) {
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
     cleanup = error.cleanup;
-    problem = fail("cleanup");
+    if (problem && beforeFailureCleanup) problem.durabilityUncertain = true;
+    else problem = carryHostFailure(error, fail("cleanup"));
   }
   // Credentials and incomplete worker files are task scratch, never archives.
-  await rm(input, { recursive: true, force: true }).catch(() => {
-    problem = fail("cleanup");
+  await rm(input, { recursive: true, force: true }).catch(async (error) => {
+    if (beforeFailureCleanup) await beforeFailureCleanup(error);
+    if (!beforeFailureCleanup || !problem) problem = carryHostFailure(error, fail("cleanup"));
     if (cleanup) cleanup.verified = false;
   });
   if (!problem) {
@@ -159,12 +174,14 @@ export async function createDatabaseBackup({
         throw fail(`inventory-limit-${inventoryBytes.length}`);
       result = { ...result, archive, inventoryBytes };
     } catch (error) {
-      problem = error.stage ? error : fail(`${phase}-validation`);
+      if (beforeFailureCleanup) await beforeFailureCleanup(error);
+      problem = error.stage ? error : carryHostFailure(error, fail(`${phase}-validation`));
     }
   }
   if (problem) {
-    await rm(output, { recursive: true, force: true }).catch(() => {
-      problem = fail("cleanup");
+    await rm(output, { recursive: true, force: true }).catch(async (error) => {
+      if (beforeFailureCleanup) await beforeFailureCleanup(error);
+      if (!beforeFailureCleanup || !problem) problem = carryHostFailure(error, fail("cleanup"));
     });
     await writePrivateFile(
       directory,
@@ -181,7 +198,7 @@ export async function createDatabaseBackup({
         }),
       ),
     );
-    throw fail(problem.stage ?? "backup");
+    throw carryHostFailure(problem, fail(problem.stage ?? "backup"));
   }
   const archive = await publishArchive(directory, result.dump, "database.dump");
   ensure(archive.sha256 === result.archive.sha256 && archive.bytes === result.archive.bytes);

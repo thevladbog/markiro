@@ -1,9 +1,34 @@
 import { validateLocale } from "./locale.mjs";
 import { createHash } from "node:crypto";
+// Capture only fixed source modules while this constructor still owns the error.
+// Never parse a caller-supplied stack or retain raw frames, messages or paths.
+const validationSites = new WeakMap();
+const noSites = Object.freeze([]);
+const sourceSite =
+  /\/deploy\/platform\/(host\/(?:prepared-target|backup-gate|deployment-boundary|forward-activation|forward-state)\.mjs|backup\/(?:archive|restore|inventory)\.mjs):(\d{1,5}):\d+/u;
+export const backupFailureSites = (error) => validationSites.get(error) ?? noSites;
 export const fail = (stage = "validation") => {
   const e = new Error("Protected database backup operation failed.");
   e.code = "ERR_DATABASE_BACKUP";
   e.stage = stage;
+  let sites = noSites;
+  try {
+    const frames = String(e.stack).slice(0, 32768).split("\n").slice(1, 33);
+    sites = Object.freeze(
+      frames
+        .flatMap((frame) => {
+          const match = sourceSite.exec(frame);
+          const line = Number(match?.[2]);
+          return match && line > 0 && line <= 10000
+            ? [Object.freeze({ module: match[1], line })]
+            : [];
+        })
+        .slice(0, 3),
+    );
+  } catch {
+    // Optional diagnostics must not replace the original validation refusal.
+  }
+  validationSites.set(e, sites);
   return e;
 };
 export function ensure(ok) {

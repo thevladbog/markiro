@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { readPrivateFile, writePrivateFile } from "./files.mjs";
-import { withHostState } from "./state.mjs";
+import { withHostState, assertLegacyWriteOwnership } from "./state.mjs";
 import { stateError } from "./state-validation.mjs";
 import {
   activationHash,
@@ -26,6 +26,7 @@ async function absent(root, name) {
 export async function withRecoveryActivationState(root, input, callback, { now = Date.now } = {}) {
   const envelope = snapshotActivation(input); // before the first await
   return withHostState(root, async (host) => {
+    await assertLegacyWriteOwnership(root);
     let active = true,
       state,
       preparationBytes,
@@ -66,6 +67,7 @@ export async function withRecoveryActivationState(root, input, callback, { now =
         }
       });
     const save = async (next) => {
+      await assertLegacyWriteOwnership(root);
       await writePrivateFile(root, "recovery-state.json", bytes(next), { replace: true });
       state = next;
     };

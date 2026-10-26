@@ -128,3 +128,27 @@ test("network failure is sanitized and never retried", async () => {
   );
   assert.equal(calls, 1);
 });
+import { upgradePhase } from "../upgrade-dispatch.mjs";
+test("phase registry rejects forged or inherited names and never maps forward phases to legacy operations", () => {
+  for (const phase of [
+    "__proto__",
+    "toString",
+    "constructor",
+    "resume",
+    "post-migration-return-old",
+    null,
+    {},
+    "activate;id",
+  ])
+    assert.throws(() => upgradePhase(phase));
+  for (const [phase, status] of [
+    ["post-migration-prepare", "backup-verified"],
+    ["post-migration-activate", "healthy"],
+  ]) {
+    const spec = upgradePhase(phase);
+    assert.ok(Object.isFrozen(spec));
+    assert.equal(spec.status, status);
+    assert.equal(spec.kind, "platform-forward-recovery-host-operation");
+  }
+  assert.equal(upgradePhase("return-old").kind, "platform-upgrade-host-operation");
+});

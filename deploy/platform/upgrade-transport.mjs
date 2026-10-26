@@ -13,7 +13,11 @@ import {
   recoverySshArguments,
   buildSourceBundle as buildRecoverySourceBundle,
 } from "./recovery-transport.mjs";
-import { validateUpgradeDispatch, verifyUpgradeDispatch } from "./upgrade-dispatch.mjs";
+import {
+  upgradePhase,
+  validateUpgradeDispatch,
+  verifyUpgradeDispatch,
+} from "./upgrade-dispatch.mjs";
 import { canonical, digest, ensure, keys } from "./backup/schemas.mjs";
 import { canonicalId, exactKeys } from "./release-admission.mjs";
 import { runHostProcess } from "./host/process.mjs";
@@ -44,10 +48,7 @@ const SELECTION_KEYS = [
 ];
 const same = (a, b) => ensure(canonical(a) === canonical(b));
 const matches = (v, p) => typeof v === "string" && p.exec(v)?.[0] === v;
-const phaseStatus = (phase) => {
-  ensure(["prepare", "activate", "return-old"].includes(phase));
-  return { prepare: "backup-verified", activate: "healthy", "return-old": "returned-old" }[phase];
-};
+const phaseStatus = (phase) => upgradePhase(phase).status;
 const phaseOutput = (phase) => `Platform upgrade ${phase} ${phaseStatus(phase)}.\n`;
 function failure() {
   const e = new Error(
@@ -67,7 +68,7 @@ export function upgradeSshArguments(target, mode, operationId, phase, executorSh
     target,
     mode,
     operationId,
-    phase === "return-old" ? "prepare" : phase,
+    upgradePhase(phase).sshPhase,
     executorSha,
     dispatch,
   );
@@ -338,7 +339,8 @@ async function preparedUpgrade(operationId, phase, executorSha, dispatch, option
   same(record.dispatch, dispatch);
   const admission = record.operation.admission;
   ensure(
-    record.phase === phase &&
+    record.kind === upgradePhase(phase).kind &&
+      record.phase === phase &&
       admission.identity.operationId === operationId &&
       admission.identity.executorSha === executorSha,
   );

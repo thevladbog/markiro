@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { load } from "js-yaml";
+import { UPGRADE_BUNDLE_FILES } from "../../../deploy/platform/host/upgrade-command.mjs";
 import { classifyChangedFiles } from "../affected.mjs";
 test("upgrade phases are independently protected, serialized and stdin-only", () => {
   const raw = readFileSync(".github/workflows/upgrade-platform.yml", "utf8"),
@@ -11,6 +12,8 @@ test("upgrade phases are independently protected, serialized and stdin-only", ()
     "prepare",
     "activate",
     "return-old",
+    "post-migration-prepare",
+    "post-migration-activate",
   ]);
   assert.deepEqual(w.concurrency, {
     group: "timeweb-platform-production",
@@ -34,6 +37,10 @@ test("upgrade implementation and workflow select required platform contracts and
     "deploy/platform/upgrade-transport.mjs",
     "deploy/platform/host/upgrade-command-runtime.mjs",
     ".github/workflows/upgrade-platform.yml",
+    ".github/workflows/ci.yml",
+    "deploy/platform/forward-ci.mjs",
+    "deploy/platform/forward-ci-scenario.mjs",
+    ...UPGRADE_BUNDLE_FILES.filter((path) => path.includes("/forward-")),
   ]) {
     const { jobs } = classifyChangedFiles([file]);
     assert.equal(jobs.production_bundle, true);
@@ -66,4 +73,21 @@ test("required production gate rehearses exact old return and exports only safe 
     classifyChangedFiles(["deploy/platform/upgrade-ci.mjs"]).jobs.production_bundle,
     true,
   );
+});
+
+test("required production gate runs actual forward recovery serially and exports only safe create-only evidence", () => {
+  const w = load(readFileSync(".github/workflows/ci.yml", "utf8")),
+    steps = w.jobs["production-bundle"].steps;
+  const old = steps.findIndex((s) => s.run?.includes("rehearseUpgrade"));
+  const forward = steps.findIndex((s) => s.run?.includes("rehearseForwardRecovery"));
+  const stack = steps.findIndex((s) => s.run?.includes("deploy/platform/ci-stack.mjs"));
+  assert.ok(old >= 0 && forward > old && stack > forward);
+  assert.ok(steps[forward].run.includes('flag: "wx"'));
+  assert.equal(steps[forward].if, undefined);
+  const upload = steps.find((s) => s.with?.name === "platform-forward-recovery-evidence");
+  assert.equal(upload.if, "always()");
+  assert.equal(upload.with.path, "${{ runner.temp }}/platform-forward-recovery.json");
+  assert.equal(upload.with.overwrite, false);
+  assert.equal(upload.with["if-no-files-found"], "error");
+  assert.match(upload.uses, /@[a-f0-9]{40}$/u);
 });

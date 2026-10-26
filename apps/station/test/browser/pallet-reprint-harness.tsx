@@ -33,6 +33,8 @@ const exec: SqlExecutor = {
   },
 };
 await applyMigrations(exec);
+// Test-data setup is separate from the UI readiness assertion.
+document.documentElement.dataset.fixtureDatabaseReady = "true";
 const deviceId = "00000000-0000-4000-8000-000000000010",
   operatorId = "00000000-0000-4000-8000-000000000011";
 const config = {

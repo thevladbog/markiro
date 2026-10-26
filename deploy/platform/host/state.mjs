@@ -1,3 +1,4 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, unlink } from "node:fs/promises";
@@ -49,6 +50,19 @@ function lockReleaseError() {
   return error;
 }
 
+// Legacy mutation entry points must never overwrite forward ownership. The
+// shared lock and read-only held-host capability remain available to its store.
+export async function assertLegacyWriteOwnership(root) {
+  try {
+    await lstat(join(root, "upgrade-index.json"));
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  const value = JSON.parse(await readPrivateFile(root, "upgrade-index.json"));
+  if (value.kind !== "platform-upgrade-index") throw stateError();
+}
+
 // Lock names are deliberately fixed. The private root and cooperating operators
 // are the trust boundary, not protection against hostile root/current-UID peers.
 export async function withHostState(root, callback) {
@@ -66,7 +80,7 @@ export async function withHostState(root, callback) {
     // The producer drain can reject after the guarded action has returned.
     // Unreaped work is uncertain regardless of which rejection path reaches us.
     uncertain ||= error?.durabilityUncertain === true || error?.terminationConfirmed === false;
-    return stateError(uncertain);
+    return carryHostFailure(error, stateError(uncertain));
   };
   try {
     await assertPrivateRoot(root);
@@ -121,6 +135,7 @@ export async function withHostState(root, callback) {
       return result;
     }
     async function save(next) {
+      await assertLegacyWriteOwnership(root);
       next.sequence = state.sequence + 1;
       validateState(next);
       await writePrivateFile(root, "state.json", Buffer.from(JSON.stringify(next) + "\n"), {
@@ -221,7 +236,7 @@ export async function withHostState(root, callback) {
       active = false;
       await pending?.catch(() => {});
     }
-    if (callbackError || uncertain) throw stateError(uncertain);
+    if (callbackError || uncertain) throw carryHostFailure(callbackError, stateError(uncertain));
   } catch (error) {
     failure = latch(error);
   } finally {
@@ -241,7 +256,7 @@ export async function withHostState(root, callback) {
       }
     }
   }
-  if (uncertain) throw stateError(true);
+  if (uncertain) throw carryHostFailure(failure, stateError(true));
   if (retirementFailed) throw lockReleaseError();
   if (failure) throw failure;
   return outcome;

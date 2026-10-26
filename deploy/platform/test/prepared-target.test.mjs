@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { appendFile } from "node:fs/promises";
 import { validatePreparedTarget } from "../host/prepared-target.mjs";
 import { preparedFixture } from "./prepared-target-fixture.mjs";
+import { productionFixture } from "./production-activation-fixture.mjs";
 import { withHostState } from "../host/state.mjs";
 
 const mutations = {
@@ -279,3 +280,153 @@ for (const mutation of [
     };
     await assert.rejects(validatePreparedTarget(f.record, f.expected));
   });
+
+function preparedClock(t, f) {
+  const clock = { now: Date.now() };
+  t.mock.method(Date, "now", () => clock.now);
+  const inspect = f.expected.workload.inspect;
+  f.expected.workload.inspect = async (...args) => ({
+    ...(await inspect(...args)),
+    observedAt: new Date(clock.now).toISOString(),
+  });
+  const observe = f.expected.writerFence.observe;
+  f.expected.writerFence.observe = async (...args) => ({
+    ...(await observe(...args)),
+    observedAt: new Date(clock.now).toISOString(),
+  });
+  return clock;
+}
+
+test("slow writer fence is followed by a fresh complete cleanup observation", async (t) => {
+  const f = await preparedFixture(t);
+  f.expected.workload = cleanedWorkload(f);
+  const clock = preparedClock(t, f);
+  const observe = f.expected.writerFence.observe;
+  f.expected.writerFence.observe = async (...args) => {
+    const value = await observe(...args);
+    clock.now += 31000;
+    return { ...value, observedAt: new Date(clock.now).toISOString() };
+  };
+  const result = await validatePreparedTarget(f.record, f.expected);
+  result.recheckFreshness();
+  clock.now += 30001;
+  assert.throws(result.recheckFreshness);
+});
+
+test("unsafe early cleanup denies the writer fence before its producer runs", async (t) => {
+  const f = await preparedFixture(t);
+  f.expected.workload = cleanedWorkload(f);
+  const inspect = f.expected.workload.inspect;
+  f.expected.workload.inspect = async (...args) => {
+    const value = await inspect(...args);
+    value.present.push(value.resources[0]);
+    return value;
+  };
+  let fenceRan = false;
+  f.expected.writerFence.observe = async () => {
+    fenceRan = true;
+    throw Error("must not reach a fence producer with active restore resources");
+  };
+  await assert.rejects(validatePreparedTarget(f.record, f.expected));
+  assert.equal(fenceRan, false);
+});
+
+for (const mutation of ["substituted resource", "foreign resource", "stale", "future", "producer"])
+  test(`cleanup changed after slow fence rejects ${mutation}`, async (t) => {
+    const f = await preparedFixture(t);
+    f.expected.workload = cleanedWorkload(f);
+    const clock = preparedClock(t, f);
+    const observe = f.expected.writerFence.observe;
+    let fenceCompleted = false;
+    f.expected.writerFence.observe = async (...args) => {
+      const value = await observe(...args);
+      clock.now += 31000;
+      fenceCompleted = true;
+      return { ...value, observedAt: new Date(clock.now).toISOString() };
+    };
+    const inspect = f.expected.workload.inspect;
+    f.expected.workload.inspect = async (...args) => {
+      const value = await inspect(...args);
+      if (fenceCompleted) {
+        if (mutation === "substituted resource") value.resources[0].name += "-changed";
+        if (mutation === "foreign resource")
+          value.operationResources.push({ kind: "container", name: "foreign-restore" });
+        if (mutation === "stale") value.observedAt = new Date(clock.now - 30001).toISOString();
+        if (mutation === "future") value.observedAt = new Date(clock.now + 1).toISOString();
+        if (mutation === "producer") value.producerId = "untrusted-producer";
+      }
+      return value;
+    };
+    await assert.rejects(validatePreparedTarget(f.record, f.expected));
+  });
+
+test("slow final cleanup rejects a fence older than 30 seconds", async (t) => {
+  const f = await preparedFixture(t);
+  f.expected.workload = cleanedWorkload(f);
+  const clock = preparedClock(t, f);
+  const observe = f.expected.writerFence.observe;
+  let fenceCompleted = false;
+  f.expected.writerFence.observe = async (...args) => {
+    const value = await observe(...args);
+    fenceCompleted = true;
+    return value;
+  };
+  const inspect = f.expected.workload.inspect;
+  f.expected.workload.inspect = async (...args) => {
+    if (fenceCompleted) clock.now += 31000;
+    return inspect(...args);
+  };
+  await assert.rejects(validatePreparedTarget(f.record, f.expected));
+});
+
+test("final cleanup cannot extend backup freshness", async (t) => {
+  const f = await preparedFixture(t);
+  const began = Date.parse(f.document.startedAt);
+  const clock = { now: began + 1000 };
+  t.mock.method(Date, "now", () => clock.now);
+  const iso = () => new Date(clock.now).toISOString();
+  f.expected.maxAgeMs = 1500;
+  f.document.completedAt = iso();
+  f.evidence.startedAt = iso();
+  f.evidence.completedAt = iso();
+  await f.publish();
+  const restored = f.record.observations.restoredSnapshot.value;
+  restored.inventorySha256 = f.backup.inventorySha256;
+  restored.restoreEvidenceSha256 = f.restoreEvidence.evidenceSha256;
+  for (const value of Object.values(f.record.observations)) value.observedAt = iso();
+  f.expected.workload = cleanedWorkload(f);
+  const observe = f.expected.writerFence.observe;
+  let fenceCompleted = false;
+  f.expected.writerFence.observe = async (...args) => {
+    const value = await observe(...args);
+    fenceCompleted = true;
+    return { ...value, observedAt: iso() };
+  };
+  const inspect = f.expected.workload.inspect;
+  f.expected.workload.inspect = async (...args) => {
+    if (fenceCompleted) clock.now += 1000;
+    return { ...(await inspect(...args)), observedAt: iso() };
+  };
+  await assert.rejects(validatePreparedTarget(f.record, f.expected));
+});
+
+test("final cleanup cannot extend production authorization expiry", async (t) => {
+  const f = await productionFixture(t);
+  f.expected.workload = cleanedWorkload(f);
+  const clock = preparedClock(t, f);
+  f.record.observations.egress.value.expiresAt = new Date(clock.now + 1000).toISOString();
+  await validatePreparedTarget(f.record, f.expected);
+  const observe = f.expected.writerFence.observe;
+  let fenceCompleted = false;
+  f.expected.writerFence.observe = async (...args) => {
+    const value = await observe(...args);
+    fenceCompleted = true;
+    return value;
+  };
+  const inspect = f.expected.workload.inspect;
+  f.expected.workload.inspect = async (...args) => {
+    if (fenceCompleted) clock.now += 1001;
+    return inspect(...args);
+  };
+  await assert.rejects(validatePreparedTarget(f.record, f.expected));
+});

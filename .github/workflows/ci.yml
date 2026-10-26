@@ -364,7 +364,12 @@ jobs:
     # browser suites run in their own jobs below. On run 39454185717 these steps
     # took about 21 minutes of the old 55-minute job, image builds without a
     # layer cache included.
-    timeout-minutes: 40
+    # Run 40296243127 used 69min without completing its first forward namespace;
+    # the second required serial scenario and final stack still remained.
+    # Give this CI job 150min for the measured compound work. This is only an
+    # outer resource budget: process/operation deadlines, 30s observations,
+    # both scenarios and cleanup acceptance remain unchanged.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -480,6 +485,25 @@ jobs:
         with:
           name: platform-upgrade-return-evidence
           path: ${{ runner.temp }}/platform-upgrade-return.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+      - name: Rehearse post-migration forward recovery without a second migrator
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          import { join } from "node:path";
+          import { rehearseForwardRecovery } from "./deploy/platform/forward-ci.mjs";
+          await rehearseForwardRecovery(["--local-ci"], {
+            writeResult: (result) => writeFile(join(process.env.RUNNER_TEMP, "platform-forward-recovery.json"), JSON.stringify(result) + "\n", { mode: 0o600, flag: "wx" }),
+          });
+          NODE
+      - name: Preserve safe isolated forward evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-forward-recovery-evidence
+          path: ${{ runner.temp }}/platform-forward-recovery.json
           if-no-files-found: error
           overwrite: false
           retention-days: 7

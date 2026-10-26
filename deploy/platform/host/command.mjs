@@ -129,6 +129,7 @@ export async function measureActivationProjection(
 }
 
 export const HOST_BUNDLE_FILES = Object.freeze([
+  "deploy/platform/host/failure-diagnostic.mjs",
   "deploy/platform/host/upgrade-state.mjs",
   "deploy/platform/host/upgrade-admission.mjs",
   "deploy/platform/host/upgrade-phase-admission.mjs",
@@ -488,6 +489,7 @@ async function buildHostAdapters(loaded, options, createObservers) {
       workerPath: join(record.installedRoot, "deploy/platform/host/probe-worker.mjs"),
       verifySources,
       registerCleanup: options.registerProbeCleanup,
+      beforeFailureCleanup: options.beforeFailureCleanup,
     });
     same(result.tls, op.preparedTarget.observations.tls.value);
     same(

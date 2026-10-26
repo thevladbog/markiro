@@ -1,6 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { withHostState, withHeldHostState } from "./state.mjs";
+import { withHostState, withHeldHostState, assertLegacyWriteOwnership } from "./state.mjs";
 import { stateError, validateBackup, validateIdentity } from "./state-validation.mjs";
 import { createPrivateDirectory, readPrivateFile, writePrivateFile } from "./files.mjs";
 import { activationHash, snapshotActivation } from "./recovery-activation-admission.mjs";
@@ -74,6 +74,7 @@ export async function readUpgradePredecessor(root, identity) {
 export async function withUpgradeState(root, input, callback, { now = Date.now } = {}) {
   const admission = snapshotActivation(input);
   return withHostState(root, async (host) => {
+    await assertLegacyWriteOwnership(root);
     let active = true,
       state,
       index,
@@ -102,6 +103,7 @@ export async function withUpgradeState(root, input, callback, { now = Date.now }
         throw stateError();
     };
     const save = async (next, first = false) => {
+      await assertLegacyWriteOwnership(root);
       const nextBytes = bytes(next);
       await writePrivateFile(root, stateName, nextBytes, { replace: !first });
       // A crash between these durable writes leaves mismatched hashes and the
@@ -249,6 +251,7 @@ export async function withUpgradePhaseState(root, input, callback, { now = Date.
   validateIdentity(decision.identity);
   if (!["activate", "return-old"].includes(decision.phase)) throw stateError();
   return withHostState(root, async (host) => {
+    await assertLegacyWriteOwnership(root);
     let active = true,
       state,
       index,
@@ -301,6 +304,7 @@ export async function withUpgradePhaseState(root, input, callback, { now = Date.
     };
     const check = () => validateUpgradePhaseAdmission(decision, { priorBytes, prior, now: now() });
     const save = async (next) => {
+      await assertLegacyWriteOwnership(root);
       validateUpgradeJournal(next, prior);
       const encoded = bytes(next);
       await writePrivateFile(root, stateName, encoded, { replace: true });

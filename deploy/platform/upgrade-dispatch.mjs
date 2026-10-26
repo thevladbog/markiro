@@ -1,6 +1,38 @@
 import { canonical, ensure, keys } from "./backup/schemas.mjs";
 import { canonicalId } from "./release-admission.mjs";
 import { REPOSITORY } from "./admission-github.mjs";
+// One strict phase table for receiver, executor, loader and outcome validation.
+const phases = Object.freeze({
+  prepare: Object.freeze({
+    kind: "platform-upgrade-host-operation",
+    status: "backup-verified",
+    sshPhase: "prepare",
+  }),
+  activate: Object.freeze({
+    kind: "platform-upgrade-host-operation",
+    status: "healthy",
+    sshPhase: "activate",
+  }),
+  "return-old": Object.freeze({
+    kind: "platform-upgrade-host-operation",
+    status: "returned-old",
+    sshPhase: "prepare",
+  }),
+  "post-migration-prepare": Object.freeze({
+    kind: "platform-forward-recovery-host-operation",
+    status: "backup-verified",
+    sshPhase: "prepare",
+  }),
+  "post-migration-activate": Object.freeze({
+    kind: "platform-forward-recovery-host-operation",
+    status: "healthy",
+    sshPhase: "activate",
+  }),
+});
+export function upgradePhase(value) {
+  ensure(typeof value === "string" && Object.hasOwn(phases, value));
+  return phases[value];
+}
 const login = (value) =>
   typeof value === "string" && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u.test(value);
 const user = (value) =>

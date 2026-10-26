@@ -415,6 +415,22 @@ for (const locale of ["ru", "en"])
       });
     });
 
+// Pixel assertions must observe the bundled font, rather than transient platform
+// fallback metrics while font-display:swap is still resolving.
+async function waitForPrinterFonts(page: Page) {
+  const span = page.getByRole("radio", { name: "TSPL", exact: true }).locator("..").locator("span");
+  await span.waitFor({ state: "attached" });
+  await span.evaluate(async (span) => {
+    const style = getComputedStyle(span);
+    const faces = await document.fonts.load(
+      `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,
+      "ZPL TSPL",
+    );
+    if (faces.length === 0) throw new Error("Missing bundled printer language font");
+    await document.fonts.ready;
+  });
+}
+
 test("printer settings remain usable on the existing 1024 by 768 floor viewport", async ({
   page,
 }, info) => {
@@ -424,6 +440,7 @@ test("printer settings remain usable on the existing 1024 by 768 floor viewport"
     "data-gallery-state",
     "setup-printer",
   );
+  await waitForPrinterFonts(page);
   const dpi = page.getByRole("combobox", { name: "Printer resolution", exact: true });
   await expect(dpi).toBeInViewport({ ratio: 1 });
   await dpi.selectOption("300");
@@ -443,6 +460,57 @@ test("printer settings remain usable on the existing 1024 by 768 floor viewport"
   expect(footer && footer.y + footer.height).toBeLessThanOrEqual(768);
   await expect(page.getByRole("button", { name: "Done", exact: true })).toBeEnabled();
   await page.screenshot({ path: info.outputPath("station-printer-1024-en.png") });
+});
+
+test("printer layout measurement waits for the bundled font response", async ({ page }) => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const font = /ibm-plex-sans-latin-600-normal\.woff2(?:\?.*)?$/u;
+  const requested = page.waitForRequest(font);
+  await page.route(font, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  try {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`${station}/?gallery=1&state=setup-printer&locale=en`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByTestId("station-screen-gallery")).toHaveAttribute(
+      "data-gallery-state",
+      "setup-printer",
+    );
+    await requested;
+    await page.getByRole("radio", { name: "TSPL", exact: true }).waitFor({ state: "attached" });
+    let completed = false;
+    const ready = waitForPrinterFonts(page).then(() => {
+      completed = true;
+    });
+    // A protocol round trip ensures the measurement request has started while
+    // the font response remains held; no sleeps or timeout changes are needed.
+    await page.evaluate(() => undefined);
+    expect(completed).toBe(false);
+    release();
+    await ready;
+    expect(
+      await page.evaluate(() => {
+        const faces = [...document.fonts].filter(
+          (face) =>
+            face.family === "IBM Plex Sans" &&
+            face.weight === "600" &&
+            face.unicodeRange.startsWith("U+0-FF"),
+        );
+        return faces.length > 0 && faces.every((face) => face.status === "loaded");
+      }),
+    ).toBe(true);
+  } finally {
+    release();
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+  }
 });
 
 for (const locale of ["ru", "en"])
@@ -594,7 +662,7 @@ for (const locale of ["ru", "en"])
     test(`station creates pallet aggregation using product capacity and separate labels ${locale} ${theme}`, async ({
       page,
     }, info) => {
-      const writes: Record<string, unknown>[] = [];
+      const writes: unknown[] = [];
       const unexpected: string[] = [];
       const sqliteRequests: string[] = [];
       page.on("request", (request) => {

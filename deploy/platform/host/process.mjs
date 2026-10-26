@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { assertPrivateRootSync } from "./files.mjs";
 
+import { noteHostProcessFailure } from "./failure-diagnostic.mjs";
+
 const termGraceMs = 2000;
 const killReapMs = 2000;
 
@@ -38,6 +40,14 @@ function explicitEnvironment(env) {
 // its operation-labelled, deterministically named container before recovery.
 // terminationConfirmed=false must retain unresolved operation state.
 export async function runHostProcess(options) {
+  return runBoundedHostProcess(options, 1048576);
+}
+// Separate trusted producer for a migration TAR only. Ordinary command/control
+// output retains its 1 MiB ceiling; stderr never receives the archive budget.
+export async function runHostArchiveProcess(options) {
+  return runBoundedHostProcess(options, 16 * 1048576);
+}
+async function runBoundedHostProcess(options, maxOutputBytes) {
   let executable, args, cwd, env, timeoutMs, outputLimitBytes, signal;
   let childEnv;
   let childArgs;
@@ -56,7 +66,7 @@ export async function runHostProcess(options) {
       timeoutMs > 3600000 ||
       !Number.isSafeInteger(outputLimitBytes) ||
       outputLimitBytes <= 0 ||
-      outputLimitBytes > 1048576 ||
+      outputLimitBytes > maxOutputBytes ||
       (signal !== undefined && !(signal instanceof AbortSignal))
     )
       throw processError("spawn", true);
@@ -73,6 +83,7 @@ export async function runHostProcess(options) {
 
   return new Promise((resolve, reject) => {
     let child;
+    let exitStatus = null;
     let closed = false;
     let settled = false;
     let reason;
@@ -110,7 +121,13 @@ export async function runHostProcess(options) {
       if (reason || !confirmed) {
         output.stdout.length = 0;
         output.stderr.length = 0;
-        reject(processError(confirmed ? reason : "termination", confirmed));
+        reject(
+          noteHostProcessFailure(
+            processError(confirmed ? reason : "termination", confirmed),
+            executable,
+            exitStatus,
+          ),
+        );
       } else {
         resolve({ stdout: Buffer.concat(output.stdout), stderr: Buffer.concat(output.stderr) });
       }
@@ -168,13 +185,18 @@ export async function runHostProcess(options) {
       child[stream].on("data", (bytes) => {
         if (reason || settled) return;
         sizes[stream] += bytes.length;
-        if (sizes[stream] > outputLimitBytes) stop("output-limit");
+        if (
+          sizes[stream] >
+          (stream === "stderr" ? Math.min(outputLimitBytes, 1048576) : outputLimitBytes)
+        )
+          stop("output-limit");
         else output[stream].push(bytes);
       });
       child[stream].on("error", () => stop("exit"));
     }
     child.on("error", () => stop("spawn"));
     child.on("exit", (code, exitSignal) => {
+      exitStatus = code;
       if (code !== 0 || exitSignal !== null) stop("exit");
     });
     child.on("close", () => {
