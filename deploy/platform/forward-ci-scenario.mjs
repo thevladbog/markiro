@@ -27,7 +27,7 @@ import { observerProducer } from "./host/observe.mjs";
 import { measureActivationProjection } from "./host/command.mjs";
 import { productionAuthorization } from "./test/production-activation-fixture.mjs";
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
-import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
+import { sanitizeHostFailure, hostFailureSites } from "./host/failure-diagnostic.mjs";
 export const forwardActivationPhases = Object.freeze([
   "activation-admitted",
   "api-started",
@@ -958,7 +958,9 @@ async function runScenario(c, mode, checks) {
       }
       const diagnostic = forwardActivationFailure(error, forwardIdentity.operationId, record);
       c.progress(`forward activation failure: ${diagnostic.phase}`);
-      process.stderr.write(`Rehearsal activation failure: ${JSON.stringify(diagnostic)}\n`);
+      process.stderr.write(
+        `Rehearsal activation failure: ${JSON.stringify({ ...diagnostic, sites: hostFailureSites(error) })}\n`,
+      );
       throw error;
     }
   };

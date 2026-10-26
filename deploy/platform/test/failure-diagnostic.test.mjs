@@ -146,3 +146,38 @@ test("fixed Python ZIP verifier origin records only basename and numeric status"
   assert.equal(record.exitStatus, 7);
   assert.doesNotMatch(JSON.stringify(record), new RegExp(secret, "u"));
 });
+
+test("only constructor-captured validation sites survive wrappers without private stack text", async (t) => {
+  const { preparedFixture } = await import("./prepared-target-fixture.mjs");
+  const { validatePreparedTarget } = await import("../host/prepared-target.mjs");
+  const { hostFailureSites, carryHostFailure } = await import("../host/failure-diagnostic.mjs");
+  const f = await preparedFixture(t, { nested: true });
+  f.record.observations.keyContinuity.value.decryptionVerified = false;
+  let first;
+  await assert.rejects(validatePreparedTarget(f.record, f.expected), (error) => {
+    first = error;
+    return error.code === "ERR_DATABASE_BACKUP";
+  });
+  first.stack = secret;
+  const wrapped = carryHostFailure(first, new Error(secret));
+  const sites = hostFailureSites(carryHostFailure(wrapped, new Error(secret)));
+  assert.ok(sites.some((site) => site.module === "host/prepared-target.mjs"));
+  assert.ok(sites.length > 0 && sites.length <= 3);
+  for (const site of sites) {
+    assert.deepEqual(Object.keys(site), ["module", "line"]);
+    assert.ok(Number.isInteger(site.line) && site.line > 0 && site.line <= 10000);
+    assert.equal(Object.isFrozen(site), true);
+  }
+  assert.equal(Object.isFrozen(sites), true);
+  assert.equal(JSON.stringify(sites).includes(secret), false);
+  assert.equal(JSON.stringify(sites).includes(f.root), false);
+  assert.equal(Object.hasOwn(sanitizeHostFailure(wrapped, context), "sites"), false);
+  const forged = Object.assign(new Error(secret), { code: "ERR_DATABASE_BACKUP" });
+  Object.defineProperty(forged, "stack", {
+    get() {
+      throw new Error(secret);
+    },
+  });
+  assert.deepEqual(hostFailureSites(forged), []);
+  assert.deepEqual(hostFailureSites(carryHostFailure(forged, new Error(secret))), []);
+});

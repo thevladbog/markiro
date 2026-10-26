@@ -1,9 +1,12 @@
 import { basename } from "node:path";
 import { writePrivateFile } from "./files.mjs";
+import { backupFailureSites } from "../backup/schemas.mjs";
 
 // Only safe, bounded metadata crosses wrappers. Never retain the error, cause,
 // process arguments, environment, stack or output in this map.
 const origins = new WeakMap();
+const validationSites = new WeakMap();
+export const hostFailureSites = (error) => validationSites.get(error) ?? backupFailureSites(error);
 const confirmations = new WeakMap();
 const records = new WeakSet();
 const codes = new Set([
@@ -142,6 +145,7 @@ export function noteHostProcessFailure(error, executable, exitStatus) {
 }
 export function carryHostFailure(source, target) {
   origins.set(target, safeOrigin(source));
+  validationSites.set(target, hostFailureSites(source));
   confirmations.set(
     target,
     own(source, "terminationConfirmed") ?? (object(source) ? confirmations.get(source) : undefined),

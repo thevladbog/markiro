@@ -679,13 +679,13 @@ test("forward restore directory larger than control stdin is copied and fully ve
 
 test("forward activation inputs normalize real Buffer SQL output and retain complete restore proof", async (t) => {
   const { activationInputs } = await import("../forward-ci-scenario.mjs");
-  const { preparedFixture } = await import("./prepared-target-fixture.mjs");
+  const { productionFixture } = await import("./production-activation-fixture.mjs");
   const { activationTables } = await import("../host/prepared-target.mjs");
   const { digest } = await import("../backup/schemas.mjs");
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const { join } = await import("node:path");
-  const f = await preparedFixture(t, { nested: true });
+  const f = await productionFixture(t, { nested: true });
   await promisify(execFile)("/usr/bin/openssl", [
     "req",
     "-x509",
@@ -756,6 +756,15 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
   });
   assert.deepEqual(result.preparedTarget.observations.egress.value.review.projection, projection);
   assert.equal(c.evidence.differences.length, 1);
+  const { validatePreparedTarget } = await import("../host/prepared-target.mjs");
+  await validatePreparedTarget(result.preparedTarget, {
+    root: f.root,
+    identity: f.identity,
+    configuration: f.expected.configuration,
+    ...result.preparedPolicy,
+    writerFence: f.expected.writerFence,
+    workload: f.expected.workload,
+  });
 });
 
 test("projection transport uses the pinned absolute DinD CLI without widening the host PATH", async (t) => {
