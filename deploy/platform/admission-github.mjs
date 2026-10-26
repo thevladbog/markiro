@@ -1,5 +1,5 @@
 import { canonicalId } from "./release-admission.mjs";
-import { withAdmissionReadStage } from "./admission-read-failure.mjs";
+import { withAdmissionReadStage } from "./host/admission-read-failure.mjs";
 
 export const REPOSITORY = "thevladbog/markiro";
 const BASE = `https://api.github.com/repos/${REPOSITORY}/actions`;

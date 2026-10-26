@@ -1,4 +1,4 @@
-import { carryAdmissionReadFailure } from "./admission-read-failure.mjs";
+import { carryAdmissionReadFailure } from "./host/admission-read-failure.mjs";
 import { validatePlatformCiEvidence } from "./release-evidence.mjs";
 
 /** Only GitHub HTTPS, no redirects, fixed attempt and complete bounded pagination. */

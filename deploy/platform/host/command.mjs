@@ -1,5 +1,5 @@
 import { carryHostFailure } from "./failure-diagnostic.mjs";
-import { withAdmissionReadStage } from "../admission-read-failure.mjs";
+import { withAdmissionReadStage } from "./admission-read-failure.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -171,7 +171,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/release-admission.mjs",
   "deploy/platform/release-ci.mjs",
   "deploy/platform/admission-github.mjs",
-  "deploy/platform/admission-read-failure.mjs",
+  "deploy/platform/host/admission-read-failure.mjs",
   "deploy/platform/admission-archive.py",
   "deploy/production/release-manifest.mjs",
   "deploy/production/cli-main.mjs",

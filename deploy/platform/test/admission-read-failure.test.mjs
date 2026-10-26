@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { githubTransport } from "../admission-github.mjs";
-import { admissionReadFailure, withAdmissionReadStage } from "../admission-read-failure.mjs";
+import { admissionReadFailure, withAdmissionReadStage } from "../host/admission-read-failure.mjs";
 import { noteHostProcessFailure, sanitizeHostFailure } from "../host/failure-diagnostic.mjs";
 import { observationError } from "../host/observe.mjs";
 

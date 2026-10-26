@@ -254,7 +254,7 @@ for (const change of [
 ])
   test(`historical read diagnostic ${change}`, async (t) => {
     const { withAdmissionReadStage, admissionReadFailure } =
-      await import("../admission-read-failure.mjs");
+      await import("../host/admission-read-failure.mjs");
     const { sanitizeHostFailure } = await import("../host/failure-diagnostic.mjs");
     const f = await forwardSuccessorFixture(t);
     let error;

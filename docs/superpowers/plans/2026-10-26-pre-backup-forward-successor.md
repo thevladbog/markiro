@@ -30,7 +30,7 @@
 
 ## File map and fixed interfaces
 
-- New `deploy/platform/admission-read-failure.mjs`: `withAdmissionReadStage(stage, action)` creates/propagates trusted bounded failure metadata; `admissionReadFailure(error)` retrieves only metadata held in its WeakMap. Fixed stages: publisher, artifact-metadata, artifact-download, artifact-archive, product-ci, executor-ci, publisher-recheck. Fixed reasons: validation, http, body-limit, redirect, timeout, transport. HTTP status100–599 or null; bounded integer byte/limit/hop fields only. It never retains the error/body/URL/token itself.
+- New `deploy/platform/host/admission-read-failure.mjs`: `withAdmissionReadStage(stage, action)` creates/propagates trusted bounded failure metadata; `admissionReadFailure(error)` retrieves only metadata held in its WeakMap. Fixed stages: publisher, artifact-metadata, artifact-download, artifact-archive, product-ci, executor-ci, publisher-recheck. Fixed reasons: validation, http, body-limit, redirect, timeout, transport. HTTP status100–599 or null; bounded integer byte/limit/hop fields only. It never retains the error/body/URL/token itself.
 - Modify `admission-github.mjs`, `host/command.mjs`, `host/failure-diagnostic.mjs`: tag the actual failed trusted read/validation stage, preserve the first origin across existing wrappers, persist optional strict `admissionRead` metadata. Existing failures without metadata retain their existing shape.
 - New `host/forward-successor-admission.mjs`: exports `failedForwardNames`, `readFailedForwardPredecessor(root, operationId, {successorOperationId, indexFromSuccessorArchive=false}={})` and `validateForwardSuccessorAdmission(input, {failedForwardBytes, failedUpgradeBytes, originalPredecessorBytes, productMigrationProof, now})`.
 - New `host/forward-history.mjs`: `readForwardHistory(root, admission, {ownIndexArchive}={})` returns explicit `{original, failedUpgrade, failedForward, immediateIndex}` byte records. Only a fixed current global index or the current operation's own fixed predecessor-index may supply immediate ownership. Older upgrade index comes from243's pinned predecessor archive, never masquerades as current.
@@ -38,9 +38,11 @@
 - Existing `host/forward-index-handoff.py` stays the fixed NOREPLACE rename/fsync bridge; do not replace it with ordinary rename or copying an old index.
 - Update existing forward fixtures/rehearsal, focused tests, production runbook and this execution journal. No app/migration/lockfile edits.
 
+Implementation packaging correction: the shared diagnostic module lives in `host/` so the existing closed backup-worker source cohort contains it. The pinned historical cdae executor keeps its original root-level path; its byte closure is never rewritten. Public exports and every diagnostic/acceptance boundary remain unchanged.
+
 ### Task 1: Bounded original-stage diagnostics
 
-**Files:** create `admission-read-failure.mjs`, `test/admission-read-failure.test.mjs`; modify `admission-github.mjs`, `host/command.mjs`, `host/failure-diagnostic.mjs`, source closure lists and adjacent diagnostic/admission tests.
+**Files:** create `host/admission-read-failure.mjs`, `test/admission-read-failure.test.mjs`; modify `admission-github.mjs`, `host/command.mjs`, `host/failure-diagnostic.mjs`, source closure lists and adjacent diagnostic/admission tests.
 
 **Interfaces:** produces the stage wrapper/getter and optional `admissionRead` metadata above. The wrapper's callback is trusted compiled code; untrusted error properties are never copied.
 

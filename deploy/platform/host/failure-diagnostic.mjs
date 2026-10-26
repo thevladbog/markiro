@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { admissionReadFailure, carryAdmissionReadFailure } from "../admission-read-failure.mjs";
+import { admissionReadFailure, carryAdmissionReadFailure } from "./admission-read-failure.mjs";
 import { writePrivateFile } from "./files.mjs";
 import { backupFailureSites } from "../backup/schemas.mjs";
 
