@@ -49,6 +49,7 @@ import {
   validateRehearsalEnvironment,
   rehearsalTemporaryBase,
   cleanupRehearsalResources,
+  rehearsalCleanupStep,
 } from "./upgrade-ci-guards.mjs";
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1182,6 +1183,7 @@ export async function rehearseUpgrade(
         const diagnostic = rehearsalFailure("owned cleanup", error);
         process.stderr.write(
           `Rehearsal cleanup failure: ${JSON.stringify({
+            step: rehearsalCleanupStep(error),
             exitStatus: diagnostic.exitStatus,
             executable: diagnostic.executable,
             processReason: diagnostic.processReason,

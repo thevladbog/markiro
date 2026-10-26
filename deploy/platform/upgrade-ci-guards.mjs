@@ -111,35 +111,50 @@ export function validateRehearsalEnvironment(value, generated, root, base) {
     }
   }
 }
+// Fixed local step names only; caller-owned error fields are never consulted.
+const cleanupSteps = new WeakMap();
+export const rehearsalCleanupStep = (error) => cleanupSteps.get(error) ?? null;
 export async function cleanupRehearsalResources(expected, io) {
-  // Inspect both before removing either. Name alone never authorizes cleanup.
-  const container = await io.inspectContainer(expected.id),
-    volume = await io.inspectVolume(expected.name);
-  same(
-    captureRehearsalResources({ invocationId: expected.invocationId, container, volume }),
-    expected,
-  );
-  await io.removeContainer(expected.id);
-  const after = await io.inspectVolume(expected.name);
-  same(
-    {
-      name: after.Name,
-      createdAt: after.CreatedAt,
-      mountpoint: after.Mountpoint,
-      labels: after.Labels,
-      options: after.Options ?? {},
-      driver: after.Driver,
-    },
-    {
-      name: volume.Name,
-      createdAt: volume.CreatedAt,
-      mountpoint: volume.Mountpoint,
-      labels: volume.Labels,
-      options: volume.Options ?? {},
-      driver: volume.Driver,
-    },
-  );
-  await io.removeVolume(expected.name);
+  let step = "inspect-container";
+  try {
+    // Inspect both before removing either. Name alone never authorizes cleanup.
+    const container = await io.inspectContainer(expected.id);
+    step = "inspect-volume";
+    const volume = await io.inspectVolume(expected.name);
+    step = "verify-ownership";
+    same(
+      captureRehearsalResources({ invocationId: expected.invocationId, container, volume }),
+      expected,
+    );
+    step = "remove-container";
+    await io.removeContainer(expected.id);
+    step = "verify-volume";
+    const after = await io.inspectVolume(expected.name);
+    same(
+      {
+        name: after.Name,
+        createdAt: after.CreatedAt,
+        mountpoint: after.Mountpoint,
+        labels: after.Labels,
+        options: after.Options ?? {},
+        driver: after.Driver,
+      },
+      {
+        name: volume.Name,
+        createdAt: volume.CreatedAt,
+        mountpoint: volume.Mountpoint,
+        labels: volume.Labels,
+        options: volume.Options ?? {},
+        driver: volume.Driver,
+      },
+    );
+    step = "remove-volume";
+    await io.removeVolume(expected.name);
+  } catch (error) {
+    if (error !== null && ["object", "function"].includes(typeof error))
+      cleanupSteps.set(error, step);
+    throw error;
+  }
 }
 
 export function rehearsalStagingNetwork(container) {

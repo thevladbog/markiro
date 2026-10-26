@@ -722,3 +722,49 @@ for (const field of ["container", "volume", "ipv4", "ipv6"])
     readers[field] = async () => (field.startsWith("ipv") ? "default via foreign" : {});
     await assert.rejects(verifyRehearsalIsolation(f.invocationId, readers, expected));
   });
+
+test("cleanup records only its exact owned step without reading caller diagnostics", async () => {
+  const { rehearsalCleanupStep } = await import("../upgrade-ci-guards.mjs");
+  for (const step of [
+    "inspect-container",
+    "inspect-volume",
+    "verify-ownership",
+    "remove-container",
+    "verify-volume",
+    "remove-volume",
+  ]) {
+    const f = fixture(),
+      expected = captureRehearsalResources(f);
+    const original = new Error("PRIVATE-CLEANUP-OUTPUT");
+    Object.defineProperty(original, "cleanupStep", {
+      get() {
+        throw new Error("Do not read caller metadata");
+      },
+    });
+    let volumes = 0;
+    const io = {
+      inspectContainer: async () => {
+        if (step === "inspect-container") throw original;
+        return step === "verify-ownership" ? { ...f.container, Id: "b".repeat(64) } : f.container;
+      },
+      inspectVolume: async () => {
+        if (++volumes === 1 && step === "inspect-volume") throw original;
+        if (volumes === 2 && step === "verify-volume")
+          return { ...f.volume, CreatedAt: "2026-10-24T01:00:00Z" };
+        return f.volume;
+      },
+      removeContainer: async () => {
+        if (step === "remove-container") throw original;
+      },
+      removeVolume: async () => {
+        if (step === "remove-volume") throw original;
+      },
+    };
+    await assert.rejects(cleanupRehearsalResources(expected, io), (error) => {
+      assert.equal(rehearsalCleanupStep(error), step);
+      if (!["verify-ownership", "verify-volume"].includes(step)) assert.equal(error, original);
+      return true;
+    });
+  }
+  assert.equal(rehearsalCleanupStep({ cleanupStep: "remove-volume" }), null);
+});

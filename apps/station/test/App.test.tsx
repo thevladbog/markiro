@@ -5666,10 +5666,13 @@ it("gates startup on the current credential's saved label and resumes a remotely
 });
 
 describe("restricted saved-label recovery after restart", () => {
-  async function setup(accepted = true) {
+  async function setup(accepted = true, verificationDelayMs = 0) {
     lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
     const owner = await credentialGenerationOwnership(createCredentialGeneration("mk_key"));
     const h = await openProductLabelWork("required", owner ?? undefined, accepted, true);
+    const verificationApplied = deferred<void>();
+    void verificationApplied.promise.catch(() => {});
+    let verificationPending: Promise<void> | undefined;
     if (accepted) {
       await appendProductLabelEvent(h.exec, h.input.credentialOwnership, {
         ...h.eventBase(2),
@@ -5735,7 +5738,22 @@ describe("restricted saved-label recovery after restart", () => {
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
       if (cmd === "plugin:sql|select") return h.exec.all(query, values);
       if (cmd === "plugin:sql|execute") {
-        await h.exec.run(query, values);
+        const verification =
+          query.includes("INSERT INTO product_label_event_commands") &&
+          values?.includes("verified") === true;
+        const operation = (async () => {
+          if (verification && verificationDelayMs > 0)
+            await new Promise((resolve) => setTimeout(resolve, verificationDelayMs));
+          await h.exec.run(query, values);
+        })();
+        if (verification) {
+          verificationPending = operation;
+          void operation.then(
+            () => verificationApplied.resolve(),
+            (error: unknown) => verificationApplied.reject(error),
+          );
+        }
+        await operation;
         return [0, 0];
       }
       return undefined;
@@ -5749,8 +5767,10 @@ describe("restricted saved-label recovery after restart", () => {
     return {
       h,
       fetch,
+      verificationApplied: verificationApplied.promise,
       close: async () => {
         view.unmount();
+        await verificationPending?.catch(() => {});
         await Promise.resolve();
         h.close();
       },
@@ -5758,7 +5778,9 @@ describe("restricted saved-label recovery after restart", () => {
   }
 
   it("opens only the retained unknown print and reconciles its exact code without productive entry", async () => {
-    const { h, fetch, close } = await setup();
+    // Keep a real SQLite acknowledgement slower than the default UI wait.
+    // The test's existing overall budget still bounds the whole operation.
+    const { h, fetch, close, verificationApplied } = await setup(true, 1100);
     try {
       const resume = await screen.findByRole("button", { name: "Resume saved label" });
       const before = await h.exec.all("SELECT * FROM product_label_accept_commands");
@@ -5770,9 +5792,10 @@ describe("restricted saved-label recovery after restart", () => {
         (await requireProductLabelJob(h.exec, h.input.credentialOwnership, h.input.jobId))
           .projection.attemptState,
       ).toBe("delivery_unknown");
-      act(() => {
+      await act(async () => {
         for (const key of h.input.raw) fireEvent.keyDown(window, { key });
         fireEvent.keyDown(window, { key: "Enter" });
+        await verificationApplied;
       });
       await screen.findByText("Label verified");
       expect(
