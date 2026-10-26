@@ -6,7 +6,9 @@ import { join, dirname } from "node:path";
 import { digest } from "./backup/schemas.mjs";
 import { validateWorkerManifest, recoveryRoleMapping } from "./recovery-ci-helpers.mjs";
 import { hashArchive } from "./backup/files.mjs";
-import { UPGRADE_BUNDLE_FILES } from "./host/upgrade-command.mjs";
+import { stageForwardPredecessor } from "./forward-ci-predecessor.mjs";
+import { readFailedForwardPredecessor } from "./host/forward-successor-admission.mjs";
+import { loadUpgradeOperation, UPGRADE_BUNDLE_FILES } from "./host/upgrade-command.mjs";
 import { extractProductMigrationProof } from "./host/forward-product.mjs";
 import { observeForwardMigrationLedger } from "./host/forward-ledger.mjs";
 import { withUpgradePhaseState } from "./host/upgrade-state.mjs";
@@ -251,6 +253,7 @@ async function stage(context) {
   }
   return {
     workerImage: manifest.image.id,
+    priorForward: await stageForwardPredecessor({ parent, command }),
     sourceSha: sha,
     root,
     sourceFiles: Object.fromEntries(
@@ -756,6 +759,207 @@ async function runScenario(c, mode, checks) {
   };
   const observers = createForwardObservers(authority, deps),
     verifyBaseline = createForwardBaselineVerifier(authority, deps);
+  // The prior phase executes its exact historical Git closure and owns its own
+  // proof WeakSet; current bytes are never relabeled as that executor.
+  const historicalExecutor = c.forwardStage.priorForward;
+  await historicalExecutor.verify();
+  const priorAdmission = structuredClone(admission);
+  priorAdmission.identity = {
+    ...structuredClone(forwardIdentity),
+    operationId: randomUUID(),
+    executorSha: historicalExecutor.executorSha,
+  };
+  priorAdmission.executorCi = { runId: "998101", runAttempt: "1" };
+  priorAdmission.dispatch = {
+    toolingSha: historicalExecutor.executorSha,
+    runId: "998102",
+    runAttempt: "1",
+  };
+  const priorProof = await historicalExecutor.product.extractProductMigrationProof({
+    root,
+    identity: priorAdmission.identity,
+    verifySources: historicalExecutor.verify,
+    runProcess,
+  });
+  assert.equal(priorProof.proofSha256, proof.proofSha256);
+  const priorOperation = { ...forwardOperation, identity: priorAdmission.identity };
+  const priorAuthority = {
+    ...authority,
+    candidateOperation: priorOperation,
+    productMigrationProof: priorProof,
+  };
+  const priorObservers = historicalExecutor.observation.createForwardObservers(
+    priorAuthority,
+    deps,
+  );
+  const priorBaseline = historicalExecutor.observation.createForwardBaselineVerifier(
+    priorAuthority,
+    deps,
+  );
+  const priorDirectory = join(
+    parent,
+    "upgrade-operations",
+    priorAdmission.identity.operationId,
+    "post-migration-prepare",
+  );
+  await mkdir(priorDirectory, { recursive: true, mode: 0o700 });
+  const historicalSources = {};
+  // These two older authorities are explicitly synthetic namespace fixtures;
+  // their generated source marker is never imported or used as an executor.
+  for (const [kind, id, ci, dispatch, key] of [
+    [
+      "recovery",
+      admission.originalPredecessor.identity,
+      JSON.parse(built.originalPredecessorBytes.activationOperation).operation.activation.admission
+        .executorCi,
+      null,
+      "recoveryReceiptSha256",
+    ],
+    [
+      "upgrade",
+      admission.failed.identity,
+      f.input.executorCi,
+      f.input.dispatch,
+      "failedReceiptSha256",
+    ],
+  ]) {
+    const marker = Buffer.from(`export const syntheticHistoricalExecutor = "${id.executorSha}";\n`),
+      file = "deploy/platform/synthetic-history.mjs";
+    await put(join(parent, `${kind}-bootstrap`, id.executorSha, file), marker);
+    const receipt = {
+      version: 1,
+      kind: `platform-${kind}-installed-executor`,
+      operationId: id.operationId,
+      executorSha: id.executorSha,
+      ci,
+      installationDispatch: dispatch ?? { toolingSha: id.executorSha, runId: "1", runAttempt: "1" },
+      files: { [file]: digest(marker) },
+    };
+    const receiptBytes = Buffer.from(`${JSON.stringify(receipt)}\n`);
+    await put(join(root, `${kind}-installed-executor-${id.operationId}.json`), receiptBytes);
+    historicalSources[key] = digest(receiptBytes);
+  }
+  const priorRecord = {
+    version: 1,
+    kind: "platform-forward-recovery-host-operation",
+    phase: admission.phase,
+    installedRoot: historicalExecutor.installedRoot,
+    dispatch: priorAdmission.dispatch,
+    authorization,
+    historicalSources,
+    observationPolicy: policy,
+    operation: {
+      root,
+      dockerConfig: join(root, "docker"),
+      admission: priorAdmission,
+      configuration: forwardOperation.configuration,
+      predecessorContainers,
+      connectionFile,
+      roleMapping,
+    },
+  };
+  const priorReceipt = {
+    version: 1,
+    kind: "platform-upgrade-installed-executor",
+    operationId: priorAdmission.identity.operationId,
+    executorSha: historicalExecutor.executorSha,
+    ci: priorAdmission.executorCi,
+    installationDispatch: priorAdmission.dispatch,
+    files: historicalExecutor.files,
+  };
+  await put(
+    join(root, `upgrade-installed-executor-${priorAdmission.identity.operationId}.json`),
+    priorReceipt,
+  );
+  await put(join(root, `forward-backup-runtime-${priorAdmission.identity.operationId}.json`), {
+    version: 1,
+    executorSha: historicalExecutor.executorSha,
+    dockerExecutable: "/usr/bin/docker",
+    endpoint: "unix:///var/run/docker.sock",
+    image: c.forwardStage.workerImage,
+    provenance: "live-source",
+  });
+  await put(join(priorDirectory, "operation.json"), priorRecord);
+  await put(join(priorDirectory, "github-token"), "synthetic-rehearsal-token");
+  await put(join(priorDirectory, "delivery.json"), {
+    phase: admission.phase,
+    dispatch: priorAdmission.dispatch,
+    executorSha: historicalExecutor.executorSha,
+    operationId: priorAdmission.identity.operationId,
+    bundleSha256: digest(Buffer.from(JSON.stringify(priorRecord))),
+  });
+  for (const file of ["execution-fence.json", "command-started.json"])
+    await put(join(priorDirectory, file), {
+      version: 1,
+      phase: admission.phase,
+      executorSha: historicalExecutor.executorSha,
+      operationId: priorAdmission.identity.operationId,
+      dispatch: priorAdmission.dispatch,
+    });
+  c.progress("create exact failed pre-backup forward admission");
+  await assert.rejects(
+    historicalExecutor.preparation.executeForwardPreparation(
+      { root, admission: priorAdmission, configuration: forwardOperation.configuration },
+      {
+        verifyAdmission: async () =>
+          historicalExecutor.reads.withAdmissionReadStage("publisher", async (reject) =>
+            reject("http", { status: 502 }),
+          ),
+        inspectSource: (_context, cap) => priorObservers.inspectSource(cap),
+        inspectSchema: (_context, cap) => priorObservers.inspectSchema(cap),
+        createBackup: () => assert.fail("prior admission must never reach backup"),
+      },
+      { productMigrationProof: priorProof, verifyBaseline: priorBaseline },
+    ),
+  );
+  const priorBytes = await readFailedForwardPredecessor(root, priorAdmission.identity.operationId),
+    priorState = JSON.parse(priorBytes.state),
+    priorFailure = JSON.parse(priorBytes.failure);
+  assert.equal(priorState.sequence, 2);
+  assert.equal(priorState.status, "recovery-required");
+  assert.equal(priorState.sourceRuntime, null);
+  assert.equal(priorState.backup, null);
+  assert.equal(priorState.preparation, null);
+  assert.equal(priorFailure.admissionRead.stage, "publisher");
+  assert.equal(priorFailure.admissionRead.status, 502);
+  checks.preBackupPredecessor = true;
+  admission.kind = "platform-forward-admission-successor";
+  admission.priorForward = {
+    identity: priorAdmission.identity,
+    hashes: Object.fromEntries(
+      Object.entries(priorBytes).map(([key, value]) => [key, digest(value)]),
+    ),
+  };
+  const installedRoot = join(parent, "upgrade-bootstrap", forwardIdentity.executorSha);
+  for (const path of UPGRADE_BUNDLE_FILES)
+    await put(
+      join(installedRoot, path),
+      await readFile(join(parent, "current-sources", path)),
+      path.endsWith("pg_hba.conf") ? 0o644 : 0o600,
+    );
+  const successorRecord = {
+    ...priorRecord,
+    installedRoot,
+    dispatch: admission.dispatch,
+    historicalSources: {
+      ...historicalSources,
+      priorForwardReceiptSha256: admission.priorForward.hashes.installedExecutor,
+    },
+    operation: { ...priorRecord.operation, admission },
+  };
+  const successorReceipt = {
+    version: 1,
+    kind: "platform-upgrade-installed-executor",
+    operationId: forwardIdentity.operationId,
+    executorSha: forwardIdentity.executorSha,
+    ci: admission.executorCi,
+    installationDispatch: admission.dispatch,
+    files: c.forwardStage.sourceFiles,
+  };
+  await put(
+    join(root, `upgrade-installed-executor-${forwardIdentity.operationId}.json`),
+    successorReceipt,
+  );
   const options = { productMigrationProof: proof, verifyBaseline };
   const prepareDirectory = join(
     parent,
@@ -764,6 +968,12 @@ async function runScenario(c, mode, checks) {
     "post-migration-prepare",
   );
   await mkdir(prepareDirectory, { recursive: true, mode: 0o700 });
+  await put(join(prepareDirectory, "operation.json"), successorRecord);
+  const authenticated = await loadUpgradeOperation(prepareDirectory, {
+    hostRoot: parent,
+    ambient: {},
+  });
+  await authenticated.verifySources();
   let backupResult;
   c.progress(
     "forward preparation performs actual source dump, isolated restore, cleanup and Linux index handoff",
@@ -820,6 +1030,25 @@ async function runScenario(c, mode, checks) {
     options,
   );
   assert.ok(backupResult);
+  await authenticated.verifySources();
+  await historicalExecutor.verify();
+  const immediateArchive = await readFile(
+    join(
+      root,
+      "forward-recovery-operations",
+      forwardIdentity.operationId,
+      "predecessor-index.json",
+    ),
+  );
+  assert.deepEqual(immediateArchive, priorBytes.index);
+  const successorIntent = JSON.parse(
+    await readFile(
+      join(root, "forward-recovery-operations", forwardIdentity.operationId, "handoff-intent.json"),
+    ),
+  );
+  assert.equal(successorIntent.failedOperationId, priorAdmission.identity.operationId);
+  assert.equal(successorIntent.expectedSha256, digest(priorBytes.index));
+  checks.directSuccessor = true;
   const verified = await readVerifiedBackup({
     root,
     identity: forwardIdentity,
@@ -1016,8 +1245,21 @@ async function runScenario(c, mode, checks) {
     ),
     false,
   );
+  await authenticated.verifySources();
+  const preservedPrior = await readFailedForwardPredecessor(
+    root,
+    priorAdmission.identity.operationId,
+    { successorOperationId: forwardIdentity.operationId, indexFromSuccessorArchive: true },
+  );
+  for (const key of Object.keys(priorBytes)) assert.deepEqual(preservedPrior[key], priorBytes[key]);
+  await historicalExecutor.verify();
+  checks.preservedHistory = true;
   c.evidence.forward = {
     mode,
+    priorForwardOperationId: priorAdmission.identity.operationId,
+    priorForwardStateSha256: digest(priorBytes.state),
+    priorForwardIndexSha256: digest(priorBytes.index),
+    admissionReadStage: priorFailure.admissionRead.stage,
     operationId: forwardIdentity.operationId,
     failedOperationId: candidate.operationId,
     productSha: forwardProduct,

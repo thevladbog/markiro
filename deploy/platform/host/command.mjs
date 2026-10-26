@@ -1,3 +1,5 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
+import { withAdmissionReadStage } from "./admission-read-failure.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -169,6 +171,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/release-admission.mjs",
   "deploy/platform/release-ci.mjs",
   "deploy/platform/admission-github.mjs",
+  "deploy/platform/host/admission-read-failure.mjs",
   "deploy/platform/admission-archive.py",
   "deploy/production/release-manifest.mjs",
   "deploy/production/cli-main.mjs",
@@ -303,62 +306,87 @@ export async function verifyAdmission(loaded, runProcess, request) {
     workflowRunId: admission.publisher.runId,
     workflowRunAttempt: admission.publisher.runAttempt,
   };
-  const publisher = await fetchPublisher(expected, transport);
-  const artifact = validateArtifact(
-    await transport.json(`/artifacts/${admission.artifact.id}`),
-    publisher,
-    admission.artifact.id,
+  const publisher = await withAdmissionReadStage("publisher", () =>
+    fetchPublisher(expected, transport),
   );
-  ensure(artifact.sha256 === admission.artifact.sha256);
-  const archive = await transport.download(admission.artifact.id);
-  ensure(archive.length === artifact.size && digest(archive) === artifact.sha256);
+  const artifact = await withAdmissionReadStage("artifact-metadata", async () => {
+    const value = validateArtifact(
+      await transport.json(`/artifacts/${admission.artifact.id}`),
+      publisher,
+      admission.artifact.id,
+    );
+    ensure(value.sha256 === admission.artifact.sha256);
+    return value;
+  });
+  const archive = await withAdmissionReadStage("artifact-download", async () => {
+    const value = await transport.download(admission.artifact.id);
+    ensure(value.length === artifact.size && digest(value) === artifact.sha256);
+    return value;
+  });
   const name = `release-check-${randomUUID()}`;
-  await createPrivateDirectory(op.root, name);
+  await withAdmissionReadStage("artifact-archive", () => createPrivateDirectory(op.root, name));
   const temp = join(op.root, name);
-  let terminated = true;
+  let terminated = true,
+    failure;
   try {
-    await writePrivateFile(temp, "release.zip", archive);
-    const result = await runProcess({
-      executable: "/usr/bin/python3",
-      args: [
-        "-I",
-        join(record.installedRoot, "deploy/platform/admission-archive.py"),
-        join(temp, "release.zip"),
-      ],
-      cwd: op.root,
-      env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
-      timeoutMs: 30000,
-      outputLimitBytes: 1048576,
+    await withAdmissionReadStage("artifact-archive", async () => {
+      await writePrivateFile(temp, "release.zip", archive);
+      const result = await runProcess({
+        executable: "/usr/bin/python3",
+        args: [
+          "-I",
+          join(record.installedRoot, "deploy/platform/admission-archive.py"),
+          join(temp, "release.zip"),
+        ],
+        cwd: op.root,
+        env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+        timeoutMs: 30000,
+        outputLimitBytes: 1048576,
+      });
+      const texts = JSON.parse(result.stdout);
+      keys(texts, ["platform-manifest.json", "release-evidence.json"]);
+      const actual = validatePublishedPlatformRelease({
+        manifestText: texts["platform-manifest.json"],
+        evidenceText: texts["release-evidence.json"],
+        expected,
+      });
+      same(actual.manifest, admission.manifest);
+      same(actual.verified, admission.verified);
     });
-    const texts = JSON.parse(result.stdout);
-    keys(texts, ["platform-manifest.json", "release-evidence.json"]);
-    const actual = validatePublishedPlatformRelease({
-      manifestText: texts["platform-manifest.json"],
-      evidenceText: texts["release-evidence.json"],
-      expected,
-    });
-    same(actual.manifest, admission.manifest);
-    same(actual.verified, admission.verified);
-    for (const [sha, ci] of [
-      [admission.manifest.sourceSha, admission.ci],
-      [receipt.executorSha, receipt.ci],
+    for (const [stage, sha, ci] of [
+      ["product-ci", admission.manifest.sourceSha, admission.ci],
+      ["executor-ci", receipt.executorSha, receipt.ci],
     ]) {
-      const current = await fetchPlatformCi(
-        { repository: REPOSITORY, sourceSha: sha, runId: ci.runId },
-        token,
-        transport.ciRequest,
-      );
-      ensure(
-        current.identity.ciRunAttempt === ci.runAttempt && current.identity.ciRunId === ci.runId,
-      );
+      await withAdmissionReadStage(stage, async () => {
+        const current = await fetchPlatformCi(
+          { repository: REPOSITORY, sourceSha: sha, runId: ci.runId },
+          token,
+          transport.ciRequest,
+        );
+        ensure(
+          current.identity.ciRunAttempt === ci.runAttempt && current.identity.ciRunId === ci.runId,
+        );
+      });
     }
-    await recheckPublisher(expected, publisher, transport);
+    await withAdmissionReadStage("publisher-recheck", () =>
+      recheckPublisher(expected, publisher, transport),
+    );
   } catch (error) {
     terminated = error.terminationConfirmed !== false;
-    throw error;
+    failure = error;
   } finally {
-    if (terminated) await rm(temp, { recursive: true });
+    if (terminated) {
+      try {
+        await rm(temp, { recursive: true });
+      } catch (cleanupError) {
+        // A failed cleanup must still reject and retain the owner lock, while
+        // the first trusted read/child origin remains the diagnostic cause.
+        failure = carryHostFailure(failure ?? cleanupError, commandError(cleanupError));
+        failure.durabilityUncertain = true;
+      }
+    }
   }
+  if (failure) throw failure;
 }
 
 function smokeRequest(host, path, sha, status, request = httpsRequest) {

@@ -1,4 +1,5 @@
 import { canonicalId } from "./release-admission.mjs";
+import { withAdmissionReadStage } from "./host/admission-read-failure.mjs";
 
 export const REPOSITORY = "thevladbog/markiro";
 const BASE = `https://api.github.com/repos/${REPOSITORY}/actions`;
@@ -6,19 +7,29 @@ const safeNumber = (value) => Number.isSafeInteger(value) && value > 0;
 function requireTrue(value) {
   if (!value) throw new Error("invalid GitHub admission response");
 }
-async function boundedBytes(response, limit) {
-  const length = response.headers.get("content-length");
-  if (length !== null) requireTrue(/^[0-9]+$/.test(length) && Number(length) <= limit);
+async function boundedBytes(response, limit, reject, details = {}) {
   requireTrue(response.body);
   const reader = response.body.getReader();
   const chunks = [];
   let size = 0;
   try {
+    const length = response.headers.get("content-length");
+    if (length !== null) {
+      requireTrue(/^[0-9]+$/.test(length));
+      if (Number(length) > limit)
+        reject("body-limit", { ...details, status: response.status, limitBytes: limit });
+    }
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      requireTrue(size <= limit);
+      if (size > limit)
+        reject("body-limit", {
+          ...details,
+          status: response.status,
+          limitBytes: limit,
+          bytesSeen: Math.min(size, 2097153),
+        });
       chunks.push(Buffer.from(value));
     }
     return Buffer.concat(chunks, size);
@@ -47,39 +58,66 @@ export function githubTransport(token, request = fetch) {
     });
   }
   async function json(path) {
-    const response = await api(path);
-    requireTrue(response.status === 200);
-    const bytes = await boundedBytes(response, 2 * 1024 * 1024);
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return withAdmissionReadStage(
+      typeof path === "string" && path.startsWith("/artifacts/")
+        ? "artifact-metadata"
+        : "publisher",
+      async (reject) => {
+        const response = await api(path);
+        if (response.status !== 200) {
+          await response.body?.cancel().catch(() => undefined);
+          reject("http", { status: response.status });
+        }
+        const bytes = await boundedBytes(response, 2 * 1024 * 1024, reject);
+        try {
+          return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+        } catch {
+          reject("validation");
+        }
+      },
+    );
   }
   return {
     json,
-    // Reuse the existing CI validator while making its transport bounded too.
     async ciRequest(url) {
       requireTrue(typeof url === "string" && url.startsWith(`${BASE}/runs/`));
       const value = await json(url.slice(BASE.length));
       return { ok: true, json: async () => value };
     },
     async download(artifactId) {
-      requireTrue(canonicalId(artifactId));
-      let response = await api(`/artifacts/${artifactId}/zip`);
-      requireTrue(response.status === 302);
-      for (let hop = 0; hop < 4; hop++) {
-        const location = response.headers.get("location");
+      return withAdmissionReadStage("artifact-download", async (reject) => {
+        requireTrue(canonicalId(artifactId));
+        let response = await api(`/artifacts/${artifactId}/zip`);
+        if (response.status !== 302) {
+          await response.body?.cancel().catch(() => undefined);
+          reject("http", { status: response.status });
+        }
+        for (let hop = 0; hop < 4; hop++) {
+          const location = response.headers.get("location");
+          await response.body?.cancel();
+          requireTrue(typeof location === "string");
+          let url;
+          try {
+            url = new URL(location);
+          } catch {
+            reject("validation", { redirectCount: hop });
+          }
+          requireTrue(url.protocol === "https:" && !url.username && !url.password);
+          response = await request(url.href, {
+            redirect: "manual",
+            signal: AbortSignal.timeout(30000),
+            headers: {},
+          });
+          if (response.status === 200)
+            return boundedBytes(response, 1024 * 1024, reject, { redirectCount: hop + 1 });
+          if (![301, 302, 303, 307, 308].includes(response.status)) {
+            await response.body?.cancel().catch(() => undefined);
+            reject("http", { status: response.status, redirectCount: hop + 1 });
+          }
+        }
         await response.body?.cancel();
-        requireTrue(typeof location === "string");
-        const url = new URL(location);
-        requireTrue(url.protocol === "https:" && !url.username && !url.password);
-        response = await request(url.href, {
-          redirect: "manual",
-          signal: AbortSignal.timeout(30000),
-          headers: {},
-        });
-        if (response.status === 200) return boundedBytes(response, 1024 * 1024);
-        requireTrue([301, 302, 303, 307, 308].includes(response.status));
-      }
-      await response.body?.cancel();
-      throw new Error("download redirect limit");
+        reject("redirect", { redirectCount: 4 });
+      });
     },
   };
 }

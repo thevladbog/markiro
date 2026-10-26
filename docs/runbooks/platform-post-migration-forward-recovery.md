@@ -1,11 +1,33 @@
 # Post-migration forward recovery
 
-This path applies only to the reviewed failed upgrade at terminal
+The base admission applies to the reviewed failed upgrade at terminal
 `api-started/recovery-required`, sequence 14, with `migrationEntered=true`.
+A separately reviewed `platform-forward-admission-successor` variant accepts
+exactly one failed base forward preparation at sequence2/admitted/recovery-required,
+with the migration latch true and sourceRuntime, backup and preparation all null.
 It preserves the already migrated physical PostgreSQL database. It never runs
 another migrator, restores SQL over that database, starts old applications, or
 returns the old version. A different failure shape needs a separately reviewed
-project.
+project. A failed successor is never an eligible predecessor.
+
+The successor design and plan are
+[pre-backup-forward-successor-design](../superpowers/specs/2026-10-26-pre-backup-forward-successor-design.md)
+and [pre-backup-forward-successor](../superpowers/plans/2026-10-26-pre-backup-forward-successor.md).
+The genuine private-file reader must prove no retained runtime, activation directory,
+activation consumption or extra phase/state files. Its exact13file digest set includes
+the prior input, dispatch consumption, installation/runtime receipts, delivery/fence/
+command markers, first failure, handoff receipts, current index and older archive;
+the job token remains private and is never read into that evidence. Historical
+execution-source receipts use their own file lists. New authorization is fresh;
+historical expiry is checked historically and never renewed.
+
+The successor archives the CURRENT failed-forward index directly through the
+existing locked NOREPLACE/fsync handoff. The older failed-upgrade index stays in
+the failed forward operation's own predecessor-index.json. Never restore an older
+global index, patch a journal, delete a marker or replay a consumed run. Any
+uncertainty retains the shared lock. Each protected phase needs its own new run
+and independent approval after immutable inputs and loader readback are ready.
+New actual backup/restore and unique encrypted Mac/Timeweb copies remain mandatory.
 
 The approved design is
 [post-migration-forward-recovery-design](../superpowers/specs/2026-10-25-post-migration-forward-recovery-design.md).
@@ -27,8 +49,16 @@ this gate.
 The forward harness uses two fresh isolated nested daemons serially: one reaches
 healthy; another injects failure after actual API replacement and verifies exact
 owned cleanup. Each applies candidate migrations once to its generated database,
-fails canonically before API-up, then executes forward preparation on that same
-migrated physical database. There is no retry of a failed forward operation.
+fails canonically before API-up, then executes a base forward admission from the
+exact historical Git executor cdae4e1ab3faf57c4941d8373aeba345fa0ef5de. A trusted
+publisher502 injection creates only sequence2 before retained capture or backup.
+Its own source closure, proof extractor and diagnostics are used, without relabeling
+current source bytes. The current executor authenticates that complete history and
+hands ownership directly to its distinct successor on the same migrated physical
+database. The safe uploaded evidence pins both immediate predecessor digests and
+its operation ID, plus the fixed injected read stage and all12mandatory checks.
+The injection is synthetic; the actual historical243 failure cause remains unknown.
+There is no retry of a failed forward operation.
 The worker archive is staged inside the captured daemon volume under
 `/var/lib/docker/markiro-forward-worker.tar`. Its SHA is read back through the live
 container namespace before the single image load. DinD mounts a private tmpfs at

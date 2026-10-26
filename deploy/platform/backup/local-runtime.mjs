@@ -470,6 +470,14 @@ export async function withForwardBackupRuntime(capability, action) {
         `upgrade-backup-runtime-${admission.failed.identity.operationId}.json`,
         admission.failed.identity.executorSha,
       ],
+      ...(admission.kind === "platform-forward-admission-successor"
+        ? [
+            [
+              `forward-backup-runtime-${admission.priorForward.identity.operationId}.json`,
+              admission.priorForward.identity.executorSha,
+            ],
+          ]
+        : []),
     ];
     const retained = [];
     for (const [name, executorSha] of descriptors) {

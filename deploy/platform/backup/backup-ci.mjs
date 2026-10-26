@@ -252,7 +252,7 @@ try {
     imageId,
     "node",
     "-e",
-    "const f=require('node:fs');f.accessSync('/opt/backup/fixture/probe.mjs');f.accessSync('/opt/backup/backup/postgres-worker.mjs');require('/opt/backup/node_modules/pg');require('/opt/backup/node_modules/pg-boss');import('/opt/backup/fixture/runtime-migrate.mjs').catch(()=>process.exit(1));",
+    "const f=require('node:fs');f.accessSync('/opt/backup/fixture/probe.mjs');f.accessSync('/opt/backup/backup/postgres-worker.mjs');require('/opt/backup/node_modules/pg');require('/opt/backup/node_modules/pg-boss');import('/opt/backup/host/process.mjs').then(()=>import('/opt/backup/fixture/runtime-migrate.mjs')).catch(()=>process.exit(1));",
   ]);
 
   const executorSha =

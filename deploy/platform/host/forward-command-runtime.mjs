@@ -4,12 +4,8 @@ import { canonical, digest, ensure, keys, runtime as validateRuntime } from "../
 import { readPrivateFile, assertPrivateRootSync, assertBindFileSync } from "./files.mjs";
 import { readFile, lstat } from "node:fs/promises";
 import { fingerprintHostConfiguration, hostChildEnvironment } from "./config.mjs";
-import { readUpgradePredecessor } from "./upgrade-state.mjs";
-import {
-  readFailedUpgradePredecessor,
-  validateForwardAdmission,
-  validateForwardDecision,
-} from "./forward-admission.mjs";
+import { validateForwardDecision } from "./forward-admission.mjs";
+import { readForwardHistory, validateForwardHistory } from "./forward-history.mjs";
 import { validateForwardJournal } from "./forward-state.mjs";
 import { captureForwardRetained, readForwardRetained } from "./forward-retained.mjs";
 import { extractProductMigrationProof } from "./forward-product.mjs";
@@ -44,17 +40,22 @@ export function forwardRuntimeProcess(request) {
   return archive ? runHostArchiveProcess : runHostProcess;
 }
 const preparing = (r) => r.phase === "post-migration-prepare";
-async function failedHistory(root, admission) {
-  const result = await readFailedUpgradePredecessor(root, admission.failed.identity.operationId);
-  const index = JSON.parse(result.index);
-  if (index.kind === "platform-forward-recovery-index") {
-    ensure(index.operationId === admission.identity.operationId);
-    result.index = await readPrivateFile(
-      root,
-      `forward-recovery-operations/${admission.identity.operationId}/predecessor-index.json`,
+async function operationHistory(root, admission) {
+  const index = JSON.parse(await readPrivateFile(root, "upgrade-index.json"));
+  const own =
+    index.kind === "platform-forward-recovery-index" &&
+    index.operationId === admission.identity.operationId;
+  if (!own) {
+    const successor = admission.kind === "platform-forward-admission-successor";
+    ensure(
+      index.kind === (successor ? "platform-forward-recovery-index" : "platform-upgrade-index") &&
+        index.operationId ===
+          (successor
+            ? admission.priorForward.identity.operationId
+            : admission.failed.identity.operationId),
     );
   }
-  return result;
+  return readForwardHistory(root, admission, { ownIndexArchive: own });
 }
 async function historicalInstallation(root, kind, identity, expected, ci, dispatch) {
   ensure(hash(expected));
@@ -118,9 +119,18 @@ export async function validateForwardOperation(loaded, options = {}) {
       ["post-migration-prepare", "post-migration-activate"].includes(record.phase),
   );
   ensure(typeof loaded.verifyInstalledSources === "function");
-  keys(record.historicalSources, ["recoveryReceiptSha256", "failedReceiptSha256"]);
-  const original = await readUpgradePredecessor(op.root, admission.originalPredecessor.identity);
-  const failed = await failedHistory(op.root, admission);
+  const successor = admission.kind === "platform-forward-admission-successor";
+  keys(record.historicalSources, [
+    "recoveryReceiptSha256",
+    "failedReceiptSha256",
+    ...(successor ? ["priorForwardReceiptSha256"] : []),
+  ]);
+  const history = await operationHistory(op.root, admission),
+    original = history.original,
+    failed = history.failedUpgrade;
+  if (successor)
+    for (const [key, value] of Object.entries(history.failedForward))
+      ensure(digest(value) === admission.priorForward.hashes[key]);
   for (const name of Object.keys(original))
     ensure(digest(original[name]) === admission.originalPredecessor.hashes[name]);
   for (const name of Object.keys(failed))
@@ -150,6 +160,29 @@ export async function validateForwardOperation(loaded, options = {}) {
       JSON.parse(failed.prepareOperation).dispatch,
     ),
   ]);
+  if (successor) {
+    const prior = JSON.parse(history.failedForward.state).admission;
+    ensure(
+      record.historicalSources.priorForwardReceiptSha256 ===
+        admission.priorForward.hashes.installedExecutor,
+    );
+    histories.push(
+      await historicalInstallation(
+        op.root,
+        "upgrade",
+        prior.identity,
+        record.historicalSources.priorForwardReceiptSha256,
+        prior.executorCi,
+        prior.dispatch,
+      ),
+    );
+    const priorInput = JSON.parse(history.failedForward.prepareOperation);
+    same(priorInput.historicalSources, {
+      recoveryReceiptSha256: record.historicalSources.recoveryReceiptSha256,
+      failedReceiptSha256: record.historicalSources.failedReceiptSha256,
+    });
+    same(priorInput.operation.configuration, op.configuration);
+  }
   const retained = new Map();
   const retain = async (path) => {
     const b = await readPrivateFile(op.root, path);
@@ -166,6 +199,14 @@ export async function validateForwardOperation(loaded, options = {}) {
       `upgrade-backup-runtime-${admission.failed.identity.operationId}.json`,
       admission.failed.identity.executorSha,
     ],
+    ...(successor
+      ? [
+          [
+            `forward-backup-runtime-${admission.priorForward.identity.operationId}.json`,
+            admission.priorForward.identity.executorSha,
+          ],
+        ]
+      : []),
     [
       `forward-backup-runtime-${admission.identity.operationId}.json`,
       admission.identity.executorSha,
@@ -222,13 +263,10 @@ export async function validateForwardOperation(loaded, options = {}) {
     await loaded.verifyInstalledSources();
     if (retainedRuntime)
       ensure((await readForwardRetained(op.root, admission)).bytes.equals(retainedRuntime));
-    const currentOriginal = await readUpgradePredecessor(
-        op.root,
-        admission.originalPredecessor.identity,
-      ),
-      currentFailed = await failedHistory(op.root, admission);
-    for (const key of Object.keys(original)) ensure(currentOriginal[key].equals(original[key]));
-    for (const key of Object.keys(failed)) ensure(currentFailed[key].equals(failed[key]));
+    const currentHistory = await operationHistory(op.root, admission);
+    for (const node of ["original", "failedUpgrade", ...(successor ? ["failedForward"] : [])])
+      for (const [key, value] of Object.entries(history[node]))
+        ensure(currentHistory[node][key].equals(value));
     for (const fn of histories) await fn();
     for (const [path, bytes] of retained)
       ensure((await readPrivateFile(op.root, path)).equals(bytes));
@@ -338,9 +376,7 @@ export async function validateForwardOperation(loaded, options = {}) {
       });
       boundary = "validation";
       category = "validation";
-      validateForwardAdmission(admission, {
-        failedBytes: failed,
-        originalPredecessorBytes: original,
+      validateForwardHistory(admission, await operationHistory(op.root, admission), {
         productMigrationProof,
         now: preparing(record) ? Date.now() : Date.parse(admission.expiresAt) - 1,
       });
