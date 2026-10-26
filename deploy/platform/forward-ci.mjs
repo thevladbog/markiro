@@ -58,6 +58,7 @@ const failurePhases = new Set([
   "complete synthetic migration latch",
   "verify exact failed synthetic migration state",
   "forward preparation performs actual source dump, isolated restore, cleanup and Linux index handoff",
+  "create exact failed pre-backup forward admission",
   "forward preparation: verifyAdmission",
   "forward preparation: inspectSource",
   "forward preparation: inspectSchema",
@@ -175,11 +176,18 @@ const checkNames = Object.freeze([
   "forwardHealthy",
   "replacementFailureCleanup",
   "externalTls",
+  "preBackupPredecessor",
+  "directSuccessor",
+  "preservedHistory",
 ]);
 const namespaceKeys = Object.freeze([
   "mode",
   "operationId",
   "failedOperationId",
+  "priorForwardOperationId",
+  "priorForwardStateSha256",
+  "priorForwardIndexSha256",
+  "admissionReadStage",
   "productSha",
   "executorSha",
   "postgresId",
@@ -193,8 +201,13 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
 function namespace(value) {
   keys(value, namespaceKeys);
   assert.ok(["healthy", "replacement-failure"].includes(value.mode));
-  for (const key of ["operationId", "failedOperationId"]) assert.match(value[key], uuid);
-  assert.notEqual(value.operationId, value.failedOperationId);
+  for (const key of ["operationId", "failedOperationId", "priorForwardOperationId"])
+    assert.match(value[key], uuid);
+  assert.equal(
+    new Set([value.operationId, value.failedOperationId, value.priorForwardOperationId]).size,
+    3,
+  );
+  assert.equal(value.admissionReadStage, "publisher");
   assert.equal(value.productSha, forwardProduct);
   assert.match(value.executorSha, /^[a-f0-9]{40}$/u);
   for (const key of [
@@ -203,6 +216,8 @@ function namespace(value) {
     "archiveSha256",
     "restoreEvidenceSha256",
     "terminalSha256",
+    "priorForwardStateSha256",
+    "priorForwardIndexSha256",
   ])
     assert.match(value[key], /^[a-f0-9]{64}$/u);
   keys(value.schema, ["systemId", "schemaSha256", "migrationSha256", "migrationCount"]);
@@ -243,8 +258,14 @@ export function validateForwardRehearsalEvidence(value) {
   assert.ok(Array.isArray(value.runs) && value.runs.length <= 2);
   value.runs.forEach(namespace);
   assert.equal(
-    new Set(value.runs.flatMap((run) => [run.operationId, run.failedOperationId])).size,
-    value.runs.length * 2,
+    new Set(
+      value.runs.flatMap((run) => [
+        run.operationId,
+        run.failedOperationId,
+        run.priorForwardOperationId,
+      ]),
+    ).size,
+    value.runs.length * 3,
   );
   if (value.completed) {
     assert.deepEqual(
