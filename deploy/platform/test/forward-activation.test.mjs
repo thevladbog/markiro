@@ -181,3 +181,70 @@ for (const diagnosticFails of [false, true])
     }
     assert.ok(await lstat(join(f.root, ".deploy.lock")));
   });
+
+for (const transport of ["serial", "batched"])
+  test(`physical isolation ${transport} reads preserve the strict fence deadline`, async (t) => {
+    const f = await forwardActivationFixture(t),
+      clock = clocked(t, f);
+    const { rehearsalFixture } = await import("./rehearsal-fixture.mjs");
+    const { captureRehearsalResources, validateRehearsalDaemon } =
+      await import("../upgrade-ci-guards.mjs");
+    const actual = rehearsalFixture(),
+      expected = captureRehearsalResources(actual);
+    // Match the real rehearsal policy; only fence/workload retain the strict30s limit.
+    f.input.preparedPolicy.maxAgeMs = 3600000;
+    const samples = [];
+    for (const [name, object, method] of [
+      ["fence", f.adapters.writerFence, "observe"],
+      ["cleanup", f.adapters.workload, "inspect"],
+    ]) {
+      const original = object[method];
+      object[method] = async (...args) => {
+        const value = await original(...args);
+        samples.push({ name, at: Date.parse(value.observedAt) });
+        return value;
+      };
+    }
+    const read = async (value) => {
+      const began = clock.now;
+      await Promise.resolve();
+      clock.now = Math.max(clock.now, began + 4000);
+      return value;
+    };
+    f.options.verifyBaseline = async () => {
+      const readers = {
+        container: () => read(actual.container),
+        volume: () => read(actual.volume),
+        ipv4: () => read(actual.routes.ipv4),
+        ipv6: () => read(actual.routes.ipv6),
+      };
+      if (transport === "serial") {
+        const container = await readers.container(),
+          volume = await readers.volume();
+        const routes = { ipv4: await readers.ipv4(), ipv6: await readers.ipv6() };
+        validateRehearsalDaemon(
+          { invocationId: actual.invocationId, container, volume, routes },
+          expected,
+        );
+      } else {
+        const { verifyRehearsalIsolation } = await import("../upgrade-ci.mjs");
+        await verifyRehearsalIsolation(actual.invocationId, readers, expected);
+      }
+    };
+    if (transport === "serial") {
+      await assert.rejects(run(f));
+      assert.deepEqual(f.commands, []);
+      const failure = JSON.parse(await readFile(join(f.directory, "failure.json")));
+      assert.equal(failure.phase, "activation-admitted");
+      assert.equal(failure.boundary, "entry");
+      assert.equal(failure.code, "ERR_DATABASE_BACKUP");
+      assert.deepEqual(
+        samples.map(({ name }) => name),
+        ["cleanup", "fence", "cleanup"],
+      );
+      assert.ok(samples[2].at - samples[1].at > 30000);
+    } else {
+      await run(f);
+      assert.deepEqual(f.commands, ["api", "edge"]);
+    }
+  });

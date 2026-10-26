@@ -630,3 +630,95 @@ test("rehearsal directory-copy rejects mixed transport and linked inputs before 
   await assert.rejects(stageRehearsalTree(source.root, io));
   assert.equal(copies, 0);
 });
+
+test("isolation reads all four facts together and drains every read before rejection", async () => {
+  const { verifyRehearsalIsolation } = await import("../upgrade-ci.mjs");
+  const f = fixture(),
+    expected = captureRehearsalResources(f);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = [],
+    completed = [];
+  const readers = Object.fromEntries(
+    Object.entries({ container: f.container, volume: f.volume, ...f.routes }).map(
+      ([key, value]) => [
+        key,
+        async () => {
+          started.push(key);
+          await gate;
+          completed.push(key);
+          return value;
+        },
+      ],
+    ),
+  );
+  const result = verifyRehearsalIsolation(f.invocationId, readers, expected);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started.sort(), ["container", "ipv4", "ipv6", "volume"]);
+  assert.deepEqual(completed, []);
+  release();
+  await result;
+  assert.equal(completed.length, 4);
+
+  for (const kind of ["sync", "async"]) {
+    let finish;
+    const pending = new Promise((resolve) => {
+      finish = resolve;
+    });
+    let settled = false,
+      drained = false;
+    const failure = new Error("PRIVATE-READ-FAILURE");
+    const failed = verifyRehearsalIsolation(
+      f.invocationId,
+      {
+        container:
+          kind === "sync"
+            ? () => {
+                throw failure;
+              }
+            : async () => {
+                throw failure;
+              },
+        volume: async () => f.volume,
+        ipv4: async () => {
+          await pending;
+          drained = true;
+          return f.routes.ipv4;
+        },
+        ipv6: async () => f.routes.ipv6,
+      },
+      expected,
+    );
+    const observed = failed.then(
+      () => {
+        settled = true;
+      },
+      (error) => {
+        settled = true;
+        assert.equal(error, failure);
+      },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    finish();
+    await observed;
+    assert.equal(drained, true);
+  }
+});
+
+for (const field of ["container", "volume", "ipv4", "ipv6"])
+  test(`batched isolation refuses changed ${field} before accepting the namespace`, async () => {
+    const { verifyRehearsalIsolation } = await import("../upgrade-ci.mjs");
+    const f = fixture(),
+      expected = captureRehearsalResources(f);
+    const readers = {
+      container: async () => f.container,
+      volume: async () => f.volume,
+      ipv4: async () => f.routes.ipv4,
+      ipv6: async () => f.routes.ipv6,
+    };
+    readers[field] = async () => (field.startsWith("ipv") ? "default via foreign" : {});
+    await assert.rejects(verifyRehearsalIsolation(f.invocationId, readers, expected));
+  });

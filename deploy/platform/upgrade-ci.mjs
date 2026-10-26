@@ -52,6 +52,21 @@ import {
 } from "./upgrade-ci-guards.mjs";
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// These four independent read-only facts are still checked before and after
+// every protected command. Drain all reads even after a refusal: no background
+// inspector may overlap a subsequent command or namespace cleanup.
+export async function verifyRehearsalIsolation(invocationId, readers, expected) {
+  const names = ["container", "volume", "ipv4", "ipv6"];
+  assert.ok(names.every((name) => typeof readers[name] === "function"));
+  const results = await Promise.allSettled(
+    names.map((name) => Promise.resolve().then(readers[name])),
+  );
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) throw failed.reason;
+  const [container, volume, ipv4, ipv6] = results.map((result) => result.value);
+  validateRehearsalDaemon({ invocationId, container, volume, routes: { ipv4, ipv6 } }, expected);
+}
+
 // Hash the read-back private files as configuration integrity evidence. These
 // SHA256 values are file identities, never password authentication verifiers.
 export async function createRehearsalConfiguration(root, values, migrationUrl) {
@@ -314,15 +329,17 @@ export async function rehearseUpgrade(
     );
   const inspect = async (kind, id) => JSON.parse((await nested([kind, "inspect", id])).stdout)[0];
   const shell = (args) => outer(["exec", containerId, ...args]);
-  const verifyIsolation = async () => {
-    const container = await inspectOuter("container", containerId),
-      volume = await inspectOuter("volume", name);
-    const routes = {
-      ipv4: (await shell(["ip", "-4", "route", "show", "default"])).stdout,
-      ipv6: (await shell(["ip", "-6", "route", "show", "default"])).stdout,
-    };
-    validateRehearsalDaemon({ invocationId, container, volume, routes }, owned);
-  };
+  const verifyIsolation = () =>
+    verifyRehearsalIsolation(
+      invocationId,
+      {
+        container: () => inspectOuter("container", containerId),
+        volume: () => inspectOuter("volume", name),
+        ipv4: async () => (await shell(["ip", "-4", "route", "show", "default"])).stdout,
+        ipv6: async () => (await shell(["ip", "-6", "route", "show", "default"])).stdout,
+      },
+      owned,
+    );
   try {
     const daemon = await inspectOuter("image", rehearsalImages.daemon);
     validateRehearsalImage(daemon);
