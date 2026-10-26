@@ -713,7 +713,8 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
   const c = {
     root: f.root,
     repository: process.cwd(),
-    policy: { postgresImageId: f.expected.postgres.image },
+    // Docker Config.Id differs from the registry manifest digest in runtime.env.
+    policy: { postgresImageId: `sha256:${digest("docker-config-id-not-manifest")}` },
     predecessorContainers: { postgres: "a".repeat(64) },
     evidence: { differences: [] },
     sql: async (query) => {
@@ -741,6 +742,7 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
       };
     },
   );
+  assert.notEqual(c.policy.postgresImageId, f.expected.postgres.image);
   assert.equal(queries, 1);
   assert.equal(projections, 1);
   assert.equal(result.preparedTarget.observations.postgres.value.postgresVersion, "17.11");
@@ -765,6 +767,8 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
     writerFence: f.expected.writerFence,
     workload: f.expected.workload,
   });
+  assert.equal(result.preparedPolicy.postgres.image, f.expected.postgres.image);
+  assert.equal(result.preparedTarget.observations.postgres.value.image, f.expected.postgres.image);
 });
 
 test("projection transport uses the pinned absolute DinD CLI without widening the host PATH", async (t) => {

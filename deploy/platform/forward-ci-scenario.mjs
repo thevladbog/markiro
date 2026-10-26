@@ -27,6 +27,7 @@ import { observerProducer } from "./host/observe.mjs";
 import { measureActivationProjection } from "./host/command.mjs";
 import { productionAuthorization } from "./test/production-activation-fixture.mjs";
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
+import { readProtectedEnv } from "./preflight.mjs";
 import { sanitizeHostFailure, hostFailureSites } from "./host/failure-diagnostic.mjs";
 export const forwardActivationPhases = Object.freeze([
   "activation-admitted",
@@ -1044,8 +1045,11 @@ export async function activationInputs(
   const { document, evidence } = verified,
     at = new Date().toISOString();
   const certificate = new X509Certificate(await readFile(join(c.root, "pg/server.crt")));
+  const runtime = await readProtectedEnv(configuration.runtimeSnapshot.path);
   const postgres = {
-    image: c.policy.postgresImageId,
+    // The prepared-target contract binds the registry digest, while the physical
+    // observer independently pins Docker Config.Id through c.policy.
+    image: runtime.MARKIRO_POSTGRES_IMAGE_DIGEST,
     architecture: "amd64",
     os: "linux",
     uid: 70,
