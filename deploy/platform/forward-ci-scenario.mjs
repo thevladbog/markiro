@@ -985,7 +985,7 @@ async function runScenario(c, mode, checks) {
   checks.noOldStarts = true;
   checks.noSecondMigrator = true;
 }
-async function activationInputs(
+export async function activationInputs(
   c,
   identity,
   configuration,
@@ -1009,7 +1009,10 @@ async function activationInputs(
     await readFile(join(c.repository, "deploy/platform/postgres/roles.mjs")),
   );
   const values = {
-    postgres: { ...postgres, postgresVersion: (await c.sql("SHOW server_version;")).stdout.trim() },
+    postgres: {
+      ...postgres,
+      postgresVersion: String((await c.sql("SHOW server_version;")).stdout).trim(),
+    },
     tls: {
       ...tls,
       notBefore: new Date(certificate.validFrom).toISOString(),

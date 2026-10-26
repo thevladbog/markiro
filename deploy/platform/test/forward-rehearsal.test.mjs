@@ -676,3 +676,84 @@ test("forward restore directory larger than control stdin is copied and fully ve
     }
   }
 });
+
+test("forward activation inputs normalize real Buffer SQL output and retain complete restore proof", async (t) => {
+  const { activationInputs } = await import("../forward-ci-scenario.mjs");
+  const { preparedFixture } = await import("./prepared-target-fixture.mjs");
+  const { activationTables } = await import("../host/prepared-target.mjs");
+  const { digest } = await import("../backup/schemas.mjs");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { join } = await import("node:path");
+  const f = await preparedFixture(t, { nested: true });
+  await promisify(execFile)("/usr/bin/openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-days",
+    "1",
+    "-subj",
+    "/CN=db.private",
+    "-keyout",
+    join(f.root, "fixture-key"),
+    "-out",
+    join(f.root, "pg/server.crt"),
+  ]);
+  const projection = activationTables.map((table) => ({
+    table,
+    rows: 0,
+    pending: 0,
+    expired: 0,
+    sha256: digest(""),
+  }));
+  let queries = 0,
+    projections = 0;
+  const c = {
+    root: f.root,
+    repository: process.cwd(),
+    policy: { postgresImageId: f.expected.postgres.image },
+    predecessorContainers: { postgres: "a".repeat(64) },
+    evidence: { differences: [] },
+    sql: async (query) => {
+      assert.equal(query, "SHOW server_version;");
+      queries++;
+      return { stdout: Buffer.from("17.11\n"), stderr: Buffer.alloc(0) };
+    },
+  };
+  const result = await activationInputs(
+    c,
+    f.identity,
+    f.expected.configuration,
+    { document: f.document, evidence: f.evidence },
+    { backup: f.backup, restoreEvidence: f.restoreEvidence, fence: f.record.fence },
+    f.expected.roleMapping,
+    async (request) => {
+      projections++;
+      assert.ok(Buffer.isBuffer(request.input));
+      assert.ok(
+        request.input.toString().startsWith("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;"),
+      );
+      return {
+        stdout: Buffer.from(projection.map((row) => JSON.stringify(row)).join("\n")),
+        stderr: Buffer.alloc(0),
+      };
+    },
+  );
+  assert.equal(queries, 1);
+  assert.equal(projections, 1);
+  assert.equal(result.preparedTarget.observations.postgres.value.postgresVersion, "17.11");
+  assert.deepEqual(result.preparedTarget.observations.restoredSnapshot.value, {
+    snapshotId: f.document.snapshotId,
+    archiveSha256: f.backup.archiveSha256,
+    inventorySha256: f.evidence.inventorySha256,
+    restoreEvidenceSha256: f.restoreEvidence.evidenceSha256,
+    roleMappingSha256: f.evidence.roleMappingSha256,
+    restoredInventorySha256: f.evidence.restoredInventorySha256,
+    workerImage: f.evidence.runtime.image,
+    workerArchitecture: f.evidence.runtime.architecture,
+  });
+  assert.deepEqual(result.preparedTarget.observations.egress.value.review.projection, projection);
+  assert.equal(c.evidence.differences.length, 1);
+});
