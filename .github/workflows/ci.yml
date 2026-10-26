@@ -364,10 +364,12 @@ jobs:
     # browser suites run in their own jobs below. On run 39454185717 these steps
     # took about 21 minutes of the old 55-minute job, image builds without a
     # layer cache included.
-    # Run 40243943492 exhausted 40 minutes during the first forward namespace.
-    # Allow both namespace outcomes and verified cleanup; per-process budgets,
-    # admission TTLs and freshness checks remain unchanged.
-    timeout-minutes: 90
+    # Run 40296243127 used 69min without completing its first forward namespace;
+    # the second required serial scenario and final stack still remained.
+    # Give this CI job 150min for the measured compound work. This is only an
+    # outer resource budget: process/operation deadlines, 30s observations,
+    # both scenarios and cleanup acceptance remain unchanged.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

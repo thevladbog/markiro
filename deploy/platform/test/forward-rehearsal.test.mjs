@@ -759,7 +759,7 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
   assert.deepEqual(result.preparedTarget.observations.egress.value.review.projection, projection);
   assert.equal(c.evidence.differences.length, 1);
   const { validatePreparedTarget } = await import("../host/prepared-target.mjs");
-  await validatePreparedTarget(result.preparedTarget, {
+  const checked = await validatePreparedTarget(result.preparedTarget, {
     root: f.root,
     identity: f.identity,
     configuration: f.expected.configuration,
@@ -767,6 +767,48 @@ test("forward activation inputs normalize real Buffer SQL output and retain comp
     writerFence: f.expected.writerFence,
     workload: f.expected.workload,
   });
+  // The real contract permits a fresh one-hour activation admission. Native
+  // guarded work can legitimately outlast the helper fixture's default30min.
+  let now = Date.parse(result.preparedTarget.observations.egress.observedAt) + 31 * 60000;
+  t.mock.method(Date, "now", () => now);
+  await validatePreparedTarget(result.preparedTarget, {
+    root: f.root,
+    identity: f.identity,
+    configuration: f.expected.configuration,
+    ...result.preparedPolicy,
+    writerFence: {
+      ...f.expected.writerFence,
+      observe: async (request) => ({
+        ...(await f.expected.writerFence.observe(request)),
+        observedAt: new Date(now).toISOString(),
+      }),
+    },
+    workload: {
+      ...f.expected.workload,
+      inspect: async (request) => ({
+        ...(await f.expected.workload.inspect(request)),
+        observedAt: new Date(now).toISOString(),
+      }),
+    },
+  });
+  const authorization = result.preparedTarget.observations.egress.value;
+  assert.equal(authorization.expiresAt, authorization.sourceHold.expiresAt);
+  assert.equal(
+    Date.parse(authorization.expiresAt) -
+      Date.parse(result.preparedTarget.observations.egress.observedAt),
+    3600000,
+  );
+  now = Date.parse(authorization.expiresAt) + 1;
+  const { validateProductionAuthorization } = await import("../host/prepared-target.mjs");
+  assert.throws(() =>
+    validateProductionAuthorization(
+      result.preparedTarget,
+      f.document,
+      f.evidence,
+      checked.backupProof,
+      now,
+    ),
+  );
   assert.equal(result.preparedPolicy.postgres.image, f.expected.postgres.image);
   assert.equal(result.preparedTarget.observations.postgres.value.image, f.expected.postgres.image);
 });

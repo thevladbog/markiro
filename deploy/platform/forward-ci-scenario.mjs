@@ -1122,11 +1122,14 @@ export async function activationInputs(
     fence: result.fence,
     observations: {},
   };
-  values.egress = productionAuthorization(
+  const authorization = productionAuthorization(
     preparedTarget,
     { document, backup: result.backup, restoreEvidence: result.restoreEvidence },
     Date.parse(at),
   );
+  // Construct this new synthetic admission within the existing one-hour hold.
+  // Never renew it during execution or change production/30s freshness checks.
+  values.egress = { ...authorization, expiresAt: authorization.sourceHold.expiresAt };
   values.egress.review.projection = await measureActivationProjection(
     { root: c.root, dockerConfig: join(c.root, "docker") },
     c.predecessorContainers.postgres,

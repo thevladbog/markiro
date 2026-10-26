@@ -42,10 +42,15 @@ Restore input directories use that verified archive-copy boundary, avoiding an
 in-memory TAR through the control runner's 1 MiB stdin limit. Local ownership,
 file/link/mode checks run before transfer; every received directory must remain
 0700 and every file must match its hash, size and mode afterward. The ordinary
-process limits remain unchanged. Run 40243943492 exhausted the previous
-40-minute job during the first forward namespace, so the outer job allows
-90 minutes for both outcomes and verified cleanup. Process deadlines, admission
-TTLs and freshness checks retain their existing bounds.
+process limits remain unchanged. The outer CI job budget is 150 minutes:
+run 40296243127 used 69 minutes without completing its first namespace, with
+the second required serial scenario and final stack still pending. This is a
+resource estimate, not completion evidence. Both scenarios, verified cleanup,
+process/operation deadlines and acceptance checks remain required.
+Each new synthetic activation admission uses its already-generated one-hour
+source hold as expiry, stays immutable throughout execution and is rejected at
+expiry. Live validators, the helper fixture's default 30 minutes and all 30 second
+fence/cleanup checks remain unchanged.
 
 Before application processes, the staging network is disconnected, IPv4/IPv6
 default routes are absent, and actual TCP egress must fail. No host socket or
