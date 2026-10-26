@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { admissionReadFailure, carryAdmissionReadFailure } from "../admission-read-failure.mjs";
 import { writePrivateFile } from "./files.mjs";
 import { backupFailureSites } from "../backup/schemas.mjs";
 
@@ -115,7 +116,9 @@ const own = (value, key) => {
   return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
 };
 function safeOrigin(error) {
-  if (object(error) && origins.has(error)) return origins.get(error);
+  const known = object(error) ? origins.get(error) : undefined;
+  const admissionRead = admissionReadFailure(error);
+  if (known) return admissionRead ? Object.freeze({ ...known, admissionRead }) : known;
   let name = own(error, "name");
   if (name === undefined && object(error)) {
     // Native Error names are data properties of their immediate prototype.
@@ -126,6 +129,7 @@ function safeOrigin(error) {
     errorName: names.has(name) ? name : "Error",
     exitStatus: null,
     executable: null,
+    ...(admissionRead ? { admissionRead } : {}),
   });
 }
 export function noteHostProcessFailure(error, executable, exitStatus) {
@@ -144,6 +148,7 @@ export function noteHostProcessFailure(error, executable, exitStatus) {
   return error;
 }
 export function carryHostFailure(source, target) {
+  carryAdmissionReadFailure(source, target);
   origins.set(target, safeOrigin(source));
   validationSites.set(target, hostFailureSites(source));
   confirmations.set(

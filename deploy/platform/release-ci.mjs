@@ -1,3 +1,4 @@
+import { carryAdmissionReadFailure } from "./admission-read-failure.mjs";
 import { validatePlatformCiEvidence } from "./release-evidence.mjs";
 
 /** Only GitHub HTTPS, no redirects, fixed attempt and complete bounded pagination. */
@@ -57,7 +58,9 @@ export async function fetchPlatformCi(expected, token, request = fetch) {
     // The initial selected run must itself have the same successful provenance.
     validatePlatformCiEvidence(latest, jobs, expected);
     return { run, jobs, identity };
-  } catch {
-    throw new Error("platform CI verification failed");
+  } catch (error) {
+    const failure = new Error("platform CI verification failed");
+    carryAdmissionReadFailure(error, failure);
+    throw failure;
   }
 }
