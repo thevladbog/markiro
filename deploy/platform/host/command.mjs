@@ -1,3 +1,4 @@
+import { carryHostFailure } from "./failure-diagnostic.mjs";
 import { withAdmissionReadStage } from "../admission-read-failure.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -325,7 +326,8 @@ export async function verifyAdmission(loaded, runProcess, request) {
   const name = `release-check-${randomUUID()}`;
   await withAdmissionReadStage("artifact-archive", () => createPrivateDirectory(op.root, name));
   const temp = join(op.root, name);
-  let terminated = true;
+  let terminated = true,
+    failure;
   try {
     await withAdmissionReadStage("artifact-archive", async () => {
       await writePrivateFile(temp, "release.zip", archive);
@@ -371,10 +373,20 @@ export async function verifyAdmission(loaded, runProcess, request) {
     );
   } catch (error) {
     terminated = error.terminationConfirmed !== false;
-    throw error;
+    failure = error;
   } finally {
-    if (terminated) await rm(temp, { recursive: true });
+    if (terminated) {
+      try {
+        await rm(temp, { recursive: true });
+      } catch (cleanupError) {
+        // A failed cleanup must still reject and retain the owner lock, while
+        // the first trusted read/child origin remains the diagnostic cause.
+        failure = carryHostFailure(failure ?? cleanupError, commandError(cleanupError));
+        failure.durabilityUncertain = true;
+      }
+    }
   }
+  if (failure) throw failure;
 }
 
 function smokeRequest(host, path, sha, status, request = httpsRequest) {

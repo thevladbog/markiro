@@ -225,3 +225,62 @@ for (const [stage, id] of [
     assert.equal(admissionReadFailure(error)?.status, 502);
     assert.doesNotMatch(JSON.stringify(sanitizeHostFailure(error, context)), new RegExp(secret));
   });
+
+for (const mode of ["read", "child", "success"])
+  test(`actual admission cleanup refusal preserves first origin and holds the lock: ${mode}`, async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const fixtureUrl = new URL("./host-command-integration-fixture.mjs", import.meta.url).href;
+    const commandUrl = new URL("../host/command.mjs", import.meta.url).href;
+    const stateUrl = new URL("../host/state.mjs", import.meta.url).href;
+    const diagnosticUrl = new URL("../host/failure-diagnostic.mjs", import.meta.url).href;
+    const script = `
+      import assert from "node:assert/strict";
+      import { test, mock } from "node:test";
+      import * as actual from "node:fs/promises";
+      import { basename, join } from "node:path";
+      let removals = 0;
+      const rm = async (path, ...args) => {
+        if (typeof path === "string" && basename(path).startsWith("release-check-")) {
+          removals++;
+          throw Object.assign(new Error("PRIVATE cleanup output and path"), { code: "EACCES" });
+        }
+        return actual.rm(path, ...args);
+      };
+      const namedExports = Object.fromEntries(Object.entries(actual).filter(([key]) => key !== "default"));
+      mock.module("node:fs/promises", { namedExports: { ...namedExports, rm }, defaultExport: { ...actual.default, rm } });
+      const { commandIntegrationFixture, integrationOptions } = await import(${JSON.stringify(fixtureUrl)});
+      const { verifyAdmission } = await import(${JSON.stringify(commandUrl)});
+      const { withHostState } = await import(${JSON.stringify(stateUrl)});
+      const { sanitizeHostFailure, noteHostProcessFailure } = await import(${JSON.stringify(diagnosticUrl)});
+      test("controlled cleanup refusal", async t => {
+        const f = await commandIntegrationFixture(t), options = await integrationOptions(f.root);
+        await actual.writeFile(join(f.root, "state.json"), JSON.stringify({ version: 1, sequence: 0, current: null, previousHealthy: null }), { mode: 0o600 });
+        const before = await actual.readFile(join(f.root, "state.json"));
+        const mode = ${JSON.stringify(mode)};
+        const request = (url, init) => mode === "read" && new URL(url).pathname.includes("/runs/123")
+          ? Promise.resolve(new Response("PRIVATE response", { status: 502 })) : options.request(url, init);
+        const run = async request => {
+          if (mode === "child") throw noteHostProcessFailure(Object.assign(new Error("PRIVATE child output"), { terminationConfirmed: true }), "/usr/bin/python3", 23);
+          return options.runProcess(request);
+        };
+        let error;
+        try { await withHostState(f.root, () => verifyAdmission({ record: f.record, receipt: f.receipt, operationDirectory: f.root }, run, request)); }
+        catch (e) { error = e; }
+        assert.ok(error); assert.equal(removals, 1);
+        const record = sanitizeHostFailure(error, { operationId: f.record.deployment.identity.operationId, phase: "admitted", boundary: "verifyAdmission", commandCategory: "validation" });
+        if (mode === "read") { assert.equal(record.admissionRead?.stage, "product-ci"); assert.equal(record.admissionRead?.status, 502); }
+        if (mode === "child") { assert.equal(record.admissionRead?.stage, "artifact-archive"); assert.equal(record.executable, "python3"); assert.equal(record.exitStatus, 23); }
+        if (mode === "success") assert.equal(record.admissionRead, undefined);
+        assert.equal(record.durabilityUncertain, true);
+        assert.ok((await actual.lstat(join(f.root, ".deploy.lock"))).isFile());
+        assert.deepEqual(await actual.readFile(join(f.root, "state.json")), before);
+        assert.doesNotMatch(JSON.stringify(record), /PRIVATE|release-check-|EACCES/);
+      });
+    `;
+    await promisify(execFile)(
+      process.execPath,
+      ["--experimental-test-module-mocks", "--input-type=module", "--eval", script],
+      { timeout: 15000, maxBuffer: 65536, env: { PATH: process.env.PATH } },
+    );
+  });
