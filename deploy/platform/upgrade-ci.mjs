@@ -148,6 +148,41 @@ export async function stageRehearsalTree(root, io) {
   return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
 
+// Use the already-probed regular-rootfs archive boundary for private source
+// trees. The complete historical/current closures can exceed control stdin's
+// unchanged 1 MiB cap. Every directory and file is still verified after copy.
+export async function copyRehearsalTree(root, { archive, outer, shell, containerId }) {
+  assert.match(containerId, /^[a-f0-9]{64}$/u);
+  assert.equal(typeof archive, "function");
+  return stageRehearsalTree(root, {
+    copyDirectory: async (directory) => {
+      // Preserve the old bounded TAR preflight without feeding a large archive
+      // into the ordinary control process's smaller stdin contract.
+      const bytes = await archive(directory);
+      assert.ok(Buffer.isBuffer(bytes) && bytes.length <= 4 * 1048576);
+      await shell(["mkdir", "-p", "-m", "700", directory]);
+      await shell(["chmod", "700", directory]);
+      await outer(["cp", `${directory}/.`, `${containerId}:${directory}`]);
+    },
+    inspectDirectory: async (relative) => {
+      const [mode, type] = (await shell(["stat", "-c", "%a:%F", join(root, relative)])).stdout
+        .trim()
+        .split(":");
+      return { mode: Number.parseInt(mode, 8), type };
+    },
+    inspectFile: async (relative) => {
+      const path = join(root, relative);
+      const sha = (await shell(["sha256sum", path])).stdout;
+      assert.match(sha, /^[a-f0-9]{64} {2}/u);
+      assert.equal(sha.slice(66), `${path}\n`);
+      const metadata = (await shell(["stat", "-c", "%a:%s", path])).stdout.trim();
+      assert.match(metadata, /^[0-7]{3,4}:\d+$/u);
+      const [mode, size] = metadata.split(":");
+      return { sha256: sha.slice(0, 64), size: Number(size), mode: Number.parseInt(mode, 8) };
+    },
+  });
+}
+
 // Fail before applications if archive-copy and live exec disagree on this
 // invocation's private directory. Probe bytes contain no configuration/secrets.
 export async function verifyRehearsalArchiveTransfer(parent, io) {
@@ -610,7 +645,7 @@ export async function rehearseUpgrade(
     };
     const composeEnv = join(parent, "compose.env");
     await save("compose.env", envBytes(interpolation).toString());
-    // Stream only the private generated tree, never bind a host path/socket.
+    // Copy only the validated private tree after the live-rootfs probe; no host bind/socket.
     progress("stream and verify generated private tree in the isolated daemon");
     await shell(["mkdir", "-p", parent]);
     await verifyRehearsalArchiveTransfer(parent, {
@@ -619,24 +654,12 @@ export async function rehearseUpgrade(
         (await outer(["exec", containerId, "cat", path], { encoding: "buffer" })).stdout,
       download: (path, out) => outer(["cp", `${containerId}:${path}`, out]),
     });
-    evidence.privateTreeTransfer = await stageRehearsalTree(parent, {
+    evidence.privateTreeTransfer = await copyRehearsalTree(parent, {
       archive: async (directory) =>
         (await command("tar", ["-C", directory, "-cf", "-", "."], { encoding: "buffer" })).stdout,
-      extract: (bytes) =>
-        stdinOuter(
-          ["exec", "-i", containerId, "tar", "--no-same-owner", "-xpf", "-", "-C", parent],
-          bytes,
-        ),
-      inspectFile: async (relative) => {
-        const path = join(parent, relative);
-        const sha = (await shell(["sha256sum", path])).stdout;
-        assert.match(sha, /^[a-f0-9]{64} {2}/u);
-        assert.equal(sha.slice(66), `${path}\n`);
-        const metadata = (await shell(["stat", "-c", "%a:%s", path])).stdout.trim();
-        assert.match(metadata, /^[0-7]{3,4}:\d+$/u);
-        const [mode, size] = metadata.split(":");
-        return { sha256: sha.slice(0, 64), size: Number(size), mode: Number.parseInt(mode, 8) };
-      },
+      outer,
+      shell,
+      containerId,
     });
     progress("verify copied private PostgreSQL TLS file metadata");
     evidence.copiedTlsFiles = {};
