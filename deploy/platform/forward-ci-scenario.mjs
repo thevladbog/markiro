@@ -310,16 +310,21 @@ export function createForwardRehearsalProcess(c, trace = []) {
     assert.equal(stat.isSymbolicLink(), false);
     assert.equal(stat.uid, process.getuid());
     if (stat.isDirectory()) {
-      await c.shell(["mkdir", "-p", source]);
+      await c.shell(["mkdir", "-p", "-m", "700", source]);
+      await c.shell(["chmod", "700", source]);
       await stageRehearsalTree(source, {
-        archive: async (directory) =>
-          (await c.command("tar", ["-C", directory, "-cf", "-", "."], { encoding: "buffer" }))
-            .stdout,
-        extract: (bytes) =>
-          c.stdinOuter(
-            ["exec", "-i", c.containerId, "tar", "--no-same-owner", "-xpf", "-", "-C", source],
-            bytes,
-          ),
+        // The regular-rootfs archive boundary is probed before staging. Keep
+        // database dumps out of the control runner's 1 MiB stdin contract.
+        copyDirectory: (directory) =>
+          c.outer(["cp", `${directory}/.`, `${c.containerId}:${directory}`]),
+        inspectDirectory: async (relative) => {
+          const [mode, type] = (
+            await c.shell(["stat", "-c", "%a:%F", join(source, relative)])
+          ).stdout
+            .trim()
+            .split(":");
+          return { mode: Number.parseInt(mode, 8), type };
+        },
         inspectFile: async (relative) => {
           const p = join(source, relative);
           const sha = (await c.shell(["sha256sum", p])).stdout.slice(0, 64);

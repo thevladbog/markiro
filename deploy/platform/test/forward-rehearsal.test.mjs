@@ -591,3 +591,88 @@ test("backup stages are compiled safe labels and hostile getters cannot enter di
     "isolated forward rehearsal",
   );
 });
+
+test("forward restore directory larger than control stdin is copied and fully verified", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { mkdir, writeFile, cp, lstat, chmod } = await import("node:fs/promises");
+  const { join, relative } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { digest } = await import("../backup/schemas.mjs");
+  const { runHostProcess } = await import("../host/process.mjs");
+  const source = await privateFixture(t, { nested: true });
+  const input = join(source.root, "restore-input");
+  await mkdir(input, { mode: 0o700 });
+  await writeFile(join(input, "database.dump"), Buffer.alloc(2 * 1048576, 7), { mode: 0o600 });
+  await writeFile(join(input, "request.json"), "fixture inventory", { mode: 0o600 });
+  const command = promisify(execFile);
+  for (const corrupt of [false, "bytes", "mode", "directory"]) {
+    const target = await privateFixture(t, { nested: true });
+    const mapped = (path) => join(target.root, relative(source.root, path));
+    const seen = new Set();
+    let copied = false;
+    const run = createForwardRehearsalProcess({
+      root: source.root,
+      parent: source.root,
+      repository: source.root,
+      containerId: "a".repeat(64),
+      verifyIsolation: async () => {},
+      command: (bin, args, options) => command(bin, args, { maxBuffer: 4 * 1048576, ...options }),
+      shell: async (args) => {
+        if (args[0] === "mkdir") {
+          await mkdir(mapped(args.at(-1)), { mode: 0o700, recursive: true });
+          return { stdout: "", stderr: "" };
+        }
+        if (args[0] === "chmod") {
+          await chmod(mapped(args.at(-1)), Number.parseInt(args[1], 8));
+          return { stdout: "", stderr: "" };
+        }
+        assert.equal(copied, true);
+        const path = mapped(args.at(-1));
+        seen.add(relative(mapped(input), path));
+        if (args[0] === "sha256sum") return { stdout: digest(await readFile(path)) };
+        assert.equal(args[0], "stat");
+        const stat = await lstat(path);
+        if (args[2] === "%a:%F")
+          return {
+            stdout: `${(stat.mode & 0o777).toString(8)}:${stat.isDirectory() ? "directory" : "other"}`,
+          };
+        assert.equal(args[2], "%a:%s");
+        return { stdout: `${(stat.mode & 0o777).toString(8)}:${stat.size}` };
+      },
+      outer: async (args) => {
+        assert.deepEqual(args, ["cp", `${input}/.`, `${"a".repeat(64)}:${input}`]);
+        await cp(input, mapped(input), { recursive: true, force: false });
+        copied = true;
+        if (corrupt === "bytes") await writeFile(join(mapped(input), "database.dump"), "changed");
+        if (corrupt === "mode") await chmod(join(mapped(input), "request.json"), 0o644);
+        if (corrupt === "directory") await chmod(mapped(input), 0o755);
+        return { stdout: "", stderr: "" };
+      },
+      // The old TAR path really reaches the unchanged 1 MiB pre-spawn guard.
+      stdinOuter: (_args, input) =>
+        runHostProcess({
+          executable: "/usr/bin/true",
+          args: [],
+          cwd: source.root,
+          env: { PATH: process.env.PATH },
+          timeoutMs: 10000,
+          outputLimitBytes: 1048576,
+          ...(input === undefined ? {} : { input }),
+        }),
+    });
+    const request = {
+      executable: "/usr/bin/docker",
+      args: ["--host", "unix:///var/run/docker.sock", "cp", `${input}/.`, "worker:/input/"],
+      env: { DOCKER_CONFIG: join(source.root, "docker") },
+      timeoutMs: 10000,
+      outputLimitBytes: 1048576,
+    };
+    if (corrupt) await assert.rejects(run(request));
+    else {
+      await run(request);
+      assert.equal(copied, true);
+      assert.deepEqual([...seen].sort(), ["", "database.dump", "request.json"]);
+    }
+  }
+});

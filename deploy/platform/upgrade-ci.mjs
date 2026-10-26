@@ -81,10 +81,21 @@ export async function createRehearsalConfiguration(root, values, migrationUrl) {
   };
 }
 
-// Stream the generated private tree through the container process rather than
-// relying on daemon archive-copy mount resolution. Verify every received file.
+// Transfer a validated private tree, then verify every received file. The caller
+// selects stdin extraction or a separately probed regular-rootfs archive copy.
 export async function stageRehearsalTree(root, io) {
-  const files = [];
+  const copy = Object.hasOwn(io, "copyDirectory");
+  if (copy) {
+    assert.equal(typeof io.copyDirectory, "function");
+    assert.equal(typeof io.inspectDirectory, "function");
+    assert.equal(Object.hasOwn(io, "archive"), false);
+    assert.equal(Object.hasOwn(io, "extract"), false);
+  } else {
+    assert.equal(typeof io.archive, "function");
+    assert.equal(typeof io.extract, "function");
+  }
+  const files = [],
+    directories = [];
   async function walk(relative) {
     const path = join(root, relative),
       metadata = await lstat(path);
@@ -92,6 +103,7 @@ export async function stageRehearsalTree(root, io) {
     assert.equal(metadata.isSymbolicLink(), false);
     if (metadata.isDirectory()) {
       assert.equal(metadata.mode & 0o777, 0o700);
+      directories.push(relative);
       for (const name of (await readdir(path)).sort()) {
         assert.match(name, /^[a-zA-Z0-9_.-]+$/u);
         await walk(join(relative, name));
@@ -106,9 +118,15 @@ export async function stageRehearsalTree(root, io) {
   }
   await walk("");
   assert.ok(files.length > 0);
-  const archive = await io.archive(root);
-  assert.ok(Buffer.isBuffer(archive));
-  await io.extract(archive);
+  if (copy) {
+    await io.copyDirectory(root);
+    for (const relative of directories)
+      assert.deepEqual(await io.inspectDirectory(relative), { mode: 0o700, type: "directory" });
+  } else {
+    const archive = await io.archive(root);
+    assert.ok(Buffer.isBuffer(archive));
+    await io.extract(archive);
+  }
   for (const { relative, ...expected } of files)
     assert.deepEqual(await io.inspectFile(relative), expected);
   return { files: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };

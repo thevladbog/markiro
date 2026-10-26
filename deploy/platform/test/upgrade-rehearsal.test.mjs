@@ -351,6 +351,9 @@ test("private rehearsal staging rejects linked source files before transmission"
       transmitted = true;
       throw Error("must not archive");
     },
+    extract: async () => {
+      throw Error("must not extract");
+    },
   };
   const path = join(source.root, "linked");
   await symlink("pg/ca.crt", path);
@@ -602,4 +605,28 @@ test("rehearsal retains trusted child metadata through preparation error wrapper
   assert.equal(result.exitStatus, 19);
   assert.equal(result.executable, "docker");
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE/u);
+});
+
+test("rehearsal directory-copy rejects mixed transport and linked inputs before transfer", async (t) => {
+  const { stageRehearsalTree } = await import("../upgrade-ci.mjs");
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { symlink, unlink, link } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const source = await privateFixture(t, { nested: true });
+  let copies = 0;
+  const io = {
+    copyDirectory: async () => {
+      copies++;
+    },
+    inspectDirectory: async () => ({ mode: 0o700, type: "directory" }),
+  };
+  for (const key of ["archive", "extract"])
+    await assert.rejects(stageRehearsalTree(source.root, { ...io, [key]: () => {} }));
+  const path = join(source.root, "linked");
+  await symlink("pg/ca.crt", path);
+  await assert.rejects(stageRehearsalTree(source.root, io));
+  await unlink(path);
+  await link(join(source.root, "pg/ca.crt"), path);
+  await assert.rejects(stageRehearsalTree(source.root, io));
+  assert.equal(copies, 0);
 });
