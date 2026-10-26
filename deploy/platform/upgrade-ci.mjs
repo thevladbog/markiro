@@ -1199,7 +1199,13 @@ export async function rehearseUpgrade(
           inspectContainer: (id) => inspectOuter("container", id),
           inspectVolume: (n) => inspectOuter("volume", n),
           removeContainer: (id) => outer(["rm", "--force", id]),
-          removeVolume: (n) => outer(["volume", "rm", n]),
+          // Run 40391451254 reached forward activation and then the exact
+          // owned DinD volume removal was killed by execFile's 120s default
+          // (exit143, killed=true). VFS deletes the nested image/workload tree.
+          // Bound this CI resource cleanup separately; ownership checks and
+          // required cleanup completion remain unchanged. No protected deployment command or
+          // production observation/operation deadline receives this budget.
+          removeVolume: (n) => outer(["volume", "rm", n], { timeout: 900000 }),
         });
         evidence.cleanup = true;
       } catch (error) {
