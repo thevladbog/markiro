@@ -48,6 +48,13 @@ pub const MAX_SQL_BYTES: usize = 64 * 1024;
 pub const MAX_VALUES: usize = 256;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// The size the `-wal` file is cut back to when SQLite resets it after a checkpoint, set on
+/// every connection (the scan lag fix). The WAL normally peaks at 4–8 MB (the 1 000-page
+/// auto-checkpoint, about twice that while a reader holds an older snapshot), so 64 MiB never
+/// truncates it in normal work, and a WAL that once grew large — readers that kept the
+/// checkpoint from resetting it (0.3 MB/s measured), a long migration (0.9 GB for `0014`) —
+/// shrinks back to it instead of keeping its peak size on disk for good.
+pub const JOURNAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
 /// How often a set-aside tries to move a file of the database, and the pause
 /// between tries. On Windows a file SQLite or an antivirus scan still holds
 /// open refuses to move for a moment: sqlx closes the handle of a connection
@@ -343,7 +350,8 @@ impl LocalDb {
                     .busy_timeout(BUSY_TIMEOUT)
                     // A deleted row is zeroed where it stood, not merely
                     // unlinked: the copies hold PIN and badge hashes.
-                    .pragma("secure_delete", "ON"),
+                    .pragma("secure_delete", "ON")
+                    .pragma("journal_size_limit", JOURNAL_SIZE_LIMIT.to_string()),
             )
             .await?;
         // A failure to read the migrations goes back as it is: a corrupt
@@ -396,7 +404,8 @@ impl LocalDb {
                 SqliteConnectOptions::new()
                     .filename(&path)
                     .read_only(true)
-                    .busy_timeout(BUSY_TIMEOUT),
+                    .busy_timeout(BUSY_TIMEOUT)
+                    .pragma("journal_size_limit", JOURNAL_SIZE_LIMIT.to_string()),
             )
             .await?;
         let epochs: Vec<(String, String)> =
@@ -416,6 +425,35 @@ impl LocalDb {
 
     pub fn dataset(&self) -> Arc<DatasetState> {
         self.dataset.clone()
+    }
+
+    /// `PRAGMA journal_size_limit` of the writer and of each reader connection, every
+    /// connection held at once so that each pool hands out all it has (tests).
+    #[doc(hidden)]
+    pub async fn journal_size_limits(&self) -> Result<(i64, Vec<i64>), sqlx::Error> {
+        let mut writer = self.writer.acquire().await?;
+        let mut first = self.readers.acquire().await?;
+        let mut second = self.readers.acquire().await?;
+        async fn limit(conn: &mut sqlx::SqliteConnection) -> Result<i64, sqlx::Error> {
+            sqlx::query_scalar("PRAGMA journal_size_limit")
+                .fetch_one(conn)
+                .await
+        }
+        let written = limit(&mut writer).await?;
+        let read = vec![limit(&mut first).await?, limit(&mut second).await?];
+        Ok((written, read))
+    }
+
+    /// Close every connection of both pools, so the next use opens new ones (tests).
+    #[doc(hidden)]
+    pub async fn reconnect_every_connection(&self) -> Result<(), sqlx::Error> {
+        let writer = self.writer.acquire().await?;
+        let first = self.readers.acquire().await?;
+        let second = self.readers.acquire().await?;
+        for conn in [writer.detach(), first.detach(), second.detach()] {
+            conn.close().await?;
+        }
+        Ok(())
     }
 
     /// Replace every local business/reference row, including legacy queues. Native

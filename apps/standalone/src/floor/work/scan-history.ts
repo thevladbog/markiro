@@ -85,29 +85,72 @@ export function codeDisplay(
 }
 
 /**
+ * The newest-first slice of a shift's scans (`readScanHistory`). The page is chosen first,
+ * by the rowids alone (`page`: sorted and limited on its own, which SQLite never flattens into
+ * the join), and only its rows are read back and given the operator's name and the place in
+ * the box. The old text computed the place, a correlated count over the box's scans, for every
+ * scan of the shift before the sort and the limit: quadratic in the shift's scans (1.2 s at
+ * 4 000, 12.6 s at 10 000 on a Mac), on every scan, and the code of the last scan waited for it.
+ * Same columns, order and rows as before (`test/floor-scan-history-read.test.ts` keeps the old
+ * text as its oracle); the plan is pinned on both SQLite builds.
+ */
+export const SCAN_HISTORY_SQL =
+  "SELECT s.id AS id, s.scanned_at AS scanned_at, s.verdict AS verdict, " +
+  "s.duplicate_source AS duplicate_source, s.gtin14 AS gtin14, s.serial AS serial, " +
+  "(SELECT o.name FROM ref_operators AS o WHERE o.id = s.operator_id) AS operator_name, " +
+  "CASE WHEN s.box_id IS NULL THEN NULL ELSE " +
+  "(SELECT count(*) FROM floor_scans AS p WHERE p.host_id = s.host_id " +
+  "AND p.device_id = s.device_id AND p.shift_id = s.shift_id AND p.box_id = s.box_id " +
+  "AND p.verdict = 'ok' AND (p.scanned_at < s.scanned_at " +
+  "OR (p.scanned_at = s.scanned_at AND p.rowid <= s.rowid))) END AS box_position " +
+  "FROM (SELECT rowid AS page_rowid FROM floor_scans " +
+  "WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
+  "ORDER BY scanned_at DESC, rowid DESC LIMIT ? OFFSET ?) AS page " +
+  "JOIN floor_scans AS s ON s.rowid = page.page_rowid " +
+  "ORDER BY s.scanned_at DESC, s.rowid DESC";
+
+/** The history read each station database is running or last ran (see `readScanHistory`). */
+const historyTurns = new WeakMap<LocalExecutor, Promise<void>>();
+
+/**
  * The newest-first slice of the shift's scans, with the operator's name from
  * the station's roster copy and the place an accepted code took in its box.
  * Every figure comes from this station's own facts (`floor_scans`); nothing is
  * asked of the host. The place counts the accepted scans of the same box up to
  * this one by time, then by insertion order.
+ *
+ * The history reads of one database run one after another (the scan lag fix):
+ * the station has two reader connections, and a read cannot be cancelled once
+ * the shell runs it, so the history — the work screen's list and the full
+ * history over it — never takes both, and the scan path's own reads always
+ * find one free. Each list keeps at most one read waiting (`useScanHistory`).
  */
-export async function readScanHistory(
+export function readScanHistory(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+  slice: { limit: number; offset: number },
+): Promise<{ rows: ScanHistoryRow[]; total: number }> {
+  const before = historyTurns.get(local) ?? Promise.resolve();
+  const turn = before.then(() => readHistorySlice(local, pairing, shiftId, slice));
+  historyTurns.set(
+    local,
+    turn.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return turn;
+}
+
+async function readHistorySlice(
   local: LocalExecutor,
   pairing: Pairing,
   shiftId: string,
   slice: { limit: number; offset: number },
 ): Promise<{ rows: ScanHistoryRow[]; total: number }> {
   const rows = await local.query(
-    "SELECT s.id AS id, s.scanned_at AS scanned_at, s.verdict AS verdict, " +
-      "s.duplicate_source AS duplicate_source, s.gtin14 AS gtin14, s.serial AS serial, " +
-      "(SELECT o.name FROM ref_operators AS o WHERE o.id = s.operator_id) AS operator_name, " +
-      "CASE WHEN s.box_id IS NULL THEN NULL ELSE " +
-      "(SELECT count(*) FROM floor_scans AS p WHERE p.host_id = s.host_id " +
-      "AND p.device_id = s.device_id AND p.shift_id = s.shift_id AND p.box_id = s.box_id " +
-      "AND p.verdict = 'ok' AND (p.scanned_at < s.scanned_at " +
-      "OR (p.scanned_at = s.scanned_at AND p.rowid <= s.rowid))) END AS box_position " +
-      "FROM floor_scans AS s WHERE s.host_id = ? AND s.device_id = ? AND s.shift_id = ? " +
-      "ORDER BY s.scanned_at DESC, s.rowid DESC LIMIT ? OFFSET ?",
+    SCAN_HISTORY_SQL,
     [pairing.hostId, pairing.deviceId, shiftId, slice.limit, slice.offset],
     row,
   );

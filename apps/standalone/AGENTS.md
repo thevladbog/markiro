@@ -242,7 +242,14 @@ indexes of both migrations exist.
 
 `src-tauri/src/local_db.rs` keeps `standalone-station.db` in the app's local
 data directory, next to `device.json`: WAL, `synchronous=FULL`, foreign
-keys, a 5 s busy timeout, migrations in `src-tauri/migrations`. The webview
+keys, a 5 s busy timeout, migrations in `src-tauri/migrations`. Every
+connection (the writer and both readers) sets `journal_size_limit` to 64 MiB
+(`JOURNAL_SIZE_LIMIT`, the scan lag fix): the WAL peaks at 4–8 MB in normal
+work, so the limit never truncates it there, and a WAL that once grew (readers
+that kept the checkpoint from resetting it, a long migration) is cut back to
+64 MiB at its next reset instead of keeping its peak on disk
+(`every_connection_limits_the_wal_it_keeps`, also after the pools reconnect).
+The host's database still has no such limit. The webview
 reads it with `local_query` — one `SELECT` or `WITH` statement on read-only
 connections, rows as objects keyed by column name — and writes it only with
 `local_transaction`: up to 32 statements of at most 64 KB and 256 values
@@ -665,6 +672,26 @@ the newest is the cursor of the next read, which must never go back;
 `floor_displacements_cursor` and the partial `floor_displacements_open`; the
 statements' plans are pinned on both SQLite builds
 (`the_conflict_notices_search_an_index`).
+
+Migration `0023_scan_history_indexes.sql` (the scan lag fix) adds two indexes
+of `floor_scans` for the work screen's history read (`SCAN_HISTORY_SQL`, see
+«Floor work»): `floor_scans_shift_time (host_id, device_id, shift_id,
+scanned_at)`, whose order gives the page of a shift's newest scans without a
+sort of the shift, and the partial `floor_scans_box (host_id, device_id,
+box_id) WHERE box_id IS NOT NULL`, through which each listed scan's place in
+its box counts that box's scans only. `floor_scans_shift` is a prefix of the
+first and stays on purpose: the shift's other reads and deletes (the validation
+counts, the retention's delete) keep their pinned plans; a later migration may
+drop it once they are re-pinned. The receipt's check of a marked box's other
+scans moves from `floor_scans_shift` to `floor_scans_box`. Additive:
+`test/floor-scan-indexes-migration.test.ts` (Node's SQLite) and
+`migration_0023_adds_the_scan_indexes_and_keeps_every_row` (the shell's
+`Migrator`) apply it over a database of `0022`; the tests of `0014` and `0015`,
+which open the database whole, leave its two indexes out (`without_0023`). It
+runs in the shell's setup before the window appears: on a Mac NVMe about 3 s
+for 1 000 000 scans and 8.5 s for 2 000 000 (the WAL grows by about 256 MB per
+million, the file by about 255 MB). Owner check: its time on the station's
+Windows hardware.
 
 ## Writes
 
@@ -4957,6 +4984,25 @@ while the scan was on its way fails it too. Refused scans are journalled with
 their record the same way. A failed write is a system error: the scan is not
 taken, and the work stops until the operator closes the message.
 
+Every outcome carries the code it journalled (`ScanOutcome.code`: the GTIN-14
+and the serial, `null` for a scan that was no code), and the hero shows it with
+the verdict (the scan lag fix): it never waits for the history list, whose read
+may be late or fail. «История сканирований» (`ScanHistory.tsx`,
+`scan-history.ts`) reads the shift's newest scans again after every scan.
+`SCAN_HISTORY_SQL` chooses the page first, by rowid, and only then reads each
+row back with the operator's name and its place in its box; the old text
+counted the place for every scan of the shift before the sort and the limit,
+quadratic in the shift (1.2 s at 4 000 scans, 12.6 s at 10 000 on a Mac, re-run
+on every scan, starving the two reader connections and the WAL checkpoint).
+`test/floor-scan-history-read.test.ts` keeps the old text as the oracle of the
+same rows and pins the plan's shape on Node's SQLite, and
+`the_scan_history_reads_its_page_first` on the shell's. A list keeps one read
+in flight (`useScanHistory`): a change while it runs marks it asked again and
+exactly one more read follows; `readScanHistory` runs the history reads of one
+database one after another, so the list and the full history over it never
+hold both readers and the scan path's own reads always find one free. A read
+the shell started still cannot be cancelled.
+
 A box (`box-close.ts`, `closeOpenBox`) closes with the next serial of the
 earliest block of the snapshot's issuer prefix and the box extension `0` that
 has one, its SSCC by the domain's `buildSscc`, in ONE transaction: the serial
@@ -5692,8 +5738,9 @@ Known limits of the retention, and who carries each:
   marked box in a shift of 100 000 scans (995 ms for a batch of 100 accepted
   scans of 100 marked boxes), inside the single-writer receipt transaction.
   Realistic only after a restore re-sends scans that conflicted before, so for
-  few boxes. Not done: an index `floor_scans (box_id) WHERE conflict = 1` with
-  the next shell migration.
+  few boxes. Since migration `0023` (the scan lag fix) the check searches
+  `floor_scans_box`, the box's own scans, instead of its shift; not measured
+  again. An index `floor_scans (box_id) WHERE conflict = 1` was not added.
 - A station clock set forward purges early (the cutoff is the clock's);
   checking the clock is not part of plan РК-С and stays open.
 - A pass that fails leaves no trace but the next pass trying again: plan 2b or

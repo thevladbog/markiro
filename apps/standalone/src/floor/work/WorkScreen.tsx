@@ -117,6 +117,7 @@ import {
 import { UnitLabelRefusedError } from "../unit-labels/unit-label-work.js";
 import { UnitLabelHistory } from "../unit-labels/UnitLabelHistory.js";
 import { COMPACT_ROWS, ScanHistory, ScanHistoryScreen, useScanHistory } from "./ScanHistory.js";
+import { maskCode } from "./scan-history.js";
 import { UnitLabelPanel } from "../unit-labels/UnitLabelPanel.js";
 import { UnitLabelVerification } from "../unit-labels/UnitLabelVerification.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
@@ -1241,8 +1242,8 @@ export function WorkScreen(props: WorkScreenProps) {
     sendAccepted: sendUnitAccepted,
   } = unit;
 
-  // The screen's one read of the shift's newest scans: the single history list, and the code
-  // tail the last scan's hero shows (read after the screen's own first read, as before).
+  // The screen's one read of the shift's newest scans: the single history list (read after the
+  // screen's own first read, as before). The last scan's code comes from its outcome, not from it.
   const history = useScanHistory(
     props.local,
     props.pairing,
@@ -2510,14 +2511,17 @@ export function WorkScreen(props: WorkScreenProps) {
   // its figures are in its panel.
   const lastOutcomeAt = last !== null && "scannedAt" in last ? last.scannedAt : null;
   const lastTime = lastOutcomeAt === null ? null : scanTime(lastOutcomeAt);
-  const lastRow =
-    lastOutcomeAt === null || history.kind !== "ready"
-      ? undefined
-      : history.rows.find((row) => row.scannedAt === lastOutcomeAt);
+  // The code comes from the scan's own outcome, with its verdict (the scan lag fix): never from
+  // the history list, whose read may be late or fail.
+  const lastScanned = last !== null && "code" in last ? last.code : null;
   const lastCode =
-    lastRow === undefined || lastRow.maskedCode === null
+    lastScanned === null
       ? null
-      : { gtin14: lastRow.gtin14, serial: lastRow.serial, fallback: lastRow.maskedCode };
+      : {
+          gtin14: lastScanned.gtin14,
+          serial: lastScanned.serial,
+          fallback: maskCode(lastScanned.gtin14, lastScanned.serial) ?? lastScanned.serial,
+        };
   const facts = validation
     ? []
     : [
