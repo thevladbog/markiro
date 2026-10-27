@@ -44,7 +44,7 @@
 
 ### Task 2: Exact failed-activation reader and admission
 
-**Files:** Create `deploy/platform/host/forward-activation-successor-admission.mjs`, `deploy/platform/test/forward-activation-successor-fixture.mjs`, `deploy/platform/test/forward-activation-successor-admission.test.mjs`.
+**Files:** Create `deploy/platform/host/forward-activation-successor-admission.mjs`, `deploy/platform/host/forward-activation-reconciliation.mjs`, `deploy/platform/test/forward-activation-successor-fixture.mjs`, `deploy/platform/test/forward-activation-successor-admission.test.mjs`.
 
 **Interfaces:** Export `failedActivationNames`; `readFailedForwardActivationPredecessor(root,operationId,options={}) -> Promise<FrozenByteRecords>` with the existing explicit successor-index-archive option; `validateForwardActivationSuccessorAdmission(input,{failedActivationBytes,failedForwardBytes,failedUpgradeBytes,originalPredecessorBytes,productMigrationProof,now}) -> admission`. Mint nonserializable reader observations; JSON claims alone cannot satisfy them. Bind lock-preservation/probe-cleanup receipts and the exact older genuine reader object.
 
@@ -54,7 +54,7 @@
 
 ### Task 3: Typed history, ownership and compiled runtime
 
-**Files:** Modify `deploy/platform/host/forward-history.mjs`, `forward-state.mjs`, `forward-index-handoff.py`, `forward-command-runtime.mjs`, `forward-admission.mjs`, `upgrade-command.mjs`; create state/command tests beside the new fixture. Update existing source-closure contract fixtures only where required.
+**Files:** Modify `deploy/platform/host/forward-history.mjs`, `forward-state.mjs`, `forward-index-handoff.py`, `forward-command-runtime.mjs`, `forward-admission.mjs`, `upgrade-command.mjs`, `deploy/platform/backup/local-runtime.mjs`; create state/command tests beside the new fixture. Update existing source-closure contract fixtures only where required.
 
 **Interfaces:** `forwardImmediatePredecessor` returns the new admission's `priorActivation`; `readForwardHistory` adds `failedForwardActivation` only for this discriminant and retains the exact genuine older `failedForward`. Runtime authenticates recovery, failed-upgrade, prior-forward and failed-activation installed closures. Bundle membership includes the new source module. Existing protected phase names remain unchanged.
 
