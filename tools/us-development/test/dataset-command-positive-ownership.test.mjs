@@ -286,6 +286,51 @@ test(
         verificationArtifact: "manifest.json",
       },
     );
+    // Request observations extend only the fixed transport enum, not the
+    // private frame or strict JSON tuple. Keep all original 28 witnesses below.
+    for (const verificationTransportWitness of [
+      "await_send:code:ECONNRESET:new-before-response",
+      "await_send:code:ECONNRESET:reused-before-response",
+      "await_send:code:ECONNRESET:new-after-response",
+      "await_send:code:ECONNRESET:reused-after-response",
+    ]) {
+      assert.equal(
+        projectTransportWitness(verificationTransportWitness),
+        verificationTransportWitness,
+      );
+      const input = { ...witnessInput, verificationTransportWitness };
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          JSON.stringify(input) + "\n",
+          diagnose,
+          projectVerificationFailure,
+          projectStorageReadFailureCode,
+          projectTransportWitness,
+        ),
+        {
+          status: "available",
+          ...input,
+          verificationOperation: "read_private_object",
+          verificationArtifact: "manifest.json",
+        },
+      );
+      for (const invalid of [
+        verificationTransportWitness + ":private",
+        " " + verificationTransportWitness,
+      ])
+        assert.equal(projectTransportWitness(invalid), undefined);
+      const wrong = { ...input, verificationStorageCode: "us_request_package_storage_timeout" };
+      assert.deepEqual(
+        fixtureSupport.datasetPositiveCommandDiagnostic(
+          JSON.stringify(wrong) + "\n",
+          diagnose,
+          projectVerificationFailure,
+          projectStorageReadFailureCode,
+          projectTransportWitness,
+        ),
+        { status: "unavailable" },
+      );
+    }
     let witnessCombinations = 0;
     assert.equal(witnessLiterals.length, 28);
     for (const verificationTransportWitness of witnessLiterals) {

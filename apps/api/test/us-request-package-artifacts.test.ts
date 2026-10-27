@@ -5,12 +5,19 @@ import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import { compileFunction } from "node:vm";
 import ts from "typescript";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UsWorkerObjectEvidence } from "../src/modules/traceability/requests/us-request-worker-types";
 import { createUsRequestWorkerStorageFixture } from "./support/us-request-worker-storage-fixture";
 import * as artifactConfig from "../src/modules/traceability/requests/us-request-package-artifact-config";
 import * as workerTypes from "../src/modules/traceability/requests/us-request-worker-types";
+import * as requestObservation from "../src/modules/traceability/requests/us-request-read-observation";
+import { UsRequestPackageArtifactStore } from "../src/modules/traceability/requests/us-request-package-artifacts";
 import type * as artifactTypes from "../src/modules/traceability/requests/us-request-package-artifacts";
 import {
   projectUsRequestPackageStorageReadFailureCode as projectStorageCode,
@@ -50,6 +57,50 @@ const readFailureCodes = [
   "us_request_package_storage_read_failed",
   "us_request_worker_unknown_failure",
 ];
+
+it("carries the same owned read observation into the existing take-once witness", async () => {
+  // The helper's real SDK acquisition is covered separately. This unit test
+  // isolates the adapter wiring without opening its reserved provider port.
+  const original = Object.assign(new Error("synthetic reset"), { code: "ECONNRESET" });
+  let observed: object | undefined;
+  let finished = false,
+    destroyed = false;
+  vi.spyOn(S3Client.prototype, "send").mockImplementation(async () => {
+    throw original;
+  });
+  vi.spyOn(requestObservation, "createUsRequestReadObservation").mockImplementation(() => ({
+    run<T>(token: object, action: () => Promise<T>): Promise<T> {
+      observed = token;
+      return action();
+    },
+    take(token: object, error: unknown) {
+      return token === observed && error === original
+        ? ("reused-before-response" as const)
+        : undefined;
+    },
+    finish(token: object) {
+      if (token === observed) finished = true;
+    },
+    destroy() {
+      destroyed = true;
+    },
+  }));
+  const fixture = createUsRequestWorkerStorageFixture();
+  const owned = new UsRequestPackageArtifactStore(fixture.config);
+  try {
+    const error: unknown = await owned
+      .readVerified(scope, evidence())
+      .catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: "us_request_package_storage_transport_failed" });
+    expect(takeWitness(error)).toBe("await_send:code:ECONNRESET:reused-before-response");
+    expect(takeWitness(error)).toBeUndefined();
+    expect(finished).toBe(true);
+  } finally {
+    owned.destroy();
+    fixture.destroy();
+  }
+  expect(destroyed).toBe(true);
+});
 
 it("retains a private take-once witness from the actual failed send without changing its error", async () => {
   const s = createUsRequestWorkerStorageFixture(() => ({
@@ -370,7 +421,9 @@ it("the actual adapter rejects phase, first-match and take-consumption semantic 
         ? artifactConfig
         : path === "./us-request-worker-types"
           ? workerTypes
-          : require(path),
+          : path === "./us-request-read-observation"
+            ? requestObservation
+            : require(path),
     );
     const fixture = createUsRequestWorkerStorageFixture();
     const store = new mutant.UsRequestPackageArtifactStore(fixture.config, {

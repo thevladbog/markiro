@@ -25,11 +25,17 @@ export interface UsRequestPackageArtifactS3Transport {
   ): Promise<unknown>;
   destroy?(): void;
 }
+import { createUsRequestReadObservation } from "./us-request-read-observation";
+
 const OPERATION_TIMEOUT_MS = 15_000;
 export function projectUsRequestPackageTransportWitness(value: unknown) {
   return (
     [
       "await_send:code:ECONNRESET",
+      "await_send:code:ECONNRESET:new-before-response",
+      "await_send:code:ECONNRESET:reused-before-response",
+      "await_send:code:ECONNRESET:new-after-response",
+      "await_send:code:ECONNRESET:reused-after-response",
       "consume_body:code:ECONNRESET",
       "await_send:code:ECONNREFUSED",
       "consume_body:code:ECONNREFUSED",
@@ -209,6 +215,7 @@ const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 export class UsRequestPackageArtifactStore {
   readonly #client: UsRequestPackageArtifactS3Transport;
   readonly #ownsClient: boolean;
+  readonly #requestObservation: ReturnType<typeof createUsRequestReadObservation> | undefined;
   readonly #active = new Set<AbortController>();
   #destroyed = false;
   constructor(
@@ -217,21 +224,26 @@ export class UsRequestPackageArtifactStore {
   ) {
     assertUsRequestPackageArtifactStorageConfig(config);
     this.#ownsClient = transport === undefined;
-    this.#client =
-      transport ??
-      new S3Client({
+    if (transport) {
+      this.#client = transport;
+      this.#requestObservation = undefined;
+    } else {
+      const requestHandler = new NodeHttpHandler({
+        connectionTimeout: 3_000,
+        requestTimeout: OPERATION_TIMEOUT_MS,
+        socketTimeout: 10_000,
+        throwOnRequestTimeout: true,
+      });
+      this.#client = new S3Client({
         endpoint: config.endpoint,
         region: config.region,
         forcePathStyle: config.forcePathStyle,
         credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
         maxAttempts: 1,
-        requestHandler: new NodeHttpHandler({
-          connectionTimeout: 3_000,
-          requestTimeout: OPERATION_TIMEOUT_MS,
-          socketTimeout: 10_000,
-          throwOnRequestTimeout: true,
-        }),
+        requestHandler,
       });
+      this.#requestObservation = createUsRequestReadObservation(requestHandler);
+    }
   }
 
   async putVerified(
@@ -300,6 +312,7 @@ export class UsRequestPackageArtifactStore {
     if (this.#destroyed) return;
     this.#destroyed = true;
     for (const controller of this.#active) controller.abort();
+    this.#requestObservation?.destroy();
     if (this.#ownsClient) this.#client.destroy?.();
   }
 
@@ -308,10 +321,14 @@ export class UsRequestPackageArtifactStore {
     readStages.set(readToken, "await_send");
     return this.io(
       async (signal) => {
-        const response = await this.#client.send(
-          new GetObjectCommand({ Bucket: this.config.bucket, Key: artifact.objectKey }),
-          { abortSignal: signal },
-        );
+        const send = () =>
+          this.#client.send(
+            new GetObjectCommand({ Bucket: this.config.bucket, Key: artifact.objectKey }),
+            { abortSignal: signal },
+          );
+        const response = await (this.#requestObservation
+          ? this.#requestObservation.run(readToken, send)
+          : send());
         if (readStages.has(readToken)) readStages.set(readToken, "consume_body");
         const body = own(response, "Body");
         const close = () => closeBody(body);
@@ -372,6 +389,13 @@ export class UsRequestPackageArtifactStore {
       };
       const transport = isTransportFailure(error, capture);
       const mapped = failure(transport ? "us_request_package_storage_transport_failed" : fallback);
+      if (transport && readToken && capture.witness === "await_send:code:ECONNRESET") {
+        const observation = this.#requestObservation?.take(readToken, error);
+        const witness = projectUsRequestPackageTransportWitness(
+          observation ? `await_send:code:ECONNRESET:${observation}` : undefined,
+        );
+        if (witness) capture.witness = witness;
+      }
       if (transport && capture.witness) transportWitnesses.set(mapped, capture.witness);
       throw mapped;
     } finally {
@@ -379,6 +403,7 @@ export class UsRequestPackageArtifactStore {
       if (rejectAbort) controller.signal.removeEventListener("abort", rejectAbort);
       controller.abort();
       this.#active.delete(controller);
+      if (readToken) this.#requestObservation?.finish(readToken);
       closeReadStage(readToken);
     }
   }
