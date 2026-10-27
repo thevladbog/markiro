@@ -37,6 +37,17 @@ import { productionAuthorization } from "./test/production-activation-fixture.mj
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
 import { readProtectedEnv } from "./preflight.mjs";
 import { sanitizeHostFailure, hostFailureSites } from "./host/failure-diagnostic.mjs";
+// Start before constructing live activation proofs/projection; the returned
+// stopwatch continues through application commands and owned failure cleanup.
+export async function prepareTimedForwardActivation(build) {
+  assert.equal(typeof build, "function");
+  const started = performance.now();
+  const inputs = await build();
+  return Object.freeze({
+    inputs,
+    elapsedMs: () => Math.max(1, Math.ceil(performance.now() - started)),
+  });
+}
 export const forwardActivationPhases = Object.freeze([
   "activation-admitted",
   "api-started",
@@ -1249,7 +1260,12 @@ async function runScenario(c, mode, checks) {
         Object.entries(activationHistory.bytes).map(([key, bytes]) => [key, digest(bytes)]),
       ),
     },
-    expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    expiresAt: new Date(
+      Math.min(
+        Date.now() + 3600000,
+        Date.parse(JSON.parse(activationHistory.bytes.beforeObservation).observedAt) + 3600000,
+      ),
+    ).toISOString(),
   };
   delete admission.priorForward;
   const { backupResult, verified, preparedState, statePath, options, authenticated } =
@@ -1263,15 +1279,18 @@ async function runScenario(c, mode, checks) {
     "post-migration-activate",
   );
   await mkdir(activationDirectory, { recursive: true, mode: 0o700 });
-  const { preparedTarget, preparedPolicy } = await activationInputs(
-    c,
-    forwardIdentity,
-    forwardOperation.configuration,
-    verified,
-    backupResult,
-    roleMapping,
-    runProcess,
+  const activationWindow = await prepareTimedForwardActivation(() =>
+    activationInputs(
+      c,
+      forwardIdentity,
+      forwardOperation.configuration,
+      verified,
+      backupResult,
+      roleMapping,
+      runProcess,
+    ),
   );
+  const { preparedTarget, preparedPolicy } = activationWindow.inputs;
   const loaded = {
     operationDirectory: activationDirectory,
     receipt: {
@@ -1366,7 +1385,6 @@ async function runScenario(c, mode, checks) {
       throw error;
     }
   };
-  const activationStarted = performance.now();
   if (mode === "healthy") {
     await activate();
     const terminal = JSON.parse(await readFile(statePath));
@@ -1390,7 +1408,7 @@ async function runScenario(c, mode, checks) {
     assert.equal(JSON.stringify(diagnostic).includes("synthetic post-replacement failure"), false);
     checks.replacementFailureCleanup = true;
   }
-  duration.activationMs = Math.max(1, Math.ceil(performance.now() - activationStarted));
+  duration.activationMs = activationWindow.elapsedMs();
   assert.equal(
     (await c.inspect("container", "markiro-platform-postgres-1")).Id,
     predecessorContainers.postgres,

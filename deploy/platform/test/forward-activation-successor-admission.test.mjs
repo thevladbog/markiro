@@ -222,3 +222,17 @@ for (const fault of ["pid", "mount-path", "postgres-image"])
     );
     assert.throws(() => check(f));
   });
+
+test("unanchored hourly successor deadline is rejected before later historical guards", async (t) => {
+  const f = await forwardActivationSuccessorFixture(t);
+  f.input.expiresAt = new Date(f.now + 3600000).toISOString();
+  assert.throws(() => check(f));
+});
+
+test("hourly successor anchored to reconciliation remains valid at its historical horizon", async (t) => {
+  const f = await forwardActivationSuccessorFixture(t);
+  const before = JSON.parse(f.failedActivationBytes.beforeObservation);
+  f.input.expiresAt = new Date(Date.parse(before.observedAt) + 3600000).toISOString();
+  assert.deepEqual(check(f), f.input);
+  assert.deepEqual(check({ ...f, now: Date.parse(f.input.expiresAt) - 1 }), f.input);
+});

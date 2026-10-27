@@ -70,11 +70,17 @@ closures and hands ownership directly from the failed activation index, with
 both older archives unchanged. It performs another actual fresh backup/restore
 before the healthy or post-replacement failure outcome.
 
+The successor preparation expiry is no later than one hour after the original
+`before.json` reconciliation observation. It is never recomputed as a fresh hour
+after receipt construction; historical rechecks must fit that same horizon.
+
 Safe evidence pins both preceding forward IDs and state/index digests, the fixed
 publisher failure stage, full202migration schema, and all13mandatory checks.
 Missing either namespace outcome or cleanup cannot pass. Per-namespace monotonic
 measurements include product extraction, preparation and activation milliseconds,
-Docker call count and source verification count. Product extraction plus current
+Docker call count and top-level source verification count. The activation timer
+starts before live proof/projection construction and continues through application
+commands and owned failure cleanup. Product extraction plus that complete current
 activation must fit25minutes of the existing one-hour authority; ten minutes are
 reserved for provisioning, fifteen for independent approval/queue, and ten for
 safety. Preparation must also finish within one hour. These are conservative CI

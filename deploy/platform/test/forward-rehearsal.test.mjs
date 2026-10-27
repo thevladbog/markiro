@@ -950,3 +950,23 @@ test("forward activation failure retains only validated first-record context and
     assert.ok(!JSON.stringify(fallback).includes("PRIVATE"));
   }
 });
+
+test("activation timing includes asynchronous proof construction and subsequent activation", async () => {
+  const { prepareTimedForwardActivation } = await import("../forward-ci-scenario.mjs");
+  assert.equal(typeof prepareTimedForwardActivation, "function");
+  const { setTimeout: delay } = await import("node:timers/promises");
+  const window = await prepareTimedForwardActivation(async () => {
+    await delay(25);
+    return { prepared: true };
+  });
+  assert.deepEqual(window.inputs, { prepared: true });
+  assert.ok(window.elapsedMs() >= 20);
+  await delay(25);
+  assert.ok(window.elapsedMs() >= 40);
+  await assert.rejects(
+    prepareTimedForwardActivation(async () => {
+      throw new Error("synthetic construction failure");
+    }),
+    /synthetic construction failure/u,
+  );
+});
