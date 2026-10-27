@@ -37,6 +37,7 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       externalTls: true,
       preBackupPredecessor: true,
       directSuccessor: true,
+      activationSuccessor: true,
       preservedHistory: true,
     },
     problem: null,
@@ -44,6 +45,8 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       mode,
       operationId: `${i + 1}1111111-1111-4111-8111-111111111111`,
       failedOperationId: `${i + 3}1111111-1111-4111-8111-111111111111`,
+      failedActivationOperationId: `${i + 7}1111111-1111-4111-8111-111111111111`,
+      failedActivationStateSha256: "3".repeat(64),
       priorForwardOperationId: `${i + 5}1111111-1111-4111-8111-111111111111`,
       priorForwardStateSha256: "1".repeat(64),
       priorForwardIndexSha256: "2".repeat(64),
@@ -61,6 +64,13 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       archiveSha256: "e".repeat(64),
       restoreEvidenceSha256: "f".repeat(64),
       terminalSha256: "a".repeat(64),
+      duration: {
+        productProofMs: 1000,
+        prepareMs: 2000,
+        activationMs: 3000,
+        dockerCalls: 123,
+        sourceVerifications: 456,
+      },
     })),
   };
   assert.deepEqual(validateForwardRehearsalEvidence(value), value);
@@ -74,6 +84,13 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     name: "AssertionError",
   });
   assert.deepEqual(validateForwardRehearsalEvidence(failed), failed);
+  const timedOut = structuredClone(value);
+  timedOut.completed = false;
+  timedOut.problem = failed.problem;
+  timedOut.runs[0].duration.activationMs = 40 * 60000;
+  // Preserve safe measured failure data, while completed acceptance still
+  // rejects the identical over-budget duration below.
+  assert.deepEqual(validateForwardRehearsalEvidence(timedOut), timedOut);
   for (const patch of [
     { stdout: "PRIVATE" },
     { argv: ["PRIVATE"] },
@@ -103,6 +120,16 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.runs[0].priorForwardOperationId = v.runs[0].operationId),
     (v) => (v.runs[0].admissionReadStage = "private-url"),
     (v) => (v.checks.directSuccessor = false),
+    (v) => (v.checks.activationSuccessor = false),
+    (v) => delete v.runs[0].failedActivationOperationId,
+    (v) => (v.runs[0].failedActivationOperationId = v.runs[0].operationId),
+    (v) => (v.runs[0].schema.migrationCount = "2"),
+    (v) => delete v.runs[0].duration,
+    (v) => (v.runs[0].duration.activationMs = 40 * 60000),
+    (v) => (v.runs[0].duration.productProofMs = -1),
+    (v) => (v.runs[0].duration.dockerCalls = 0),
+    (v) => (v.runs[0].duration.sourceVerifications = 0),
+    (v) => (v.runs[0].duration.argv = ["PRIVATE"]),
   ]) {
     const bad = structuredClone(value);
     mutate(bad);
@@ -310,12 +337,15 @@ test("synthetic wrapper never borrows cleanup proof for a later invocation witho
           forward: { mode: "healthy", operationId: "11111111-1111-4111-8111-111111111111",
             failedOperationId: "22222222-2222-4222-8222-222222222222",
             priorForwardOperationId: "33333333-3333-4333-8333-333333333333",
+            failedActivationOperationId: "44444444-4444-4444-8444-444444444444",
+            failedActivationStateSha256: "3".repeat(64),
             priorForwardStateSha256: "1".repeat(64), priorForwardIndexSha256: "2".repeat(64), admissionReadStage: "publisher",
             productSha: "6e32b3bf5970ed8793293bcc7e80aef342836e53", executorSha: "a".repeat(40),
             postgresId: "b".repeat(64), schema: { systemId: "1234", migrationCount: "202",
               schemaSha256: "c".repeat(64), migrationSha256: "d".repeat(64) },
             productMigrationProofSha256: "e".repeat(64), archiveSha256: "f".repeat(64),
-            restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64) } };
+            restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64), duration: { productProofMs: 1000,
+              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456 } } };
         await options.writeResult(result);
         return result;
       }

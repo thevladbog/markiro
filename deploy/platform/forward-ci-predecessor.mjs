@@ -5,10 +5,12 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { digest } from "./backup/schemas.mjs";
 export const priorForwardExecutor = "cdae4e1ab3faf57c4941d8373aeba345fa0ef5de";
-export async function stageForwardPredecessor({ parent, command }) {
+export const failedActivationExecutor = "9c5240964bcf8869838e5574015d2838f3c42d57";
+export const stageForwardPredecessor = (options) => stage(options, priorForwardExecutor);
+export const stageFailedActivationExecutor = (options) => stage(options, failedActivationExecutor);
+async function stage({ parent, command }, executorSha) {
   const git = async (path) =>
-    (await command("git", ["show", `${priorForwardExecutor}:${path}`], { encoding: "buffer" }))
-      .stdout;
+    (await command("git", ["show", `${executorSha}:${path}`], { encoding: "buffer" })).stdout;
   const declarations = [];
   for (const [path, name] of [
     ["deploy/platform/host/recovery-command.mjs", "RECOVERY_BUNDLE_FILES"],
@@ -24,7 +26,7 @@ export async function stageForwardPredecessor({ parent, command }) {
   }
   const paths = [...new Set(declarations)];
   assert.ok(paths.length >= 40 && paths.length <= 256);
-  const installedRoot = join(parent, "upgrade-bootstrap", priorForwardExecutor),
+  const installedRoot = join(parent, "upgrade-bootstrap", executorSha),
     files = {};
   for (const path of paths) {
     assert.ok(!path.split("/").some((p) => !p || p === "." || p === ".."));
@@ -46,9 +48,25 @@ export async function stageForwardPredecessor({ parent, command }) {
   const preparation = await load("deploy/platform/host/forward-preparation.mjs"),
     product = await load("deploy/platform/host/forward-product.mjs"),
     observation = await load("deploy/platform/host/forward-observation.mjs"),
-    reads = await load("deploy/platform/admission-read-failure.mjs");
+    reads = await load(
+      files["deploy/platform/host/admission-read-failure.mjs"]
+        ? "deploy/platform/host/admission-read-failure.mjs"
+        : "deploy/platform/admission-read-failure.mjs",
+    );
+  const state = await load("deploy/platform/host/forward-state.mjs"),
+    backup = await load("deploy/platform/host/target-backup.mjs"),
+    commandModule = await load("deploy/platform/host/upgrade-command.mjs"),
+    retained = await load("deploy/platform/host/forward-retained.mjs"),
+    probe = await load("deploy/platform/host/probe.mjs"),
+    ledger = await load("deploy/platform/host/forward-ledger.mjs");
   return {
-    executorSha: priorForwardExecutor,
+    state,
+    ledger,
+    probe,
+    backup,
+    command: commandModule,
+    retained,
+    executorSha,
     installedRoot,
     files,
     verify,

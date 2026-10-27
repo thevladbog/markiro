@@ -59,6 +59,7 @@ const failurePhases = new Set([
   "verify exact failed synthetic migration state",
   "forward preparation performs actual source dump, isolated restore, cleanup and Linux index handoff",
   "create exact failed pre-backup forward admission",
+  "seed exact expired forward activation and preserve its owned artifacts",
   "forward preparation: verifyAdmission",
   "forward preparation: inspectSource",
   "forward preparation: inspectSchema",
@@ -178,6 +179,7 @@ const checkNames = Object.freeze([
   "externalTls",
   "preBackupPredecessor",
   "directSuccessor",
+  "activationSuccessor",
   "preservedHistory",
 ]);
 const namespaceKeys = Object.freeze([
@@ -185,6 +187,8 @@ const namespaceKeys = Object.freeze([
   "operationId",
   "failedOperationId",
   "priorForwardOperationId",
+  "failedActivationOperationId",
+  "failedActivationStateSha256",
   "priorForwardStateSha256",
   "priorForwardIndexSha256",
   "admissionReadStage",
@@ -196,16 +200,27 @@ const namespaceKeys = Object.freeze([
   "archiveSha256",
   "restoreEvidenceSha256",
   "terminalSha256",
+  "duration",
 ]);
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 function namespace(value) {
   keys(value, namespaceKeys);
   assert.ok(["healthy", "replacement-failure"].includes(value.mode));
-  for (const key of ["operationId", "failedOperationId", "priorForwardOperationId"])
+  for (const key of [
+    "operationId",
+    "failedOperationId",
+    "priorForwardOperationId",
+    "failedActivationOperationId",
+  ])
     assert.match(value[key], uuid);
   assert.equal(
-    new Set([value.operationId, value.failedOperationId, value.priorForwardOperationId]).size,
-    3,
+    new Set([
+      value.operationId,
+      value.failedOperationId,
+      value.priorForwardOperationId,
+      value.failedActivationOperationId,
+    ]).size,
+    4,
   );
   assert.equal(value.admissionReadStage, "publisher");
   assert.equal(value.productSha, forwardProduct);
@@ -218,6 +233,7 @@ function namespace(value) {
     "terminalSha256",
     "priorForwardStateSha256",
     "priorForwardIndexSha256",
+    "failedActivationStateSha256",
   ])
     assert.match(value[key], /^[a-f0-9]{64}$/u);
   keys(value.schema, ["systemId", "schemaSha256", "migrationSha256", "migrationCount"]);
@@ -225,7 +241,23 @@ function namespace(value) {
     assert.match(value.schema[key], /^[1-9][0-9]*$/u);
   for (const key of ["schemaSha256", "migrationSha256"])
     assert.match(value.schema[key], /^[a-f0-9]{64}$/u);
+  assert.equal(value.schema.migrationCount, "202");
+  keys(value.duration, [
+    "productProofMs",
+    "prepareMs",
+    "activationMs",
+    "dockerCalls",
+    "sourceVerifications",
+  ]);
+  for (const n of Object.values(value.duration)) assert.ok(Number.isSafeInteger(n) && n > 0);
   return structuredClone(value);
+}
+function durationBudget(value) {
+  // The existing one-hour authority is unchanged. Reserve ten minutes for
+  // provisioning, fifteen for independent approval/queue and ten for safety.
+  // Private production provisioning must also check its actual remaining TTL.
+  assert.ok(value.duration.productProofMs + value.duration.activationMs <= 25 * 60000);
+  assert.ok(value.duration.prepareMs <= 60 * 60000);
 }
 const safeNamespace = (value) =>
   namespace(Object.fromEntries(namespaceKeys.map((key) => [key, value[key]])));
@@ -263,9 +295,10 @@ export function validateForwardRehearsalEvidence(value) {
         run.operationId,
         run.failedOperationId,
         run.priorForwardOperationId,
+        run.failedActivationOperationId,
       ]),
     ).size,
-    value.runs.length * 3,
+    value.runs.length * 4,
   );
   if (value.completed) {
     assert.deepEqual(
@@ -276,6 +309,7 @@ export function validateForwardRehearsalEvidence(value) {
     assert.equal(value.isolated, true);
     assert.equal(value.cleanup, true);
     assert.ok(Object.values(value.checks).every(Boolean));
+    value.runs.forEach(durationBudget);
   } else {
     if (Object.keys(value.problem ?? {}).length === 2) {
       // Historical failed artifacts contained only this conservative fallback.
@@ -335,8 +369,10 @@ export async function rehearseForwardRecovery(args, options = {}) {
       failure = createForwardScenario("replacement-failure");
     const a = await runInner(success);
     result.runs.push(safeNamespace(a.forward));
+    durationBudget(result.runs.at(-1));
     const b = await runInner(failure);
     result.runs.push(safeNamespace(b.forward));
+    durationBudget(result.runs.at(-1));
     result.isolated = a.isolated && b.isolated;
     result.cleanup = a.cleanup && b.cleanup;
     for (const name of checkNames)
