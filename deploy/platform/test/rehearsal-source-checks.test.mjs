@@ -11,7 +11,9 @@ import {
 import { rehearsalFixture } from "./rehearsal-fixture.mjs";
 import { captureRehearsalResources } from "../upgrade-ci-guards.mjs";
 async function setup(t, verifyIsolation = async () => {}) {
-  const temporaryBase = await realpath("/tmp");
+  const temporaryBase = await realpath(
+    process.platform === "linux" ? "/home/runner/work/_temp" : "/tmp",
+  );
   const root = await mkdtemp(join(temporaryBase, "markiro-upgrade-ci-source-"));
   await chmod(root, 0o700);
   t.after(() => rm(root, { recursive: true }));
