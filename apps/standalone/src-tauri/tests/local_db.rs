@@ -450,6 +450,90 @@ async fn migration_0010_adds_the_shift_indexes_and_keeps_every_row() {
     assert!(MIGRATOR.iter().any(|migration| migration.version == 10));
 }
 
+/// Migration `0023` over a station's database of `0022` (the scan lag fix): the shell's own
+/// SQLite adds the two indexes of the work screen's history read — the shift's scans in time
+/// order and the accepted scans by box (partial) — keeps `floor_scans_shift`, and every row
+/// stays with its rowid.
+#[tokio::test]
+async fn migration_0023_adds_the_scan_indexes_and_keeps_every_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let until_0022: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 22)
+        .cloned()
+        .collect();
+    assert!(until_0022.iter().any(|migration| migration.version == 22));
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 23));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(until_0022),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        "INSERT INTO floor_scans (id, host_id, device_id, shift_id, box_id, verdict, \
+         duplicate_source, raw_kind, raw_length, code_hash, gtin14, serial, canonical, \
+         scanned_at) VALUES ('scan-1', 'host', 'device', 'shift-1', 'box-1', 'ok', NULL, 'km', \
+         31, 'h1', '04600682000013', 'S1', 'c', '2026-10-27T08:00:00.000Z')",
+        "INSERT INTO floor_scans (id, host_id, device_id, shift_id, box_id, verdict, \
+         duplicate_source, raw_kind, raw_length, code_hash, gtin14, serial, canonical, \
+         scanned_at) VALUES ('scan-2', 'host', 'device', 'shift-1', NULL, 'invalid', NULL, \
+         'unknown', 5, NULL, NULL, NULL, NULL, '2026-10-27T08:00:01.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let indexes = db
+        .query(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'floor_scans' \
+             AND sql IS NOT NULL ORDER BY name",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(indexes.into_iter().map(Value::Object).collect()),
+        json!([
+            {
+                "name": "floor_scans_box",
+                "sql": "CREATE INDEX floor_scans_box ON floor_scans (host_id, device_id, box_id) WHERE box_id IS NOT NULL"
+            },
+            {
+                "name": "floor_scans_shift",
+                "sql": "CREATE INDEX floor_scans_shift ON floor_scans (host_id, device_id, shift_id)"
+            },
+            {
+                "name": "floor_scans_shift_time",
+                "sql": "CREATE INDEX floor_scans_shift_time ON floor_scans (host_id, device_id, shift_id, scanned_at)"
+            }
+        ])
+    );
+    let rows = db
+        .query(
+            "SELECT rowid AS r, id, box_id FROM floor_scans ORDER BY rowid",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(rows.into_iter().map(Value::Object).collect()),
+        json!([
+            { "r": 1, "id": "scan-1", "box_id": "box-1" },
+            { "r": 2, "id": "scan-2", "box_id": null }
+        ])
+    );
+}
+
 /// Migration `0013` over a station's database of the migrations before it that holds a refused
 /// record: the record stays as it was with no resolution, a resolution takes only `resent` or
 /// `dismissed`, and the table of the blocks the station did not take exists and is the device's
@@ -884,8 +968,17 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 /// The independent native generation table of `0020` is pinned by the dataset tests, the
 /// demo flag `0021` appends to `ref_products` (spec 2026-10-21) is set aside with `0017`'s column,
 /// and the participation cache of `0022` (plan 2b) by `the_participation_cache_takes_a_newer_read_only`.
-fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
+/// The rows of `sqlite_master` without migration `0023`'s two indexes of `floor_scans` (the scan
+/// lag fix), which a full start applies after the migration a test is about.
+fn without_0023(rows: Vec<Value>) -> Vec<Value> {
     rows.into_iter()
+        .filter(|row| row["name"] != "floor_scans_box" && row["name"] != "floor_scans_shift_time")
+        .collect()
+}
+
+fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
+    without_0023(rows)
+        .into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
         .filter(|row| row["tbl_name"] != "ref_product_photos")
         .filter(|row| row["tbl_name"] != "installation_dataset_epochs")
@@ -1178,7 +1271,8 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
             row
         })
         .collect();
-    assert_eq!(master_rows(&mut raw, "IN").await, intended);
+    // `0023` (the scan lag fix) adds two indexes of `floor_scans` in the same start.
+    assert_eq!(without_0023(master_rows(&mut raw, "IN").await), intended);
     assert_eq!(
         intended
             .iter()
@@ -1203,6 +1297,34 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
         .collect();
     assert_eq!(later, others);
     let after = plans_of(&mut raw, &statements).await;
+    // The plans stay, but for the receipt's check of a box's other scans: `0023` (the scan lag
+    // fix), applied by the same start, gives it the box's own index instead of its shift.
+    const BY_SHIFT: &str =
+        "SEARCH c USING INDEX floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)";
+    const BY_BOX: &str =
+        "SEARCH c USING INDEX floor_scans_box (host_id=? AND device_id=? AND box_id=?)";
+    assert_eq!(
+        plans
+            .iter()
+            .flatten()
+            .filter(|step| *step == BY_SHIFT)
+            .count(),
+        1
+    );
+    let plans: Vec<Vec<String>> = plans
+        .into_iter()
+        .map(|plan| {
+            plan.into_iter()
+                .map(|step| {
+                    if step == BY_SHIFT {
+                        BY_BOX.to_owned()
+                    } else {
+                        step
+                    }
+                })
+                .collect()
+        })
+        .collect();
     assert_eq!(after, plans, "the plans stay");
     assert!(after[0]
         .iter()
@@ -2758,6 +2880,26 @@ async fn the_scan_history_reads_its_page_first() {
             "{detail} should run outside the page: {steps:?}"
         );
     }
+    // Migration `0023`: the page comes from the shift's scans in time order, the index's own
+    // (no sort of the shift), and each box position counts the box's scans only.
+    for index in [
+        "SEARCH floor_scans USING COVERING INDEX floor_scans_shift_time (host_id=? AND device_id=? AND shift_id=?)",
+        "SEARCH p USING INDEX floor_scans_box (host_id=? AND device_id=? AND box_id=?)",
+    ] {
+        assert!(
+            steps.iter().any(|(_, _, detail)| detail == index),
+            "the plan should hold {index}: {steps:?}"
+        );
+    }
+    assert_eq!(
+        steps
+            .iter()
+            .filter(|(_, _, detail)| detail.contains("TEMP B-TREE"))
+            .map(|(_, parent, _)| *parent)
+            .collect::<Vec<_>>(),
+        [0],
+        "only the page's own rows are sorted, outside it: {steps:?}"
+    );
     assert!(
         !steps.iter().any(|(_, _, detail)| {
             let mut words = detail.split(' ');
@@ -2854,7 +2996,8 @@ async fn the_floors_repeating_reads_search_an_index() {
             "sqlite_autoindex_floor_scans_1 (id=?)",
         ),
         // Plan ОЧ: an accepted scan takes its conflict off, and its box's mark once no scan of it
-        // is in conflict; each by the records' own key, the box's other scans by its shift.
+        // is in conflict; each by the records' own key, the box's other scans by the box
+        // (`floor_scans_box`, migration `0023`; before it, by the box's whole shift).
         (
             "UPDATE floor_scans SET conflict = 0 WHERE +host_id = ? AND +device_id = ? AND conflict = 1 \
              AND id IN (SELECT value ->> 'id' FROM json_each(?) \
@@ -2879,7 +3022,7 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND NOT EXISTS (SELECT 1 FROM floor_scans c WHERE c.host_id = floor_boxes.host_id \
              AND c.device_id = floor_boxes.device_id AND c.shift_id = floor_boxes.shift_id \
              AND c.box_id = floor_boxes.id AND c.conflict = 1)",
-            "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
+            "floor_scans_box (host_id=? AND device_id=? AND box_id=?)",
         ),
         // The close a receipt gives its shift (plan 2a8): by the records' own key, not through
         // `outbox_settled`, which holds every settled record of the pairing.

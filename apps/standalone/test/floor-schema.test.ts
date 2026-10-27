@@ -873,7 +873,14 @@ describe("the shape of the production tables (migration 0006)", () => {
         isUnique: 0,
         isPartial: 0,
       },
+      { tableName: "floor_scans", name: "floor_scans_box", isUnique: 0, isPartial: 1 },
       { tableName: "floor_scans", name: "floor_scans_shift", isUnique: 0, isPartial: 0 },
+      {
+        tableName: "floor_scans",
+        name: "floor_scans_shift_time",
+        isUnique: 0,
+        isPartial: 0,
+      },
       { tableName: "floor_shifts", name: "floor_shifts_line", isUnique: 0, isPartial: 0 },
       {
         tableName: "floor_sscc_blocks",
@@ -1229,7 +1236,8 @@ describe("the shape of the production tables (migration 0006)", () => {
     );
     // An accepted scan takes its conflict off, and its box's mark once no scan of it is in
     // conflict (plan ОЧ): the scan by its own key; the box by its key, the accepted scan found by
-    // its key and the box's other scans by the box's shift, never by the pairing's whole table.
+    // its key and the box's other scans by the box itself (`floor_scans_box`, migration `0023`;
+    // before it, by the box's whole shift), never by the pairing's whole table.
     expect(plan(unmark?.sql ?? "")).toContain(
       "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
     );
@@ -1240,7 +1248,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
     );
     expect(plan(unfix?.sql ?? "")).toContain(
-      "SEARCH c USING INDEX floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
+      "SEARCH c USING INDEX floor_scans_box (host_id=? AND device_id=? AND box_id=?)",
     );
     // The close a receipt gives its shift (plan 2a8) looks the batch's records up by their key
     // too: the planner would rather walk `outbox_settled`, every settled record of the pairing.
@@ -1260,9 +1268,14 @@ describe("the shape of the production tables (migration 0006)", () => {
         expect(plan(statement?.sql ?? "")).not.toContain(slow);
       }
     }
-    // The box's other scans are looked up by the box's shift (`floor_scans_shift`), once per box
-    // the accepted scans name that is still marked: never by a walk over a table.
-    for (const slow of ["outbox_unsent", "outbox_settled", "floor_boxes_shift"]) {
+    // The box's other scans are looked up by the box (`floor_scans_box`), once per box the
+    // accepted scans name that is still marked: never by a walk over a table or the box's shift.
+    for (const slow of [
+      "outbox_unsent",
+      "outbox_settled",
+      "floor_boxes_shift",
+      "floor_scans_shift",
+    ]) {
       expect(plan(unfix?.sql ?? "")).not.toContain(slow);
     }
     expect(
