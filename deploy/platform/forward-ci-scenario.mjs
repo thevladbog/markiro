@@ -35,6 +35,7 @@ import { observerProducer } from "./host/observe.mjs";
 import { measureActivationProjection } from "./host/command.mjs";
 import { productionAuthorization } from "./test/production-activation-fixture.mjs";
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
+import { rehearsalInspectPath } from "./rehearsal-inspect-channel.mjs";
 import { readProtectedEnv } from "./preflight.mjs";
 import { sanitizeHostFailure, hostFailureSites } from "./host/failure-diagnostic.mjs";
 // Inclusive aggregate costs only. No arguments, paths, results or errors enter
@@ -482,6 +483,23 @@ export function createForwardRehearsalProcess(c, trace = [], timing = createForw
       await c.shell(["chown", `${st.uid}:${st.gid}`, source]);
     }
     trace.push([...args]);
+    // Only three exact read-only CLI forms have byte-equivalent Engine replies.
+    // Keep every logical freshness/source/recheck boundary; only reuse the wire.
+    if (
+      c.inspectChannel &&
+      rehearsalInspectPath(args) &&
+      request.input === undefined &&
+      Object.keys(request.env).sort().join(",") === "DOCKER_CONFIG,LANG,PATH"
+    ) {
+      for (const value of Object.values(request.env)) {
+        assert.equal(typeof value, "string");
+        assert.equal(/[\r\n\0]/u.test(value), false);
+      }
+      recheck?.();
+      const output = await c.inspectChannel.read({ ...request, args });
+      await timing.measure("isolationMs", () => c.verifyIsolation());
+      return output;
+    }
     // Never pass generated credential values in an OS argv. Docker reads this
     // private local env-file and conveys the fixed child environment directly.
     const envFile = join(c.parent, `forward-child-env-${randomUUID()}`);

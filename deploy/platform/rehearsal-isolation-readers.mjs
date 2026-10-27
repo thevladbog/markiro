@@ -4,12 +4,13 @@ import http from "node:http";
 import { performance } from "node:perf_hooks";
 import { isAbsolute, normalize } from "node:path";
 const reasons = new WeakMap();
-function failure(reason) {
+export function rehearsalEngineReadFailure(reason) {
   const error = new Error("Rehearsal engine metadata read failed.");
   error.code = "ERR_REHEARSAL_ENGINE_READ";
   reasons.set(error, reason);
   return error;
 }
+const failure = rehearsalEngineReadFailure;
 export const rehearsalEngineReadReason = (error) => reasons.get(error) ?? null;
 export function createRehearsalMetadataReader(endpoint) {
   assert.equal(typeof endpoint, "string");

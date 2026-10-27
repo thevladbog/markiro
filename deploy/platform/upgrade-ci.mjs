@@ -1,3 +1,4 @@
+import { createDockerInspectChannel } from "./rehearsal-inspect-channel.mjs";
 /** Actual Docker/SQL/TLS rehearsal, synthetic data and admissions only.
  * The outer local daemon hosts a fresh nested daemon. Only image staging has
  * network access; it is disconnected and checked before product code starts.
@@ -350,6 +351,7 @@ export async function rehearseUpgrade(
   let phase = "stage isolated daemon",
     owned,
     containerId,
+    inspectChannel,
     volumeCreated = false,
     completed = false,
     isolated = false,
@@ -1034,7 +1036,15 @@ export async function rehearseUpgrade(
       },
     );
     if (forwardScenario) {
+      inspectChannel = createDockerInspectChannel({
+        executable: dockerPath,
+        endpoint,
+        containerId,
+        cwd: parent,
+        env,
+      });
       await forwardScenario.run({
+        inspectChannel,
         root,
         parent,
         repository,
@@ -1243,6 +1253,11 @@ export async function rehearseUpgrade(
     );
     problem = rehearsalFailure(phase, error);
   } finally {
+    try {
+      await inspectChannel?.close();
+    } catch (error) {
+      problem ??= rehearsalFailure("owned cleanup", error);
+    }
     if (owned) {
       try {
         await cleanupRehearsalResources(owned, {
