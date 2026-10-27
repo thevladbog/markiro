@@ -3,7 +3,8 @@
 
 use markiro_standalone_lib::local_db::{
     pre_upgrade_file, table_class, LocalDb, LocalDbError, LocalDbState, LocalStatement,
-    OpenFailure, TableClass, UnsentGuard, FILE_NAME, MIGRATOR, PRE_UPGRADE_PREFIX, TABLE_CLASSES,
+    OpenFailure, TableClass, UnsentGuard, FILE_NAME, JOURNAL_SIZE_LIMIT, MIGRATOR,
+    PRE_UPGRADE_PREFIX, TABLE_CLASSES,
 };
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -32,6 +33,53 @@ async fn open() -> (tempfile::TempDir, LocalDb) {
     let dir = tempfile::tempdir().unwrap();
     let db = LocalDb::open(dir.path()).await.unwrap();
     (dir, db)
+}
+
+/// Every connection of the station's database — the writer and both readers — cuts its `-wal`
+/// back to `JOURNAL_SIZE_LIMIT` (64 MiB) when SQLite resets it, and so do the connections the
+/// pools open again after closing theirs (the scan lag fix: a WAL that once grew stays large
+/// otherwise). The webview's read sees the same value.
+#[tokio::test]
+async fn every_connection_limits_the_wal_it_keeps() {
+    let (_dir, db) = open().await;
+    assert_eq!(JOURNAL_SIZE_LIMIT, 67_108_864);
+    assert_eq!(
+        db.journal_size_limits().await.unwrap(),
+        (
+            JOURNAL_SIZE_LIMIT,
+            vec![JOURNAL_SIZE_LIMIT, JOURNAL_SIZE_LIMIT]
+        )
+    );
+    db.reconnect_every_connection().await.unwrap();
+    assert_eq!(
+        db.journal_size_limits().await.unwrap(),
+        (
+            JOURNAL_SIZE_LIMIT,
+            vec![JOURNAL_SIZE_LIMIT, JOURNAL_SIZE_LIMIT]
+        )
+    );
+    let read = db
+        .query(
+            "SELECT journal_size_limit AS n FROM pragma_journal_size_limit",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(read.into_iter().map(Value::Object).collect()),
+        json!([{ "n": JOURNAL_SIZE_LIMIT }])
+    );
+    // A write after the reconnect works on the new writer.
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    assert_eq!(
+        lines(&db).await,
+        json!([{ "id": LINE_1, "name": "Линия 1", "archived": 0, "rev": 3 }])
+    );
 }
 
 /// Every line, ordered by name, as the webview receives them.
