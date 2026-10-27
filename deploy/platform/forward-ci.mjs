@@ -16,7 +16,9 @@ import {
 export { validateRehearsalDaemon, cleanupRehearsalResources } from "./upgrade-ci-guards.mjs";
 // Compiled stage labels and fixed child metadata only. Never project error text,
 // private paths, argv, output or environment into the uploaded CI evidence.
+import { forwardActivationSeedStages } from "./forward-ci-expired-activation.mjs";
 const failurePhases = new Set([
+  ...Object.values(forwardActivationSeedStages),
   "isolated forward rehearsal",
   "stage isolated daemon",
   "owned cleanup",

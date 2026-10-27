@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rename, lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { digest } from "./backup/schemas.mjs";
+import { snapshotActivation } from "./host/recovery-activation-admission.mjs";
 import { writePrivateFile } from "./host/files.mjs";
 import { createDockerCommand } from "./host/observe.mjs";
 import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
@@ -12,6 +13,55 @@ import { forwardMetadata } from "./test/forward-state-fixture.mjs";
 import { readFailedForwardActivationPredecessor } from "./host/forward-activation-successor-admission.mjs";
 import { failedActivationExecutor } from "./forward-ci-predecessor.mjs";
 const encode = (v) => Buffer.from(`${JSON.stringify(v)}\n`);
+// Healthcheck timestamps and output rotate while container identity stays fixed.
+// The reconciliation contract authenticates health status, not that telemetry.
+export function projectActivationReconciliationContainer(input) {
+  const value = snapshotActivation(input);
+  return {
+    id: value.Id,
+    imageId: value.Image,
+    ...Object.fromEntries(
+      ["Running", "Paused", "Restarting", "Status", "StartedAt", "FinishedAt"].map((key) => [
+        key,
+        value.State[key],
+      ]),
+    ),
+    Health: value.State.Health ? { Status: value.State.Health.Status } : {},
+  };
+}
+export function assertSameExitedActivationProbe(before, after) {
+  const stable = (input) => {
+    const value = snapshotActivation(input);
+    assert.equal(value.State.Status, "exited");
+    for (const key of ["Running", "Paused", "Restarting"]) assert.equal(value.State[key], false);
+    assert.equal(value.State.ExitCode, 0);
+    assert.equal(value.State.Pid, 0);
+    const state = { ...value.State };
+    // An exited probe's success is established by exit status/PID. Keep every
+    // other identity, recipe, mount, network and terminal-state field exact.
+    delete state.Health;
+    return { ...value, State: state };
+  };
+  assert.deepEqual(stable(after), stable(before));
+}
+export const forwardActivationSeedStages = Object.freeze({
+  inputs: "seed activation: validate historical inputs",
+  persist: "seed activation: persist immutable phase inputs",
+  coordinator: "seed activation: enter historical coordinator",
+  admitted: "seed activation: complete activation admission",
+  enter: "seed activation: enter before API replacement",
+  probe: "seed activation: execute historical role probe",
+  probeResult: "seed activation: verify exited owned probe",
+  deadline: "seed activation: verify probe deadline",
+  wait: "seed activation: wait for controlled expiry",
+  fail: "seed activation: persist exact expired failure",
+  terminal: "seed activation: verify canonical terminal state",
+  observation: "seed activation: record actual reconciliation observation",
+  lock: "seed activation: preserve exact failed lock",
+  cleanup: "seed activation: remove exact exited probe",
+  receipts: "seed activation: verify cleanup receipts",
+  predecessor: "seed activation: authenticate failed predecessor",
+});
 async function syncDirectory(path) {
   const fd = await open(path, "r");
   try {
@@ -35,6 +85,7 @@ export async function seedExpiredForwardActivation({
   verifyBaseline,
   runProcess,
 }) {
+  c.progress(forwardActivationSeedStages.inputs);
   assert.equal(process.platform, "linux");
   assert.equal(executor.executorSha, failedActivationExecutor);
   assert.equal(admission.identity.executorSha, failedActivationExecutor);
@@ -68,6 +119,7 @@ export async function seedExpiredForwardActivation({
       preparedPolicy,
     },
   };
+  c.progress(forwardActivationSeedStages.persist);
   await put(activationDirectory, "operation.json", activationRecord);
   for (const [directory, phase, dispatch] of [
     [prepareDirectory, admission.phase, admission.dispatch],
@@ -93,12 +145,15 @@ export async function seedExpiredForwardActivation({
     code: "ERR_HOST_FORWARD_ADMISSION",
     terminationConfirmed: false,
   });
+  c.progress(forwardActivationSeedStages.coordinator);
   await assert.rejects(
     executor.state.withForwardActivationState(
       root,
       decision,
       async (store) => {
+        c.progress(forwardActivationSeedStages.admitted);
         await store.complete("activation-admitted");
+        c.progress(forwardActivationSeedStages.enter);
         await store.enter("api-started");
         // Execute the historical real DB/TLS role probe, then deliberately report
         // uncertain transport after its actual successful start. Its normal cleanup
@@ -112,6 +167,7 @@ export async function seedExpiredForwardActivation({
           async (request, recheck) => {
             const result = await runProcess(request, recheck);
             if (request.args.includes("start")) {
+              c.progress(forwardActivationSeedStages.probeResult);
               probe = await c.inspect("container", `markiro-platform-probe-${id}`);
               assert.equal(probe.State.Status, "exited");
               assert.equal(probe.State.ExitCode, 0);
@@ -121,6 +177,7 @@ export async function seedExpiredForwardActivation({
             return result;
           },
         );
+        c.progress(forwardActivationSeedStages.probe);
         await assert.rejects(
           executor.probe.runPostgresProbe({
             context: {
@@ -139,13 +196,16 @@ export async function seedExpiredForwardActivation({
             return true;
           },
         );
+        c.progress(forwardActivationSeedStages.deadline);
         assert.ok(probe);
         assert.ok(Date.parse(probe.State.FinishedAt) <= Date.parse(decision.expiresAt));
 
         // No receipt claims the future: wait at most the deliberate five-minute CI
         // lifetime, then use actual wall time for all successor observations.
+        c.progress(forwardActivationSeedStages.wait);
         await delay(Math.max(0, Date.parse(decision.expiresAt) + 1 - Date.now()));
         syntheticNow = Date.now();
+        c.progress(forwardActivationSeedStages.fail);
         await store.fail();
         injectedExpiry = true;
         throw expected;
@@ -158,6 +218,7 @@ export async function seedExpiredForwardActivation({
       return true;
     },
   );
+  c.progress(forwardActivationSeedStages.terminal);
   const folder = join(root, "forward-recovery-operations", id),
     stateBytes = await readFile(join(folder, "state.json")),
     state = JSON.parse(stateBytes);
@@ -229,15 +290,7 @@ export async function seedExpiredForwardActivation({
     for (const service of ["postgres", "api", "edge"]) {
       const value = await c.inspect("container", admission.baseline.containers[service]);
       assert.equal(value.State.Running, service === "postgres");
-      containers[service] = {
-        id: value.Id,
-        imageId: value.Image,
-        ...Object.fromEntries(
-          ["Running", "Paused", "Restarting", "Status", "Health", "StartedAt", "FinishedAt"].map(
-            (key) => [key, value.State[key] ?? (key === "Health" ? {} : undefined)],
-          ),
-        ),
-      };
+      containers[service] = projectActivationReconciliationContainer(value);
     }
     // No compiled worker is launched in this harness: the historical coordinator
     // has returned and every nested process above was awaited to completion.
@@ -255,6 +308,7 @@ export async function seedExpiredForwardActivation({
       probe: { present: probePresent, id: probe.Id, inspectionSha256: digest(inspection) },
     };
   };
+  c.progress(forwardActivationSeedStages.observation);
   const before = await observe();
   assert.equal(before.lock.present, true);
   assert.equal(before.probe.present, true);
@@ -273,6 +327,7 @@ export async function seedExpiredForwardActivation({
   await syncDirectory(reconciliation);
   // The entire destination directory was created exclusively above, in this
   // private single-coordinator namespace; no production lock helper uses this.
+  c.progress(forwardActivationSeedStages.lock);
   assert.deepEqual((await observe()).containers, before.containers);
   await rename(lock, join(reconciliation, "lock"));
   await syncDirectory(root);
@@ -301,7 +356,8 @@ export async function seedExpiredForwardActivation({
   await c.verifyIsolation();
   await executor.verify();
   assert.deepEqual((await observe()).containers, before.containers);
-  assert.deepEqual(await c.inspect("container", probe.Id), probe);
+  c.progress(forwardActivationSeedStages.cleanup);
+  assertSameExitedActivationProbe(probe, await c.inspect("container", probe.Id));
   await c.nested(["container", "rm", probe.Id]);
   assert.equal(
     String(
@@ -319,6 +375,7 @@ export async function seedExpiredForwardActivation({
     ).trim(),
     "",
   );
+  c.progress(forwardActivationSeedStages.receipts);
   const after = await observe();
   assert.equal(after.lock.present, false);
   assert.equal(after.probe.present, false);
@@ -335,5 +392,6 @@ export async function seedExpiredForwardActivation({
     completedAt: after.observedAt,
   });
   await syncDirectory(reconciliation);
+  c.progress(forwardActivationSeedStages.predecessor);
   return { decision, bytes: await readFailedForwardActivationPredecessor(root, id) };
 }
