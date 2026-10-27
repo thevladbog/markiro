@@ -110,9 +110,11 @@ export function validateForwardJournal(input, prior = null) {
   validateIdentity(s.admission.identity);
   ensure(
     s.version === 1 &&
-      ["platform-upgrade-forward-recovery", "platform-forward-admission-successor"].includes(
-        s.admission.kind,
-      ) &&
+      [
+        "platform-upgrade-forward-recovery",
+        "platform-forward-admission-successor",
+        "platform-forward-activation-successor",
+      ].includes(s.admission.kind) &&
       s.admission.phase === "post-migration-prepare" &&
       s.migrationEntered === true &&
       Number.isSafeInteger(s.sequence) &&

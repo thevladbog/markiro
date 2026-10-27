@@ -5,7 +5,11 @@ import { readPrivateFile, assertPrivateRootSync, assertBindFileSync } from "./fi
 import { readFile, lstat } from "node:fs/promises";
 import { fingerprintHostConfiguration, hostChildEnvironment } from "./config.mjs";
 import { validateForwardDecision } from "./forward-admission.mjs";
-import { readForwardHistory, validateForwardHistory } from "./forward-history.mjs";
+import {
+  readForwardHistory,
+  validateForwardHistory,
+  forwardImmediatePredecessor,
+} from "./forward-history.mjs";
 import { validateForwardJournal } from "./forward-state.mjs";
 import { captureForwardRetained, readForwardRetained } from "./forward-retained.mjs";
 import { extractProductMigrationProof } from "./forward-product.mjs";
@@ -46,13 +50,11 @@ async function operationHistory(root, admission) {
     index.kind === "platform-forward-recovery-index" &&
     index.operationId === admission.identity.operationId;
   if (!own) {
-    const successor = admission.kind === "platform-forward-admission-successor";
+    const predecessor = forwardImmediatePredecessor(admission);
+    const successor = admission.kind !== "platform-upgrade-forward-recovery";
     ensure(
       index.kind === (successor ? "platform-forward-recovery-index" : "platform-upgrade-index") &&
-        index.operationId ===
-          (successor
-            ? admission.priorForward.identity.operationId
-            : admission.failed.identity.operationId),
+        index.operationId === predecessor.identity.operationId,
     );
   }
   return readForwardHistory(root, admission, { ownIndexArchive: own });
@@ -120,17 +122,26 @@ export async function validateForwardOperation(loaded, options = {}) {
   );
   ensure(typeof loaded.verifyInstalledSources === "function");
   const successor = admission.kind === "platform-forward-admission-successor";
+  const activationSuccessor = admission.kind === "platform-forward-activation-successor";
   keys(record.historicalSources, [
     "recoveryReceiptSha256",
     "failedReceiptSha256",
-    ...(successor ? ["priorForwardReceiptSha256"] : []),
+    ...(successor || activationSuccessor ? ["priorForwardReceiptSha256"] : []),
+    ...(activationSuccessor ? ["priorActivationReceiptSha256"] : []),
   ]);
   const history = await operationHistory(op.root, admission),
     original = history.original,
     failed = history.failedUpgrade;
-  if (successor)
+  const priorActivation = activationSuccessor
+    ? JSON.parse(history.failedForwardActivation.state).admission
+    : null;
+  const priorForward = successor ? admission.priorForward : priorActivation?.priorForward;
+  if (priorForward)
     for (const [key, value] of Object.entries(history.failedForward))
-      ensure(digest(value) === admission.priorForward.hashes[key]);
+      ensure(digest(value) === priorForward.hashes[key]);
+  if (activationSuccessor)
+    for (const [key, value] of Object.entries(history.failedForwardActivation))
+      ensure(digest(value) === admission.priorActivation.hashes[key]);
   for (const name of Object.keys(original))
     ensure(digest(original[name]) === admission.originalPredecessor.hashes[name]);
   for (const name of Object.keys(failed))
@@ -160,11 +171,10 @@ export async function validateForwardOperation(loaded, options = {}) {
       JSON.parse(failed.prepareOperation).dispatch,
     ),
   ]);
-  if (successor) {
+  if (priorForward) {
     const prior = JSON.parse(history.failedForward.state).admission;
     ensure(
-      record.historicalSources.priorForwardReceiptSha256 ===
-        admission.priorForward.hashes.installedExecutor,
+      record.historicalSources.priorForwardReceiptSha256 === priorForward.hashes.installedExecutor,
     );
     histories.push(
       await historicalInstallation(
@@ -183,6 +193,31 @@ export async function validateForwardOperation(loaded, options = {}) {
     });
     same(priorInput.operation.configuration, op.configuration);
   }
+  if (activationSuccessor) {
+    ensure(
+      record.historicalSources.priorActivationReceiptSha256 ===
+        admission.priorActivation.hashes.installedExecutor,
+    );
+    const input = JSON.parse(history.failedForwardActivation.prepareOperation);
+    same(input.historicalSources, {
+      recoveryReceiptSha256: record.historicalSources.recoveryReceiptSha256,
+      failedReceiptSha256: record.historicalSources.failedReceiptSha256,
+      priorForwardReceiptSha256: record.historicalSources.priorForwardReceiptSha256,
+    });
+    same(input.operation.configuration, op.configuration);
+    const receipt = JSON.parse(history.failedForwardActivation.installedExecutor);
+    ensure(receipt.version === 1 && receipt.kind === "platform-upgrade-installed-executor");
+    same(receipt.operationId, priorActivation.identity.operationId);
+    same(receipt.executorSha, priorActivation.identity.executorSha);
+    same(receipt.ci, priorActivation.executorCi);
+    same(receipt.installationDispatch, priorActivation.dispatch);
+    // The genuine activation reader already authenticated this fourth closure
+    // and repeats it on every operationHistory read below.
+  }
+  const forwardLineage = [
+    ...(priorForward ? [priorForward] : []),
+    ...(activationSuccessor ? [admission.priorActivation] : []),
+  ];
   const retained = new Map();
   const retain = async (path) => {
     const b = await readPrivateFile(op.root, path);
@@ -199,14 +234,10 @@ export async function validateForwardOperation(loaded, options = {}) {
       `upgrade-backup-runtime-${admission.failed.identity.operationId}.json`,
       admission.failed.identity.executorSha,
     ],
-    ...(successor
-      ? [
-          [
-            `forward-backup-runtime-${admission.priorForward.identity.operationId}.json`,
-            admission.priorForward.identity.executorSha,
-          ],
-        ]
-      : []),
+    ...forwardLineage.map((prior) => [
+      `forward-backup-runtime-${prior.identity.operationId}.json`,
+      prior.identity.executorSha,
+    ]),
     [
       `forward-backup-runtime-${admission.identity.operationId}.json`,
       admission.identity.executorSha,
@@ -264,7 +295,12 @@ export async function validateForwardOperation(loaded, options = {}) {
     if (retainedRuntime)
       ensure((await readForwardRetained(op.root, admission)).bytes.equals(retainedRuntime));
     const currentHistory = await operationHistory(op.root, admission);
-    for (const node of ["original", "failedUpgrade", ...(successor ? ["failedForward"] : [])])
+    for (const node of [
+      "original",
+      "failedUpgrade",
+      ...(priorForward ? ["failedForward"] : []),
+      ...(activationSuccessor ? ["failedForwardActivation"] : []),
+    ])
       for (const [key, value] of Object.entries(history[node]))
         ensure(currentHistory[node][key].equals(value));
     for (const fn of histories) await fn();

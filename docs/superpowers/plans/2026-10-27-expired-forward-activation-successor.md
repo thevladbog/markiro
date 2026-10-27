@@ -48,9 +48,9 @@
 
 **Interfaces:** Export `failedActivationNames`; `readFailedForwardActivationPredecessor(root,operationId,options={}) -> Promise<FrozenByteRecords>` with the existing explicit successor-index-archive option; `validateForwardActivationSuccessorAdmission(input,{failedActivationBytes,failedForwardBytes,failedUpgradeBytes,originalPredecessorBytes,productMigrationProof,now}) -> admission`. Mint nonserializable reader observations; JSON claims alone cannot satisfy them. Bind lock-preservation/probe-cleanup receipts and the exact older genuine reader object.
 
-- [ ] Write RED cases: exact canonical sequence10 expired activation with original sequence6; fake reader, changed before/consumption/envelope/dispatch/failure/history/source/receipt, wrong phase/cause, extra generation, running/replaced app, unretired lock and unconfirmed probe cleanup.
-- [ ] Implement the separate discriminant and full exact-directory/hash/metadata/identity bindings. Validate prior admission with its existing canonical validator and genuine product proof at its historical clock; never treat it as live authority.
-- [ ] Run only the new admission suite plus existing successor admission suite; require PASS and original rejection semantics unchanged. Review/commit the deliverable.
+- [x] Write RED cases: exact canonical sequence10 expired activation with original sequence6; fake reader, changed before/consumption/envelope/dispatch/failure/history/source/receipt, wrong phase/cause, extra generation, running/replaced app, unretired lock and unconfirmed probe cleanup.
+- [x] Implement the separate discriminant and full exact-directory/hash/metadata/identity bindings. Validate prior admission with its existing canonical validator and genuine product proof at its historical clock; never treat it as live authority.
+- [x] Run only the new admission suite plus existing successor admission suite; require PASS and original rejection semantics unchanged. Review/commit the deliverable.
 
 ### Task 3: Typed history, ownership and compiled runtime
 
@@ -58,10 +58,10 @@
 
 **Interfaces:** `forwardImmediatePredecessor` returns the new admission's `priorActivation`; `readForwardHistory` adds `failedForwardActivation` only for this discriminant and retains the exact genuine older `failedForward`. Runtime authenticates recovery, failed-upgrade, prior-forward and failed-activation installed closures. Bundle membership includes the new source module. Existing protected phase names remain unchanged.
 
-- [ ] Write RED state/command cases proving exact current-index handoff, canonical newseq6 after real backup, same PostgreSQL/schema, unchanged old journals and no migration path.
-- [ ] Add controlled intent/rename/success failures and altered metadata/index/extra files; require preserved artifacts and refusal before app commands.
-- [ ] Implement exhaustive type selection in journal/decision/history/runtime and Python handoff without broadening old formats. Every historical byte must still be re-read and compared at its existing boundary.
-- [ ] Run new state/command suites and existing forward/successor state/command/observation/backup suites serially; review/commit.
+- [x] Write RED state/command cases proving exact current-index handoff, canonical newseq6 after real backup, same PostgreSQL/schema, unchanged old journals and no migration path.
+- [x] Add controlled intent/rename/success failures and altered metadata/index/extra files; require preserved artifacts and refusal before app commands.
+- [x] Implement exhaustive type selection in journal/decision/history/runtime and Python handoff without broadening old formats. Every historical byte must still be re-read and compared at its existing boundary.
+- [x] Run new state/command suites and existing forward/successor state/command/observation/backup suites serially; review/commit.
 
 ### Task 4: Genuine rehearsal and duration evidence
 
