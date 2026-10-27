@@ -51,14 +51,23 @@ function inspectOutput(raw, limit) {
   return Buffer.from(chunks.join(""));
 }
 
-// Deliberately exclude images: the CLI transforms their Config representation.
-// No names, formats, lists, writes, arbitrary URLs or version negotiation.
+// Match the pinned Docker 28.5.2 CLI API (1.51). Older API versions change image
+// Config fields. Only immutable IDs and the rehearsal's pinned repositories are
+// eligible; no mutable names, formats, lists, writes or version negotiation.
 export function rehearsalInspectPath(args) {
   if (!Array.isArray(args) || args.length !== 3 || args[1] !== "inspect") return null;
   const [kind, , key] = args;
   if (["container", "network"].includes(kind) && /^[a-f0-9]{64}$/u.test(key))
     return kind === "container" ? `/v1.51/containers/${key}/json` : `/v1.51/networks/${key}`;
   if (kind === "volume" && key === "markiro-platform_postgres-data") return `/v1.51/volumes/${key}`;
+  if (
+    kind === "image" &&
+    typeof key === "string" &&
+    /^(?:sha256:|(?:postgres:17-alpine|ghcr\.io\/thevladbog\/markiro-(?:api|platform-edge))@sha256:)[a-f0-9]{64}$/u.exec(
+      key,
+    )?.[0] === key
+  )
+    return `/v1.51/images/${encodeURIComponent(key)}/json`;
   return null;
 }
 export function createRehearsalInspectReader(open) {

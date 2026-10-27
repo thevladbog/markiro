@@ -1022,50 +1022,55 @@ test("forward timing keeps only aggregate costs and preserves action failures", 
 test("fresh inner inspections retain source, isolation and recheck boundaries and never use CLI fallback after failure", async (t) => {
   const { privateFixture } = await import("./host-fixtures.mjs");
   const { root } = await privateFixture(t);
-  for (const fault of [null, "read", "post-isolation"]) {
-    const events = [];
-    const run = createForwardRehearsalProcess({
-      root,
-      parent: root,
-      containerId: "a".repeat(64),
-      verifyIsolation: async () => {
-        events.push("isolation");
-        if (fault === "post-isolation" && events.length > 1) throw Error("changed");
-      },
-      inspectChannel: {
-        read: async (request) => {
-          events.push("read");
-          assert.deepEqual(request.args, ["container", "inspect", "b".repeat(64)]);
-          if (fault === "read") throw Error("read failed");
-          return { stdout: Buffer.from("[{}]\n"), stderr: Buffer.alloc(0) };
+  for (const args of [
+    ["container", "inspect", "b".repeat(64)],
+    ["image", "inspect", `sha256:${"b".repeat(64)}`],
+    ["image", "inspect", `ghcr.io/thevladbog/markiro-api@sha256:${"b".repeat(64)}`],
+  ])
+    for (const fault of [null, "read", "post-isolation"]) {
+      const events = [];
+      const run = createForwardRehearsalProcess({
+        root,
+        parent: root,
+        containerId: "a".repeat(64),
+        verifyIsolation: async () => {
+          events.push("isolation");
+          if (fault === "post-isolation" && events.length > 1) throw Error("changed");
         },
-      },
-      stdinOuter: async () => {
-        events.push("CLI");
-        throw Error("unexpected CLI");
-      },
-    });
-    const operation = run(
-      {
-        executable: "/usr/bin/docker",
-        args: ["--host", "unix:///var/run/docker.sock", "container", "inspect", "b".repeat(64)],
-        env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", DOCKER_CONFIG: `${root}/docker` },
-        timeoutMs: 1000,
-        outputLimitBytes: 1048576,
-      },
-      () => events.push("recheck"),
-    );
-    if (fault) await assert.rejects(operation);
-    else assert.equal(String((await operation).stdout), "[{}]\n");
-    assert.deepEqual(
-      events,
-      fault === "read"
-        ? ["isolation", "recheck", "read"]
-        : ["isolation", "recheck", "read", "isolation"],
-    );
-  }
+        inspectChannel: {
+          read: async (request) => {
+            events.push("read");
+            assert.deepEqual(request.args, args);
+            if (fault === "read") throw Error("read failed");
+            return { stdout: Buffer.from("[{}]\n"), stderr: Buffer.alloc(0) };
+          },
+        },
+        stdinOuter: async () => {
+          events.push("CLI");
+          throw Error("unexpected CLI");
+        },
+      });
+      const operation = run(
+        {
+          executable: "/usr/bin/docker",
+          args: ["--host", "unix:///var/run/docker.sock", ...args],
+          env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", DOCKER_CONFIG: `${root}/docker` },
+          timeoutMs: 1000,
+          outputLimitBytes: 1048576,
+        },
+        () => events.push("recheck"),
+      );
+      if (fault) await assert.rejects(operation);
+      else assert.equal(String((await operation).stdout), "[{}]\n");
+      assert.deepEqual(
+        events,
+        fault === "read"
+          ? ["isolation", "recheck", "read"]
+          : ["isolation", "recheck", "read", "isolation"],
+      );
+    }
 });
-test("image inspections and caller-specified Docker environment retain the original CLI", async (t) => {
+test("unqualified images and caller-specified Docker environment retain the original CLI", async (t) => {
   const { privateFixture } = await import("./host-fixtures.mjs");
   const { root } = await privateFixture(t);
   for (const mode of ["image", "API-version"]) {

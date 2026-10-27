@@ -60,6 +60,61 @@ test("only exact single container/network/volume inspections have a read-only ro
   ])
     assert.equal(rehearsalInspectPath(args), null);
 });
+test("pinned image identities use the same API version as the pinned Docker CLI", () => {
+  for (const key of [
+    `sha256:${id}`,
+    `postgres:17-alpine@sha256:${id}`,
+    `ghcr.io/thevladbog/markiro-api@sha256:${id}`,
+    `ghcr.io/thevladbog/markiro-platform-edge@sha256:${id}`,
+  ])
+    assert.equal(
+      rehearsalInspectPath(["image", "inspect", key]),
+      `/v1.51/images/${encodeURIComponent(key)}/json`,
+    );
+  for (const key of [
+    id,
+    "postgres:17-alpine",
+    "ghcr.io/thevladbog/markiro-api:latest",
+    `other.invalid/image@sha256:${id}`,
+    `../image@sha256:${id}`,
+    `ghcr.io/thevladbog/markiro-api@sha256:${id}?x=1`,
+    `ghcr.io/thevladbog/markiro-api@sha256:${id}#x`,
+    `ghcr.io/thevladbog/markiro-api@sha256:${id}%2f..`,
+    `sha256:${id.toUpperCase()}`,
+    `sha256:${id}\n`,
+  ])
+    assert.equal(rehearsalInspectPath(["image", "inspect", key]), null);
+});
+test("image reads preserve the complete fresh Config including absent and null Cmd", async (t) => {
+  const seen = [];
+  const configs = [
+    { Entrypoint: ["/entrypoint"] },
+    { Entrypoint: ["/entrypoint"], Cmd: null },
+    { Entrypoint: ["/entrypoint"], Cmd: ["changed"] },
+  ];
+  const f = await fixture(t, (req, res) => {
+    seen.push(req.url);
+    res.end(
+      JSON.stringify({
+        Id: `sha256:${id}`,
+        Config: configs[seen.length - 1],
+        Unknown: { retained: true },
+      }),
+    );
+  });
+  const key = `ghcr.io/thevladbog/markiro-platform-edge@sha256:${id}`;
+  for (const Config of configs) {
+    const result = await f.reader.read(request(["image", "inspect", key]));
+    assert.deepEqual(JSON.parse(result.stdout), [
+      { Id: `sha256:${id}`, Config, Unknown: { retained: true } },
+    ]);
+  }
+  assert.deepEqual(
+    seen,
+    configs.map(() => `/v1.51/images/${encodeURIComponent(key)}/json`),
+  );
+  assert.equal(f.counts().opens, 1);
+});
 test("reuses transport but reads every complete object afresh in request order", async (t) => {
   let n = 0;
   const seen = [];
