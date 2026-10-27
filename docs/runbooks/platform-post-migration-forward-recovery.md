@@ -8,7 +8,11 @@ with the migration latch true and sourceRuntime, backup and preparation all null
 It preserves the already migrated physical PostgreSQL database. It never runs
 another migrator, restores SQL over that database, starts old applications, or
 returns the old version. A different failure shape needs a separately reviewed
-project. A failed successor is never an eligible predecessor.
+project. The separately approved `platform-forward-activation-successor` accepts
+only the exact expired sequence10/api-started/recovery-required successor,
+with its canonical sequence6 preparation and both consumed phases preserved.
+It binds exactly two preceding forward operations; no further failed generation
+is eligible. See [expired activation successor design](../superpowers/specs/2026-10-27-expired-forward-activation-successor-design.md).
 
 The successor design and plan are
 [pre-backup-forward-successor-design](../superpowers/specs/2026-10-26-pre-backup-forward-successor-design.md)
@@ -53,12 +57,39 @@ fails canonically before API-up, then executes a base forward admission from the
 exact historical Git executor cdae4e1ab3faf57c4941d8373aeba345fa0ef5de. A trusted
 publisher502 injection creates only sequence2 before retained capture or backup.
 Its own source closure, proof extractor and diagnostics are used, without relabeling
-current source bytes. The current executor authenticates that complete history and
-hands ownership directly to its distinct successor on the same migrated physical
-database. The safe uploaded evidence pins both immediate predecessor digests and
-its operation ID, plus the fixed injected read stage and all12mandatory checks.
-The injection is synthetic; the actual historical243 failure cause remains unknown.
-There is no retry of a failed forward operation.
+current source bytes. The exact historical9c5240964bcf8869838e5574015d2838f3c42d57 Git closure
+then performs actual preparation/backup/isolated restore. Its real DB/TLS probe
+is retained as an exact exited container using a CI-only uncertain-transport
+injection after successful execution. The historical state coordinator uses a
+frozen CI clock to seed the canonical sequence10 expiry before API replacement;
+the subsequent successor uses ordinary wall time. The rehearsal preserves the
+lock through durable rename receipts and removes only the exact inspected probe
+by ID. This is a disposable namespace fixture, never production reconciliation
+or approval authority. The current executor authenticates all four historical
+closures and hands ownership directly from the failed activation index, with
+both older archives unchanged. It performs another actual fresh backup/restore
+before the healthy or post-replacement failure outcome.
+
+The successor preparation expiry is no later than one hour after the original
+`before.json` reconciliation observation. It is never recomputed as a fresh hour
+after receipt construction; historical rechecks must fit that same horizon.
+
+Safe evidence pins both preceding forward IDs and state/index digests, the fixed
+publisher failure stage, full202migration schema, and all13mandatory checks.
+Missing either namespace outcome or cleanup cannot pass. Per-namespace monotonic
+measurements include product extraction, preparation and activation milliseconds,
+Docker call count and top-level source verification count. The activation timer
+starts before live proof/projection construction and continues through application
+commands and owned failure cleanup. Product extraction plus that complete current
+activation must fit25minutes of the existing one-hour authority; ten minutes are
+reserved for provisioning, fifteen for independent approval/queue, and ten for
+safety. Preparation must also finish within one hour. These are conservative CI
+acceptance limits, not a production TTL extension or availability promise.
+Concrete production provisioning must independently verify the actual remaining
+TTL including all fresh proof generation, transfer, provisioning and approval.
+The controlled historical injections do not establish the cause of the actual
+243failure; they reproduce only the exact admitted predecessor state classes.
+There is no retry of a consumed failed operation.
 The worker archive is staged inside the captured daemon volume under
 `/var/lib/docker/markiro-forward-worker.tar`. Its SHA is read back through the live
 container namespace before the single image load. DinD mounts a private tmpfs at

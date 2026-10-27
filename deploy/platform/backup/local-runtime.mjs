@@ -2,7 +2,7 @@ import { carryHostFailure } from "../host/failure-diagnostic.mjs";
 import { join, dirname, relative } from "node:path";
 import { chmod, mkdir } from "node:fs/promises";
 import { assertPrivateRootSync, readPrivateFile } from "../host/files.mjs";
-import { ensure, runtime, fail } from "./schemas.mjs";
+import { ensure, runtime, fail, digest } from "./schemas.mjs";
 import { withHeldHostState } from "../host/state.mjs";
 import { withHeldUpgradeState } from "../host/upgrade-state.mjs";
 const recoveryRuntimes = new WeakMap();
@@ -460,6 +460,19 @@ export async function withForwardBackupRuntime(capability, action) {
     );
     validateForwardSourceRuntime(state.sourceRuntime, admission);
     const originalState = JSON.parse(await readPrivateFile(root, "state.json"));
+    const preceding = [];
+    if (admission.kind === "platform-forward-admission-successor")
+      preceding.push(admission.priorForward);
+    if (admission.kind === "platform-forward-activation-successor") {
+      const parentBytes = await readPrivateFile(
+        root,
+        `forward-recovery-operations/${admission.priorActivation.identity.operationId}/state.json`,
+      );
+      ensure(digest(parentBytes) === admission.priorActivation.hashes.state);
+      const parent = JSON.parse(parentBytes).admission;
+      ensure(parent.kind === "platform-forward-admission-successor");
+      preceding.push(parent.priorForward, admission.priorActivation);
+    }
     const descriptors = [
       ["backup-runtime.json", originalState.current.identity.executorSha],
       [
@@ -470,14 +483,10 @@ export async function withForwardBackupRuntime(capability, action) {
         `upgrade-backup-runtime-${admission.failed.identity.operationId}.json`,
         admission.failed.identity.executorSha,
       ],
-      ...(admission.kind === "platform-forward-admission-successor"
-        ? [
-            [
-              `forward-backup-runtime-${admission.priorForward.identity.operationId}.json`,
-              admission.priorForward.identity.executorSha,
-            ],
-          ]
-        : []),
+      ...preceding.map((prior) => [
+        `forward-backup-runtime-${prior.identity.operationId}.json`,
+        prior.identity.executorSha,
+      ]),
     ];
     const retained = [];
     for (const [name, executorSha] of descriptors) {

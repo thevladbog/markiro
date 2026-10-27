@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { writeFile, chmod, symlink, link } from "node:fs/promises";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { privateFixture } from "./host-fixtures.mjs";
 import { readPrivateFile, writePrivateFile } from "../host/files.mjs";
@@ -45,3 +46,57 @@ test("explicit inventory capacity remains bounded and rejects unsafe metadata", 
   await link(join(root, "boundary.json"), join(root, "hard.json"));
   await assert.rejects(readPrivateFile(root, "boundary.json", inventoryCapacity));
 });
+
+// Retained history and source closures keep these buffers alive across every
+// command boundary. Small records must not each pin the full control-file cap.
+test("retained small private documents have a proportional memory budget", async (t) => {
+  const { root } = await privateFixture(t);
+  const bytes = Buffer.alloc(1024, 37);
+  await writePrivateFile(root, "small.json", bytes);
+  const retained = [];
+  for (let i = 0; i < 32; i++) {
+    const actual = await readPrivateFile(root, "small.json");
+    assert.deepEqual(actual, bytes);
+    retained.push(actual);
+  }
+  const backingBytes = [...new Set(retained.map((b) => b.buffer))].reduce(
+    (sum, buffer) => sum + buffer.byteLength,
+    0,
+  );
+  assert.ok(backingBytes <= 128 * 1024, `small documents retain ${backingBytes} bytes`);
+});
+
+for (const growthBytes of [64 * 1024, 1024 * 1024]) {
+  test(`private read preserves bounded growth handling (${growthBytes} bytes)`, async (t) => {
+    const { root } = await privateFixture(t);
+    const initial = Buffer.from("x");
+    const growth = Buffer.alloc(growthBytes, 41);
+    await writePrivateFile(root, "growing.json", initial);
+    const originalAlloc = Buffer.alloc;
+    let grew = false;
+    // Append after initial metadata has been checked, before the first read.
+    const allocation = t.mock.method(Buffer, "alloc", (size, ...args) => {
+      const result = originalAlloc(size, ...args);
+      if (!grew) {
+        grew = true;
+        appendFileSync(join(root, "growing.json"), growth);
+      }
+      return result;
+    });
+    try {
+      if (growthBytes < 1024 * 1024) {
+        assert.deepEqual(
+          await readPrivateFile(root, "growing.json"),
+          Buffer.concat([initial, growth]),
+        );
+      } else {
+        await assert.rejects(readPrivateFile(root, "growing.json"), {
+          code: "ERR_HOST_PRIVATE_FILE",
+        });
+      }
+      assert.equal(grew, true);
+    } finally {
+      allocation.mock.restore();
+    }
+  });
+}

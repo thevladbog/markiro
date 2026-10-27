@@ -37,6 +37,7 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       externalTls: true,
       preBackupPredecessor: true,
       directSuccessor: true,
+      activationSuccessor: true,
       preservedHistory: true,
     },
     problem: null,
@@ -44,6 +45,8 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       mode,
       operationId: `${i + 1}1111111-1111-4111-8111-111111111111`,
       failedOperationId: `${i + 3}1111111-1111-4111-8111-111111111111`,
+      failedActivationOperationId: `${i + 7}1111111-1111-4111-8111-111111111111`,
+      failedActivationStateSha256: "3".repeat(64),
       priorForwardOperationId: `${i + 5}1111111-1111-4111-8111-111111111111`,
       priorForwardStateSha256: "1".repeat(64),
       priorForwardIndexSha256: "2".repeat(64),
@@ -61,6 +64,18 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       archiveSha256: "e".repeat(64),
       restoreEvidenceSha256: "f".repeat(64),
       terminalSha256: "a".repeat(64),
+      duration: {
+        productProofMs: 1000,
+        prepareMs: 2000,
+        activationMs: 3000,
+        dockerCalls: 123,
+        sourceVerifications: 456,
+        activationDockerCalls: 100,
+        activationSourceVerifications: 400,
+        activationDockerTransportMs: 1200,
+        activationIsolationMs: 400,
+        activationSourceVerificationMs: 200,
+      },
     })),
   };
   assert.deepEqual(validateForwardRehearsalEvidence(value), value);
@@ -74,6 +89,13 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     name: "AssertionError",
   });
   assert.deepEqual(validateForwardRehearsalEvidence(failed), failed);
+  const timedOut = structuredClone(value);
+  timedOut.completed = false;
+  timedOut.problem = failed.problem;
+  timedOut.runs[0].duration.activationMs = 40 * 60000;
+  // Preserve safe measured failure data, while completed acceptance still
+  // rejects the identical over-budget duration below.
+  assert.deepEqual(validateForwardRehearsalEvidence(timedOut), timedOut);
   for (const patch of [
     { stdout: "PRIVATE" },
     { argv: ["PRIVATE"] },
@@ -103,6 +125,22 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.runs[0].priorForwardOperationId = v.runs[0].operationId),
     (v) => (v.runs[0].admissionReadStage = "private-url"),
     (v) => (v.checks.directSuccessor = false),
+    (v) => (v.checks.activationSuccessor = false),
+    (v) => delete v.runs[0].failedActivationOperationId,
+    (v) => (v.runs[0].failedActivationOperationId = v.runs[0].operationId),
+    (v) => (v.runs[0].schema.migrationCount = "2"),
+    (v) => delete v.runs[0].duration,
+    (v) => (v.runs[0].duration.activationMs = 40 * 60000),
+    (v) => (v.runs[0].duration.productProofMs = -1),
+    (v) => (v.runs[0].duration.dockerCalls = 0),
+    (v) => (v.runs[0].duration.sourceVerifications = 0),
+    (v) => (v.runs[0].duration.activationDockerCalls = 124),
+    (v) => (v.runs[0].duration.activationSourceVerifications = 457),
+    (v) => delete v.runs[0].duration.activationDockerCalls,
+    (v) => (v.runs[0].duration.activationDockerTransportMs = -1),
+    (v) => (v.runs[0].duration.activationIsolationMs = "PRIVATE"),
+    (v) => delete v.runs[0].duration.activationSourceVerificationMs,
+    (v) => (v.runs[0].duration.argv = ["PRIVATE"]),
   ]) {
     const bad = structuredClone(value);
     mutate(bad);
@@ -310,12 +348,17 @@ test("synthetic wrapper never borrows cleanup proof for a later invocation witho
           forward: { mode: "healthy", operationId: "11111111-1111-4111-8111-111111111111",
             failedOperationId: "22222222-2222-4222-8222-222222222222",
             priorForwardOperationId: "33333333-3333-4333-8333-333333333333",
+            failedActivationOperationId: "44444444-4444-4444-8444-444444444444",
+            failedActivationStateSha256: "3".repeat(64),
             priorForwardStateSha256: "1".repeat(64), priorForwardIndexSha256: "2".repeat(64), admissionReadStage: "publisher",
             productSha: "6e32b3bf5970ed8793293bcc7e80aef342836e53", executorSha: "a".repeat(40),
             postgresId: "b".repeat(64), schema: { systemId: "1234", migrationCount: "202",
               schemaSha256: "c".repeat(64), migrationSha256: "d".repeat(64) },
             productMigrationProofSha256: "e".repeat(64), archiveSha256: "f".repeat(64),
-            restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64) } };
+            restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64), duration: { productProofMs: 1000,
+              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456, activationDockerCalls: 100, activationSourceVerifications: 400,
+              activationDockerTransportMs: 1200, activationIsolationMs: 400,
+              activationSourceVerificationMs: 200 } } };
         await options.writeResult(result);
         return result;
       }
@@ -918,5 +961,148 @@ test("forward activation failure retains only validated first-record context and
     assert.equal(fallback.phase, "activation-admitted");
     assert.equal(fallback.boundary, "validation");
     assert.ok(!JSON.stringify(fallback).includes("PRIVATE"));
+  }
+});
+
+test("activation timing includes asynchronous proof construction and subsequent activation", async () => {
+  const { prepareTimedForwardActivation } = await import("../forward-ci-scenario.mjs");
+  assert.equal(typeof prepareTimedForwardActivation, "function");
+  const { setTimeout: delay } = await import("node:timers/promises");
+  const window = await prepareTimedForwardActivation(async () => {
+    await delay(25);
+    return { prepared: true };
+  });
+  assert.deepEqual(window.inputs, { prepared: true });
+  assert.ok(window.elapsedMs() >= 20);
+  await delay(25);
+  assert.ok(window.elapsedMs() >= 40);
+  await assert.rejects(
+    prepareTimedForwardActivation(async () => {
+      throw new Error("synthetic construction failure");
+    }),
+    /synthetic construction failure/u,
+  );
+});
+
+test("forward timing keeps only aggregate costs and preserves action failures", async () => {
+  const { createForwardTiming } = await import("../forward-ci-scenario.mjs");
+  const timing = createForwardTiming();
+  const result = { private: "not telemetry" };
+  assert.equal(
+    await timing.measure("dockerMs", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return result;
+    }),
+    result,
+  );
+  const failure = new Error("PRIVATE-CHILD-ERROR");
+  await assert.rejects(
+    timing.measure("sourceMs", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      throw failure;
+    }),
+    (error) => error === failure,
+  );
+  let called = false;
+  await assert.rejects(
+    timing.measure("PRIVATE-UNSUPPORTED-CATEGORY", async () => {
+      called = true;
+    }),
+  );
+  assert.equal(called, false);
+  const observed = timing.snapshot();
+  assert.deepEqual(Object.keys(observed), ["dockerMs", "isolationMs", "sourceMs"]);
+  assert.ok(observed.dockerMs > 0 && observed.sourceMs > 0);
+  assert.equal(observed.isolationMs, 0);
+  observed.dockerMs = -1;
+  assert.ok(timing.snapshot().dockerMs > 0);
+  assert.equal(JSON.stringify(timing.snapshot()).includes("PRIVATE"), false);
+});
+
+test("fresh inner inspections retain source, isolation and recheck boundaries and never use CLI fallback after failure", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { root } = await privateFixture(t);
+  for (const fault of [null, "read", "post-isolation"]) {
+    const events = [];
+    const run = createForwardRehearsalProcess({
+      root,
+      parent: root,
+      containerId: "a".repeat(64),
+      verifyIsolation: async () => {
+        events.push("isolation");
+        if (fault === "post-isolation" && events.length > 1) throw Error("changed");
+      },
+      inspectChannel: {
+        read: async (request) => {
+          events.push("read");
+          assert.deepEqual(request.args, ["container", "inspect", "b".repeat(64)]);
+          if (fault === "read") throw Error("read failed");
+          return { stdout: Buffer.from("[{}]\n"), stderr: Buffer.alloc(0) };
+        },
+      },
+      stdinOuter: async () => {
+        events.push("CLI");
+        throw Error("unexpected CLI");
+      },
+    });
+    const operation = run(
+      {
+        executable: "/usr/bin/docker",
+        args: ["--host", "unix:///var/run/docker.sock", "container", "inspect", "b".repeat(64)],
+        env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", DOCKER_CONFIG: `${root}/docker` },
+        timeoutMs: 1000,
+        outputLimitBytes: 1048576,
+      },
+      () => events.push("recheck"),
+    );
+    if (fault) await assert.rejects(operation);
+    else assert.equal(String((await operation).stdout), "[{}]\n");
+    assert.deepEqual(
+      events,
+      fault === "read"
+        ? ["isolation", "recheck", "read"]
+        : ["isolation", "recheck", "read", "isolation"],
+    );
+  }
+});
+test("image inspections and caller-specified Docker environment retain the original CLI", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { root } = await privateFixture(t);
+  for (const mode of ["image", "API-version"]) {
+    let cli = 0;
+    const run = createForwardRehearsalProcess({
+      root,
+      parent: root,
+      containerId: "a".repeat(64),
+      verifyIsolation: async () => {},
+      inspectChannel: {
+        read: () => {
+          throw Error("not eligible");
+        },
+      },
+      stdinOuter: async () => {
+        cli++;
+        return { stdout: Buffer.from("[]"), stderr: Buffer.alloc(0) };
+      },
+    });
+    await run({
+      executable: "/usr/bin/docker",
+      args: [
+        "--host",
+        "unix:///var/run/docker.sock",
+        mode === "image" ? "image" : "container",
+        "inspect",
+        "b".repeat(64),
+      ],
+      env: {
+        PATH: "/usr/bin:/bin",
+        LANG: "C.UTF-8",
+        DOCKER_CONFIG: `${root}/docker`,
+        ...(mode === "API-version" ? { DOCKER_API_VERSION: "1.48" } : {}),
+      },
+      timeoutMs: 1000,
+      outputLimitBytes: 1048576,
+    });
+    assert.equal(cli, 1);
   }
 });

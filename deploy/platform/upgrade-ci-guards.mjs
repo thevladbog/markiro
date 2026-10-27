@@ -1,3 +1,4 @@
+import { rehearsalEngineReadReason } from "./rehearsal-isolation-readers.mjs";
 import { sanitizeHostFailure } from "./host/failure-diagnostic.mjs";
 /** Rehearsal-only isolation. Never imported by an installed host executor. */
 import assert from "node:assert/strict";
@@ -264,6 +265,7 @@ export function rehearsalFailure(phase, error) {
       ? `host-${error.reason}`
       : null;
   const processReason =
+    rehearsalEngineReadReason(error) ??
     hostReason ??
     (command === "docker exec"
       ? (reasons.find(([pattern]) => pattern.test(stderr))?.[1] ?? null)

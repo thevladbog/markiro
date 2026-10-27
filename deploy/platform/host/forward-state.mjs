@@ -110,9 +110,11 @@ export function validateForwardJournal(input, prior = null) {
   validateIdentity(s.admission.identity);
   ensure(
     s.version === 1 &&
-      ["platform-upgrade-forward-recovery", "platform-forward-admission-successor"].includes(
-        s.admission.kind,
-      ) &&
+      [
+        "platform-upgrade-forward-recovery",
+        "platform-forward-admission-successor",
+        "platform-forward-activation-successor",
+      ].includes(s.admission.kind) &&
       s.admission.phase === "post-migration-prepare" &&
       s.migrationEntered === true &&
       Number.isSafeInteger(s.sequence) &&
@@ -254,7 +256,15 @@ async function withForwardState(root, input, action, options, activation) {
     };
     const check = async (cleanup = false, physical = true) => {
       if (!active) throw stateError();
-      await readHistory(true);
+      // One fresh complete history read at this boundary. Integrity has already
+      // checked the owned journal/index/retained bytes; history stays LAST before
+      // admission/physical checks. No result survives this check or an action.
+      let history;
+      try {
+        history = await readHistory(true);
+      } catch (error) {
+        throw carryHostFailure(error, stateError(true));
+      }
       if (!cleanup) {
         if (activation)
           validateForwardDecision(decision, {
@@ -262,7 +272,7 @@ async function withForwardState(root, input, action, options, activation) {
             prior,
             now: now(),
           });
-        else await readHistory(false);
+        else validateForwardHistory(admission, history, { productMigrationProof, now: now() });
       }
       if (physical)
         await verifyBaseline({
@@ -274,7 +284,6 @@ async function withForwardState(root, input, action, options, activation) {
     };
     const integrity = async () => {
       try {
-        await readHistory(true);
         for (const [path, expected] of retained)
           ensure((await readPrivateFile(root, path)).equals(expected));
         ensure(
@@ -497,6 +506,13 @@ async function withForwardState(root, input, action, options, activation) {
     const fail = () =>
       host.guardPersistence(async () => {
         if (!active) throw stateError();
+        // Failure persistence has no following check(), so retain its original
+        // history-before-integrity ordering and uncertain-durability semantics.
+        try {
+          await readHistory(true);
+        } catch (error) {
+          throw carryHostFailure(error, stateError(true));
+        }
         await integrity();
         if (state.status !== "recovery-required")
           await save({ ...state, sequence: state.sequence + 1, status: "recovery-required" });
