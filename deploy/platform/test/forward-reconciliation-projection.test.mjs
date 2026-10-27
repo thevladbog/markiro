@@ -124,3 +124,48 @@ test("probe failure identifies a compiled field group without exposing values", 
     );
   }
 });
+
+const mountSet = () =>
+  ["/input/ca.crt", "/input/connections.json", "/probe/worker.mjs"].map((Destination, i) => ({
+    Type: "bind",
+    Source: `/private/synthetic/${i}`,
+    Destination,
+    RW: false,
+    Mode: "ro",
+    Propagation: "rprivate",
+  }));
+test("all Docker mount permutations preserve the exact destination-to-recipe mapping", () => {
+  const before = inspect();
+  before.Mounts = mountSet();
+  for (const order of [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ]) {
+    const after = inspect();
+    after.Mounts = order.map((i) => before.Mounts[i]);
+    assertSameExitedActivationProbe(before, after);
+    assert.deepEqual(
+      after.Mounts.map((m) => m.Destination),
+      order.map((i) => before.Mounts[i].Destination),
+    );
+  }
+});
+for (const field of ["Type", "Source", "Destination", "RW", "Mode", "Propagation", "Extra"]) {
+  test(`mount ordering normalization still rejects changed ${field}`, () => {
+    const before = inspect(),
+      after = inspect();
+    before.Mounts = mountSet();
+    after.Mounts = mountSet().reverse();
+    after.Mounts[0][field] = field === "RW" ? true : "changed";
+    assert.throws(() => assertSameExitedActivationProbe(before, after));
+  });
+}
+test("identical duplicate mount destinations are rejected", () => {
+  const value = inspect();
+  value.Mounts = [...mountSet(), mountSet()[0]];
+  assert.throws(() => assertSameExitedActivationProbe(value, value));
+});

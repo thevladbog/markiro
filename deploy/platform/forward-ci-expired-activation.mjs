@@ -41,7 +41,21 @@ export function assertSameExitedActivationProbe(before, after, progress = () => 
     // An exited probe's success is established by exit status/PID. Keep every
     // other identity, recipe, mount, network and terminal-state field exact.
     delete state.Health;
-    return { ...value, State: state };
+    progress(forwardActivationSeedStages.probeMounts);
+    assert.ok(Array.isArray(value.Mounts));
+    const destinations = new Set();
+    for (const mount of value.Mounts) {
+      assert.equal(typeof mount.Destination, "string");
+      assert.ok(mount.Destination.startsWith("/"));
+      assert.equal(destinations.has(mount.Destination), false);
+      destinations.add(mount.Destination);
+    }
+    // Docker 28 GetMountPoints ranges over a map, so inspect array order is
+    // unspecified. Preserve every mount field and compare by unique target.
+    const mounts = [...value.Mounts].sort((a, b) =>
+      a.Destination < b.Destination ? -1 : a.Destination > b.Destination ? 1 : 0,
+    );
+    return { ...value, State: state, Mounts: mounts };
   };
   const prior = stable(before, forwardActivationSeedStages.probeTerminalBefore);
   const current = stable(after, forwardActivationSeedStages.probeTerminalAfter);
