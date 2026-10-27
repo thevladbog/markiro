@@ -250,8 +250,12 @@ function namespace(value) {
     "activationMs",
     "dockerCalls",
     "sourceVerifications",
+    "activationDockerCalls",
+    "activationSourceVerifications",
   ]);
   for (const n of Object.values(value.duration)) assert.ok(Number.isSafeInteger(n) && n > 0);
+  assert.ok(value.duration.activationDockerCalls <= value.duration.dockerCalls);
+  assert.ok(value.duration.activationSourceVerifications <= value.duration.sourceVerifications);
   return structuredClone(value);
 }
 function durationBudget(value) {

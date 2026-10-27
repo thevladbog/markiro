@@ -68,6 +68,46 @@ export async function verifyRehearsalIsolation(invocationId, readers, expected) 
   validateRehearsalDaemon({ invocationId, container, volume, routes: { ipv4, ipv6 } }, expected);
 }
 
+// Compiled direct forward helpers (smoke/SQL/inspect) also execute inside the
+// namespace without passing through the host-process adapter. Keep fresh full
+// physical guards on both sides; never return success after a post-check fails.
+export function guardRehearsalOperation(verifyIsolation, operation) {
+  assert.equal(typeof verifyIsolation, "function");
+  assert.equal(typeof operation, "function");
+  return async (...args) => {
+    await verifyIsolation();
+    const result = await operation(...args);
+    await verifyIsolation();
+    return result;
+  };
+}
+
+// Source reads do not execute workloads. The forward transport independently
+// re-observes all four isolation facts before and after every Docker request.
+// The ordinary return harness retains its original isolation-first composition.
+export function createRehearsalSourceChecks({
+  root,
+  closure,
+  values,
+  generated,
+  temporaryBase,
+  verifyIsolation,
+}) {
+  assert.equal(typeof verifyIsolation, "function");
+  const verifySourceBytes = async () => {
+    for (const [file, sha] of Object.entries(closure))
+      assert.equal(digest(await readFile(join(root, file))), sha);
+    validateRehearsalEnvironment(values, generated, root, temporaryBase);
+  };
+  return Object.freeze({
+    verifySourceBytes,
+    verifySources: async () => {
+      await verifyIsolation();
+      await verifySourceBytes();
+    },
+  });
+}
+
 // Hash the read-back private files as configuration integrity evidence. These
 // SHA256 values are file identities, never password authentication verifiers.
 export async function createRehearsalConfiguration(root, values, migrationUrl) {
@@ -886,14 +926,17 @@ export async function rehearseUpgrade(
         identity: candidate,
         configuration: candidateConfig.configuration,
       };
+    const sourceChecks = createRehearsalSourceChecks({
+      root: parent,
+      closure,
+      values,
+      generated,
+      temporaryBase,
+      verifyIsolation,
+    });
     const deps = {
       readMachineId: async () => machineId,
-      verifySources: async () => {
-        await verifyIsolation();
-        for (const [file, sha] of Object.entries(closure))
-          assert.equal(digest(await readFile(join(parent, file))), sha);
-        validateRehearsalEnvironment(values, generated, parent, temporaryBase);
-      },
+      verifySources: sourceChecks.verifySources,
       runProcess: async (request) => {
         await verifyIsolation();
         assert.equal(request.executable, "/usr/bin/docker");
@@ -996,14 +1039,15 @@ export async function rehearseUpgrade(
         owned,
         forwardStage,
         verifyIsolation,
+        verifySourceBytes: sourceChecks.verifySourceBytes,
         command,
         outer,
-        nested,
+        nested: guardRehearsalOperation(verifyIsolation, nested),
         shell,
         stdinOuter,
-        stdinNested,
-        inspect,
-        sql,
+        stdinNested: guardRehearsalOperation(verifyIsolation, stdinNested),
+        inspect: guardRehearsalOperation(verifyIsolation, inspect),
+        sql: guardRehearsalOperation(verifyIsolation, sql),
         oldOperation,
         candidateOperation,
         candidate,

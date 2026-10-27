@@ -347,6 +347,19 @@ function runtimeInterpolation(configuration, values) {
     MARKIRO_PLATFORM_ENV_FILE: configuration.runtimeSnapshot.path,
   };
 }
+// This is a compiled harness binding, not a caller-selectable bypass. Source
+// bytes/environment remain fresh on every call; physical isolation belongs to
+// createForwardRehearsalProcess on both sides of each actual Docker request.
+export function forwardRehearsalDependencies(c, duration) {
+  assert.equal(typeof c.verifySourceBytes, "function");
+  return {
+    ...c.deps,
+    verifySources: async () => {
+      duration.sourceVerifications++;
+      await c.verifySourceBytes();
+    },
+  };
+}
 export function createForwardRehearsalProcess(c, trace = []) {
   const privatePath = (path) => {
     assert.equal(typeof path, "string");
@@ -562,15 +575,10 @@ async function runScenario(c, mode, checks) {
     activationMs: 0,
     dockerCalls: 0,
     sourceVerifications: 0,
+    activationDockerCalls: 0,
+    activationSourceVerifications: 0,
   };
-  const originalVerifySources = c.deps.verifySources;
-  c.deps = {
-    ...c.deps,
-    verifySources: async () => {
-      duration.sourceVerifications++;
-      return originalVerifySources();
-    },
-  };
+  c.deps = forwardRehearsalDependencies(c, duration);
   const trace = [],
     run = createForwardRehearsalProcess(c, trace),
     runProcess = async (...args) => {
@@ -1279,6 +1287,10 @@ async function runScenario(c, mode, checks) {
     "post-migration-activate",
   );
   await mkdir(activationDirectory, { recursive: true, mode: 0o700 });
+  const activationCounts = {
+    dockerCalls: duration.dockerCalls,
+    sourceVerifications: duration.sourceVerifications,
+  };
   const activationWindow = await prepareTimedForwardActivation(() =>
     activationInputs(
       c,
@@ -1409,6 +1421,9 @@ async function runScenario(c, mode, checks) {
     checks.replacementFailureCleanup = true;
   }
   duration.activationMs = activationWindow.elapsedMs();
+  duration.activationDockerCalls = duration.dockerCalls - activationCounts.dockerCalls;
+  duration.activationSourceVerifications =
+    duration.sourceVerifications - activationCounts.sourceVerifications;
   assert.equal(
     (await c.inspect("container", "markiro-platform-postgres-1")).Id,
     predecessorContainers.postgres,

@@ -70,6 +70,8 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
         activationMs: 3000,
         dockerCalls: 123,
         sourceVerifications: 456,
+        activationDockerCalls: 100,
+        activationSourceVerifications: 400,
       },
     })),
   };
@@ -129,6 +131,9 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.runs[0].duration.productProofMs = -1),
     (v) => (v.runs[0].duration.dockerCalls = 0),
     (v) => (v.runs[0].duration.sourceVerifications = 0),
+    (v) => (v.runs[0].duration.activationDockerCalls = 124),
+    (v) => (v.runs[0].duration.activationSourceVerifications = 457),
+    (v) => delete v.runs[0].duration.activationDockerCalls,
     (v) => (v.runs[0].duration.argv = ["PRIVATE"]),
   ]) {
     const bad = structuredClone(value);
@@ -345,7 +350,7 @@ test("synthetic wrapper never borrows cleanup proof for a later invocation witho
               schemaSha256: "c".repeat(64), migrationSha256: "d".repeat(64) },
             productMigrationProofSha256: "e".repeat(64), archiveSha256: "f".repeat(64),
             restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64), duration: { productProofMs: 1000,
-              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456 } } };
+              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456, activationDockerCalls: 100, activationSourceVerifications: 400 } } };
         await options.writeResult(result);
         return result;
       }
