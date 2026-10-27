@@ -68,6 +68,7 @@ describe("a scan of a validation shift", () => {
       boxId: null,
       acceptedCount: 1,
       scannedAt: "2026-10-08T06:15:00.000Z",
+      code: { gtin14: GTIN, serial: "5Yq'Ct;" },
     });
     const codeHash = kmHash(canonicalizeKm(raw));
     expect(rows(db, "SELECT count(*) AS n FROM floor_boxes")).toEqual([{ n: 0 }]);
@@ -137,6 +138,7 @@ describe("a scan of a validation shift", () => {
       source: "local",
       firstScannedAt: "2026-10-08T06:15:00.000Z",
       scannedAt: "2026-10-08T06:15:01.000Z",
+      code: { gtin14: GTIN, serial: "D1" },
     });
     expect(rows(db, "SELECT verdict, duplicate_source, box_id FROM floor_scans")).toEqual([
       { verdict: "ok", duplicate_source: null, box_id: null },
@@ -157,6 +159,7 @@ describe("a scan of a validation shift", () => {
       firstScannedAt: TAKEN.owner.scannedAt,
       shiftNumber: "OCT26-003",
       scannedAt: "2026-10-08T06:15:00.000Z",
+      code: { gtin14: GTIN, serial: "H1" },
     });
     expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 0 }]);
     expect(payloads(db)).toMatchObject([
@@ -171,11 +174,13 @@ describe("a scan of a validation shift", () => {
       kind: "wrong_gtin",
       gtin14: OTHER_GTIN,
       scannedAt: "2026-10-08T06:15:00.000Z",
+      code: { gtin14: OTHER_GTIN, serial: "W1" },
     });
     await expect(processScan(context, "MRK-000742")).resolves.toEqual({
       kind: "invalid",
       rawKind: "unknown",
       scannedAt: "2026-10-08T06:15:01.000Z",
+      code: null,
     });
     expect(rows(db, "SELECT verdict, box_id FROM floor_scans")).toEqual([
       { verdict: "wrong_gtin", box_id: null },

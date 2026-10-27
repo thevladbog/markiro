@@ -148,10 +148,39 @@ export type ScanHistoryRead =
   | { kind: "ready"; rows: ScanHistoryRow[]; total: number };
 type Read = ScanHistoryRead;
 
+/** The slice a history list asks for, as one effect saw it. */
+interface Asked {
+  local: LocalExecutor;
+  hostId: string;
+  deviceId: string;
+  shiftId: string;
+  limit: number;
+  offset: number;
+}
+
+function sameSlice(a: Asked, b: Asked): boolean {
+  return (
+    a.local === b.local &&
+    a.hostId === b.hostId &&
+    a.deviceId === b.deviceId &&
+    a.shiftId === b.shiftId &&
+    a.limit === b.limit &&
+    a.offset === b.offset
+  );
+}
+
 /**
  * One slice of the shift's scans, read again when `refreshKey` changes (the
  * work screen changes it after every scan). A failed read leaves the old rows
  * out and says so; it never touches the work itself.
+ *
+ * One read at a time (the scan lag fix): a read the shell started cannot be
+ * cancelled and holds one of the station's two reader connections to its end,
+ * so a change while a read runs only marks the list as asked again, and the
+ * read that ends starts exactly one more for the newest ask — never a queue
+ * of reads, one per scan. A read that ends shows its rows if the list still
+ * asks for the same slice (they are newer than what it shows); a page turned
+ * meanwhile drops them.
  */
 export function useScanHistory(
   local: LocalExecutor,
@@ -164,20 +193,44 @@ export function useScanHistory(
 ): Read {
   const [read, setRead] = useState<Read>({ kind: "loading" });
   const { hostId, deviceId } = pairing;
+  // The newest ask (a new object per change, `null` while disabled), and whether a read runs.
+  const wanted = useRef<Asked | null>(null);
+  const running = useRef(false);
+  const mounted = useRef(true);
   useEffect(() => {
-    if (!enabled) return undefined;
-    let cancelled = false;
-    readScanHistory(local, { hostId, deviceId }, shiftId, { limit, offset }).then(
-      (next) => {
-        if (!cancelled) setRead({ kind: "ready", ...next });
-      },
-      () => {
-        if (!cancelled) setRead({ kind: "failed" });
-      },
-    );
+    mounted.current = true;
     return () => {
-      cancelled = true;
+      mounted.current = false;
     };
+  }, []);
+  useEffect(() => {
+    const asked: Asked = { local, hostId, deviceId, shiftId, limit, offset };
+    wanted.current = enabled ? asked : null;
+    // A read in flight takes the newest ask when it ends.
+    if (!enabled || running.current) return;
+    const run = (slice: Asked) => {
+      running.current = true;
+      void readScanHistory(
+        slice.local,
+        { hostId: slice.hostId, deviceId: slice.deviceId },
+        slice.shiftId,
+        { limit: slice.limit, offset: slice.offset },
+      )
+        .then(
+          (next): Read => ({ kind: "ready", ...next }),
+          (): Read => ({ kind: "failed" }),
+        )
+        .then((result) => {
+          running.current = false;
+          if (!mounted.current) return;
+          const now = wanted.current;
+          if (now === null) return;
+          if (sameSlice(now, slice)) setRead(result);
+          // Asked again while it ran (a scan, a page): exactly one more read, for the newest ask.
+          if (now !== slice) run(now);
+        });
+    };
+    run(asked);
   }, [local, hostId, deviceId, shiftId, limit, offset, refreshKey, enabled]);
   return read;
 }
