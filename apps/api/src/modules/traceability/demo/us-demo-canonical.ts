@@ -29,12 +29,20 @@ const plainPrototype: unknown = Object.prototype;
 const arrayPrototype: unknown = Array.prototype;
 const safeProxy = types.isProxy;
 
-type Guard = { target: object; key: PropertyKey; descriptor: PropertyDescriptor };
+type Guard = {
+  target: object;
+  key: PropertyKey;
+  descriptor: PropertyDescriptor;
+  valueDescriptor: PropertyDescriptor | undefined;
+};
 const guards: Guard[] = [];
 function guard(target: object, key: PropertyKey): void {
   const descriptor = safeDescriptor(target, key);
   if (!descriptor) throw new Error("Missing canonical runtime intrinsic");
-  guards[guards.length] = { target, key, descriptor };
+  // This descriptor is private bootstrap metadata, not a live runtime target.
+  // Precompute its data/accessor shape; the target itself is still checked fresh.
+  const valueDescriptor = safeDescriptor(descriptor, "value");
+  guards[guards.length] = { target, key, descriptor, valueDescriptor };
 }
 for (const key of ["JSON", "Array", "Object", "Reflect", "Number", "Set", "RegExp"])
   guard(globalThis, key);
@@ -62,7 +70,7 @@ function stableIntrinsics(): boolean {
     if (!item) return false;
     const current = safeDescriptor(item.target, item.key);
     if (!current) return false;
-    const savedValue = safeDescriptor(item.descriptor, "value");
+    const savedValue = item.valueDescriptor;
     const currentValue = safeDescriptor(current, "value");
     if (savedValue) {
       if (!currentValue || currentValue.value !== savedValue.value) return false;

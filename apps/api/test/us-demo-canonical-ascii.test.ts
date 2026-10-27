@@ -195,6 +195,39 @@ function observed(kind: string): Witness {
 }
 
 describe("bounded JSON printable ASCII specialization", () => {
+  it("does not reread private bootstrap descriptor metadata at every canonical entry", async () => {
+    const original = Object.getOwnPropertyDescriptor;
+    const bootstrapDescriptors = new WeakSet<object>();
+    let bootstrapping = true,
+      metadataReads = 0;
+    const observer = vi
+      .spyOn(Object, "getOwnPropertyDescriptor")
+      .mockImplementation((value, key) => {
+        if (
+          !bootstrapping &&
+          typeof value === "object" &&
+          value !== null &&
+          bootstrapDescriptors.has(value)
+        )
+          metadataReads++;
+        const descriptor = original(value, key);
+        if (bootstrapping && descriptor) bootstrapDescriptors.add(descriptor);
+        return descriptor;
+      });
+    try {
+      vi.resetModules();
+      const current = await import("../src/modules/traceability/demo/us-demo-canonical.js");
+      bootstrapping = false;
+      const raw = { text: "x".repeat(1024) };
+      const owned = current.ownedUsDemoJsonCopy(raw);
+      expect(current.canonicalExportJson(owned)).toBe(canonicalExportJson(raw));
+      expect(metadataReads).toBe(0);
+    } finally {
+      observer.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   it("rechecks an owned sibling after an unowned proxy changes intrinsics", async () => {
     vi.resetModules();
     const current = await import("../src/modules/traceability/demo/us-demo-canonical.js");
