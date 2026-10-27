@@ -2675,6 +2675,99 @@ const QUEUE_DISMISS_DISPLACEMENT: &str =
     "UPDATE floor_displacements SET resolved_at = ?, resolved_by = ? WHERE host_id = ? AND \
      device_id = ? AND conflict_id = ? AND resolved_at IS NULL";
 
+/// The work screen's history read (`SCAN_HISTORY_SQL`, `src/floor/work/scan-history.ts`), run
+/// after every scan: the page first, the box position only for its rows (the scan lag fix).
+/// `test/floor-scan-history-read.test.ts` plans the same text on the Node runtime's SQLite and
+/// checks that it appears here word for word.
+const SCAN_HISTORY: &str = "SELECT s.id AS id, s.scanned_at AS scanned_at, s.verdict AS verdict, \
+     s.duplicate_source AS duplicate_source, s.gtin14 AS gtin14, s.serial AS serial, \
+     (SELECT o.name FROM ref_operators AS o WHERE o.id = s.operator_id) AS operator_name, \
+     CASE WHEN s.box_id IS NULL THEN NULL ELSE \
+     (SELECT count(*) FROM floor_scans AS p WHERE p.host_id = s.host_id \
+     AND p.device_id = s.device_id AND p.shift_id = s.shift_id AND p.box_id = s.box_id \
+     AND p.verdict = 'ok' AND (p.scanned_at < s.scanned_at \
+     OR (p.scanned_at = s.scanned_at AND p.rowid <= s.rowid))) END AS box_position \
+     FROM (SELECT rowid AS page_rowid FROM floor_scans \
+     WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+     ORDER BY scanned_at DESC, rowid DESC LIMIT ? OFFSET ?) AS page \
+     JOIN floor_scans AS s ON s.rowid = page.page_rowid \
+     ORDER BY s.scanned_at DESC, s.rowid DESC";
+
+/// The history read chooses its page on its own (a co-routine or a materialized subquery),
+/// reads each row of it back by its rowid, and only then runs its two correlated subqueries:
+/// never inside the page, so the box position is counted for the page's rows only, not for
+/// every scan of the shift before the sort and the limit (quadratic: 12.6 s at 10 000 scans).
+/// The plan of the SQLite the shell bundles; the Node runtime's is pinned in
+/// `test/floor-scan-history-read.test.ts`.
+#[tokio::test]
+async fn the_scan_history_reads_its_page_first() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    let text = format!("EXPLAIN QUERY PLAN {SCAN_HISTORY}");
+    let steps: Vec<(i64, i64, String)> = sqlx::query(&text)
+        .bind("x")
+        .bind("x")
+        .bind("x")
+        .bind(8_i64)
+        .bind(0_i64)
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row.get::<i64, _>("id"),
+                row.get::<i64, _>("parent"),
+                row.get::<String, _>("detail"),
+            )
+        })
+        .collect();
+    let within = |mut parent: i64, ancestor: i64| -> bool {
+        while let Some((id, up, _)) = steps.iter().find(|(id, _, _)| *id == parent) {
+            if *id == ancestor {
+                return true;
+            }
+            parent = *up;
+        }
+        false
+    };
+    let page = steps
+        .iter()
+        .find(|(_, _, detail)| detail == "CO-ROUTINE page" || detail == "MATERIALIZE page")
+        .unwrap_or_else(|| panic!("the page should be chosen on its own: {steps:?}"))
+        .0;
+    assert!(
+        steps
+            .iter()
+            .any(|(_, _, detail)| detail == "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"),
+        "each row of the page should be read back by its rowid: {steps:?}"
+    );
+    let correlated: Vec<&(i64, i64, String)> = steps
+        .iter()
+        .filter(|(_, _, detail)| detail.starts_with("CORRELATED SCALAR SUBQUERY"))
+        .collect();
+    assert_eq!(correlated.len(), 2, "{steps:?}");
+    for (_, parent, detail) in correlated {
+        assert!(
+            !within(*parent, page),
+            "{detail} should run outside the page: {steps:?}"
+        );
+    }
+    assert!(
+        !steps.iter().any(|(_, _, detail)| {
+            let mut words = detail.split(' ');
+            words.next() == Some("SCAN")
+                && matches!(words.next(), Some("s") | Some("p") | Some("floor_scans"))
+        }),
+        "nothing should walk the scans whole: {steps:?}"
+    );
+}
+
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
 /// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
