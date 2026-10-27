@@ -77,6 +77,7 @@ const failureCodes = new Set([
   "CLEANUP_FAILED",
   "PARTIAL_RESOURCES_RETAINED",
   "ERR_ASSERTION",
+  "ERR_REHEARSAL_ENGINE_READ",
   "ERR_HOST_PROCESS",
   "ERR_HOST_OBSERVATION",
   "ERR_HOST_PRIVATE_FILE",
@@ -106,6 +107,11 @@ const failureNames = new Set([
 ]);
 const failureExecutables = new Set(["docker", "git", "openssl", "which", "tar"]);
 const failureReasons = new Set([
+  "engine-timeout",
+  "engine-socket",
+  "engine-http-status",
+  "engine-response-size",
+  "engine-invalid-json",
   "host-spawn",
   "host-exit",
   "host-stdin",

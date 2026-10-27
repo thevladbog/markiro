@@ -51,6 +51,12 @@ import {
   cleanupRehearsalResources,
   rehearsalCleanupStep,
 } from "./upgrade-ci-guards.mjs";
+import {
+  createRehearsalMetadataReader,
+  rehearsalIsolationReaders,
+  parseRehearsalRoutes,
+  rehearsalRouteCommand,
+} from "./rehearsal-isolation-readers.mjs";
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // These four independent read-only facts are still checked before and after
@@ -405,15 +411,15 @@ export async function rehearseUpgrade(
     );
   const inspect = async (kind, id) => JSON.parse((await nested([kind, "inspect", id])).stdout)[0];
   const shell = (args) => outer(["exec", containerId, ...args]);
+  const metadata = createRehearsalMetadataReader(endpoint);
   const verifyIsolation = () =>
     verifyRehearsalIsolation(
       invocationId,
-      {
-        container: () => inspectOuter("container", containerId),
-        volume: () => inspectOuter("volume", name),
-        ipv4: async () => (await shell(["ip", "-4", "route", "show", "default"])).stdout,
-        ipv6: async () => (await shell(["ip", "-6", "route", "show", "default"])).stdout,
-      },
+      rehearsalIsolationReaders({
+        container: () => metadata.container(containerId),
+        volume: () => metadata.volume(name),
+        routes: async () => parseRehearsalRoutes((await shell(rehearsalRouteCommand)).stdout),
+      }),
       owned,
     );
   try {
