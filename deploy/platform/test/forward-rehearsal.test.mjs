@@ -72,6 +72,9 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
         sourceVerifications: 456,
         activationDockerCalls: 100,
         activationSourceVerifications: 400,
+        activationDockerTransportMs: 1200,
+        activationIsolationMs: 400,
+        activationSourceVerificationMs: 200,
       },
     })),
   };
@@ -134,6 +137,9 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.runs[0].duration.activationDockerCalls = 124),
     (v) => (v.runs[0].duration.activationSourceVerifications = 457),
     (v) => delete v.runs[0].duration.activationDockerCalls,
+    (v) => (v.runs[0].duration.activationDockerTransportMs = -1),
+    (v) => (v.runs[0].duration.activationIsolationMs = "PRIVATE"),
+    (v) => delete v.runs[0].duration.activationSourceVerificationMs,
     (v) => (v.runs[0].duration.argv = ["PRIVATE"]),
   ]) {
     const bad = structuredClone(value);
@@ -350,7 +356,9 @@ test("synthetic wrapper never borrows cleanup proof for a later invocation witho
               schemaSha256: "c".repeat(64), migrationSha256: "d".repeat(64) },
             productMigrationProofSha256: "e".repeat(64), archiveSha256: "f".repeat(64),
             restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64), duration: { productProofMs: 1000,
-              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456, activationDockerCalls: 100, activationSourceVerifications: 400 } } };
+              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456, activationDockerCalls: 100, activationSourceVerifications: 400,
+              activationDockerTransportMs: 1200, activationIsolationMs: 400,
+              activationSourceVerificationMs: 200 } } };
         await options.writeResult(result);
         return result;
       }
@@ -974,4 +982,39 @@ test("activation timing includes asynchronous proof construction and subsequent 
     }),
     /synthetic construction failure/u,
   );
+});
+
+test("forward timing keeps only aggregate costs and preserves action failures", async () => {
+  const { createForwardTiming } = await import("../forward-ci-scenario.mjs");
+  const timing = createForwardTiming();
+  const result = { private: "not telemetry" };
+  assert.equal(
+    await timing.measure("dockerMs", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return result;
+    }),
+    result,
+  );
+  const failure = new Error("PRIVATE-CHILD-ERROR");
+  await assert.rejects(
+    timing.measure("sourceMs", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      throw failure;
+    }),
+    (error) => error === failure,
+  );
+  let called = false;
+  await assert.rejects(
+    timing.measure("PRIVATE-UNSUPPORTED-CATEGORY", async () => {
+      called = true;
+    }),
+  );
+  assert.equal(called, false);
+  const observed = timing.snapshot();
+  assert.deepEqual(Object.keys(observed), ["dockerMs", "isolationMs", "sourceMs"]);
+  assert.ok(observed.dockerMs > 0 && observed.sourceMs > 0);
+  assert.equal(observed.isolationMs, 0);
+  observed.dockerMs = -1;
+  assert.ok(timing.snapshot().dockerMs > 0);
+  assert.equal(JSON.stringify(timing.snapshot()).includes("PRIVATE"), false);
 });

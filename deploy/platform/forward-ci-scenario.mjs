@@ -37,6 +37,24 @@ import { productionAuthorization } from "./test/production-activation-fixture.mj
 import { stageRehearsalTree } from "./upgrade-ci.mjs";
 import { readProtectedEnv } from "./preflight.mjs";
 import { sanitizeHostFailure, hostFailureSites } from "./host/failure-diagnostic.mjs";
+// Inclusive aggregate costs only. No arguments, paths, results or errors enter
+// evidence. Transport includes its isolation guards; categories are not additive.
+export function createForwardTiming() {
+  const totals = { dockerMs: 0, isolationMs: 0, sourceMs: 0 };
+  return Object.freeze({
+    measure: async (category, action) => {
+      assert.ok(Object.hasOwn(totals, category) && typeof action === "function");
+      const started = performance.now();
+      try {
+        return await action();
+      } finally {
+        totals[category] += performance.now() - started;
+      }
+    },
+    snapshot: () =>
+      Object.fromEntries(Object.entries(totals).map(([key, ms]) => [key, Math.ceil(ms)])),
+  });
+}
 // Start before constructing live activation proofs/projection; the returned
 // stopwatch continues through application commands and owned failure cleanup.
 export async function prepareTimedForwardActivation(build) {
@@ -350,17 +368,17 @@ function runtimeInterpolation(configuration, values) {
 // This is a compiled harness binding, not a caller-selectable bypass. Source
 // bytes/environment remain fresh on every call; physical isolation belongs to
 // createForwardRehearsalProcess on both sides of each actual Docker request.
-export function forwardRehearsalDependencies(c, duration) {
+export function forwardRehearsalDependencies(c, duration, timing = createForwardTiming()) {
   assert.equal(typeof c.verifySourceBytes, "function");
   return {
     ...c.deps,
     verifySources: async () => {
       duration.sourceVerifications++;
-      await c.verifySourceBytes();
+      await timing.measure("sourceMs", () => c.verifySourceBytes());
     },
   };
 }
-export function createForwardRehearsalProcess(c, trace = []) {
+export function createForwardRehearsalProcess(c, trace = [], timing = createForwardTiming()) {
   const privatePath = (path) => {
     assert.equal(typeof path, "string");
     assert.ok(path.startsWith(`${c.root}/`));
@@ -405,7 +423,7 @@ export function createForwardRehearsalProcess(c, trace = []) {
     }
   };
   return async (request, recheck) => {
-    await c.verifyIsolation();
+    await timing.measure("isolationMs", () => c.verifyIsolation());
     for (const [path, sha] of Object.entries(c.forwardStage?.sourceFiles ?? {}))
       assert.equal(digest(await readFile(join(c.repository, path))), sha);
     assert.equal(request.executable, "/usr/bin/docker");
@@ -532,7 +550,7 @@ export function createForwardRehearsalProcess(c, trace = []) {
       }
       await c.outer(["cp", `${c.containerId}:${dest}${st ? "/." : ""}`, dest], { timeout: 120000 });
     }
-    await c.verifyIsolation();
+    await timing.measure("isolationMs", () => c.verifyIsolation());
     return output;
   };
 }
@@ -577,13 +595,17 @@ async function runScenario(c, mode, checks) {
     sourceVerifications: 0,
     activationDockerCalls: 0,
     activationSourceVerifications: 0,
+    activationDockerTransportMs: 0,
+    activationIsolationMs: 0,
+    activationSourceVerificationMs: 0,
   };
-  c.deps = forwardRehearsalDependencies(c, duration);
+  const timing = createForwardTiming();
+  c.deps = forwardRehearsalDependencies(c, duration, timing);
   const trace = [],
-    run = createForwardRehearsalProcess(c, trace),
+    run = createForwardRehearsalProcess(c, trace, timing),
     runProcess = async (...args) => {
       duration.dockerCalls++;
-      return run(...args);
+      return timing.measure("dockerMs", () => run(...args));
     };
   await put(
     join(parent, "forward-retained-containers.json"),
@@ -1291,6 +1313,7 @@ async function runScenario(c, mode, checks) {
     dockerCalls: duration.dockerCalls,
     sourceVerifications: duration.sourceVerifications,
   };
+  const activationTiming = timing.snapshot();
   const activationWindow = await prepareTimedForwardActivation(() =>
     activationInputs(
       c,
@@ -1421,6 +1444,10 @@ async function runScenario(c, mode, checks) {
     checks.replacementFailureCleanup = true;
   }
   duration.activationMs = activationWindow.elapsedMs();
+  const completedTiming = timing.snapshot();
+  duration.activationDockerTransportMs = completedTiming.dockerMs - activationTiming.dockerMs;
+  duration.activationIsolationMs = completedTiming.isolationMs - activationTiming.isolationMs;
+  duration.activationSourceVerificationMs = completedTiming.sourceMs - activationTiming.sourceMs;
   duration.activationDockerCalls = duration.dockerCalls - activationCounts.dockerCalls;
   duration.activationSourceVerifications =
     duration.sourceVerifications - activationCounts.sourceVerifications;

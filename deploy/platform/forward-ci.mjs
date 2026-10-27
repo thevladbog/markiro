@@ -258,8 +258,17 @@ function namespace(value) {
     "sourceVerifications",
     "activationDockerCalls",
     "activationSourceVerifications",
+    "activationDockerTransportMs",
+    "activationIsolationMs",
+    "activationSourceVerificationMs",
   ]);
-  for (const n of Object.values(value.duration)) assert.ok(Number.isSafeInteger(n) && n > 0);
+  const aggregateTimes = [
+    "activationDockerTransportMs",
+    "activationIsolationMs",
+    "activationSourceVerificationMs",
+  ];
+  for (const [key, n] of Object.entries(value.duration))
+    assert.ok(Number.isSafeInteger(n) && (aggregateTimes.includes(key) ? n >= 0 : n > 0));
   assert.ok(value.duration.activationDockerCalls <= value.duration.dockerCalls);
   assert.ok(value.duration.activationSourceVerifications <= value.duration.sourceVerifications);
   return structuredClone(value);
