@@ -195,6 +195,77 @@ function observed(kind: string): Witness {
 }
 
 describe("bounded JSON printable ASCII specialization", () => {
+  it("rechecks an owned sibling after an unowned proxy changes intrinsics", async () => {
+    vi.resetModules();
+    const current = await import("../src/modules/traceability/demo/us-demo-canonical.js");
+    const text = "é".repeat(600);
+    const first = current.ownedUsDemoJsonCopy({ text });
+    const last = current.ownedUsDemoJsonCopy({ text });
+    // Warm nested entries; the first owned subtree cannot authorize later siblings.
+    current.canonicalExportJson({ first, last });
+    const stringify = JSON.stringify;
+    const replacement = ((value: unknown) =>
+      value === text ? stringify("changed") : stringify(value)) as typeof JSON.stringify;
+    const make = () => ({
+      a: first,
+      b: new Proxy(
+        {},
+        {
+          getPrototypeOf(target) {
+            JSON.stringify = replacement;
+            return Reflect.getPrototypeOf(target);
+          },
+        },
+      ),
+      c: last,
+    });
+    let actual: string, expected: string;
+    try {
+      actual = current.canonicalExportJson(make());
+      JSON.stringify = stringify;
+      expected = canonicalExportJson(make());
+    } finally {
+      JSON.stringify = stringify;
+      vi.resetModules();
+    }
+    expect(actual).toBe(expected);
+    expect(actual).toContain('"c":{"text":"changed"}');
+  });
+
+  it("bounds intrinsic descriptor work for a cold privately owned subtree", async () => {
+    const raw = {
+      items: Array.from({ length: 40 }, (_, index) => ({
+        label: `synthetic-${index}`,
+        payload: "x".repeat(1024),
+      })),
+    };
+    const expected = canonicalExportJson(raw);
+    const original = Object.getOwnPropertyDescriptor;
+    let reads = 0;
+    const observer = vi
+      .spyOn(Object, "getOwnPropertyDescriptor")
+      .mockImplementation((value, key) => {
+        reads++;
+        return original(value, key);
+      });
+    try {
+      vi.resetModules();
+      const current = await import("../src/modules/traceability/demo/us-demo-canonical.js");
+      const owned = current.ownedUsDemoJsonCopy(raw);
+      reads = 0;
+      const bytes = current.canonicalExportJson(owned);
+      const coldReads = reads;
+      expect(bytes).toBe(expected);
+      // Descriptor work must be bounded by the entry guard, not forty full scans.
+      expect(coldReads).toBeGreaterThan(0);
+      expect(coldReads).toBeLessThan(400);
+      expect(current.canonicalExportJson(owned)).toBe(expected);
+    } finally {
+      observer.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   it("validates and hashes real ASCII receipt bytes without generic ASCII stringification", () => {
     const result = { b: "hello", a: "world" };
     const literal = '{"a":"world","b":"hello"}';

@@ -169,7 +169,12 @@ function quoteJsonString(text: string): string {
 /** Exact reference traversal; only successful owned subgraphs may reuse bytes. */
 export function canonicalExportJson(input: unknown): string {
   const ancestors = new Set<object>();
-  const serialize = (value: unknown, root = false, unordered = false): string => {
+  const serialize = (
+    value: unknown,
+    root = false,
+    unordered = false,
+    trustedSubtree = false,
+  ): string => {
     if (value === null) return "null";
     if (typeof value === "string") return quoteJsonString(value);
     if (typeof value === "boolean") return JSON.stringify(value);
@@ -177,7 +182,11 @@ export function canonicalExportJson(input: unknown): string {
     if (typeof value !== "object") throw new TypeError("Export digest requires finite JSON values");
     if (ancestors.has(value)) throw new TypeError("Export digest cannot contain cycles");
     const context = unordered ? "unordered" : root ? "root" : "nested";
-    const eligible = safeApply(weakHas, owned, [value]) && stableIntrinsics();
+    // Only a privately admitted, deeply frozen JSON subtree can carry this
+    // synchronous trust. Unowned parents/proxies still recheck each owned entry.
+    // No caller callback can run inside an admitted subtree with intact intrinsics.
+    const eligible = safeApply(weakHas, owned, [value]) && (trustedSubtree || stableIntrinsics());
+    const trustedChildren = trustedSubtree || eligible;
     const previous: unknown = eligible ? safeApply(mapGet, bytesByNode, [value]) : undefined;
     if (isBytes(previous) && previous[context] !== undefined) return previous[context];
     ancestors.add(value);
@@ -186,7 +195,9 @@ export function canonicalExportJson(input: unknown): string {
       if (Array.isArray(value)) {
         if (Object.keys(value).length !== value.length)
           throw new TypeError("Export digest requires dense JSON arrays");
-        const parts = Array.from(value, (item: unknown) => serialize(item));
+        const parts = Array.from(value, (item: unknown) =>
+          serialize(item, false, false, trustedChildren),
+        );
         if (unordered) parts.sort();
         bytes = `[${parts.join(",")}]`;
       } else {
@@ -202,12 +213,12 @@ export function canonicalExportJson(input: unknown): string {
             const descriptor = descriptors[key];
             if (!descriptor || !("value" in descriptor))
               throw new TypeError("Export digest cannot evaluate getters");
-            return `${quoteJsonString(key)}:${serialize(descriptor.value, false, root && (key === "events" || key === "findings"))}`;
+            return `${quoteJsonString(key)}:${serialize(descriptor.value, false, root && (key === "events" || key === "findings"), trustedChildren)}`;
           })
           .join(",")}}`;
       }
       const size = bytes.length * 2;
-      if (eligible && size >= 1024 && size <= 256 * 1024 && stableIntrinsics()) {
+      if (eligible && size >= 1024 && size <= 256 * 1024) {
         if (retainedBytes + size > 8 * 1024 * 1024) {
           bytesByNode = new SafeWeakMap<object, Bytes>();
           retainedBytes = 0;
