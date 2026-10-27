@@ -24,6 +24,7 @@ import {
   holdingWrites,
   km,
   OPERATOR_ID,
+  GTIN,
   PAIRING,
   PREFIX,
   rows,
@@ -407,6 +408,7 @@ describe("«Очистить короб»", () => {
       boxId: box?.["id"],
       itemCount: 1,
       scannedAt: "2026-10-08T06:15:04.000Z",
+      code: { gtin14: GTIN, serial: "A1" },
     });
   });
 

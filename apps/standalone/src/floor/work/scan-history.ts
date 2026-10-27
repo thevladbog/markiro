@@ -109,14 +109,41 @@ export const SCAN_HISTORY_SQL =
   "JOIN floor_scans AS s ON s.rowid = page.page_rowid " +
   "ORDER BY s.scanned_at DESC, s.rowid DESC";
 
+/** The history read each station database is running or last ran (see `readScanHistory`). */
+const historyTurns = new WeakMap<LocalExecutor, Promise<void>>();
+
 /**
  * The newest-first slice of the shift's scans, with the operator's name from
  * the station's roster copy and the place an accepted code took in its box.
  * Every figure comes from this station's own facts (`floor_scans`); nothing is
  * asked of the host. The place counts the accepted scans of the same box up to
  * this one by time, then by insertion order.
+ *
+ * The history reads of one database run one after another (the scan lag fix):
+ * the station has two reader connections, and a read cannot be cancelled once
+ * the shell runs it, so the history — the work screen's list and the full
+ * history over it — never takes both, and the scan path's own reads always
+ * find one free. Each list keeps at most one read waiting (`useScanHistory`).
  */
-export async function readScanHistory(
+export function readScanHistory(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+  slice: { limit: number; offset: number },
+): Promise<{ rows: ScanHistoryRow[]; total: number }> {
+  const before = historyTurns.get(local) ?? Promise.resolve();
+  const turn = before.then(() => readHistorySlice(local, pairing, shiftId, slice));
+  historyTurns.set(
+    local,
+    turn.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return turn;
+}
+
+async function readHistorySlice(
   local: LocalExecutor,
   pairing: Pairing,
   shiftId: string,

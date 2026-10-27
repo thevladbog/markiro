@@ -79,7 +79,21 @@ export interface ScanContext {
  * one of a validation shift is in no box (`boxId: null`, plan РЕЖ), and `acceptedCount` is the
  * codes this station holds in the shift now.
  */
-export type ScanOutcome = { scannedAt: string } & (
+/**
+ * The code a scan read, as the hero shows it at once (the scan lag fix): its GTIN-14 and its
+ * serial (GS1 AI 21), exactly what the scan's journal row keeps (`floor_scans.gtin14`, `serial`);
+ * never the whole code.
+ */
+export interface ScannedCodeShown {
+  gtin14: string;
+  serial: string;
+}
+
+export type ScanOutcome = {
+  scannedAt: string;
+  /** The code of a code of marking, `null` for a scan that was none (it keeps no text). */
+  code: ScannedCodeShown | null;
+} & (
   | { kind: "accepted"; boxId: string; itemCount: number }
   | {
       kind: "accepted";
@@ -228,18 +242,25 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       code: null,
       boxId: null,
     });
-    return { kind: "invalid", rawKind: reading.kind, scannedAt };
+    return { kind: "invalid", rawKind: reading.kind, scannedAt, code: null };
   }
   const code = scannedCode(reading.km);
+  const shown: ScannedCodeShown = { gtin14: code.gtin14, serial: code.serial };
   const refused = { ...base, rawKind: "km" as const, code, boxId: null };
   if (code.gtin14 !== shift.snapshot.product.gtin14) {
     await journal({ ...refused, verdict: "wrong_gtin", duplicateSource: null });
-    return { kind: "wrong_gtin", gtin14: code.gtin14, scannedAt };
+    return { kind: "wrong_gtin", gtin14: code.gtin14, scannedAt, code: shown };
   }
   const mine = await readLocalOwner(context, code.codeHash);
   if (mine !== null) {
     await journal({ ...refused, verdict: "duplicate", duplicateSource: "local" });
-    return { kind: "duplicate", source: "local", firstScannedAt: mine.scannedAt, scannedAt };
+    return {
+      kind: "duplicate",
+      source: "local",
+      firstScannedAt: mine.scannedAt,
+      scannedAt,
+      code: shown,
+    };
   }
   const owner = await hostOwner(context, code.codeHash);
   if (owner !== null) {
@@ -251,6 +272,7 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       shiftNumber: owner.shiftNumber,
       ...(owner.deviceId === CLOUD_HISTORY_DEVICE_ID ? { cloudHistory: true as const } : {}),
       scannedAt,
+      code: shown,
     };
   }
   const claim = (boxId: string | null): LocalStatement => ({
@@ -305,10 +327,10 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
           ],
         },
       );
-      return { kind: "accepted", boxId: null, acceptedCount, scannedAt, label };
+      return { kind: "accepted", boxId: null, acceptedCount, scannedAt, code: shown, label };
     }
     await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId: null }, [claim(null)]);
-    return { kind: "accepted", boxId: null, acceptedCount, scannedAt };
+    return { kind: "accepted", boxId: null, acceptedCount, scannedAt, code: shown };
   }
   const box = await readOpenBox(local, pairing, shift.copy.id);
   const boxId = box?.id ?? context.newId();
@@ -332,5 +354,11 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
     intoBox,
     claim(boxId),
   ]);
-  return { kind: "accepted", boxId, itemCount: (box?.itemCount ?? 0) + 1, scannedAt };
+  return {
+    kind: "accepted",
+    boxId,
+    itemCount: (box?.itemCount ?? 0) + 1,
+    scannedAt,
+    code: shown,
+  };
 }

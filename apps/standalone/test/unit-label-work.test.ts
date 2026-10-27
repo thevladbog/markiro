@@ -576,6 +576,7 @@ describe("accepting a unit with its label", () => {
       boxId: null,
       acceptedCount: 1,
       scannedAt: "2026-10-08T06:15:00.000Z",
+      code: { gtin14: GTIN, serial: "5Yq'Ct;" },
     });
     expect(rows(db, "SELECT count(*) AS n FROM floor_unit_labels")).toEqual([{ n: 0 }]);
     expect(outbox(db).map((record) => record.kind)).toEqual(["scan"]);
