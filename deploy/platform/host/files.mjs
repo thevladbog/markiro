@@ -135,10 +135,18 @@ export async function readPrivateFile(root, relativePath, options = {}) {
     const { limit } = fileOptions(options);
     const path = descendant(root, relativePath);
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    fileMetadata(await handle.stat(), true, limit);
-    const buffer = Buffer.alloc(limit + 1);
+    const initial = await handle.stat();
+    fileMetadata(initial, true, limit);
+    // Retained source/history bytes must not pin a full 1–2 MiB allocation for
+    // every small file. Keep one extra byte to detect growth past the cap.
+    let buffer = Buffer.alloc(initial.size + 1);
     let length = 0;
-    while (length < buffer.length) {
+    while (length < limit + 1) {
+      if (length === buffer.length) {
+        const expanded = Buffer.alloc(Math.min(limit + 1, Math.max(4096, buffer.length * 2)));
+        buffer.copy(expanded, 0, 0, length);
+        buffer = expanded;
+      }
       const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
       if (!bytesRead) break;
       length += bytesRead;
