@@ -99,3 +99,28 @@ test("inspection projections refuse getters without executing them", () => {
   assert.throws(() => assertSameExitedActivationProbe(inspect(), value));
   assert.equal(executed, false);
 });
+
+test("probe failure identifies a compiled field group without exposing values", async () => {
+  const { forwardActivationSeedStages } = await import("../forward-ci-expired-activation.mjs");
+  for (const [field, stage] of [
+    ["NetworkSettings", "probeNetwork"],
+    ["Config", "probeConfig"],
+    ["Mounts", "probeMounts"],
+    ["PrivateUnclassifiedKey", "probeOther"],
+  ]) {
+    const before = inspect(),
+      after = inspect(),
+      seen = [];
+    before[field] = { synthetic: "first" };
+    after[field] = { synthetic: "PRIVATE-VALUE" };
+    assert.throws(() =>
+      assertSameExitedActivationProbe(before, after, (phase) => seen.push(phase)),
+    );
+    assert.ok(seen.length > 0);
+    assert.equal(seen.at(-1), forwardActivationSeedStages[stage]);
+    assert.equal(
+      seen.some((v) => v.includes("PRIVATE")),
+      false,
+    );
+  }
+});

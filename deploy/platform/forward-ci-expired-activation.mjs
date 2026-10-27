@@ -29,8 +29,9 @@ export function projectActivationReconciliationContainer(input) {
     Health: value.State.Health ? { Status: value.State.Health.Status } : {},
   };
 }
-export function assertSameExitedActivationProbe(before, after) {
-  const stable = (input) => {
+export function assertSameExitedActivationProbe(before, after, progress = () => {}) {
+  const stable = (input, phase) => {
+    progress(phase);
     const value = snapshotActivation(input);
     assert.equal(value.State.Status, "exited");
     for (const key of ["Running", "Paused", "Restarting"]) assert.equal(value.State[key], false);
@@ -42,7 +43,26 @@ export function assertSameExitedActivationProbe(before, after) {
     delete state.Health;
     return { ...value, State: state };
   };
-  assert.deepEqual(stable(after), stable(before));
+  const prior = stable(before, forwardActivationSeedStages.probeTerminalBefore);
+  const current = stable(after, forwardActivationSeedStages.probeTerminalAfter);
+  const groups = [
+    ["probeIdentity", ["Id", "Image", "Name"]],
+    ["probeConfig", ["Config"]],
+    ["probeHostConfig", ["HostConfig"]],
+    ["probeMounts", ["Mounts"]],
+    ["probeNetwork", ["NetworkSettings"]],
+    ["probeState", ["State"]],
+  ];
+  const selected = (value, keys) =>
+    Object.fromEntries(Object.entries(value).filter(([key]) => keys.includes(key)));
+  for (const [stage, keys] of groups) {
+    progress(forwardActivationSeedStages[stage]);
+    assert.deepEqual(selected(current, keys), selected(prior, keys));
+  }
+  // Keep the original full comparison, including unknown fields. Never publish
+  // raw assertion diffs or caller-selected property names as diagnostics.
+  progress(forwardActivationSeedStages.probeOther);
+  assert.deepEqual(current, prior);
 }
 export const forwardActivationSeedStages = Object.freeze({
   inputs: "seed activation: validate historical inputs",
@@ -58,7 +78,18 @@ export const forwardActivationSeedStages = Object.freeze({
   terminal: "seed activation: verify canonical terminal state",
   observation: "seed activation: record actual reconciliation observation",
   lock: "seed activation: preserve exact failed lock",
-  cleanup: "seed activation: remove exact exited probe",
+  cleanup: "seed activation: compare exact exited probe",
+  probeTerminalBefore: "seed activation: verify captured probe terminal state",
+  probeTerminalAfter: "seed activation: verify current probe terminal state",
+  probeIdentity: "seed activation: compare probe identity",
+  probeConfig: "seed activation: compare probe config",
+  probeHostConfig: "seed activation: compare probe host config",
+  probeMounts: "seed activation: compare probe mounts",
+  probeNetwork: "seed activation: compare probe network settings",
+  probeState: "seed activation: compare probe other state",
+  probeOther: "seed activation: compare probe other inspection",
+  removal: "seed activation: remove exact exited probe",
+  absence: "seed activation: verify exact probe absent",
   receipts: "seed activation: verify cleanup receipts",
   predecessor: "seed activation: authenticate failed predecessor",
 });
@@ -171,6 +202,7 @@ export async function seedExpiredForwardActivation({
               probe = await c.inspect("container", `markiro-platform-probe-${id}`);
               assert.equal(probe.State.Status, "exited");
               assert.equal(probe.State.ExitCode, 0);
+              assertSameExitedActivationProbe(probe, probe, c.progress);
               interruptedProbe = true;
               throw interrupted;
             }
@@ -357,8 +389,10 @@ export async function seedExpiredForwardActivation({
   await executor.verify();
   assert.deepEqual((await observe()).containers, before.containers);
   c.progress(forwardActivationSeedStages.cleanup);
-  assertSameExitedActivationProbe(probe, await c.inspect("container", probe.Id));
+  assertSameExitedActivationProbe(probe, await c.inspect("container", probe.Id), c.progress);
+  c.progress(forwardActivationSeedStages.removal);
   await c.nested(["container", "rm", probe.Id]);
+  c.progress(forwardActivationSeedStages.absence);
   assert.equal(
     String(
       (
