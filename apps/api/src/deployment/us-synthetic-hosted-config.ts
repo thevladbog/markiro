@@ -92,6 +92,10 @@ const configuration = z
       .object({
         ...common,
         service: z.literal("api"),
+        auth: z
+          .object({ secretFile: z.literal("/run/secrets/us-demo/api-auth-secret") })
+          .strict()
+          .readonly(),
         database: database("api"),
         storage: storage("api"),
         tls: z

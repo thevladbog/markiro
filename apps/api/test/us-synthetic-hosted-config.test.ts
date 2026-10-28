@@ -31,6 +31,7 @@ function fixture(service: "api" | "worker" = "api") {
     },
     ...(service === "api"
       ? {
+          auth: { secretFile: "/run/secrets/us-demo/api-auth-secret" },
           tls: {
             certificateFile: "/run/secrets/us-demo/api-cert.pem",
             privateKeyFile: "/run/secrets/us-demo/api-key.pem",
@@ -59,6 +60,17 @@ function refused(document: string, expected: "api" | "worker" = "api") {
 }
 
 describe("synthetic hosted configuration admission", () => {
+  it("requires an explicit API auth secret reference without admitting worker auth", () => {
+    refused(JSON.stringify({ ...api, auth: undefined }));
+    const auth = { secretFile: "/run/secrets/us-demo/api-auth-secret" };
+    expect(parseUsSyntheticHostedConfig(JSON.stringify({ ...api, auth }), "api")).toEqual({
+      ...api,
+      auth,
+    });
+    refused(JSON.stringify({ ...fixture("worker"), auth }), "worker");
+    refused(JSON.stringify({ ...api, auth: { secretFile: "/tmp/auth" } }));
+    refused(JSON.stringify({ ...api, auth: { ...auth, secret: "synthetic-secret-canary" } }));
+  });
   it.each(["api", "worker"] as const)("admits explicit synthetic %s configuration", (service) => {
     const input = fixture(service);
     const before = JSON.stringify(input);
@@ -67,7 +79,10 @@ describe("synthetic hosted configuration admission", () => {
     expect(JSON.stringify(input)).toBe(before);
     for (const value of [parsed, parsed.database, parsed.storage, parsed.release])
       expect(Object.isFrozen(value)).toBe(true);
-    if (parsed.service === "api") expect(Object.isFrozen(parsed.tls)).toBe(true);
+    if (parsed.service === "api") {
+      expect(Object.isFrozen(parsed.tls)).toBe(true);
+      expect(Object.isFrozen(parsed.auth)).toBe(true);
+    }
     expect(Reflect.set(parsed.database, "user", "markiro_us")).toBe(false);
     refused(before, service === "api" ? "worker" : "api");
   });
