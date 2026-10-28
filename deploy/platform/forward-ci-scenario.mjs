@@ -483,7 +483,8 @@ export function createForwardRehearsalProcess(c, trace = [], timing = createForw
       await c.shell(["chown", `${st.uid}:${st.gid}`, source]);
     }
     trace.push([...args]);
-    // Only the allowlisted immutable inspections have byte-equivalent Engine replies.
+    // Only the exact allowlisted reads use the owned Engine channel. Archive
+    // bytes and ordered IDs are unchanged; info retains every server field.
     // Keep every logical freshness/source/recheck boundary; only reuse the wire.
     if (
       c.inspectChannel &&

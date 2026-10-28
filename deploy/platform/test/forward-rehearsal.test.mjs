@@ -1026,6 +1026,9 @@ test("fresh inner inspections retain source, isolation and recheck boundaries an
     ["container", "inspect", "b".repeat(64)],
     ["image", "inspect", `sha256:${"b".repeat(64)}`],
     ["image", "inspect", `ghcr.io/thevladbog/markiro-api@sha256:${"b".repeat(64)}`],
+    ["info", "--format", "{{json .}}"],
+    ["container", "ls", "--all", "--quiet", "--no-trunc"],
+    ["cp", `${"b".repeat(64)}:/app/node_modules/@markiro/db/migrations/meta/_journal.json`, "-"],
   ])
     for (const fault of [null, "read", "post-isolation"]) {
       const events = [];
@@ -1041,6 +1044,7 @@ test("fresh inner inspections retain source, isolation and recheck boundaries an
           read: async (request) => {
             events.push("read");
             assert.deepEqual(request.args, args);
+            assert.equal(request.outputLimitBytes, args[0] === "cp" ? 16 * 1048576 : 1048576);
             if (fault === "read") throw Error("read failed");
             return { stdout: Buffer.from("[{}]\n"), stderr: Buffer.alloc(0) };
           },
@@ -1056,7 +1060,7 @@ test("fresh inner inspections retain source, isolation and recheck boundaries an
           args: ["--host", "unix:///var/run/docker.sock", ...args],
           env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", DOCKER_CONFIG: `${root}/docker` },
           timeoutMs: 1000,
-          outputLimitBytes: 1048576,
+          outputLimitBytes: args[0] === "cp" ? 16 * 1048576 : 1048576,
         },
         () => events.push("recheck"),
       );

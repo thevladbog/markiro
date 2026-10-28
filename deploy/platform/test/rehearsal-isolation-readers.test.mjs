@@ -248,3 +248,121 @@ test("ambient Docker endpoint and HTTP proxies cannot replace the explicit Unix 
   });
   assert.equal(calls, 1);
 });
+
+function frame(stream, bytes) {
+  const b = Buffer.from(bytes),
+    h = Buffer.alloc(8);
+  h[0] = stream;
+  h.writeUInt32BE(b.length, 4);
+  return Buffer.concat([h, b]);
+}
+test("route reads run the exact fixed command anew and require observed successful termination", async (t) => {
+  const id = "a".repeat(64),
+    exec = "b".repeat(64),
+    seen = [];
+  let n = 0;
+  const r = await engine(t, (req, res) => {
+    let body = "";
+    req.on("data", (b) => (body += b));
+    req.on("end", () => {
+      seen.push({ method: req.method, path: req.url, body: body ? JSON.parse(body) : null });
+      if (req.url.endsWith("/exec")) {
+        res.writeHead(201);
+        res.end(JSON.stringify({ Id: exec }));
+      } else if (req.url.endsWith("/start")) {
+        res.end(frame(1, ++n === 1 ? "\0\0" : "default via changed\0\0"));
+      } else res.end(JSON.stringify({ ID: exec, ContainerID: id, Running: false, ExitCode: 0 }));
+    });
+  });
+  assert.deepEqual(await r.routes(id), { ipv4: "", ipv6: "" });
+  assert.deepEqual(await r.routes(id), { ipv4: "default via changed", ipv6: "" });
+  assert.equal(seen.length, 6);
+  for (const offset of [0, 3]) {
+    assert.equal(seen[offset].method, "POST");
+    assert.equal(seen[offset].path, `/v1.41/containers/${id}/exec`);
+    assert.deepEqual(seen[offset].body.Cmd, rehearsalRouteCommand);
+    assert.equal(seen[offset].body.Tty, false);
+    assert.equal(seen[offset].body.Privileged, false);
+    assert.deepEqual(seen[offset + 1].body, { Detach: false, Tty: false });
+    assert.equal(seen[offset + 2].method, "GET");
+    assert.equal(seen[offset + 2].path, `/v1.41/exec/${exec}/json`);
+  }
+  await assert.rejects(r.routes("../bad"));
+  assert.equal(seen.length, 6);
+});
+for (const fault of ["running", "exit", "identity", "stderr", "framing", "disconnect"])
+  test(`route exec rejects ${fault} and never accepts partial output`, async (t) => {
+    const id = "a".repeat(64),
+      exec = "b".repeat(64);
+    const r = await engine(t, (req, res) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url.endsWith("/exec")) {
+          res.writeHead(201);
+          res.end(JSON.stringify({ Id: exec }));
+        } else if (req.url.endsWith("/start")) {
+          if (fault === "disconnect") req.socket.destroy();
+          else
+            res.end(
+              fault === "framing"
+                ? Buffer.from("PRIVATE")
+                : frame(fault === "stderr" ? 2 : 1, fault === "stderr" ? "PRIVATE" : "\0\0"),
+            );
+        } else
+          res.end(
+            JSON.stringify({
+              ID: exec,
+              ContainerID: fault === "identity" ? "c".repeat(64) : id,
+              Running: fault === "running",
+              ExitCode: fault === "exit" ? 1 : 0,
+            }),
+          );
+      });
+    });
+    await assert.rejects(r.routes(id), (e) => {
+      assert.equal(e.code, "ERR_REHEARSAL_ENGINE_READ");
+      assert.doesNotMatch(e.message, /PRIVATE/);
+      return true;
+    });
+  });
+
+test("route timeout bounds the whole command and poisons uncertain execution without retry", async (t) => {
+  let ready;
+  const started = new Promise((r) => (ready = r));
+  let calls = 0;
+  const id = "a".repeat(64),
+    exec = "b".repeat(64);
+  const r = await engine(t, (req, res) => {
+    calls++;
+    req.resume();
+    req.on("end", () => {
+      if (calls > 2) {
+        res.writeHead(500);
+        res.end("PRIVATE");
+        return;
+      }
+      if (req.url.endsWith("/exec")) {
+        res.writeHead(201);
+        res.end(JSON.stringify({ Id: exec }));
+      } else {
+        res.write(frame(1, "partial"));
+        ready();
+      }
+    });
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const pending = r.routes(id);
+    const rejected = assert.rejects(pending, (e) => {
+      assert.equal(e.terminationConfirmed, false);
+      return e.code === "ERR_REHEARSAL_ENGINE_READ";
+    });
+    await started;
+    t.mock.timers.tick(120001);
+    await rejected;
+    await assert.rejects(r.routes(id));
+    assert.equal(calls, 2);
+  } finally {
+    t.mock.timers.reset();
+  }
+});

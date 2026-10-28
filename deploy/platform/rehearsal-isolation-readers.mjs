@@ -18,12 +18,22 @@ export function createRehearsalMetadataReader(endpoint) {
   const socketPath = endpoint.slice(7);
   assert.ok(isAbsolute(socketPath) && normalize(socketPath) === socketPath);
   assert.equal(/[\r\n\0?#]/u.test(socketPath), false);
-  const read = (path) =>
+  // Private transport: callers can select only the fixed methods below.
+  const read = (
+    path,
+    { method = "GET", body, status = 200, raw = false, timeoutMs = 120000 } = {},
+  ) =>
     new Promise((resolve, reject) => {
       const started = performance.now();
       let request;
       try {
-        request = http.request({ socketPath, path, method: "GET", agent: false });
+        request = http.request({
+          socketPath,
+          path,
+          method,
+          agent: false,
+          ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" } }),
+        });
       } catch {
         reject(failure("engine-socket"));
         return;
@@ -41,7 +51,7 @@ export function createRehearsalMetadataReader(endpoint) {
       };
       const timer = setTimeout(
         () => fail("engine-timeout"),
-        Math.max(1, 120000 - (performance.now() - started)),
+        Math.max(1, timeoutMs - (performance.now() - started)),
       );
       request.on("error", () => fail("engine-socket"));
       // Resolve/reject only after the request closes: allSettled must drain every
@@ -49,13 +59,13 @@ export function createRehearsalMetadataReader(endpoint) {
       request.on("close", () => {
         closed = true;
         clearTimeout(timer);
-        if (performance.now() - started > 120000) problem ??= failure("engine-timeout");
+        if (performance.now() - started > timeoutMs) problem ??= failure("engine-timeout");
         if (problem) reject(problem);
         else if (!complete) reject(failure("engine-socket"));
         else resolve(value);
       });
       request.on("response", (response) => {
-        if (response.statusCode !== 200) {
+        if (response.statusCode !== status || response.headers["content-encoding"]) {
           fail("engine-http-status");
           return;
         }
@@ -73,14 +83,18 @@ export function createRehearsalMetadataReader(endpoint) {
         response.on("end", () => {
           if (problem) return;
           try {
-            const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
-            value = JSON.parse(text);
-            assert.ok(value && typeof value === "object" && !Array.isArray(value));
+            const bytes = Buffer.concat(chunks);
+            if (raw) value = bytes;
+            else {
+              const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+              value = JSON.parse(text);
+              assert.ok(value && typeof value === "object" && !Array.isArray(value));
+            }
           } catch {
             fail("engine-invalid-json");
             return;
           }
-          if (performance.now() - started > 120000) {
+          if (performance.now() - started > timeoutMs) {
             fail("engine-timeout");
             return;
           }
@@ -90,9 +104,76 @@ export function createRehearsalMetadataReader(endpoint) {
           if (!complete) fail("engine-socket");
         });
       });
-      request.end();
+      request.end(body === undefined ? undefined : JSON.stringify(body));
     });
+  let routesFailed = false;
   return Object.freeze({
+    routes: async (id) => {
+      assert.ok(typeof id === "string" && /^[a-f0-9]{64}$/u.exec(id)?.[0] === id);
+      if (routesFailed) throw failure("engine-socket");
+      const began = performance.now();
+      const remaining = () => {
+        const ms = Math.floor(120000 - (performance.now() - began));
+        if (ms <= 0) throw failure("engine-timeout");
+        return ms;
+      };
+      let terminated = false;
+      try {
+        // Same fixed sh/ip argv as docker exec, fresh process on every guard.
+        // Only the Docker CLI process is removed from the transport.
+        const exec = await read(`/v1.41/containers/${id}/exec`, {
+          method: "POST",
+          status: 201,
+          timeoutMs: remaining(),
+          body: {
+            AttachStdin: false,
+            AttachStdout: true,
+            AttachStderr: true,
+            Tty: false,
+            Privileged: false,
+            Cmd: rehearsalRouteCommand,
+          },
+        });
+        assert.ok(typeof exec.Id === "string" && /^[a-f0-9]{64}$/u.exec(exec.Id)?.[0] === exec.Id);
+        const bytes = await read(`/v1.41/exec/${exec.Id}/start`, {
+          method: "POST",
+          raw: true,
+          timeoutMs: remaining(),
+          body: { Detach: false, Tty: false },
+        });
+        const state = await read(`/v1.41/exec/${exec.Id}/json`, { timeoutMs: remaining() });
+        assert.equal(state.ID, exec.Id);
+        assert.equal(state.ContainerID, id);
+        assert.equal(state.Running, false);
+        terminated = true;
+        assert.equal(state.ExitCode, 0);
+        const stdout = [];
+        for (let offset = 0; offset < bytes.length;) {
+          assert.ok(offset + 8 <= bytes.length);
+          const h = bytes.subarray(offset, offset + 8),
+            size = h.readUInt32BE(4);
+          assert.ok([1, 2].includes(h[0]) && h.subarray(1, 4).every((b) => b === 0));
+          offset += 8;
+          assert.ok(offset + size <= bytes.length);
+          // Successful ip must not report errors on stderr, even with exit 0.
+          assert.ok(h[0] === 1 || size === 0);
+          if (h[0] === 1) stdout.push(bytes.subarray(offset, offset + size));
+          offset += size;
+        }
+        const value = parseRehearsalRoutes(
+          new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(stdout)),
+        );
+        remaining();
+        return value;
+      } catch (error) {
+        routesFailed = true;
+        const problem = rehearsalEngineReadReason(error) ? error : failure("engine-invalid-json");
+        // A lost exec response never proves the remote process stopped. The
+        // namespace owner must remove its exact daemon before any acceptance.
+        if (!terminated) problem.terminationConfirmed = false;
+        throw problem;
+      }
+    },
     container: async (id) => {
       assert.ok(typeof id === "string" && /^[a-f0-9]{64}$/u.test(id));
       return read(`/v1.41/containers/${id}/json`);

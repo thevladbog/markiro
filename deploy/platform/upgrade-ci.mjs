@@ -55,8 +55,6 @@ import {
 import {
   createRehearsalMetadataReader,
   rehearsalIsolationReaders,
-  parseRehearsalRoutes,
-  rehearsalRouteCommand,
 } from "./rehearsal-isolation-readers.mjs";
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -420,7 +418,7 @@ export async function rehearseUpgrade(
       rehearsalIsolationReaders({
         container: () => metadata.container(containerId),
         volume: () => metadata.volume(name),
-        routes: async () => parseRehearsalRoutes((await shell(rehearsalRouteCommand)).stdout),
+        routes: () => metadata.routes(containerId),
       }),
       owned,
     );

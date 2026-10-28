@@ -308,3 +308,84 @@ test("a failed drain preserves the initiating safe HTTP refusal and records unce
   await assert.rejects(reader.close());
   await assert.rejects(reader.read(request()));
 });
+
+const migrationPath = "/app/node_modules/@markiro/db/migrations/meta/_journal.json";
+test("fixed info/list and individual migration archives have exact read-only routes", () => {
+  assert.equal(rehearsalInspectPath(["info", "--format", "{{json .}}"]), "/v1.51/info");
+  assert.equal(
+    rehearsalInspectPath(["container", "ls", "--all", "--quiet", "--no-trunc"]),
+    "/v1.51/containers/json?all=1",
+  );
+  for (const suffix of ["meta/_journal.json", "0201_example.sql"])
+    assert.equal(
+      rehearsalInspectPath(["cp", `${id}:/app/node_modules/@markiro/db/migrations/${suffix}`, "-"]),
+      `/v1.51/containers/${id}/archive?path=${encodeURIComponent(`/app/node_modules/@markiro/db/migrations/${suffix}`)}`,
+    );
+  for (const args of [
+    ["info"],
+    ["info", "--format", "json"],
+    ["container", "ls", "--quiet"],
+    ["container", "ls", "--all", "--quiet", "--no-trunc", "--filter", "name=x"],
+    ["cp", `${id}:/etc/passwd`, "-"],
+    ["cp", `${id}:${migrationPath}`, "/tmp/file"],
+    ["cp", `name:${migrationPath}`, "-"],
+    ["cp", `${id}:${migrationPath}/../x`, "-"],
+    ["cp", `${id}:${migrationPath}\n`, "-"],
+  ])
+    assert.equal(rehearsalInspectPath(args), null);
+});
+test("info keeps all daemon fields and list keeps all IDs freshly in server order", async (t) => {
+  let generation = 0;
+  const rows = [{ Id: id }, { Id: "b".repeat(64) }];
+  const f = await fixture(t, (req, res) =>
+    res.end(
+      JSON.stringify(
+        req.url.endsWith("/info")
+          ? {
+              ID: id,
+              OSType: "linux",
+              Architecture: "amd64",
+              Generation: ++generation,
+              Unknown: "kept",
+            }
+          : rows,
+      ),
+    ),
+  );
+  for (let i = 1; i <= 2; i++)
+    assert.deepEqual(
+      JSON.parse((await f.reader.read(request(["info", "--format", "{{json .}}"]))).stdout),
+      { ID: id, OSType: "linux", Architecture: "amd64", Generation: i, Unknown: "kept" },
+    );
+  const args = ["container", "ls", "--all", "--quiet", "--no-trunc"];
+  assert.equal(
+    String((await f.reader.read(request(args))).stdout),
+    rows.map((r) => r.Id + "\n").join(""),
+  );
+  rows.reverse();
+  assert.equal(
+    String((await f.reader.read(request(args))).stdout),
+    rows.map((r) => r.Id + "\n").join(""),
+  );
+  rows.length = 0;
+  assert.equal((await f.reader.read(request(args))).stdout.length, 0);
+});
+test("only individual migration archive reads retain the existing 16MiB binary ceiling", async (t) => {
+  const bytes = Buffer.alloc(1048577, 0xab);
+  const f = await fixture(t, (_req, res) => res.end(bytes));
+  const args = ["cp", `${id}:${migrationPath}`, "-"];
+  assert.deepEqual(
+    (await f.reader.read({ ...request(args), outputLimitBytes: 16 * 1048576 })).stdout,
+    bytes,
+  );
+  await assert.rejects(f.reader.read({ ...request(), outputLimitBytes: 16 * 1048576 }));
+  await assert.rejects(f.reader.read({ ...request(args), outputLimitBytes: 16 * 1048576 + 1 }));
+});
+for (const rows of [[{ Id: "truncated" }], [{ Id: id }, { Id: id }], {}, [{}]])
+  test("malformed or duplicate full container IDs poison the read channel", async (t) => {
+    const f = await fixture(t, (_req, res) => res.end(JSON.stringify(rows)));
+    await assert.rejects(
+      f.reader.read(request(["container", "ls", "--all", "--quiet", "--no-trunc"])),
+    );
+    await assert.rejects(f.reader.read(request()));
+  });
