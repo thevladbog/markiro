@@ -81,6 +81,18 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     })),
   };
   assert.deepEqual(validateForwardRehearsalEvidence(value), value);
+  // Elapsed work is diagnostic after the owner removed time-based success
+  // gates. Both namespaces and every physical/functional proof stay required.
+  const slow = structuredClone(value);
+  slow.runs[0].duration.productProofMs = 111993;
+  slow.runs[0].duration.activationMs = 1594770;
+  slow.runs[1].duration.prepareMs = 61 * 60000;
+  assert.deepEqual(validateForwardRehearsalEvidence(slow), slow);
+  for (const name of Object.keys(value.checks)) {
+    const incomplete = structuredClone(slow);
+    incomplete.checks[name] = false;
+    assert.throws(() => validateForwardRehearsalEvidence(incomplete));
+  }
   const failed = structuredClone(value);
   failed.completed = false;
   failed.isolated = false;
@@ -95,8 +107,8 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
   timedOut.completed = false;
   timedOut.problem = failed.problem;
   timedOut.runs[0].duration.activationMs = 40 * 60000;
-  // Preserve safe measured failure data, while completed acceptance still
-  // rejects the identical over-budget duration below.
+  // Preserve measured durations for an incomplete run; a duration alone
+  // cannot turn its failed result into a completed proof.
   assert.deepEqual(validateForwardRehearsalEvidence(timedOut), timedOut);
   for (const patch of [
     { stdout: "PRIVATE" },
@@ -133,7 +145,6 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.runs[0].failedActivationOperationId = v.runs[0].operationId),
     (v) => (v.runs[0].schema.migrationCount = "2"),
     (v) => delete v.runs[0].duration,
-    (v) => (v.runs[0].duration.activationMs = 40 * 60000),
     (v) => (v.runs[0].duration.productProofMs = -1),
     (v) => (v.runs[0].duration.dockerCalls = 0),
     (v) => (v.runs[0].duration.sourceVerifications = 0),
@@ -333,7 +344,7 @@ test("synthetic wrapper unit retains delegated failure and cleanup without execu
   assert.match(result.stdout, /synthetic wrapper unit only/u);
 });
 
-test("synthetic wrapper never borrows cleanup proof for a later invocation without a result", async () => {
+test("synthetic wrapper reaches the second namespace after slow work and never borrows its cleanup proof", async () => {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const engine = new URL("../upgrade-ci.mjs", import.meta.url).href;
@@ -359,7 +370,7 @@ test("synthetic wrapper never borrows cleanup proof for a later invocation witho
               schemaSha256: "c".repeat(64), migrationSha256: "d".repeat(64) },
             productMigrationProofSha256: "e".repeat(64), archiveSha256: "f".repeat(64),
             restoreEvidenceSha256: "a".repeat(64), terminalSha256: "b".repeat(64), duration: { productProofMs: 1000,
-              prepareMs: 2000, activationMs: 3000, dockerCalls: 123, sourceVerifications: 456, activationDockerCalls: 100, activationSourceVerifications: 400,
+              prepareMs: 61 * 60000, activationMs: 40 * 60000, dockerCalls: 123, sourceVerifications: 456, activationDockerCalls: 100, activationSourceVerifications: 400,
               activationDockerTransportMs: 1200, activationIsolationMs: 400,
               activationSourceVerificationMs: 200 } } };
         await options.writeResult(result);

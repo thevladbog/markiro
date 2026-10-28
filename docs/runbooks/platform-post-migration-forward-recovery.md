@@ -105,10 +105,12 @@ journals, archives and image/source identities remain bound.
 Safe evidence requires both namespace outcomes, full202migration schema and every
 mandatory check, including `edgeSuccessor`. Monotonic measurements include product
 extraction, preparation and activation, Docker calls and source verifications.
-The final product extraction plus complete current activation, including proof
-construction and owned failure cleanup, must still fit25minutes. This CI
-performance gate is independent of production authorization; it is not a
-production wall-clock guarantee. No consumed failed operation is retried.
+Elapsed durations are diagnostic metrics, not success criteria. The former
+25minute activation and60minute preparation gates were derived from the removed
+one-hour expiry and are no longer applied. Both complete scenarios, every
+functional check, exact history/schema and verified isolation/cleanup remain
+mandatory. Failed or missing proof cannot become successful through its timing.
+No consumed failed operation is retried.
 The worker archive is staged inside the captured daemon volume under
 `/var/lib/docker/markiro-forward-worker.tar`. Its SHA is read back through the live
 container namespace before the single image load. DinD mounts a private tmpfs at
