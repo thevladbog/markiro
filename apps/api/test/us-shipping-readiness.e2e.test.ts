@@ -1,11 +1,60 @@
 import { randomUUID } from "node:crypto";
 import { schema } from "@markiro/db";
+import {
+  SHIPPING_READINESS_RULE_VERSION,
+  shippingReadinessSchema,
+  type ShippingReadiness,
+} from "@markiro/platform-contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UsShippingStore } from "../src/modules/traceability/shipping/us-shipping-draft";
 import { UsReceivingStore } from "../src/modules/traceability/receiving/us-receiving-store";
 import { createUsProfileTestDatabase } from "./support/us-profile-database";
 import { seedCompleteReceiving, seedReceivingTenant } from "./support/us-receiving-fixture";
+
+// Assertions apply to readiness semantics, while opaque metadata is validated separately.
+function expectNoFdaReadinessAssertion(ready: ShippingReadiness) {
+  const assertions = Object.fromEntries(
+    Object.entries(shippingReadinessSchema.parse(ready)).filter(
+      ([key]) => key !== "eventId" && key !== "inputDigest",
+    ),
+  );
+  expect(JSON.stringify(assertions)).not.toMatch(/FDA|FSMA|export.ready/i);
+}
+
+describe("generic Shipping readiness assertion", () => {
+  const ready: ShippingReadiness = {
+    eventId: "fdafdafd-0000-4000-8000-000000000000",
+    expectedDraftVersion: 1,
+    ruleVersion: SHIPPING_READINESS_RULE_VERSION,
+    inputDigest: "fda" + "0".repeat(61),
+    state: "incomplete",
+    profileCode: "US_GENERIC_LOT_TRACEABILITY",
+    issues: [{ severity: "error", path: "eventDate", code: "required", line: null }],
+  };
+  it("does not mistake validated opaque UUID and digest bytes for regulatory assertions", () => {
+    expectNoFdaReadinessAssertion(ready);
+  });
+  it("still rejects actual FDA, FSMA and export-ready readiness assertions", () => {
+    for (const text of ["FDA", "FSMA", "export-ready"]) {
+      expect(() =>
+        expectNoFdaReadinessAssertion({
+          ...ready,
+          eventId: "00000000-0000-4000-8000-000000000000",
+          inputDigest: "0".repeat(64),
+          issues: [{ severity: "error", path: "readiness", code: text, line: null }],
+        }),
+      ).toThrow();
+    }
+  });
+  it("rejects malformed opaque metadata instead of excluding it unchecked", () => {
+    for (const value of [
+      { ...ready, eventId: "invalid" },
+      { ...ready, inputDigest: "invalid" },
+    ])
+      expect(() => expectNoFdaReadinessAssertion(value)).toThrow();
+  });
+});
 
 const url = process.env.US_TEST_DATABASE_URL;
 describe.skipIf(!url)("Shipping saved readiness", () => {
@@ -89,7 +138,7 @@ describe.skipIf(!url)("Shipping saved readiness", () => {
       profileCode: "US_GENERIC_LOT_TRACEABILITY",
       state: "incomplete",
     });
-    expect(JSON.stringify(ready)).not.toMatch(/FDA|FSMA|export.ready/i);
+    expectNoFdaReadinessAssertion(ready);
   });
 
   it("checks current ship-from and recipient roles after a draft was saved", async () => {
