@@ -94,13 +94,19 @@ export function lighthouseScoreSummary(report, profile) {
     .join(" ")}`;
 }
 
-export function lighthouseArguments({ chromePath, isCI, output, profile, url }) {
+// Lighthouse CLI selects its executable through CHROME_PATH; --chrome-path is
+// not forwarded to chrome-launcher. Pin the same Playwright binary CI installs.
+export function lighthouseBrowserEnvironment(chromePath, environment = process.env) {
+  if (typeof chromePath !== "string" || !path.isAbsolute(chromePath) || chromePath.includes("\0"))
+    throw new Error("Lighthouse Chromium executable must be an absolute path");
+  return { ...environment, CHROME_PATH: chromePath };
+}
+export function lighthouseArguments({ isCI, output, profile, url }) {
   const arguments_ = [
     url,
     "--quiet",
     "--output=json",
     `--output-path=${output}`,
-    `--chrome-path=${chromePath}`,
     "--only-categories=performance,accessibility,best-practices,seo",
   ];
   if (isCI) arguments_.push("--chrome-flags=--headless=new --no-sandbox --disable-dev-shm-usage");
@@ -114,7 +120,9 @@ async function waitForServer(url, child) {
     try {
       const response = await fetch(url);
       if (response.ok) return;
-    } catch {}
+    } catch {
+      // Preview may still be binding its socket; the bounded loop checks readiness.
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error("landing preview did not become ready");
@@ -143,7 +151,6 @@ export async function runLandingLighthouse() {
             `${profile}-${route.replaceAll("/", "_")}-${attempt}.json`,
           );
           const arguments_ = lighthouseArguments({
-            chromePath: chromium.executablePath(),
             isCI: Boolean(process.env.CI),
             output,
             profile,
@@ -151,6 +158,7 @@ export async function runLandingLighthouse() {
           });
           await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
             cwd: toolRoot,
+            env: lighthouseBrowserEnvironment(chromium.executablePath()),
           });
           const report = JSON.parse(await readFile(output, "utf8"));
           reports.push(report);
