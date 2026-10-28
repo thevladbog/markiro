@@ -34,6 +34,10 @@ export function projectUsRequestPackageTransportWitness(value: unknown) {
       "await_send:code:ECONNRESET",
       "await_send:code:ECONNRESET:new-before-response",
       "await_send:code:ECONNRESET:reused-before-response",
+      "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-lt-1000",
+      "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-ge-1000",
+      "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-lt-1000",
+      "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-ge-1000",
       "await_send:code:ECONNRESET:new-after-response",
       "await_send:code:ECONNRESET:reused-after-response",
       "consume_body:code:ECONNRESET",
@@ -390,9 +394,13 @@ export class UsRequestPackageArtifactStore {
       const transport = isTransportFailure(error, capture);
       const mapped = failure(transport ? "us_request_package_storage_transport_failed" : fallback);
       if (transport && readToken && capture.witness === "await_send:code:ECONNRESET") {
-        const observation = this.#requestObservation?.take(readToken, error);
+        const observation = this.#requestObservation?.takeDetailed(readToken, error);
+        const timing =
+          observation?.state === "reused-before-response" && observation.timing
+            ? `:${observation.timing}`
+            : "";
         const witness = projectUsRequestPackageTransportWitness(
-          observation ? `await_send:code:ECONNRESET:${observation}` : undefined,
+          observation ? `await_send:code:ECONNRESET:${observation.state}${timing}` : undefined,
         );
         if (witness) capture.witness = witness;
       }

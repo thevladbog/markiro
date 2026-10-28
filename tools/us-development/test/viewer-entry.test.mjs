@@ -186,9 +186,11 @@ function withoutCpuObservation(current) {
 }
 
 test("CPU observation inverse rejects source or bound displacement before erasure", () => {
-  const raw = readFileSync(
-    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-    "utf8",
+  const raw = withoutIdleWaitProjection(
+    readFileSync(
+      new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+      "utf8",
+    ),
   );
   for (const [before, after] of [
     ["86_400_000", "864_000_000"],
@@ -200,13 +202,48 @@ test("CPU observation inverse rejects source or bound displacement before erasur
   }
 });
 
+// Human-authorized four-bucket projection is checked before every older inverse.
+function withoutIdleWaitProjection(current) {
+  assert.equal(digest(current), "e05907a5e9aca2ea4099b6f3f8ea5fd139597a8342d586ca1e9a369fc8ea122f");
+  for (const [extension, original] of [
+    [
+      '              "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-lt-1000",\n              "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-ge-1000",\n              "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-lt-1000",\n              "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-ge-1000",\n',
+      "",
+    ],
+  ]) {
+    assert.equal(current.split(extension).length, 2);
+    current = current.replace(extension, original);
+  }
+  return current;
+}
+
+test("idle/wait projection inverse rejects an added, displaced or changed timing literal", () => {
+  const raw = readFileSync(
+    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  for (const [before, after] of [
+    ["idle-lt-6000:wait-lt-1000", "idle-lt-6000:wait-lt-2000"],
+    ["idle-ge-6000:wait-ge-1000", "idle-ge-6000:wait-ge-1000:private"],
+  ]) {
+    assert.equal(raw.split(before).length, 2);
+    assert.throws(() => withoutIdleWaitProjection(raw.replace(before, after)));
+  }
+  const line =
+    '            "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-lt-1000",\n';
+  assert.equal(raw.split(line).length, 2);
+  assert.throws(() => withoutIdleWaitProjection(raw.replace(line, "") + line));
+});
+
 function preservationSources() {
   return {
     current: withoutInitializeObservation(
       withoutCpuObservation(
-        readFileSync(
-          new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-          "utf8",
+        withoutIdleWaitProjection(
+          readFileSync(
+            new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+            "utf8",
+          ),
         ),
       ),
     ),
@@ -255,9 +292,11 @@ function withoutInitializeObservation(current) {
 
 test("initialize observation inverse refuses displaced helper, guard, wiring or edited projection before erasure", () => {
   const raw = withoutCpuObservation(
-    readFileSync(
-      new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-      "utf8",
+    withoutIdleWaitProjection(
+      readFileSync(
+        new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+        "utf8",
+      ),
     ),
   );
   assertFrozenFixture(preservationSources());

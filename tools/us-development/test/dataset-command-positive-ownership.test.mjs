@@ -293,6 +293,10 @@ test(
       "await_send:code:ECONNRESET:reused-before-response",
       "await_send:code:ECONNRESET:new-after-response",
       "await_send:code:ECONNRESET:reused-after-response",
+      "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-lt-1000",
+      "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-ge-1000",
+      "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-lt-1000",
+      "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-ge-1000",
     ]) {
       assert.equal(
         projectTransportWitness(verificationTransportWitness),

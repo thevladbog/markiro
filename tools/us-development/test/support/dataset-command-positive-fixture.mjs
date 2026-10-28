@@ -401,6 +401,10 @@ export function observeDatasetInitializeFailures(installation, sink) {
               "await_send:code:ECONNRESET:new-after-response",
               "await_send:code:ECONNRESET:reused-after-response",
               "consume_body:code:ECONNRESET",
+              "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-lt-1000",
+              "await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-ge-1000",
+              "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-lt-1000",
+              "await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-ge-1000",
             ])
           : 0;
       const elapsed = own(evidence, "elapsedMs");

@@ -78,6 +78,11 @@ it("carries the same owned read observation into the existing take-once witness"
         ? ("reused-before-response" as const)
         : undefined;
     },
+    takeDetailed(token: object, error: unknown) {
+      return token === observed && error === original
+        ? { state: "reused-before-response" as const }
+        : undefined;
+    },
     finish(token: object) {
       if (token === observed) finished = true;
     },
@@ -101,6 +106,52 @@ it("carries the same owned read observation into the existing take-once witness"
   }
   expect(destroyed).toBe(true);
 });
+
+for (const timing of [
+  "idle-lt-6000:wait-lt-1000",
+  "idle-lt-6000:wait-ge-1000",
+  "idle-ge-6000:wait-lt-1000",
+  "idle-ge-6000:wait-ge-1000",
+] as const) {
+  it(`carries the owned same-error timing bucket ${timing} through the existing witness`, async () => {
+    const original = Object.assign(new Error("synthetic reset"), { code: "ECONNRESET" });
+    let observed: object | undefined;
+    vi.spyOn(S3Client.prototype, "send").mockImplementation(async () => {
+      throw original;
+    });
+    vi.spyOn(requestObservation, "createUsRequestReadObservation").mockImplementation(() => ({
+      run<T>(token: object, action: () => Promise<T>): Promise<T> {
+        observed = token;
+        return action();
+      },
+      take() {
+        return "reused-before-response" as const;
+      },
+      takeDetailed(token: object, error: unknown) {
+        return token === observed && error === original
+          ? { state: "reused-before-response" as const, timing }
+          : undefined;
+      },
+      finish() {},
+      destroy() {},
+    }));
+    const fixture = createUsRequestWorkerStorageFixture();
+    const store = new UsRequestPackageArtifactStore(fixture.config);
+    try {
+      const error: unknown = await store
+        .readVerified(scope, evidence())
+        .catch((value: unknown) => value);
+      const witness = `await_send:code:ECONNRESET:reused-before-response:${timing}`;
+      expect(takeWitness(error)).toBe(witness);
+      expect(takeWitness(error)).toBeUndefined();
+      expect(projectWitness(witness)).toBe(witness);
+      expect(projectWitness(witness + ":private")).toBeUndefined();
+    } finally {
+      store.destroy();
+      fixture.destroy();
+    }
+  });
+}
 
 it("retains a private take-once witness from the actual failed send without changing its error", async () => {
   const s = createUsRequestWorkerStorageFixture(() => ({

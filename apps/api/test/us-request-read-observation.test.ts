@@ -1,10 +1,10 @@
-import { ClientRequest, IncomingMessage, createServer } from "node:http";
+import { ClientRequest, IncomingMessage, createServer, Agent } from "node:http";
 import type { ServerResponse } from "node:http";
 import { once } from "node:events";
 import { channel } from "node:diagnostics_channel";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createUsRequestReadObservation } from "../src/modules/traceability/requests/us-request-read-observation";
 
 // These are real SDK requests. Losing request association must lose the stronger
@@ -523,5 +523,215 @@ it("cleans a successful token and rejects foreign-agent acquisition in its own c
   } finally {
     await foreign.close();
     await fixture.close();
+  }
+});
+
+it("retains same-agent idle and request-wait buckets for an actual reused SDK reset", async () => {
+  let requests = 0;
+  const server = createServer((request, response) => {
+    if (++requests === 1) response.end("warm");
+    else request.socket.destroy();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected owned TCP listener");
+  const handler = new NodeHttpHandler({ connectionTimeout: 1000, socketTimeout: 1000 });
+  const client = new S3Client({
+    endpoint: `http://127.0.0.1:${address.port}`,
+    region: "us-east-1",
+    credentials: { accessKeyId: "synthetic", secretAccessKey: "synthetic" },
+    forcePathStyle: true,
+    maxAttempts: 1,
+    requestHandler: handler,
+  });
+  const observation = createUsRequestReadObservation(handler);
+  const token = {};
+  const command = () => client.send(new GetObjectCommand({ Bucket: "synthetic", Key: "fixture" }));
+  try {
+    const warm = await command();
+    expect(await warm.Body?.transformToString()).toBe("warm");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const error: unknown = await observation.run(token, command).catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: "ECONNRESET" });
+    const details = observation.takeDetailed(token, error);
+    expect(details).toEqual({
+      state: "reused-before-response",
+      timing: "idle-lt-6000:wait-lt-1000",
+    });
+    expect(observation.take(token, error)).toBeUndefined();
+    expect(requests).toBe(2);
+  } finally {
+    observation.finish(token);
+    observation.destroy();
+    client.destroy();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it("keeps the original request-state witness when a diagnostic clock becomes unavailable", async () => {
+  let restore = () => {};
+  const server = createServer((request) => {
+    const spy = vi.spyOn(performance, "now").mockImplementation(() => {
+      throw new Error("diagnostic clock unavailable");
+    });
+    restore = () => spy.mockRestore();
+    request.socket.destroy();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected owned TCP listener");
+  const handler = new NodeHttpHandler({ connectionTimeout: 1000, socketTimeout: 1000 });
+  const client = new S3Client({
+    endpoint: `http://127.0.0.1:${address.port}`,
+    region: "us-east-1",
+    credentials: { accessKeyId: "synthetic", secretAccessKey: "synthetic" },
+    forcePathStyle: true,
+    maxAttempts: 1,
+    requestHandler: handler,
+  });
+  const observation = createUsRequestReadObservation(handler),
+    token = {};
+  try {
+    const error: unknown = await observation
+      .run(token, () => client.send(new GetObjectCommand({ Bucket: "synthetic", Key: "fixture" })))
+      .catch((value: unknown) => value);
+    restore();
+    expect(error).toMatchObject({ code: "ECONNRESET" });
+    expect(observation.takeDetailed(token, error)).toEqual({ state: "new-before-response" });
+  } finally {
+    restore();
+    observation.finish(token);
+    observation.destroy();
+    client.destroy();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+// Boundary clocks are synthetic; SDK requests, native events and errors remain real.
+for (const [idleMs, waitMs, expected] of [
+  [5999, 999, "idle-lt-6000:wait-lt-1000"],
+  [5999, 1000, "idle-lt-6000:wait-ge-1000"],
+  [6000, 999, "idle-ge-6000:wait-lt-1000"],
+  [6000, 1000, "idle-ge-6000:wait-ge-1000"],
+] as const) {
+  it(`snapshots exact timing boundary ${expected} before consumption`, async () => {
+    let timestamp = 100,
+      requests = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => timestamp);
+    const server = createServer((request, response) => {
+      if (++requests === 1) response.end("warm");
+      else {
+        timestamp += waitMs;
+        request.socket.destroy();
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected owned TCP listener");
+    const handler = new NodeHttpHandler({ connectionTimeout: 1000, socketTimeout: 1000 });
+    const client = new S3Client({
+      endpoint: `http://127.0.0.1:${address.port}`,
+      region: "us-east-1",
+      credentials: { accessKeyId: "synthetic", secretAccessKey: "synthetic" },
+      forcePathStyle: true,
+      maxAttempts: 1,
+      requestHandler: handler,
+    });
+    const observation = createUsRequestReadObservation(handler),
+      token = {};
+    const command = () =>
+      client.send(new GetObjectCommand({ Bucket: "synthetic", Key: "fixture" }));
+    try {
+      const warm = await command();
+      expect(await warm.Body?.transformToString()).toBe("warm");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const agent = handler.httpHandlerConfigs().httpAgent;
+      if (!(agent instanceof Agent)) throw new Error("Expected existing handler agent");
+      const withObserver = agent.listenerCount("free");
+      expect(withObserver).toBeGreaterThan(1);
+      timestamp += idleMs;
+      const error: unknown = await observation.run(token, command).catch((value: unknown) => value);
+      expect(error).toMatchObject({ code: "ECONNRESET" });
+      timestamp += 10000;
+      expect(observation.takeDetailed({}, error)).toBeUndefined();
+      expect(observation.takeDetailed(token, new Error("rewrapped"))).toBeUndefined();
+      expect(observation.takeDetailed(token, error)).toEqual({
+        state: "reused-before-response",
+        timing: expected,
+      });
+      expect(observation.takeDetailed(token, error)).toBeUndefined();
+      expect(observation.take(token, error)).toBeUndefined();
+      if (expected === "idle-ge-6000:wait-ge-1000")
+        agent.once("removeListener", (name) => {
+          if (name === "free") throw new Error("diagnostic cleanup failure");
+        });
+      expect(() => observation.destroy()).not.toThrow();
+      observation.destroy();
+      expect(agent.listenerCount("free")).toBe(withObserver - 1);
+      expect(requests).toBe(2);
+    } finally {
+      clock.mockRestore();
+      observation.finish(token);
+      observation.destroy();
+      client.destroy();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+}
+
+it("invalidates an earlier free timestamp when the latest same-socket free clock is unavailable", async () => {
+  let timestamp = 100,
+    requests = 0;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => timestamp);
+  const server = createServer((request, response) => {
+    if (++requests < 3) response.end("warm");
+    else request.socket.destroy();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected owned TCP listener");
+  const handler = new NodeHttpHandler({ connectionTimeout: 1000, socketTimeout: 1000 });
+  const client = new S3Client({
+    endpoint: `http://127.0.0.1:${address.port}`,
+    region: "us-east-1",
+    credentials: { accessKeyId: "synthetic", secretAccessKey: "synthetic" },
+    forcePathStyle: true,
+    maxAttempts: 1,
+    requestHandler: handler,
+  });
+  const observation = createUsRequestReadObservation(handler),
+    token = {};
+  const command = () => client.send(new GetObjectCommand({ Bucket: "synthetic", Key: "fixture" }));
+  try {
+    const first = await command();
+    expect(await first.Body?.transformToString()).toBe("warm");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timestamp = NaN;
+    const second = await command();
+    expect(await second.Body?.transformToString()).toBe("warm");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timestamp = 10100;
+    const error: unknown = await observation.run(token, command).catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: "ECONNRESET" });
+    expect(observation.takeDetailed(token, error)).toEqual({ state: "reused-before-response" });
+    expect(requests).toBe(3);
+  } finally {
+    clock.mockRestore();
+    observation.finish(token);
+    observation.destroy();
+    client.destroy();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });

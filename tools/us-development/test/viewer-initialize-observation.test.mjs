@@ -239,6 +239,10 @@ for (const [witness, expected] of [
   ["await_send:code:ECONNRESET:reused-before-response", 3],
   ["await_send:code:ECONNRESET:new-after-response", 4],
   ["await_send:code:ECONNRESET:reused-after-response", 5],
+  ["await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-lt-1000", 7],
+  ["await_send:code:ECONNRESET:reused-before-response:idle-lt-6000:wait-ge-1000", 8],
+  ["await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-lt-1000", 9],
+  ["await_send:code:ECONNRESET:reused-before-response:idle-ge-6000:wait-ge-1000", 10],
 ])
   test(`finite transport projection ${expected} requires the complete existing diagnostic conjunction`, async () => {
     const diagnostic = {
