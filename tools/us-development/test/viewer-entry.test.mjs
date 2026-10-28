@@ -123,6 +123,44 @@ const excludedModules = {
     "80a4f30d29a8dd998dd9acc35c492847f8904d4524fc4a951e25334794605880",
 };
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+// Validate the complete provider delta before applying the historical module digest.
+function restoreProviderLifetime(name, bytes) {
+  if (name !== "dataset-command-provider.mjs") return bytes;
+  assert.equal(digest(bytes), "71cc56cc6f8754a3c0e14fe9a6774cb09cbc078524ead4dcad11a0dd264c1cf2");
+  const current = bytes.toString("utf8");
+  const extension =
+    '        // Each leg owns its connection lifetime; upstream hints cannot describe this socket.\n        const headers = upstream.rawHeaders.filter(\n          (_value, index, raw) =>\n            !["connection", "keep-alive"].includes(raw[index - (index % 2)].toLowerCase()),\n        );\n        response.writeHead(upstream.statusCode, upstream.statusMessage, headers);';
+  assert.equal(current.split(extension).length, 2);
+  return Buffer.from(
+    current.replace(
+      extension,
+      "        response.writeHead(upstream.statusCode, upstream.statusMessage, upstream.rawHeaders);",
+    ),
+  );
+}
+
+test("provider lifetime inverse rejects altered forwarding before historical module hashing", () => {
+  const raw = readFileSync(new URL("./support/dataset-command-provider.mjs", import.meta.url));
+  assert.equal(
+    digest(restoreProviderLifetime("dataset-command-provider.mjs", raw)),
+    excludedModules["dataset-command-provider.mjs"],
+  );
+  const current = raw.toString("utf8");
+  for (const [before, after] of [
+    ["upstream.statusCode", "200"],
+    ["upstream.rawHeaders.filter", "request.rawHeaders.filter"],
+    ['"connection", "keep-alive"', '"connection"'],
+  ]) {
+    assert.ok(current.includes(before));
+    assert.throws(() =>
+      restoreProviderLifetime(
+        "dataset-command-provider.mjs",
+        Buffer.from(current.replace(before, after)),
+      ),
+    );
+  }
+});
+
 function preservationSources() {
   return {
     current: withoutInitializeObservation(
@@ -134,7 +172,7 @@ function preservationSources() {
     modules: Object.fromEntries(
       Object.keys(excludedModules).map((name) => [
         name,
-        readFileSync(new URL(`./support/${name}`, import.meta.url)),
+        restoreProviderLifetime(name, readFileSync(new URL(`./support/${name}`, import.meta.url))),
       ]),
     ),
   };

@@ -225,3 +225,109 @@ test(
     }
   },
 );
+
+test(
+  "observer advertises its own connection lifetime instead of the upstream lifetime",
+  { timeout: 5000 },
+  async () => {
+    const f = await fixture((_req, res) => {
+      res.writeHead(200, {
+        connection: "keep-alive",
+        "keep-alive": "timeout=60",
+        "x-provider-value": "unchanged",
+      });
+      res.end("real upstream");
+    });
+    const agent = new http.Agent({ keepAlive: true });
+    const get = () =>
+      new Promise((resolve, reject) => {
+        const req = http.get({ hostname: "127.0.0.1", port: f.port, agent }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("error", reject);
+          res.on("end", () =>
+            resolve({
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString(),
+              reused: req.reusedSocket,
+            }),
+          );
+        });
+        req.on("error", reject);
+      });
+    try {
+      const first = await get();
+      assert.equal(first.headers.connection, "keep-alive");
+      assert.equal(first.headers["keep-alive"], "timeout=5");
+      assert.equal(first.headers["x-provider-value"], "unchanged");
+      assert.equal(first.body, "real upstream");
+      await new Promise((resolve) => setImmediate(resolve));
+      const second = await get();
+      assert.equal(second.reused, true);
+      assert.equal(second.body, "real upstream");
+      assert.deepEqual(f.observer.counts(), { reads: 2, mutations: 0, failures: 0, active: 0 });
+    } finally {
+      agent.destroy();
+      await f.close();
+    }
+  },
+);
+
+test(
+  "observer owns downstream persistence even when upstream closes and lifetime fields use mixed case",
+  { timeout: 5000 },
+  async () => {
+    const f = await fixture((_req, res) => {
+      res.writeHead(206, [
+        "cOnNeCtIoN",
+        "close",
+        "KeEp-AlIvE",
+        "timeout=60",
+        "keep-alive",
+        "max=1",
+        "x-provider-value",
+        "one",
+        "x-provider-value",
+        "two",
+        "Trailer",
+        "x-provider-tail",
+      ]);
+      res.addTrailers({ "x-provider-tail": "preserved" });
+      res.end(Buffer.from([0, 255, 4]));
+    });
+    const agent = new http.Agent({ keepAlive: true });
+    const get = () =>
+      new Promise((resolve, reject) => {
+        const req = http.get({ hostname: "127.0.0.1", port: f.port, agent }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("error", reject);
+          res.on("end", () =>
+            resolve({
+              code: res.statusCode,
+              headers: res.headers,
+              trailers: res.trailers,
+              bytes: Buffer.concat(chunks),
+              reused: req.reusedSocket,
+            }),
+          );
+        });
+        req.on("error", reject);
+      });
+    try {
+      const first = await get();
+      assert.equal(first.code, 206);
+      assert.equal(first.headers.connection, "keep-alive");
+      assert.equal(first.headers["keep-alive"], "timeout=5");
+      assert.equal(first.headers["x-provider-value"], "one, two");
+      assert.deepEqual(first.trailers, { "x-provider-tail": "preserved" });
+      assert.deepEqual(first.bytes, Buffer.from([0, 255, 4]));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal((await get()).reused, true);
+      assert.deepEqual(f.observer.counts(), { reads: 2, mutations: 0, failures: 0, active: 0 });
+    } finally {
+      agent.destroy();
+      await f.close();
+    }
+  },
+);

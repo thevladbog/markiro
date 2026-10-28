@@ -46,7 +46,12 @@ export async function startDatasetProviderObservation({ port, upstreamPort }) {
       },
       (upstream) => {
         if (upstream.statusCode >= 400) fail();
-        response.writeHead(upstream.statusCode, upstream.statusMessage, upstream.rawHeaders);
+        // Each leg owns its connection lifetime; upstream hints cannot describe this socket.
+        const headers = upstream.rawHeaders.filter(
+          (_value, index, raw) =>
+            !["connection", "keep-alive"].includes(raw[index - (index % 2)].toLowerCase()),
+        );
+        response.writeHead(upstream.statusCode, upstream.statusMessage, headers);
         upstream.on("error", () => {
           fail();
           response.destroy();
