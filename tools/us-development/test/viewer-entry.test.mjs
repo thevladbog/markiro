@@ -161,12 +161,53 @@ test("provider lifetime inverse rejects altered forwarding before historical mod
   }
 });
 
+// CPU projection is validated before restoring the original viewer diagnostic and older hashes.
+function withoutCpuObservation(current) {
+  assert.equal(digest(current), "28279062cc46c169fff1200c4ecca0f42448af30579717a92090097ad79c7d80");
+  for (const [extension, original] of [
+    ["    let cpu;\n", ""],
+    [
+      "        const user = [...time.matchAll(/^\\tUser time \\(seconds\\): ([^\\r\\n]*)$/gm)];\n        const system = [...time.matchAll(/^\\tSystem time \\(seconds\\): ([^\\r\\n]*)$/gm)];\n        if (user.length === 1 && system.length === 1) {\n          const values = [user[0][1], system[0][1]];\n          const milliseconds = values.map((value) => Math.round(Number(value) * 1000));\n          if (\n            values.every((value) => /^\\d+(?:\\.\\d{1,6})?$/.test(value)) &&\n            milliseconds.every(\n              (value) => Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000,\n            )\n          )\n            cpu = { userCpuMs: milliseconds[0], systemCpuMs: milliseconds[1] };\n        }\n",
+      "",
+    ],
+    [
+      '    if (["initialize", "verify"].includes(mode))\n      error.command = { mode, measurement, provider, ...(cpu ? { cpu } : {}) };\n',
+      '    if (["initialize", "verify"].includes(mode)) error.command = { mode, measurement, provider };\n',
+    ],
+    [
+      '        userCpuMs: integer(own(own(command, "cpu"), "userCpuMs"), 86_400_000),\n        systemCpuMs: integer(own(own(command, "cpu"), "systemCpuMs"), 86_400_000),\n',
+      "",
+    ],
+  ]) {
+    assert.equal(current.split(extension).length, 2);
+    current = current.replace(extension, original);
+  }
+  return current;
+}
+
+test("CPU observation inverse rejects source or bound displacement before erasure", () => {
+  const raw = readFileSync(
+    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  for (const [before, after] of [
+    ["86_400_000", "864_000_000"],
+    ["let cpu;", "let cpu = {};"],
+    ["userCpuMs: milliseconds[0]", "userCpuMs: milliseconds[1]"],
+  ]) {
+    assert.ok(raw.includes(before));
+    assert.throws(() => withoutCpuObservation(raw.replace(before, after)));
+  }
+});
+
 function preservationSources() {
   return {
     current: withoutInitializeObservation(
-      readFileSync(
-        new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-        "utf8",
+      withoutCpuObservation(
+        readFileSync(
+          new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+          "utf8",
+        ),
       ),
     ),
     modules: Object.fromEntries(
@@ -213,9 +254,11 @@ function withoutInitializeObservation(current) {
 }
 
 test("initialize observation inverse refuses displaced helper, guard, wiring or edited projection before erasure", () => {
-  const raw = readFileSync(
-    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-    "utf8",
+  const raw = withoutCpuObservation(
+    readFileSync(
+      new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+      "utf8",
+    ),
   );
   assertFrozenFixture(preservationSources());
   for (const [before, after] of [

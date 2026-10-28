@@ -174,9 +174,23 @@ function commandDiagnostic(
 export async function retainDatasetPositiveCommandFailure(error, mode, timeFile, observer) {
   try {
     let measurement = { status: "unavailable" };
+    let cpu;
     try {
       const time = await readFile(timeFile, "utf8");
       if (time.length <= 16 * 1024) {
+        const user = [...time.matchAll(/^\tUser time \(seconds\): ([^\r\n]*)$/gm)];
+        const system = [...time.matchAll(/^\tSystem time \(seconds\): ([^\r\n]*)$/gm)];
+        if (user.length === 1 && system.length === 1) {
+          const values = [user[0][1], system[0][1]];
+          const milliseconds = values.map((value) => Math.round(Number(value) * 1000));
+          if (
+            values.every((value) => /^\d+(?:\.\d{1,6})?$/.test(value)) &&
+            milliseconds.every(
+              (value) => Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000,
+            )
+          )
+            cpu = { userCpuMs: milliseconds[0], systemCpuMs: milliseconds[1] };
+        }
         const rss = [...time.matchAll(/^\tMaximum resident set size \(kbytes\): ([^\r\n]*)$/gm)];
         const exit = [...time.matchAll(/^\tExit status: ([^\r\n]*)$/gm)];
         const maximumRssKiB = Number(rss[0]?.[1]),
@@ -210,7 +224,8 @@ export async function retainDatasetPositiveCommandFailure(error, mode, timeFile,
     } catch {
       /* Diagnostic counter failures cannot mask the original error. */
     }
-    if (["initialize", "verify"].includes(mode)) error.command = { mode, measurement, provider };
+    if (["initialize", "verify"].includes(mode))
+      error.command = { mode, measurement, provider, ...(cpu ? { cpu } : {}) };
   } catch {
     /* Even a frozen/hostile error must escape unchanged. */
   }
@@ -416,6 +431,8 @@ export function observeDatasetInitializeFailures(installation, sink) {
           "validation.json",
         ]),
         maximumRssKiB: integer(own(measurement, "maximumRssKiB"), 33_554_432),
+        userCpuMs: integer(own(own(command, "cpu"), "userCpuMs"), 86_400_000),
+        systemCpuMs: integer(own(own(command, "cpu"), "systemCpuMs"), 86_400_000),
         reads: integer(own(provider, "reads"), 1_000_000),
         mutations: integer(own(provider, "mutations"), 1_000_000),
         failures: integer(own(provider, "failures"), 1_000_000),

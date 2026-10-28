@@ -1312,3 +1312,45 @@ test(
     );
   },
 );
+
+test("failure observation projects existing GNU time CPU fields without changing original measurement or error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "us-cpu-observation-"));
+  const timeFile = join(directory, "time.txt");
+  const observer = { counts: () => ({ reads: 0, mutations: 0, failures: 0, active: 0 }) };
+  const base = "\tMaximum resident set size (kbytes): 123456\n\tExit status: 1\n";
+  const cpu = "\tUser time (seconds): 812.34\n\tSystem time (seconds): 21.09\n";
+  const retain = async (text) => {
+    await writeFile(timeFile, text, { mode: 0o600 });
+    const error = new Error("us_dataset_positive_child_failed");
+    assert.equal(
+      await fixtureSupport.retainDatasetPositiveCommandFailure(
+        error,
+        "initialize",
+        timeFile,
+        observer,
+      ),
+      error,
+    );
+    assert.deepEqual(error.command.measurement, {
+      status: "available",
+      maximumRssKiB: 123456,
+      exitStatus: 1,
+    });
+    return error.command;
+  };
+  try {
+    const result = await retain(base + cpu + "\tCommand being timed: private-secret\n");
+    assert.deepEqual(result.cpu, { userCpuMs: 812340, systemCpuMs: 21090 });
+    assert.ok(!JSON.stringify(result).includes("private-secret"));
+    for (const text of [
+      base,
+      base + cpu + cpu,
+      base + cpu.replace("812.34", "Infinity"),
+      base + cpu.replace("21.09", "-1"),
+      base + cpu.replace("21.09", "86401.00"),
+    ])
+      assert.equal((await retain(text)).cpu, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

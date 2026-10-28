@@ -284,3 +284,18 @@ test("hostile descriptor traps cannot replace rejection or leak arbitrary error 
   assert.deepEqual(value, { kind: 0 });
   assert.ok(!line.includes("private"));
 });
+
+test("viewer finite record includes only bounded CPU milliseconds from the retained command", async () => {
+  const failure = Object.assign(new Error("us_dataset_positive_child_failed"), {
+    command: { cpu: { userCpuMs: 812340, systemCpuMs: 21090, secret: "private-secret" } },
+  });
+  const { value, line } = await project(failure);
+  assert.equal(value.userCpuMs, 812340);
+  assert.equal(value.systemCpuMs, 21090);
+  assert.ok(!line.includes("private-secret"));
+  failure.command.cpu.userCpuMs = Infinity;
+  failure.command.cpu.systemCpuMs = 86400001;
+  const invalid = (await project(failure)).value;
+  assert.equal(invalid.userCpuMs, -1);
+  assert.equal(invalid.systemCpuMs, -1);
+});
