@@ -483,7 +483,7 @@ export function createForwardRehearsalProcess(c, trace = [], timing = createForw
       await c.shell(["chown", `${st.uid}:${st.gid}`, source]);
     }
     trace.push([...args]);
-    // Only three exact read-only CLI forms have byte-equivalent Engine replies.
+    // Only the allowlisted immutable inspections have byte-equivalent Engine replies.
     // Keep every logical freshness/source/recheck boundary; only reuse the wire.
     if (
       c.inspectChannel &&
