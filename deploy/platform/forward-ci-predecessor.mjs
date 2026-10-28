@@ -4,6 +4,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { digest } from "./backup/schemas.mjs";
+export const failedEdgeExecutor = "0b6ab03da0d560a5946cf5ff3e5b8485d1d124ff";
+export const stageFailedEdgeExecutor = (options) => stage(options, failedEdgeExecutor);
 export const priorForwardExecutor = "cdae4e1ab3faf57c4941d8373aeba345fa0ef5de";
 export const failedActivationExecutor = "9c5240964bcf8869838e5574015d2838f3c42d57";
 export const stageForwardPredecessor = (options) => stage(options, priorForwardExecutor);

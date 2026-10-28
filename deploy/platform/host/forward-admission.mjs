@@ -1,4 +1,5 @@
 import { dirname } from "node:path";
+import { operationAuthorityFields, validateOperationAuthority } from "./operation-authority.mjs";
 import { canonical, ensure, hash, keys } from "../backup/schemas.mjs";
 import { canonicalId } from "../release-admission.mjs";
 import { validateUpgradeAuthorization, validateUpgradeDispatch } from "../upgrade-dispatch.mjs";
@@ -28,17 +29,6 @@ const encode = (value) => Buffer.from(`${JSON.stringify(value)}\n`);
 const uuid = (v) =>
   typeof v === "string" &&
   /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(v);
-const expiry = (value, now) => {
-  const end = Date.parse(value);
-  ensure(
-    typeof value === "string" &&
-      Number.isSafeInteger(now) &&
-      Number.isSafeInteger(end) &&
-      new Date(end).toISOString() === value &&
-      end > now &&
-      end - now <= 3600000,
-  );
-};
 function ci(value) {
   keys(value, ["runId", "runAttempt"]);
   ensure(canonicalId(value.runId) && value.runAttempt === "1");
@@ -93,10 +83,10 @@ export function validateForwardAdmission(
       "executorCi",
       "dispatch",
       "reviewedPlanSha256",
-      "expiresAt",
+      ...operationAuthorityFields(value),
     ]);
     ensure(
-      value.version === 1 &&
+      [1, 2].includes(value.version) &&
         value.kind === "platform-upgrade-forward-recovery" &&
         value.phase === "post-migration-prepare",
     );
@@ -271,7 +261,7 @@ export function validateForwardAdmission(
         value.executorCi.runId !== old.executorCi.runId &&
         hash(value.reviewedPlanSha256),
     );
-    expiry(value.expiresAt, now);
+    validateOperationAuthority(value, now);
     return value;
   } catch (error) {
     throw refusal(error);
@@ -289,10 +279,10 @@ export function validateForwardDecision(input, { priorBytes, prior, now }) {
       "executorCi",
       "reviewedPlanSha256",
       "dispatch",
-      "expiresAt",
+      ...operationAuthorityFields(value),
     ]);
     ensure(
-      value.version === 1 &&
+      [1, 2].includes(value.version) &&
         value.kind === "platform-forward-recovery-phase" &&
         value.phase === "post-migration-activate",
     );
@@ -306,6 +296,7 @@ export function validateForwardDecision(input, { priorBytes, prior, now }) {
           "platform-upgrade-forward-recovery",
           "platform-forward-admission-successor",
           "platform-forward-activation-successor",
+          "platform-forward-edge-successor",
         ].includes(prior.admission.kind) &&
         prior.admission.phase === "post-migration-prepare" &&
         !prior.decision &&
@@ -330,7 +321,7 @@ export function validateForwardDecision(input, { priorBytes, prior, now }) {
         value.dispatch.runId !== prior.admission.dispatch.runId &&
         hash(value.reviewedPlanSha256),
     );
-    expiry(value.expiresAt, now);
+    validateOperationAuthority(value, now);
     return value;
   } catch (error) {
     throw refusal(error);

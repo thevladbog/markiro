@@ -20,7 +20,7 @@ import {
 } from "./upgrade-dispatch.mjs";
 import { canonical, digest, ensure, keys } from "./backup/schemas.mjs";
 import { canonicalId, exactKeys } from "./release-admission.mjs";
-import { runHostProcess } from "./host/process.mjs";
+import { runHostProcess, runHostCoordinatorProcess } from "./host/process.mjs";
 import {
   assertPrivateRootSync,
   assertPrivateFileSync,
@@ -76,6 +76,58 @@ export function upgradeSshArguments(target, mode, operationId, phase, executorSh
     ...args.slice(0, -1),
     `exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C /usr/bin/node ${HOST_ROOT}/upgrade-bootstrap/${executorSha}/deploy/platform/upgrade-transport.mjs ${mode} ${operationId} ${phase} ${executorSha} ${dispatch.toolingSha} ${dispatch.runId} ${dispatch.runAttempt}`,
   ];
+}
+// Only the fixed protected forward coordinator can use the larger resource
+// budget. This is a compiled transport choice, never an operation JSON option.
+export async function upgradeTransportProcess(request) {
+  if (request.timeoutMs <= 3600000) return runHostProcess(request);
+  const args = request.args;
+  ensure(Array.isArray(args));
+  if (request.executable === "/usr/bin/node") {
+    ensure(args.length === 8);
+    const [script, mode, id, phase, executor, toolingSha, runId, runAttempt] = args;
+    validateUpgradeDispatch({ toolingSha, runId, runAttempt });
+    ensure(
+      mode === "host-command" &&
+        executor === toolingSha &&
+        ["post-migration-prepare", "post-migration-activate"].includes(phase) &&
+        matches(id, /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u) &&
+        script ===
+          `${HOST_ROOT}/upgrade-bootstrap/${executor}/deploy/platform/upgrade-transport.mjs`,
+    );
+  } else {
+    ensure(request.executable === "/usr/bin/ssh");
+    const remote = args.at(-1);
+    ensure(typeof remote === "string");
+    const parts = remote.split(" ");
+    ensure(parts.length === 15);
+    const [, , , , , , , , mode, id, phase, executor, toolingSha, runId, runAttempt] = parts;
+    ensure(
+      mode === "execute" && ["post-migration-prepare", "post-migration-activate"].includes(phase),
+    );
+    const port = args.indexOf("-p");
+    ensure(port === args.length - 9);
+    const hosts = args.find(
+      (value) => typeof value === "string" && value.startsWith("UserKnownHostsFile="),
+    );
+    ensure(typeof hosts === "string");
+    const target = {
+      port: args[port + 1],
+      identityFile: args[port + 3],
+      user: args[port + 5],
+      host: args[port + 7],
+      knownHostsFile: hosts.slice("UserKnownHostsFile=".length),
+    };
+    same(
+      args,
+      upgradeSshArguments(target, "execute", id, phase, executor, {
+        toolingSha,
+        runId,
+        runAttempt,
+      }),
+    );
+  }
+  return runHostCoordinatorProcess(request);
 }
 export function upgradeOutcome(result, phase) {
   ensure(
@@ -211,7 +263,7 @@ export async function runTransport(
       actorLogin: githubActor,
       request: options.request,
     });
-    const run = options.runProcess ?? runHostProcess;
+    const run = options.runProcess ?? upgradeTransportProcess;
     const transport = githubTransport(token, options.request);
     const ci = await fetchPlatformCi(
       {
@@ -278,7 +330,8 @@ export async function runTransport(
     const invoke = (mode, input) =>
       run({
         ...processOptions(workDirectory),
-        timeoutMs: mode === "execute" ? 3000000 : 120000,
+        timeoutMs:
+          mode === "execute" ? (phase.startsWith("post-migration-") ? 6900000 : 3000000) : 120000,
         executable: "/usr/bin/ssh",
         args: upgradeSshArguments(
           target,
@@ -438,9 +491,9 @@ export async function executeUpgradeHost(
     );
     await writePrivateFile(directory, "github-token", tokenBytes);
   });
-  const result = await (options.runProcess ?? runHostProcess)({
+  const result = await (options.runProcess ?? upgradeTransportProcess)({
     ...processOptions(directory),
-    timeoutMs: 2940000,
+    timeoutMs: phase.startsWith("post-migration-") ? 6840000 : 2940000,
     executable: "/usr/bin/node",
     args: [
       join(record.installedRoot, "deploy/platform/upgrade-transport.mjs"),

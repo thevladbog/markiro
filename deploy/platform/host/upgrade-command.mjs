@@ -36,6 +36,7 @@ export const UPGRADE_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/forward-admission.mjs",
   "deploy/platform/host/forward-successor-admission.mjs",
   "deploy/platform/host/forward-activation-successor-admission.mjs",
+  "deploy/platform/host/forward-edge-successor-admission.mjs",
   "deploy/platform/host/forward-activation-reconciliation.mjs",
   "deploy/platform/host/forward-history.mjs",
   "deploy/platform/host/forward-product.mjs",

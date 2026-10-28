@@ -1,5 +1,10 @@
 // Loaded only after upgrade-command authenticates the entire installed closure.
 import { dirname, join } from "node:path";
+import {
+  validateOperationAuthority,
+  historicalOperationNow,
+  runWithForwardAuthority,
+} from "./operation-authority.mjs";
 import { canonical, digest, ensure, keys, runtime as validateRuntime } from "../backup/schemas.mjs";
 import { readPrivateFile, assertPrivateRootSync, assertBindFileSync } from "./files.mjs";
 import { readFile, lstat } from "node:fs/promises";
@@ -16,7 +21,7 @@ import { extractProductMigrationProof } from "./forward-product.mjs";
 import { createForwardObservers, createForwardBaselineVerifier } from "./forward-observation.mjs";
 import { validateObservationPolicy } from "./observe.mjs";
 import { readProtectedEnv, validateConfig } from "../preflight.mjs";
-import { validateCatalogConfig } from "../catalog-config.mjs";
+import { validateCatalogConfig, catalogComposeFiles } from "../catalog-config.mjs";
 import { validateUpgradeDispatch, verifyUpgradeDispatch } from "../upgrade-dispatch.mjs";
 import { verifyAdmission } from "./command.mjs";
 import { executeForwardPreparation } from "./forward-preparation.mjs";
@@ -122,16 +127,22 @@ export async function validateForwardOperation(loaded, options = {}) {
   );
   ensure(typeof loaded.verifyInstalledSources === "function");
   const successor = admission.kind === "platform-forward-admission-successor";
-  const activationSuccessor = admission.kind === "platform-forward-activation-successor";
+  const edgeSuccessor = admission.kind === "platform-forward-edge-successor";
+  const activationSuccessor =
+    edgeSuccessor || admission.kind === "platform-forward-activation-successor";
   keys(record.historicalSources, [
     "recoveryReceiptSha256",
     "failedReceiptSha256",
     ...(successor || activationSuccessor ? ["priorForwardReceiptSha256"] : []),
     ...(activationSuccessor ? ["priorActivationReceiptSha256"] : []),
+    ...(edgeSuccessor ? ["priorEdgeReceiptSha256"] : []),
   ]);
   const history = await operationHistory(op.root, admission),
     original = history.original,
     failed = history.failedUpgrade;
+  const activationReference = edgeSuccessor
+    ? JSON.parse(history.failedEdge.state).admission.priorActivation
+    : admission.priorActivation;
   const priorActivation = activationSuccessor
     ? JSON.parse(history.failedForwardActivation.state).admission
     : null;
@@ -141,7 +152,10 @@ export async function validateForwardOperation(loaded, options = {}) {
       ensure(digest(value) === priorForward.hashes[key]);
   if (activationSuccessor)
     for (const [key, value] of Object.entries(history.failedForwardActivation))
-      ensure(digest(value) === admission.priorActivation.hashes[key]);
+      ensure(digest(value) === activationReference.hashes[key]);
+  if (edgeSuccessor)
+    for (const [key, value] of Object.entries(history.failedEdge))
+      ensure(digest(value) === admission.priorEdge.hashes[key]);
   for (const name of Object.keys(original))
     ensure(digest(original[name]) === admission.originalPredecessor.hashes[name]);
   for (const name of Object.keys(failed))
@@ -196,7 +210,7 @@ export async function validateForwardOperation(loaded, options = {}) {
   if (activationSuccessor) {
     ensure(
       record.historicalSources.priorActivationReceiptSha256 ===
-        admission.priorActivation.hashes.installedExecutor,
+        activationReference.hashes.installedExecutor,
     );
     const input = JSON.parse(history.failedForwardActivation.prepareOperation);
     same(input.historicalSources, {
@@ -214,9 +228,31 @@ export async function validateForwardOperation(loaded, options = {}) {
     // The genuine activation reader already authenticated this fourth closure
     // and repeats it on every operationHistory read below.
   }
+  if (edgeSuccessor) {
+    ensure(
+      record.historicalSources.priorEdgeReceiptSha256 ===
+        admission.priorEdge.hashes.installedExecutor,
+    );
+    const input = JSON.parse(history.failedEdge.prepareOperation);
+    same(input.historicalSources, {
+      recoveryReceiptSha256: record.historicalSources.recoveryReceiptSha256,
+      failedReceiptSha256: record.historicalSources.failedReceiptSha256,
+      priorForwardReceiptSha256: record.historicalSources.priorForwardReceiptSha256,
+      priorActivationReceiptSha256: record.historicalSources.priorActivationReceiptSha256,
+    });
+    same(input.operation.configuration, op.configuration);
+    const parent = JSON.parse(history.failedEdge.state).admission;
+    const receipt = JSON.parse(history.failedEdge.installedExecutor);
+    same(receipt.operationId, parent.identity.operationId);
+    same(receipt.executorSha, parent.identity.executorSha);
+    same(receipt.ci, parent.executorCi);
+    same(receipt.installationDispatch, parent.dispatch);
+    // The genuine edge reader authenticates this fifth closure on every history read.
+  }
   const forwardLineage = [
     ...(priorForward ? [priorForward] : []),
-    ...(activationSuccessor ? [admission.priorActivation] : []),
+    ...(activationSuccessor ? [activationReference] : []),
+    ...(edgeSuccessor ? [admission.priorEdge] : []),
   ];
   const retained = new Map();
   const retain = async (path) => {
@@ -262,7 +298,8 @@ export async function validateForwardOperation(loaded, options = {}) {
         Array.isArray(op.roleMapping.allowedDeltas),
     );
     for (const r of op.roleMapping.roles) keys(r, ["source", "target"]);
-    ensure(admission.phase === record.phase && Date.parse(admission.expiresAt) > Date.now());
+    ensure(admission.phase === record.phase);
+    validateOperationAuthority(admission);
   } else {
     retainedRuntime = (await readForwardRetained(op.root, admission)).bytes;
     priorBytes = await readPrivateFile(
@@ -275,7 +312,7 @@ export async function validateForwardOperation(loaded, options = {}) {
     validateForwardDecision(op.decision, { priorBytes, prior, now: Date.now() });
     ensure(
       op.decision.phase === record.phase &&
-        op.preparedTarget.version === 2 &&
+        op.preparedTarget.version === (op.decision.version === 2 ? 3 : 2) &&
         op.preparedTarget.provenance === "live-source" &&
         op.preparedPolicy.provenance === "live-source",
     );
@@ -300,6 +337,7 @@ export async function validateForwardOperation(loaded, options = {}) {
       "failedUpgrade",
       ...(priorForward ? ["failedForward"] : []),
       ...(activationSuccessor ? ["failedForwardActivation"] : []),
+      ...(edgeSuccessor ? ["failedEdge"] : []),
     ])
       for (const [key, value] of Object.entries(history[node]))
         ensure(currentHistory[node][key].equals(value));
@@ -343,7 +381,7 @@ export async function validateForwardOperation(loaded, options = {}) {
     });
   };
   await verify();
-  const authorize = async () => {
+  const verifyDispatch = async () => {
     const token = String(await readPrivateFile(loaded.operationDirectory, "github-token")).trim();
     same(
       await verifyUpgradeDispatch(record.dispatch, token, {
@@ -352,6 +390,12 @@ export async function validateForwardOperation(loaded, options = {}) {
       }),
       record.authorization,
     );
+  };
+  const applicationFiles = catalogComposeFiles(
+    await readProtectedEnv(op.configuration.runtimeSnapshot.path),
+  );
+  const authorize = async () => {
+    await verifyDispatch();
     await verifyAdmission(
       {
         operationDirectory: loaded.operationDirectory,
@@ -386,13 +430,16 @@ export async function validateForwardOperation(loaded, options = {}) {
       let terminated = true;
       const runProcess = async (request, recheck) => {
         ensure(terminated);
-        await verify();
-        recheck?.();
         try {
-          const result = await (options.runProcess ?? forwardRuntimeProcess(request))(
-            request,
+          const result = await runWithForwardAuthority(request, {
+            verify,
             recheck,
-          );
+            decision: op.decision,
+            composeFiles: applicationFiles,
+            allowRecreate: admission.kind === "platform-forward-edge-successor",
+            authorize: verifyDispatch,
+            run: options.runProcess ?? forwardRuntimeProcess(request),
+          });
           ensure(terminated);
           await verify();
           return result;
@@ -414,7 +461,7 @@ export async function validateForwardOperation(loaded, options = {}) {
       category = "validation";
       validateForwardHistory(admission, await operationHistory(op.root, admission), {
         productMigrationProof,
-        now: preparing(record) ? Date.now() : Date.parse(admission.expiresAt) - 1,
+        now: preparing(record) ? Date.now() : historicalOperationNow(admission),
       });
       await verify();
       const oldOperation = {

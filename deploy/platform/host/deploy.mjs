@@ -104,6 +104,8 @@ export async function executePreparedDeployment(input, adapters) {
     ensure(adapters.signal === undefined || adapters.signal instanceof AbortSignal);
     const { root, identity, configuration, dockerConfig, preparedTarget, preparedPolicy } =
       operation;
+    // Dispatch-bound authority belongs only to the compiled forward coordinator.
+    ensure([1, 2].includes(preparedTarget.version));
     const migration = freeze({
       name: `${project}-migrate-${identity.operationId}`,
       ownerOperationId: identity.operationId,

@@ -1,3 +1,4 @@
+import { forwardRecipePredecessorIds } from "./forward-history.mjs";
 import { canonical, ensure } from "../backup/schemas.mjs";
 import { withHeldForwardState } from "./forward-state.mjs";
 import { createUpgradeHostAdapters } from "./command.mjs";
@@ -106,7 +107,7 @@ export function createForwardActivationAdapters(
         const observers = createUpgradeHostObservers(
           candidate,
           oldOperation,
-          op.predecessorContainers,
+          forwardRecipePredecessorIds(op.admission),
           record.observationPolicy,
           dependencies,
         );
@@ -126,7 +127,7 @@ export function createForwardActivationAdapters(
             record: { ...record, deployment: candidate },
           },
           oldOperation,
-          op.predecessorContainers,
+          forwardRecipePredecessorIds(op.admission),
           dependencies,
         );
         result = await callback({ held, verify, adapters });

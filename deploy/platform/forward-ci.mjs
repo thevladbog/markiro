@@ -62,6 +62,7 @@ const failurePhases = new Set([
   "forward preparation performs actual source dump, isolated restore, cleanup and Linux index handoff",
   "create exact failed pre-backup forward admission",
   "seed exact expired forward activation and preserve its owned artifacts",
+  "seed exact failed edge after actual API replacement",
   "forward preparation: verifyAdmission",
   "forward preparation: inspectSource",
   "forward preparation: inspectSchema",
@@ -188,6 +189,7 @@ const checkNames = Object.freeze([
   "preBackupPredecessor",
   "directSuccessor",
   "activationSuccessor",
+  "edgeSuccessor",
   "preservedHistory",
 ]);
 const namespaceKeys = Object.freeze([
@@ -274,9 +276,8 @@ function namespace(value) {
   return structuredClone(value);
 }
 function durationBudget(value) {
-  // The existing one-hour authority is unchanged. Reserve ten minutes for
-  // provisioning, fifteen for independent approval/queue and ten for safety.
-  // Private production provisioning must also check its actual remaining TTL.
+  // CI performance acceptance is independent of single-run authority. Keep
+  // both complete elapsed-work gates without expiring production admissions.
   assert.ok(value.duration.productProofMs + value.duration.activationMs <= 25 * 60000);
   assert.ok(value.duration.prepareMs <= 60 * 60000);
 }

@@ -18,6 +18,7 @@ import { fingerprintHostConfiguration } from "./config.mjs";
 import {
   createHostObservers,
   createAcceptedRecoveryObservers,
+  createUpgradeHostObservers,
   validateObservationPolicy,
 } from "./observe.mjs";
 import { observePostgresAdmin } from "./probe.mjs";
@@ -270,16 +271,29 @@ async function produceTargetBackup(
         ];
         validateConnectionFiles(serviceBytes, passwordBytes);
         stage = "observer-setup";
-        const sourceOperation = upgradeSource?.operation ?? op;
-        const observers = (upgradeSource ? createAcceptedRecoveryObservers : createHostObservers)(
-          sourceOperation,
-          policy,
-          {
-            runProcess: run,
-            ...(options.signal ? { signal: options.signal } : {}),
-            ...(options.readMachineId ? { readMachineId: options.readMachineId } : {}),
-          },
-        );
+        const sourceOperation = upgradeSource?.candidateOperation ?? upgradeSource?.operation ?? op;
+        const observerOptions = {
+          runProcess: run,
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.readMachineId ? { readMachineId: options.readMachineId } : {}),
+        };
+        // This selection is assembled only by the held forward factory below.
+        // Actual source IDs remain independently checked by inspect(); original
+        // recipe IDs classify the replaced API and still-retained legacy edge.
+        const observers = upgradeSource?.candidateOperation
+          ? createUpgradeHostObservers(
+              sourceOperation,
+              upgradeSource.operation,
+              upgradeSource.recipePredecessorIds,
+              policy,
+              observerOptions,
+            )
+          : (upgradeSource ? createAcceptedRecoveryObservers : createHostObservers)(
+              sourceOperation,
+              policy,
+              observerOptions,
+            );
+
         const context = {
           ...sourceOperation,
           allowedServices: ["postgres"],
@@ -412,7 +426,8 @@ export async function createHeldForwardBackup(input, capability, admission, opti
     ensure(root === input.operation.root);
     ensure(canonical(admitted) === canonical(state.admission));
     ensure(canonical(input.operation.identity) === canonical(admitted.identity));
-    const { readForwardHistory } = await import("./forward-history.mjs");
+    const { readForwardHistory, forwardRecipePredecessorIds } =
+      await import("./forward-history.mjs");
     const predecessor = JSON.parse(
       (await readForwardHistory(root, admitted, { ownIndexArchive: true })).original
         .activationOperation,
@@ -478,6 +493,12 @@ export async function createHeldForwardBackup(input, capability, admission, opti
       },
       {
         operation: oldOperation,
+        ...(admitted.kind === "platform-forward-edge-successor"
+          ? {
+              candidateOperation: input.operation,
+              recipePredecessorIds: forwardRecipePredecessorIds(admitted),
+            }
+          : {}),
         containers: state.sourceRuntime.containers,
         verify: sourceBoundary,
       },

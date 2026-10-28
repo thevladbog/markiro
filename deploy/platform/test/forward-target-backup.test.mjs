@@ -1,3 +1,4 @@
+import { hostFailureSites } from "../host/failure-diagnostic.mjs";
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile, writeFile, lstat } from "node:fs/promises";
@@ -184,3 +185,87 @@ for (const purpose of ["archive", "restore"])
       assert.equal(cleanup > 0, !diagnosticFails);
       assert.ok(await lstat(join(f.root, ".deploy.lock")));
     });
+
+for (const fault of [null, "late-running", "late-env"])
+  test(`failed-edge mixed source inner inventory and restore checks (${fault})`, async (t) => {
+    const { forwardEdgeSuccessorFixture } = await import("./forward-edge-successor-fixture.mjs");
+    const { replaceForwardService } = await import("./forward-observation-fixture.mjs");
+    const id = "b75b2c77-3785-4df0-8613-e70b0beafc57";
+    const b = await targetBackupFixture(t, "valid", { nested: true, workerOperationId: id });
+    const f = await forwardEdgeSuccessorFixture(t, { targetBackup: b });
+    const api = replaceForwardService(f, "api");
+    api.Id = f.sourceIds.api;
+    api.State = { Running: false, Restarting: false, Paused: false, Status: "exited", ExitCode: 0 };
+    await b.publish();
+    await f.put(join(f.root, `forward-backup-runtime-${id}.json`), {
+      version: 1,
+      executorSha: f.input.identity.executorSha,
+      dockerExecutable: "/usr/bin/docker",
+      endpoint: "unix:///var/run/docker.sock",
+      image: b.runtime.image,
+      provenance: "live-source",
+    });
+    const connectionFile = join(f.root, `forward-connection-${id}.json`);
+    await f.put(connectionFile, { ...b.connection, operationId: id });
+    let inventories = 0,
+      failure;
+    const options = {
+      ...b.options,
+      productMigrationProof: f.productMigrationProof,
+      runProcess: async (request) => {
+        if (request.args[2] === "info" && ++inventories === 2 && fault) {
+          if (fault === "late-running") api.State.Running = true;
+          if (fault === "late-env")
+            api.Config.Env = api.Config.Env.filter(
+              (value) => !value.startsWith("MARKIRO_RELEASES_DOMAIN="),
+            );
+          await b.publish();
+        }
+        if (request.args.at(-1) === forwardMigrationQuery)
+          return { stdout: Buffer.from(JSON.stringify(f.ledger)) };
+        return b.options.runProcess(request);
+      },
+    };
+    const work = withForwardPreparationState(
+      f.root,
+      f.input,
+      async (store) => {
+        const p = forwardPrepared(f);
+        await store.complete("admitted", p.sourceRuntime);
+        await store.enter("source-held");
+        await store.complete("source-held");
+        await store.enter("backup-verified");
+        const result = await store.guard((cap) =>
+          createHeldForwardBackup(
+            {
+              ...b.input,
+              operation: { ...f.candidateOperation, identity: f.input.identity },
+              connectionFile,
+            },
+            cap,
+            f.input,
+            options,
+          ).catch((error) => {
+            failure = { code: error.code, stage: error.targetBackupStage };
+            if (!fault)
+              t.diagnostic(JSON.stringify({ ...failure, sites: hostFailureSites(error) }));
+            throw error;
+          }),
+        );
+        const evidence = JSON.parse(await readFile(result.restoreEvidence.evidencePath));
+        assert.equal(evidence.status, "completed");
+        assert.equal(evidence.checks.length, 10);
+        assert.equal(evidence.cleanup.verified, true);
+        assert.ok(b.workerCommands() > 0);
+        assert.equal(b.daemon.containers[1].Id, f.sourceIds.api);
+        assert.equal(b.daemon.containers[1].State.Running, false);
+      },
+      f.options,
+    );
+    if (fault) {
+      await assert.rejects(work);
+      assert.deepEqual(failure, { code: "ERR_TARGET_BACKUP", stage: "entry-observation" });
+      assert.equal(inventories, 2);
+      assert.equal(b.workerCommands(), 0);
+    } else await work;
+  });

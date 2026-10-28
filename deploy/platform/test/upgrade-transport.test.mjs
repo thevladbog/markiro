@@ -201,6 +201,10 @@ for (const executionPhase of ["prepare", "post-migration-prepare"])
         runProcess: async (request) => {
           runs++;
           assert.equal(request.executable, "/usr/bin/node");
+          assert.equal(
+            request.timeoutMs,
+            executionPhase === "post-migration-prepare" ? 6840000 : 2940000,
+          );
           assert.ok(!JSON.stringify(request).includes("test-secret-token"));
           assert.equal(request.env.HOME, "/nonexistent");
           if (scenario === "unconfirmed")
@@ -293,4 +297,108 @@ test("forward phases remain in the existing protected workflow with no rerun or 
   assert.match(workflow, /github.run_attempt == 1/u);
   assert.match(workflow, /github.ref == 'refs\/heads\/main'/u);
   assert.match(workflow, /upgrade-transport.mjs run/u);
+});
+
+for (const kind of ["node", "ssh"])
+  test(`protected forward ${kind} coordinator accepts its resource budget beyond one hour`, async (t) => {
+    const { privateFixture } = await import("./host-fixtures.mjs");
+    const { runHostProcess } = await import("../host/process.mjs");
+    const transport = await import("../upgrade-transport.mjs");
+    const run = transport.upgradeTransportProcess ?? runHostProcess;
+    const f = await privateFixture(t);
+    const controller = new AbortController();
+    controller.abort();
+    const phase = "post-migration-activate";
+    const request = {
+      executable: kind === "node" ? "/usr/bin/node" : "/usr/bin/ssh",
+      args:
+        kind === "node"
+          ? [
+              `/opt/markiro-platform/upgrade-bootstrap/${sha}/deploy/platform/upgrade-transport.mjs`,
+              "host-command",
+              id,
+              phase,
+              sha,
+              sha,
+              "12",
+              "1",
+            ]
+          : upgradeSshArguments(target, "execute", id, phase, sha, dispatch),
+      cwd: f.root,
+      env: {},
+      timeoutMs: 6840000,
+      outputLimitBytes: 1024,
+      signal: controller.signal,
+    };
+    // Already-aborted valid input proves validation accepted the coordinator
+    // budget without spawning a process or waiting for the long timeout.
+    await assert.rejects(
+      run(request),
+      (error) =>
+        error.code === "ERR_HOST_PROCESS" &&
+        error.reason === "aborted" &&
+        error.terminationConfirmed === true,
+    );
+    await assert.rejects(
+      runHostProcess(request),
+      (error) => error.code === "ERR_HOST_PROCESS" && error.reason === "spawn",
+    );
+  });
+
+test("larger coordinator budget rejects alternate commands, SSH options and wider I/O", async (t) => {
+  const { privateFixture } = await import("./host-fixtures.mjs");
+  const { upgradeTransportProcess } = await import("../upgrade-transport.mjs");
+  const f = await privateFixture(t),
+    controller = new AbortController();
+  controller.abort();
+  const node = {
+    executable: "/usr/bin/node",
+    args: [
+      `/opt/markiro-platform/upgrade-bootstrap/${sha}/deploy/platform/upgrade-transport.mjs`,
+      "host-command",
+      id,
+      "post-migration-activate",
+      sha,
+      sha,
+      "12",
+      "1",
+    ],
+    cwd: f.root,
+    env: {},
+    timeoutMs: 6840000,
+    outputLimitBytes: 1024,
+    signal: controller.signal,
+  };
+  const ssh = {
+    ...node,
+    executable: "/usr/bin/ssh",
+    args: upgradeSshArguments(target, "execute", id, "post-migration-activate", sha, dispatch),
+  };
+  const cases = [
+    { ...node, executable: "/usr/bin/docker" },
+    { ...node, args: [...node.args, "--extra"] },
+    { ...node, args: ["-e", "process.exit(0)"] },
+    { ...node, args: node.args.map((v, i) => (i === 3 ? "activate" : v)) },
+    { ...node, args: node.args.map((v, i) => (i === 5 ? "b".repeat(40) : v)) },
+    { ...node, args: node.args.map((v, i) => (i === 7 ? "2" : v)) },
+    { ...node, timeoutMs: 7200001 },
+    { ...node, outputLimitBytes: 1048577 },
+    { ...node, input: Buffer.alloc(1048577) },
+    { ...ssh, args: ["-o", "ProxyCommand=unsafe", ...ssh.args] },
+    { ...ssh, args: ssh.args.map((v) => (v === "/dev/null" ? "/tmp/custom-ssh-config" : v)) },
+    {
+      ...ssh,
+      args: ssh.args.map((v) =>
+        v === "StrictHostKeyChecking=yes" ? "StrictHostKeyChecking=no" : v,
+      ),
+    },
+    {
+      ...ssh,
+      args: ssh.args.map((v, i) =>
+        i === ssh.args.length - 1 ? v.replace(" execute ", " receive ") : v,
+      ),
+    },
+  ];
+  for (const request of cases)
+    await assert.rejects(upgradeTransportProcess(request), (error) => error.reason !== "aborted");
 });

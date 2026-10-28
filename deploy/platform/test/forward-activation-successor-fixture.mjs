@@ -13,8 +13,8 @@ import { digest } from "../backup/schemas.mjs";
 import { readFailedForwardPredecessor } from "../host/forward-successor-admission.mjs";
 import { readFailedForwardActivationPredecessor } from "../host/forward-activation-successor-admission.mjs";
 
-export async function forwardActivationSuccessorFixture(t) {
-  const f = await forwardSuccessorFixture(t);
+export async function forwardActivationSuccessorFixture(t, fixtureOptions) {
+  const f = await forwardSuccessorFixture(t, fixtureOptions);
   const prior = structuredClone(f.input),
     id = prior.identity.operationId;
   const encode = (value) => Buffer.from(`${JSON.stringify(value)}\n`);

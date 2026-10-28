@@ -1,4 +1,5 @@
 import { lstat } from "node:fs/promises";
+import { historicalOperationNow } from "./operation-authority.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonical, ensure, hash, keys } from "../backup/schemas.mjs";
@@ -114,6 +115,7 @@ export function validateForwardJournal(input, prior = null) {
         "platform-upgrade-forward-recovery",
         "platform-forward-admission-successor",
         "platform-forward-activation-successor",
+        "platform-forward-edge-successor",
       ].includes(s.admission.kind) &&
       s.admission.phase === "post-migration-prepare" &&
       s.migrationEntered === true &&
@@ -250,7 +252,7 @@ async function withForwardState(root, input, action, options, activation) {
       if (ownership) await retain(archive);
       validateForwardHistory(admission, history, {
         productMigrationProof,
-        now: historical ? Date.parse(admission.expiresAt) - 1 : now(),
+        now: historical ? historicalOperationNow(admission, now()) : now(),
       });
       return history;
     };

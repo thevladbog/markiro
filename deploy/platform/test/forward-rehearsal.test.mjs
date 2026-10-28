@@ -1,3 +1,4 @@
+import { digest } from "../backup/schemas.mjs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -38,6 +39,7 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
       preBackupPredecessor: true,
       directSuccessor: true,
       activationSuccessor: true,
+      edgeSuccessor: true,
       preservedHistory: true,
     },
     problem: null,
@@ -126,6 +128,7 @@ test("safe forward evidence rejects private output and incomplete acceptance cla
     (v) => (v.runs[0].admissionReadStage = "private-url"),
     (v) => (v.checks.directSuccessor = false),
     (v) => (v.checks.activationSuccessor = false),
+    (v) => (v.checks.edgeSuccessor = false),
     (v) => delete v.runs[0].failedActivationOperationId,
     (v) => (v.runs[0].failedActivationOperationId = v.runs[0].operationId),
     (v) => (v.runs[0].schema.migrationCount = "2"),
@@ -1115,3 +1118,73 @@ test("unqualified images and caller-specified Docker environment retain the orig
     assert.equal(cli, 1);
   }
 });
+
+for (const fault of [null, "changed", "foreign"])
+  test(`historical failed-edge probe mount requires its exact verified source (${fault})`, async (t) => {
+    const { mkdtemp, mkdir, writeFile, realpath, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join, dirname } = await import("node:path");
+    const parent = await realpath(await mkdtemp(join(tmpdir(), "forward-old-worker-")));
+    t.after(() => rm(parent, { recursive: true }));
+    const installedRoot = join(
+      parent,
+      "upgrade-bootstrap",
+      "0b6ab03da0d560a5946cf5ff3e5b8485d1d124ff",
+    );
+    const source = join(installedRoot, "deploy/platform/host/probe-worker.mjs");
+    await mkdir(dirname(source), { recursive: true, mode: 0o700 });
+    const bytes = Buffer.from("// synthetic public worker fixture\n");
+    await writeFile(source, bytes, { mode: 0o600 });
+    let checks = 0,
+      copies = 0,
+      commands = 0;
+    const run = createForwardRehearsalProcess({
+      parent,
+      root: join(parent, "state"),
+      containerId: "a".repeat(64),
+      verifyIsolation: async () => {},
+      forwardStage: {
+        failedEdge: {
+          installedRoot,
+          verify: async () => {
+            checks++;
+            if (fault === "changed") throw Error("changed source");
+          },
+        },
+      },
+      shell: async (args) => ({
+        stdout: args[0] === "sha256sum" ? `${digest(bytes)}  ${source}\n` : "",
+      }),
+      outer: async () => {
+        copies++;
+        return { stdout: "" };
+      },
+      stdinOuter: async () => {
+        commands++;
+        return { stdout: "", stderr: "" };
+      },
+    });
+    const request = {
+      executable: "/usr/bin/docker",
+      args: [
+        "--host",
+        "unix:///var/run/docker.sock",
+        "create",
+        "--mount",
+        `type=bind,source=${fault === "foreign" ? join(parent, "unapproved-worker") : source},target=/worker,readonly`,
+      ],
+      env: { DOCKER_CONFIG: join(parent, "state/docker") },
+      timeoutMs: 30000,
+      outputLimitBytes: 1048576,
+    };
+    if (fault) {
+      await assert.rejects(run(request));
+      assert.equal(commands, 0);
+      assert.equal(copies, 0);
+    } else {
+      await run(request);
+      assert.equal(checks, 2);
+      assert.equal(copies, 1);
+      assert.equal(commands, 1);
+    }
+  });
