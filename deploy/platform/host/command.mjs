@@ -148,6 +148,7 @@ export const HOST_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/files.mjs",
   "deploy/platform/host/process.mjs",
   "deploy/platform/host/prepared-target.mjs",
+  "deploy/platform/host/operation-authority.mjs",
   "deploy/platform/host/backup-gate.mjs",
   "deploy/platform/host/state.mjs",
   "deploy/platform/host/state-validation.mjs",
@@ -207,6 +208,7 @@ export async function loadHostOperation(directory, options = {}) {
     assertPrivateRootSync(record.installedRoot);
     const op = record.deployment;
     keys(op, deploymentKeys);
+    ensure([1, 2].includes(op.preparedTarget?.version));
     validateIdentity(op.identity);
     assertPrivateRootSync(op.root);
     assertPrivateRootSync(op.dockerConfig);
@@ -549,7 +551,7 @@ async function buildHostAdapters(loaded, options, createObservers) {
       guarded(async () => {
         const { state } = await inspect(context);
         if (
-          op.preparedTarget.version === 2 &&
+          [2, 3].includes(op.preparedTarget.version) &&
           context.phase === "api-started" &&
           ["entry", "command"].includes(context.boundary)
         ) {
@@ -563,7 +565,7 @@ async function buildHostAdapters(loaded, options, createObservers) {
             options.signal,
           );
           same(current, value.review.projection);
-          ensure(Date.parse(value.expiresAt) > Date.now());
+          if (op.preparedTarget.version === 2) ensure(Date.parse(value.expiresAt) > Date.now());
         }
         return {
           target: plain(op.identity.target),

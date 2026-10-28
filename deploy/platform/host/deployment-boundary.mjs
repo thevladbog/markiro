@@ -29,7 +29,7 @@ export function preparedHostBoundary({
   let environment, recheckPreparedFreshness;
   const project = "markiro-platform";
   const checkActivationDeadline = () => {
-    if (preparedTarget.version !== 2) return;
+    if (preparedTarget.version !== 2) return; // v3 is bound to a single protected run, not a date.
     const value = preparedTarget.observations.egress.value,
       now = Date.now();
     ensure(Date.parse(value.expiresAt) > now && Date.parse(value.sourceHold.expiresAt) > now);

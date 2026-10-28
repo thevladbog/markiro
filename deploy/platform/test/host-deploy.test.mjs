@@ -620,3 +620,19 @@ test("production deadline crossed after validator checkedAt but before final asy
   assert.ok(!f.trace.some(([action]) => ["api", "edge"].includes(action)));
   assert.equal((await disk(f.root)).current.status, "recovery-required");
 });
+
+test("ordinary deployment cannot consume nonexpiring forward authority", async (t) => {
+  const f = await fixture(t, null, async (t) => {
+    const { productionFixture } = await import("./production-activation-fixture.mjs");
+    const p = await productionFixture(t);
+    p.record.version = 3;
+    const value = p.record.observations.egress.value;
+    value.authority = "protected-dispatch-once";
+    value.sourceHold.authority = "protected-dispatch-once";
+    delete value.expiresAt;
+    delete value.sourceHold.expiresAt;
+    return p;
+  });
+  await assert.rejects(execute(f.input, f.adapters));
+  assert.deepEqual(f.trace, []);
+});

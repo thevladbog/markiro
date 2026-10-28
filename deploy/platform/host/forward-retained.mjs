@@ -1,10 +1,11 @@
+import { forwardSourceImage } from "./forward-history.mjs";
 /** Full private pre-replacement metadata. Never print or upload this document. */
 import { canonical, ensure, keys } from "../backup/schemas.mjs";
 import { readPrivateFile, writePrivateFile, inventoryDocumentOptions } from "./files.mjs";
 import { withHeldForwardState } from "./forward-state.mjs";
 import { runHostProcess } from "./process.mjs";
 const same = (a, b) => ensure(canonical(a) === canonical(b));
-function validate(record, admission) {
+export function validateForwardRetained(record, admission) {
   keys(record, [
     "version",
     "kind",
@@ -25,7 +26,7 @@ function validate(record, admission) {
   for (const service of ["postgres", "api", "edge"]) {
     const c = record.containers[service],
       image = record.images[service],
-      selected = admission.originalPredecessor.identity.admission.registry[service];
+      selected = forwardSourceImage(admission, service);
     const id = service === "postgres" ? record.postgresImageId : selected.imageId;
     ensure(
       c.Id === admission.baseline.containers[service] &&
@@ -55,7 +56,7 @@ export async function readForwardRetained(root, admission) {
     `forward-retained-${admission.identity.operationId}.json`,
     inventoryDocumentOptions,
   );
-  return { bytes, record: validate(JSON.parse(bytes), admission) };
+  return { bytes, record: validateForwardRetained(JSON.parse(bytes), admission) };
 }
 export async function captureForwardRetained(input, capability, options = {}) {
   keys(options, Object.hasOwn(options, "verifyAdmission") ? ["verifyAdmission"] : []);
@@ -102,10 +103,10 @@ export async function captureForwardRetained(input, capability, options = {}) {
       const id =
         service === "postgres"
           ? input.postgresImageId
-          : admission.originalPredecessor.identity.admission.registry[service].imageId;
+          : forwardSourceImage(admission, service).imageId;
       images[service] = await one("image", id);
     }
-    const record = validate(
+    const record = validateForwardRetained(
       {
         version: 1,
         kind: "platform-forward-retained-runtime",

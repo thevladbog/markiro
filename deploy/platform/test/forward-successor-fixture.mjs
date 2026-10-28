@@ -6,8 +6,8 @@ import { withForwardPreparationState } from "../host/forward-state.mjs";
 import { sanitizeHostFailure } from "../host/failure-diagnostic.mjs";
 import { digest } from "../backup/schemas.mjs";
 import { readFailedForwardPredecessor } from "../host/forward-successor-admission.mjs";
-export async function forwardSuccessorFixture(t) {
-  const f = await forwardCommandFixture(t);
+export async function forwardSuccessorFixture(t, fixtureOptions) {
+  const f = await forwardCommandFixture(t, fixtureOptions);
   const prior = structuredClone(f.input),
     id = prior.identity.operationId;
   const injected = new Error("synthetic admission read failure");

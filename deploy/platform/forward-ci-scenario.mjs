@@ -10,7 +10,10 @@ import { hashArchive } from "./backup/files.mjs";
 import {
   stageForwardPredecessor,
   stageFailedActivationExecutor,
+  stageFailedEdgeExecutor,
 } from "./forward-ci-predecessor.mjs";
+import { seedFailedForwardEdge } from "./forward-ci-failed-edge.mjs";
+import { readFailedForwardEdgePredecessor } from "./host/forward-edge-successor-admission.mjs";
 import { seedExpiredForwardActivation } from "./forward-ci-expired-activation.mjs";
 import { readFailedForwardPredecessor } from "./host/forward-successor-admission.mjs";
 import { readFailedForwardActivationPredecessor } from "./host/forward-activation-successor-admission.mjs";
@@ -291,6 +294,7 @@ async function stage(context) {
     workerImage: manifest.image.id,
     priorForward: await stageForwardPredecessor({ parent, command }),
     failedActivation: await stageFailedActivationExecutor({ parent, command }),
+    failedEdge: await stageFailedEdgeExecutor({ parent, command }),
     sourceSha: sha,
     root,
     sourceFiles: Object.fromEntries(
@@ -454,23 +458,26 @@ export function createForwardRehearsalProcess(c, trace = [], timing = createForw
       if (parts.type !== "bind") continue;
       const source = parts.source ?? parts.src;
       const worker = join(c.parent, "current-sources", "deploy/platform/host/probe-worker.mjs");
-      const historicalWorker =
-        c.forwardStage?.failedActivation &&
-        join(
-          c.forwardStage.failedActivation.installedRoot,
-          "deploy/platform/host/probe-worker.mjs",
+      const historical = [c.forwardStage?.failedActivation, c.forwardStage?.failedEdge]
+        .filter(Boolean)
+        .find(
+          (executor) =>
+            source === join(executor.installedRoot, "deploy/platform/host/probe-worker.mjs"),
         );
-      const isWorker = source === worker || source === historicalWorker;
+      const isWorker = source === worker || Boolean(historical);
       assert.ok(isWorker || (typeof source === "string" && source.startsWith(`${c.root}/`)));
       assert.equal(
         source.split("/").some((part) => part === ".."),
         false,
       );
       if (!isWorker) await copyInput(source);
-      else if (source === historicalWorker) {
-        await c.forwardStage.failedActivation.verify();
+      else if (historical) {
+        await historical.verify();
         await c.shell(["mkdir", "-p", dirname(source)]);
         await c.outer(["cp", source, `${c.containerId}:${source}`]);
+        const actual = (await c.shell(["sha256sum", source])).stdout.slice(0, 64);
+        assert.equal(actual, digest(await readFile(source)));
+        await historical.verify();
       } else
         assert.equal(
           digest(await readFile(source)),
@@ -854,7 +861,7 @@ async function runScenario(c, mode, checks) {
     productMigrationProof: proof,
     policy,
   };
-  const observers = createForwardObservers(authority, deps);
+  let observers = createForwardObservers(authority, deps);
   // The prior phase executes its exact historical Git closure and owns its own
   // proof WeakSet; current bytes are never relabeled as that executor.
   const historicalExecutor = c.forwardStage.priorForward;
@@ -1027,7 +1034,7 @@ async function runScenario(c, mode, checks) {
     ),
   };
   const currentProof = proof;
-  let activationHistory;
+  let activationHistory, edgeHistory;
   const failedActivationAdmission = {
     ...structuredClone(admission),
     identity: {
@@ -1077,7 +1084,7 @@ async function runScenario(c, mode, checks) {
     const authority = {
       oldOperation,
       candidateOperation: forwardOperation,
-      retainedIds: predecessorContainers,
+      retainedIds: admission.baseline.containers,
       baseline: admission.baseline,
       productMigrationProof: proof,
       policy,
@@ -1107,13 +1114,25 @@ async function runScenario(c, mode, checks) {
           ? admission.priorForward.hashes.installedExecutor
           : JSON.parse(activationHistory.bytes.prepareOperation).historicalSources
               .priorForwardReceiptSha256,
+        ...(admission.priorEdge
+          ? {
+              priorActivationReceiptSha256: JSON.parse(edgeHistory.bytes.prepareOperation)
+                .historicalSources.priorActivationReceiptSha256,
+              priorEdgeReceiptSha256: admission.priorEdge.hashes.installedExecutor,
+            }
+          : {}),
         ...(admission.priorActivation
           ? {
               priorActivationReceiptSha256: admission.priorActivation.hashes.installedExecutor,
             }
           : {}),
       },
-      operation: { ...priorRecord.operation, admission, connectionFile },
+      operation: {
+        ...priorRecord.operation,
+        admission,
+        connectionFile,
+        predecessorContainers: admission.baseline.containers,
+      },
     };
     const successorReceipt = {
       version: 1,
@@ -1210,7 +1229,7 @@ async function runScenario(c, mode, checks) {
         "predecessor-index.json",
       ),
     );
-    const immediateBytes = activationHistory?.bytes ?? priorBytes;
+    const immediateBytes = edgeHistory?.bytes ?? activationHistory?.bytes ?? priorBytes;
     assert.deepEqual(immediateArchive, immediateBytes.index);
     const successorIntent = JSON.parse(
       await readFile(
@@ -1224,12 +1243,15 @@ async function runScenario(c, mode, checks) {
     );
     assert.equal(
       successorIntent.failedOperationId,
-      activationHistory
-        ? failedActivationAdmission.identity.operationId
-        : priorAdmission.identity.operationId,
+      edgeHistory
+        ? edgeHistory.admission.identity.operationId
+        : activationHistory
+          ? failedActivationAdmission.identity.operationId
+          : priorAdmission.identity.operationId,
     );
     assert.equal(successorIntent.expectedSha256, digest(immediateBytes.index));
-    if (activationHistory) checks.activationSuccessor = true;
+    if (edgeHistory) checks.edgeSuccessor = true;
+    else if (activationHistory) checks.activationSuccessor = true;
     else checks.directSuccessor = true;
     const verified = await readVerifiedBackup({
       root,
@@ -1317,10 +1339,77 @@ async function runScenario(c, mode, checks) {
     ).toISOString(),
   };
   delete admission.priorForward;
+  // Reproduce the actual later failure using its exact historical Git executor.
+  // Only this disposable coordinator has a controlled legacy-expiry clock.
+  const edgeAdmission = {
+    ...structuredClone(admission),
+    identity: {
+      ...structuredClone(admission.identity),
+      operationId: randomUUID(),
+      executorSha: c.forwardStage.failedEdge.executorSha,
+    },
+    executorCi: { runId: "998301", runAttempt: "1" },
+    dispatch: {
+      toolingSha: c.forwardStage.failedEdge.executorSha,
+      runId: "998302",
+      runAttempt: "1",
+    },
+  };
+  admission = edgeAdmission;
+  await put(join(root, `forward-backup-runtime-${admission.identity.operationId}.json`), {
+    version: 1,
+    executorSha: admission.identity.executorSha,
+    dockerExecutable: "/usr/bin/docker",
+    endpoint: "unix:///var/run/docker.sock",
+    image: c.forwardStage.workerImage,
+    provenance: "live-source",
+  });
+  const edgePrepared = await prepareGeneration(c.forwardStage.failedEdge);
+  edgeHistory = await seedFailedForwardEdge({
+    c,
+    executor: c.forwardStage.failedEdge,
+    admission,
+    ...edgePrepared,
+    runProcess,
+    deps,
+    oldOperation,
+    roleMapping,
+    inputs: await activationInputs(
+      c,
+      admission.identity,
+      forwardOperation.configuration,
+      edgePrepared.verified,
+      edgePrepared.backupResult,
+      roleMapping,
+      runProcess,
+    ),
+  });
+  admission = {
+    ...structuredClone(finalAdmission),
+    version: 2,
+    kind: "platform-forward-edge-successor",
+    authority: "protected-dispatch-once",
+    baseline: { ...structuredClone(finalAdmission.baseline), containers: edgeHistory.sourceIds },
+    priorEdge: {
+      identity: edgeAdmission.identity,
+      originalContainers: predecessorContainers,
+      hashes: Object.fromEntries(
+        Object.entries(edgeHistory.bytes).map(([key, bytes]) => [key, digest(bytes)]),
+      ),
+    },
+  };
+  delete admission.expiresAt;
+  delete admission.priorForward;
+  observers = createForwardObservers(
+    { ...authority, baseline: admission.baseline, retainedIds: edgeHistory.sourceIds },
+    deps,
+  );
   const { backupResult, verified, preparedState, statePath, options, authenticated } =
     await prepareGeneration();
   const decision = forwardDecision({ input: admission }, preparedState);
-  decision.expiresAt = new Date(Date.now() + 3600000).toISOString();
+  decision.version = 2;
+  decision.authority = "protected-dispatch-once";
+  delete decision.expiresAt;
   const activationDirectory = join(
     parent,
     "upgrade-operations",
@@ -1345,6 +1434,12 @@ async function runScenario(c, mode, checks) {
     ),
   );
   const { preparedTarget, preparedPolicy } = activationWindow.inputs;
+  preparedTarget.version = 3;
+  const authorityValue = preparedTarget.observations.egress.value;
+  authorityValue.authority = "protected-dispatch-once";
+  authorityValue.sourceHold.authority = "protected-dispatch-once";
+  delete authorityValue.expiresAt;
+  delete authorityValue.sourceHold.expiresAt;
   const loaded = {
     operationDirectory: activationDirectory,
     receipt: {
@@ -1361,7 +1456,7 @@ async function runScenario(c, mode, checks) {
         admission,
         decision,
         configuration: forwardOperation.configuration,
-        predecessorContainers,
+        predecessorContainers: edgeHistory.sourceIds,
         preparedTarget,
         preparedPolicy,
       },
@@ -1387,6 +1482,8 @@ async function runScenario(c, mode, checks) {
     if (request.args.includes("up") && request.args.at(-1) === "api") {
       replacedApi = (await c.inspect("container", "markiro-platform-api-1")).Id;
       assert.notEqual(replacedApi, predecessorContainers.api);
+      assert.notEqual(replacedApi, edgeHistory.sourceIds.api);
+      assert.ok(request.args.includes("--force-recreate"));
       if (mode === "replacement-failure")
         throw Object.assign(Error("synthetic post-replacement failure"), {
           terminationConfirmed: true,
@@ -1513,13 +1610,21 @@ async function runScenario(c, mode, checks) {
     root,
     failedActivationAdmission.identity.operationId,
     {
-      successorOperationId: forwardIdentity.operationId,
+      successorOperationId: edgeAdmission.identity.operationId,
       indexFromSuccessorArchive: true,
     },
   );
   for (const key of Object.keys(activationHistory.bytes))
     assert.deepEqual(preservedActivation[key], activationHistory.bytes[key]);
   await c.forwardStage.failedActivation.verify();
+  const preservedEdge = await readFailedForwardEdgePredecessor(
+    root,
+    edgeAdmission.identity.operationId,
+    { successorOperationId: forwardIdentity.operationId, indexFromSuccessorArchive: true },
+  );
+  for (const key of Object.keys(edgeHistory.bytes))
+    assert.deepEqual(preservedEdge[key], edgeHistory.bytes[key]);
+  await c.forwardStage.failedEdge.verify();
   checks.preservedHistory = true;
   c.evidence.forward = {
     mode,

@@ -1,3 +1,4 @@
+import { forwardRecipePredecessorIds } from "./forward-history.mjs";
 import { canonical, ensure, hash, keys } from "../backup/schemas.mjs";
 import { snapshotActivation } from "./recovery-activation-admission.mjs";
 import { withHeldForwardState } from "./forward-state.mjs";
@@ -111,7 +112,7 @@ function physicalObserver(input, dependencies) {
     const observers = createUpgradeHostObservers(
       candidateOperation,
       oldOperation,
-      retainedIds,
+      forwardRecipePredecessorIds(admission),
       policy,
       { ...dependencies, runProcess },
     );

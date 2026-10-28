@@ -127,3 +127,51 @@ for (const value of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, "1"]
     );
   });
 }
+
+test("the installed Lighthouse launcher receives the pinned Playwright Chromium through CHROME_PATH", async (t) => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { createRequire } = await import("node:module");
+  const { pathToFileURL } = await import("node:url");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const gate = await import("../scripts/lighthouse-landing.mjs");
+  const directory = await mkdtemp(path.join(tmpdir(), "lighthouse-binary-contract-"));
+  t.after(() => rm(directory, { recursive: true }));
+  const pinned = path.join(directory, "playwright-chromium"),
+    ambient = path.join(directory, "ambient-chrome");
+  for (const file of [pinned, ambient])
+    await writeFile(file, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const require = createRequire(import.meta.url),
+    lhRequire = createRequire(require.resolve("lighthouse"));
+  const launcher = pathToFileURL(lhRequire.resolve("chrome-launcher")).href;
+  const environment = gate.lighthouseBrowserEnvironment(pinned, {
+    ...process.env,
+    CHROME_PATH: ambient,
+  });
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const {getChromePath}=await import(${JSON.stringify(launcher)});process.stdout.write(getChromePath());`,
+    ],
+    { env: environment },
+  );
+  assert.equal(stdout, pinned);
+});
+
+test("Lighthouse arguments do not rely on the unsupported chrome-path CLI option", () => {
+  const args = lighthouseArguments({
+    chromePath: "/pinned/chromium",
+    isCI: true,
+    output: "/report.json",
+    profile: "mobile",
+    url: "http://127.0.0.1:5473/",
+  });
+  assert.equal(
+    args.some((value) => value.startsWith("--chrome-path=")),
+    false,
+  );
+});

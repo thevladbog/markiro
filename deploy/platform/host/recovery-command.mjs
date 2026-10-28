@@ -26,6 +26,7 @@ export const RECOVERY_BUNDLE_FILES = Object.freeze([
   "deploy/platform/host/files.mjs",
   "deploy/platform/host/process.mjs",
   "deploy/platform/host/prepared-target.mjs",
+  "deploy/platform/host/operation-authority.mjs",
   "deploy/platform/host/backup-gate.mjs",
   "deploy/platform/host/state.mjs",
   "deploy/platform/host/state-validation.mjs",

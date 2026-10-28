@@ -608,9 +608,10 @@ export function validateForwardActivationSuccessorAdmission(
     );
     // Historical guards validate at the immutable admission horizon. That
     // horizon must itself fit the original observation freshness window.
-    ensure(
-      Date.parse(value.expiresAt) <= Date.parse(records.beforeObservation.observedAt) + 3600000,
-    );
+    if (value.version === 1)
+      ensure(
+        Date.parse(value.expiresAt) <= Date.parse(records.beforeObservation.observedAt) + 3600000,
+      );
     return value;
   } catch {
     throw refusal();

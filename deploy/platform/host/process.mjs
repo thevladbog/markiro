@@ -47,7 +47,15 @@ export async function runHostProcess(options) {
 export async function runHostArchiveProcess(options) {
   return runBoundedHostProcess(options, 16 * 1048576);
 }
-async function runBoundedHostProcess(options, maxOutputBytes) {
+// Separate trusted producer for protected SSH/Node coordinators. The upgrade
+// transport classifies their exact fixed argv before selecting this producer;
+// ordinary commands/workloads and migration archives keep the one-hour ceiling.
+export async function runHostCoordinatorProcess(options) {
+  if (!["/usr/bin/node", "/usr/bin/ssh"].includes(options?.executable))
+    throw processError("spawn", true);
+  return runBoundedHostProcess(options, 1048576, 7200000);
+}
+async function runBoundedHostProcess(options, maxOutputBytes, maxTimeoutMs = 3600000) {
   let executable, args, cwd, env, timeoutMs, outputLimitBytes, signal;
   let childEnv;
   let childArgs;
@@ -63,7 +71,7 @@ async function runBoundedHostProcess(options, maxOutputBytes) {
       (input !== undefined && (!Buffer.isBuffer(input) || input.length > 1048576)) ||
       !Number.isSafeInteger(timeoutMs) ||
       timeoutMs <= 0 ||
-      timeoutMs > 3600000 ||
+      timeoutMs > maxTimeoutMs ||
       !Number.isSafeInteger(outputLimitBytes) ||
       outputLimitBytes <= 0 ||
       outputLimitBytes > maxOutputBytes ||

@@ -186,3 +186,29 @@ test("terminal cleanup observes stopped retained apps when failure preceded API 
     f.options,
   );
 });
+
+for (const fault of [null, "running", "old-env", "image", "source-id"])
+  test(`mixed failed-edge source uses actual IDs and exact per-image recipe (${fault})`, async (t) => {
+    const f = await forwardObservationFixture(t);
+    const originalIds = { ...f.retainedIds };
+    const api = replaceForwardService(f, "api");
+    api.State = { Running: false, Restarting: false, Paused: false, Status: "exited", ExitCode: 0 };
+    const ids = { ...originalIds, api: api.Id };
+    f.retainedIds = ids;
+    f.baseline.containers = ids;
+    f.input.kind = "platform-forward-edge-successor";
+    f.input.priorEdge = { identity: f.input.identity, originalContainers: originalIds };
+    const verify = createForwardBaselineVerifier(f, f.dependencies);
+    if (fault === "running") api.State.Running = true;
+    if (fault === "old-env")
+      api.Config.Env = api.Config.Env.filter((v) => !v.startsWith("MARKIRO_RELEASES_DOMAIN="));
+    if (fault === "image") api.Image = `sha256:${"a".repeat(64)}`;
+    if (fault === "source-id") api.Id = originalIds.api;
+    const observe = () => verify({ root: f.root, admission: f.input });
+    if (fault) await assert.rejects(observe());
+    else await observe();
+    assert.equal(
+      f.u.commands.some((args) => ["start", "stop", "create", "run", "rm"].includes(args[0])),
+      false,
+    );
+  });

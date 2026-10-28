@@ -11,8 +11,16 @@ returns the old version. A different failure shape needs a separately reviewed
 project. The separately approved `platform-forward-activation-successor` accepts
 only the exact expired sequence10/api-started/recovery-required successor,
 with its canonical sequence6 preparation and both consumed phases preserved.
-It binds exactly two preceding forward operations; no further failed generation
-is eligible. See [expired activation successor design](../superpowers/specs/2026-10-27-expired-forward-activation-successor-design.md).
+The owner-authorized `platform-forward-edge-successor` additionally accepts exactly
+one later sequence12/edge-started/recovery-required failure of that legacy
+activation successor. The new API must be stopped after replacement; the original
+edge and PostgreSQL IDs stay exact. A genuine private reader binds all phase,
+consumption, handoff, source-closure and stopped-source observation files. The
+fixed chain is edge successor → activation successor → pre-backup successor →
+failed upgrade → accepted recovery. It cannot recursively accept another edge
+successor. Source ownership uses the actual stopped API ID and candidate image;
+recipe classification keeps the original predecessor IDs. Both application
+services use `--force-recreate` so a stopped same-image source is never restarted.
 
 The successor design and plan are
 [pre-backup-forward-successor-design](../superpowers/specs/2026-10-26-pre-backup-forward-successor-design.md)
@@ -70,26 +78,39 @@ closures and hands ownership directly from the failed activation index, with
 both older archives unchanged. It performs another actual fresh backup/restore
 before the healthy or post-replacement failure outcome.
 
-The successor preparation expiry is no later than one hour after the original
-`before.json` reconciliation observation. It is never recomputed as a fresh hour
-after receipt construction; historical rechecks must fit that same horizon.
+New forward admissions and activation decisions use version2 with
+`authority: "protected-dispatch-once"` and no `expiresAt`. PreparedTarget version3
+has the same authority policy. Elapsed time alone does not revoke this single-use
+operation. Legacy version1 admissions/decisions and version2 prepared targets
+retain their original expiry rules for historical validation; their bytes and
+consumption markers are never edited or revived.
 
-Safe evidence pins both preceding forward IDs and state/index digests, the fixed
-publisher failure stage, full202migration schema, and all13mandatory checks.
-Missing either namespace outcome or cleanup cannot pass. Per-namespace monotonic
-measurements include product extraction, preparation and activation milliseconds,
-Docker call count and top-level source verification count. The activation timer
-starts before live proof/projection construction and continues through application
-commands and owned failure cleanup. Product extraction plus that complete current
-activation must fit25minutes of the existing one-hour authority; ten minutes are
-reserved for provisioning, fifteen for independent approval/queue, and ten for
-safety. Preparation must also finish within one hour. These are conservative CI
-acceptance limits, not a production TTL extension or availability promise.
-Concrete production provisioning must independently verify the actual remaining
-TTL including all fresh proof generation, transfer, provisioning and approval.
-The controlled historical injections do not establish the cause of the actual
-243failure; they reproduce only the exact admitted predecessor state classes.
-There is no retry of a consumed failed operation.
+Before API/edge Compose-up, production rechecks the exact running protected
+GitHub run/attempt, executor and independent approval after asynchronous local
+checks. Cancellation, changed sources, changed physical identity, reused
+consumption or a lost fence refuse the command. Fresh workload/fence observations
+still have their strict30second limit. Natural TLS certificate expiry, key
+continuity, exact backup/restore/copy hashes, projection and schema checks remain.
+Immutable backup/attestation age does not grant or revoke the run authority.
+Ordinary deployment cannot accept PreparedTarget3.
+
+The Linux rehearsal additionally uses the exact0b6ab03da0d560a5946cf5ff3e5b8485d1d124ff
+historical closure to prepare a real backup, replace API, then seed the controlled
+legacy failure at edge entry and stop only that new API. Its CI-only frozen
+coordinator clock never enters installed production inputs. The final current
+executor authenticates all five historical cohorts and performs another fresh
+actual backup/restore from the mixed stopped source before activation. All older
+journals, archives and image/source identities remain bound.
+
+Safe evidence requires both namespace outcomes, full202migration schema and every
+mandatory check, including `edgeSuccessor`. Monotonic measurements include product
+extraction, preparation and activation, Docker calls and source verifications.
+Elapsed durations are diagnostic metrics, not success criteria. The former
+25minute activation and60minute preparation gates were derived from the removed
+one-hour expiry and are no longer applied. Both complete scenarios, every
+functional check, exact history/schema and verified isolation/cleanup remain
+mandatory. Failed or missing proof cannot become successful through its timing.
+No consumed failed operation is retried.
 The worker archive is staged inside the captured daemon volume under
 `/var/lib/docker/markiro-forward-worker.tar`. Its SHA is read back through the live
 container namespace before the single image load. DinD mounts a private tmpfs at
@@ -108,10 +129,11 @@ run 40296243127 used 69 minutes without completing its first namespace, with
 the second required serial scenario and final stack still pending. This is a
 resource estimate, not completion evidence. Both scenarios, verified cleanup,
 process/operation deadlines and acceptance checks remain required.
-Each new synthetic activation admission uses its already-generated one-hour
-source hold as expiry, stays immutable throughout execution and is rejected at
-expiry. Live validators, the helper fixture's default 30 minutes and all 30 second
-fence/cleanup checks remain unchanged.
+The final synthetic activation exercises the nonexpiring dispatch-bound policy.
+Protected transport has a120minute job resource budget with bounded child/SSH
+execution inside it; these resource limits terminate stalled processes and do
+not create an expiry-bearing deployment admission. Individual command/network
+bounds and cancellation/termination handling remain enforced.
 
 Before application processes, the staging network is disconnected, IPv4/IPv6
 default routes are absent, and actual TCP egress must fail. No host socket or

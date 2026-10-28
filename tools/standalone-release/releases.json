@@ -3,6 +3,8 @@
   "releases": [
     { "version": "0.1.0", "protocol": 6, "minProtocol": 1 },
     { "version": "0.1.1", "protocol": 6, "minProtocol": 1 },
-    { "version": "1.0.0", "protocol": 6, "minProtocol": 1 }
+    { "version": "1.0.0", "protocol": 6, "minProtocol": 1 },
+    { "version": "1.1.0", "protocol": 7, "minProtocol": 1 },
+    { "version": "1.1.1", "protocol": 7, "minProtocol": 1 }
   ]
 }

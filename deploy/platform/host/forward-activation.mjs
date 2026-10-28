@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path";
+import { validateOperationAuthority } from "./operation-authority.mjs";
 import { canonical, ensure, keys } from "../backup/schemas.mjs";
 import { catalogComposeFiles } from "../catalog-config.mjs";
 import { snapshotActivation } from "./recovery-activation-admission.mjs";
@@ -54,7 +55,7 @@ export async function executeForwardActivation(input, adapters, options) {
     ensure(
       decision.phase === "post-migration-activate" &&
         dockerConfig === `${root}/docker` &&
-        preparedTarget.version === 2 &&
+        preparedTarget.version === (decision.version === 2 ? 3 : 2) &&
         preparedTarget.provenance === "live-source" &&
         preparedPolicy.provenance === "live-source",
     );
@@ -156,8 +157,10 @@ export async function executeForwardActivation(input, adapters, options) {
             composeFiles = files;
           },
         });
-        const checkDecision = () =>
-          ensure(!adapters.signal?.aborted && Date.parse(decision.expiresAt) > Date.now());
+        const checkDecision = () => {
+          ensure(!adapters.signal?.aborted);
+          validateOperationAuthority(decision);
+        };
         const recheck = () => {
           checkDecision();
           ensure(typeof recheckBoundary === "function");
@@ -289,6 +292,9 @@ export async function executeForwardActivation(input, adapters, options) {
                       "-d",
                       ...(service === "api" ? ["--wait"] : []),
                       "--no-deps",
+                      ...(initial.admission.kind === "platform-forward-edge-successor"
+                        ? ["--force-recreate"]
+                        : []),
                       service,
                     ],
                     cwd: root,

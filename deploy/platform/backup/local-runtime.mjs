@@ -461,18 +461,29 @@ export async function withForwardBackupRuntime(capability, action) {
     validateForwardSourceRuntime(state.sourceRuntime, admission);
     const originalState = JSON.parse(await readPrivateFile(root, "state.json"));
     const preceding = [];
-    if (admission.kind === "platform-forward-admission-successor")
-      preceding.push(admission.priorForward);
-    if (admission.kind === "platform-forward-activation-successor") {
+    let lineage = admission;
+    if (admission.kind === "platform-forward-edge-successor") {
+      const bytes = await readPrivateFile(
+        root,
+        `forward-recovery-operations/${admission.priorEdge.identity.operationId}/state.json`,
+      );
+      ensure(digest(bytes) === admission.priorEdge.hashes.state);
+      lineage = JSON.parse(bytes).admission;
+      ensure(lineage.kind === "platform-forward-activation-successor");
+    }
+    if (lineage.kind === "platform-forward-admission-successor")
+      preceding.push(lineage.priorForward);
+    if (lineage.kind === "platform-forward-activation-successor") {
       const parentBytes = await readPrivateFile(
         root,
-        `forward-recovery-operations/${admission.priorActivation.identity.operationId}/state.json`,
+        `forward-recovery-operations/${lineage.priorActivation.identity.operationId}/state.json`,
       );
-      ensure(digest(parentBytes) === admission.priorActivation.hashes.state);
+      ensure(digest(parentBytes) === lineage.priorActivation.hashes.state);
       const parent = JSON.parse(parentBytes).admission;
       ensure(parent.kind === "platform-forward-admission-successor");
-      preceding.push(parent.priorForward, admission.priorActivation);
+      preceding.push(parent.priorForward, lineage.priorActivation);
     }
+    if (admission.kind === "platform-forward-edge-successor") preceding.push(admission.priorEdge);
     const descriptors = [
       ["backup-runtime.json", originalState.current.identity.executorSha],
       [

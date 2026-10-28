@@ -32,12 +32,17 @@ function tar(path) {
   }
   return Buffer.concat([...chunks, Buffer.alloc(1024)]);
 }
-export async function forwardCommandFixture(t) {
-  const base = await commandIntegrationFixture(t, null, { nested: true });
+export async function forwardCommandFixture(t, { targetBackup } = {}) {
+  const base = targetBackup?.f ?? (await commandIntegrationFixture(t, null, { nested: true }));
   const external = await integrationOptions(base.root);
-  const f = await forwardObservationFixture(t, {
-    suppliedDaemon: await dockerFixture(t, { fixture: base }),
-  });
+  const f = await forwardObservationFixture(
+    t,
+    targetBackup
+      ? { targetBackup }
+      : {
+          suppliedDaemon: await dockerFixture(t, { fixture: base }),
+        },
+  );
   f.input.expiresAt = new Date(Date.now() + 1800000).toISOString();
   f.candidateOperation.configuration.runtimeSnapshot.interpolation = {
     ...base.expected.configuration.runtimeSnapshot.interpolation,

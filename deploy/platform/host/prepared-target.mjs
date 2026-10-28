@@ -1,3 +1,4 @@
+import { DISPATCH_BOUND_AUTHORITY } from "./operation-authority.mjs";
 import {
   canonical,
   digest,
@@ -22,6 +23,13 @@ const label = (v) =>
 function fresh(value, beganAt, maxAgeMs, now) {
   const time = timestamp(value);
   ensure(time >= timestamp(beganAt) && time <= now && now - time <= maxAgeMs);
+}
+function freshPrepared(value, record, maxAgeMs, now) {
+  if (record.version !== 3) return fresh(value, record.fence.beganAt, maxAgeMs, now);
+  // Immutable backup/attestation bytes stay bound to the same held operation;
+  // actual workload/fence observations below are still refreshed at each action.
+  const time = timestamp(value);
+  ensure(time >= timestamp(record.fence.beganAt) && time <= now);
 }
 function acceptance(value, fields) {
   keys(value, ["approved", "actor", "reference", ...fields]);
@@ -70,7 +78,7 @@ export function validateProductionAuthorization(
     "review",
     "reviewSha256",
     "sourceHold",
-    "expiresAt",
+    ...(record.version === 3 ? ["authority"] : ["expiresAt"]),
   ]);
   ensure(
     value.mode === "production-activation" &&
@@ -117,7 +125,15 @@ export function validateProductionAuthorization(
       timestamp(review.observedAt) <= timestamp(observation.observedAt),
   );
   const hold = value.sourceHold;
-  keys(hold, ["kind", "held", "actor", "reference", "evidenceSha256", "observedAt", "expiresAt"]);
+  keys(hold, [
+    "kind",
+    "held",
+    "actor",
+    "reference",
+    "evidenceSha256",
+    "observedAt",
+    ...(record.version === 3 ? ["authority"] : ["expiresAt"]),
+  ]);
   ensure(hold.kind === "operator-attestation" && hold.held === true && hash(hold.evidenceSha256));
   label(hold.actor);
   label(hold.reference);
@@ -125,13 +141,19 @@ export function validateProductionAuthorization(
     timestamp(hold.observedAt) >= completed &&
       timestamp(hold.observedAt) <= timestamp(observation.observedAt),
   );
-  const expires = timestamp(value.expiresAt);
-  ensure(
-    expires > now &&
-      expires <= timestamp(observation.observedAt) + 3600000 &&
-      timestamp(hold.expiresAt) >= expires &&
-      timestamp(hold.expiresAt) <= timestamp(hold.observedAt) + 3600000,
-  );
+  if (record.version === 3) {
+    ensure(
+      value.authority === DISPATCH_BOUND_AUTHORITY && hold.authority === DISPATCH_BOUND_AUTHORITY,
+    );
+  } else {
+    const expires = timestamp(value.expiresAt);
+    ensure(
+      expires > now &&
+        expires <= timestamp(observation.observedAt) + 3600000 &&
+        timestamp(hold.expiresAt) >= expires &&
+        timestamp(hold.expiresAt) <= timestamp(hold.observedAt) + 3600000,
+    );
+  }
   return value;
 }
 
@@ -141,15 +163,15 @@ function preparedTargetFreshness(context) {
   const { record, document, evidence, backupProof, policy, workload, fenceValue } = plain(context);
   return () => {
     const checkedAt = Date.now();
-    fresh(document.startedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
-    fresh(evidence.completedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
+    freshPrepared(document.startedAt, record, policy.maxAgeMs, checkedAt);
+    freshPrepared(evidence.completedAt, record, policy.maxAgeMs, checkedAt);
     fresh(workload.observedAt, record.fence.beganAt, 30000, checkedAt);
     fresh(fenceValue.observedAt, record.fence.beganAt, 30000, checkedAt);
     // Long adapters cannot extend the validity of older attestations/certificates.
     for (const name of names)
-      fresh(record.observations[name].observedAt, record.fence.beganAt, policy.maxAgeMs, checkedAt);
+      freshPrepared(record.observations[name].observedAt, record, policy.maxAgeMs, checkedAt);
     ensure(timestamp(record.observations.tls.value.expiresAt) > checkedAt);
-    if (record.version === 2)
+    if (record.version >= 2)
       validateProductionAuthorization(record, document, evidence, backupProof, checkedAt);
   };
 }
@@ -194,14 +216,14 @@ export async function validatePreparedTarget(input, expected) {
     "observations",
   ]);
   ensure(
-    [1, 2].includes(record.version) &&
+    [1, 2, 3].includes(record.version) &&
       record.kind === "platform-prepared-target" &&
       ["local-synthetic", "live-source"].includes(policy.provenance),
   );
   for (const key of ["operationId", "target", "executorSha", "configurationSha256"])
     same(record[key], identity[key]);
   same(record.provenance, policy.provenance);
-  if (record.version === 2) ensure(policy.provenance === "live-source");
+  if (record.version >= 2) ensure(policy.provenance === "live-source");
   keys(record.fence, ["fenceId", "enforcementSha256", "beganAt"]);
   keys(record.observations, names);
   keys(policy.producers, names);
@@ -217,8 +239,8 @@ export async function validatePreparedTarget(input, expected) {
   for (const key of ["fenceId", "enforcementSha256", "beganAt"])
     same(record.fence[key], document.fence.before[key]);
   const now = Date.now();
-  fresh(document.startedAt, record.fence.beganAt, policy.maxAgeMs, now);
-  fresh(evidence.completedAt, record.fence.beganAt, policy.maxAgeMs, now);
+  freshPrepared(document.startedAt, record, policy.maxAgeMs, now);
+  freshPrepared(evidence.completedAt, record, policy.maxAgeMs, now);
   for (const name of names) {
     const observation = record.observations[name];
     keys(observation, [
@@ -240,7 +262,7 @@ export async function validatePreparedTarget(input, expected) {
       same(observation[key], identity[key]);
     same(observation.fenceId, record.fence.fenceId);
     same(observation.snapshotId, document.snapshotId);
-    fresh(observation.observedAt, record.fence.beganAt, policy.maxAgeMs, now);
+    freshPrepared(observation.observedAt, record, policy.maxAgeMs, now);
   }
   const pg = record.observations.postgres.value;
   keys(policy.postgres, ["image", "architecture", "os", "uid", "gid"]);
@@ -286,7 +308,7 @@ export async function validatePreparedTarget(input, expected) {
     timestamp(record.observations.restoredSnapshot.observedAt) >= timestamp(evidence.completedAt),
   );
   const egress = record.observations.egress.value;
-  if (record.version === 2)
+  if (record.version >= 2)
     validateProductionAuthorization(record, document, evidence, backupProof, now);
   else {
     acceptance(egress, [
