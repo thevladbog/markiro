@@ -53,9 +53,25 @@ function inspectOutput(raw, limit) {
 
 // Match the pinned Docker 28.5.2 CLI API (1.51). Older API versions change image
 // Config fields. Only immutable IDs and the rehearsal's pinned repositories are
-// eligible; no mutable names, formats, lists, writes or version negotiation.
+// eligible. The other exact read forms below have fixed server-side semantics;
+// no caller-supplied queries, paths, formats, writes or version negotiation.
 export function rehearsalInspectPath(args) {
-  if (!Array.isArray(args) || args.length !== 3 || args[1] !== "inspect") return null;
+  if (!Array.isArray(args)) return null;
+  if (JSON.stringify(args) === JSON.stringify(["info", "--format", "{{json .}}"]))
+    return "/v1.51/info";
+  if (
+    JSON.stringify(args) === JSON.stringify(["container", "ls", "--all", "--quiet", "--no-trunc"])
+  )
+    return "/v1.51/containers/json?all=1";
+  if (args.length === 3 && args[0] === "cp" && args[2] === "-" && typeof args[1] === "string") {
+    const match =
+      /^([a-f0-9]{64}):(\/app\/node_modules\/@markiro\/db\/migrations\/(?:meta\/_journal\.json|[0-9]{4}_[a-z0-9_-]{1,100}\.sql))$/u.exec(
+        args[1],
+      );
+    if (match?.[0] === args[1])
+      return `/v1.51/containers/${match[1]}/archive?path=${encodeURIComponent(match[2])}`;
+  }
+  if (args.length !== 3 || args[1] !== "inspect") return null;
   const [kind, , key] = args;
   if (["container", "network"].includes(kind) && /^[a-f0-9]{64}$/u.test(key))
     return kind === "container" ? `/v1.51/containers/${key}/json` : `/v1.51/networks/${key}`;
@@ -92,11 +108,12 @@ export function createRehearsalInspectReader(open) {
     read: async ({ args, timeoutMs, outputLimitBytes, signal }) => {
       const path = rehearsalInspectPath(args);
       assert.ok(path);
+      const archive = args[0] === "cp";
       assert.ok(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 3600000);
       assert.ok(
         Number.isSafeInteger(outputLimitBytes) &&
           outputLimitBytes > 3 &&
-          outputLimitBytes <= 1048576,
+          outputLimitBytes <= (archive ? 16 * 1048576 : 1048576),
       );
       assert.ok(signal === undefined || signal instanceof AbortSignal);
       if (closed || busy || signal?.aborted) throw failure("engine-socket");
@@ -156,13 +173,36 @@ export function createRehearsalInspectReader(open) {
             response.on("data", (chunk) => {
               if (problem) return;
               bytes += chunk.length;
-              if (bytes > outputLimitBytes - 3) fail("engine-response-size");
+              if (bytes > outputLimitBytes - (archive ? 0 : 3)) fail("engine-response-size");
               else chunks.push(chunk);
             });
             response.on("end", () => {
               if (problem) return;
               try {
-                const stdout = inspectOutput(Buffer.concat(chunks), outputLimitBytes);
+                const raw = Buffer.concat(chunks);
+                let stdout;
+                if (archive) stdout = raw;
+                else if (args[0] === "info" || args[1] === "ls") {
+                  const text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+                  const value = JSON.parse(text);
+                  if (args[0] === "info") {
+                    assert.ok(value && typeof value === "object" && !Array.isArray(value));
+                    // Keep the entire fresh server object. ClientInfo is CLI-local
+                    // metadata, never read by the fixed inventory caller.
+                    stdout = Buffer.concat([raw, Buffer.from("\n")]);
+                  } else {
+                    assert.ok(Array.isArray(value) && value.length <= 32);
+                    const ids = value.map((row) => row?.Id);
+                    assert.ok(
+                      ids.every(
+                        (id) => typeof id === "string" && /^[a-f0-9]{64}$/u.exec(id)?.[0] === id,
+                      ),
+                    );
+                    assert.equal(new Set(ids).size, ids.length);
+                    stdout = Buffer.from(ids.map((id) => id + "\n").join(""));
+                  }
+                  if (stdout.length > outputLimitBytes) throw failure("engine-response-size");
+                } else stdout = inspectOutput(raw, outputLimitBytes);
                 result = { stdout, stderr: Buffer.alloc(0) };
                 complete = true;
               } catch (error) {
