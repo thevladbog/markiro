@@ -125,9 +125,11 @@ const excludedModules = {
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function preservationSources() {
   return {
-    current: readFileSync(
-      new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
-      "utf8",
+    current: withoutInitializeObservation(
+      readFileSync(
+        new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+        "utf8",
+      ),
     ),
     modules: Object.fromEntries(
       Object.keys(excludedModules).map((name) => [
@@ -137,6 +139,65 @@ function preservationSources() {
     ),
   };
 }
+// Validate the entire new helper and its guarded placement before restoring historical bytes.
+function withoutInitializeObservation(current) {
+  const start = "export function observeDatasetInitializeFailures(";
+  const boundary = "export async function createDemoViewerInstallationFixture()";
+  assert.equal(current.split(start).length, 2);
+  assert.equal(current.split(boundary).length, 2);
+  const begin = current.indexOf(start),
+    end = current.indexOf(boundary);
+  assert.ok(begin < end);
+  assert.ok(
+    current
+      .slice(0, begin)
+      .endsWith(
+        "export async function createDatasetPositiveFixture(env = process.env) {\n  assertDatasetPositiveRunner(env);\n  return acquireDatasetInstallation();\n}\n\n",
+      ),
+  );
+  assert.equal(
+    digest(current.slice(begin, end)),
+    "c6b33bcc1856eea2ea39c533e3e15e4c43dc0d430f95b21e1e0d68e96d2c9386",
+  );
+  const wiring =
+    "export async function createDemoViewerInstallationFixture() {\n  assertDemoViewerRunner();\n  return observeDatasetInitializeFailures(await acquireDatasetInstallation(), (line) =>\n    console.error(line),\n  );\n}";
+  assert.equal(current.slice(end, end + wiring.length), wiring);
+  assert.ok(
+    current
+      .slice(end + wiring.length)
+      .startsWith("\n\nasync function acquireDatasetInstallation()"),
+  );
+  return (
+    current.slice(0, begin) +
+    "export async function createDemoViewerInstallationFixture() {\n  assertDemoViewerRunner();\n  return acquireDatasetInstallation();\n}" +
+    current.slice(end + wiring.length)
+  );
+}
+
+test("initialize observation inverse refuses displaced helper, guard, wiring or edited projection before erasure", () => {
+  const raw = readFileSync(
+    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  assertFrozenFixture(preservationSources());
+  for (const [before, after] of [
+    [
+      "  assertDemoViewerRunner();\n  return observeDatasetInitializeFailures",
+      "  return observeDatasetInitializeFailures",
+    ],
+    [
+      "export function observeDatasetInitializeFailures",
+      "function observeDatasetInitializeFailures",
+    ],
+    ["  let closed = false;", "  let closed = true;"],
+    ["await acquireDatasetInstallation()", "acquireDatasetInstallation()"],
+    ["    console.error(line),", "    console.log(line),"],
+  ]) {
+    assert.equal(raw.split(before).length, 2);
+    assert.throws(() => withoutInitializeObservation(raw.replace(before, after)));
+  }
+});
+
 // Independently pinned complete Task8 fragments; verify each exactly once BEFORE
 // erasing only this extension. Historical restoration and all digests stay below.
 function withoutTransportWitness(current) {

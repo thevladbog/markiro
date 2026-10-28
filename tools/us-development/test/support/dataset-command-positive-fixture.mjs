@@ -333,9 +333,130 @@ export async function createDatasetPositiveFixture(env = process.env) {
   return acquireDatasetInstallation();
 }
 
+export function observeDatasetInitializeFailures(installation, sink) {
+  let pending;
+  let closed = false;
+  let emitted = false;
+  const own = (object, key) => {
+    if ((typeof object !== "object" || object === null) && typeof object !== "function")
+      return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+  };
+  const integer = (value, maximum) =>
+    Number.isSafeInteger(value) && value >= 0 && value <= maximum ? value : -1;
+  const flag = (value) => (value === true ? 1 : value === false ? 0 : -1);
+  const index = (value, values) => values.indexOf(value) + 1;
+  const capture = (error) => {
+    try {
+      if (closed || pending) return;
+      const message = own(error, "message");
+      const kind = index(message, [
+        "us_dataset_positive_child_failed",
+        "us_dataset_positive_pool_failed",
+      ]);
+      const evidence = kind === 1 ? own(error, "evidence") : undefined;
+      const diagnostic = own(evidence, "diagnostic");
+      const command = kind === 1 ? own(error, "command") : undefined;
+      const measurement = own(command, "measurement");
+      const provider = own(command, "provider");
+      const unit = index(own(diagnostic, "unitKey"), [
+        "request_scenario_a",
+        "request_april",
+        "request_september",
+      ]);
+      const packageStage = own(diagnostic, "stage") === "package" ? 1 : 0;
+      const operation = own(diagnostic, "verificationOperation") === "read_private_object" ? 1 : 0;
+      const storage = index(own(diagnostic, "verificationStorageCode"), [
+        "us_request_package_storage_scope_invalid",
+        "us_request_package_storage_evidence_invalid",
+        "us_request_package_storage_timeout",
+        "us_request_package_storage_checksum_mismatch",
+        "us_request_package_storage_transport_failed",
+        "us_request_package_storage_read_failed",
+        "us_request_worker_unknown_failure",
+      ]);
+      const failed = own(diagnostic, "code") === "us_dataset_command_failed" ? 1 : 0;
+      const transport =
+        failed && unit && packageStage && operation && storage === 5
+          ? index(own(diagnostic, "verificationTransportWitness"), [
+              "await_send:code:ECONNRESET",
+              "await_send:code:ECONNRESET:new-before-response",
+              "await_send:code:ECONNRESET:reused-before-response",
+              "await_send:code:ECONNRESET:new-after-response",
+              "await_send:code:ECONNRESET:reused-after-response",
+              "consume_body:code:ECONNRESET",
+            ])
+          : 0;
+      const elapsed = own(evidence, "elapsedMs");
+      pending = `US_DEMO_VIEWER_INITIALIZE_OBSERVATION ${JSON.stringify({
+        kind,
+        exitCode: integer(own(evidence, "code"), 255),
+        timedOut: flag(own(evidence, "timedOut")),
+        overflow: flag(own(evidence, "overflow")),
+        elapsedMs:
+          typeof elapsed === "number" &&
+          Number.isFinite(elapsed) &&
+          elapsed >= 0 &&
+          elapsed <= 1_000_000
+            ? Math.floor(elapsed)
+            : -1,
+        failed,
+        unit,
+        packageStage,
+        operation,
+        storage,
+        transport,
+        artifact: index(own(diagnostic, "verificationArtifact"), [
+          "manifest.json",
+          "package.zip",
+          "plan.pdf",
+          "records.xlsx",
+          "request-report.pdf",
+          "validation.json",
+        ]),
+        maximumRssKiB: integer(own(measurement, "maximumRssKiB"), 33_554_432),
+        reads: integer(own(provider, "reads"), 1_000_000),
+        mutations: integer(own(provider, "mutations"), 1_000_000),
+        failures: integer(own(provider, "failures"), 1_000_000),
+        active: integer(own(provider, "active"), 1_000_000),
+      })}`;
+    } catch {
+      pending = 'US_DEMO_VIEWER_INITIALIZE_OBSERVATION {"kind":0}';
+    }
+  };
+  const finish = () => {
+    closed = true;
+    if (emitted || !pending) return;
+    emitted = true;
+    const line = pending;
+    pending = undefined;
+    try {
+      sink(line);
+    } catch {
+      /* Observation cannot mask command or disposal results. */
+    }
+  };
+  return {
+    ...installation,
+    command(mode) {
+      const result = installation.command(mode);
+      if (mode === "initialize") void result.then(undefined, capture);
+      return result;
+    },
+    close() {
+      const result = installation.close();
+      void result.then(finish, finish);
+      return result;
+    },
+  };
+}
+
 export async function createDemoViewerInstallationFixture() {
   assertDemoViewerRunner();
-  return acquireDatasetInstallation();
+  return observeDatasetInitializeFailures(await acquireDatasetInstallation(), (line) =>
+    console.error(line),
+  );
 }
 
 async function acquireDatasetInstallation() {
