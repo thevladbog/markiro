@@ -325,6 +325,12 @@ export class UsRequestPackageArtifactStore {
     readStages.set(readToken, "await_send");
     return this.io(
       async (signal) => {
+        if (this.#ownsClient) {
+          // Let queued native socket closure run before the default agent acquires
+          // a free connection. This stays inside the existing operation deadline.
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          if (signal.aborted) throw failure("us_request_package_storage_timeout");
+        }
         const send = () =>
           this.#client.send(
             new GetObjectCommand({ Bucket: this.config.bucket, Key: artifact.objectKey }),

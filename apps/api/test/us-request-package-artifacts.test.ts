@@ -1,3 +1,5 @@
+import { Worker } from "node:worker_threads";
+import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -152,6 +154,70 @@ for (const timing of [
     }
   });
 }
+
+it("drains a peer's queued idle close before an owned SDK private read acquisition", async () => {
+  const shared = new SharedArrayBuffer(4);
+  const signal = new Int32Array(shared);
+  const peer = new Worker(resolve("test/support/us-request-native-peer-fixture.mjs"), {
+    workerData: shared,
+  });
+  const [port]: unknown[] = await once(peer, "message");
+  if (typeof port !== "number") throw new Error("Expected owned listener port");
+  const client = new S3Client({
+    endpoint: `http://127.0.0.1:${port}`,
+    region: "us-east-1",
+    credentials: { accessKeyId: "synthetic", secretAccessKey: "synthetic" },
+    forcePathStyle: true,
+    maxAttempts: 1,
+  });
+  // Capture the real SDK method before the adapter-only forwarding seam.
+  const nativeSend = client.send.bind(client);
+  vi.spyOn(S3Client.prototype, "send").mockImplementation(async (command) => {
+    if (!(command instanceof GetObjectCommand)) throw new Error("Expected private read");
+    return nativeSend(command);
+  });
+  const fixture = createUsRequestWorkerStorageFixture();
+  const store = new UsRequestPackageArtifactStore(fixture.config);
+  try {
+    expect(await store.readVerified(scope, evidence())).toEqual(bytes);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    peer.postMessage("expire");
+    expect(Atomics.wait(signal, 0, 0, 2000)).not.toBe("timed-out");
+    expect(Atomics.load(signal, 0)).toBe(1);
+    expect(await store.readVerified(scope, evidence())).toEqual(bytes);
+  } finally {
+    store.destroy();
+    fixture.destroy();
+    client.destroy();
+    const closed = once(peer, "exit");
+    peer.postMessage("close");
+    const [exit] = await closed;
+    expect(exit).toBe(0);
+  }
+});
+
+it("does not dispatch a queued owned SDK read after store destruction", async () => {
+  let sends = 0;
+  vi.spyOn(S3Client.prototype, "send").mockImplementation(async () => {
+    sends++;
+    throw new Error("A destroyed read must not dispatch");
+  });
+  const fixture = createUsRequestWorkerStorageFixture();
+  const store = new UsRequestPackageArtifactStore(fixture.config);
+  try {
+    const result = store.readVerified(scope, evidence());
+    const rejected = expect(result).rejects.toMatchObject({
+      message: "us_request_package_storage_timeout",
+    });
+    store.destroy();
+    await rejected;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(sends).toBe(0);
+  } finally {
+    store.destroy();
+    fixture.destroy();
+  }
+});
 
 it("retains a private take-once witness from the actual failed send without changing its error", async () => {
   const s = createUsRequestWorkerStorageFixture(() => ({
