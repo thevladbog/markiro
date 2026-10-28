@@ -1,6 +1,6 @@
 [package]
 name = "markiro-host"
-version = "1.1.0"
+version = "1.1.1"
 description = "Markiro standalone host: the LAN service with the master database"
 edition = "2021"
 license-file = "../../../LICENSE"
