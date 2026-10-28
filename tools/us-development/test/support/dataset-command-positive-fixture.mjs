@@ -343,6 +343,16 @@ async function child(
   return { stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), ...measurement };
 }
 
+/** Pure closed fixture input, never an acquisition or authorization override. */
+export function datasetInstallationProfile(mode) {
+  if (mode !== "positive" && mode !== "viewer") throw new Error("us_dataset_profile_mode_invalid");
+  return Object.freeze({
+    code: "US_FSMA204_PROCESSOR",
+    timeZone: "America/Los_Angeles",
+    ...(mode === "viewer" ? { retentionYears: 2 } : {}),
+  });
+}
+
 export async function createDatasetPositiveFixture(env = process.env) {
   assertDatasetPositiveRunner(env);
   return acquireDatasetInstallation();
@@ -475,12 +485,13 @@ export function observeDatasetInitializeFailures(installation, sink) {
 
 export async function createDemoViewerInstallationFixture() {
   assertDemoViewerRunner();
-  return observeDatasetInitializeFailures(await acquireDatasetInstallation(), (line) =>
+  return observeDatasetInitializeFailures(await acquireDatasetInstallation("viewer"), (line) =>
     console.error(line),
   );
 }
 
-async function acquireDatasetInstallation() {
+async function acquireDatasetInstallation(mode = "positive") {
+  const profileInput = datasetInstallationProfile(mode);
   const uid = process.getuid?.(),
     gid = process.getgid?.();
   if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0)
@@ -739,7 +750,7 @@ async function acquireDatasetInstallation() {
     await new UsProfileStore(connection.db).provision(
       identity.tenantId,
       identity.userId,
-      { code: "US_FSMA204_PROCESSOR", timeZone: "America/Los_Angeles" },
+      profileInput,
       randomUUID(),
     );
     directory = await mkdtemp(join(tmpdir(), "us-dataset-positive-"));

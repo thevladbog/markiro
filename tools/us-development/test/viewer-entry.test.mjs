@@ -7,6 +7,23 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import * as support from "./support/dataset-command-positive-fixture.mjs";
 
+test("viewer profile uses its required retention while positive preserves the schema default", () => {
+  const require = createRequire(new URL("../../../apps/api/package.json", import.meta.url));
+  const { provisionUsTraceabilityProfileSchema } = require("@markiro/platform-contracts");
+  const positive = support.datasetInstallationProfile("positive");
+  assert.deepEqual(positive, {
+    code: "US_FSMA204_PROCESSOR",
+    timeZone: "America/Los_Angeles",
+  });
+  assert.equal(provisionUsTraceabilityProfileSchema.parse(positive).retentionYears, 5);
+  const viewer = support.datasetInstallationProfile("viewer");
+  assert.equal(provisionUsTraceabilityProfileSchema.parse(viewer).retentionYears, 2);
+  assert.deepEqual(viewer, { ...positive, retentionYears: 2 });
+  assert.ok(Object.isFrozen(viewer));
+  assert.ok(Object.isFrozen(positive));
+  assert.throws(() => support.datasetInstallationProfile("unknown"));
+});
+
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtureUrl = new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url).href;
 const valid = {
@@ -202,8 +219,59 @@ test("CPU observation inverse rejects source or bound displacement before erasur
   }
 });
 
+// Verify the complete new fixture before restoring any historical oracle input.
+function withoutViewerProfile(current) {
+  assert.equal(digest(current), "889ceb6e2e7caaf6183b04fe5b1f5f6181830c33f67c0464900ca56d553bc554");
+  for (const [extension, original] of [
+    [
+      '/** Pure closed fixture input, never an acquisition or authorization override. */\nexport function datasetInstallationProfile(mode) {\n  if (mode !== "positive" && mode !== "viewer") throw new Error("us_dataset_profile_mode_invalid");\n  return Object.freeze({\n    code: "US_FSMA204_PROCESSOR",\n    timeZone: "America/Los_Angeles",\n    ...(mode === "viewer" ? { retentionYears: 2 } : {}),\n  });\n}\n\n',
+      "",
+    ],
+    ['await acquireDatasetInstallation("viewer")', "await acquireDatasetInstallation()"],
+    [
+      'async function acquireDatasetInstallation(mode = "positive") {\n  const profileInput = datasetInstallationProfile(mode);',
+      "async function acquireDatasetInstallation() {",
+    ],
+    [
+      "      profileInput,\n",
+      '      { code: "US_FSMA204_PROCESSOR", timeZone: "America/Los_Angeles" },\n',
+    ],
+  ]) {
+    assert.equal(current.split(extension).length, 2);
+    current = current.replace(extension, original);
+  }
+  assert.equal(digest(current), "e05907a5e9aca2ea4099b6f3f8ea5fd139597a8342d586ca1e9a369fc8ea122f");
+  return current;
+}
+
+test("viewer profile inverse rejects displaced guard, profile, positive default or private mode", () => {
+  const raw = readFileSync(
+    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    digest(withoutViewerProfile(raw)),
+    "e05907a5e9aca2ea4099b6f3f8ea5fd139597a8342d586ca1e9a369fc8ea122f",
+  );
+  for (const [before, after] of [
+    ["retentionYears: 2", "retentionYears: 5"],
+    ["  assertDemoViewerRunner();\n", ""],
+    ['mode = "positive"', 'mode = "viewer"'],
+    ['mode !== "positive" && mode !== "viewer"', 'mode !== "viewer"'],
+    ["return acquireDatasetInstallation();", 'return acquireDatasetInstallation("viewer");'],
+    [
+      "      profileInput,\n",
+      '      { code: "US_FSMA204_PROCESSOR", timeZone: "America/Los_Angeles" },\n',
+    ],
+  ]) {
+    assert.equal(raw.split(before).length, 2);
+    assert.throws(() => withoutViewerProfile(raw.replace(before, after)));
+  }
+});
+
 // Human-authorized four-bucket projection is checked before every older inverse.
 function withoutIdleWaitProjection(current) {
+  current = withoutViewerProfile(current);
   assert.equal(digest(current), "e05907a5e9aca2ea4099b6f3f8ea5fd139597a8342d586ca1e9a369fc8ea122f");
   for (const [extension, original] of [
     [

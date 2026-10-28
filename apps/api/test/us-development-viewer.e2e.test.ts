@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { schema } from "@markiro/db";
 import { and, eq, sql } from "drizzle-orm";
 import { verifyPassword } from "better-auth/crypto";
@@ -53,14 +55,19 @@ describe.skipIf(!base)("reserved viewer in owned PostgreSQL", () => {
       randomUUID(),
     );
     context = { tenantId: owner.tenantId, originalOwnerId: owner.userId, requestId: randomUUID() };
+    const profileSource = pathToFileURL(
+      resolve(
+        __dirname,
+        "../../../tools/us-development/test/support/dataset-command-positive-fixture.mjs",
+      ),
+    ).href;
+    const { datasetInstallationProfile } = (await import(profileSource)) as {
+      datasetInstallationProfile(mode: "viewer"): unknown;
+    };
     await new UsProfileStore(fixture.db).provision(
       context.tenantId,
       context.originalOwnerId,
-      {
-        code: "US_FSMA204_PROCESSOR",
-        retentionYears: 2,
-        timeZone: "America/Los_Angeles",
-      },
+      datasetInstallationProfile("viewer"),
       randomUUID(),
     );
   });
