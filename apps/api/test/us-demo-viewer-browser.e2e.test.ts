@@ -233,7 +233,7 @@ describe.skipIf(process.env.US_TEST_DATABASE_URL === undefined)(
             (r) =>
               apiPath(r, "/traceability/events") &&
               new URL(r.url()).searchParams.get("offset") === "50",
-            () => page.getByRole("button", { name: "Next", exact: true }).click(),
+            () => page.getByRole("button", { name: "Next page", exact: true }).click(),
           ),
         );
         assert.equal(next.items.length, 50);

@@ -347,7 +347,13 @@ const observationImport =
   'import { observeViewerJourney } from "./support/us-viewer-journey-observation";\n';
 const browserSource = () =>
   readFileSync(resolve(__dirname, "us-demo-viewer-browser.e2e.test.ts"), "utf8");
+const previousPagerAction = '() => page.getByRole("button", { name: "Next", exact: true }).click()';
+const correctedPagerAction =
+  '() => page.getByRole("button", { name: "Next page", exact: true }).click()';
 function inverseJourney(source: string) {
+  // One intentional selector correction, checked before restoring historical bytes.
+  expect(source.split(correctedPagerAction)).toHaveLength(2);
+  expect(source.includes(previousPagerAction)).toBe(false);
   const ast = ts.createSourceFile("journey.ts", source, ts.ScriptTarget.Latest, true);
   const calls: ts.CallExpression[] = [];
   const visit = (node: ts.Node) => {
@@ -419,7 +425,9 @@ function inverseJourney(source: string) {
     originalEnvelope.footer +
     source.slice(statement.end);
   expect(restored.split(observationImport)).toHaveLength(2);
-  const original = restored.replace(observationImport, "");
+  const original = restored
+    .replace(observationImport, "")
+    .replace(correctedPagerAction, previousPagerAction);
   expect(createHash("sha256").update(original).digest("hex")).toBe(originalSha);
   return original;
 }
@@ -429,6 +437,7 @@ describe("complete original viewer preservation", () => {
     inverseJourney(browserSource());
   });
   it.each([
+    [correctedPagerAction, previousPagerAction],
     ["5000", "5001"],
     ["300_000", "300_001"],
     ["960_000", "960_001"],

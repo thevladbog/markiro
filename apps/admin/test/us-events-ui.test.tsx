@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import ts from "typescript";
 import { createHash, webcrypto } from "node:crypto";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -466,6 +469,60 @@ it("uses the server's global page and resets its offset when filtering", async (
   const { user, send } = await setup({ fullPage: true });
   await user.click(await screen.findByRole("button", { name: "Events" }));
   expect(await screen.findAllByRole("row")).toHaveLength(51);
+  const viewer = readFileSync(resolve("../api/test/us-demo-viewer-browser.e2e.test.ts"), "utf8");
+  const source = ts.createSourceFile("viewer.ts", viewer, ts.ScriptTarget.Latest, true);
+  const nextNames: string[] = [];
+  let inNext = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === "enter") {
+      const checkpoint = node.arguments[0];
+      if (checkpoint && ts.isStringLiteral(checkpoint)) {
+        if (checkpoint.text === "next-events") inNext = true;
+        if (checkpoint.text === "readonly-controls") inNext = false;
+      }
+    }
+    if (
+      inNext &&
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "getByRole"
+    ) {
+      const role = node.arguments[0],
+        options = node.arguments[1];
+      if (
+        !role ||
+        !ts.isStringLiteral(role) ||
+        role.text !== "button" ||
+        !options ||
+        !ts.isObjectLiteralExpression(options)
+      )
+        throw new Error("Invalid actual pager locator");
+      const name = options.properties.find(
+        (property) => ts.isPropertyAssignment(property) && property.name.getText(source) === "name",
+      );
+      const exact = options.properties.find(
+        (property) =>
+          ts.isPropertyAssignment(property) && property.name.getText(source) === "exact",
+      );
+      if (
+        !name ||
+        !ts.isPropertyAssignment(name) ||
+        !ts.isStringLiteral(name.initializer) ||
+        !exact ||
+        !ts.isPropertyAssignment(exact) ||
+        exact.initializer.kind !== ts.SyntaxKind.TrueKeyword
+      )
+        throw new Error("Actual pager locator must remain exact and literal");
+      nextNames.push(name.initializer.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  expect(nextNames).toHaveLength(1);
+  const nextName = nextNames[0];
+  if (!nextName) throw new Error("Missing actual pager selector");
+  const visibleNext = screen.getByRole("button", { name: "Next page" });
+  expect(screen.queryByRole("button", { name: nextName }) === visibleNext).toBe(true);
   await user.click(screen.getByRole("button", { name: "Next page" }));
   await screen.findByRole("button", { name: transformation.eventNumber });
   expect(send.mock.calls.some(([url]) => String(url).includes("offset=50"))).toBe(true);
