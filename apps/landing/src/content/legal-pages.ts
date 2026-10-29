@@ -48,8 +48,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom operator instruction for exceptions: removing codes from a box, label reprint, box and pallet disassembly, print failures, and reprinting labels of any shift.",
   },
   "MKR-INS-04": {
-    ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",
-    en: "Printable technician instruction: pairing the station with the cabinet, connecting the scanner and printer, sound, and station updates.",
+    ru: "Печатная инструкция наладчика Маркиро Автоном: подключение станции к хосту в локальной сети по коду из офиса, выбор линии, принтеры, сканеры, звук, обновление и отвязка станции.",
+    en: "Printable Markiro Autonom technician instruction: pairing the station with the host on the local network with a code from the office, choosing the line, printers, scanners, sound, updating and unpairing the station.",
   },
   "MKR-INS-08": {
     ru: "Печатная инструкция менеджера: производственная линия, станции на линии, планирование смены, режимы, агрегация и запуск.",
