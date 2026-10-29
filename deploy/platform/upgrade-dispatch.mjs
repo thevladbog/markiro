@@ -55,7 +55,31 @@ export function validateUpgradeAuthorization(value) {
   );
   return value;
 }
-export async function verifyUpgradeDispatch(dispatch, token, { actorLogin, request = fetch }) {
+export function verifyUpgradeDispatch(dispatch, token, options) {
+  return verifyProtectedDispatch(
+    dispatch,
+    token,
+    options,
+    ".github/workflows/upgrade-platform.yml",
+    "upgrade",
+  );
+}
+export function verifyCatalogBootstrapDispatch(dispatch, token, options) {
+  return verifyProtectedDispatch(
+    dispatch,
+    token,
+    options,
+    ".github/workflows/bootstrap-release-catalog.yml",
+    "catalog bootstrap",
+  );
+}
+async function verifyProtectedDispatch(
+  dispatch,
+  token,
+  { actorLogin, request = fetch },
+  workflowPath,
+  label,
+) {
   try {
     validateUpgradeDispatch(dispatch);
     ensure(login(actorLogin));
@@ -86,7 +110,7 @@ export async function verifyUpgradeDispatch(dispatch, token, { actorLogin, reque
           run.event === "workflow_dispatch",
       );
       ensure(
-        run.path === ".github/workflows/upgrade-platform.yml" &&
+        run.path === workflowPath &&
           run.repository?.full_name === REPOSITORY &&
           run.head_repository?.full_name === REPOSITORY,
       );
@@ -122,8 +146,62 @@ export async function verifyUpgradeDispatch(dispatch, token, { actorLogin, reque
     ensure(canonical(check(await read(base))) === canonical(actor));
     return Object.freeze(proof);
   } catch {
-    const error = new Error("Protected upgrade dispatch rejected.");
+    const error = new Error(`Protected ${label} dispatch rejected.`);
     error.code = "ERR_UPGRADE_DISPATCH";
     throw error;
   }
+}
+
+/** Writer fencing uses complete active-workflow pagination, not a current-head listing. */
+export async function assertNoCatalogPeers(dispatch, token, request = fetch) {
+  validateUpgradeDispatch(dispatch);
+  let total,
+    seen = new Set();
+  for (let page = 1; page <= 10; page++) {
+    const response = await request(
+      `https://api.github.com/repos/${REPOSITORY}/actions/runs?status=in_progress&per_page=100&page=${page}`,
+      {
+        redirect: "error",
+        signal: AbortSignal.timeout(30000),
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+    ensure(response.ok);
+    const value = await response.json();
+    ensure(
+      Number.isSafeInteger(value.total_count) &&
+        value.total_count >= 1 &&
+        value.total_count <= 1000 &&
+        Array.isArray(value.workflow_runs),
+    );
+    total ??= value.total_count;
+    ensure(
+      total === value.total_count &&
+        value.workflow_runs.length === Math.min(100, total - seen.size),
+    );
+    for (const run of value.workflow_runs) {
+      ensure(
+        Number.isSafeInteger(run.id) &&
+          run.id > 0 &&
+          !seen.has(run.id) &&
+          typeof run.path === "string" &&
+          run.status === "in_progress",
+      );
+      seen.add(run.id);
+      const production =
+        /^\.github\/workflows\/(?:deploy-production|deploy-platform|recover-platform|upgrade-platform|release-images|release-platform-images|station-beta-release|station-stable-release|handheld-release|standalone-release|signer-stable-release|station-release-reseed|bootstrap-release-catalog)\.yml$/u.test(
+          run.path,
+        );
+      ensure(!production || String(run.id) === dispatch.runId);
+    }
+    if (seen.size === total) {
+      ensure(seen.has(Number(dispatch.runId)));
+      return;
+    }
+  }
+  throw new Error("Catalog writer fencing rejected.");
 }

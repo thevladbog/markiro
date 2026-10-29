@@ -1,0 +1,214 @@
+import { canonical, ensure, keys } from "./backup/schemas.mjs";
+import { COMPATIBLE_PRODUCT_SHA } from "../../tools/release-catalog/bootstrap-artifact.mjs";
+const sha = (v) => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v);
+const id = (v) => typeof v === "string" && /^[1-9][0-9]{0,19}$/u.test(v);
+const uuid = (v) =>
+  typeof v === "string" &&
+  /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(v);
+const path = (v) =>
+  typeof v === "string" &&
+  /^[A-Za-z0-9_-][A-Za-z0-9._/-]*$/u.test(v) &&
+  v.split("/").every((p) => p && p !== "." && p !== "..") &&
+  !v.endsWith("github-token");
+export function validateReadBootstrapOperation(o) {
+  keys(o, [
+    "schema",
+    "kind",
+    "operationId",
+    "catalogOperationId",
+    "executorSha",
+    "executorCi",
+    "productSourceSha",
+    "artifact",
+    "inputFileSha256",
+    "bootstrapModuleSha256",
+    "runtimeScriptSha256",
+    "binding",
+    "acceptedOperationId",
+    "guards",
+    "containers",
+    "networkId",
+    "schemaProof",
+    "postgresCaSha256",
+  ]);
+  ensure(
+    o.schema === 1 &&
+      o.kind === "catalog-read-bootstrap" &&
+      uuid(o.operationId) &&
+      uuid(o.catalogOperationId) &&
+      uuid(o.acceptedOperationId),
+  );
+  ensure(
+    typeof o.executorSha === "string" &&
+      /^[a-f0-9]{40}$/u.test(o.executorSha) &&
+      o.productSourceSha === COMPATIBLE_PRODUCT_SHA,
+  );
+  keys(o.executorCi, ["runId", "runAttempt"]);
+  ensure(id(o.executorCi.runId) && o.executorCi.runAttempt === "1");
+  keys(o.artifact, ["id", "zipSha256"]);
+  ensure(id(o.artifact.id) && sha(o.artifact.zipSha256));
+  ensure(
+    [o.inputFileSha256, o.bootstrapModuleSha256, o.runtimeScriptSha256, o.networkId].every(sha),
+  );
+  ensure(sha(o.postgresCaSha256));
+  keys(o.binding, ["operationId", "epoch", "evidenceSha256", "identity", "targetVersion"]);
+  keys(o.binding.identity, ["product", "channel"]);
+  ensure(
+    o.binding.operationId === o.catalogOperationId &&
+      uuid(o.binding.epoch) &&
+      sha(o.binding.evidenceSha256) &&
+      o.binding.identity.product === "standalone" &&
+      o.binding.identity.channel === "stable" &&
+      /^\d+\.\d+\.\d+$/u.test(o.binding.targetVersion),
+  );
+  ensure(Array.isArray(o.guards) && o.guards.length <= 1000);
+  for (const guard of o.guards) {
+    keys(guard, ["path", "sha256"]);
+    ensure(path(guard.path) && sha(guard.sha256));
+  }
+  const names = new Set(o.guards.map((g) => g.path));
+  ensure(names.size === o.guards.length);
+  ensure(
+    [
+      "state/state.json",
+      "state/backup-runtime.json",
+      "state/upgrade-index.json",
+      `state/forward-recovery-operations/${o.acceptedOperationId}/state.json`,
+    ].every((name) => names.has(name)),
+  );
+  ensure([...names].some((name) => /^state\/candidates\/[a-f0-9-]{36}\/runtime.env$/u.test(name)));
+  keys(o.containers, ["api", "edge", "postgres"]);
+  for (const c of Object.values(o.containers)) {
+    keys(c, ["id", "imageId", "recipeSha256"]);
+    ensure(
+      sha(c.id) &&
+        typeof c.imageId === "string" &&
+        /^sha256:[a-f0-9]{64}$/u.test(c.imageId) &&
+        sha(c.recipeSha256),
+    );
+  }
+  ensure(new Set(Object.values(o.containers).map((c) => c.id)).size === 3);
+  keys(o.schemaProof, ["systemId", "schemaSha256", "migrationSha256", "migrationCount"]);
+  ensure(
+    id(o.schemaProof.systemId) &&
+      id(o.schemaProof.migrationCount) &&
+      sha(o.schemaProof.schemaSha256) &&
+      sha(o.schemaProof.migrationSha256),
+  );
+  return o;
+}
+export function workerEnvironment(entries) {
+  ensure(Array.isArray(entries));
+  const values = new Map();
+  for (const entry of entries) {
+    ensure(typeof entry === "string" && !/[\r\n\0]/u.test(entry));
+    const offset = entry.indexOf("=");
+    ensure(offset > 0);
+    const key = entry.slice(0, offset);
+    ensure(!values.has(key));
+    values.set(key, entry.slice(offset + 1));
+  }
+  ensure(
+    values.get("SERVER_PROFILE") === "platform-only" &&
+      values.get("RELEASE_CATALOG_WRITERS_ENABLED") === "false" &&
+      values.get("DATABASE_URL"),
+  );
+  return entries.filter((entry) =>
+    /^(?:DATABASE_URL|SERVER_PROFILE|RELEASE_CATALOG_(?!PUBLISHERS_JSON=)[A-Z0-9_]+)=/u.test(entry),
+  );
+}
+export function sameReadBootstrap(a, b) {
+  ensure(canonical(a) === canonical(b));
+}
+
+export function postgresCaMount(api) {
+  const environment = Object.fromEntries(
+    api.Config.Env.map((entry) => {
+      const index = entry.indexOf("=");
+      return [entry.slice(0, index), entry.slice(index + 1)];
+    }),
+  );
+  const url = new URL(environment.DATABASE_URL);
+  ensure(
+    url.searchParams.get("sslmode") === "verify-full" &&
+      url.searchParams.get("sslrootcert") === "/run/markiro-postgres/ca.crt",
+  );
+  const mounts = api.Mounts.filter((m) => m.Destination === "/run/markiro-postgres/ca.crt");
+  ensure(mounts.length === 1);
+  const ca = mounts[0];
+  ensure(
+    ca.Type === "bind" &&
+      ca.RW === false &&
+      typeof ca.Source === "string" &&
+      ca.Source.startsWith("/opt/markiro-platform/") &&
+      path(ca.Source.slice("/opt/markiro-platform/".length)),
+  );
+  return ca;
+}
+export function readBootstrapWorkerArguments({ operation, root, api }) {
+  const ca = postgresCaMount(api);
+  const mounts = [
+    [
+      `${root}/catalog-bootstrap.js`,
+      "/app/dist/modules/release-catalog/catalog-bootstrap.js",
+      true,
+    ],
+    [`${root}/bootstrap-runtime.mjs`, "/app/bootstrap-runtime.mjs", true],
+    [`${root}/input.json`, "/bootstrap/input.json", true],
+    [`${root}/rpc`, "/bootstrap/rpc", false],
+    [ca.Source, ca.Destination, true],
+    ...["cache", "journal"].map((name) => [
+      `/opt/markiro-platform/release-catalog/${name}`,
+      `/opt/markiro-platform/release-catalog/${name}`,
+      false,
+    ]),
+  ];
+  return [
+    "create",
+    "--name",
+    `markiro-catalog-bootstrap-${operation.operationId}`,
+    "--label",
+    `markiro.catalog-bootstrap=${operation.operationId}`,
+    "--user",
+    "1000:1000",
+    "--network",
+    operation.networkId,
+    "--read-only",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "--pids-limit",
+    "128",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--workdir",
+    "/app",
+    "--env-file",
+    `${root}/worker.env`,
+    ...mounts.flatMap(([source, target, readonly]) => [
+      "--mount",
+      `type=bind,source=${source},target=${target}${readonly ? ",readonly" : ""}`,
+    ]),
+    "--entrypoint",
+    "/usr/local/bin/node",
+    operation.containers.api.imageId,
+    "/app/bootstrap-runtime.mjs",
+  ];
+}
+
+export function validateBootstrapCaFile(info) {
+  const mode = info.mode & 0o7777;
+  ensure(
+    [0, 1000].includes(info.uid) &&
+      [0, 1000].includes(info.gid) &&
+      (mode & 0o7022) === 0 &&
+      info.size > 0 &&
+      info.size <= 65536,
+  );
+  const read = info.uid === 1000 ? mode & 0o400 : info.gid === 1000 ? mode & 0o040 : mode & 0o004;
+  ensure(read !== 0);
+  return { owner: info.uid, mode };
+}

@@ -166,6 +166,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       # Minted per run rather than hardcoded: the signer suites only need *a*
       # valid 32-byte key, and a literal one here reads as a leaked secret to
       # scanners.
@@ -217,6 +218,20 @@ jobs:
           pnpm test:release-catalog:contract
           node --test deploy/platform/test/backup-catalog-postgres.test.mjs
           (cd apps/api && pnpm exec vitest run test/release-catalog-*.integration.test.ts test/standalone-releases.e2e.test.ts)
+      - name: Check compatibility of optional read-only bootstrap tooling
+        id: bootstrap-compatibility
+        run: node tools/release-catalog/bootstrap-artifact.mjs --applicable >> "$GITHUB_OUTPUT"
+      - name: Build read-only catalog bootstrap tooling
+        if: steps.bootstrap-compatibility.outputs.applicable == 'true'
+        run: node tools/release-catalog/bootstrap-artifact.mjs release-catalog-bootstrap
+      - name: Retain exact compiled catalog bootstrap tooling
+        if: steps.bootstrap-compatibility.outputs.applicable == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-catalog-bootstrap-${{ github.sha }}
+          path: release-catalog-bootstrap/
+          if-no-files-found: error
+          retention-days: 30
       - name: Remove only this job's catalog PostgreSQL
         if: always() && steps.catalog-postgres.outputs.container_id != ''
         env:
