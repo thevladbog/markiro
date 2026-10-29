@@ -56,8 +56,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom office instruction: lines and devices per shift, stations on a line, shift planning, aggregation, pallets, and duplicate printing.",
   },
   "MKR-INS-09": {
-    ru: "Печатная инструкция менеджера: наблюдение за производством, закрытие смены из кабинета, данные после закрытия, отчёты для ГИС МТ и разбор их отказов.",
-    en: "Printable manager instruction: production monitoring, closing a shift from the cabinet, late data, GIS MT reports, and resolving their failures.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: обзор производства, карточка смены, закрытие смены в офисе, данные после закрытия, выгрузки для ГИС МТ и 1С.",
+    en: "Printable Markiro Autonom office instruction: the production overview, the shift card, closing a shift in the office, late data, and exports for GIS MT and 1C.",
   },
   "MKR-INS-10": {
     ru: "Печатная инструкция менеджера: каталог продукции, карточка товара, ГТИН и его владелец, доведение карточки до статуса «Активен», фотография и вывод товара из оборота.",
