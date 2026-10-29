@@ -23,7 +23,12 @@ const { values } = parseArgs({
 const root =
   process.env.STAND_ROOT ?? path.join(process.env.TMPDIR ?? "/tmp", "markiro-instruction-stand");
 const stateDir = path.join(root, "work", "devices");
-const connect = { host: "127.0.0.1", port: Number(values["host-port"]) };
+// The host `tsd.mjs serve` runs keeps its data, and so its certificate, in work/host.
+const connect = {
+  host: "127.0.0.1",
+  port: Number(values["host-port"]),
+  certFile: path.join(root, "work", "host", "tls", "cert.der"),
+};
 const product = PRODUCTS[1];
 const BOXES = 3;
 
