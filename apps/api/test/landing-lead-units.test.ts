@@ -114,6 +114,42 @@ describe("LandingLeadService defenses", () => {
   }
   const input = () => landingLeadBodySchema.parse(body());
 
+  it("awaits durable rate admission before storing a lead", async () => {
+    let admit: () => void = () => {
+      throw new Error("gate not initialized");
+    };
+    const gate = new Promise<void>((resolve) => {
+      admit = resolve;
+    });
+    const accept = vi.fn(async () => undefined);
+    const subject = new LandingLeadService(
+      { enabled: true },
+      { assertAllowed: () => gate },
+      { accept },
+    );
+    const pending = subject.submit(input(), "203.0.113.7");
+    await Promise.resolve();
+    expect(accept).not.toHaveBeenCalled();
+    admit();
+    await pending;
+    expect(accept).toHaveBeenCalledOnce();
+  });
+
+  it("does not store a lead when asynchronous admission rejects", async () => {
+    const accept = vi.fn(async () => undefined);
+    const subject = new LandingLeadService(
+      { enabled: true },
+      {
+        assertAllowed: async () => {
+          throw rateLimitedError();
+        },
+      },
+      { accept },
+    );
+    await expect(subject.submit(input(), "203.0.113.7")).rejects.toMatchObject({ status: 429 });
+    expect(accept).not.toHaveBeenCalled();
+  });
+
   it("stores an accepted form and echoes its request id", async () => {
     const { service: subject, accept } = service();
     await expect(subject.submit(input(), "203.0.113.7")).resolves.toEqual({

@@ -13,6 +13,7 @@ import {
 import { DemoRequestRepository } from "../src/modules/demo-requests/demo-request.repository";
 import { LandingLeadRepository } from "../src/modules/landing-leads/landing-lead.repository";
 import { LandingLeadService } from "../src/modules/landing-leads/landing-lead.service";
+import { LandingLeadRateLimiter } from "../src/modules/landing-leads/landing-lead-rate-limiter";
 import { LandingLeadsController } from "../src/modules/landing-leads/landing-leads.controller";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
@@ -110,7 +111,12 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
   async function build(enabled: boolean): Promise<INestApplication> {
     const service = new LandingLeadService(
       { enabled },
-      { assertAllowed: () => undefined },
+      new LandingLeadRateLimiter(db, {
+        windowMs: 900_000,
+        sourceBudget: 100,
+        globalBudget: 10_000,
+        sourceKeySecret: randomUUID(),
+      }),
       repository(),
     );
     const ref = await Test.createTestingModule({

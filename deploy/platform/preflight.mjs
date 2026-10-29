@@ -113,6 +113,7 @@ function exactHttpsOrigin(value, key) {
   }
 }
 
+/** Validate platform identities and delivery routing before accepting the release configuration. */
 export function validateConfig(env, manifest) {
   if (
     env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA !== undefined &&

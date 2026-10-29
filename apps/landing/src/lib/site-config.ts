@@ -64,6 +64,7 @@ function readEnabled(value: string | undefined): boolean {
   throw new Error("PUBLIC_DEMO_SUBMISSION_ENABLED must be true or false");
 }
 
+/** Lead forms need only delivery configuration; the legacy demo additionally needs CAPTCHA. */
 export function readPublicSiteConfig(
   env: PublicEnvironment,
   locale: Locale = "ru",

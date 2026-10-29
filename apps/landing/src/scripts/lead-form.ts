@@ -148,6 +148,7 @@ function setStatus(form: HTMLFormElement, message: string): void {
   if (status !== null) status.textContent = message;
 }
 
+/** Validate consent and fields, then submit a retry-safe lead without loading third-party CAPTCHA. */
 export function initLeadForm(
   form: HTMLFormElement,
   runtime: LeadFormRuntime,

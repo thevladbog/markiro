@@ -4,10 +4,11 @@ import {
   submissionDisabledError,
   submissionUnavailableError,
 } from "../demo-requests/demo-request.errors";
-import type { DemoRequestRateLimiter } from "../demo-requests/demo-request-rate-limiter";
 import type { LandingLeadDto } from "./landing-lead.schema";
 
-type Limiter = Pick<DemoRequestRateLimiter, "assertAllowed">;
+interface Limiter {
+  assertAllowed(source: string): void | Promise<void>;
+}
 interface Repository {
   accept(input: LandingLeadDto): Promise<unknown>;
 }
@@ -23,12 +24,13 @@ export class LandingLeadService {
     private readonly repository: Repository,
   ) {}
 
+  /** Persist admission before storing a lead; rejection never reaches the mail outbox. */
   async submit(
     input: LandingLeadDto,
     source: string,
   ): Promise<{ accepted: true; requestId: string }> {
     if (!this.options.enabled) throw submissionDisabledError();
-    this.limiter.assertAllowed(source);
+    await this.limiter.assertAllowed(source);
     if (input.website !== "") throw invalidRequestError();
     if (input.consentVersion !== CURRENT_DEMO_CONSENT_ID) throw invalidRequestError();
 
