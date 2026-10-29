@@ -17,6 +17,8 @@ import {
   postgresCaMount,
   validateBootstrapCaFile,
   readBootstrapWorkerArguments,
+  readBootstrapWorkerDatabaseArguments,
+  validateReadBootstrapNetworks,
   sameReadBootstrap,
 } from "./catalog-bootstrap-policy.mjs";
 const HOST = "/opt/markiro-platform",
@@ -198,13 +200,16 @@ export async function executeReadBootstrap({
     );
     ensure(validateCatalogConfig(environment));
     assertCatalogMounts(environment);
-    const networks = Object.values(lastApi.NetworkSettings.Networks);
-    ensure(networks.some((network) => network.NetworkID === operation.networkId));
-    ensure(
-      Object.values(containers.postgres.NetworkSettings.Networks).some(
-        (network) => network.NetworkID === operation.networkId,
-      ),
+    const networks = JSON.parse(
+      (await command(["network", "inspect", operation.networkId, operation.egressNetworkId]))
+        .stdout,
     );
+    validateReadBootstrapNetworks(operation, {
+      api: lastApi,
+      postgres: containers.postgres,
+      networks,
+      ...(workerId ? { worker: await inspect(workerId) } : {}),
+    });
     const running = (await command(["ps", "--no-trunc", "--format", "{{.ID}}"])).stdout
       .toString()
       .trim()
@@ -361,6 +366,7 @@ export async function executeReadBootstrap({
           "worker-created.json",
           Buffer.from(JSON.stringify({ id: workerId, operationId }) + "\n"),
         );
+        await command(readBootstrapWorkerDatabaseArguments(operation, workerId));
         await command(["start", workerId]);
         for (;;) {
           const worker = await inspect(workerId);

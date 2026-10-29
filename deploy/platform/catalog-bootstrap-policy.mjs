@@ -28,6 +28,7 @@ export function validateReadBootstrapOperation(o) {
     "guards",
     "containers",
     "networkId",
+    "egressNetworkId",
     "schemaProof",
     "postgresCaSha256",
   ]);
@@ -48,9 +49,15 @@ export function validateReadBootstrapOperation(o) {
   keys(o.artifact, ["id", "zipSha256"]);
   ensure(id(o.artifact.id) && sha(o.artifact.zipSha256));
   ensure(
-    [o.inputFileSha256, o.bootstrapModuleSha256, o.runtimeScriptSha256, o.networkId].every(sha),
+    [
+      o.inputFileSha256,
+      o.bootstrapModuleSha256,
+      o.runtimeScriptSha256,
+      o.networkId,
+      o.egressNetworkId,
+    ].every(sha),
   );
-  ensure(sha(o.postgresCaSha256));
+  ensure(sha(o.postgresCaSha256) && o.networkId !== o.egressNetworkId);
   keys(o.binding, ["operationId", "epoch", "evidenceSha256", "identity", "targetVersion"]);
   keys(o.binding.identity, ["product", "channel"]);
   ensure(
@@ -172,7 +179,7 @@ export function readBootstrapWorkerArguments({ operation, root, api }) {
     "--user",
     "1000:1000",
     "--network",
-    operation.networkId,
+    operation.egressNetworkId,
     "--read-only",
     "--cap-drop",
     "ALL",
@@ -211,4 +218,50 @@ export function validateBootstrapCaFile(info) {
   const read = info.uid === 1000 ? mode & 0o400 : info.gid === 1000 ? mode & 0o040 : mode & 0o004;
   ensure(read !== 0);
   return { owner: info.uid, mode };
+}
+
+function sameNetworkIds(container, expected) {
+  const actual = Object.values(container.NetworkSettings.Networks).map(
+    (network) => network.NetworkID,
+  );
+  ensure(actual.length === expected.length && new Set(actual).size === actual.length);
+  sameReadBootstrap([...actual].sort(), [...expected].sort());
+}
+export function validateReadBootstrapNetworks(operation, { api, postgres, networks, worker }) {
+  ensure(
+    sha(operation.networkId) &&
+      sha(operation.egressNetworkId) &&
+      operation.networkId !== operation.egressNetworkId,
+  );
+  sameNetworkIds(api, [operation.networkId, operation.egressNetworkId]);
+  sameNetworkIds(postgres, [operation.networkId]);
+  if (worker) sameNetworkIds(worker, [operation.networkId, operation.egressNetworkId]);
+  ensure(Array.isArray(networks) && networks.length === 2);
+  for (const [name, id, internal] of [
+    ["database", operation.networkId, true],
+    ["default", operation.egressNetworkId, false],
+  ]) {
+    const matches = networks.filter((network) => network.Id === id);
+    ensure(matches.length === 1);
+    const n = matches[0];
+    ensure(
+      n.Name === `markiro-platform_${name}` &&
+        n.Driver === "bridge" &&
+        n.Scope === "local" &&
+        n.Internal === internal &&
+        n.Attachable === false &&
+        n.Ingress === false &&
+        n.Labels?.["com.docker.compose.project"] === "markiro-platform" &&
+        n.Labels?.["com.docker.compose.network"] === name,
+    );
+  }
+}
+export function readBootstrapWorkerDatabaseArguments(operation, workerId) {
+  ensure(
+    sha(operation.networkId) &&
+      sha(operation.egressNetworkId) &&
+      operation.networkId !== operation.egressNetworkId &&
+      sha(workerId),
+  );
+  return ["network", "connect", operation.networkId, workerId];
 }

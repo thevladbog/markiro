@@ -38,6 +38,7 @@ export function operation() {
       ]),
     ),
     networkId: "c".repeat(64),
+    egressNetworkId: "d".repeat(64),
     postgresCaSha256: sha,
     schemaProof: {
       systemId: "7698396358009868314",
@@ -58,6 +59,8 @@ test("strict bootstrap plan has no writer enablement or operation expiry and req
     (o) => (o.guards[0].path = "../state.json"),
     (o) => o.guards.push({ path: "state/github-token", sha256: "a".repeat(64) }),
     (o) => (o.containers.edge.id = o.containers.api.id),
+    (o) => delete o.egressNetworkId,
+    (o) => (o.egressNetworkId = o.networkId),
   ]) {
     const input = operation();
     change(input);
