@@ -158,6 +158,26 @@
 			redir * /en/{http.request.uri.prefixed_query} 301
 		}
 
+		# Withdrawn instructions answer with a permanent redirect to the
+		# instructions hub of their language: Markiro Autonom has no inventory
+		# and no National Catalog import, so MKR-INS-05, 06, 07 and 11 were
+		# withdrawn together with their verification pages (2026-10-29).
+		@retiredInstructionsRu {
+			method GET HEAD
+			path /instruktsii/inventarizatsiya-na-terminale /instruktsii/inventarizatsiya-na-terminale/ /instruktsii/inventarizatsiya-na-terminale/* /instruktsii/inventarizatsiya-na-terminale.md /instruktsii/inventarizatsiya-podgotovka /instruktsii/inventarizatsiya-podgotovka/ /instruktsii/inventarizatsiya-podgotovka/* /instruktsii/inventarizatsiya-podgotovka.md /instruktsii/inventarizatsiya-zakrytie /instruktsii/inventarizatsiya-zakrytie/ /instruktsii/inventarizatsiya-zakrytie/* /instruktsii/inventarizatsiya-zakrytie.md /instruktsii/katalog-zagruzka-iz-nk /instruktsii/katalog-zagruzka-iz-nk/ /instruktsii/katalog-zagruzka-iz-nk/* /instruktsii/katalog-zagruzka-iz-nk.md /d/MKR-INS-05/* /d/MKR-INS-06/* /d/MKR-INS-07/* /d/MKR-INS-11/*
+		}
+		handle @retiredInstructionsRu {
+			redir * /instruktsii/{http.request.uri.prefixed_query} 301
+		}
+
+		@retiredInstructionsEn {
+			method GET HEAD
+			path /en/instructions/terminal-inventory-count /en/instructions/terminal-inventory-count/ /en/instructions/terminal-inventory-count/* /en/instructions/terminal-inventory-count.md /en/instructions/inventory-preparation /en/instructions/inventory-preparation/ /en/instructions/inventory-preparation/* /en/instructions/inventory-preparation.md /en/instructions/inventory-closing /en/instructions/inventory-closing/ /en/instructions/inventory-closing/* /en/instructions/inventory-closing.md /en/instructions/national-catalog-import /en/instructions/national-catalog-import/ /en/instructions/national-catalog-import/* /en/instructions/national-catalog-import.md
+		}
+		handle @retiredInstructionsEn {
+			redir * /en/instructions/{http.request.uri.prefixed_query} 301
+		}
+
 		@landingAssets {
 			path /assets/*
 			method GET HEAD

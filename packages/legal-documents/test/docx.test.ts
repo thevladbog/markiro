@@ -750,13 +750,15 @@ describe("wordmark alignment across the registry", () => {
     // 12 -> 9: the small-screen work screen reissue moved MKR-INS-01, 02 and
     // 03 to new revisions.
     // 9 -> 7: the station set's catch-up reissue moved MKR-INS-04 and 05.
-    expect(legacyWordmarkReleaseKeys()).toHaveLength(7);
+    // 7 -> 4: MKR-INS-06, 07 and 11 were withdrawn with the move to Markiro
+    // Autonom.
+    expect(legacyWordmarkReleaseKeys()).toHaveLength(4);
   });
 
   it("gives a release that is not on the list the corrected header", () => {
-    expect(isLegacyWordmarkRelease("MKR-INS-06", "2026.09/01")).toBe(true);
-    expect(isLegacyWordmarkRelease("MKR-INS-06", "2026.09/02")).toBe(false);
-    expect(isLegacyWordmarkRelease("MKR-INS-05", "2026.09/02")).toBe(false);
+    expect(isLegacyWordmarkRelease("MKR-DPA-01", "2026.08/01")).toBe(true);
+    expect(isLegacyWordmarkRelease("MKR-DPA-01", "2026.08/02")).toBe(false);
+    expect(isLegacyWordmarkRelease("MKR-INS-04", "2026.09/01")).toBe(false);
   });
 });
 

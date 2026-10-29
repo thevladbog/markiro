@@ -517,8 +517,9 @@ function assertAuthorityContract(adapted, { alb }) {
         : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
           : // Landing: the demo/lead POST, then GET/HEAD only, including the two
-            // permanent redirects of the retired film and kiosk pages.
-            [["POST"], ...Array.from({ length: 16 }, () => ["GET", "HEAD"])],
+            // permanent redirects of the retired film and kiosk pages and the
+            // two of the withdrawn instructions.
+            [["POST"], ...Array.from({ length: 18 }, () => ["GET", "HEAD"])],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -1147,7 +1148,7 @@ test("edge build validates every tracked legal artifact before copying landing o
     readFile("apps/landing/public/legal/artifacts.json", "utf8"),
   ]);
   const artifacts = JSON.parse(manifestSource);
-  assert.equal(artifacts.length, 34);
+  assert.equal(artifacts.length, 26);
   assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
   for (const artifact of artifacts) {
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
@@ -1474,7 +1475,7 @@ test("direct Caddy adapter exposes only the four exact legacy legal redirects pl
   }
 });
 
-test("direct Caddy adapter moves the retired film and kiosk pages permanently to their home page", async () => {
+test("direct Caddy adapter moves the retired film, kiosk and instruction pages permanently", async () => {
   const adapted = await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8"));
   const routeTable = applicationOrderedRouteTable(applicationRoute(adapted, landingHost));
   const permanent = routeTable.filter((route) =>
@@ -1493,6 +1494,33 @@ test("direct Caddy adapter moves the retired film and kiosk pages permanently to
     ["/en/how-it-works.md", "/en/{http.request.uri.prefixed_query}"],
     ["/en/self-service-pickup-kiosk/", "/en/{http.request.uri.prefixed_query}"],
     ["/en/self-service-pickup-kiosk", "/en/{http.request.uri.prefixed_query}"],
+    [
+      "/instruktsii/inventarizatsiya-na-terminale/",
+      "/instruktsii/{http.request.uri.prefixed_query}",
+    ],
+    ["/instruktsii/inventarizatsiya-podgotovka", "/instruktsii/{http.request.uri.prefixed_query}"],
+    ["/instruktsii/inventarizatsiya-zakrytie.md", "/instruktsii/{http.request.uri.prefixed_query}"],
+    [
+      "/instruktsii/katalog-zagruzka-iz-nk/index.html",
+      "/instruktsii/{http.request.uri.prefixed_query}",
+    ],
+    ["/d/MKR-INS-05/2026.09/02/26.09.2026/", "/instruktsii/{http.request.uri.prefixed_query}"],
+    ["/d/MKR-INS-06/2026.09/01/10.09.2026/", "/instruktsii/{http.request.uri.prefixed_query}"],
+    ["/d/MKR-INS-07/2026.08/03/01.09.2026/", "/instruktsii/{http.request.uri.prefixed_query}"],
+    ["/d/MKR-INS-11/2026.09/01/11.09.2026/", "/instruktsii/{http.request.uri.prefixed_query}"],
+    [
+      "/en/instructions/terminal-inventory-count/",
+      "/en/instructions/{http.request.uri.prefixed_query}",
+    ],
+    [
+      "/en/instructions/inventory-preparation",
+      "/en/instructions/{http.request.uri.prefixed_query}",
+    ],
+    ["/en/instructions/inventory-closing.md", "/en/instructions/{http.request.uri.prefixed_query}"],
+    [
+      "/en/instructions/national-catalog-import/",
+      "/en/instructions/{http.request.uri.prefixed_query}",
+    ],
   ]);
   for (const [retired, location] of expected) {
     const matching = permanent.filter((route) =>
@@ -1504,7 +1532,18 @@ test("direct Caddy adapter moves the retired film and kiosk pages permanently to
     );
     assert.deepEqual(response.headers?.Location, [location], retired);
   }
-  for (const live of ["/", "/en/", "/faq/", "/kak-rabotaet-x/", "/en/how-it-works-x/"]) {
+  for (const live of [
+    "/",
+    "/en/",
+    "/faq/",
+    "/kak-rabotaet-x/",
+    "/en/how-it-works-x/",
+    "/instruktsii/",
+    "/instruktsii/smena-planirovanie/",
+    "/en/instructions/",
+    "/en/instructions/shift-planning/",
+    "/d/MKR-INS-01/2026.09/04/26.09.2026/",
+  ]) {
     assert.equal(
       permanent.some((route) => adaptedRouteMatches(route, { method: "GET", path: live })),
       false,

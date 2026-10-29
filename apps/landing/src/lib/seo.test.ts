@@ -112,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(70);
+    expect(sitemap.match(/<url>/g)).toHaveLength(62);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -222,7 +222,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(70);
+    expect(sitemap.match(/<url>/g)).toHaveLength(62);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -541,13 +541,22 @@ describe("SEO generators", () => {
 });
 
 // The film and the disposal kiosk were retired with a 301 to the home page of their
-// language; search surfaces must not advertise them any more.
+// language, and the inventory and National Catalog instructions with a 301 to the
+// instructions hub of theirs; search surfaces must not advertise them any more.
 describe("retired pages", () => {
   const retired = [
     "/kak-rabotaet/",
     "/en/how-it-works/",
     "/kiosk-samovydachi/",
     "/en/self-service-pickup-kiosk/",
+    "/instruktsii/inventarizatsiya-na-terminale/",
+    "/instruktsii/inventarizatsiya-podgotovka/",
+    "/instruktsii/inventarizatsiya-zakrytie/",
+    "/instruktsii/katalog-zagruzka-iz-nk/",
+    "/en/instructions/terminal-inventory-count/",
+    "/en/instructions/inventory-preparation/",
+    "/en/instructions/inventory-closing/",
+    "/en/instructions/national-catalog-import/",
   ];
 
   it("are absent from the sitemap and llms.txt", () => {

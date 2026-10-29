@@ -1476,9 +1476,9 @@ describe("rendered landing page", () => {
     const ruInstructionLinks = [...ruInstructions.querySelectorAll("[data-hub-item] a[href]")].map(
       (a) => a.getAttribute("href"),
     );
-    expect(ruInstructionLinks).toHaveLength(11);
+    expect(ruInstructionLinks).toHaveLength(7);
     expect(ruInstructionLinks.every((href) => href?.startsWith("/instruktsii/"))).toBe(true);
-    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(11);
+    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(7);
 
     for (const hub of [ruArticles, enArticles, ruInstructions, enInstructions]) {
       expect(hub.querySelectorAll("h1")).toHaveLength(1);
@@ -1759,6 +1759,37 @@ describe("rendered landing page", () => {
       expect(existsSync(path.join(outputDirectory, route.slice(1), "index.html")), route).toBe(
         false,
       );
+    }
+  });
+
+  it("retires the inventory and National Catalog instructions from every built page", () => {
+    // Markiro Autonom has neither feature, so MKR-INS-05, 06, 07 and 11 were withdrawn:
+    // their pages moved permanently to the instructions hub of their language and their
+    // verification pages to /instruktsii/ (Caddy 301, 2026-10-29).
+    const retired = [
+      "/instruktsii/inventarizatsiya-na-terminale/",
+      "/instruktsii/inventarizatsiya-podgotovka/",
+      "/instruktsii/inventarizatsiya-zakrytie/",
+      "/instruktsii/katalog-zagruzka-iz-nk/",
+      "/en/instructions/terminal-inventory-count/",
+      "/en/instructions/inventory-preparation/",
+      "/en/instructions/inventory-closing/",
+      "/en/instructions/national-catalog-import/",
+      "/d/MKR-INS-05/",
+      "/d/MKR-INS-06/",
+      "/d/MKR-INS-07/",
+      "/d/MKR-INS-11/",
+    ];
+    const builtFiles = readdirSync(outputDirectory, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(?:html|txt|xml|md)$/u.test(entry.name))
+      .map((entry) => path.join(entry.parentPath, entry.name));
+    expect(builtFiles.length).toBeGreaterThan(50);
+    for (const file of builtFiles) {
+      const text = readFileSync(file, "utf8");
+      for (const route of retired) expect(text, `${file}: ${route}`).not.toContain(route);
+    }
+    for (const route of retired) {
+      expect(existsSync(path.join(outputDirectory, route.slice(1))), route).toBe(false);
     }
   });
 

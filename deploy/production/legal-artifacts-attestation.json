@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "releaseId": "MKR-LEGAL-2026.09-27-2026-09-26",
-  "manifestSha256": "d45c45ceb66cf146aa5ccef72ed09a02bfa8ee371cabff838143c2fdf950f079",
+  "releaseId": "MKR-LEGAL-2026.10-28-2026-10-29",
+  "manifestSha256": "efdcfb886cd1c7b8027e27d978e73735bf3248b9a22e3f488b6fe7437c60b202",
   "pdfs": [
     {
       "fileName": "markiro_mkr-brd-01_2026.08-01_en.pdf",
@@ -52,30 +52,6 @@
       "sha256": "41922d814b60d820a268d026285e0efa812537521e246ede6ff764bb3f1b2542"
     },
     {
-      "fileName": "markiro_mkr-ins-05_2026.09-02_en.pdf",
-      "sha256": "a3a8b3702ca00dc7e6a66ec953863496aa129dfca6c87716b1a57ff622e3e02e"
-    },
-    {
-      "fileName": "markiro_mkr-ins-05_2026.09-02_ru.pdf",
-      "sha256": "befff2736092e8243ae67aca8620e0da671b742b39ae5c68c5fafb8dcf07d62b"
-    },
-    {
-      "fileName": "markiro_mkr-ins-06_2026.09-01_en.pdf",
-      "sha256": "f6c87f4c86bb6ed4433bcef2f045b80e81de7cd7a5f47bf3fb376cf086031ca8"
-    },
-    {
-      "fileName": "markiro_mkr-ins-06_2026.09-01_ru.pdf",
-      "sha256": "f55d3fb0bb0d9599351d9b75110793c5f31567ef909149cbc3d0fd5ffe657ecb"
-    },
-    {
-      "fileName": "markiro_mkr-ins-07_2026.08-03_en.pdf",
-      "sha256": "7fd90153a66e2418ec4cd3c0d6db083344d9a4ef0d0407d97c1979f3c48e0ac8"
-    },
-    {
-      "fileName": "markiro_mkr-ins-07_2026.08-03_ru.pdf",
-      "sha256": "78eadc282016ec15c448f565c331a24c583361aca02368900df0ea78584ab858"
-    },
-    {
       "fileName": "markiro_mkr-ins-08_2026.09-02_en.pdf",
       "sha256": "ade3728381f7ace8b33d5205a45052b50cea0cb4faa4e2a54229dd5be5a22a6b"
     },
@@ -98,14 +74,6 @@
     {
       "fileName": "markiro_mkr-ins-10_2026.09-02_ru.pdf",
       "sha256": "06593ab6666c717d32703ff10379d307f93ef0b9ad5d291792c6c2c99735b520"
-    },
-    {
-      "fileName": "markiro_mkr-ins-11_2026.09-01_en.pdf",
-      "sha256": "b308927f9ca9be7344c22c4e3ba0d5dae03087cf32a673a139233c92b21ec49b"
-    },
-    {
-      "fileName": "markiro_mkr-ins-11_2026.09-01_ru.pdf",
-      "sha256": "0ab45ff925911a627e101ddc41988aac4f2b96ec5fd52b03d9935a2a45cf6f15"
     },
     {
       "fileName": "markiro_mkr-pd-01_2026.08-01_en.pdf",

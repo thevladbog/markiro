@@ -140,6 +140,25 @@ const retiredRedirects = new Map([
   ["/en/self-service-pickup-kiosk/?utm_source=test", "/en/?utm_source=test"],
 ]);
 
+// Withdrawn instructions (2026-10-29): Markiro Autonom has no inventory and no National
+// Catalog import, so MKR-INS-05, 06, 07 and 11 move permanently to the instructions hub
+// of their language, their verification pages included, and keep the query string.
+const withdrawnInstructionRedirects = new Map([
+  ["/instruktsii/inventarizatsiya-na-terminale/", "/instruktsii/"],
+  ["/instruktsii/inventarizatsiya-podgotovka", "/instruktsii/"],
+  ["/instruktsii/inventarizatsiya-zakrytie.md", "/instruktsii/"],
+  ["/instruktsii/katalog-zagruzka-iz-nk/?utm_source=test", "/instruktsii/?utm_source=test"],
+  ["/d/MKR-INS-05/2026.09/02/26.09.2026/", "/instruktsii/"],
+  ["/d/MKR-INS-11/2026.09/01/11.09.2026/", "/instruktsii/"],
+  ["/en/instructions/terminal-inventory-count/", "/en/instructions/"],
+  ["/en/instructions/inventory-preparation", "/en/instructions/"],
+  ["/en/instructions/inventory-closing.md", "/en/instructions/"],
+  [
+    "/en/instructions/national-catalog-import/?utm_source=test",
+    "/en/instructions/?utm_source=test",
+  ],
+]);
+
 test("production Caddy moves retired pages permanently to their home page", async ({ request }) => {
   for (const [retired, target] of retiredRedirects) {
     const response = await request.get(retired, { maxRedirects: 0 });
@@ -147,6 +166,20 @@ test("production Caddy moves retired pages permanently to their home page", asyn
     expect(response.headers().location, retired).toBe(target);
   }
   for (const live of ["/", "/en/", "/skachat/"]) {
+    const response = await request.get(live, { maxRedirects: 0 });
+    expect(response.status(), live).toBe(200);
+  }
+});
+
+test("production Caddy moves withdrawn instructions permanently to the instructions hub", async ({
+  request,
+}) => {
+  for (const [retired, target] of withdrawnInstructionRedirects) {
+    const response = await request.get(retired, { maxRedirects: 0 });
+    expect(response.status(), retired).toBe(301);
+    expect(response.headers().location, retired).toBe(target);
+  }
+  for (const live of ["/instruktsii/", "/instruktsii/smena-planirovanie/", "/en/instructions/"]) {
     const response = await request.get(live, { maxRedirects: 0 });
     expect(response.status(), live).toBe(200);
   }
