@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { admitPlatformRelease } from "../admit-release.mjs";
+import { PLATFORM_CI_REQUIRED_JOBS } from "../release-evidence.mjs";
 import { extractReleaseZip } from "../admission-archive.mjs";
 import { validateRegistryManifest, inspectRegistryImage } from "../admission-registry.mjs";
 import { expected, release, publisher, jobs, registry, digest } from "./admission-fixtures.mjs";
@@ -61,7 +62,7 @@ async function harness(t) {
     jobs: jobs(run),
     ci,
     ciAttempt: structuredClone(ci),
-    ciJobs: jobs(ci, ["production-bundle", "ci-required"]),
+    ciJobs: jobs(ci, [...PLATFORM_CI_REQUIRED_JOBS]),
     calls: [],
     commands: [],
     metadata: {
@@ -537,7 +538,7 @@ test("successful newer CI attempt cannot replace the attempt in release evidence
   h.state.override = async (url) => {
     if (url === `${base}/runs/123/attempts/4`) return response(rerun);
     if (url === `${base}/runs/123/attempts/4/jobs?per_page=100&page=1`)
-      return response(jobs(rerun, ["production-bundle", "ci-required"]));
+      return response(jobs(rerun, [...PLATFORM_CI_REQUIRED_JOBS]));
   };
   await rejected(h, "ci");
   assert.equal(h.state.commands.length, 0);
