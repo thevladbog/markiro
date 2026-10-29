@@ -40,8 +40,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom station operator instruction: sign-in with a badge or a personnel number and PIN, choosing a shift of the line, creating a shift on the station, and starting work.",
   },
   "MKR-INS-02": {
-    ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, сборка паллет, работа без сети и закрытие смены.",
-    en: "Printable operator instruction: the scanning cycle, station signals, box filling and closing, pallet assembly, offline work, and closing the shift.",
+    ru: "Печатная инструкция оператора Маркиро Автоном: сигналы сканирования, закрытие коробов и паллет, проверка этикетки, работа без связи с хостом, очередь отправки и закрытие смены.",
+    en: "Printable Markiro Autonom operator instruction: scan signals, closing boxes and pallets, the label check, working without the host connection, the send queue, and closing the shift.",
   },
   "MKR-INS-03": {
     ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба и паллеты, сбой печати, коды, занятые другим терминалом.",

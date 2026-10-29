@@ -67,9 +67,11 @@ describe("legal document registry", () => {
       // product card and the pallet label template -- so 01 was reissued.
       // 2026-10-29: the move to Markiro Autonom -- the station works with the
       // site's host over the LAN, with its own sign-in, shift list and new
-      // shift form -- so 01 was rewritten and reissued with new frames.
+      // shift form -- so 01 was rewritten and reissued with new frames, and
+      // 02 for its work cycle: SSCC blocks from the host, the sync panel and
+      // the send queue in place of the cloud server.
       "MKR-INS-01": "2026.10/01",
-      "MKR-INS-02": "2026.09/03",
+      "MKR-INS-02": "2026.10/01",
       "MKR-INS-03": "2026.09/04",
       "MKR-INS-04": "2026.09/01",
       // 2026-09-10: the shift cabinet was reworked -- row actions moved into
@@ -106,7 +108,7 @@ describe("legal document registry", () => {
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
     expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
