@@ -185,8 +185,8 @@ describe("rendered legal pages", () => {
       const document = documents.get(route);
       // Both registries list the same artifacts now that every instruction
       // is bilingual.
-      const pdfCount = 11;
-      const shaCount = 13;
+      const pdfCount = 12;
+      const shaCount = 14;
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(pdfCount);
       expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
       expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(shaCount);
