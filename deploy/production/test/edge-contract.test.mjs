@@ -1542,7 +1542,7 @@ test("direct Caddy adapter moves the retired film, kiosk and instruction pages p
     "/instruktsii/smena-planirovanie/",
     "/en/instructions/",
     "/en/instructions/shift-planning/",
-    "/d/MKR-INS-01/2026.09/04/26.09.2026/",
+    "/d/MKR-INS-01/2026.10/01/29.10.2026/",
   ]) {
     assert.equal(
       permanent.some((route) => adaptedRouteMatches(route, { method: "GET", path: live })),

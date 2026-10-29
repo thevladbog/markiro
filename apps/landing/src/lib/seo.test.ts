@@ -359,9 +359,9 @@ describe("SEO generators", () => {
       .sort()
       .at(-1);
 
-    // The small-screen work screen reissue of MKR-INS-01/02/03 made
-    // 2026-09-26 the newest effective date in the registry.
-    expect(newest).toBe("2026-09-26");
+    // The Markiro Autonom reissue of MKR-INS-01 made 2026-10-29 the newest
+    // effective date in the registry.
+    expect(newest).toBe("2026-10-29");
     expect(sitemap).toMatch(
       new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );
