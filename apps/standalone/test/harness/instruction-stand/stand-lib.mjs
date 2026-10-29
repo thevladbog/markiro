@@ -78,7 +78,7 @@ export async function startHost({
   });
   let stderr = "";
   child.stderr.on("data", (chunk) => (stderr += chunk));
-  const connect = { host: "127.0.0.1", port };
+  const connect = { host: "127.0.0.1", port, certFile: path.join(dataDir, "tls", "cert.der") };
   await waitFor(async () => {
     if (child.exitCode !== null) throw new Error(`markiro-host exited: ${stderr}`);
     return (
