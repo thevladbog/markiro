@@ -14,14 +14,12 @@ const config = readPublicSiteConfig(
   {
     PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
     PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
-    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
   },
   "ru",
 );
 const enabled =
   config.leadEndpoint !== null &&
   config.legalLinks !== null &&
-  config.captchaClientKey !== null &&
   config.consentVersion !== null;
 const copy = DOWNLOAD_COPY;
 const placeholderFile = "markiro-standalone-<версия>-windows-x86_64-setup.exe";
@@ -43,7 +41,13 @@ const phoneText = config.phone === null ? "" : `, ${config.phone.display}`;
           <div data-release-fact hidden><dt>{copy.meta.released}</dt><dd data-release="date"></dd></div>
           <div data-release-fact hidden><dt>{copy.meta.size}</dt><dd data-release="size"></dd></div>
           <div><dt>{copy.meta.system}</dt><dd>{copy.system}</dd></div>
+          <div><dt>{copy.meta.architecture}</dt><dd>{copy.architecture}</dd></div>
+          <div><dt>{copy.meta.network}</dt><dd>{copy.network}</dd></div>
         </dl>
+        <section class="ax-system-requirements" aria-labelledby="system-requirements-title">
+          <h2 id="system-requirements-title">{copy.requirementsTitle}</h2>
+          <ul>{copy.requirements.map((requirement) => <li>{requirement}</li>)}</ul>
+        </section>
       </div>
 
       <div class="ax-form-card">
@@ -69,8 +73,8 @@ const phoneText = config.phone === null ? "" : `, ${config.phone.display}`;
               <p class="ax-field__error" id="download-company-error" data-error-for="company"></p>
             </div>
             <p class="ax-form__hint">{copy.form.later}</p>
-            {enabled && config.legalLinks && config.captchaClientKey && (
-              <LeadConsent idPrefix="download" legalLinks={config.legalLinks} captchaClientKey={config.captchaClientKey} />
+            {enabled && config.legalLinks && (
+              <LeadConsent idPrefix="download" legalLinks={config.legalLinks} />
             )}
             <LeadSubmit label={copy.form.submit} labelNarrow={copy.form.submitPhone} icon="arrow-right" iconNarrow="mail" />
           </fieldset>

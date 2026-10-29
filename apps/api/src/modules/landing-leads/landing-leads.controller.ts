@@ -75,7 +75,7 @@ export class LandingLeadsController {
       "Public landing form intake — no authentication. `intent` is `download` (the /skachat/ form) " +
       "or `invoice` (the /stoimost/ invoice form, which also requires `inn` and `tariffCode`). " +
       "`website` is a honeypot and must stay empty, `consentVersion` must match the published " +
-      "consent document and `captchaToken` is verified before anything is stored. A retried " +
+      "consent document. Rate limits apply before storage. A retried " +
       "`requestId` is accepted again without a second lead event or e-mail. Every error is " +
       "reduced to a single `{ code }` body.",
   })
@@ -83,13 +83,13 @@ export class LandingLeadsController {
   @ApiResponse({ status: 202, schema: demoRequestAcceptedOpenApiSchema })
   @ApiResponse({
     status: 400,
-    schema: demoRequestErrorOpenApiSchema("invalid_request", "captcha_invalid"),
+    schema: demoRequestErrorOpenApiSchema("invalid_request"),
   })
   @ApiResponse({ status: 404, schema: demoRequestErrorOpenApiSchema("submission_disabled") })
   @ApiResponse({ status: 429, schema: demoRequestErrorOpenApiSchema("rate_limited") })
   @ApiResponse({
     status: 503,
-    schema: demoRequestErrorOpenApiSchema("captcha_unavailable", "submission_unavailable"),
+    schema: demoRequestErrorOpenApiSchema("submission_unavailable"),
   })
   async submit(
     @Body(new ZodValidationPipe(landingLeadBodySchema)) body: LandingLeadDto,
