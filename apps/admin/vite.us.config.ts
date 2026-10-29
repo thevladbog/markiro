@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin, type UserConfig, type ViteDevServer } from "vite";
+import { defineConfig, type UserConfig, type ViteDevServer } from "vite";
+import { createUsEntryBoundary } from "./vite.us-entry-boundary.ts";
 import { usRequestListQuerySchema, usRequestHistoryQuerySchema } from "@markiro/platform-contracts";
 
 const requestRoot = "/api/us/traceability/requests";
@@ -419,20 +420,7 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       next();
     });
   }
-  const adminSource = fileURLToPath(new URL("./src/", import.meta.url));
-  const entryBoundary = {
-    name: "us-entry-boundary",
-    enforce: "pre",
-    transform(_source: string, id: string) {
-      if (
-        id.startsWith(adminSource) &&
-        !id.startsWith(`${adminSource}us/`) &&
-        !id.startsWith(`${adminSource}assets/`)
-      ) {
-        this.error("US entry cannot import RU application code");
-      }
-    },
-  } satisfies Plugin;
+  const entryBoundary = createUsEntryBoundary();
   return {
     root: fileURLToPath(new URL("./us", import.meta.url)),
     envDir: false,
