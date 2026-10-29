@@ -46,12 +46,12 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     kind: "instructions",
     title: "Инструкции Markiro для операторов, наладчиков и менеджеров",
     description:
-      "Печатные инструкции Маркиро Автоном: вход и старт смены, сканирование и агрегация, исключения, подключение станции, смены, товары, ТСД на складе.",
+      "Печатные инструкции Маркиро Автоном: установка, резервные копии, вход и старт смены, сканирование, исключения, подключение станции, смены, товары, ТСД.",
     heading: "Инструкции по работе со станцией, офисом и ТСД Markiro",
     navigationLabel: "Инструкции",
     eyebrow: "Печатные инструкции",
     introduction:
-      "Каждая инструкция опубликована как редакция с кодом, датой вступления в силу и неизменяемым PDF/A. Здесь они собраны по рабочим местам Маркиро Автоном: станция сканирования на линии, офис и ТСД на складе.",
+      "Каждая инструкция опубликована как редакция с кодом, датой вступления в силу и неизменяемым PDF/A. Здесь они собраны по рабочим местам Маркиро Автоном: станция сканирования на линии, офис и ТСД на складе, а также установка и резервные копии для администратора.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: "Markiro — печатные инструкции для станции сканирования, офиса и ТСД",
     reviewedAt: "2026-10-29",
@@ -80,12 +80,12 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     kind: "instructions",
     title: "Markiro instructions for station operators, technicians and managers",
     description:
-      "Printable Markiro Autonom instructions: sign-in and shift start, scanning and aggregation, exceptions, station pairing, shifts, products, the warehouse handheld.",
+      "Printable Markiro Autonom instructions: installation, backups, sign-in and shift start, scanning, exceptions, station pairing, shifts, products, the handheld.",
     heading: "Instructions for the Markiro station, office and handheld",
     navigationLabel: "Instructions",
     eyebrow: "Printable instructions",
     introduction:
-      "Each instruction is published as a revision with a code, an effective date and an immutable PDF/A, grouped by Markiro Autonom workplace: the scanning station on the line, the office and the warehouse handheld. English editions are informational translations of the authoritative Russian revisions.",
+      "Each instruction is published as a revision with a code, an effective date and an immutable PDF/A, grouped by Markiro Autonom workplace: the scanning station on the line, the office and the warehouse handheld, plus installation and backups for the administrator. English editions are informational translations of the authoritative Russian revisions.",
     socialImage: SHARED_IMAGE,
     socialImageAlt:
       "Markiro — printable instructions for the scanning station, the office and the handheld",
