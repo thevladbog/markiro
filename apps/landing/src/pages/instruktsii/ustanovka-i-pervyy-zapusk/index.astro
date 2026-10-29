@@ -1,0 +1,36 @@
+---
+import wizardAdmin from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/wizard-admin.png?url";
+import wizardOrg from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/wizard-org.png?url";
+import wizardSscc from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/wizard-sscc.png?url";
+import wizardLines from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/wizard-lines.png?url";
+import wizardAddress from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/wizard-address.png?url";
+import wizardReview from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/wizard-review.png?url";
+import officeLogin from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/office-login.png?url";
+import overviewTrial from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/overview-trial.png?url";
+import devicesPairing from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/devices-pairing.png?url";
+import licenseTrial from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/license-trial.png?url";
+import licensePreview from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/license-preview.png?url";
+import licenseLoaded from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/license-loaded.png?url";
+import update from "@markiro/legal-documents/assets/instructions/mkr-ins-12/ru/update.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  "wizard-admin": wizardAdmin,
+  "wizard-org": wizardOrg,
+  "wizard-sscc": wizardSscc,
+  "wizard-lines": wizardLines,
+  "wizard-address": wizardAddress,
+  "wizard-review": wizardReview,
+  "office-login": officeLogin,
+  "overview-trial": overviewTrial,
+  "devices-pairing": devicesPairing,
+  "license-trial": licenseTrial,
+  "license-preview": licensePreview,
+  "license-loaded": licenseLoaded,
+  "update": update,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-12", "ru")} images={images} />
