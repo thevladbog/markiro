@@ -304,7 +304,7 @@ function artifactEntry(
     >
   > = {
     "MKR-INS-01": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-02": ["2026.09/03", "2026-09-26"],
+    "MKR-INS-02": ["2026.10/01", "2026-10-29"],
     "MKR-INS-03": ["2026.09/04", "2026-09-26"],
     "MKR-INS-04": ["2026.09/01", "2026-09-26"],
     "MKR-INS-08": ["2026.09/02", "2026-09-19"],
@@ -1287,8 +1287,8 @@ describe("legal artifact release generation", () => {
       "MKR-BRD-01|en|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.10/01/29.10.2026",
       "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.10/01/29.10.2026",
-      "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/03/26.09.2026",
-      "MKR-INS-02|en|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/03/26.09.2026",
+      "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.10/01/29.10.2026",
+      "MKR-INS-02|en|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.10/01/29.10.2026",
       "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/04/26.09.2026",
       "MKR-INS-03|en|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/04/26.09.2026",
       "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.09/01/26.09.2026",
@@ -1301,7 +1301,7 @@ describe("legal artifact release generation", () => {
       "MKR-INS-10|en|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/02/19.09.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
-      new Set(["2026.08/01", "2026.09/01", "2026.09/02", "2026.09/03", "2026.09/04", "2026.10/01"]),
+      new Set(["2026.08/01", "2026.09/01", "2026.09/02", "2026.09/04", "2026.10/01"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
       new Set(["2026-08-15", "2026-09-19", "2026-09-26", "2026-10-29"]),
