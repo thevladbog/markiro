@@ -20,7 +20,51 @@ const prefix =
 const imports =
   'import {\n  DOCUMENT_BYTES,\n  FILE_BYTES,\n  TOTAL_BYTES,\n  MAX_FILES,\n  LIBRARIES,\n  TREES,\n  DESCRIPTOR,\n  safePath,\n  documentSchema,\n  type UsRequestBuildDocument,\n} from "./us-request-build-document";\nexport type { UsRequestBuildDocument } from "./us-request-build-document";\n';
 const read = (file: string) => readFileSync(resolve(__dirname, "../src/deployment", file), "utf8");
+const verificationPrefix =
+  'import { createHash } from "node:crypto";\nimport { constants } from "node:fs";\nimport { lstat, open, realpath } from "node:fs/promises";\nimport { createRequire } from "node:module";\nimport { dirname, join, resolve } from "node:path";\nimport { z } from "zod";\nimport type { UsRequestBuildRoots } from "./us-request-build-descriptor";\nimport {\n  DOCUMENT_BYTES,\n  LIBRARIES,\n  type UsRequestBuildDocument,\n} from "./us-request-build-document";\n\nconst invalid = () => new Error("us_request_build_invalid");\n\n';
+const verificationImport =
+  'import {\n  readBounded,\n  hash,\n  installedLibraries,\n  assertWorkspaceResolution,\n} from "./us-request-build-verification-core";\n';
+function restoreVerification(local: string, verification: string) {
+  expect(verification.startsWith(verificationPrefix)).toBe(true);
+  let block = verification.slice(verificationPrefix.length);
+  for (const [before, after] of [
+    ["export async function readBounded(", "async function readBounded("],
+    ["export const hash =", "const hash ="],
+    ["export async function installedLibraries(", "async function installedLibraries("],
+    [
+      "export async function assertWorkspaceResolution(",
+      "async function assertWorkspaceResolution(",
+    ],
+  ]) {
+    if (before === undefined || after === undefined) throw new Error("Missing inverse pair");
+    expect(block.split(before)).toHaveLength(2);
+    block = block.replace(before, after);
+  }
+  expect(local.split(verificationImport)).toHaveLength(2);
+  let original = local.replace(verificationImport, "");
+  const importsBefore = 'import { lstat, readdir, realpath } from "node:fs/promises";\n';
+  const importsAfter =
+    'import { createHash } from "node:crypto";\nimport { constants } from "node:fs";\nimport { lstat, open, readdir, realpath } from "node:fs/promises";\nimport { createRequire } from "node:module";\n';
+  expect(original.split(importsBefore)).toHaveLength(2);
+  original = original.replace(importsBefore, importsAfter);
+  const typeOnly = 'import type { z } from "zod";';
+  expect(original.split(typeOnly)).toHaveLength(2);
+  original = original.replace(typeOnly, 'import { z } from "zod";');
+  const documentImports = "  MAX_FILES,\n  TREES,";
+  expect(original.split(documentImports)).toHaveLength(2);
+  original = original.replace(documentImports, "  MAX_FILES,\n  LIBRARIES,\n  TREES,");
+  const anchor = "export async function captureUsRequestBuildDescriptor(";
+  expect(original.split(anchor)).toHaveLength(2);
+  expect(block.endsWith("}\n")).toBe(true);
+  original = original.replace(anchor, block + "\n" + anchor);
+  expect(createHash("sha256").update(original).digest("hex")).toBe(
+    "9410ad50591d7355a68ae580dacf4f1d1b7274ce6fc8c5ea1c4de944722fcf46",
+  );
+  return original;
+}
+
 function restore(local: string, core: string) {
+  local = restoreVerification(local, read("us-request-build-verification-core.ts"));
   expect(core.startsWith(prefix)).toBe(true);
   let block = core.slice(prefix.length);
   for (const name of names) {
