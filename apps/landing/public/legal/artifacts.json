@@ -376,6 +376,38 @@
     }
   },
   {
+    "code": "MKR-INS-13",
+    "revision": "2026.10/01",
+    "effectiveDate": "2026-10-29",
+    "locale": "en",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-13_2026.10-01_en.pdf",
+    "bytes": 942737,
+    "sha256": "8d7214bc0a68ac700291884491daf27e470e96dbf34a90fd6c871dff4abf2d8a",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-13",
+    "revision": "2026.10/01",
+    "effectiveDate": "2026-10-29",
+    "locale": "ru",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-13_2026.10-01_ru.pdf",
+    "bytes": 945117,
+    "sha256": "2a20b2acb89d1bdfe6b74f29076849949cec362fc943c2061a0f52875e149a91",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
     "code": "MKR-PD-01",
     "revision": "2026.08/01",
     "effectiveDate": "2026-08-15",

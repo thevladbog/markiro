@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "releaseId": "MKR-LEGAL-2026.10-36-2026-10-29",
-  "manifestSha256": "92225abc920a59178db4f5258c6dc7705ee03183a6eed285961c8f0c92657df2",
+  "releaseId": "MKR-LEGAL-2026.10-37-2026-10-29",
+  "manifestSha256": "d2cb819535418d95cd615a8dfde82a7e998b26af84870d0f05aec39678448be9",
   "pdfs": [
     {
       "fileName": "markiro_mkr-brd-01_2026.08-01_en.pdf",
@@ -82,6 +82,14 @@
     {
       "fileName": "markiro_mkr-ins-12_2026.10-01_ru.pdf",
       "sha256": "93eb0fe131edfbd841cd3bf537a46d7bfb4cba5b31777b2236df52326dfc99f9"
+    },
+    {
+      "fileName": "markiro_mkr-ins-13_2026.10-01_en.pdf",
+      "sha256": "8d7214bc0a68ac700291884491daf27e470e96dbf34a90fd6c871dff4abf2d8a"
+    },
+    {
+      "fileName": "markiro_mkr-ins-13_2026.10-01_ru.pdf",
+      "sha256": "2a20b2acb89d1bdfe6b74f29076849949cec362fc943c2061a0f52875e149a91"
     },
     {
       "fileName": "markiro_mkr-pd-01_2026.08-01_en.pdf",
