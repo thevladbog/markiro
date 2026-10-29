@@ -3,7 +3,7 @@ import { HttpException, type INestApplication } from "@nestjs/common";
 import { toNodeHandler } from "better-auth/node";
 import { json, type NextFunction, type Request, type Response } from "express";
 import { handleUsAuth } from "../modules/traceability/auth/us-auth";
-import type { UsRuntime } from "./us-runtime";
+import type { UsHttpRuntime } from "./us-http-runtime";
 
 function isUsBusinessPath(path: string): boolean {
   // Express routes are case-insensitive by default; security scope must match.
@@ -17,7 +17,7 @@ function isUsBusinessPath(path: string): boolean {
 }
 
 /** Runs before Nest routing. CORS is not mutation authorization. */
-export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
+export function mountUsHttp(app: INestApplication, runtime: UsHttpRuntime): void {
   const host = new URL(runtime.env.BETTER_AUTH_URL).host;
   const parseJson = json({ limit: "16kb", inflate: false });
   const parseReceivingJson = json({ limit: "256kb", inflate: false });
