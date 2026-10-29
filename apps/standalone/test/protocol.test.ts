@@ -823,6 +823,16 @@ describe("request builders produce their fixtures exactly", () => {
     );
   });
 
+  it("a handheld put on a line, and an office PC that has none", () => {
+    const device = deviceRecordSchema.parse(fixture("device-record.json"));
+    const handheld = { ...device, kind: "handheld" as const, lineId: null };
+    expect(deviceUpdate(handheld, { name: handheld.name, lineId: "line-2" })).toStrictEqual({
+      lineId: "line-2",
+    });
+    const office = { ...device, kind: "office" as const, lineId: null };
+    expect(deviceUpdate(office, { name: office.name, lineId: "line-2" })).toStrictEqual({});
+  });
+
   it("a new pairing code that replaces the one on screen", () => {
     const code = pairingCodeSchema.parse(fixture("pairing-code.json"));
     expect(pairingCodeRequest(code.id)).toStrictEqual(fixture("pairing-code-request.json"));

@@ -167,8 +167,8 @@ export interface DeviceChange {
 
 /**
  * `PUT /v1/office/devices/{id}` (`device-update.json`): only the fields that
- * change. Only a station has a line, so a line goes only with a station's
- * update; `lineId: null` clears it.
+ * change. A station or a handheld has a line (the office assigns a handheld
+ * its line), so a line goes only with their updates; `lineId: null` clears it.
  */
 export function deviceUpdate(
   device: Pick<DeviceRecord, "kind" | "name" | "lineId">,
@@ -176,7 +176,8 @@ export function deviceUpdate(
 ): DeviceUpdate {
   const update: DeviceUpdate = {};
   if (next.name !== device.name) update.name = next.name;
-  if (device.kind === "station" && next.lineId !== device.lineId) update.lineId = next.lineId;
+  const worksLine = device.kind === "station" || device.kind === "handheld";
+  if (worksLine && next.lineId !== device.lineId) update.lineId = next.lineId;
   return update;
 }
 
