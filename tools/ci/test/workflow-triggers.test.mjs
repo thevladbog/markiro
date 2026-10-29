@@ -82,7 +82,7 @@ test("the standalone load test is opt-in, read-only and fits the job limit", () 
   }
 });
 
-test("read-only catalog bootstrap keeps manual independent approval, main first-attempt scope and host serialization", () => {
+test("read-only catalog bootstrap keeps manual independent approval, main or exact SHA-tag first attempt and host serialization", () => {
   const value = workflow("bootstrap-release-catalog.yml"),
     job = value.jobs.bootstrap;
   assert.deepEqual(Object.keys(value.on), ["workflow_dispatch"]);
@@ -94,7 +94,7 @@ test("read-only catalog bootstrap keeps manual independent approval, main first-
   assert.equal(job.environment, "production-deploy");
   assert.equal(
     job.if,
-    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}",
+    "${{ github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/catalog-bootstrap-{0}', github.sha)) && github.run_attempt == 1 }}",
   );
   assert.deepEqual(job.permissions, { contents: "read", actions: "read" });
   for (const step of job.steps) {
