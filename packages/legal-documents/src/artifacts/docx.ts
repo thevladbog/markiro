@@ -140,6 +140,9 @@ export interface LegalDocxDraft extends LegalDocxMeta {
 // width (11906 - 2 * 1134 twips) is ~642 px at 96 DPI; 600 px leaves slack
 // for LibreOffice rounding during PDF export.
 const INSTRUCTION_IMAGE_WIDTH = 600;
+// A portrait screenshot (a handheld's screen) at the full column would run past
+// the page; it renders at this height instead, its width following the ratio.
+const INSTRUCTION_PORTRAIT_HEIGHT = 560;
 
 const copy = {
   ru: {
@@ -931,7 +934,13 @@ function renderStep(
       throw new Error(`Missing instruction image: ${block.image.id}`);
     }
     const { width, height } = readPngDimensions(data, block.image.id);
-    const displayHeight = Math.max(1, Math.round((height / width) * INSTRUCTION_IMAGE_WIDTH));
+    const portrait = height > width;
+    const displayWidth = portrait
+      ? Math.max(1, Math.round((width / height) * INSTRUCTION_PORTRAIT_HEIGHT))
+      : INSTRUCTION_IMAGE_WIDTH;
+    const displayHeight = portrait
+      ? INSTRUCTION_PORTRAIT_HEIGHT
+      : Math.max(1, Math.round((height / width) * INSTRUCTION_IMAGE_WIDTH));
     children.push(
       new Paragraph({
         keepNext: true,
@@ -940,7 +949,7 @@ function renderStep(
           new ImageRun({
             type: "png",
             data,
-            transformation: { width: INSTRUCTION_IMAGE_WIDTH, height: displayHeight },
+            transformation: { width: displayWidth, height: displayHeight },
             altText: {
               name: block.image.id,
               description: block.image.caption,

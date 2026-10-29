@@ -20,9 +20,16 @@ import LandingHeader from "./LandingHeader.astro";
 import LegalArtifactControls from "./LegalArtifactControls.astro";
 import LegalTable from "./LegalTable.astro";
 
+/** A frame with its own size: a handheld's portrait screen. A bare URL is a 1280×800 station or office frame. */
+interface InstructionImage {
+  src: string;
+  width: number;
+  height: number;
+}
+
 interface Props {
   page: LegalDocumentPageDefinition;
-  images: Record<string, string>;
+  images: Record<string, string | InstructionImage>;
 }
 
 const { page, images } = Astro.props;
@@ -70,10 +77,10 @@ const graph = buildLegalPageGraph(
   { breadcrumbs: [{ name: hub.navigationLabel, path: hub.path }] },
 );
 
-const imageUrl = (id: string): string => {
-  const url = images[id];
-  if (!url) throw new Error(`Missing instruction image asset: ${id}`);
-  return url;
+const imageOf = (id: string): InstructionImage => {
+  const image = images[id];
+  if (!image) throw new Error(`Missing instruction image asset: ${id}`);
+  return typeof image === "string" ? { src: image, width: 1280, height: 800 } : image;
 };
 
 const stepBlocks = (blocks: readonly LegalBlock[]) => {
@@ -158,12 +165,15 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
                       {chrome.step} {stepNumber}. {block.title}
                     </h3>
                     <p>{block.text}</p>
-                    {block.image && (
-                      <figure class="instruction-step__figure">
-                        <img src={imageUrl(block.image.id)} alt={block.image.caption} loading="lazy" width="1280" height="800" />
-                        <figcaption>{block.image.caption}</figcaption>
-                      </figure>
-                    )}
+                    {block.image && (() => {
+                      const image = imageOf(block.image.id);
+                      return (
+                        <figure class:list={["instruction-step__figure", { "instruction-step__figure--portrait": image.height > image.width }]}>
+                          <img src={image.src} alt={block.image.caption} loading="lazy" width={image.width} height={image.height} />
+                          <figcaption>{block.image.caption}</figcaption>
+                        </figure>
+                      );
+                    })()}
                     {block.expected && (
                       <p class="instruction-step__expected"><strong>{chrome.expected}</strong> {block.expected}</p>
                     )}

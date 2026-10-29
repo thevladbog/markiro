@@ -2155,6 +2155,12 @@ input:focus-visible {
   border-radius: var(--r-2);
 }
 
+/* A handheld's portrait screen would fill a page at the column's width. */
+.instruction-step__figure--portrait img {
+  width: auto;
+  max-width: min(100%, 360px);
+}
+
 .instruction-step__figure figcaption {
   margin-top: var(--sp-2);
   color: var(--fg-3);
