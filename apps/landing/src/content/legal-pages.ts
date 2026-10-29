@@ -60,8 +60,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom office instruction: the production overview, the shift card, closing a shift in the office, late data, and exports for GIS MT and 1C.",
   },
   "MKR-INS-10": {
-    ru: "Печатная инструкция менеджера: каталог продукции, карточка товара, ГТИН и его владелец, доведение карточки до статуса «Активен», фотография и вывод товара из оборота.",
-    en: "Printable manager instruction: the product catalog, the product card, GTIN ownership, completing a card so it becomes active, the photo, and retiring a product.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: товары, карточка товара, GTIN и его владелец, черновик и «Активен», фото, шаблоны по умолчанию и архив.",
+    en: "Printable Markiro Autonom office instruction: products, the product card, GTIN ownership, draft and active, the photo, default templates, and archiving.",
   },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
