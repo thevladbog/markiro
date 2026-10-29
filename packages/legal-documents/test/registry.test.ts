@@ -91,7 +91,9 @@ describe("legal document registry", () => {
       // rewritten for the standalone office -- lines with a maximum of
       // devices per shift, devices on the host, the shift side panel.
       "MKR-INS-08": "2026.10/01",
-      "MKR-INS-09": "2026.09/04",
+      // 2026-10-29: 09 followed 08 onto the standalone office -- the overview,
+      // the shift card and its tabs, the office close and the local exports.
+      "MKR-INS-09": "2026.10/01",
       // 2026-09-19: the product card gained a readiness model and category
       // attributes, so the catalog card instruction was reissued.
       "MKR-INS-10": "2026.09/02",
@@ -118,7 +120,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
+    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(22);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
