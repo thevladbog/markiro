@@ -204,16 +204,6 @@ for (const [route, label] of [
 }
 
 test.describe("standalone lead forms", () => {
-  async function addCaptchaToken(form: ReturnType<Page["locator"]>, token: string): Promise<void> {
-    await form.evaluate((element, value) => {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "smart-token";
-      input.value = value;
-      element.append(input);
-    }, token);
-  }
-
   test("/skachat/ posts the download lead and shows the installer from latest.json", async ({
     page,
     isMobile,
@@ -257,13 +247,11 @@ test.describe("standalone lead forms", () => {
 
     await form.locator('input[name="email"]').fill(" Ivan@Zavod.ru ");
     await form.locator('input[name="company"]').fill("ООО «Пивоварня»");
-    await form.locator('input[name="consent"]').check({ force: true });
-    await addCaptchaToken(form, "download-token");
+    await form.locator('input[name="consent"]').check();
     await form.locator('button[type="submit"]').click();
 
     await expect(page.locator("[data-download-ready] [data-release-only] h2")).toBeFocused();
     expect(payload).toEqual({
-      captchaToken: "download-token",
       company: "ООО «Пивоварня»",
       consentVersion: "MKR-PD-02/2026.08/01",
       email: "ivan@zavod.ru",
@@ -299,8 +287,7 @@ test.describe("standalone lead forms", () => {
     const form = page.locator("form[data-lead-form]");
     await form.locator('input[name="email"]').fill("ivan@zavod.ru");
     await form.locator('input[name="company"]').fill("Завод");
-    await form.locator('input[name="consent"]').check({ force: true });
-    await addCaptchaToken(form, "token");
+    await form.locator('input[name="consent"]').check();
     await form.locator('button[type="submit"]').click();
     await expect(page.locator("[data-pending-only] h2")).toHaveText("Версия готовится");
     await expect(page.locator("[data-pending-only]")).toContainText("ivan@zavod.ru");
@@ -319,8 +306,7 @@ test.describe("standalone lead forms", () => {
     const form = page.locator("form[data-lead-form]");
     await form.locator('input[name="email"]').fill("ivan@zavod.ru");
     await form.locator('input[name="company"]').fill("Завод");
-    await form.locator('input[name="consent"]').check({ force: true });
-    await addCaptchaToken(form, "token");
+    await form.locator('input[name="consent"]').check();
     await form.locator('button[type="submit"]').click();
     await expect(form.locator("[data-lead-alert]")).toBeVisible();
     await expect(form.locator('[data-label="retry"]')).toBeVisible();
@@ -354,8 +340,7 @@ test.describe("standalone lead forms", () => {
 
     await form.locator('input[name="inn"]').fill("7707083893");
     await form.locator('input[name="email"]').fill("buh@zavod.ru");
-    await form.locator('input[name="consent"]').check({ force: true });
-    await addCaptchaToken(form, "invoice-token");
+    await form.locator('input[name="consent"]').check();
     await form.locator('button[type="submit"]').click();
     await expect(page.locator("[data-invoice-success]")).toContainText(
       "Счёт по тарифу «Цех» и ссылку на договор-оферту пришлём на buh@zavod.ru",
@@ -412,9 +397,7 @@ for (const route of routes) {
   });
 }
 
-test("the captcha runtime loads only once the visitor reaches the download form", async ({
-  page,
-}) => {
+test("the download form never loads a third-party captcha runtime", async ({ page }) => {
   let captchaRequests = 0;
   await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
     captchaRequests += 1;
@@ -432,10 +415,10 @@ test("the captcha runtime loads only once the visitor reaches the download form"
   ).toHaveCount(0);
 
   await page.locator('[data-lead-form] input[name="email"]').focus();
-  await expect.poll(() => captchaRequests).toBe(1);
+  await expect(page.locator(".smart-captcha")).toHaveCount(0);
   await page.locator('[data-lead-form] input[name="company"]').focus();
   await page.waitForTimeout(200);
-  expect(captchaRequests).toBe(1);
+  expect(captchaRequests).toBe(0);
 });
 
 test("keyboard focus is visible on the first interactive control", async ({ page }) => {
