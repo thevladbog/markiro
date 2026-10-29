@@ -41,7 +41,7 @@ async function waitFor(check, what, timeoutMs = 60_000) {
 
 /** `markiro-host run` over `dataDir`; resolves once `hello` answers. */
 /** `stand-clock.c` built once into the stand's cache. */
-function clockLibrary(cacheDir) {
+export function clockLibrary(cacheDir) {
   const library = path.join(cacheDir, "stand-clock.dylib");
   if (!existsSync(library)) {
     mkdirSync(cacheDir, { recursive: true });

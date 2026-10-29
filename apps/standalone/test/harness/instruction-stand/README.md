@@ -60,6 +60,28 @@ Two environment variables help the office instructions (MKR-INS-08, 09, 10):
 The office states live in `states-office.mjs` (prefixes `ins08/`, `ins09/`, `ins10/`)
 and their extra seed data in `seed-office.mjs`.
 
+The installation and backup states (MKR-INS-12, 13) live in `states-install.mjs`
+(prefixes `ins12/`, `ins13/`). They need a test-keys host and a snapshot that keeps the
+trial period, which `STAND_TRIAL=1` asks of the seed:
+
+```bash
+export STAND_ROOT=/tmp/claude/ins12/stand STAND_TRIAL=1 \
+  STAND_HOST_BINARY=$PWD/apps/standalone/target/stand/debug/markiro-host
+node stand.mjs seed
+node stand.mjs capture install/wizard-admin install/wizard-review ins12/wizard-org …
+```
+
+- `ins12/license-*` choose a license file signed by the test key in «Информация» →
+  «Лицензия», as an administrator would.
+- `ins13/*` load that license through the host API first, so their frames carry no trial
+  banner.
+- `ins13/hold*` stop the host, run `markiro-host restore` of its newest copy under the
+  stand's clock and start it again: the office then holds the stations' data.
+- Two things on these frames are the stand's, not the host's: the host address in
+  «Подключение устройства» is replaced by the fixed `192.168.10.5:45710` (the host lists
+  the Mac's own addresses), and the copies' folder reads
+  `C:\ProgramData\Markiro\Host\backups` (the host names the stand's temporary folder).
+
 ## What the seed builds
 
 The seed works through the product the way a site would. `site.mjs` holds every value
