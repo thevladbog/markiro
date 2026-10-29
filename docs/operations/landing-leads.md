@@ -15,8 +15,8 @@
   владельцу (`landing-lead-notification`; у демо-формы — прежние два письма);
 - строку очереди оповещений `lead_notifications`.
 
-Защита та же, что у демо-формы, и те же переменные: `LANDING_DEMO_SUBMISSION_ENABLED`,
-`SMARTCAPTCHA_SERVER_KEY`, `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT`, `LANDING_DEMO_REPLY_TO`,
+Приём заявок управляется переменными: `LANDING_DEMO_SUBMISSION_ENABLED`,
+`LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT`, `LANDING_DEMO_REPLY_TO`,
 `LANDING_DEMO_*_LIMIT`. Ссылки на карточку лида строятся от `SAAS_ADMIN_ORIGIN`.
 
 ## Telegram
@@ -73,3 +73,8 @@
 (`landing_lead.status_changed`, `landing_lead.tenant_linked`, `landing_lead.anonymized`).
 «Создать клиента без кабинета» использует обычное создание клиента (`cabinetAccess: none`) и
 дополнительно требует `tenants.write`.
+
+Заявки скачивания и счёта не используют Yandex SmartCaptcha. Перед сохранением API
+проверяет переключатель приёма, лимиты запросов по источнику и общему числу, пустую
+ловушку для ботов (`website`) и актуальную версию согласия. Поле `captchaToken`
+остаётся необязательным для совместимости с закешированными страницами и не сохраняется.

@@ -82,16 +82,16 @@ export function readPublicSiteConfig(
 
   const captchaClientKey = readOptionalValue(env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY);
 
-  if (captchaClientKey === null) {
-    throw new Error("demo submission requires a captcha client key");
-  }
-  if (!captchaClientKey.startsWith("ysc1_") || captchaClientKey.length === "ysc1_".length) {
+  if (
+    captchaClientKey !== null &&
+    (!captchaClientKey.startsWith("ysc1_") || captchaClientKey.length === "ysc1_".length)
+  ) {
     throw new Error("PUBLIC_SMARTCAPTCHA_CLIENT_KEY must begin with ysc1_");
   }
   return {
     captchaClientKey,
     consentVersion: CURRENT_DEMO_CONSENT_ID,
-    demoEndpoint: "/api/demo-requests",
+    demoEndpoint: captchaClientKey === null ? null : "/api/demo-requests",
     leadEndpoint: "/api/landing-leads",
     legalLinks:
       locale === "en"

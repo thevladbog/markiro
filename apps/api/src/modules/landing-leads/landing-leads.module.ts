@@ -2,7 +2,6 @@ import { Module, type DynamicModule } from "@nestjs/common";
 import type { Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { Env } from "../../env";
-import { DemoRequestCaptchaService } from "../demo-requests/demo-request-captcha.service";
 import { DemoRequestRateLimiter } from "../demo-requests/demo-request-rate-limiter";
 import {
   DEMO_REQUEST_SUBMISSION_ENABLED,
@@ -16,7 +15,7 @@ import { LandingLeadPublicErrorFilter, LandingLeadsController } from "./landing-
 
 /**
  * Public intake `POST /api/landing-leads` (spec §15.3). It shares the demo form's switch,
- * captcha and rate-limit settings; the limiter instance is its own.
+ * rate-limit settings; the limiter instance is its own.
  */
 @Module({})
 export class LandingLeadsModule {
@@ -44,18 +43,6 @@ export class LandingLeadsModule {
             ),
         },
         {
-          provide: DemoRequestCaptchaService,
-          inject: [DemoRequestTelemetry],
-          useFactory: (telemetry: DemoRequestTelemetry) =>
-            new DemoRequestCaptchaService(
-              {
-                serverKey: env.SMARTCAPTCHA_SERVER_KEY ?? "",
-                landingOrigin: env.LANDING_ORIGIN ?? "http://landing-demo-disabled.invalid",
-              },
-              telemetry,
-            ),
-        },
-        {
           provide: LandingLeadRepository,
           inject: [DB, MailDeliveryService],
           useFactory: (db: Db, mail: MailDeliveryService) =>
@@ -68,16 +55,11 @@ export class LandingLeadsModule {
         },
         {
           provide: LandingLeadService,
-          inject: [DemoRequestRateLimiter, DemoRequestCaptchaService, LandingLeadRepository],
-          useFactory: (
-            limiter: DemoRequestRateLimiter,
-            captcha: DemoRequestCaptchaService,
-            repository: LandingLeadRepository,
-          ) =>
+          inject: [DemoRequestRateLimiter, LandingLeadRepository],
+          useFactory: (limiter: DemoRequestRateLimiter, repository: LandingLeadRepository) =>
             new LandingLeadService(
               { enabled: env.LANDING_DEMO_SUBMISSION_ENABLED },
               limiter,
-              captcha,
               repository,
             ),
         },

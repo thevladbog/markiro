@@ -73,7 +73,7 @@ beforeAll(() => {
         PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
         PUBLIC_PHONE: "",
         PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
-        PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_render-test-key",
+        PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "",
       },
       stdio: "pipe",
     },
@@ -1920,9 +1920,7 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
     expect(
       form?.querySelector('.ax-honeypot input[name="website"]')?.getAttribute("tabindex"),
     ).toBe("-1");
-    expect(form?.querySelector(".smart-captcha")?.getAttribute("data-sitekey")).toBe(
-      "ysc1_render-test-key",
-    );
+    expect(form?.querySelector(".smart-captcha")).toBeNull();
     expect(form?.querySelector('a[href="/personal-data-consent/"]')).not.toBeNull();
     expect(form?.querySelector('a[href="/privacy/"]')).not.toBeNull();
     expect(
@@ -1930,6 +1928,37 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
         .get("/skachat/")
         ?.querySelector('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
     ).toBeNull();
+  });
+
+  it("keeps spaces around every legal link in both consent labels", () => {
+    for (const route of ["/skachat/", "/stoimost/"]) {
+      const label = enabledDocuments.get(route)?.querySelector(".ax-consent label");
+      expect(label?.textContent?.replace(/\s+/gu, " ").trim(), route).toBe(
+        "Согласен на обработку персональных данных по политике Маркиро",
+      );
+    }
+  });
+
+  it("separates the Russian FAQ contact links from the surrounding words", () => {
+    const text = documents
+      .get("/")
+      ?.querySelector("#voprosy .ax-faq__intro .ax-muted")
+      ?.textContent?.replace(/\s+/gu, " ")
+      .trim();
+    expect(text).toBe(
+      "Если ответа здесь нет, напишите в Telegram @thevladbog или на hello@markiro.app.",
+    );
+  });
+
+  it("separates the English FAQ contact links from the surrounding words", () => {
+    const text = documents
+      .get("/en/")
+      ?.querySelector("#faq .ax-faq__intro .ax-muted")
+      ?.textContent?.replace(/\s+/gu, " ")
+      .trim();
+    expect(text).toBe(
+      "If your question is not here, write to Telegram @thevladbog or to hello@markiro.app.",
+    );
   });
 
   it("renders the invoice form with INN, tariff and address", () => {

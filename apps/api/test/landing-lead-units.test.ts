@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  captchaInvalidError,
-  rateLimitedError,
-} from "../src/modules/demo-requests/demo-request.errors";
+import { rateLimitedError } from "../src/modules/demo-requests/demo-request.errors";
 import {
   landingLeadBodySchema,
   safeReferrer,
@@ -49,6 +46,12 @@ function body(overrides: Record<string, unknown> = {}) {
 }
 
 describe("landing lead body (spec §15.3)", () => {
+  it("accepts a lead without a captcha token", () => {
+    const withoutCaptcha: Record<string, unknown> = body();
+    delete withoutCaptcha.captchaToken;
+    expect(landingLeadBodySchema.safeParse(withoutCaptcha).success).toBe(true);
+  });
+
   it("normalizes the request id, e-mail and a Russian phone and drops empty fields", () => {
     const parsed = landingLeadBodySchema.parse(
       body({ phone: "8 (999) 123-45-67", name: "", utm: { source: "yandex", medium: "" } }),
@@ -61,6 +64,7 @@ describe("landing lead body (spec §15.3)", () => {
       utm: { source: "yandex" },
     });
     expect(parsed).not.toHaveProperty("name");
+    expect(parsed).not.toHaveProperty("captchaToken");
   });
 
   it("rejects a malformed phone, an unknown path and an invoice without INN", () => {
@@ -89,19 +93,14 @@ describe("LandingLeadService defenses", () => {
     overrides: {
       enabled?: boolean;
       limited?: boolean;
-      captcha?: "invalid";
       failing?: boolean;
     } = {},
   ) {
     const accept = vi.fn(async () => {
       if (overrides.failing) throw new Error("private database detail");
     });
-    const assertHuman = vi.fn(async () => {
-      if (overrides.captcha === "invalid") throw captchaInvalidError();
-    });
     return {
       accept,
-      assertHuman,
       service: new LandingLeadService(
         { enabled: overrides.enabled ?? true },
         {
@@ -109,7 +108,6 @@ describe("LandingLeadService defenses", () => {
             if (overrides.limited) throw rateLimitedError();
           },
         },
-        { assertHuman },
         { accept },
       ),
     };
@@ -128,7 +126,6 @@ describe("LandingLeadService defenses", () => {
   it.each([
     ["disabled", { enabled: false }, 404, "submission_disabled"],
     ["rate limited", { limited: true }, 429, "rate_limited"],
-    ["captcha", { captcha: "invalid" as const }, 400, "captcha_invalid"],
     ["storage", { failing: true }, 503, "submission_unavailable"],
   ])("refuses %s with the public code", async (_case, overrides, status, code) => {
     const { service: subject } = service(overrides);
@@ -138,17 +135,16 @@ describe("LandingLeadService defenses", () => {
     });
   });
 
-  it("refuses a filled honeypot and a stale consent before the captcha", async () => {
+  it("refuses a filled honeypot and a stale consent before storage", async () => {
     for (const candidate of [
       landingLeadBodySchema.parse(body({ website: "spam" })),
       landingLeadBodySchema.parse(body({ consentVersion: "MKR-PD-02/2025.01/01" })),
     ]) {
-      const { service: subject, assertHuman, accept } = service();
+      const { service: subject, accept } = service();
       await expect(subject.submit(candidate, "203.0.113.7")).rejects.toMatchObject({
         status: 400,
         response: { code: "invalid_request" },
       });
-      expect(assertHuman).not.toHaveBeenCalled();
       expect(accept).not.toHaveBeenCalled();
     }
   });
