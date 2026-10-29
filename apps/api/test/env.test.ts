@@ -12,6 +12,20 @@ const requiredEnv = {
   BETTER_AUTH_URL: "http://localhost:3000",
 };
 
+describe("landing lead configuration", () => {
+  it("enables lead intake without a SmartCaptcha server key", () => {
+    const env = loadEnv({
+      ...requiredEnv,
+      LANDING_DEMO_SUBMISSION_ENABLED: "true",
+      LANDING_ORIGIN: "https://markiro.example",
+      LANDING_DEMO_RECIPIENT: "owner@example.test",
+      LANDING_DEMO_REPLY_TO: "hello@example.test",
+    });
+    expect(env.LANDING_DEMO_SUBMISSION_ENABLED).toBe(true);
+    expect(env.SMARTCAPTCHA_SERVER_KEY).toBeUndefined();
+  });
+});
+
 describe("validation duplicate rollout gate", () => {
   it.each([undefined, "", "false"])("defaults safely to disabled: %s", (value) => {
     expect(

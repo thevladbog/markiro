@@ -128,12 +128,7 @@ describe("landing demo environment", () => {
       thrown = error;
     }
     const message = String(thrown);
-    for (const name of [
-      "LANDING_ORIGIN",
-      "LANDING_DEMO_RECIPIENT",
-      "LANDING_DEMO_REPLY_TO",
-      "SMARTCAPTCHA_SERVER_KEY",
-    ]) {
+    for (const name of ["LANDING_ORIGIN", "LANDING_DEMO_RECIPIENT", "LANDING_DEMO_REPLY_TO"]) {
       expect(message).toContain(name);
     }
 
@@ -144,7 +139,6 @@ describe("landing demo environment", () => {
         LANDING_ORIGIN: "https://markiro.app",
         LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
         LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
-        SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
       }),
     ).toMatchObject({ LANDING_DEMO_SUBMISSION_ENABLED: true });
   });
