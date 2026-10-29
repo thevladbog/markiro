@@ -172,3 +172,21 @@ export const leadNotifications = pgTable(
     ),
   ],
 );
+
+/** Private, platform-wide admission counters; no raw network addresses or lead data. */
+export const landingLeadRateWindows = pgTable(
+  "landing_lead_rate_windows",
+  {
+    key: text("key").primaryKey(),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull(),
+  },
+  (t) => [
+    index("landing_lead_rate_windows_expiry_idx").on(t.windowStartedAt),
+    check(
+      "landing_lead_rate_windows_key_check",
+      sql`${t.key} = 'global' OR ${t.key} ~ '^source:[0-9a-f]{64}$'`,
+    ),
+    check("landing_lead_rate_windows_attempts_check", sql`${t.attempts} BETWEEN 1 AND 10001`),
+  ],
+);

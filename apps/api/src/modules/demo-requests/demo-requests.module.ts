@@ -16,7 +16,9 @@ import type { Db } from "@markiro/db";
 
 @Module({})
 export class DemoRequestsModule {
+  /** Legacy demo stays closed without its required provider key; lead forms are independent. */
   static forRoot(env: Env): DynamicModule {
+    const enabled = env.LANDING_DEMO_SUBMISSION_ENABLED && Boolean(env.SMARTCAPTCHA_SERVER_KEY);
     return {
       module: DemoRequestsModule,
       controllers: [DemoRequestsController],
@@ -25,7 +27,7 @@ export class DemoRequestsModule {
         DemoRequestPublicErrorFilter,
         {
           provide: DEMO_REQUEST_SUBMISSION_ENABLED,
-          useValue: env.LANDING_DEMO_SUBMISSION_ENABLED,
+          useValue: enabled,
         },
         DemoRequestSubmissionGuard,
         {
@@ -73,7 +75,7 @@ export class DemoRequestsModule {
           ) =>
             new DemoRequestService(
               {
-                enabled: env.LANDING_DEMO_SUBMISSION_ENABLED,
+                enabled,
               },
               limiter,
               captcha,
