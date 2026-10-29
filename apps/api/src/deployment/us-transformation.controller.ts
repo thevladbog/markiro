@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   ConflictException,
@@ -98,7 +99,7 @@ const readinessHttpQuerySchema = z
   schema: usMasterDataErrorSchema,
 })
 export class UsTransformationController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Post("genealogy/query")
   @HttpCode(200)

@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   Controller,
@@ -80,7 +81,7 @@ const conflictSchema = z.union([
   schema: usMasterDataErrorSchema,
 })
 export class UsLotController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get()
   @ApiOperation({

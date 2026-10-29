@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   Controller,
@@ -34,7 +35,7 @@ import {
 @UseGuards(UsRequestsCanonicalRouteGuard, UsSessionGuard)
 @ApiUsRequestBoundary()
 export class UsExportRunsController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
   @Get(":id")
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOperation({ summary: "Read safe immutable run detail without private worker state" })

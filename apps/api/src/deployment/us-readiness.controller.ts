@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   BadRequestException,
   Controller,
@@ -61,7 +62,7 @@ class UsReadinessRouteGuard implements CanActivate {
   schema: usMasterDataErrorSchema,
 })
 export class UsReadinessController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get("readiness")
   @Header("Cache-Control", "no-store")

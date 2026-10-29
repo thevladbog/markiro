@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Controller,
   Get,
@@ -39,7 +40,7 @@ import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
   schema: usMasterDataErrorSchema,
 })
 export class UsEventsController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
   @Get()
   @ApiOperation({
     summary: "List tenant Receiving and Transformation summaries in one global page",

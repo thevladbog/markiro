@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   BadRequestException,
   Body,
@@ -129,7 +130,7 @@ const binaryResponse = {
   schema: usMasterDataErrorSchema,
 })
 export class UsPlansController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   private context(request: UsRequest) {
     if (!request.usPrincipal || !request.usRequestId)

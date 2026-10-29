@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   Controller,
@@ -68,7 +69,7 @@ import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
   schema: usMasterDataErrorSchema,
 })
 export class UsCaseController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get("cases/lookup")
   @ApiOperation({ summary: "Look up one tenant case by current normalized SSCC" })

@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Controller,
   Get,
@@ -58,7 +59,7 @@ class UsDevelopmentController {
 /** Explicit US allowlist: no RU routes, auth adapters, jobs or outbound clients. */
 @Module({})
 export class UsDevelopmentModule {
-  static register(runtime: UsRuntime): DynamicModule {
+  static register(runtime: UsBusinessRuntimeView): DynamicModule {
     return {
       module: UsDevelopmentModule,
       controllers: [

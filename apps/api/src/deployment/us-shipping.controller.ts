@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   Controller,
@@ -127,7 +128,7 @@ function revisionQuery(query: unknown): unknown {
   schema: usMasterDataErrorSchema,
 })
 export class UsShippingController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Post()
   @ApiOperation({ summary: "Create an incomplete Shipping draft with an operation key" })

@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   BadRequestException,
   Controller,
@@ -52,7 +53,7 @@ import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
   schema: usMasterDataErrorSchema,
 })
 export class UsSearchLotCardController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get("search")
   @Header("Cache-Control", "no-store")

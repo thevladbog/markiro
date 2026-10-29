@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   Controller,
@@ -42,7 +43,7 @@ export interface UsRequest extends Request {
 
 @Injectable()
 export class UsSessionGuard implements CanActivate {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<UsRequest>();
@@ -75,7 +76,7 @@ export class UsSessionGuard implements CanActivate {
   schema: errorSchema,
 })
 export class UsProfileController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get()
   @ApiOperation({

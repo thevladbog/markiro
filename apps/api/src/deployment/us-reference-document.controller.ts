@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Body,
   Controller,
@@ -62,7 +63,7 @@ import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
   schema: usMasterDataErrorSchema,
 })
 export class UsReferenceDocumentController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get()
   @ApiOperation({ summary: "List reference-document metadata in the active US tenant" })

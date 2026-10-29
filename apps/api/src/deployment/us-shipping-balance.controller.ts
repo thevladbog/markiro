@@ -1,3 +1,4 @@
+import type { UsBusinessRuntimeView } from "./us-business-runtime-view";
 import {
   Controller,
   Get,
@@ -65,7 +66,7 @@ const httpQuery = z
   schema: usMasterDataErrorSchema,
 })
 export class UsShippingBalanceController {
-  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+  constructor(@Inject(UsRuntime) private readonly runtime: UsBusinessRuntimeView) {}
 
   @Get(":id/shipping-balance")
   @ApiOperation({
