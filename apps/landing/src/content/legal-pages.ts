@@ -67,6 +67,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция по установке Маркиро Автоном: роли компьютеров, постоянный адрес хоста, служба и порт, мастер первого запуска, лицензия, подключение устройств и обновление.",
     en: "Printable Markiro Autonom installation instruction: computer roles, the host's permanent address, the service and port, the first-start wizard, the license, pairing devices, and updates.",
   },
+  "MKR-INS-13": {
+    ru: "Печатная инструкция администратора Маркиро Автоном: автоматические копии хоста, копия по кнопке, вторая папка и Яндекс Диск, восстановление на том же или новом ПК и возобновление приёма данных станций.",
+    en: "Printable Markiro Autonom administrator instruction: the host's automatic copies, a copy on request, the second folder and Yandex Disk, restoring on the same or a new PC, and resuming station data.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
