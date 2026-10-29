@@ -1,4 +1,5 @@
-//! The events of a device outside a shift (plan ТСД-Х, spec 6.4): a handheld's warehouse pallets.
+//! The events of a device outside a shift (plan ТСД-Х, spec 6.4): a handheld's warehouse pallets,
+//! and since protocol 8 the disassembly of a closed one.
 //! One record, one receipt, as `facts::receive` does it: a record whose id has a kept receipt
 //! answers that receipt when its digest is the same and `payload_mismatch` (kept nowhere) when it
 //! is not; a record that cannot be read or breaks a rule is a `rejected` receipt and writes
@@ -7,9 +8,9 @@
 
 use axum::http::StatusCode;
 use markiro_proto::{
-    receipt_codes, FactOutcome, FactReceipt, PalletBoxAddedData, PalletBoxRemovedData,
-    PalletEventKind, PalletEventRecord, WarehousePalletClosedData, WarehousePalletLabelData,
-    WarehousePalletOpenedData,
+    exception_reasons, receipt_codes, FactOutcome, FactReceipt, PalletBoxAddedData,
+    PalletBoxRemovedData, PalletEventKind, PalletEventRecord, WarehousePalletClosedData,
+    WarehousePalletDisassembledData, WarehousePalletLabelData, WarehousePalletOpenedData,
 };
 use serde_json::{json, Value};
 use sqlx::SqliteConnection;
@@ -182,6 +183,9 @@ async fn apply(
             closed(conn, &context, &record.data, revision).await
         }
         PalletEventKind::WarehousePalletLabel => label(conn, &context, &record.data).await,
+        PalletEventKind::WarehousePalletDisassembled => {
+            disassembled(conn, &context, &record.data, revision).await
+        }
     };
     match answer {
         Ok(applied) => Ok((kind, Ok(applied))),
@@ -576,6 +580,74 @@ async fn label(
     // The label of a pallet that was never closed is a state the device must fix.
     if closed_at.is_none() {
         return Err(Reject::new(receipt_codes::PALLET_STATE).into());
+    }
+    Ok(Applied::accepted())
+}
+
+/// A closed pallet of this device taken apart: the pallet keeps its SSCC (no other pallet takes
+/// it) and the moment, reason and operator; every box on it leaves it at that moment, so it can
+/// go onto another pallet. An open pallet is `pallet_state` (its boxes come off one by one). A
+/// pallet already taken apart answers `accepted` and changes nothing: the device took it apart
+/// once, whatever id a resend carries.
+async fn disassembled(
+    conn: &mut SqliteConnection,
+    context: &Context<'_>,
+    data: &Value,
+    revision: &mut Option<i64>,
+) -> Result<Applied, Failure> {
+    let data: WarehousePalletDisassembledData =
+        serde_json::from_value(data.clone()).map_err(|_| Reject::field("data"))?;
+    uuid_field("data.palletId", &data.pallet_id)?;
+    if !exception_reasons::DISASSEMBLE.contains(&data.reason_code.as_str()) {
+        return Err(Reject::field("data.reasonCode").into());
+    }
+    let reason_text = match (data.reason_code.as_str(), &data.reason_text) {
+        (_, None) => None,
+        (exception_reasons::OTHER, Some(text)) => Some(
+            validate::exception_reason_text("data.reasonText", text)
+                .map_err(|_| Reject::field("data.reasonText"))?,
+        ),
+        _ => return Err(Reject::field("data.reasonText").into()),
+    };
+    instant_field("data.disassembledAt", &data.disassembled_at)?;
+    let (closed_at, _) = own_pallet(conn, context, &data.pallet_id).await?;
+    if closed_at.is_none() {
+        return Err(Reject::new(receipt_codes::PALLET_STATE).into());
+    }
+    let done = sqlx::query(
+        "UPDATE warehouse_pallets SET disassembled_at = ?, disassembly_reason_code = ?, \
+         disassembly_reason_text = ?, disassembly_operator_id = ? \
+         WHERE id = ? AND disassembled_at IS NULL",
+    )
+    .bind(&data.disassembled_at)
+    .bind(&data.reason_code)
+    .bind(&reason_text)
+    .bind(context.operator_id)
+    .bind(&data.pallet_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    if done.rows_affected() == 0 {
+        return Ok(Applied::accepted());
+    }
+    // The registry hears of every box still on it before they leave (the touch reads live stays).
+    registry_touch::warehouse_pallet_boxes(&mut *conn, &data.pallet_id, context.received_at)
+        .await?;
+    sqlx::query(
+        "UPDATE warehouse_pallet_boxes SET removed_at = ? WHERE pallet_id = ? AND removed_at IS NULL",
+    )
+    .bind(&data.disassembled_at)
+    .bind(&data.pallet_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    // The office's list of warehouse pallets changed, as at a close.
+    if revision.is_none() {
+        *revision = Some(
+            next_revision(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?,
+        );
     }
     Ok(Applied::accepted())
 }

@@ -1,10 +1,12 @@
 package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.box.Sscc
+import app.markiro.handheld.core.exceptions.DisassembleReason
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.HostOutboxEntity
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletEntity
+import app.markiro.handheld.core.storage.PalletExceptionEntity
 import app.markiro.handheld.core.storage.PalletMembershipEntity
 import app.markiro.handheld.core.storage.PalletMembershipRemovalEntity
 import app.markiro.handheld.core.util.Iso
@@ -16,7 +18,7 @@ import java.util.UUID
 
 /**
  * Freezes the device's own warehouse pallets into the records of the pallet-events channel (`POST /v1/device/pallet-events`): the pallet
- * opened, a box put on it, a box taken off, the pallet closed. A record is built once and never again: a retry sends the same bytes under
+ * opened, a box put on it, a box taken off, the pallet closed and, for a host of protocol 8, a closed pallet taken apart. A record is built once and never again: a retry sends the same bytes under
  * the same id, and the id is derived from the source (a pallet, a box and the moment it was put there), so a pass that runs twice makes
  * nothing twice.
  *
@@ -44,6 +46,11 @@ class HostPalletEvents(
         }
         for (m in db.palletMembershipDao().pending(MAX_PER_PASS)) drafts += added(m)
         for (r in db.palletMembershipRemovalDao().pending(MAX_PER_PASS)) drafts += removed(r)
+        if (readsDisassembly()) {
+            for (taken in dao.unsentWarehouseDisassemblies()) {
+                if (dao.frozen(DISASSEMBLED, taken.id.toString()) == 0) drafts += disassembled(taken)
+            }
+        }
         for (pallet in pallets) {
             val closedAt = pallet.closedAt ?: continue
             if (pallet.sscc == null || dao.frozen(CLOSED, pallet.palletId) > 0) continue
@@ -58,6 +65,10 @@ class HostPalletEvents(
     }
 
     private suspend fun opened(palletId: String) = db.metaDao().get(openedKey(palletId)) != null
+
+    /** A host before protocol 8 answers the kind `invalid_record` for good: the disassembly waits until the host is updated. */
+    private suspend fun readsDisassembly() =
+        (db.metaDao().get(MetaStore.HOST_PROTOCOL)?.toIntOrNull() ?: 0) >= DISASSEMBLY_PROTOCOL
 
     private fun id(kind: String, key: String) = UUID.nameUUIDFromBytes("pallet-event:$kind:$key".toByteArray()).toString()
 
@@ -133,16 +144,40 @@ class HostPalletEvents(
         return queued(id, KIND_CLOSED, CLOSED, p.palletId, closedAt, 3, record(id, KIND_CLOSED, p.operatorId, data))
     }
 
+    /**
+     * A closed pallet taken apart (`ExceptionEngine.disassemblePallet`): the source is its exception row, settled by the host's receipt. The
+     * reason goes as its code (the enum's name), never the Russian words the row keeps; this screen offers no «другое», so no text goes.
+     */
+    private fun disassembled(row: PalletExceptionEntity): Draft {
+        val key = row.id.toString()
+        val id = id(DISASSEMBLED, row.palletId)
+        val code = DisassembleReason.entries.firstOrNull { it.audit == row.reason }?.name?.lowercase()
+            ?: return quarantined(id, KIND_DISASSEMBLED, DISASSEMBLED, key, "bad_reason")
+        if (!Iso.isDeviceInstant(row.occurredAt)) return quarantined(id, KIND_DISASSEMBLED, DISASSEMBLED, key, BAD_DEVICE_TIME)
+        val data = buildJsonObject {
+            put("palletId", row.palletId)
+            put("reasonCode", code)
+            put("reasonText", JsonNull)
+            put("disassembledAt", row.occurredAt)
+        }
+        return queued(id, KIND_DISASSEMBLED, DISASSEMBLED, key, row.occurredAt, 4, record(id, KIND_DISASSEMBLED, row.operatorId, data))
+    }
+
     companion object {
         const val OPEN = "warehouse_pallet_open"
         const val ADDED = "warehouse_pallet_box_added"
         const val REMOVED = "warehouse_pallet_box_removed"
         const val CLOSED = "warehouse_pallet_closed"
+        const val DISASSEMBLED = "warehouse_pallet_disassembled"
 
         const val KIND_OPEN = "warehouse_pallet_opened"
         const val KIND_ADDED = "pallet_box_added"
         const val KIND_REMOVED = "pallet_box_removed"
         const val KIND_CLOSED = "warehouse_pallet_closed"
+        const val KIND_DISASSEMBLED = "warehouse_pallet_disassembled"
+
+        /** The host protocol that reads [KIND_DISASSEMBLED] (`markiro_proto::PROTOCOL_VERSION` 8). */
+        const val DISASSEMBLY_PROTOCOL = 8
 
         private const val BAD_DEVICE_TIME = "bad_device_time"
         private const val MAX_PER_PASS = 10_000

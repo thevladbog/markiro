@@ -65,6 +65,7 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
             // The receipt belongs to the add that was frozen (its `addedAt`): a box taken off and put on again is another row.
             HostPalletEvents.ADDED -> body(row)?.let { db.palletMembershipDao().markAcceptedAt(it.palletId, it.sscc, it.addedAt, now()) }
             HostPalletEvents.REMOVED -> row.sourceKey.toLongOrNull()?.let { db.palletMembershipRemovalDao().delete(it) }
+            HostPalletEvents.DISASSEMBLED -> row.sourceKey.toLongOrNull()?.let { db.palletExceptionDao().markAcked(listOf(it), now()) }
             HostPalletEvents.CLOSED -> {
                 db.palletDao().markAcked(listOf(row.sourceKey), now())
                 db.metaDao().remove(HostPalletEvents.openedKey(row.sourceKey))

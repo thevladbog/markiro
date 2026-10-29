@@ -85,6 +85,9 @@ class MetaStore(private val db: HandheldDatabase) {
         /** The SSCC issuer prefix the pallet bootstrap carried, for locally minted pallet SSCCs. */
         const val PALLET_BOOTSTRAP_ISSUER_PREFIX = "pallet_bootstrap_issuer_prefix"
 
+        /** The protocol of the paired host as its last `hello` said: which pallet events it reads (`HostPalletEvents`). */
+        const val HOST_PROTOCOL = "host_protocol"
+
         /** The in-flight document, so a retry re-sends exactly that row and nothing else. */
         fun writeoffPin(documentId: String) = "writeoff_pending:$documentId"
 

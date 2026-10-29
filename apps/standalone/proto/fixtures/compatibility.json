@@ -1,5 +1,9 @@
 {
   "cases": [
+    { "client": 8, "host": { "protocol": 8, "minProtocol": 1 }, "expected": "compatible" },
+    { "client": 7, "host": { "protocol": 8, "minProtocol": 1 }, "expected": "compatible" },
+    { "client": 6, "host": { "protocol": 8, "minProtocol": 1 }, "expected": "compatible" },
+    { "client": 8, "host": { "protocol": 7, "minProtocol": 1 }, "expected": "host_too_old" },
     { "client": 7, "host": { "protocol": 7, "minProtocol": 1 }, "expected": "compatible" },
     { "client": 6, "host": { "protocol": 7, "minProtocol": 1 }, "expected": "compatible" },
     { "client": 7, "host": { "protocol": 6, "minProtocol": 1 }, "expected": "host_too_old" },

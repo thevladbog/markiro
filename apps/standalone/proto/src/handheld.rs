@@ -22,6 +22,8 @@ pub enum PalletEventKind {
     WarehousePalletClosed,
     /// The check of a closed pallet's label.
     WarehousePalletLabel,
+    /// A closed pallet taken apart (protocol 8): its SSCC stays used, its boxes leave it.
+    WarehousePalletDisassembled,
 }
 
 impl PalletEventKind {
@@ -32,6 +34,7 @@ impl PalletEventKind {
             PalletEventKind::PalletBoxRemoved => "pallet_box_removed",
             PalletEventKind::WarehousePalletClosed => "warehouse_pallet_closed",
             PalletEventKind::WarehousePalletLabel => "warehouse_pallet_label",
+            PalletEventKind::WarehousePalletDisassembled => "warehouse_pallet_disassembled",
         }
     }
 }
@@ -114,6 +117,17 @@ pub struct WarehousePalletLabelData {
     pub pallet_id: String,
     pub outcome: LabelOutcome,
     pub at: String,
+}
+
+/// `data` of `warehouse_pallet_disassembled` (protocol 8): a reason code of
+/// [`crate::exception_reasons::DISASSEMBLE`], words only with `other`, and the device's time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WarehousePalletDisassembledData {
+    pub pallet_id: String,
+    pub reason_code: String,
+    pub reason_text: Option<String>,
+    pub disassembled_at: String,
 }
 
 /// What a registry item says about its box.

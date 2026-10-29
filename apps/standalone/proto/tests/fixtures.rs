@@ -27,8 +27,8 @@ use markiro_proto::{
     receipt_codes, shift_close_reasons, shift_supports, BoxRegistryItem, BoxRegistryKind,
     BoxRegistryPage, DemoDataSummary, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData,
     PalletBoxRemovedData, PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState,
-    WarehousePalletClosedData, WarehousePalletLabelData, WarehousePalletOpenedData,
-    MIN_PROTOCOL_VERSION,
+    WarehousePalletClosedData, WarehousePalletDisassembledData, WarehousePalletLabelData,
+    WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -89,7 +89,7 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 8);
+    assert_eq!(hello.protocol, 9);
     assert!(hello.initialized);
 }
 
@@ -108,7 +108,8 @@ fn envelope_decides_compatibility_before_the_rest() {
     assert_eq!(compatibility_for(6, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(7, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(8, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(9, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(9, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(10, &future), Compatibility::HostTooOld);
     // A host of a later protocol that still takes this build's.
     assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
@@ -1971,7 +1972,7 @@ fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
 
 #[test]
 fn this_build_speaks_protocol_seven_and_the_current_hello_fixtures_say_so() {
-    assert_eq!(PROTOCOL_VERSION, 7);
+    assert_eq!(PROTOCOL_VERSION, 8);
     assert_eq!(MIN_PROTOCOL_VERSION, 1);
     for name in ["hello.json", "hello-restored.json", "hello-replaced.json"] {
         let hello: Hello = serde_json::from_value(fixture(name)).unwrap();
@@ -2025,6 +2026,7 @@ fn the_pallet_event_batch_holds_every_kind_with_the_data_its_kind_reads() {
             PalletEventKind::PalletBoxRemoved,
             PalletEventKind::WarehousePalletClosed,
             PalletEventKind::WarehousePalletLabel,
+            PalletEventKind::WarehousePalletDisassembled,
         ]
     );
     for record in &batch.records {
@@ -2042,6 +2044,13 @@ fn the_pallet_event_batch_holds_every_kind_with_the_data_its_kind_reads() {
             PalletEventKind::WarehousePalletClosed => {
                 let closed: WarehousePalletClosedData = serde_json::from_value(data).unwrap();
                 assert_eq!((closed.serial, closed.box_count), (40, 1));
+            }
+            PalletEventKind::WarehousePalletDisassembled => {
+                let taken: WarehousePalletDisassembledData = serde_json::from_value(data).unwrap();
+                assert_eq!(
+                    (taken.reason_code.as_str(), taken.reason_text.as_deref()),
+                    ("wrong_product", None)
+                );
             }
             PalletEventKind::WarehousePalletLabel => {
                 serde_json::from_value::<WarehousePalletLabelData>(data).unwrap();

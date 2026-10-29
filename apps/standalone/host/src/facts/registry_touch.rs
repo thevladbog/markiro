@@ -69,7 +69,7 @@ pub async fn pallet_boxes(
     Ok(())
 }
 
-/// Every box now on a warehouse pallet (it closed).
+/// Every box now on a warehouse pallet (it closed, or is about to be taken apart).
 pub async fn warehouse_pallet_boxes(
     conn: &mut SqliteConnection,
     pallet_id: &str,
