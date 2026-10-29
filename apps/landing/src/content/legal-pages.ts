@@ -44,8 +44,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom operator instruction: scan signals, closing boxes and pallets, the label check, working without the host connection, the send queue, and closing the shift.",
   },
   "MKR-INS-03": {
-    ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба и паллеты, сбой печати, коды, занятые другим терминалом.",
-    en: "Printable operator instruction for exceptions: label reprint, box and pallet disassembly, print recovery, and codes claimed by another terminal.",
+    ru: "Печатная инструкция оператора Маркиро Автоном для нештатных ситуаций: снятие кодов из короба, перепечатка этикетки, расформирование короба и паллеты, сбой печати и повторная печать этикеток.",
+    en: "Printable Markiro Autonom operator instruction for exceptions: removing codes from a box, label reprint, box and pallet disassembly, print failures, and reprinting labels of any shift.",
   },
   "MKR-INS-04": {
     ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",
