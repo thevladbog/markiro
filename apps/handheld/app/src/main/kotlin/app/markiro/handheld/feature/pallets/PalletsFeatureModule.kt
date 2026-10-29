@@ -23,6 +23,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import javax.inject.Singleton
 
 /**
@@ -47,6 +48,9 @@ interface PalletsGateway {
 
     /** «Другой принтер» on a failed pallet label needs the device's own profiles. */
     fun observePrinters(): Flow<List<PrinterEntity>>
+
+    /** The printer the first label of [palletId] went to (null for none yet or no pallet), as the work screen names it. */
+    fun observeDestinationName(palletId: String?): Flow<String?>
 
     fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>>
 
@@ -128,6 +132,10 @@ class PalletsRepository(
     override fun observeClosedPalletCount(): Flow<Int> = db.palletDao().observeClosedCount(null)
 
     override fun observePrinters(): Flow<List<PrinterEntity>> = db.printerDao().observeAll()
+
+    override fun observeDestinationName(palletId: String?): Flow<String?> =
+        if (palletId == null) flowOf(null)
+        else db.printerDao().observeActiveDestinations(null, palletId, null).map { rows -> rows.firstOrNull()?.printer?.name }
 
     override fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>> =
         db.palletMembershipDao().observeByPallet(palletId)
