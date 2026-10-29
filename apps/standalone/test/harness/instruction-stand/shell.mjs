@@ -367,14 +367,21 @@ export class StandShell {
       case "set_system_awake":
         return null;
       // Office files.
+      // The folder is `APP_FOLDER` («Markiro») under the documents (src-tauri/src/office_files.rs).
       case "get_exports_folder":
-        return { path: null, default: "C:\\Users\\Office\\Documents\\Маркиро\\Выгрузки" };
+        return { path: null, default: "C:\\Users\\Office\\Documents\\Markiro\\Выгрузки" };
       case "set_exports_folder":
         return {
           path: args.path ?? null,
-          default: "C:\\Users\\Office\\Documents\\Маркиро\\Выгрузки",
+          default: "C:\\Users\\Office\\Documents\\Markiro\\Выгрузки",
         };
+      // Saved as `SavedFolder` says, nothing written: the office reports the folder and names.
       case "save_office_files":
+        return {
+          segments: args.segments,
+          path: ["C:\\Users\\Office\\Documents\\Markiro", ...args.segments].join("\\"),
+          files: args.files.map((file) => file.name),
+        };
       case "open_office_folder":
       case "open_office_file":
       case "open_external_link":
