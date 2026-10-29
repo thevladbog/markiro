@@ -6,6 +6,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // A4 rasterization and synchronous SQLite contend on the 4-vCPU CI host.
+    // Keep the existing assertions, geometry and 15s timeout; bound CPU contention.
+    maxWorkers: 2,
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     setupFiles: ["test/setup.ts"],
     // Node 24 ships `node:sqlite` as an experimental built-in; the flag marks

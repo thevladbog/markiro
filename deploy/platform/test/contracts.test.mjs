@@ -88,6 +88,21 @@ test("versioned platform manifest binds profiles and distinct image identity; le
   assert.throws(() => parsePlatformManifest(JSON.stringify(value), "124"));
 });
 
+test("lead intake enables without captcha keys and still requires mail routing", () => {
+  const value = {
+    ...env(),
+    LANDING_DEMO_SUBMISSION_ENABLED: "true",
+    LANDING_DEMO_RECIPIENT: "owner@example.test",
+    LANDING_DEMO_REPLY_TO: "hello@example.test",
+  };
+  assert.doesNotThrow(() => validateConfig(value, manifest()));
+  for (const key of ["LANDING_DEMO_RECIPIENT", "LANDING_DEMO_REPLY_TO"]) {
+    const invalid = { ...value };
+    delete invalid[key];
+    assert.throws(() => validateConfig(invalid, manifest()), undefined, key);
+  }
+});
+
 test("configuration fails closed on profiles, origins, digest, secret and manifest mismatch", () => {
   const noTlsDatabaseUrl = databaseUrl();
   noTlsDatabaseUrl.searchParams.delete("sslmode");
