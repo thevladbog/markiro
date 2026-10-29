@@ -109,6 +109,9 @@ Add an entry to `STATES` in `states.mjs`:
 },
 ```
 
+The station's states for MKR-INS-01…04 live in `states-station.mjs`, which `states.mjs`
+spreads into `STATES`.
+
 `computer(name, role)` opens a computer of the site whose shell keeps its pairing in the
 snapshot. Use the following:
 
@@ -127,8 +130,11 @@ gets it in the seed (`seed.mjs`, `seedStationWork`). After that, run `seed` agai
   - Native file dialogs, the exports folder and opening files are canned.
 - **Hardware.**
   - There are no USB or COM devices: the scanner and printer lists are empty.
-  - A printer «Пробная печать» always succeeds, and printing never fails.
-  - A failed printer or a lost scanner needs a canned failure added to `shell.mjs`.
+  - A printer «Пробная печать» always succeeds, and printing succeeds unless a state sets
+    `shell.faults.print` to a `PrintError::code` (`not_sent`, `outcome_unknown`).
+  - `shell.faults.noLocalHost` makes a computer a station on its own PC: no host answers
+    on `127.0.0.1`, so the app offers «Подключиться к хосту в сети».
+  - A lost scanner still needs a canned failure added to `shell.mjs`.
 - **Network and host.**
   - The host's own network answers (`/v1/office/host-network`, MAC and addresses) are
     this Mac's.
