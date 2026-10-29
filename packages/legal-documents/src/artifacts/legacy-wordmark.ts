@@ -20,14 +20,13 @@ const LEGACY_WORDMARK_RELEASES: ReadonlySet<string> = new Set([
   // MKR-INS-01, 02 and 03 left this list with the small-screen work screen
   // reissue (2026.09/02), and 04 and 05 with the station set's catch-up
   // reissue (2026.09/01 and 2026.09/02), for the same reason as 08-10 below.
-  "MKR-INS-06/2026.09/01",
-  "MKR-INS-07/2026.08/03",
+  // MKR-INS-06, 07 and 11 left it when they were withdrawn with the move to
+  // Markiro Autonom: a withdrawn release publishes no files.
   // MKR-INS-08 and MKR-INS-09 left this list with the pallet reissue
   // (2026.09/02 and 2026.09/04): their revisions moved, so they pick up the
   // centred header here rather than keeping the header they were issued with.
   // MKR-INS-10 left this list with the readiness/attributes reissue
   // (2026.09/02) for the same reason.
-  "MKR-INS-11/2026.09/01",
   "MKR-PD-01/2026.08/01",
   "MKR-PD-02/2026.08/01",
 ]);

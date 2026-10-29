@@ -51,18 +51,6 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",
     en: "Printable technician instruction: pairing the station with the cabinet, connecting the scanner and printer, sound, and station updates.",
   },
-  "MKR-INS-05": {
-    ru: "Печатная инструкция оператора для инвентаризации: открытие задания, вердикты сканирования, переупаковка коробов и печать этикеток.",
-    en: "Printable operator instruction for stock counts: opening a task, scan verdicts, repacking boxes, and label printing.",
-  },
-  "MKR-INS-06": {
-    ru: "Печатная инструкция менеджера: создание задания инвентаризации, выписки Честного Знака, фиксация снимка, терминалы и запуск.",
-    en: "Printable manager instruction: creating a stock-count task, Chestny Znak exports, fixing the snapshot, terminals, and launch.",
-  },
-  "MKR-INS-07": {
-    ru: "Печатная инструкция менеджера: ход инвентаризации, исправления, закрытие, поздние события, итоговые документы и завершение.",
-    en: "Printable manager instruction: stock-count progress, corrections, closing, late events, final documents, and completion.",
-  },
   "MKR-INS-08": {
     ru: "Печатная инструкция менеджера: производственная линия, станции на линии, планирование смены, режимы, агрегация и запуск.",
     en: "Printable manager instruction: production lines, stations on a line, shift planning, modes, aggregation, and launch.",
@@ -74,10 +62,6 @@ const DESCRIPTION_BY_CODE = {
   "MKR-INS-10": {
     ru: "Печатная инструкция менеджера: каталог продукции, карточка товара, ГТИН и его владелец, доведение карточки до статуса «Активен», фотография и вывод товара из оборота.",
     en: "Printable manager instruction: the product catalog, the product card, GTIN ownership, completing a card so it becomes active, the photo, and retiring a product.",
-  },
-  "MKR-INS-11": {
-    ru: "Печатная инструкция менеджера: загрузка товаров из Национального каталога Честного знака, проверка полей и фотографии перед добавлением, результат операции и связь карточки товара с ЧЗ.",
-    en: "Printable manager instruction: importing products from the Chestny Znak National Catalog, reviewing fields and photos before applying, the operation result, and the product's link to its Chestny Znak card.",
   },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 

@@ -46,7 +46,7 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     kind: "instructions",
     title: "Инструкции Markiro для операторов, наладчиков и менеджеров",
     description:
-      "Печатные инструкции Markiro: вход в станцию, цикл сканирования и агрегации, исключения, настройка рабочего места, инвентаризация, планирование и закрытие смены.",
+      "Печатные инструкции Markiro: вход в станцию, цикл сканирования и агрегации, исключения, настройка рабочего места, планирование и закрытие смены, каталог.",
     heading: "Инструкции по работе со станцией и кабинетом Markiro",
     navigationLabel: "Инструкции",
     eyebrow: "Печатные инструкции",
@@ -55,7 +55,7 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     socialImage: SHARED_IMAGE,
     socialImageAlt:
       "Markiro — печатные инструкции для станции сканирования и кабинета производства",
-    reviewedAt: "2026-09-06",
+    reviewedAt: "2026-10-29",
   },
   {
     path: "/en/articles/",
@@ -81,7 +81,7 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     kind: "instructions",
     title: "Markiro instructions for station operators and technicians",
     description:
-      "Printable Markiro instructions: station sign-in, the scanning and aggregation cycle, exceptions and recovery, workstation setup, and inventory on the terminal.",
+      "Printable Markiro instructions: station sign-in, the scanning and aggregation cycle, exceptions and recovery, workstation setup, shift planning and closing.",
     heading: "Instructions for the Markiro scanning station",
     navigationLabel: "Instructions",
     eyebrow: "Printable instructions",
@@ -89,7 +89,7 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
       "Each instruction is published as a revision with a code, an effective date and an immutable PDF/A. English editions are informational translations of the authoritative Russian revisions.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: "Markiro — printable instructions for the scanning station",
-    reviewedAt: "2026-09-06",
+    reviewedAt: "2026-10-29",
   },
 ];
 

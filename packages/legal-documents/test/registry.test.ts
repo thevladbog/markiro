@@ -23,13 +23,9 @@ describe("legal document registry", () => {
       "MKR-INS-02",
       "MKR-INS-03",
       "MKR-INS-04",
-      "MKR-INS-05",
-      "MKR-INS-06",
-      "MKR-INS-07",
       "MKR-INS-08",
       "MKR-INS-09",
       "MKR-INS-10",
-      "MKR-INS-11",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -47,12 +43,9 @@ describe("legal document registry", () => {
     expect(() => validateLegalRegistry(LEGAL_RELEASES)).not.toThrow();
     // Every code is still on its first revision except the reissued ones:
     // MKR-INS-04 (2026.08/02: the setup screen was rebuilt around on-screen
-    // scanner and print checks), MKR-INS-06 (2026.08/03: regenerated so the
-    // published PDF embeds exactly the committed screenshots -- the 02 PDF
-    // carried a few antialiased pixels from a different capture run) and
-    // MKR-INS-07 (2026.08/03: the corrections page was rebuilt around
-    // scan-event tabs and bulk selection, and voided scans stopped blocking
-    // safe close).
+    // scanner and print checks). The inventory pair (05/06/07) and the
+    // National Catalog import (11) were withdrawn with the move to Markiro
+    // Autonom, which has neither feature.
     const reissuedRevision: Record<string, string> = {
       // 2026-09-02: the station instruction set (01/02/03/05) was reissued in
       // one sweep -- the floor header collapsed into status dots, the work
@@ -76,11 +69,6 @@ describe("legal document registry", () => {
       "MKR-INS-02": "2026.09/03",
       "MKR-INS-03": "2026.09/04",
       "MKR-INS-04": "2026.09/01",
-      "MKR-INS-05": "2026.09/02",
-      // 2026-09-10: обе редакции исправлены по факту экрана при съёмке
-      // английских кадров.
-      "MKR-INS-06": "2026.09/01",
-      "MKR-INS-07": "2026.08/03",
       // 2026-09-10: the shift cabinet was reworked -- row actions moved into
       // the details panel, the list gained an actual-output line and
       // validation shifts can duplicate the Data Matrix -- so both shift
@@ -96,7 +84,6 @@ describe("legal document registry", () => {
       // 2026-09-19: the product card gained a readiness model and category
       // attributes, so the catalog card instruction was reissued.
       "MKR-INS-10": "2026.09/02",
-      "MKR-INS-11": "2026.09/01",
     };
     expect(
       LEGAL_RELEASES.every(
@@ -110,27 +97,19 @@ describe("legal document registry", () => {
           code !== "MKR-INS-02" &&
           code !== "MKR-INS-03" &&
           code !== "MKR-INS-04" &&
-          code !== "MKR-INS-05" &&
-          code !== "MKR-INS-06" &&
-          code !== "MKR-INS-07" &&
           code !== "MKR-INS-08" &&
           code !== "MKR-INS-09" &&
-          code !== "MKR-INS-10" &&
-          code !== "MKR-INS-11",
+          code !== "MKR-INS-10",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
     expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-26");
-    expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-26");
-    expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-10");
-    expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
-    expect(findLegalRelease("MKR-INS-11").effectiveDate).toBe("2026-09-11");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(30);
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(22);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -229,9 +208,6 @@ describe("legal document registry", () => {
     expect(legalDocumentKind("MKR-INS-02")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-03")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-04")).toBe("instruction");
-    expect(legalDocumentKind("MKR-INS-05")).toBe("instruction");
-    expect(legalDocumentKind("MKR-INS-06")).toBe("instruction");
-    expect(legalDocumentKind("MKR-INS-07")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-08")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-09")).toBe("instruction");
     expect(legalReleaseLocales("MKR-BRD-01")).toEqual(["ru", "en"]);
@@ -239,18 +215,13 @@ describe("legal document registry", () => {
     expect(legalReleaseLocales("MKR-INS-02")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-03")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-04")).toEqual(["ru", "en"]);
-    expect(legalReleaseLocales("MKR-INS-05")).toEqual(["ru", "en"]);
-    expect(legalReleaseLocales("MKR-INS-06")).toEqual(["ru", "en"]);
-    expect(legalReleaseLocales("MKR-INS-07")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru", "en"]);
-    expect(legalDocumentKind("MKR-INS-11")).toBe("instruction");
     expect(legalReleaseLocales("MKR-INS-10")).toEqual(["ru", "en"]);
-    expect(legalReleaseLocales("MKR-INS-11")).toEqual(["ru", "en"]);
   });
 
   it("requires paired routes for every published instruction and for legal releases", () => {
-    // With the catalog pair translated, every instruction is in
+    // Every published instruction is in
     // INSTRUCTION_EN_PUBLISHED, so each one now carries the same paired-route
     // obligation as a legal document. The set's other branch -- a Russian-only
     // instruction -- has no code left to exercise it; the next instruction
@@ -260,7 +231,7 @@ describe("legal document registry", () => {
     delete (ruOnlyLegal[0] as { routes: { en?: string } }).routes.en;
     expect(() => validateLegalRegistry(ruOnlyLegal)).toThrow(/must define routes exactly for/);
 
-    for (const code of ["MKR-INS-01", "MKR-INS-10", "MKR-INS-11"] as const) {
+    for (const code of ["MKR-INS-01", "MKR-INS-09", "MKR-INS-10"] as const) {
       const releases = cloneReleases();
       const release = releases.find((entry) => entry.code === code);
       delete (release as unknown as { routes: { en?: string } }).routes.en;
