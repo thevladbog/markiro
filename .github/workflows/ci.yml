@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve a running main executor check so unrelated merges cannot revoke its CI evidence.
+  # Later main pushes queue in this group; PR updates still replace obsolete checks.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The verification gate is split into three isolated jobs so they run on
 # separate runners in parallel. Each job still executes its own Turbo slice
