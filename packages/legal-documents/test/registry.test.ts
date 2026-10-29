@@ -87,7 +87,10 @@ describe("legal document registry", () => {
       // shift planning gained pallets. MKR-INS-09 (2026.09/04): the shift
       // panel gained a pallets section with placards, and the report catalog
       // grew from five formats to ten.
-      "MKR-INS-08": "2026.09/02",
+      // 2026-10-29: Markiro Autonom replaced the cloud cabinet, so 08 was
+      // rewritten for the standalone office -- lines with a maximum of
+      // devices per shift, devices on the host, the shift side panel.
+      "MKR-INS-08": "2026.10/01",
       "MKR-INS-09": "2026.09/04",
       // 2026-09-19: the product card gained a readiness model and category
       // attributes, so the catalog card instruction was reissued.
@@ -114,7 +117,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
+    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(22);
