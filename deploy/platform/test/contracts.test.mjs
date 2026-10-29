@@ -236,6 +236,56 @@ test("landing moves the retired film and kiosk pages permanently to the home pag
     assert.ok(landing.indexOf("handle @retiredEn") < landing.indexOf(later), later);
 });
 
+test("landing moves the withdrawn instructions permanently to the instructions hub of their language", () => {
+  const caddy = read("deploy/platform/Caddyfile");
+  const landing = caddy.slice(
+    caddy.indexOf("(landing_routes) {"),
+    caddy.indexOf("(releases_headers)"),
+  );
+  const escape = (text) => text.replace(/[.*/]/gu, (character) => `\\${character}`);
+  const variants = (page) => escape([page, `${page}/`, `${page}/*`, `${page}.md`].join(" "));
+  const ru = [
+    "/instruktsii/inventarizatsiya-na-terminale",
+    "/instruktsii/inventarizatsiya-podgotovka",
+    "/instruktsii/inventarizatsiya-zakrytie",
+    "/instruktsii/katalog-zagruzka-iz-nk",
+  ]
+    .map(variants)
+    .join(" ");
+  const verification = escape(
+    ["05", "06", "07", "11"].map((code) => `/d/MKR-INS-${code}/*`).join(" "),
+  );
+  const en = [
+    "/en/instructions/terminal-inventory-count",
+    "/en/instructions/inventory-preparation",
+    "/en/instructions/inventory-closing",
+    "/en/instructions/national-catalog-import",
+  ]
+    .map(variants)
+    .join(" ");
+  assert.match(
+    landing,
+    new RegExp(
+      `@retiredInstructionsRu \\{\\n\\t\\t\\tmethod GET HEAD\\n\\t\\t\\tpath ${ru} ${verification}\\n\\t\\t\\}\\n\\t\\thandle @retiredInstructionsRu \\{\\n\\t\\t\\tredir \\* /instruktsii/\\{http\\.request\\.uri\\.prefixed_query\\} 301\\n`,
+      "u",
+    ),
+  );
+  assert.match(
+    landing,
+    new RegExp(
+      `@retiredInstructionsEn \\{\\n\\t\\t\\tmethod GET HEAD\\n\\t\\t\\tpath ${en}\\n\\t\\t\\}\\n\\t\\thandle @retiredInstructionsEn \\{\\n\\t\\t\\tredir \\* /en/instructions/\\{http\\.request\\.uri\\.prefixed_query\\} 301\\n`,
+      "u",
+    ),
+  );
+  for (const later of [
+    "@landingAssets",
+    "@landingIndexFile",
+    "@landingDirectory",
+    "@landingDocument",
+  ])
+    assert.ok(landing.indexOf("handle @retiredInstructionsEn") < landing.indexOf(later), later);
+});
+
 test("CI routes platform files to bundle checks and builds isolated preparation without publishing", () => {
   for (const path of ["deploy/platform/Caddyfile", "deploy/platform/preflight.mjs"])
     assert.equal(classifyChangedFiles([path]).jobs.production_bundle, true);
