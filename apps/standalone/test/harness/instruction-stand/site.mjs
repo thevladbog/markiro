@@ -72,8 +72,12 @@ export const STATION = { name: "Станция линии 1", line: 0 };
 /** The day the stand's shifts are made for: the browser's clock stands on it. */
 export const PRODUCTION_DATE = "2026-10-29";
 export const NEXT_DATE = "2026-10-30";
-/** When the seed starts, for the host and the browser alike: 10:40 Moscow on the production day. */
-export const BROWSER_TIME = "2026-10-29T07:40:00Z";
+/**
+ * When the seed starts, for the host and the browser alike: 10:40 Moscow on the production day.
+ * `STAND_TIME` moves it, so a session with a real device (the handheld on an emulator, whose clock
+ * the stand cannot move: `tsd.mjs`) runs near the device's own time.
+ */
+export const BROWSER_TIME = process.env.STAND_TIME ?? "2026-10-29T07:40:00Z";
 
 const GS = "\u001d";
 
