@@ -75,16 +75,60 @@ test("required production gate rehearses exact old return and exports only safe 
   );
 });
 
-test("required production gate runs actual forward recovery serially and exports only safe create-only evidence", () => {
-  const w = load(readFileSync(".github/workflows/ci.yml", "utf8")),
-    steps = w.jobs["production-bundle"].steps;
-  const old = steps.findIndex((s) => s.run?.includes("rehearseUpgrade"));
+test("required production gate runs actual forward recovery per scenario and exports only safe create-only evidence", () => {
+  const w = load(readFileSync(".github/workflows/ci.yml", "utf8"));
+  const bundle = w.jobs["production-bundle"].steps;
+  const old = bundle.findIndex((s) => s.run?.includes("rehearseUpgrade"));
+  const stack = bundle.findIndex((s) => s.run?.includes("deploy/platform/ci-stack.mjs"));
+  assert.ok(old >= 0 && stack > old);
+  // Moved off production-bundle to parallel runners, one per scenario.
+  assert.equal(
+    bundle.some((s) => s.run?.includes("rehearseForwardRecovery")),
+    false,
+  );
+
+  const scenarioJob = w.jobs["platform-forward-recovery-scenario"];
+  assert.equal(scenarioJob["runs-on"], "ubuntu-24.04");
+  assert.deepEqual(scenarioJob.strategy.matrix.scenario, ["healthy", "replacement-failure"]);
+  assert.equal(scenarioJob.strategy["fail-fast"], false);
+  const checkout = scenarioJob.steps.find((s) => s.uses?.startsWith("actions/checkout@"));
+  assert.equal(checkout.with["fetch-depth"], 0);
+  const steps = scenarioJob.steps;
+  // The rehearsal reads this exact SHA's ICU worker export, before it runs.
+  const icu = steps.findIndex((s) =>
+    s.run?.includes(
+      'deploy/platform/backup/backup-ci.mjs --local-ci --icu --export-image "$RUNNER_TEMP/platform-recovery-image-icu"',
+    ),
+  );
   const forward = steps.findIndex((s) => s.run?.includes("rehearseForwardRecovery"));
-  const stack = steps.findIndex((s) => s.run?.includes("deploy/platform/ci-stack.mjs"));
-  assert.ok(old >= 0 && forward > old && stack > forward);
+  assert.ok(icu >= 0 && forward > icu);
+  assert.ok(
+    steps[forward].run.includes(
+      'rehearseForwardRecovery(["--local-ci", "--scenario", process.env.FORWARD_SCENARIO]',
+    ),
+  );
+  assert.equal(steps[forward].env.FORWARD_SCENARIO, "${{ matrix.scenario }}");
+  assert.ok(
+    steps[forward].run.includes("docker pull --platform linux/amd64 docker:28-dind@sha256:"),
+  );
   assert.ok(steps[forward].run.includes('flag: "wx"'));
   assert.equal(steps[forward].if, undefined);
-  const upload = steps.find((s) => s.with?.name === "platform-forward-recovery-evidence");
+  const scenarioUpload = steps.find(
+    (s) => s.with?.name === "platform-forward-scenario-${{ matrix.scenario }}",
+  );
+  assert.equal(scenarioUpload.if, "always()");
+  assert.equal(scenarioUpload.with.path, "${{ runner.temp }}/platform-forward-scenario.json");
+  assert.equal(scenarioUpload.with.overwrite, false);
+  assert.equal(scenarioUpload.with["if-no-files-found"], "error");
+  assert.match(scenarioUpload.uses, /@[a-f0-9]{40}$/u);
+
+  // Both scenarios and every check, accepted together as the serial run was.
+  const accept = w.jobs["platform-forward-recovery"];
+  assert.deepEqual(accept.needs, ["classify-changes", "platform-forward-recovery-scenario"]);
+  const combine = accept.steps.find((s) => s.run?.includes("combineForwardScenarioEvidence"));
+  assert.ok(combine.run.includes('flag: "wx"'));
+  assert.equal(combine.if, undefined);
+  const upload = accept.steps.find((s) => s.with?.name === "platform-forward-recovery-evidence");
   assert.equal(upload.if, "always()");
   assert.equal(upload.with.path, "${{ runner.temp }}/platform-forward-recovery.json");
   assert.equal(upload.with.overwrite, false);

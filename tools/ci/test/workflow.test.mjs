@@ -24,6 +24,9 @@ const heavyJobs = [
   ["tenant-team-infrastructure", "tenant_team_infrastructure"],
   ["production-bundle", "production_bundle"],
   ["platform-contracts", "platform_contracts"],
+  ["platform-forward-recovery", "platform_forward_recovery"],
+  // The two scenario runners whose evidence platform-forward-recovery accepts.
+  ["platform-forward-recovery-scenario", "platform_forward_recovery"],
   ["station-rust", "station_rust"],
   ["station-windows-build", "station_windows_build"],
   ["signer-rust", "signer_rust"],
@@ -51,6 +54,7 @@ const classifierOutputs = [
 const extraNeeds = {
   "landing-browser": ["landing-build"],
   "landing-lighthouse": ["landing-build"],
+  "platform-forward-recovery": ["platform-forward-recovery-scenario"],
 };
 // A step that starts a tools/production-browser harness (not just installs it).
 const harnessStep = /exec playwright test|--ignore-workspace test:|pnpm test:[\w:-]+:browser/;
@@ -855,14 +859,28 @@ test("the SaaS-admin suites stay required and the cabinet and station galleries 
 
 test("the platform release evidence covers the split gates through ci-required", async () => {
   // release-evidence.mjs accepts a main CI run only with a successful
-  // production-bundle and ci-required; ci-required in turn fails unless every
-  // selected required job succeeded, the landing and SaaS-admin browser jobs included.
-  const source = readFileSync("deploy/platform/release-evidence.mjs", "utf8");
-  assert.match(source, /new Set\(\["production-bundle", "ci-required"\]\)/u);
+  // production-bundle, both forward-rehearsal scenario runners, the job that
+  // accepts them together, and ci-required; ci-required in turn fails unless
+  // every selected required job succeeded, the landing and SaaS-admin browser
+  // jobs included.
+  const { PLATFORM_CI_REQUIRED_JOBS } =
+    await import("../../../deploy/platform/release-evidence.mjs");
+  const scenarios = workflow.jobs["platform-forward-recovery-scenario"].strategy.matrix.scenario;
+  assert.deepEqual(PLATFORM_CI_REQUIRED_JOBS, [
+    "production-bundle",
+    ...scenarios.map((scenario) => `platform-forward-recovery-scenario (${scenario})`),
+    "platform-forward-recovery",
+    "ci-required",
+  ]);
+  // On a main push the classifier selects the rehearsal whenever production-bundle runs.
+  const classify = workflow.jobs["classify-changes"].steps.find((step) => step.id === "affected");
+  assert.match(classify.run, /release_gate=\(--release-gate\)/u);
+  assert.match(classify.run, /--stdin-zero "\$\{release_gate\[@\]\}"/u);
   const gate = workflow.jobs["ci-required"];
   const { HEAVY_JOBS } = await import("../affected.mjs");
   for (const jobId of [
     "production-bundle",
+    "platform-forward-recovery",
     "platform-contracts",
     "landing-browser",
     "landing-lighthouse",

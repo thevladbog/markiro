@@ -106,7 +106,9 @@ async function verifyProtectedDispatch(
       );
       ensure(
         run.head_sha === dispatch.toolingSha &&
-          run.head_branch === "main" &&
+          (run.head_branch === "main" ||
+            (workflowPath === ".github/workflows/bootstrap-release-catalog.yml" &&
+              run.head_branch === `catalog-bootstrap-${dispatch.toolingSha}`)) &&
           run.event === "workflow_dispatch",
       );
       ensure(

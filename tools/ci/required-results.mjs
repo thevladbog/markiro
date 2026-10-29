@@ -7,7 +7,10 @@ import { HEAVY_JOBS } from "./affected.mjs";
 // A required job that shares another job's classifier output instead of
 // having its own: the standalone Windows tests run beside the installer job
 // whenever that job is selected (the two were one serial job until the split).
+// The forward rehearsal's two scenario runners (a matrix, one `needs` result)
+// feed the job that accepts their evidence together.
 const SHARED_OUTPUT_JOBS = Object.freeze({
+  platform_forward_recovery: ["platform-forward-recovery-scenario"],
   standalone_windows_build: ["standalone-windows-tests"],
 });
 
