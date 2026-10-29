@@ -36,8 +36,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Use and document-control rules for the compact Markiro branded letterhead.",
   },
   "MKR-INS-01": {
-    ru: "Печатная инструкция оператора станции сканирования: вход по бейджу, выбор или создание смены, начало работы.",
-    en: "Printable scanning-station operator instruction: badge sign-in, shift selection or creation, and starting work.",
+    ru: "Печатная инструкция оператора станции Маркиро Автоном: вход по бейджу или табельному номеру и PIN, выбор смены линии, создание смены на станции и начало работы.",
+    en: "Printable Markiro Autonom station operator instruction: sign-in with a badge or a personnel number and PIN, choosing a shift of the line, creating a shift on the station, and starting work.",
   },
   "MKR-INS-02": {
     ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, сборка паллет, работа без сети и закрытие смены.",

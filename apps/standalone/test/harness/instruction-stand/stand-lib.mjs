@@ -91,7 +91,10 @@ export async function startHost({
     stop: async () => {
       child.kill("SIGTERM");
       await new Promise((resolve) =>
-        child.exitCode === null ? child.once("exit", resolve) : resolve(),
+        // A host a state already stopped has exited by its signal (`exitCode` stays null).
+        child.exitCode === null && child.signalCode === null
+          ? child.once("exit", resolve)
+          : resolve(),
       );
     },
   };
