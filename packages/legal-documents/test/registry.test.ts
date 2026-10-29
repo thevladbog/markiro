@@ -71,11 +71,12 @@ describe("legal document registry", () => {
       // 02 for its work cycle: SSCC blocks from the host, the sync panel and
       // the send queue in place of the cloud server, and 03 for exceptions,
       // print failures and the label reprint session that looks codes up on
-      // the host.
+      // the host, and 04 for pairing with the host by a code from the office
+      // and the workstation tabs.
       "MKR-INS-01": "2026.10/01",
       "MKR-INS-02": "2026.10/01",
       "MKR-INS-03": "2026.10/01",
-      "MKR-INS-04": "2026.09/01",
+      "MKR-INS-04": "2026.10/01",
       // 2026-09-10: the shift cabinet was reworked -- row actions moved into
       // the details panel, the list gained an actual-output line and
       // validation shifts can duplicate the Data Matrix -- so both shift
@@ -112,7 +113,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
