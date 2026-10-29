@@ -14,6 +14,7 @@ const jobNames = [
   "tenant_team_infrastructure",
   "production_bundle",
   "platform_contracts",
+  "platform_forward_recovery",
   "station_rust",
   "station_windows_build",
   "signer_rust",
@@ -38,6 +39,7 @@ const signerOnly = {
     tenant_team_infrastructure: false,
     production_bundle: false,
     platform_contracts: false,
+    platform_forward_recovery: false,
     station_rust: false,
     station_windows_build: false,
     signer_rust: true,
@@ -429,7 +431,10 @@ test("shared Station recovery contract and fixtures select handheld verification
 test("deployment and release tooling selects its consuming jobs", () => {
   const cases = [
     ["deploy/production/preflight.mjs", ["production_bundle", "platform_contracts"]],
-    ["deploy/platform/ci-stack.mjs", ["production_bundle", "platform_contracts"]],
+    [
+      "deploy/platform/ci-stack.mjs",
+      ["production_bundle", "platform_contracts", "platform_forward_recovery"],
+    ],
     [
       "tools/production-browser/tests/landing-seo.spec.ts",
       ["landing_browser", "landing_lighthouse", "saas_admin_browser", "cabinet_station_galleries"],
@@ -569,6 +574,62 @@ test("multiple changed paths union their selected jobs", () => {
   ]);
 });
 
+test("the forward rehearsal runs only for what it exercises, and with every release gate", () => {
+  for (const path of [
+    "deploy/platform/forward-ci-scenario.mjs",
+    "deploy/platform/backup/backup-ci.mjs",
+    "deploy/production/release-manifest.mjs",
+    "deploy/production/cli-main.mjs",
+    "packages/db/migrations/0202_landing_lead_rate_windows.sql",
+    "packages/db/src/runtime-migrate.ts",
+  ])
+    assert.equal(classifyChangedFiles([path]).jobs.platform_forward_recovery, true, path);
+  for (const path of [
+    "apps/landing/src/content/hubs.ts",
+    "apps/landing/public/legal/artifacts.json",
+    "packages/legal-documents/src/registry.ts",
+    "deploy/production/legal-artifacts-attestation.json",
+    "deploy/production/verify-legal-artifacts.mjs",
+    "apps/api/src/main.ts",
+    "apps/saas-admin/src/main.tsx",
+    "packages/db/src/schema/tenants.ts",
+    "apps/standalone/src/App.tsx",
+    "compose.production.yml",
+  ]) {
+    const { jobs } = classifyChangedFiles([path]);
+    assert.equal(jobs.platform_forward_recovery, false, path);
+    // A push to main, whose run the platform release reads, needs both.
+    assert.equal(
+      classifyChangedFiles([path], { releaseGate: true }).jobs.platform_forward_recovery,
+      jobs.production_bundle,
+      path,
+    );
+  }
+  assert.equal(
+    classifyChangedFiles(["apps/standalone/src/App.tsx"], { releaseGate: true }).jobs
+      .platform_forward_recovery,
+    false,
+  );
+});
+
+test("CLI --release-gate selects the forward rehearsal with production_bundle", () => {
+  const directory = mkdtempSync(join(tmpdir(), "markiro-ci-policy-"));
+  const outputPath = join(directory, "github-output.txt");
+  const child = spawnSync(
+    process.execPath,
+    ["tools/ci/affected.mjs", "--stdin-zero", "--release-gate", "--github-output", outputPath],
+    {
+      cwd: process.cwd(),
+      input: Buffer.from("apps/landing/src/content/hubs.ts\0"),
+      encoding: "utf8",
+    },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  const output = readFileSync(outputPath, "utf8");
+  assert.match(output, /^production_bundle=true$/mu);
+  assert.match(output, /^platform_forward_recovery=true$/mu);
+});
+
 test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
   const directory = mkdtempSync(join(tmpdir(), "markiro-ci-policy-"));
   const outputPath = join(directory, "github-output.txt");
@@ -593,6 +654,7 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "tenant_team_infrastructure=false",
       "production_bundle=false",
       "platform_contracts=false",
+      "platform_forward_recovery=false",
       "station_rust=false",
       "station_windows_build=false",
       "signer_rust=true",
