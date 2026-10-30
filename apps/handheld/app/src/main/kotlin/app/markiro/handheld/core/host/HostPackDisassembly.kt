@@ -68,6 +68,7 @@ class HostPackDisassembly(
                 is HostFailure.RestorePending -> "restore_hold"
                 HostFailure.CertificateMismatch -> "certificate"
                 HostFailure.Forbidden -> "forbidden"
+                HostFailure.ProtocolUnsupported -> "protocol_unsupported"
                 else -> if(error?.status==404) "host_update" else "unavailable"
             }
             throw PackDisassemblyFailure(code, code !in DEFINITE_REFUSALS)
@@ -144,6 +145,6 @@ class HostPackDisassembly(
         const val PENDING_KEY="pack_disassembly_pending_v1"
         const val EVIDENCE_PREFIX="pack_disassembly_evidence_v1:"
         private val TOKEN=Regex("[a-f0-9]{64}")
-        private val DEFINITE_REFUSALS=setOf("pack_changed","shift_open","already_disassembled","not_closed","reason_required","pack_not_found","demo_box","cloud_history")
+        private val DEFINITE_REFUSALS=setOf("pack_changed","shift_open","already_disassembled","not_closed","reason_required","pack_not_found","demo_box","cloud_history","forbidden","protocol_unsupported")
     }
 }

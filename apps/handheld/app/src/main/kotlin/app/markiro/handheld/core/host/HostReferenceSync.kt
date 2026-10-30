@@ -4,6 +4,7 @@ import app.markiro.handheld.core.network.host.ChangeItemDto
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.network.host.HostApiError
 import app.markiro.handheld.core.network.host.HostFailure
+import app.markiro.handheld.core.network.host.text as stringField
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
@@ -89,14 +90,15 @@ class HostReferenceSync(
     private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
 
     private suspend fun releaseCodes(item: ChangeItemDto) {
-        check(!item.deleted) { "A code release cannot be deleted" }
-        val data=checkNotNull(item.data)
-        val shiftId=checkNotNull(data.text("shiftId"))
-        val at=checkNotNull(data.text("releasedAt"))
-        java.time.Instant.parse(at)
+        if(item.deleted) return
+        val data=item.data ?: return
+        val shiftId=data.stringField("shiftId")?.takeIf { it.isNotBlank() } ?: return
+        val at=data.stringField("releasedAt") ?: return
+        try { java.time.Instant.parse(at) } catch(_:java.time.format.DateTimeParseException) { return }
+        val box=db.boxDao().get(item.id)
+        if(box!=null && (box.shiftId!=shiftId || box.closedAt==null)) return
         db.boxRegistryDao().removeBox(item.id)
-        val box=db.boxDao().get(item.id) ?: return
-        check(box.shiftId==shiftId && box.closedAt!=null) { "Code release does not match a closed local box" }
+        if(box==null) return
         db.boxDao().markDisassembled(box.boxId,at)
         // Keep raw outbox sources and frozen host bytes: only receipts retire those.
         db.codeDao().deleteInBox(box.boxId)

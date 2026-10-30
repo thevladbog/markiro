@@ -150,14 +150,72 @@ class HostReferenceSyncTest {
     fun aHostCodeReleaseFreesOnlyTheNamedClosedBoxAndKeepsThePendingRawOutbox() = runTest {
         val box=app.markiro.handheld.core.storage.BoxEntity("box-1","shift-1","046012345600000016","2026-10-30T10:00:00Z","2026-10-30T10:01:00Z",null,"printed",null,"ack")
         db.boxDao().insert(box)
+        val registry=app.markiro.handheld.core.storage.BoxRegistryEntity(checkNotNull(box.sscc),box.boxId,"product-1",1,"[]","at")
+        db.boxRegistryDao().upsert(registry)
         db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity("hash-1","shift-1","04601234567015","one","2026-10-30T10:00:00Z","box-1"))
         db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity("hash-2","other-shift","04601234567015","two","2026-10-30T10:00:00Z","other-box"))
         db.outboxDao().insert(app.markiro.handheld.core.storage.OutboxEntity(shiftId="shift-1",raw="frozen-source",verdict="accepted",scannedAt="2026-10-30T10:00:00Z",operatorId=null,codeHash="hash-1",gtin14="04601234567015",serial="one",boxId="box-1"))
         val (reference,_)=sync("""{"hostId":"$hostId","rev":58,"hasMore":false,"items":[{"entity":"code_releases","id":"box-1","rev":58,"deleted":false,"data":{"shiftId":"shift-1","documentId":"doc-1","releasedAt":"2026-10-30T10:02:00.000Z","codeCount":1}}]}""")
         reference.sync().getOrThrow()
+        assertNull(db.boxRegistryDao().bySscc(registry.sscc))
         assertEquals(1,db.outboxDao().countNow())
         assertEquals(0,db.boxDao().itemCount("box-1"))
         assertEquals(1,db.boxDao().itemCount("other-box"))
         assertEquals("2026-10-30T10:02:00.000Z",db.boxDao().get("box-1")?.disassembledAt)
     }
+    private suspend fun seedReleaseBox(id:String="box-1",sscc:String="046012345600000016",closed:Boolean=true):app.markiro.handheld.core.storage.BoxRegistryEntity {
+        db.boxDao().insert(app.markiro.handheld.core.storage.BoxEntity(id,"shift-1",sscc,"2026-10-30T10:00:00Z",if(closed) "2026-10-30T10:01:00Z" else null,null,"printed",null,"ack"))
+        db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity("hash-$id","shift-1","04601234567015",id,"2026-10-30T10:00:00Z",id))
+        return app.markiro.handheld.core.storage.BoxRegistryEntity(sscc,id,"product-1",1,"[]","at").also { db.boxRegistryDao().upsert(it) }
+    }
+    private fun releasePage(rev:Long,items:String):String = """{"hostId":"$hostId","rev":$rev,"hasMore":false,"items":[$items,{"entity":"lines","id":"5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61","rev":$rev,"deleted":false,"data":{"name":"Healthy $rev"}}]}"""
+    private fun release(id:String="box-1",data:String?="""{"shiftId":"shift-1","releasedAt":"2026-10-30T10:02:00.000Z"}""",deleted:Boolean=false):String =
+        """{"entity":"code_releases","id":"$id","rev":1,"deleted":$deleted,"data":${data?:"null"}}"""
+
+    @Test fun invalidAndDeletedReleasesDoNotBlockHealthyRecordsOrAdvanceABox()=runTest {
+        val registry=seedReleaseBox()
+        val invalid=listOf(
+            release(deleted=true),release(data=null),release(data="{}"),
+            release(data="""{"shiftId":null,"releasedAt":"2026-10-30T10:02:00Z"}"""),
+            release(data="""{"shiftId":1,"releasedAt":"2026-10-30T10:02:00Z"}"""),
+            release(data="""{"shiftId":{},"releasedAt":"2026-10-30T10:02:00Z"}"""),
+            release(data="""{"shiftId":"","releasedAt":"2026-10-30T10:02:00Z"}"""),
+            release(data="""{"shiftId":"shift-1"}"""),
+            release(data="""{"shiftId":"shift-1","releasedAt":123}"""),
+            release(data="""{"shiftId":"shift-1","releasedAt":{}}"""),
+            release(data="""{"shiftId":"shift-1","releasedAt":"not-a-date"}"""),
+        )
+        for((index,item) in invalid.withIndex()) {
+            val rev=100L+index
+            sync(releasePage(rev,item)).first.sync().getOrThrow()
+            assertEquals(rev,db.deviceConfigDao().get()?.hostRev)
+            assertEquals("Healthy $rev",db.deviceConfigDao().get()?.lineName)
+            assertEquals(registry,db.boxRegistryDao().bySscc(registry.sscc))
+            assertEquals(1,db.boxDao().itemCount("box-1"));assertNull(db.boxDao().get("box-1")?.disassembledAt)
+        }
+    }
+    @Test fun mismatchedAndOpenBoxesKeepTheirRegistryEntriesAndCodes()=runTest {
+        val mismatch=seedReleaseBox("mismatch","046012345600000016")
+        val open=seedReleaseBox("open","046012345600000023",closed=false)
+        val items=release("mismatch", """{"shiftId":"other-shift","releasedAt":"2026-10-30T10:02:00Z"}""")+","+release("open")
+        sync(releasePage(60,items)).first.sync().getOrThrow()
+        assertEquals("Healthy 60",db.deviceConfigDao().get()?.lineName)
+        for(row in listOf(mismatch,open)) {
+            assertEquals(row,db.boxRegistryDao().bySscc(row.sscc))
+            assertEquals(1,db.boxDao().itemCount(row.boxId));assertNull(db.boxDao().get(row.boxId)?.disassembledAt)
+        }
+    }
+    @Test fun aValidReleaseForAnUnknownBoxStillInvalidatesItsRegistryEntry()=runTest {
+        val known=seedReleaseBox()
+        val external=known.copy(sscc="046012345600000023",boxId="external-box")
+        db.boxRegistryDao().upsert(external)
+        val invalid=release("external-box", """{"shiftId":1,"releasedAt":"2026-10-30T10:02:00Z"}""")
+        sync(releasePage(59,invalid)).first.sync().getOrThrow()
+        assertEquals(external,db.boxRegistryDao().bySscc(external.sscc))
+        sync(releasePage(60,release("external-box"))).first.sync().getOrThrow()
+        assertNull(db.boxRegistryDao().bySscc(external.sscc));assertNull(db.boxDao().get("external-box"))
+        assertEquals(known,db.boxRegistryDao().bySscc(known.sscc));assertEquals(1,db.boxDao().itemCount(known.boxId))
+        assertEquals(60L,db.deviceConfigDao().get()?.hostRev)
+    }
+
 }

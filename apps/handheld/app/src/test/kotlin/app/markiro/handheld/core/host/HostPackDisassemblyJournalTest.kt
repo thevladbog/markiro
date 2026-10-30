@@ -23,6 +23,7 @@ class HostPackDisassemblyJournalTest {
     private val credential=InMemoryCredentialStore()
     private val requests=mutableListOf<String>()
     private var timeout=true
+    private var transportFailure:TransportFailure?=null
     private var responseOverride:String?=null
     private var beforeReply:suspend () -> Unit = {}
     private var responseStatus=200
@@ -32,6 +33,7 @@ class HostPackDisassemblyJournalTest {
             if(path.endsWith("lookup")) return HostResult.Ok(200,HostFactsFixtures.fixture("device-pack-inspection.json").toString(),null)
             requests+=body
             beforeReply()
+            transportFailure?.let { return HostResult.Failed(it) }
             return if(timeout) HostResult.Failed(TransportFailure.TIMEOUT) else HostResult.Ok(responseStatus,responseOverride?:HostFactsFixtures.fixture("device-pack-disassembled.json").toString(),null)
         }
     }
@@ -134,4 +136,40 @@ class HostPackDisassemblyJournalTest {
         try{repo.pending();fail("expected unreadable request")}catch(error:PackDisassemblyFailure){assertEquals("saved_unreadable",error.code)}
         assertNotNull(db.metaDao().get(HostPackDisassembly.PENDING_KEY));assertTrue(requests.isEmpty())
     }
+    private suspend fun assertDefiniteRefusal(status:Int,code:String) {
+        val repo=repository();val card=inspection();val pending=repo.prepare(card,card.reasons.single(),operator)
+        timeout=false;responseStatus=status
+        responseOverride="""{"error":{"code":"$code","message":"test refusal"}}"""
+        try {repo.submit(pending);fail("expected definite refusal")}
+        catch(error:PackDisassemblyFailure){assertEquals(code,error.code);assertFalse(error.uncertain)}
+        assertNull(repo.pending());assertEquals(listOf(pending.body),requests)
+    }
+    @Test fun aForbiddenOperationReleasesItsPendingIntent()=runTest { assertDefiniteRefusal(403,"forbidden") }
+    @Test fun anUnsupportedProtocolReleasesItsPendingIntent()=runTest { assertDefiniteRefusal(409,"protocol_unsupported") }
+
+    @Test fun restoreOldHostAndUnreliableHttpAnswersKeepTheOriginalIntent()=runTest {
+        val repo=repository();val card=inspection();val pending=repo.prepare(card,card.reasons.single(),operator)
+        timeout=false
+        for((status,code,expected) in listOf(Triple(503,"restore_pending","restore_hold"),Triple(404,"not_found","host_update"),Triple(500,"internal","unavailable"))) {
+            responseStatus=status;responseOverride="""{"error":{"code":"$code","message":"test refusal"}}"""
+            try{repo.submit(pending);fail("expected uncertain result")}
+            catch(error:PackDisassemblyFailure){assertEquals(expected,error.code);assertTrue(error.uncertain)}
+            assertEquals(pending,repo.pending())
+        }
+        responseStatus=200;responseOverride="not-json"
+        try{repo.submit(pending);fail("expected unreadable response")}
+        catch(error:PackDisassemblyFailure){assertTrue(error.uncertain)}
+        assertEquals(pending,repo.pending());assertTrue(requests.all { it==pending.body })
+    }
+    @Test fun certificateAndTransportFailuresKeepTheOriginalIntent()=runTest {
+        val repo=repository();val card=inspection();val pending=repo.prepare(card,card.reasons.single(),operator)
+        for(failure in listOf(TransportFailure.CERT_MISMATCH,TransportFailure.TIMEOUT,TransportFailure.UNREACHABLE)) {
+            transportFailure=failure
+            try{repo.submit(pending);fail("expected uncertain result")}
+            catch(error:PackDisassemblyFailure){assertEquals(if(failure==TransportFailure.CERT_MISMATCH) "certificate" else "unavailable",error.code);assertTrue(error.uncertain)}
+            assertEquals(pending,repo.pending())
+        }
+        assertTrue(requests.all { it==pending.body })
+    }
+
 }
