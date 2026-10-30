@@ -231,6 +231,11 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       expect(
         mails.find(({ row }) => row.kind === "landing-lead-notification")?.template,
       ).toMatchObject({ intent: "download", tariffCode });
+      expect(mails.find(({ row }) => row.kind === "landing-download-link")?.template).toMatchObject(
+        {
+          downloadPageUrl: `https://markiro.example/skachat/?installer=1&tariff=${tariffCode}`,
+        },
+      );
     },
   );
 

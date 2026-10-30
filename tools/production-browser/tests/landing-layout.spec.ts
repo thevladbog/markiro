@@ -45,6 +45,7 @@ for (const width of [320, 390, 412, 768, 1440, 1920, 3440])
           const buttons = await page
             .locator(".ax-prices__grid .ax-plan__actions > .ax-btn")
             .evaluateAll((es) => es.map((e) => e.getBoundingClientRect().top));
+          expect(buttons.length, path).toBeGreaterThan(0);
           expect(Math.max(...buttons) - Math.min(...buttons)).toBeLessThanOrEqual(1);
         }
       }
