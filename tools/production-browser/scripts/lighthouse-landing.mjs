@@ -36,8 +36,8 @@ export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
  * through total-blocking-time noise while its paint metrics stayed average.
  */
 /**
- * The gate must measure what production serves: the enabled demo form with its
- * captcha container. The Playwright suite builds from the same environment, so
+ * The gate must measure what production serves: the enabled lead forms and
+ * consent controls. The Playwright suite builds from the same environment, so
  * CI builds the landing once for both (landing-build.mjs).
  */
 export const lighthouseBuildEnvironment = landingBuildEnvironment;
@@ -132,15 +132,21 @@ export async function runLandingLighthouse() {
   const toolRoot = path.resolve(import.meta.dirname, "..");
   const astro = path.join(landingRoot, "node_modules/.bin/astro");
   const environment = lighthouseBuildEnvironment(process.env);
+  const port = process.env.LANDING_TEST_PORT ?? "5473";
+  const baseUrl = `http://127.0.0.1:${port}/`;
   prepareLandingDist(process.env);
-  const preview = spawn(astro, ["preview", "--host", "127.0.0.1", "--port", "5473"], {
-    cwd: landingRoot,
-    env: environment,
-    stdio: "ignore",
-  });
+  const preview = spawn(
+    astro,
+    ["preview", "--ignore-lock", "--host", "127.0.0.1", "--port", port],
+    {
+      cwd: landingRoot,
+      env: { ...environment, ASTRO_PREVIEW_BACKGROUND: "0" },
+      stdio: "inherit",
+    },
+  );
   const outputRoot = await mkdtemp(path.join(tmpdir(), "markiro-lighthouse-"));
   try {
-    await waitForServer("http://127.0.0.1:5473/", preview);
+    await waitForServer(baseUrl, preview);
     for (const route of LIGHTHOUSE_ROUTES) {
       for (const profile of ["mobile", "desktop"]) {
         const label = `${profile} ${route}`;
@@ -154,7 +160,7 @@ export async function runLandingLighthouse() {
             isCI: Boolean(process.env.CI),
             output,
             profile,
-            url: new URL(route, "http://127.0.0.1:5473/").href,
+            url: new URL(route, baseUrl).href,
           });
           await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
             cwd: toolRoot,

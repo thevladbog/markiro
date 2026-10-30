@@ -43,7 +43,9 @@ const COPY = {
 } as const;
 const copy = COPY[locale];
 const nav: readonly { readonly href: string; readonly label: string }[] =
-  locale === "en" ? SITE_NAV_EN : SITE_NAV;
+  locale === "en" ? SITE_NAV_EN : ["/", "/skachat/", "/stoimost/"].includes(path)
+    ? [...SITE_NAV.slice(0, 3), { href: "/stati/", label: "Статьи" }, ...SITE_NAV.slice(3)]
+    : SITE_NAV;
 // The download page is Russian only, so English links to it say so with hreflang.
 const downloadLang = locale === "en" ? "ru" : undefined;
 const themes = [

@@ -3,6 +3,8 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
 import type { PageGraph, PageMetadata } from "../../lib/seo";
 import type { PublicPhone } from "../../lib/site-config";
 import "../../styles/autonom.css";
+import V4Footer from "./V4Footer.astro";
+import "../../styles/v4.css";
 import SiteFooter from "./SiteFooter.astro";
 import SiteHeader from "./SiteHeader.astro";
 
@@ -14,22 +16,23 @@ interface Props {
 }
 
 const { metadata, graph, phone, footer = "full" } = Astro.props;
+const v4 = ["/", "/skachat/", "/stoimost/"].includes(metadata.path);
 ---
 
 <BaseLayout metadata={metadata} graph={graph} theme="auto">
-  <div class="ax-page">
+  <div class:list={["ax-page", { "v4": v4 }]}>
     <SiteHeader path={metadata.path} phone={phone} locale={metadata.locale} />
     <main id="main" class="ax-main">
       <slot />
     </main>
-    <SiteFooter variant={footer} locale={metadata.locale} />
+    {v4 ? <V4Footer variant={footer}/> : <SiteFooter variant={footer} locale={metadata.locale} />}
   </div>
 
   <script>
-    import { browserLandingRuntime, initLanding } from "../../scripts/site";
-    import { browserThemeRuntime, initThemeSwitch } from "../../scripts/theme";
+        import { browserLandingRuntime, initLanding } from "../../scripts/site";
+        import { browserThemeRuntime, initThemeSwitch } from "../../scripts/theme";
 
-    initLanding(document, browserLandingRuntime(window));
-    initThemeSwitch(document, browserThemeRuntime(window));
+        initLanding(document, browserLandingRuntime(window));
+        initThemeSwitch(document, browserThemeRuntime(window));
   </script>
 </BaseLayout>

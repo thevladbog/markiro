@@ -100,7 +100,8 @@ describe.skipIf(!databaseUrl)("offline catalog items migration", () => {
 
   afterAll(async () => {
     await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
+    // Pool.end() may resolve before sockets close; FORCE races their graceful shutdown.
+    if (created) await maintenance.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });

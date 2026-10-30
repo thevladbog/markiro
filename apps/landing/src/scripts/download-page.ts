@@ -48,12 +48,18 @@ export function showReleaseFacts(root: ParentNode, release: StandaloneRelease): 
 
 export function showAccepted(
   root: Document,
-  email: string,
+  email: string | null,
   release: StandaloneRelease | null,
 ): void {
+  for (const element of root.querySelectorAll<HTMLElement>("[data-loading-only]"))
+    element.hidden = true;
   for (const element of root.querySelectorAll<HTMLElement>("[data-ready-email]")) {
-    element.textContent = email;
+    element.textContent = email ?? "";
   }
+  for (const el of root.querySelectorAll<HTMLElement>("[data-accepted-only]"))
+    el.hidden = email === null;
+  for (const el of root.querySelectorAll<HTMLElement>("[data-email-only]"))
+    el.hidden = email !== null;
   if (release !== null) showReleaseFacts(root, release);
   for (const element of root.querySelectorAll<HTMLElement>("[data-download-start]")) {
     element.hidden = true;
@@ -77,6 +83,9 @@ export function showAccepted(
       ? "[data-pending-only] [data-ready-heading]"
       : "[data-release-only] [data-ready-heading]",
   );
+  if (email === null && heading)
+    heading.textContent =
+      release === null ? "Установщик пока недоступен" : "Скачать Маркиро Автоном";
   heading?.focus();
   root.defaultView?.scrollTo({ top: 0 });
 }
@@ -88,14 +97,20 @@ export function initDownloadPage(
   /** Starts reading `latest.json`; the page calls it when the visitor turns to the form. */
   readonly prefetch: () => void;
   readonly accept: (email: string) => Promise<void>;
+  readonly openFromEmail: () => Promise<void>;
+  readonly edit: () => void;
   readonly dispose: () => void;
 } {
   // Nothing is fetched at page load: the release bucket is a third party, so the page
   // asks it only once the visitor starts on the form.
   let release: Promise<StandaloneRelease | null> | null = null;
+  let acceptedEmail: string | null = null;
+  let opened = false;
+  let checking = false;
+  let generation = 0;
   const load = (): Promise<StandaloneRelease | null> => {
     if (release === null) {
-      const pending = runtime.fetchRelease();
+      const pending = runtime.fetchRelease().catch(() => null);
       release = pending;
       void pending.then((value) => {
         if (value !== null) showReleaseFacts(root, value);
@@ -104,8 +119,51 @@ export function initDownloadPage(
     return release;
   };
 
+  const accept = async (email: string | null): Promise<void> => {
+    if (checking) return;
+    const current = ++generation;
+    acceptedEmail = email;
+    opened = true;
+    checking = true;
+    for (const el of root.querySelectorAll<HTMLElement>(
+      "[data-download-start], [data-release-only], [data-pending-only]",
+    ))
+      el.hidden = true;
+    const ready = root.querySelector<HTMLElement>("[data-download-ready]");
+    if (ready) {
+      ready.hidden = false;
+      ready.dataset.release = "loading";
+    }
+    for (const el of root.querySelectorAll<HTMLElement>("[data-loading-only]")) el.hidden = false;
+    const loadingHeading = root.querySelector<HTMLElement>(
+      "[data-loading-only] [data-ready-heading]",
+    );
+    const loadingText = root.querySelector<HTMLElement>("[data-loading-copy]");
+    if (email === null) {
+      if (loadingHeading) loadingHeading.textContent = "Проверяем установщик";
+      if (loadingText) loadingText.textContent = "Читаем сведения о текущем релизе.";
+    }
+    try {
+      let value = await load();
+      if (current !== generation) return;
+      if (value === null) {
+        release = null;
+        value = await load();
+      }
+      if (current !== generation) return;
+      showAccepted(root, email, value);
+    } finally {
+      if (current === generation) checking = false;
+    }
+  };
+
   const onClick = (event: Event): void => {
     if (!(event.target instanceof Element)) return;
+    if (event.target.closest("[data-release-retry]") && opened && !checking) {
+      release = null;
+      void accept(acceptedEmail);
+      return;
+    }
     const button = event.target.closest<HTMLButtonElement>("[data-copy]");
     const text = button?.dataset.copyText;
     if (button === null || button === undefined || text === undefined) return;
@@ -124,14 +182,13 @@ export function initDownloadPage(
     prefetch: () => {
       void load();
     },
-    accept: async (email) => {
-      let value = await load();
-      if (value === null) {
-        // A failed read gets one more chance before the visitor sees «готовится».
-        release = null;
-        value = await load();
-      }
-      showAccepted(root, email, value);
+    accept,
+    openFromEmail: () => accept(null),
+    edit: () => {
+      generation += 1;
+      checking = false;
+      opened = false;
+      acceptedEmail = null;
     },
     dispose: () => root.removeEventListener("click", onClick),
   };

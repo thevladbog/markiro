@@ -1,251 +1,163 @@
 ---
-import {
-  ALTERNATIVES,
-  INVOICE_ANCHOR,
-  PRICE_EXAMPLES,
-  PRICING_COPY,
-  PRICING_FAQ,
-  TARIFF_TABLE,
-} from "../../content/autonom";
+import { INVOICE_ANCHOR, PRICING_COPY } from "../../content/autonom";
 import { findAutonomPage } from "../../content/autonom-pages";
 import { SITE_CONTACTS } from "../../content/contacts";
-import {
-  ADDONS,
-  FIRST_SITES_SEATS_LEFT,
-  formatRoubles,
-  LAUNCH_OPTIONS,
-  TARIFFS,
-} from "../../content/pricing";
+import { ADDONS, LAUNCH_OPTIONS, TARIFFS, formatRoubles } from "../../content/pricing";
 import { buildAutonomPageGraph } from "../../lib/seo";
 import { readPublicSiteConfig } from "../../lib/site-config";
 import AutonomPage from "./AutonomPage.astro";
-import FaqSection from "./FaqSection.astro";
-import FinalCta from "./FinalCta.astro";
 import Icon from "./Icon.astro";
 import LeadConsent from "./LeadConsent.astro";
 import LeadSubmit from "./LeadSubmit.astro";
 import PriceCards from "./PriceCards.astro";
-
 const page = findAutonomPage("/stoimost/");
-const config = readPublicSiteConfig(
-  {
-    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
-    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
-  },
-  "ru",
-);
-const enabled =
-  config.leadEndpoint !== null &&
-  config.legalLinks !== null &&
-  config.consentVersion !== null;
+const config = readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED, PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, "ru");
+const enabled = config.leadEndpoint !== null && config.legalLinks !== null && config.consentVersion !== null;
 const copy = PRICING_COPY;
-const tableHeads = TARIFFS.map((tariff) => tariff.name);
-const sellable = TARIFFS.filter((tariff) => tariff.pricePerYear !== null);
-const contactsLine = config.phone === null ? "" : `, ${config.phone.display}`;
+const sellable = TARIFFS.filter(t => t.pricePerYear !== null);
 ---
 
-<AutonomPage metadata={page} graph={buildAutonomPageGraph(page, { offers: true, faq: PRICING_FAQ })} phone={config.phone}>
-  <section class="ax-hero ax-hero--page" aria-labelledby="pricing-title">
-    <div class="ax-container">
-      <div class="ax-section__head ax-section__head--split ax-section__head--page">
-        <div>
-          <p class="ax-kicker">{copy.kicker}</p>
-          <h1 class="ax-h1 ax-h1--page" id="pricing-title">{copy.title}</h1>
-          <p class="ax-lead">{copy.lead}</p>
-        </div>
-        <aside class="ax-offer ax-offer--strong">
-          <p class="ax-kicker">{copy.firstSites.kicker}</p>
-          <p class="ax-offer__title">{copy.firstSites.text}</p>
-          <p class="ax-offer__terms">{copy.firstSites.terms} Осталось мест: {FIRST_SITES_SEATS_LEFT}.</p>
-        </aside>
+<AutonomPage metadata={page} graph={buildAutonomPageGraph(page, { offers: true })} phone={config.phone}>
+  <section class="v4-section v4-pricing-intro">
+    <div class="ax-container v4-stack v4-stack--wide">
+      <nav class="ax-note" aria-label="Хлебные крошки">
+        <a href="/">Главная</a> / Стоимость</nav>
+      <h1>Тарифы Маркиро</h1>
+      <p class="ax-lead">Выберите тариф по числу линий и рабочих мест. Лицензия действует на одну площадку. Цены за год, без НДС.</p>
+      <div class="ax-actions">
+        <a class="ax-btn ax-btn--accent" href="/skachat/">Попробовать все функции <Icon name="download" size={18}/>
+        </a>
+        <span class="ax-note">14 дней, без оплаты</span>
       </div>
-      <PriceCards headingLevel={2} />
+      <PriceCards headingLevel={2}/>
+      <p>Во всех конфигурациях: проверки кодов, короба и паллеты с SSCC, локальная база, резервные копии и выгрузки TXT/CSV/XML.</p>
+      <p class="ax-note">Открытая смена не прерывается после окончания лицензии. Данные и выгрузки остаются доступны. При смене тарифа остаток засчитывается.</p>
     </div>
   </section>
-
-  <section class="ax-section ax-section--card" id="sravnenie" aria-labelledby="table-title">
-    <div class="ax-container">
-      <p class="ax-kicker">{copy.table.kicker}</p>
-      <h2 class="ax-h2 ax-h2--md" id="table-title">{copy.table.title}</h2>
-      <div class="ax-table-wrap" tabindex="0" role="region" aria-labelledby="table-title">
-        <table class="ax-table">
-          <thead>
-            <tr>
-              <td></td>
-              {tableHeads.map((name, index) => (
-                <th scope="col" class:list={{ "ax-table__hl": TARIFFS[index]?.recommended }}>{name}</th>
-              ))}
-            </tr>
-          </thead>
-          {TARIFF_TABLE.map((group) => (
-            <tbody>
-              <tr class="ax-table__group"><th scope="rowgroup" colspan="5">{group.label}</th></tr>
-              {group.rows.map(([label, ...cells]) => (
-                <tr>
-                  <th scope="row">{label}</th>
-                  {cells.map((cell, index) => (
-                    <td class:list={{ "ax-table__hl": TARIFFS[index]?.recommended, "ax-table__mono": typeof cell === "string" && /\d/.test(cell) && group.label !== "Поддержка" }}>
-                      {cell === true ? (
-                        <><Icon name="check" size={16} class="ax-table__check" /><span class="ax-visually-hidden">да</span></>
-                      ) : cell === false ? (
-                        <><span aria-hidden="true">—</span><span class="ax-visually-hidden">нет</span></>
-                      ) : cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          ))}
-        </table>
-      </div>
-      <p class="ax-note">{copy.table.note}</p>
-    </div>
-  </section>
-
-  <section class="ax-section" aria-label="Дополнения и запуск">
-    <div class="ax-container ax-two">
-      <article class="ax-card ax-price-card">
-        <p class="ax-kicker">{copy.addons.kicker}</p>
-        <h2 class="ax-h3 ax-h3--lg">{copy.addons.title}</h2>
-        <dl class="ax-price-rows">
-          {ADDONS.map((item) => (
-            <div><dt>{item.name}</dt><dd class="ax-price-rows__price">{item.price}</dd><dd class="ax-price-rows__note">{item.note}</dd></div>
-          ))}
-        </dl>
-      </article>
-      <article class="ax-card ax-price-card">
-        <p class="ax-kicker">{copy.launch.kicker}</p>
-        <h2 class="ax-h3 ax-h3--lg">{copy.launch.title}</h2>
-        <dl class="ax-price-rows">
-          {LAUNCH_OPTIONS.map((item) => (
-            <div><dt>{item.name}</dt><dd class="ax-price-rows__price">{item.price}</dd><dd class="ax-price-rows__note">{item.note}</dd></div>
-          ))}
-        </dl>
-      </article>
-    </div>
-  </section>
-
-  <section class="ax-section ax-section--card" id="primery" aria-labelledby="examples-title">
-    <div class="ax-container">
-      <p class="ax-kicker">{copy.examples.kicker}</p>
-      <h2 class="ax-h2 ax-h2--md" id="examples-title">{copy.examples.title}</h2>
-      <div class="ax-examples">
-        {PRICE_EXAMPLES.map((example) => (
-          <article class="ax-card ax-example">
-            <h3 class="ax-h3">{example.title}</h3>
-            <dl class="ax-example__lines">
-              {example.lines.map(([name, price]) => <div><dt>{name}</dt><dd>{formatRoubles(price)} ₽</dd></div>)}
-            </dl>
-            <div class="ax-example__total">
-              <p><span>Первый год</span><strong>{formatRoubles(example.firstYear)} ₽</strong></p>
-              <small>{example.note}</small>
-            </div>
-          </article>
-        ))}
-      </div>
-      <p class="ax-note">{copy.examples.note}</p>
-    </div>
-  </section>
-
-  <section class="ax-section ax-compare" data-theme="dark" aria-labelledby="compare-title">
-    <div class="ax-container">
-      <p class="ax-kicker">{copy.comparison.kicker}</p>
-      <h2 class="ax-h2 ax-h2--md ax-h2--narrow" id="compare-title">{copy.comparison.title}</h2>
-      <ul class="ax-compare__list">
-        {ALTERNATIVES.map((item) => (
-          <li class:list={{ "ax-compare__ours": "ours" in item }}>
-            <strong>{item.name}</strong>
-            <span class="ax-compare__price">{item.price}</span>
-            <span class="ax-compare__note">{item.note}</span>
-          </li>
-        ))}
-      </ul>
-      <p class="ax-note ax-note--mono">{copy.comparison.note}</p>
-    </div>
-  </section>
-
-  <section class="ax-section ax-invoice" id={INVOICE_ANCHOR} aria-labelledby="invoice-title">
-    <div class="ax-container">
-      <form
-        class="ax-form ax-form--inline"
+  <section class="v4-section v4-section--panel ax-invoice" id={INVOICE_ANCHOR} aria-labelledby="invoice-description">
+    <div class="ax-container v4-two">
+      <header class="v4-stack">
+        <h2 id="invoice-description">Уже попробовали и решили купить?</h2>
+        <p>Оставьте ИНН и почту. Пришлём счёт и договор-оферту; после оплаты получите файл лицензии.</p>
+        <p class="ax-note">Цены за год на одну площадку, без НДС. Условия акции проверим при подготовке счёта.</p>
+      </header>
+      <div class="ax-form-card">      <form
+        class="ax-form"
+        aria-labelledby="invoice-description"
         data-lead-form
         data-intent="invoice"
         data-endpoint={enabled ? config.leadEndpoint : undefined}
         data-consent-version={enabled ? config.consentVersion : undefined}
         novalidate
-      >
-        <h2 class="ax-h3 ax-h3--lg" id="invoice-title">{copy.invoice.title}</h2>
-        <p class="ax-muted">{copy.invoice.lead}</p>
-        <fieldset class="ax-form__fields ax-form__fields--row" data-lead-fields disabled={!enabled}>
+        >
+        <fieldset class="ax-form__fields" data-lead-fields disabled={!enabled}>
           <div class="ax-field">
             <label for="invoice-inn">{copy.invoice.inn}</label>
             <input id="invoice-inn" name="inn" type="text" inputmode="numeric" autocomplete="off" maxlength="14" placeholder={copy.invoice.innPlaceholder} required />
-            <p class="ax-field__error" id="invoice-inn-error" data-error-for="inn"></p>
+            <p class="ax-field__error" id="invoice-inn-error" data-error-for="inn">
+            </p>
           </div>
           <div class="ax-field">
             <label for="invoice-tariff">{copy.invoice.tariff}</label>
             <div class="ax-select">
               <select id="invoice-tariff" name="tariffCode" required data-invoice-select>
                 {sellable.map((tariff) => (
-                  <option value={tariff.code} selected={tariff.recommended} data-tariff-name={tariff.name}>
-                    «{tariff.name}», {formatRoubles(tariff.pricePerYear ?? tariff.priceFrom)} ₽/год
-                  </option>
+                <option value={tariff.code} selected={tariff.recommended} data-tariff-name={tariff.name}>
+                  «{tariff.name}», {formatRoubles(tariff.pricePerYear ?? tariff.priceFrom)} ₽/год
+                </option>
                 ))}
               </select>
               <Icon name="arrow-right" size={16} class="ax-select__chevron" />
             </div>
-            <p class="ax-field__error" id="invoice-tariff-error" data-error-for="tariffCode"></p>
+            <p class="ax-field__error" id="invoice-tariff-error" data-error-for="tariffCode">
+            </p>
           </div>
           <div class="ax-field">
             <label for="invoice-email">{copy.invoice.email}</label>
             <input id="invoice-email" name="email" type="email" autocomplete="email" inputmode="email" maxlength="254" placeholder={copy.invoice.emailPlaceholder} required />
-            <p class="ax-field__error" id="invoice-email-error" data-error-for="email"></p>
+            <p class="ax-field__error" id="invoice-email-error" data-error-for="email">
+            </p>
           </div>
           <div class="ax-field ax-field--submit">
             <LeadSubmit label={copy.invoice.submit} tone="dark" />
           </div>
           {enabled && config.legalLinks && (
-            <div class="ax-form__extras">
-              <LeadConsent idPrefix="invoice" legalLinks={config.legalLinks} />
-            </div>
+          <div class="ax-form__extras">
+            <LeadConsent idPrefix="invoice" legalLinks={config.legalLinks} />
+          </div>
           )}
         </fieldset>
-        <p class="ax-form__status" data-form-status aria-live="polite"></p>
+        <p class="ax-form__status" data-form-status aria-live="polite">
+        </p>
         {!enabled && (
-          <p class="ax-form__note">
-            Отправка формы пока не подключена. Для счёта напишите ИНН и тариф на
-            <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>.
-          </p>
+        <p class="ax-form__note">
+          Отправка формы пока не подключена. Для счёта напишите ИНН и тариф на
+          <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>.
+        </p>
         )}
-      </form>
-      <div class="ax-success" data-invoice-success tabindex="-1" hidden>
+      </form>      <div class="ax-success" data-invoice-success tabindex="-1" hidden>
         <Icon name="check-circle" size={22} />
         <div>
           <h2 class="ax-h3">{copy.invoice.successTitle}</h2>
-          <p data-invoice-success-text data-template={copy.invoice.successText}></p>
+          <p data-invoice-success-text data-template={copy.invoice.successText}>
+          </p>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
+<section class="v4-section">
+  <div class="ax-container v4-two">
+    <article>
+      <h2>Расширение площадки</h2>
+      <p class="ax-note">Дополнения доступны для «Линии» и «Цеха». Для расширения «Старта» сначала выберите подходящий тариф.</p>
+      <dl class="v4-ledger">{ADDONS.map(item=>
+        <div>
+          <dt>{item.name}</dt>
+          <dd>{item.price}</dd>
+          <dd>{item.note}</dd>
+        </div>)}</dl>
+    </article>
+    <article>
+      <h2>Помощь с запуском</h2>
+      <dl class="v4-ledger">{LAUNCH_OPTIONS.map(item=>
+        <div>
+          <dt>{item.name}</dt>
+          <dd>{item.price}</dd>
+          <dd>{item.note}</dd>
+        </div>)}</dl>
+      <p class="ax-note">Оборудование не входит в стоимость лицензии и запуска.</p>
+    </article>
+  </div>
+</section>
+<section class="v4-section v4-section--panel">
+  <div class="ax-container v4-stack">
+    <h2>Первые 10 площадок: −30% на первый год</h2>
+    <p>Для «Линии» — 84 000 ₽, для «Цеха» — 168 000 ₽ за первый год. Условия «Завода» согласуем отдельно. На «Старт» скидка не действует.</p>
+    <p>Взамен: разрешение на логотип на сайте и отзыв после первого месяца. Доступность акции уточним перед выставлением счёта.</p>
+    <a class="ax-link" href="/#demo">Уточнить предложение <Icon name="arrow-up-right" size={16}/>
+    </a>
+  </div>
+</section>
+<section class="v4-section" id="sravnenie">
+  <div class="ax-container v4-stack">
+    <h2>Не знаете, какую конфигурацию выбрать?</h2>
+    <p>Посчитайте линии и рабочие места: станция или ТСД. Пользователи офиса считаются отдельно. Напишите, как упаковываете продукцию, — помогу подобрать тариф.</p>
+    <a class="ax-link" href="/#demo">Обсудить ваш пост <Icon name="arrow-up-right" size={16}/>
+    </a>
+  </div>
+</section>
+<script>
+      import { browserLeadFormRuntime, initLeadForm } from "../../scripts/lead-form";
+      import { selectInvoiceTariff, showInvoiceAccepted } from "../../scripts/invoice";
 
-  <FaqSection id="oplata" kicker={copy.faq.kicker} title={copy.faq.title} entries={PRICING_FAQ}>
-    Нужен счёт или особые условия: Telegram <a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a>,
-    <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>{contactsLine}.
-  </FaqSection>
-
-  <FinalCta phone={config.phone} />
-
-  <script>
-    import { browserLeadFormRuntime, initLeadForm } from "../../scripts/lead-form";
-    import { selectInvoiceTariff, showInvoiceAccepted } from "../../scripts/invoice";
-
-    const form = document.querySelector<HTMLFormElement>("[data-lead-form]");
-    const select = document.querySelector<HTMLSelectElement>("[data-invoice-select]");
-    selectInvoiceTariff(document, window, select);
-    if (form !== null) {
-      initLeadForm(form, browserLeadFormRuntime(window), ({ email }) => {
-        showInvoiceAccepted(document, form, email);
-      });
-    }
-  </script>
+      const form = document.querySelector<HTMLFormElement>("[data-lead-form]");
+      const select = document.querySelector<HTMLSelectElement>("[data-invoice-select]");
+      selectInvoiceTariff(document, window, select);
+      if (form !== null) {
+        initLeadForm(form, browserLeadFormRuntime(window), ({ email }) => {
+          showInvoiceAccepted(document, form, email);
+        });
+      }
+</script>
 </AutonomPage>

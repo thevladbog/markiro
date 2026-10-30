@@ -74,7 +74,7 @@ export function validateDownloadLead(input: DownloadLeadInput): LeadValidation<D
   return { ok: true, value: { company, email } };
 }
 
-function isTariffCode(value: string): value is TariffCode {
+export function isTariffCode(value: string): value is TariffCode {
   return (TARIFF_CODES as readonly string[]).includes(value);
 }
 

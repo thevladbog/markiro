@@ -1,0 +1,26 @@
+<dialog class="v4-gallery" data-screen-dialog aria-labelledby="screen-dialog-title">
+  <div class="v4-gallery__head">
+    <h2 id="screen-dialog-title">Экран программы</h2>
+    <button type="button" class="ax-btn ax-btn--outline" data-screen-close>Закрыть</button>
+  </div>
+  <img data-screen-image alt="" />
+</dialog>
+<script>
+    const dialog = document.querySelector<HTMLDialogElement>("[data-screen-dialog]");
+    const image = dialog?.querySelector<HTMLImageElement>("[data-screen-image]");
+    let trigger: HTMLButtonElement | null = null;
+    document.addEventListener("click", (event) => {
+      if (!(event.target instanceof Element)) return;
+      const button = event.target.closest<HTMLButtonElement>("[data-screen-open]");
+      if (button && dialog && image && button.dataset.screenSrc) {
+        trigger = button;
+        image.src = button.dataset.screenSrc;
+        image.alt = button.dataset.screenAlt ?? "Экран программы";
+        const heading = dialog.querySelector("h2");
+        if (heading) heading.textContent = image.alt;
+        dialog.showModal();
+      }
+      if (event.target.closest("[data-screen-close]")) dialog?.close();
+    });
+    dialog?.addEventListener("close", () => trigger?.focus({ preventScroll: true }));
+</script>

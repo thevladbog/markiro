@@ -1,3 +1,4 @@
+import { PRODUCT_FACTS } from "./product-facts";
 import { HOME_FAQ } from "./autonom";
 import { HOME_FAQ_EN } from "./autonom-en";
 import { findTariff, formatRoubles } from "./pricing";
@@ -74,10 +75,9 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/",
     alternatePath: "/en/",
     locale: "ru",
-    title: "Маркиро Автоном: маркировка и агрегация на вашем ПК",
-    description:
-      "Маркировка и агрегация на вашем ПК: станция проверяет каждый код и собирает короба и паллеты с SSCC без интернета. 14 дней бесплатно, от 60 000 ₽ в год.",
-    heading: "Маркировка и агрегация. Всё на вашем ПК.",
+    title: "Программа для агрегации кодов маркировки | Маркиро",
+    description: PRODUCT_FACTS.description,
+    heading: PRODUCT_FACTS.heading,
     navigationLabel: "Markiro",
     eyebrow: "Маркиро Автоном · для Windows",
     introduction:

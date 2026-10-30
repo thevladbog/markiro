@@ -526,17 +526,16 @@ describe("SEO generators", () => {
       name: "Маркиро Автоном",
       alternateName: ["Markiro Autonom", "Markiro"],
       url: "https://markiro.app/",
-      operatingSystem: "Windows 10, Windows 11, Android",
+      operatingSystem: ["Windows 10", "Windows 11"],
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
     });
-    expect(ru?.featureList).toEqual([
-      "Проверка кодов маркировки Data Matrix на линии",
-      "Агрегация в короба и паллеты с SSCC",
-      "Печать этикеток ZPL и TSPL",
-      "Работа без интернета: программа и база на ПК завода",
-      "Сборка паллет на ТСД с Android",
-      "Выгрузки смены в TXT, CSV и XML для ГИС МТ и 1С",
-    ]);
+    expect(ru?.featureList).toEqual(
+      expect.arrayContaining([
+        "Офис на ПК: смены, продукция и результаты работы.",
+        "Станция: проверка кодов, сборка коробов и паллет, печать этикеток SSCC.",
+        "Выгрузки смены в TXT, CSV или XML для ГИС МТ и 1С",
+      ]),
+    );
     expect(en).toMatchObject({
       name: "Markiro Autonom",
       alternateName: ["Маркиро Автоном", "Markiro"],

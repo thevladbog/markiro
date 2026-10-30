@@ -210,9 +210,34 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       leadUrl: `https://admin.markiro.example/leads/${lead?.id}`,
     });
     const visitor = mails.find(({ row }) => row.kind === "landing-download-link")?.template;
-    expect(visitor).toMatchObject({ downloadPageUrl: "https://markiro.example/skachat/" });
+    expect(visitor).toMatchObject({
+      downloadPageUrl: "https://markiro.example/skachat/?installer=1",
+    });
     expect(JSON.stringify(mails.map(({ template }) => template))).not.toContain("captcha-token");
   });
+
+  it.each(["start", "line", "workshop"])(
+    "preserves download tariff %s in the durable event and owner notification",
+    async (tariffCode) => {
+      const form = body({ tariffCode });
+      await request(app.getHttpServer()).post("/landing-leads").send(form).expect(202);
+      await request(app.getHttpServer()).post("/landing-leads").send(form).expect(202);
+      const { events, notifications } = await state(String(form.email));
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ kind: "download", payload: { tariffCode } });
+      expect(notifications).toHaveLength(1);
+      const mails = await deliveries(String(form.requestId));
+      expect(mails).toHaveLength(2);
+      expect(
+        mails.find(({ row }) => row.kind === "landing-lead-notification")?.template,
+      ).toMatchObject({ intent: "download", tariffCode });
+      expect(mails.find(({ row }) => row.kind === "landing-download-link")?.template).toMatchObject(
+        {
+          downloadPageUrl: `https://markiro.example/skachat/?installer=1&tariff=${tariffCode}`,
+        },
+      );
+    },
+  );
 
   it("accepts a retried request id once, also under concurrency", async () => {
     const form = body();

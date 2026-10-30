@@ -1,310 +1,183 @@
 ---
-import { Picture } from "astro:assets";
-
-import officeOverview from "../../assets/standalone/office-overview-dark.png";
-import labelBox from "../../assets/standalone/label-box-100x150.png";
-import labelPallet from "../../assets/standalone/label-pallet-100x150.png";
-import stationAggregation from "../../assets/standalone/station-aggregation-dark-r3.png";
-import stationDuplicate from "../../assets/standalone/station-duplicate-dark-r3.png";
-import stationOffline from "../../assets/standalone/station-hub-offline-dark-r4.png";
-import tsdWork from "../../assets/standalone/tsd-work-dark.png";
-import {
-  CALL_HREF,
-  DOWNLOAD_PATH,
-  HOME_COPY,
-  PRICING_PATH,
-  TRIAL_FACTS,
-} from "../../content/autonom";
-import { homeCover } from "../../content/home-images";
+import station from "../../assets/standalone/station-aggregation-dark-r3.png";
+import duplicate from "../../assets/standalone/station-duplicate-dark-r3.png";
+import office from "../../assets/standalone/office-overview-dark.png";
+import handheld from "../../assets/standalone/tsd-work-dark.png";
+import label from "../../assets/standalone/label-box-100x150.png";
+import { PRODUCT_FACTS as facts, V4_HOME_FAQ } from "../../content/product-facts";
+import { SITE_CONTACTS } from "../../content/contacts";
+import { findTariff, formatRoubles } from "../../content/pricing";
 import type { SeoPageDefinition } from "../../content/pages";
-import {
-  ADDONS,
-  FIRST_SITES_SEATS_LEFT,
-  findTariff,
-  formatRoubles,
-  LAUNCH_OPTIONS,
-  PRICE_TERMS,
-} from "../../content/pricing";
 import { buildPageGraph } from "../../lib/seo";
 import { readPublicSiteConfig } from "../../lib/site-config";
 import AutonomPage from "./AutonomPage.astro";
 import ClientStrip from "./ClientStrip.astro";
-import FaqSection from "./FaqSection.astro";
-import FinalCta from "./FinalCta.astro";
 import Icon from "./Icon.astro";
 import PriceCards from "./PriceCards.astro";
-
-interface Props {
-  page: SeoPageDefinition;
-}
-
+import ProductScreen from "./ProductScreen.astro";
+import ScreenGallery from "./ScreenGallery.astro";
+interface Props { page: SeoPageDefinition; }
 const { page } = Astro.props;
 const phone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone;
-const copy = HOME_COPY;
-const covers = [homeCover("ru", "mkr-ins-01"), homeCover("ru", "mkr-ins-02"), homeCover("ru", "mkr-ins-09")];
 const startPrice = formatRoubles(findTariff("start").priceFrom);
 ---
 
 <AutonomPage metadata={page} graph={buildPageGraph(page)} phone={phone}>
-  <section class="ax-hero" aria-labelledby="hero-title">
-    <div class="ax-container">
-      <div class="ax-hero__copy">
-        <div class="ax-hero__title">
-          <p class="ax-badge"><span class="ax-badge__dot" aria-hidden="true"></span>{copy.hero.badge}</p>
-          <h1 class="ax-h1" id="hero-title">
-            <span class="ax-h1__light">{copy.hero.titleLight[0]}<br />{copy.hero.titleLight[1]}</span>{" "}
-            <span class="ax-h1__strong">{copy.hero.titleStrong}</span>
-          </h1>
+  <section class="v4-section v4-hero" aria-labelledby="hero-title">
+    <div class="ax-container v4-hero__grid">
+      <div class="v4-stack">
+        <p class="v4-eyebrow">Маркиро Автоном · Windows</p>
+        <h1 id="hero-title">{facts.heading}</h1>
+        <p class="ax-lead">{facts.description}</p>
+        <div class="ax-actions">
+          <a class="ax-btn ax-btn--accent" href="/skachat/" data-analytics="landing_download_click" data-placement="hero">Попробовать 14 дней <Icon name="download" size={18}/>
+          </a>
+          <a class="ax-btn ax-btn--outline" href="/stoimost/">От {startPrice} ₽ в год</a>
         </div>
-        <div class="ax-hero__action">
-          <p class="ax-lead">{copy.hero.lead}</p>
-          <div class="ax-actions ax-actions--hero">
-            <a class="ax-btn ax-btn--accent ax-btn--lg ax-btn--glow" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="hero">
-              <span class="ax-only-wide">Скачать пробную версию</span>
-              <span class="ax-only-narrow">Прислать ссылку на почту</span>
-              <span class="ax-btn__icon">
-                <Icon name="download" size={18} class="ax-only-wide" />
-                <Icon name="mail" size={18} class="ax-only-narrow" />
-              </span>
-            </a>
-            <p class="ax-note ax-only-narrow">{copy.hero.phoneNote}</p>
-            <a class="ax-btn ax-btn--outline ax-btn--lg" href={PRICING_PATH} data-analytics="landing_pricing_click" data-placement="hero">
-              Цены от {startPrice} ₽ в год
-            </a>
-          </div>
-          <ul class="ax-facts">
-            {TRIAL_FACTS.map((fact) => <li><Icon name="check" size={15} />{fact}</li>)}
-          </ul>
-        </div>
+        <p class="ax-note">Все функции, без оплаты</p>
       </div>
-
-      <figure class="ax-shot ax-shot--hero">
-        <div class="ax-shot__frame">
-          <Picture
-            src={stationAggregation}
-            alt={copy.hero.screenAlt}
-            widths={[390, 720, 1080, 1440, 2160]}
-            sizes="(min-width: 1440px) 1316px, calc(100vw - 2rem)"
-            formats={["avif", "webp"]}
-            loading="eager"
-            fetchpriority="high"
-          />
-        </div>
-        <figcaption class="ax-shot__caption ax-only-narrow">{copy.hero.screenCaption}</figcaption>
-      </figure>
+      <ProductScreen src={station} alt="Станция: проверка кодов и сборка короба" caption="Станция: проверка кодов и сборка короба. Демонстрационные данные." label="Посмотреть экран станции" eager />
     </div>
   </section>
-
-  <ClientStrip kicker={copy.clients.kicker} />
-
-  <section class="ax-section ax-local" id="bez-oblaka" data-theme="dark" aria-labelledby="local-title">
-    <div class="ax-container">
-      <div class="ax-local__grid">
-        <div class="ax-local__text">
-          <p class="ax-kicker">{copy.local.kicker}</p>
-          <h2 class="ax-h2" id="local-title">{copy.local.title}</h2>
-          <p class="ax-lead">{copy.local.lead}</p>
-          <figure class="ax-network" aria-label="Схема: главный ПК в офисе, две станции на линиях и ТСД на складе в локальной сети завода">
-            <div class="ax-network__head">
-              <span class="ax-network__label">{copy.local.networkLabel}</span>
-              <span class="ax-network__badge"><Icon name="wifi-off" size={16} />{copy.local.networkBadge}</span>
-            </div>
-            <div class="ax-network__hub">
-              <Icon name="office" size={22} />
-              <span><strong>{copy.local.hub.title}</strong><small>{copy.local.hub.note}</small></span>
-            </div>
-            <div class="ax-network__wires" aria-hidden="true"></div>
-            <ul class="ax-network__nodes">
-              {copy.local.nodes.map((node) => (
-                <li>
-                  <Icon name={node.icon} size={20} />
-                  <strong>{node.title}</strong>
-                  <small>{node.note}</small>
-                </li>
-              ))}
-            </ul>
-          </figure>
-        </div>
-        <figure class="ax-shot ax-shot--panel">
-          <div class="ax-shot__frame">
-            <Picture
-              src={stationOffline}
-              alt={copy.local.screenAlt}
-              widths={[390, 644, 1288]}
-              sizes="(min-width: 1200px) 644px, calc(100vw - 2rem)"
-              formats={["avif", "webp"]}
-              loading="lazy"
-            />
+  <ClientStrip kicker="С Маркиро работают" />
+  <section class="v4-section" id="produkt" aria-labelledby="product-title">
+    <div class="ax-container v4-stack v4-stack--wide">
+      <header>
+        <h2 id="product-title">Как работает Маркиро</h2>
+        <p class="ax-muted">Вы сканируете продукцию. Маркиро проверяет коды и сохраняет состав каждого короба.</p>
+      </header>
+      <div class="v4-workflow">
+        <article class="v4-workflow__row">
+          <div>
+            <h3>Сканируйте коды на товарах</h3>
+            <p>Дубли и коды другого товара не попадут в короб.</p>
           </div>
-          <figcaption class="ax-shot__status"><span class="ax-dot ax-dot--warn" aria-hidden="true"></span>{copy.local.screenCaption}</figcaption>
-        </figure>
-      </div>
-      <ul class="ax-figures">
-        {copy.local.facts.map((fact) => (
-          <li><strong>{fact.value}</strong><span>{fact.text}</span></li>
-        ))}
-      </ul>
-    </div>
-  </section>
-
-  <section class="ax-section ax-section--card" id="produkt" aria-labelledby="product-title">
-    <div class="ax-container">
-      <div class="ax-section__head ax-section__head--split">
-        <div>
-          <p class="ax-kicker">{copy.product.kicker}</p>
-          <h2 class="ax-h2" id="product-title">{copy.product.title}</h2>
-        </div>
-        <p class="ax-muted">{copy.product.lead}</p>
-      </div>
-      <div class="ax-cards ax-cards--wide-left">
-        <article class="ax-card ax-card--screen">
-          <h3 class="ax-h3">{copy.product.station.title}</h3>
-          <p class="ax-muted">{copy.product.station.text}</p>
-          <ul class="ax-tags">{copy.product.station.tags.map((tag) => <li>{tag}</li>)}</ul>
-          <div class="ax-shot__frame ax-shot__frame--flat">
-            <Picture src={stationDuplicate} alt={copy.product.station.alt} widths={[390, 804, 1608]} sizes="(min-width: 1200px) 804px, calc(100vw - 4rem)" formats={["avif", "webp"]} loading="lazy" />
-          </div>
+          <ProductScreen src={duplicate} alt="Станция отклоняет повторный скан кода" caption="Пример: этот код уже есть в коробе. Маркиро отклонит повторный скан." label="Посмотреть проверку кода" kind="duplicate" />
         </article>
-        <article class="ax-card ax-card--screen">
-          <h3 class="ax-h3">{copy.product.handheld.title}</h3>
-          <p class="ax-muted">{copy.product.handheld.text}</p>
-          <div class="ax-stage">
-            <div class="ax-phone">
-              <Picture src={tsdWork} alt={copy.product.handheld.alt} widths={[216, 432, 648]} sizes="216px" formats={["avif", "webp"]} loading="lazy" />
-            </div>
+        <article class="v4-workflow__row">
+          <div>
+            <h3>Закройте короб</h3>
+            <p>Когда короб собран, закройте его в программе. Маркиро сохранит состав и напечатает этикетку SSCC.</p>
           </div>
-        </article>
-        <article class="ax-card ax-card--screen">
-          <h3 class="ax-h3">{copy.product.office.title}</h3>
-          <p class="ax-muted">{copy.product.office.text}</p>
-          <ul class="ax-tags">{copy.product.office.tags.map((tag) => <li>{tag}</li>)}</ul>
-          <div class="ax-shot__frame ax-shot__frame--flat">
-            <Picture src={officeOverview} alt={copy.product.office.alt} widths={[390, 736, 1440]} sizes="(min-width: 1200px) 736px, calc(100vw - 4rem)" formats={["avif", "webp"]} loading="lazy" />
-          </div>
-        </article>
-        <article class="ax-card ax-card--screen">
-          <h3 class="ax-h3">{copy.product.labels.title}</h3>
-          <p class="ax-muted">{copy.product.labels.text}</p>
-          <div class="ax-stage ax-stage--labels">
-            <Picture class="ax-label ax-label--left" src={labelBox} alt={copy.product.labels.boxAlt} widths={[200, 400]} sizes="200px" formats={["avif", "webp"]} loading="lazy" />
-            <Picture class="ax-label ax-label--right" src={labelPallet} alt={copy.product.labels.palletAlt} widths={[200, 400]} sizes="200px" formats={["avif", "webp"]} loading="lazy" />
-          </div>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section class="ax-section" id="start" aria-labelledby="start-title">
-    <div class="ax-container">
-      <p class="ax-kicker">{copy.start.kicker}</p>
-      <h2 class="ax-h2 ax-h2--narrow" id="start-title">{copy.start.title}</h2>
-      <ol class="ax-steps">
-        {copy.start.steps.map((step, index) => (
-          <li class:list={{ "ax-steps__last": index === copy.start.steps.length - 1 }}>
-            <span class="ax-steps__index">0{index + 1}</span>
-            <h3 class="ax-h3">{step.title}</h3>
-            <p class="ax-muted">{step.text}</p>
-          </li>
-        ))}
-      </ol>
-      <div class="ax-panel ax-requirements">
-        <p class="ax-kicker ax-kicker--muted">{copy.start.requirementsTitle}</p>
-        <ul>
-          {copy.start.requirements.map((item) => (
-            <li>
-              <Icon name={item.icon} size={22} />
-              <div><strong>{item.title}</strong><span>{item.text}</span></div>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div class="ax-actions ax-actions--row">
-        <a class="ax-btn ax-btn--accent ax-btn--lg" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="start">
-          <span>Скачать пробную версию</span>
-          <span class="ax-btn__icon"><Icon name="download" size={18} /></span>
-        </a>
-        <a class="ax-link" href={CALL_HREF} data-analytics="landing_demo_click" data-placement="start">{copy.start.callLink} <Icon name="arrow-right" size={16} /></a>
-      </div>
-    </div>
-  </section>
-
-  <section class="ax-section ax-section--card" id="tseny" aria-labelledby="pricing-title">
-    <div class="ax-container">
-      <div class="ax-section__head ax-section__head--split">
-        <div>
-          <p class="ax-kicker">{copy.pricing.kicker}</p>
-          <h2 class="ax-h2 ax-h2--narrow" id="pricing-title">{copy.pricing.title}</h2>
-        </div>
-        <aside class="ax-offer">
-          <p class="ax-kicker">Первые 10 площадок</p>
-          <p>−30% на первый год для «Линии», «Цеха» и «Завода». Осталось мест: {FIRST_SITES_SEATS_LEFT}.</p>
-        </aside>
-      </div>
-      <PriceCards />
-      <div class="ax-price-notes">
-        <div>
-          <p class="ax-kicker ax-kicker--muted">Дополнения к «Линии» и «Цеху»</p>
-          <dl class="ax-price-list">
-            {ADDONS.map((item) => <div><dt>{item.name}</dt><dd>{item.price}</dd></div>)}
-          </dl>
-        </div>
-        <div>
-          <p class="ax-kicker ax-kicker--muted">Запуск</p>
-          <dl class="ax-price-list">
-            {LAUNCH_OPTIONS.map((item) => <div><dt>{item.name}</dt><dd>{item.price}</dd></div>)}
-          </dl>
-        </div>
-        <div>
-          <p class="ax-kicker ax-kicker--muted">Условия</p>
-          <ul class="ax-terms">{PRICE_TERMS.map((term) => <li>{term}</li>)}</ul>
-          <a class="ax-link" href={PRICING_PATH}>Все цены и примеры расчёта <Icon name="arrow-right" size={16} /></a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="ax-section" id="kto" aria-labelledby="people-title">
-    <div class="ax-container">
-      <p class="ax-kicker">{copy.people.kicker}</p>
-      <h2 class="ax-h2" id="people-title">{copy.people.title}</h2>
-      <div class="ax-people">
-        <article class="ax-card ax-founder">
-          <div class="ax-founder__head">
-            <span class="ax-avatar" aria-hidden="true">{copy.people.founder.initials}</span>
+          <div class="v4-label">
+            <ProductScreen src={label} alt="Этикетка SSCC готового короба" label="Открыть этикетку" kind="label"/>
             <div>
-              <h3 class="ax-h3">{copy.people.founder.name}</h3>
-              <p class="ax-mono-note">{copy.people.founder.role}</p>
+              <h3>Этикетка готового короба</h3>
+              <p>SSCC связывает короб с кодами продукции внутри.</p>
             </div>
           </div>
-          <p class="ax-founder__text">{copy.people.founder.text}</p>
-          <ul class="ax-checklist ax-checklist--loose">
-            {copy.people.founder.promises.map((item) => <li><Icon name="check" size={16} />{item}</li>)}
-          </ul>
         </article>
-        <article class="ax-card ax-docs">
-          <div class="ax-docs__text">
-            <h3 class="ax-h3">{copy.people.docs.title}</h3>
-            <p class="ax-muted">{copy.people.docs.text}</p>
-            <ul class="ax-docs__links">
-              {copy.people.docs.links.map((link) => (
-                <li><a href={link.href}>{link.label}<Icon name="arrow-up-right" size={16} /></a></li>
-              ))}
-            </ul>
+        <article class="v4-workflow__row">
+          <div>
+            <h3>Соберите паллету в этой же смене</h3>
+            <p>Собирайте короба и паллеты в одной смене агрегации — на станции или ТСД.</p>
           </div>
-          <div class="ax-docs__covers" aria-hidden="true">
-            {covers.map((cover, index) => (
-              <Picture class={`ax-docs__cover ax-docs__cover--${index + 1}`} src={cover} alt="" widths={[180, 360]} sizes="180px" formats={["avif", "webp"]} loading="lazy" />
-            ))}
+          <a class="ax-link" href="#bez-oblaka">Подробнее о ТСД <Icon name="arrow-up-right" size={16}/>
+          </a>
+        </article>
+      </div>
+      <aside class="v4-equipment">
+        <div>
+          <h3>
+            <Icon name="monitor" size={22}/> Что нужно для начала</h3>
+          <p>Достаточно одного ПК с Windows 10/11 x64, сканера Data Matrix и принтера этикеток с ZPL или TSPL.</p>
+        </div>
+        <a class="ax-link" href="/rabochee-mesto-upakovki/">Требования к оборудованию <Icon name="arrow-up-right" size={16}/>
+        </a>
+      </aside>
+    </div>
+  </section>
+  <section class="v4-section v4-section--panel" id="tseny" aria-labelledby="pricing-title">
+    <div class="ax-container v4-stack v4-stack--wide">
+      <header>
+        <h2 id="pricing-title">Стоимость</h2>
+        <p class="ax-muted">Выберите тариф и попробуйте программу 14 дней со всеми функциями. Цены за год на одну площадку, без НДС.</p>
+      </header>
+      <PriceCards compact/>
+      <a class="ax-link" href="/stoimost/">Сравнить тарифы <Icon name="arrow-up-right" size={16}/>
+      </a>
+    </div>
+  </section>
+  <section class="v4-section" id="bez-oblaka" aria-labelledby="local-title">
+    <div class="ax-container v4-stack v4-stack--wide">
+      <header>
+        <h2 id="local-title">Работайте без интернета</h2>
+        <p class="ax-muted">Программа и база находятся на ПК производства. Для упаковки и агрегации интернет не нужен.</p>
+      </header>
+      <div class="v4-roles">
+        <article class="v4-stack">
+          <h3>Офис на ПК</h3>
+          <ProductScreen src={office} alt="Офис на ПК: смены, продукция и результаты работы" caption="Смены, продукция и результаты работы. Демонстрационные данные." label="Увеличить экран офиса" kind="office"/>
+        </article>
+        <article class="v4-handheld">
+          <div class="v4-handheld__copy v4-stack">
+            <h3>{facts.handheld.heading}</h3>
+            <p>{facts.handheld.description}</p>
+            <p class="ax-note">{facts.handheld.connection}</p>
           </div>
+          <ProductScreen src={handheld} alt="ТСД: проверка кодов, сборка коробов и паллет" label="Посмотреть экран ТСД" kind="handheld"/>
+        </article>
+      </div>
+      <div class="v4-data-facts">
+        <article>
+          <h3>Локальная база</h3>
+          <p>База и результаты смен хранятся на вашем ПК.</p>
+        </article>
+        <article>
+          <h3>Резервные копии</h3>
+          <p>Копии базы хранятся на вашем оборудовании.</p>
+        </article>
+        <article>
+          <h3>Файлы для ГИС МТ и 1С</h3>
+          <p>Выгружайте результаты смены в TXT, CSV или XML.</p>
         </article>
       </div>
     </div>
   </section>
-
-  <FaqSection id="voprosy" kicker={copy.faq.kicker} title={copy.faq.title} entries={page.faq ?? []}>
-    Если ответа здесь нет, напишите в Telegram <a href="https://t.me/thevladbog">@thevladbog</a> или на{" "}<a href="mailto:hello@markiro.app">hello@markiro.app</a>.
-  </FaqSection>
-
-  <FinalCta phone={phone} id="demo" />
-
+  <section class="v4-section v4-section--panel" id="start" aria-labelledby="trial-title">
+    <div class="ax-container v4-two">
+      <article class="v4-stack">
+        <h2 id="trial-title">Проверьте ваш рабочий сценарий</h2>
+        <p>Проверьте коды своего товара, напечатайте этикетку короба и выгрузите результаты смены.</p>
+        <a class="ax-btn ax-btn--accent" href="/skachat/" data-analytics="landing_download_click" data-placement="start">Попробовать 14 дней <Icon name="download" size={18}/>
+        </a>
+        <p class="ax-note">В пробный период доступны все функции. Оплачивать лицензию заранее не нужно.</p>
+      </article>
+      <article class="v4-stack" id="demo" aria-labelledby="support-title">
+        <span id="kto">
+        </span>
+        <h3 id="support-title">Владислав Богатырев</h3>
+        <p>Я разрабатываю Маркиро и отвечаю на вопросы. Помогу проверить оборудование перед запуском.</p>
+        <a class="ax-link" href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
+        <a class="v4-material-link" href="/instruktsii/">
+          <strong>Инструкции оператора и офиса <Icon name="arrow-up-right" size={16}/>
+          </strong>
+          <span>Коды, короба, паллеты и выгрузки.</span>
+        </a>
+        <a class="v4-material-link" href="/legal/">
+          <strong>Документы и реквизиты <Icon name="arrow-up-right" size={16}/>
+          </strong>
+          <span>Условия покупки и данные для счёта.</span>
+        </a>
+        <a class="ax-link" href={SITE_CONTACTS.telegram.href}>Telegram @{SITE_CONTACTS.telegram.handle}</a>{phone && <a href={phone.href} data-analytics="landing_phone_click" data-placement="final">{phone.display}</a>}</article>
+    </div>
+  </section>
+  <section class="v4-section" id="voprosy" aria-labelledby="faq-title">
+    <div class="ax-container v4-stack v4-stack--wide">
+      <h2 id="faq-title">Вопросы перед запуском</h2>
+      <div class="v4-faq" data-faq>{V4_HOME_FAQ.map((entry,i)=>
+        <details data-faq-item open={i===0}>
+          <summary>
+            <h3>{entry.question}</h3>
+          </summary>
+          <p>{entry.answer}</p>
+        </details>)}</div>
+      <div class="ax-actions">
+        <a class="ax-btn ax-btn--accent" href="/skachat/" data-analytics="landing_download_click" data-placement="final">Попробовать 14 дней <Icon name="download" size={18}/>
+        </a>
+        <span class="ax-note">14 дней, без оплаты</span>
+      </div>
+    </div>
+  </section>
+  <ScreenGallery/>
 </AutonomPage>

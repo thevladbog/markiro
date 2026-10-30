@@ -1,0 +1,42 @@
+---
+import BrandMark from "../BrandMark.astro";
+import { SITE_CONTACTS, operatorRequisites } from "../../content/contacts";
+interface Props { variant: "full" | "short"; }
+const { variant } = Astro.props;
+---
+
+<footer class:list={["v4-footer", "ax-footer", {"v4-footer--short":variant==='short'}]}>
+  <div class="ax-container">
+    {variant==='full'&&<div class="v4-footer__grid">
+      <a href="/" aria-label="Маркиро, на главную страницу">
+        <BrandMark locale="ru"/>
+      </a>
+      <nav aria-label="Продукт">
+        <strong>Продукт</strong>
+        <a href="/rabochee-mesto-upakovki/">Пост упаковки</a>
+        <a href="/sscc-i-agregatsiya/">Короба и паллеты</a>
+        <a href="/oflayn-rabota/">Без интернета</a>
+        <a href="/integratsiya-1c/">Выгрузки в 1С</a>
+        <a href="/stati/">Статьи</a>
+      </nav>
+      <div>
+        <strong>Владислав Богатырев</strong>
+        <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
+        <a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a>
+      </div>
+      <nav aria-label="Документы">
+        <a href="/instruktsii/">Инструкции</a>
+        <a href="/legal/">Документы</a>
+        <a href="/privacy/">Политика обработки данных</a>
+        <button type="button" data-consent-settings>Настройки cookies</button>
+      </nav>
+    </div>}
+    <div class="v4-footer__bottom">
+      <p>© Маркиро, 2026 · {operatorRequisites("ru")}</p>
+      <a href="/en/" hreflang="en" lang="en">English</a>{variant==='short'&&<>
+      <a href="/privacy/">Политика обработки данных</a>
+      <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
+      <button type="button" data-consent-settings>Настройки cookies</button>
+    </>}</div>
+  </div>
+</footer>

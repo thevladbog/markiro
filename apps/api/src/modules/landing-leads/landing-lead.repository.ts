@@ -76,7 +76,7 @@ export class LandingLeadRepository {
             sourcePath: input.sourcePath,
             locale: input.locale,
             ...optional("inn", invoice ? input.inn : undefined),
-            ...optional("tariffCode", invoice ? input.tariffCode : undefined),
+            ...optional("tariffCode", input.tariffCode),
             ...optional("productGroup", input.productGroup),
             ...optional("linesBucket", input.linesBucket),
             ...optional("utm", input.utm),
@@ -118,7 +118,7 @@ export class LandingLeadRepository {
             kind: "landing-download-link",
             locale: input.locale,
             company: input.company,
-            downloadPageUrl: `${this.options.landingOrigin.replace(/\/$/, "")}/skachat/`,
+            downloadPageUrl: `${this.options.landingOrigin.replace(/\/$/, "")}/skachat/?installer=1${input.tariffCode === undefined ? "" : `&tariff=${encodeURIComponent(input.tariffCode)}`}`,
             contactEmail: this.options.replyTo,
           },
         });
