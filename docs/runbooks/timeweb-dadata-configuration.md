@@ -8,8 +8,22 @@ recovery/upgrade operation to change credentials.
 
 ## Prepare and review
 
-Use a reviewed main commit and its successful main-push CI attempt 1. Install
-its exact transitive `.mjs` source closure under
+Use a reviewed commit C and its successful main-push CI attempt 1, including
+all required platform jobs actually passing. Pin a lightweight tag named
+`configuration-dadata-<full C>` directly to C. Verify that C remains an ancestor
+of main, and that neither a moved/annotated tag nor a same-named branch can
+supply authority. Unrelated main advancement does not change this pinned source.
+Never substitute another SHA's CI, a skipped platform job or a rerun.
+
+Before any protected-environment policy write, obtain the user's authorization
+for the concrete single tag rule after C, CI and the exact rule are reviewable.
+The rule is a `tag` rule for that complete name, never a wildcard. Preserve the
+existing rules, reviewers, prevent-self-review and bypass controls byte-for-byte
+where represented by the API. Native run approval is a separate gate. The
+source-rule addition applies to every workflow using `production-deploy`; it is
+not implied by merely authorizing the eventual native run.
+
+Install C's exact transitive `.mjs` source closure under
 `/opt/markiro-platform/configuration-executors/<executorSha>` with private owned
 0700 directories and regular single-link 0600 files. `sourceClosure` in
 `deploy/platform/dadata-transport.mjs` produces the hashes. Verify the hashes
@@ -35,20 +49,21 @@ runtime authority. Preserve any failed partial preparation and choose no new
 operation until its exact outcome is understood.
 
 Review the returned operation UUID, plan SHA256, old/new Compose hashes, source
-closure and tests. Inspect the plan's complete guard inventory. Old source,
+closure, pinned source/tag proof and tests. Inspect the plan's complete guard inventory. Old source,
 image, configuration, schema and catalog records remain immutable. The token
 value is not review output. A token-only status check is insufficient: validate
 real provider suggestions before proceeding.
 
 ## Protected application
 
-Dispatch `configure-platform-dadata.yml` on the exact reviewed main commit with
+After the exact tag rule has been authorized, applied and independently read
+back, dispatch `configure-platform-dadata.yml` on that exact immutable tag with
 `executor_ci_run_id`, `executor_ci_run_attempt=1`, `operation_id` and
 `plan_sha256`. It shares `timeweb-platform-production` concurrency and the
 existing `production-deploy` environment. Obtain its independent native
 approval; do not rerun the run or bypass environment rules.
 
-The executor rechecks source, main, CI and native approval, then holds the
+The executor rechecks the exact tag, main ancestry, CI and native approval, then holds the
 canonical host lock. It permits only the exact API Compose replacement. A
 `config-pending.json` marker blocks other current-source consumers. Every other
 container, image, network, mount, catalog row and journal must remain unchanged.
