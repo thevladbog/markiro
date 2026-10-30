@@ -40,8 +40,12 @@ fn owner(context: &OfficeContext) -> AttemptOwner {
     }
 }
 fn cloud_error(error: Error) -> ApiError {
+    let reason = match error {
+        Error::InvalidAttempt => serde_json::json!("connection_changed"),
+        error => serde_json::json!(error_code(&error)),
+    };
     ApiError::conflict("yandex_backup", "Yandex backup operation failed")
-        .with_details(serde_json::json!({"constraint":"yandex_backup","reason":error_code(&error)}))
+        .with_details(serde_json::json!({"constraint":"yandex_backup","reason":reason}))
 }
 fn internal_error() -> ApiError {
     ApiError::new(
@@ -296,4 +300,58 @@ pub async fn retry(
         .await
         .map_err(cloud_error)?;
     Ok((StatusCode::ACCEPTED, Json(status)))
+}
+
+#[cfg(test)]
+mod error_response_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    async fn assert_reason(error: Error, reason: &str) {
+        let response = cloud_error(error).into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "error": {
+                    "code": "conflict",
+                    "message": "Yandex backup operation failed",
+                    "details": {"constraint": "yandex_backup", "reason": reason}
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_attempt_reports_connection_changed() {
+        assert_reason(Error::InvalidAttempt, "connection_changed").await;
+    }
+
+    #[tokio::test]
+    async fn canonical_cloud_reasons_survive_http_serialization() {
+        for (error, reason) in [
+            (
+                Error::Provider("client_credentials_invalid"),
+                "client_credentials_invalid",
+            ),
+            (Error::SecretUnavailable, "secret_unavailable"),
+            (Error::Provider("quota"), "quota_exceeded"),
+            (Error::Provider("remote_conflict"), "remote_conflict"),
+            (Error::Provider("cancelled"), "cancelled"),
+        ] {
+            assert_reason(error, reason).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_error_text_and_secrets_are_not_serialized() {
+        assert_reason(Error::Provider("access_token=private-token"), "network").await;
+        assert_reason(
+            Error::Io(std::io::Error::other("client_secret=private-secret")),
+            "local_space",
+        )
+        .await;
+    }
 }

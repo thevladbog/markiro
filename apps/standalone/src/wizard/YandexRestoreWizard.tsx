@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Checkbox, Input, Select } from "@markiro/ui";
 import { yandexNative, type RecoveryCopy } from "../host/yandex-native.js";
+import { yandexErrorCode } from "../host/yandex-errors.js";
 import { formatWhen } from "../office/backups/backup-format.js";
 export function YandexRestoreWizard({
   onBack,
@@ -26,7 +27,7 @@ export function YandexRestoreWizard({
     try {
       await f();
     } catch (e) {
-      setError(typeof e === "string" ? e : "network");
+      setError(yandexErrorCode(e));
     } finally {
       setBusy(false);
     }
@@ -39,7 +40,7 @@ export function YandexRestoreWizard({
         <p>{t("yandex.restoreClientId")}</p>
         {error && (
           <Alert tone="warn">
-            {t(`yandex.errors.${error}`, { defaultValue: t("yandex.errors.network") })}
+            {t(`yandex.errors.${error}`, { defaultValue: t("yandex.errors.operation_failed") })}
           </Alert>
         )}
         {done ? (

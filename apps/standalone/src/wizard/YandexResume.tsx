@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button } from "@markiro/ui";
 import { yandexNative } from "../host/yandex-native.js";
+import { yandexErrorCode } from "../host/yandex-errors.js";
 export function YandexResume() {
   const { t } = useTranslation();
   const [available, setAvailable] = useState(false);
@@ -34,7 +35,7 @@ export function YandexResume() {
             () => window.location.reload(),
             (reason: unknown) => {
               setBusy(false);
-              setError(typeof reason === "string" ? reason : "restore_failed");
+              setError(yandexErrorCode(reason));
             },
           );
         }}
