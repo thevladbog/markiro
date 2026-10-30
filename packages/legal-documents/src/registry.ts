@@ -175,8 +175,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-09",
-    revision: "2026.09/04",
-    effectiveDate: "2026-09-19",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -207,7 +207,7 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-03/2026.10/01", content: STATION_EXCEPTIONS_CONTENT },
   { releaseKey: "MKR-INS-04/2026.10/01", content: STATION_WORKSTATION_SETUP_CONTENT },
   { releaseKey: "MKR-INS-08/2026.10/01", content: CABINET_SHIFT_PLANNING_CONTENT },
-  { releaseKey: "MKR-INS-09/2026.09/04", content: CABINET_SHIFT_CLOSE_CONTENT },
+  { releaseKey: "MKR-INS-09/2026.10/01", content: CABINET_SHIFT_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-10/2026.09/02", content: CABINET_CATALOG_PRODUCT_CONTENT },
 ];
 

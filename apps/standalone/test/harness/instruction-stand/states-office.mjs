@@ -2,7 +2,8 @@
 // The office instructions' states (MKR-INS-08 planning, 09 the shift's course and close,
 // 10 the catalog): each opens the office on the host PC as its administrator and reaches one
 // screen the way a person would.
-import { ADMIN } from "./site.mjs";
+import { ADMIN, OPERATORS } from "./site.mjs";
+import { scan, shiftCard } from "./states.mjs";
 
 /** The office on the host PC: the administrator's login, then «Обзор». */
 async function office(computer) {
@@ -29,9 +30,11 @@ async function section(page, name, heading = name) {
 const settle = (page, ms = 700) => page.waitForTimeout(ms);
 
 /** One state: open the office, run `steps`, shoot. */
-const state = (title, steps) => ({
+const state = (title, steps, { boxClosed = false } = {}) => ({
   title,
   async run({ computer, shoot }) {
+    // The line 1 station first closes the shift's open box (`stationClosesBox`).
+    if (boxClosed) await stationClosesBox(computer);
     const opened = await office(computer);
     await steps(opened.page, opened);
     await shoot(opened.page);
@@ -42,7 +45,9 @@ const state = (title, steps) => ({
 async function rowMenu(page, name, item) {
   await page.getByRole("button", { name: `Действия: ${name}` }).click();
   await settle(page, 300);
-  await page.getByRole("menuitem", { name: item }).click();
+  // The menu of a low row reaches past the frame: the keyboard picks its item.
+  await page.getByRole("menuitem", { name: item }).focus();
+  await page.keyboard.press("Enter");
   await settle(page);
 }
 
@@ -76,6 +81,66 @@ async function panelToEnd(page) {
     }
   });
   await settle(page);
+}
+
+/** The shift the seed's station opened and scanned into. */
+const ACTIVE = "OCT26-001";
+/** The reason the office gives when it closes a shift a station will not finish. */
+const CLOSE_REASON = "Станция линии 1 вышла из строя, смену закрывает технолог";
+
+/** The card of shift `number` from «Смены» (its number is the card's link). */
+async function openCard(page, number) {
+  await section(page, "Смены");
+  await page.getByRole("link", { name: `Карточка смены ${number}` }).click();
+  await page.getByRole("heading", { name: `Смена ${number}` }).waitFor();
+  await settle(page, 1000);
+}
+
+/** Tab `name` of the open shift card. */
+async function cardTab(page, name) {
+  await page.getByRole("tab", { name }).click();
+  await settle(page, 1200);
+}
+
+/** Closes the active shift from the office, as «Закрыть смену» does, and stays on «Смены». */
+async function closeActive(page) {
+  await section(page, "Смены");
+  await rowMenu(page, ACTIVE, `Закрыть смену ${ACTIVE}`);
+  await page.getByRole("dialog").getByLabel("Причина закрытия").fill(CLOSE_REASON);
+  await page.getByRole("dialog").getByRole("button", { name: "Закрыть смену" }).click();
+  await page.getByText(`Смена ${ACTIVE} закрыта.`).waitFor();
+  await settle(page, 1000);
+}
+
+/**
+ * The line 1 station closes the open box of the active shift (5 of 12), so every code of the
+ * shift sits in a closed box, and leaves the shift; the office then has a shift to close and
+ * export whole.
+ */
+async function stationClosesBox(computer) {
+  const { page } = await computer("station-1", "station");
+  await page.getByText("Отсканируйте бейдж").waitFor();
+  await page.waitForTimeout(1500);
+  await scan(page, OPERATORS[0].badge);
+  await page.getByRole("heading", { name: "Смены линии" }).waitFor();
+  await page.waitForTimeout(800);
+  await shiftCard(page, ACTIVE).getByRole("button").first().click();
+  await page.getByText("Открытый короб").waitFor();
+  await page.waitForTimeout(800);
+  await page.getByRole("button", { name: "Закрыть короб" }).click();
+  // «Закрыть неполный короб? В коробе 5 из 12.» answers with its own «Закрыть короб».
+  await page.getByText("Закрыть неполный короб?").waitFor();
+  await page.getByRole("button", { name: "Закрыть короб" }).last().click();
+  await page.getByText("Открытый короб").waitFor();
+  await page
+    .getByText("0 из 12")
+    .or(page.getByText(/^0$/))
+    .first()
+    .waitFor()
+    .catch(() => {});
+  // The facts reach the host before the office reads them.
+  await page.waitForTimeout(2500);
+  return page;
 }
 
 export const OFFICE_STATES = {
@@ -150,4 +215,99 @@ export const OFFICE_STATES = {
     await section(page, "Смены");
     await rowMenu(page, "OCT26-003", "Удалить смену OCT26-003");
   }),
+
+  // MKR-INS-09: the shift's course, its close and the exports.
+  "ins09/overview": state("09: обзор", async (page) => {
+    await settle(page, 1200);
+  }),
+  "ins09/shift-totals": state("09: итоги активной смены", async (page) => {
+    await section(page, "Смены");
+    await page.getByRole("button", { name: `Итоги смены ${ACTIVE}` }).click();
+    await settle(page, 1000);
+  }),
+  "ins09/card-summary": state("09: карточка активной смены", async (page) => {
+    await openCard(page, ACTIVE);
+  }),
+  "ins09/card-boxes": state("09: короба смены", async (page) => {
+    await openCard(page, ACTIVE);
+    await cardTab(page, "Короба");
+  }),
+  "ins09/card-pallets": state("09: паллеты смены", async (page) => {
+    await openCard(page, ACTIVE);
+    await cardTab(page, "Паллеты");
+  }),
+  "ins09/card-scans": state("09: сканирования смены", async (page) => {
+    await openCard(page, ACTIVE);
+    await cardTab(page, "Сканирования");
+  }),
+  "ins09/export-active": state("09: выгрузка незакрытой смены", async (page) => {
+    await section(page, "Смены");
+    await rowMenu(page, ACTIVE, `Выгрузка смены ${ACTIVE}`);
+    await settle(page, 1500);
+  }),
+  "ins09/close": state("09: закрытие смены в офисе", async (page) => {
+    await section(page, "Смены");
+    await rowMenu(page, ACTIVE, `Закрыть смену ${ACTIVE}`);
+    await page.getByRole("dialog").getByLabel("Причина закрытия").fill(CLOSE_REASON);
+    await settle(page);
+  }),
+  "ins09/closed-list": state(
+    "09: закрытая смена в списке",
+    async (page) => {
+      await closeActive(page);
+      await page.getByRole("combobox", { name: "Статус" }).click();
+      await settle(page, 300);
+      await page.getByRole("option", { name: "Закрыта" }).click();
+      await settle(page, 1000);
+    },
+    { boxClosed: true },
+  ),
+  "ins09/export-open-box": state("09: выгрузка смены с открытым коробом", async (page) => {
+    await closeActive(page);
+    await openCard(page, ACTIVE);
+    await page.getByRole("button", { name: "Выгрузка", exact: true }).click();
+    await page.getByRole("button", { name: "Сформировать и сохранить" }).waitFor();
+    await settle(page, 1500);
+  }),
+  "ins09/export-closed": state(
+    "09: выгрузка закрытой смены",
+    async (page) => {
+      await closeActive(page);
+      await openCard(page, ACTIVE);
+      await page.getByRole("button", { name: "Выгрузка", exact: true }).click();
+      await page.getByRole("button", { name: "Сформировать и сохранить" }).waitFor();
+      await settle(page, 1500);
+    },
+    { boxClosed: true },
+  ),
+  "ins09/export-saved": state(
+    "09: выгрузка сохранена",
+    async (page) => {
+      await closeActive(page);
+      await openCard(page, ACTIVE);
+      await page.getByRole("button", { name: "Выгрузка", exact: true }).click();
+      await page.getByRole("radio", { name: /\[XML\]\[ГИСМТ\] Отчет об агрегации/ }).check();
+      await page.getByRole("button", { name: "Сформировать и сохранить" }).click();
+      await page.getByText(/Сохранено файлов/).waitFor();
+      await settle(page);
+    },
+    { boxClosed: true },
+  ),
+  "ins09/card-exports": state(
+    "09: вкладка «Выгрузки»",
+    async (page) => {
+      await closeActive(page);
+      await openCard(page, ACTIVE);
+      await page.getByRole("button", { name: "Выгрузка", exact: true }).click();
+      await page.getByRole("radio", { name: /\[XML\]\[ГИСМТ\] Отчет об агрегации/ }).check();
+      await page.getByRole("button", { name: "Сформировать и сохранить" }).click();
+      await page.getByText(/Сохранено файлов/).waitFor();
+      // Escape closes the export and the card; the card opens again on its exports.
+      await page.keyboard.press("Escape");
+      await settle(page);
+      await openCard(page, ACTIVE);
+      await cardTab(page, "Выгрузки");
+    },
+    { boxClosed: true },
+  ),
 };
