@@ -64,7 +64,7 @@ export function validateReadBootstrapOperation(o) {
     o.binding.operationId === o.catalogOperationId &&
       uuid(o.binding.epoch) &&
       sha(o.binding.evidenceSha256) &&
-      o.binding.identity.product === "standalone" &&
+      ["standalone", "handheld"].includes(o.binding.identity.product) &&
       o.binding.identity.channel === "stable" &&
       /^\d+\.\d+\.\d+$/u.test(o.binding.targetVersion),
   );

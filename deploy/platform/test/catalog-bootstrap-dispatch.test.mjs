@@ -227,6 +227,7 @@ test("catalog physical fencing also requires absence of other active production 
     "upgrade-platform.yml",
     "station-stable-release.yml",
     "handheld-release.yml",
+    "stage-handheld-catalog.yml",
     "release-platform-images.yml",
     "signer-stable-release.yml",
     "station-release-reseed.yml",
@@ -245,7 +246,10 @@ test("writer fence covers every actual release/deployment workflow in the curren
   const { readdir } = await import("node:fs/promises");
   const { assertNoCatalogPeers } = await import("../upgrade-dispatch.mjs");
   const names = (await readdir(new URL("../../../.github/workflows/", import.meta.url))).filter(
-    (name) => /(?:release|deploy|recover|upgrade|signer-download-repair).*\.yml$/u.test(name),
+    (name) =>
+      /(?:release|deploy|recover|upgrade|signer-download-repair|stage-handheld-catalog).*\.yml$/u.test(
+        name,
+      ),
   );
   for (const name of names) {
     const request = async () => ({
