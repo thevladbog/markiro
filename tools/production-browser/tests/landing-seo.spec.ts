@@ -561,8 +561,19 @@ for (const [route, counterpart, registry] of [
 
     await expect(page.locator(`header .language-switch a[href="${counterpart}"]`)).toBeVisible();
     await expect(page.locator(`a.legal-backlink[href="${registry}"]`)).toBeVisible();
-    await page.locator('.legal-toc a[href="#general"]').click();
-    await expect(page.locator("#general")).toBeInViewport();
+    const tocLinks = page.locator(".legal-toc a");
+    const anchors = await tocLinks.evaluateAll((links) =>
+      links.map((link) => link.getAttribute("href") ?? ""),
+    );
+    expect(anchors.length).toBeGreaterThan(0);
+    for (const anchor of anchors) {
+      expect(anchor).toMatch(/^#[a-z][a-z0-9-]*$/);
+      await expect(page.locator(anchor)).toHaveCount(1);
+    }
+    const firstAnchor = anchors[0];
+    if (!firstAnchor) throw new Error("Missing legal table of contents");
+    await tocLinks.first().click();
+    await expect(page.locator(firstAnchor)).toBeInViewport();
     await expect(
       page.locator('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
     ).toHaveCount(0);
@@ -583,8 +594,8 @@ for (const [route, counterpart, registry] of [
 }
 
 for (const [route, terms] of [
-  ["/privacy/", ["Персональные данные", "Обработка", "Тенант"]],
-  ["/en/privacy/", ["Personal data", "Processing", "Tenant"]],
+  ["/legal/archive/MKR-PD-01/2026.08/01/", ["Персональные данные", "Обработка", "Тенант"]],
+  ["/en/legal/archive/MKR-PD-01/2026.08/01/", ["Personal data", "Processing", "Tenant"]],
 ] as const) {
   test(`${route} keeps definition terms and em dashes on one aligned row`, async ({ page }) => {
     await page.goto(route);
@@ -663,8 +674,18 @@ test("every manifest artifact downloads with its released size and media type", 
   request,
 }) => {
   const declaredMediaTypes = new Map<string, string>();
-  for (const registry of ["/legal/", "/en/legal/"]) {
-    await page.goto(registry);
+  // Superseded files remain downloadable on their immutable revision pages;
+  // the public registries list only the active versions.
+  for (const route of [
+    "/legal/",
+    "/en/legal/",
+    "/legal/archive/MKR-PD-01/2026.08/01/",
+    "/en/legal/archive/MKR-PD-01/2026.08/01/",
+    "/legal/archive/MKR-PD-02/2026.08/01/",
+    "/en/legal/archive/MKR-PD-02/2026.08/01/",
+  ]) {
+    const response = await page.goto(route);
+    expect(response?.status(), route).toBe(200);
     for (const link of await page.locator("a[download][type]").evaluateAll((anchors) =>
       anchors.map((anchor) => ({
         fileName: anchor.getAttribute("download") ?? "",
