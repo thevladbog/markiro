@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+const port = process.env.LANDING_TEST_PORT ?? "5473";
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: ["landing-seo.spec.ts", "landing-layout.spec.ts"],
@@ -15,10 +17,11 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   webServer: {
     command: "node scripts/serve-landing.mjs",
-    url: "http://127.0.0.1:5473/",
+    url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
+      LANDING_TEST_PORT: port,
       ASTRO_TELEMETRY_DISABLED: "1",
       PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
       PUBLIC_PHONE: "+7 960 495-46-10",
@@ -28,7 +31,7 @@ export default defineConfig({
     },
   },
   use: {
-    baseURL: "http://127.0.0.1:5473",
+    baseURL: `http://127.0.0.1:${port}`,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },

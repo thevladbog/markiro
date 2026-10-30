@@ -184,7 +184,7 @@ test("GTM stays offline until analytics consent and loads only once after permis
 // The owner's decision (#787): the home pages carry no call form. Leads come through
 // /skachat/ and /stoimost/, and «Разобрать линию» leads to the contacts of the home page.
 for (const [route, label] of [
-  ["/", "Разобрать линию за 30 минут"],
+  ["/", "hello@markiro.app"],
   ["/en/", "Walk through your line in 30 minutes"],
 ] as const) {
   test(`${route} has no call form and leads the line review to its contacts`, async ({ page }) => {
@@ -250,7 +250,9 @@ test.describe("standalone lead forms", () => {
     await form.locator('input[name="consent"]').check();
     await form.locator('button[type="submit"]').click();
 
-    await expect(page.locator("[data-download-ready] [data-release-only] h2")).toBeFocused();
+    await expect(
+      page.locator("[data-download-ready] [data-release-only] [data-ready-heading]"),
+    ).toBeFocused();
     expect(payload).toEqual({
       company: "ООО «Пивоварня»",
       consentVersion: "MKR-PD-02/2026.08/01",
@@ -267,9 +269,9 @@ test.describe("standalone lead forms", () => {
     await expect(page.locator('[data-release="sha256"]')).toHaveText(
       LATEST_RELEASE.installer.sha256,
     );
-    await expect(page.locator("#pervyy-zapusk")).toBeVisible();
+    await expect(page.getByText("Перед первым запуском Windows", { exact: true })).toBeVisible();
     await expect(page.locator("[data-download-ready]")).toContainText(
-      isMobile ? "Ссылка отправлена" : "Ссылка готова",
+      isMobile ? "Заявка принята" : "Ссылка готова",
     );
   });
 
@@ -289,7 +291,9 @@ test.describe("standalone lead forms", () => {
     await form.locator('input[name="company"]').fill("Завод");
     await form.locator('input[name="consent"]').check();
     await form.locator('button[type="submit"]').click();
-    await expect(page.locator("[data-pending-only] h2")).toHaveText("Версия готовится");
+    await expect(page.locator("[data-pending-only] [data-ready-heading]")).toHaveText(
+      "Заявка принята. Установщик пока недоступен",
+    );
     await expect(page.locator("[data-pending-only]")).toContainText("ivan@zavod.ru");
     await expect(page.locator("[data-release-only]")).toBeHidden();
   });
@@ -370,8 +374,7 @@ test.describe("standalone lead forms", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await page.goto("/stoimost/");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-    // Product screens and the recommended plan stay dark in both themes.
-    await expect(page.locator('[data-tariff="line"]')).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator('[data-tariff="line"]')).toHaveClass(/ax-plan--recommended/u);
   });
 });
 
@@ -450,7 +453,7 @@ test("article hero keeps a clear heading hierarchy", async ({ page }) => {
 });
 
 for (const [route, wordmark, headerTheme, footerTheme] of [
-  ["/", "маркиро", "light", "dark"],
+  ["/", "маркиро", "light", "light"],
   ["/en/", "MARKIRO", "light", "dark"],
   ["/sscc-i-agregatsiya/", "маркиро", "dark", "dark"],
   ["/en/sscc-and-aggregation/", "MARKIRO", "dark", "dark"],
@@ -682,7 +685,10 @@ test("every manifest artifact downloads with its released size and media type", 
 });
 
 for (const route of verificationRoutes) {
-  test(`${route} exposes bilingual verification and bounded downloads`, async ({ page }) => {
+  test(`${route} exposes bilingual verification and bounded downloads`, async ({
+    page,
+    baseURL,
+  }) => {
     await page.goto(route);
     await expect(page.locator("[data-document-id]")).toContainText(route.split("/")[2]!);
     await expect(page.locator("h1")).toContainText("Проверка документа");
@@ -693,7 +699,7 @@ for (const route of verificationRoutes) {
       "href",
       `https://markiro.app${route}`,
     );
-    expect(page.url()).toBe(`http://127.0.0.1:5473${route}`);
+    expect(page.url()).toBe(new URL(route, baseURL).href);
     for (const matrix of await page.locator("[data-document-datamatrix]").evaluateAll((nodes) =>
       nodes.map((node) => {
         const symbol = node.querySelector("svg");
@@ -944,4 +950,197 @@ test.describe("header", () => {
       }
     });
   }
+});
+
+for (const code of ["start", "line", "workshop"]) {
+  test(`V4 ${code}: tariff trial and invoice preserve context through validation and retry`, async ({
+    page,
+  }) => {
+    const requests: Record<string, unknown>[] = [];
+    let rateLimit = true;
+    await page.route("**/api/landing-leads", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (rateLimit) {
+        rateLimit = false;
+        await route.fulfill({
+          status: 429,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "rate_limited" }),
+        });
+      } else
+        await route.fulfill({
+          status: 202,
+          contentType: "application/json",
+          body: JSON.stringify({ accepted: true }),
+        });
+    });
+    await page.goto("/stoimost/");
+    await page.locator("[data-consent-reject]").click();
+    await page
+      .locator(`[data-tariff="${code}"] a[data-analytics="landing_download_click"]`)
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/skachat/\\?tariff=${code}$`));
+    const form = page.locator("[data-lead-form]");
+    await expect(form.locator('[name="tariffCode"]')).toHaveValue(code);
+    await form.locator('[name="email"]').fill("buyer@example.test");
+    await form.locator('[name="company"]').fill("Производство");
+    await form.locator('[type="submit"]').click();
+    expect(requests).toHaveLength(0);
+    await expect(form.locator('[data-error-for="consent"]')).not.toBeEmpty();
+    await form.locator('[name="consent"]').check();
+    await form.locator('[type="submit"]').click();
+    await expect(form.locator("[data-form-status]")).toContainText("Слишком много");
+    await form.locator('[type="submit"]').click();
+    await expect(page.locator("[data-release-only]")).toBeVisible();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.requestId).toBe(requests[1]?.requestId);
+    for (const payload of requests)
+      expect(payload).toMatchObject({ intent: "download", tariffCode: code });
+    await page.goto(`/stoimost/?tarif=${code}#schet`);
+    const invoice = page.locator("[data-lead-form]");
+    await expect(invoice.locator('[name="tariffCode"]')).toHaveValue(code);
+    await invoice.locator('[name="inn"]').fill("7707083893");
+    await invoice.locator('[name="email"]').fill("billing@example.test");
+    await invoice.locator('[name="consent"]').check();
+    await invoice.locator('[type="submit"]').click();
+    await expect(page.locator("[data-invoice-success]")).toBeVisible();
+    expect(requests.at(-1)).toMatchObject({
+      intent: "invoice",
+      tariffCode: code,
+      inn: "7707083893",
+    });
+  });
+}
+
+test("V4 direct and invalid tariff entry keep download available without inventing a selection", async ({
+  page,
+}) => {
+  for (const search of ["", "?tariff=not-a-tariff"]) {
+    await page.goto("/skachat/" + search);
+    await expect(page.locator("[data-download-tariff]")).toHaveValue("");
+    await expect(page.locator("[data-selected-tariff]")).toBeHidden();
+    await expect(page.locator("[data-lead-fields]")).toBeEnabled();
+  }
+});
+
+test("V4 missing release can be rechecked without creating another lead", async ({ page }) => {
+  let available = false,
+    leads = 0;
+  await page.route("https://releases.markiro.app/standalone/stable/latest.json", (route) =>
+    route.fulfill(
+      available
+        ? {
+            status: 200,
+            contentType: "application/json",
+            headers: { "access-control-allow-origin": "*" },
+            body: JSON.stringify(LATEST_RELEASE),
+          }
+        : { status: 404, headers: { "access-control-allow-origin": "*" }, body: "" },
+    ),
+  );
+  await page.route("**/api/landing-leads", (route) => {
+    leads++;
+    return route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: '{"accepted":true}',
+    });
+  });
+  await page.goto("/skachat/?tariff=line");
+  await page.locator("[data-consent-reject]").click();
+  await page.locator('[name="email"]').fill("buyer@example.test");
+  await page.locator('[name="company"]').fill("Производство");
+  await page.locator('[name="consent"]').check();
+  await page.locator('[type="submit"]').click();
+  await expect(page.locator("[data-pending-only]")).toBeVisible();
+  available = true;
+  await page.locator("[data-release-retry]").click();
+  await expect(page.locator("[data-release-only]")).toBeVisible();
+  expect(leads).toBe(1);
+});
+
+test("V4 email link opens the public installer without another form or accepted-lead claim", async ({
+  page,
+}) => {
+  let leads = 0;
+  await page.route("**/api/landing-leads", (route) => {
+    leads++;
+    return route.abort();
+  });
+  await page.goto("/skachat/?installer=1&tariff=line");
+  await expect(page.locator("[data-release-only]")).toBeVisible();
+  await expect(page.locator("[data-download-start]")).toBeHidden();
+  expect(await page.locator("[data-download-ready]").innerText()).not.toContain(
+    "поставлено в очередь",
+  );
+  await expect(page.locator("[data-release-link]")).toHaveAttribute(
+    "href",
+    LATEST_RELEASE.installer.url,
+  );
+  expect(leads).toBe(0);
+});
+
+test("V4 changed email after a lost response is a new request", async ({ page }) => {
+  const requests: Record<string, unknown>[] = [];
+  await page.route("**/api/landing-leads", async (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (requests.length === 1) await route.abort("failed");
+    else
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: '{"accepted":true}',
+      });
+  });
+  await page.goto("/skachat/?tariff=line");
+  await page.locator("[data-consent-reject]").click();
+  await page.locator('[name="email"]').fill("old@example.test");
+  await page.locator('[name="company"]').fill("Производство");
+  await page.locator('[name="consent"]').check();
+  await page.locator('[type="submit"]').click();
+  await expect(page.locator("[data-lead-alert]")).toBeVisible();
+  await page.locator('[name="email"]').fill("corrected@example.test");
+  await page.locator('[type="submit"]').click();
+  await expect(page.locator("[data-release-only]")).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[0]?.requestId).not.toBe(requests[1]?.requestId);
+  expect(requests[1]?.email).toBe("corrected@example.test");
+});
+
+test("V4 editing email during a slow manifest keeps the form open", async ({ page }) => {
+  let release: () => void = () => {};
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("https://releases.markiro.app/standalone/stable/latest.json", async (route) => {
+    await wait;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify(LATEST_RELEASE),
+    });
+  });
+  await page.route("**/api/landing-leads", (route) =>
+    route.fulfill({ status: 202, contentType: "application/json", body: '{"accepted":true}' }),
+  );
+  await page.goto("/skachat/");
+  await page.locator("[data-consent-reject]").click();
+  await page.locator('[name="email"]').fill("old@example.test");
+  await page.locator('[name="company"]').fill("Производство");
+  await page.locator('[name="consent"]').check();
+  await page.locator('[type="submit"]').click();
+  await expect(page.locator("[data-loading-only]")).toBeVisible();
+  await page.locator("[data-change-email]").click();
+  release();
+  await expect(page.locator("[data-download-start]")).toBeVisible();
+  await expect(page.locator('[name="email"]')).toBeFocused();
+  await expect(page.locator('[name="consent"]')).not.toBeChecked();
+  await page.locator('[name="email"]').fill("corrected@example.test");
+  await page.locator('[name="consent"]').check();
+  await page.locator('[type="submit"]').click();
+  await expect(page.locator("[data-release-only]")).toBeVisible();
+  await expect(page.locator("[data-release-only] [data-ready-email]")).toHaveText(
+    "corrected@example.test",
+  );
 });

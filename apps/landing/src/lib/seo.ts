@@ -1,4 +1,5 @@
 import { SITE_CONTACTS } from "../content/contacts";
+import { buildV4ProductGraph } from "./product-schema";
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
@@ -168,6 +169,7 @@ export function attachOrganizationContact(
 }
 
 export function buildPageGraph(page: SeoPageDefinition): PageGraph {
+  if (page.path === "/") return buildV4ProductGraph(page, [websiteNode(), organizationNode()]);
   const homePath = page.locale === "ru" ? "/" : "/en/";
   const homePage = SEO_PAGES.find((candidate) => candidate.path === homePath);
   const facts = SOFTWARE_FACTS[page.locale];
@@ -355,6 +357,8 @@ export function buildAutonomPageGraph(
   page: AutonomPageDefinition,
   options: AutonomGraphOptions = {},
 ): PageGraph {
+  if (page.path === "/skachat/" || page.path === "/stoimost/")
+    return buildV4ProductGraph(page, [websiteNode(), organizationNode()]);
   const pageUrl = absoluteUrl(page.path);
   const graph: JsonLdObject[] = [
     websiteNode(),

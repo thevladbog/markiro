@@ -5,7 +5,8 @@ import { TARIFF_CODES } from "../content/pricing";
  * opens with it selected, from the home page and from /stoimost/ itself.
  */
 export function tariffFromSearch(search: string): string | null {
-  const value = new URLSearchParams(search).get("tarif");
+  const params = new URLSearchParams(search);
+  const value = params.get("tariff") ?? params.get("tarif");
   return value !== null && (TARIFF_CODES as readonly string[]).includes(value) ? value : null;
 }
 

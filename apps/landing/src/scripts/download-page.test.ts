@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StandaloneRelease } from "../lib/release";
 import { initDownloadPage } from "./download-page";
+import { initDownloadFollowup } from "./download-followup";
 
 const RELEASE: StandaloneRelease = {
   version: "0.4.0",
@@ -20,6 +21,7 @@ function render(): void {
   document.body.innerHTML = `
     <section data-download-start><div data-release-fact hidden><dd data-release="version"></dd></div><dd data-release="size"></dd></section>
     <section data-download-ready hidden>
+      <div data-loading-only hidden><h2 tabindex="-1" data-ready-heading>Проверяем установщик</h2></div>
       <div data-release-only>
         <h2 tabindex="-1" data-ready-heading>Ссылка готова</h2>
         <span data-ready-email></span>
@@ -29,7 +31,7 @@ function render(): void {
       </div>
       <div data-pending-only hidden>
         <h2 tabindex="-1" data-ready-heading>Версия готовится</h2>
-        <span data-ready-email></span>
+        <span data-ready-email></span><button type="button" data-release-retry>Проверить ещё раз</button>
       </div>
       <p data-copy-status></p>
     </section>
@@ -42,6 +44,80 @@ afterEach(() => {
 });
 
 describe("download page", () => {
+  it("does not restore a stale accepted view after the visitor edits email during manifest loading", async () => {
+    render();
+    window.scrollTo = vi.fn();
+    const start = document.querySelector<HTMLElement>("[data-download-start]")!;
+    start.innerHTML =
+      '<form data-consent-version="v1"><input name="email" value="old@example.test"><input name="company" value="Производство"><input name="consent" type="checkbox" checked></form>';
+    document
+      .querySelector("[data-download-ready]")
+      ?.insertAdjacentHTML("beforeend", "<button data-change-email>Изменить почту</button>");
+    let finish: (value: StandaloneRelease | null) => void = () => {};
+    const pending = new Promise<StandaloneRelease | null>((resolve) => {
+      finish = resolve;
+    });
+    const page = initDownloadPage(document, { fetchRelease: () => pending, copy: vi.fn() });
+    const followup = initDownloadFollowup(
+      document,
+      start.querySelector("form")!,
+      {
+        createRequestId: () => "id",
+        currentPath: () => "/skachat/",
+        firstTouch: () => ({}),
+        request: vi.fn(),
+        track: vi.fn(),
+      },
+      () => page.edit(),
+    );
+    const accepted = page.accept("old@example.test");
+    document.querySelector<HTMLButtonElement>("[data-change-email]")?.click();
+    expect(start.hidden).toBe(false);
+    finish(RELEASE);
+    await accepted;
+    expect(start.hidden).toBe(false);
+    expect(document.querySelector<HTMLElement>("[data-download-ready]")?.hidden).toBe(true);
+    await page.accept("corrected@example.test");
+    expect(document.querySelector("[data-ready-email]")?.textContent).toBe(
+      "corrected@example.test",
+    );
+    followup.dispose();
+    page.dispose();
+  });
+  it("acknowledges the accepted lead while release metadata is still loading", async () => {
+    render();
+    let finish: (value: StandaloneRelease | null) => void = () => {};
+    const pending = new Promise<StandaloneRelease | null>((resolve) => {
+      finish = resolve;
+    });
+    const page = initDownloadPage(document, { fetchRelease: () => pending, copy: vi.fn() });
+    const accepted = page.accept("buyer@example.test");
+    expect(document.querySelector<HTMLElement>("[data-download-start]")?.hidden).toBe(true);
+    expect(document.querySelector<HTMLElement>("[data-loading-only]")?.hidden).toBe(false);
+    finish(RELEASE);
+    await accepted;
+    expect(document.querySelector<HTMLElement>("[data-loading-only]")?.hidden).toBe(true);
+    page.dispose();
+  });
+  it("rechecks a missing release without resubmitting the lead", async () => {
+    render();
+    window.scrollTo = vi.fn();
+    const fetchRelease = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(RELEASE);
+    const page = initDownloadPage(document, { fetchRelease, copy: vi.fn() });
+    await page.accept("buyer@example.test");
+    document.querySelector<HTMLButtonElement>("[data-release-retry]")?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector<HTMLElement>("[data-download-ready]")?.dataset.release).toBe(
+        "ready",
+      ),
+    );
+    expect(fetchRelease).toHaveBeenCalledTimes(3);
+    page.dispose();
+  });
   it("reads latest.json only once the visitor turns to the form", () => {
     render();
     const fetchRelease = vi.fn(() => Promise.resolve(RELEASE));

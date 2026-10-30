@@ -1,99 +1,42 @@
 ---
-import { DOWNLOAD_PATH, CALL_HREF, invoiceHref } from "../../content/autonom";
-import { findTariff, formatRoubles, monthlyEquivalent, TARIFFS } from "../../content/pricing";
+import { CALL_HREF, invoiceHref } from "../../content/autonom";
+import { TARIFFS, formatRoubles, monthlyEquivalent } from "../../content/pricing";
+import { PRODUCT_FACTS } from "../../content/product-facts";
 import Icon from "./Icon.astro";
-
-interface Props {
-  /** /stoimost/ puts the cards straight under its h1, so they are h2 there. */
-  headingLevel?: 2 | 3;
-}
-
-const { headingLevel = 3 } = Astro.props;
+interface Props { headingLevel?: 2 | 3; compact?: boolean; }
+const { headingLevel = 3, compact = false } = Astro.props;
 const Heading = headingLevel === 2 ? "h2" : "h3";
-/** «Линия», «Цех» and «Завод» as cards, then «Старт» as the special offer for one PC. */
-const grid = TARIFFS.filter((tariff) => tariff.code !== "start");
-const start = findTariff("start");
-const startPrice = start.pricePerYear ?? start.priceFrom;
+const grid = TARIFFS.filter(t => t.pricePerYear !== null);
 ---
 
-<div class="ax-prices">
-  <div class="ax-prices__grid">
-    {grid.map((tariff) => (
-      <article
-        class:list={["ax-plan", { "ax-plan--recommended": tariff.recommended }]}
-        data-theme={tariff.recommended ? "dark" : undefined}
-        data-tariff={tariff.code}
-        aria-labelledby={`plan-${tariff.code}`}
-      >
-        <div class="ax-plan__head">
-          <Heading id={`plan-${tariff.code}`}>{tariff.name}</Heading>
-          {tariff.recommended && <span class="ax-plan__badge">Рекомендуем</span>}
-        </div>
-        <p class="ax-plan__audience">{tariff.audience}</p>
-        {tariff.pricePerYear === null ? (
-          <p class="ax-plan__price ax-plan__price--words">
-            <span>По запросу</span>
-            <small class="ax-plan__month">под число линий и мест</small>
-          </p>
-        ) : (
-          <p class="ax-plan__price">
-            <span class="ax-plan__amount">{formatRoubles(tariff.pricePerYear)}</span>
-            <span class="ax-plan__unit">₽ в год</span>
-            <small class="ax-plan__month">≈ {formatRoubles(monthlyEquivalent(tariff.pricePerYear))} ₽ в месяц</small>
-          </p>
-        )}
-        <ul class="ax-checklist">
-          {tariff.features.map((feature) => (
-            <li><Icon name="check" size={16} />{feature}</li>
-          ))}
-        </ul>
-        <div class="ax-plan__actions">
-          {tariff.pricePerYear === null ? (
-            <a class="ax-btn ax-btn--outline ax-btn--block" href={CALL_HREF}>Обсудить условия</a>
-          ) : (
-            <>
-              <a
-                class:list={["ax-btn", "ax-btn--block", tariff.recommended ? "ax-btn--accent" : "ax-btn--outline"]}
-                href={DOWNLOAD_PATH}
-                data-analytics="landing_download_click"
-                data-placement={`plan_${tariff.code}`}
-              >
-                Попробовать 14 дней
-              </a>
-              <a class="ax-plan__invoice" href={invoiceHref(tariff.code)} data-invoice-tariff={tariff.code}>
-                Уже решили? Получить счёт <Icon name="arrow-right" size={16} />
-              </a>
-            </>
-          )}
-        </div>
-      </article>
-    ))}
-  </div>
-
-  <article class="ax-start" data-tariff="start" aria-labelledby="plan-start">
-    <div class="ax-start__body">
-      <p class="ax-start__badge"><Icon name="spark" size={14} /><span class="ax-start__badge-long">Особое предложение для небольших производств</span><span class="ax-start__badge-short">Особое предложение</span></p>
-      <Heading id="plan-start">{start.name} <span>{start.audience}</span></Heading>
-      <p class="ax-start__text">
-        Хост, офис и станция работают на одном ПК. Все функции программы, установка самостоятельно,
-        поддержка в почте и Telegram. Когда понадобится больше, перейдёте на «Линию», остаток года засчитаем.
-      </p>
-      <ul class="ax-tags">
-        {start.features.map((feature) => <li>{feature}</li>)}
-      </ul>
-    </div>
-    <div class="ax-start__price">
+<div class:list={["ax-prices", "v4-prices", {"v4-prices--compact":compact}]}>
+  <div class="ax-prices__grid">{grid.map(t=>
+    <article class:list={["ax-plan",{"ax-plan--recommended":t.recommended}]} data-tariff={t.code} aria-labelledby={`plan-${t.code}`}>
+      <div class="ax-plan__head">
+        <Heading id={`plan-${t.code}`}>{t.name}</Heading>{t.recommended && <span class="ax-plan__badge">Рекомендуем</span>}</div>
+      <p class="ax-plan__audience">{t.audience}</p>
       <p class="ax-plan__price">
-        <span class="ax-plan__amount ax-plan__amount--lg">{formatRoubles(startPrice)}</span>
-        <span class="ax-plan__unit">₽ в год</span>
-        <small class="ax-plan__month">≈ {formatRoubles(monthlyEquivalent(startPrice))} ₽ в месяц · без допов</small>
-      </p>
-      <a class="ax-btn ax-btn--outline ax-btn--block" href={DOWNLOAD_PATH} data-analytics="landing_download_click" data-placement="plan_start">
-        Попробовать 14 дней
-      </a>
-      <a class="ax-plan__invoice" href={invoiceHref("start")} data-invoice-tariff="start">
-        Уже решили? Получить счёт <Icon name="arrow-right" size={16} />
-      </a>
+        <span class="ax-plan__amount">{formatRoubles(t.pricePerYear ?? 0)}</span>
+        <span class="ax-plan__unit">₽ / год</span>{!compact&&<small class="ax-plan__month">≈ {formatRoubles(monthlyEquivalent(t.pricePerYear ?? 0))} ₽ в месяц</small>}</p>
+      <ul class="ax-checklist">{(compact ? [t.features.slice(0,2).join(" · "), t.features.find(f=>f.includes("пользовател")) ?? ""] : t.features).map(f=>
+        <li>
+          <Icon name="check" size={16}/>{f}</li>)}</ul>
+      <div class="ax-plan__actions">
+        <a class:list={["ax-btn","ax-btn--block",t.recommended?"ax-btn--accent":"ax-btn--outline"]} href={`/skachat/?tariff=${t.code}`} data-analytics="landing_download_click" data-placement={`plan_${t.code}`}>Попробовать 14 дней</a>
+        <a class="ax-plan__invoice" href={invoiceHref(t.code)} data-invoice-tariff={t.code}>Получить счёт <Icon name="arrow-up-right" size={16}/>
+        </a>
+      </div>
+    </article>)}</div>
+  <div class="v4-plant" data-tariff="plant">
+    <div>
+      <h3>Завод · от четырёх линий</h3>
+      <p>
+        <span class="ax-plan__price--words">
+          <span>По запросу</span>
+        </span> · Цену и условия запуска согласуем отдельно.</p>
     </div>
-  </article>
+    <a class="ax-link" href={CALL_HREF}>Обсудить условия <Icon name="arrow-up-right" size={16}/>
+    </a>
+  </div>
+  <p class="ax-note">{PRODUCT_FACTS.seats}</p>
 </div>

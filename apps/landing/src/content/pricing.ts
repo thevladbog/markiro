@@ -32,7 +32,7 @@ export const TARIFFS: readonly Tariff[] = [
   {
     code: "line",
     name: "Линия",
-    audience: "Линия и склад с ТСД",
+    audience: "Станция упаковки + мобильный ТСД",
     pricePerYear: 120_000,
     priceFrom: 120_000,
     features: [
@@ -88,7 +88,7 @@ export const ADDONS: readonly PriceLine[] = [
   {
     name: "Рабочее место",
     price: "30 000 ₽/год",
-    note: "Ещё одна станция у линии или ещё один ТСД на складе.",
+    note: "Ещё одна станция или один ТСД.",
   },
   {
     name: "Линия с рабочим местом",
