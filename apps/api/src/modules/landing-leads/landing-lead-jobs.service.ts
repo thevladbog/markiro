@@ -21,7 +21,12 @@ import {
   type LeadAlertFacts,
 } from "./lead-telegram-message";
 import { leadUrl } from "./landing-lead-writer";
-import { TelegramSendError, type TelegramSender } from "./telegram.client";
+import {
+  TelegramSendError,
+  type TelegramSender,
+  type TelegramNotificationTarget,
+} from "./telegram.client";
+import { deliverTelegramNotification } from "./telegram-delivery";
 
 export const DISPATCH_LEAD_NOTIFICATIONS_QUEUE = "dispatch-lead-notifications";
 export const SEND_LEAD_DIGEST_QUEUE = "send-lead-digest";
@@ -85,16 +90,33 @@ export function retryDelaySeconds(attemptsSoFar: number): number {
  */
 export class LandingLeadJobsService {
   readonly #logger = new Logger(LandingLeadJobsService.name);
+  private readonly telegramTargets: readonly TelegramNotificationTarget[] | null;
 
   constructor(
     private readonly db: Db,
     private readonly mail: Pick<MailDeliveryService, "enqueue">,
     private readonly audit: Pick<PlatformAuditService, "record">,
-    private readonly telegram: TelegramSender | null,
+    telegram: TelegramSender | readonly TelegramNotificationTarget[] | null,
     private readonly options: LandingLeadJobsOptions,
     private readonly now: () => Date = () => new Date(),
     private readonly createId: () => string = randomUUID,
-  ) {}
+  ) {
+    this.telegramTargets =
+      telegram === null
+        ? null
+        : "sendMessage" in telegram
+          ? [{ id: "legacy", sender: telegram }]
+          : telegram.length === 0
+            ? null
+            : [...telegram];
+    if (
+      this.telegramTargets &&
+      (this.telegramTargets.length > 2 ||
+        new Set(this.telegramTargets.map((target) => target.id)).size !==
+          this.telegramTargets.length)
+    )
+      throw new Error("Invalid Telegram recipient configuration");
+  }
 
   /** Sends the due outbox rows; with Telegram off they are marked `skipped`, never sent later. */
   async dispatchNotifications(): Promise<number> {
@@ -115,7 +137,7 @@ export class LandingLeadJobsService {
       `);
       let sent = 0;
       for (const row of due.rows) {
-        if (this.telegram === null) {
+        if (this.telegramTargets === null) {
           await tx.execute(sql`
             UPDATE lead_notifications
             SET status = 'skipped', last_error_code = 'telegram_disabled', updated_at = ${now}
@@ -123,8 +145,16 @@ export class LandingLeadJobsService {
           `);
           continue;
         }
+        let result: Awaited<ReturnType<typeof deliverTelegramNotification>>;
         try {
-          await this.telegram.sendMessage(await this.messageFor(tx, row));
+          result = await deliverTelegramNotification(
+            row.payload,
+            this.telegramTargets,
+            await this.messageFor(tx, row),
+            row.attempts,
+            LEAD_NOTIFICATION_MAX_ATTEMPTS,
+            (code) => this.#logger.warn(`Lead notification not sent: ${code}`),
+          );
         } catch (error) {
           const failure =
             error instanceof TelegramSendError
@@ -145,11 +175,14 @@ export class LandingLeadJobsService {
         }
         await tx.execute(sql`
           UPDATE lead_notifications
-          SET status = 'sent', attempts = attempts + 1, sent_at = ${now},
-            last_error_code = NULL, updated_at = ${now}
+          SET status = ${result.status}, attempts = attempts + 1,
+            payload = ${JSON.stringify(result.payload)}::jsonb,
+            sent_at = ${result.status === "sent" ? now : null},
+            next_attempt_at = ${new Date(now.getTime() + retryDelaySeconds(row.attempts + 1) * 1_000)},
+            last_error_code = ${result.errorCode}, updated_at = ${now}
           WHERE id = ${row.id}::uuid
         `);
-        sent += 1;
+        if (result.status === "sent") sent += 1;
       }
       return sent;
     });

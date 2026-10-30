@@ -7,7 +7,7 @@ import {
   SEND_LEAD_DIGEST_CRON,
   SEND_LEAD_DIGEST_QUEUE,
 } from "../modules/landing-leads/landing-lead-jobs.service";
-import { TelegramClient, telegramConfigFromEnv } from "../modules/landing-leads/telegram.client";
+import { telegramTargetsFromEnv } from "../modules/landing-leads/telegram.client";
 import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
 import { PlatformAuditService } from "../platform-auth/platform-audit.service";
 import {
@@ -1265,18 +1265,12 @@ function landingLeadJobsProvider(env: Env): Provider {
     provide: LandingLeadJobsService,
     inject: [DB, MailDeliveryService, PlatformAuditService],
     useFactory: (db: Db, mail: MailDeliveryService, audit: PlatformAuditService) => {
-      const telegram = telegramConfigFromEnv(env);
-      return new LandingLeadJobsService(
-        db,
-        mail,
-        audit,
-        telegram === null ? null : new TelegramClient(telegram),
-        {
-          recipient: env.LANDING_DEMO_RECIPIENT ?? "",
-          adminOrigin: env.SAAS_ADMIN_ORIGIN,
-          retentionMonths: env.LEAD_RETENTION_MONTHS,
-        },
-      );
+      const telegram = telegramTargetsFromEnv(env);
+      return new LandingLeadJobsService(db, mail, audit, telegram, {
+        recipient: env.LANDING_DEMO_RECIPIENT ?? "",
+        adminOrigin: env.SAAS_ADMIN_ORIGIN,
+        retentionMonths: env.LEAD_RETENTION_MONTHS,
+      });
     },
   };
 }

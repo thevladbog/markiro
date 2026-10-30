@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Env } from "../../env";
 
 export const TELEGRAM_API_ORIGIN = "https://api.telegram.org";
@@ -34,6 +35,33 @@ export class TelegramSendError extends Error {
 
 export interface TelegramSender {
   sendMessage(text: string): Promise<void>;
+}
+
+export interface TelegramNotificationTarget {
+  /** Opaque recipient identity; neither bot token nor raw chat ID enters the outbox. */
+  id: string;
+  sender: TelegramSender;
+}
+
+export function telegramTargetsFromEnv(
+  env: Env,
+  fetcher: typeof fetch = fetch,
+): readonly TelegramNotificationTarget[] | null {
+  const botToken = env.LEAD_TELEGRAM_BOT_TOKEN;
+  if (!env.LEAD_TELEGRAM_ENABLED || !botToken) return null;
+  const primary = telegramConfigFromEnv(env);
+  const ids = [
+    ...new Set(
+      [primary?.chatId, env.LEAD_TELEGRAM_GROUP_CHAT_ID]
+        .filter((id): id is string => Boolean(id))
+        .map((id) => (id.startsWith("@") ? id.toLowerCase() : BigInt(id).toString())),
+    ),
+  ];
+  if (ids.length === 0) return null;
+  return ids.map((chatId) => ({
+    id: createHash("sha256").update(chatId).digest("hex"),
+    sender: new TelegramClient({ botToken, chatId }, fetcher),
+  }));
 }
 
 /** Bot API client shaped like `ChatwootClient`: one origin, a timeout, no redirects. */

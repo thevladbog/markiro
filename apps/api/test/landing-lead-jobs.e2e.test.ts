@@ -56,7 +56,10 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
     }),
   };
 
-  function jobs(sender: TelegramSender | null = telegram, recipient = "owner@example.test") {
+  function jobs(
+    sender: TelegramSender | readonly { id: string; sender: TelegramSender }[] | null = telegram,
+    recipient = "owner@example.test",
+  ) {
     return new LandingLeadJobsService(
       db,
       mail,
@@ -132,6 +135,181 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
   });
 
   describe("Telegram outbox", () => {
+    it("delivers to both a personal chat and a group", async () => {
+      await submit();
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = { sendMessage: vi.fn(async () => {}) };
+      await expect(
+        jobs([
+          { id: "personal", sender: personal },
+          { id: "group", sender: group },
+        ]).dispatchNotifications(),
+      ).resolves.toBe(1);
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage).toHaveBeenCalledOnce();
+      expect(personal.sendMessage.mock.calls).toEqual(group.sendMessage.mock.calls);
+      expect((await notifications())[0]?.status).toBe("sent");
+    });
+
+    it("keeps per-recipient success across retries and a new worker instance", async () => {
+      await submit();
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = {
+        sendMessage: vi
+          .fn()
+          .mockRejectedValueOnce(new TelegramSendError("telegram_unavailable", true))
+          .mockResolvedValue(undefined),
+      };
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ];
+      await jobs(targets).dispatchNotifications();
+      const row = (await notifications())[0];
+      expect(row?.status).toBe("pending");
+      if (!row) throw new Error("notification missing");
+      clock = new Date(row.nextAttemptAt);
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage).toHaveBeenCalledTimes(2);
+      expect((await notifications())[0]?.status).toBe("sent");
+    });
+
+    it("does not retry a permanent failure while the other recipient recovers", async () => {
+      await submit();
+      const personal = {
+        sendMessage: vi
+          .fn()
+          .mockRejectedValue(new TelegramSendError("telegram_rejected_403", false)),
+      };
+      const group = {
+        sendMessage: vi
+          .fn()
+          .mockRejectedValueOnce(new TelegramSendError("telegram_unavailable", true))
+          .mockResolvedValue(undefined),
+      };
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ];
+      await jobs(targets).dispatchNotifications();
+      const row = (await notifications())[0];
+      expect(row?.status).toBe("pending");
+      if (!row) throw new Error("notification missing");
+      clock = new Date(row.nextAttemptAt);
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage).toHaveBeenCalledTimes(2);
+      expect((await notifications())[0]).toMatchObject({
+        status: "failed",
+        lastErrorCode: "telegram_rejected_403",
+      });
+    });
+
+    it("skips a removed recipient and sends only new notifications to an added one", async () => {
+      await submit();
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = {
+        sendMessage: vi.fn().mockRejectedValue(new TelegramSendError("telegram_unavailable", true)),
+      };
+      const added = { sendMessage: vi.fn(async () => {}) };
+      await jobs([
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ]).dispatchNotifications();
+      const [pending] = await notifications();
+      if (!pending) throw new Error("notification missing");
+      clock = new Date(pending.nextAttemptAt);
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "added", sender: added },
+      ];
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(added.sendMessage).not.toHaveBeenCalled();
+      expect((await notifications())[0]?.status).toBe("sent");
+      await submit();
+      await jobs(targets).dispatchNotifications();
+      expect(added.sendMessage).toHaveBeenCalledOnce();
+      expect(personal.sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it("exhausts only the failing recipient's retry budget", async () => {
+      await submit();
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = {
+        sendMessage: vi.fn().mockRejectedValue(new TelegramSendError("telegram_unavailable", true)),
+      };
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ];
+      for (let attempt = 1; attempt <= LEAD_NOTIFICATION_MAX_ATTEMPTS; attempt += 1) {
+        await jobs(targets).dispatchNotifications();
+        const [row] = await notifications();
+        if (!row) throw new Error("notification missing");
+        expect(row.status).toBe(attempt === LEAD_NOTIFICATION_MAX_ATTEMPTS ? "failed" : "pending");
+        clock = new Date(row.nextAttemptAt);
+      }
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage).toHaveBeenCalledTimes(LEAD_NOTIFICATION_MAX_ATTEMPTS);
+    });
+
+    it("preserves the retry budget of legacy pending rows during upgrade", async () => {
+      await submit();
+      const [row] = await notifications();
+      if (!row) throw new Error("notification missing");
+      await db
+        .update(schema.leadNotifications)
+        .set({ attempts: LEAD_NOTIFICATION_MAX_ATTEMPTS - 1 })
+        .where(eq(schema.leadNotifications.id, row.id));
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = {
+        sendMessage: vi.fn().mockRejectedValue(new TelegramSendError("telegram_unavailable", true)),
+      };
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ];
+      await jobs(targets).dispatchNotifications();
+      clock = new Date(clock.getTime() + 86_400_000);
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage).toHaveBeenCalledOnce();
+      expect((await notifications())[0]).toMatchObject({
+        status: "failed",
+        attempts: LEAD_NOTIFICATION_MAX_ATTEMPTS,
+      });
+    });
+
+    it("fails closed on corrupt saved progress without replaying delivered recipients", async () => {
+      await submit();
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = {
+        sendMessage: vi.fn().mockRejectedValue(new TelegramSendError("telegram_unavailable", true)),
+      };
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ];
+      await jobs(targets).dispatchNotifications();
+      const [row] = await notifications();
+      if (!row) throw new Error("notification missing");
+      await db
+        .update(schema.leadNotifications)
+        .set({ payload: { ...row.payload, telegramDelivery: { version: 999 } } })
+        .where(eq(schema.leadNotifications.id, row.id));
+      clock = new Date(row.nextAttemptAt);
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage).toHaveBeenCalledOnce();
+      expect((await notifications())[0]).toMatchObject({
+        status: "failed",
+        lastErrorCode: "telegram_delivery_state",
+      });
+    });
+
     it("sends the alert once, without e-mail, phone or name, and marks it sent", async () => {
       const lead = await submit();
       await expect(jobs().dispatchNotifications()).resolves.toBe(1);
@@ -323,6 +501,32 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       expect(text).toContain("Третий день");
       expect(text).toContain(`${ADMIN}/leads/${leads.unpaid.id}`);
       expect(text).not.toMatch(/Свежий|Отложен|Купил|@|Анна/);
+    });
+
+    it("delivers one daily digest to both recipients without duplicating its email", async () => {
+      await seedDigestLeads();
+      await db.delete(schema.leadNotifications);
+      const personal = { sendMessage: vi.fn(async () => {}) };
+      const group = { sendMessage: vi.fn(async () => {}) };
+      const targets = [
+        { id: "personal", sender: personal },
+        { id: "group", sender: group },
+      ];
+      await expect(jobs(targets).sendDailyDigest()).resolves.toBe("sent");
+      await expect(jobs(targets).sendDailyDigest()).resolves.toBe("exists");
+      await jobs(targets).dispatchNotifications();
+      await jobs(targets).dispatchNotifications();
+      expect(personal.sendMessage).toHaveBeenCalledOnce();
+      expect(group.sendMessage.mock.calls).toEqual(personal.sendMessage.mock.calls);
+      expect(
+        await db
+          .select()
+          .from(schema.emailDeliveries)
+          .where(eq(schema.emailDeliveries.kind, "landing-lead-digest")),
+      ).toHaveLength(1);
+      expect(await notifications()).toEqual([
+        expect.objectContaining({ kind: "daily_digest", status: "sent" }),
+      ]);
     });
 
     it("sends nothing when no section has a lead", async () => {
