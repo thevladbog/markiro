@@ -42,7 +42,7 @@ pub const DOCUMENT_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.created_at, d
 
 /// The lines with an SSCC, in the order they were added, each with its
 /// product's name now (the cloud's `listLines` joins the live product).
-pub const LINES_SQL: &str = "SELECT l.id, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, \
+pub const LINES_SQL: &str = "SELECT l.id, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id,l.warehouse_pallet_id) AS pallet_id, \
      COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count FROM disaggregation_document_lines l \
      LEFT JOIN products p ON p.id = l.product_id \
      WHERE l.document_id = ? AND l.sscc IS NOT NULL ORDER BY l.position, l.id";
@@ -207,6 +207,17 @@ where
             .await
             .map_err(ApiError::internal)?;
         for (pallet_id, sscc, units) in rows {
+            boxes
+                .entry(pallet_id)
+                .or_default()
+                .push(DisaggregationReportBox {
+                    sscc,
+                    units: u32::try_from(units).map_err(ApiError::internal)?,
+                });
+        }
+        let warehouse_boxes:Vec<(String,Option<String>,i64)>=sqlx::query_as("SELECT wb.pallet_id,b.sscc,(SELECT COUNT(*) FROM box_items i WHERE i.box_id=b.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) FROM disaggregation_document_lines l JOIN warehouse_pallets wp ON wp.id=l.warehouse_pallet_id JOIN warehouse_pallet_boxes wb ON wb.pallet_id=wp.id JOIN boxes b ON b.sscc=wb.box_sscc WHERE l.document_id=? AND l.sscc IS NOT NULL AND b.disassembled_at IS NULL AND (wb.removed_at IS NULL OR wb.removed_at=wp.disassembled_at) ORDER BY wb.pallet_id,wb.added_at,wb.id")
+            .bind(id).fetch_all(&mut *conn).await.map_err(ApiError::internal)?;
+        for (pallet_id, sscc, units) in warehouse_boxes {
             boxes
                 .entry(pallet_id)
                 .or_default()

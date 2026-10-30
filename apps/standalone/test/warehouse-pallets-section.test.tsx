@@ -32,20 +32,20 @@ const WAREHOUSE = {
   ],
 };
 
-describe("warehouse pallets in «Поиск кодов» → «Паллеты» (plan ТСД-Х, decision В-6)", () => {
+describe("warehouse pallets in «Поиск кодов» → «Палеты» (plan ТСД-Х, decision В-6)", () => {
   it("lists what handhelds built outside shifts, open ones first, and nothing more", async () => {
     const session = packSession();
     session.api.listWarehousePallets.mockResolvedValue(WAREHOUSE);
     await openCodes(session, "/codes/pallets");
-    const section = await screen.findByRole("region", { name: "Складские паллеты" });
+    const section = await screen.findByRole("region", { name: "Складские палеты" });
     const table = await within(section).findByRole("table");
     const rows = within(table).getAllByRole("row");
     // The header and two pallets: the open one (no SSCC yet) first.
     expect(rows).toHaveLength(3);
-    expect(within(rows[1] as HTMLElement).getByText("Открыта")).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText("Открыт")).toBeTruthy();
     expect(within(rows[1] as HTMLElement).getByText("3")).toBeTruthy();
     expect(within(rows[2] as HTMLElement).getByText("(00)146006820000000409")).toBeTruthy();
-    expect(within(section).queryByRole("link")).toBeNull();
+    expect(within(section).getAllByRole("link")).toHaveLength(2);
     await waitFor(() => expect(session.api.listWarehousePallets).toHaveBeenCalledTimes(1));
   });
 
@@ -53,7 +53,7 @@ describe("warehouse pallets in «Поиск кодов» → «Паллеты» 
     const session = packSession();
     session.api.listWarehousePallets.mockResolvedValue({ pallets: [] });
     await openCodes(session, "/codes/pallets");
-    const section = await screen.findByRole("region", { name: "Складские паллеты" });
-    expect(await within(section).findByText("Складских паллет пока нет.")).toBeTruthy();
+    const section = await screen.findByRole("region", { name: "Складские палеты" });
+    expect(await within(section).findByText("Складских палетов пока нет.")).toBeTruthy();
   });
 });

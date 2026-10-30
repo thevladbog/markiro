@@ -325,6 +325,15 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getBoxCard: vi.fn<HostApi["getBoxCard"]>(() => unexpected("getBoxCard")),
     getPalletCard: vi.fn<HostApi["getPalletCard"]>(() => unexpected("getPalletCard")),
     listPallets: vi.fn<HostApi["listPallets"]>(() => unexpected("listPallets")),
+    validateWarehousePallet: vi.fn<HostApi["validateWarehousePallet"]>(() =>
+      unexpected("validateWarehousePallet"),
+    ),
+    createWarehousePallet: vi.fn<HostApi["createWarehousePallet"]>(() =>
+      unexpected("createWarehousePallet"),
+    ),
+    getWarehousePallet: vi.fn<HostApi["getWarehousePallet"]>(() =>
+      unexpected("getWarehousePallet"),
+    ),
     listWarehousePallets: vi.fn<HostApi["listWarehousePallets"]>(() =>
       unexpected("listWarehousePallets"),
     ),

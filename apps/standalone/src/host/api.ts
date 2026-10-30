@@ -1,4 +1,13 @@
 import {
+  palletValidationSchema,
+  palletCreatedSchema,
+  officeWarehousePalletDetailSchema,
+  type PalletValidation,
+  type PalletCreateRequest,
+  type PalletCreated,
+  type OfficeWarehousePalletDetail,
+} from "./office-pallet-create.js";
+import {
   standaloneActivationRequestSchema,
   type StandaloneActivationRequest,
 } from "@markiro/domain";
@@ -567,6 +576,12 @@ export interface HostApi {
   ) => Promise<OfficePalletPage>;
   /** The pallets handhelds built outside shifts (plan ТСД-Х, Х5): open first, the latest 200. */
   listWarehousePallets: (token: string) => Promise<OfficeWarehousePallets>;
+  validateWarehousePallet: (
+    token: string,
+    request: { codes: string[] },
+  ) => Promise<PalletValidation>;
+  createWarehousePallet: (token: string, request: PalletCreateRequest) => Promise<PalletCreated>;
+  getWarehousePallet: (token: string, id: string) => Promise<OfficeWarehousePalletDetail>;
   /**
    * Of the station's records it names (1–200), those whose conflict the office
    * marked reviewed (plan КНФ), with the device key only; a host before plan
@@ -1521,6 +1536,25 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: officePalletPageSchema,
       }),
+    validateWarehousePallet: (token, request) =>
+      client.request("POST", "/v1/office/warehouse-pallets/validate", {
+        officeToken: token,
+        body: request,
+        schema: palletValidationSchema,
+      }),
+    createWarehousePallet: (token, request) =>
+      client.request("POST", "/v1/office/warehouse-pallets", {
+        officeToken: token,
+        body: request,
+        schema: palletCreatedSchema,
+      }),
+    getWarehousePallet: (token, id) => {
+      if (!isPackId(id)) return Promise.reject(new RangeError("not a pallet id"));
+      return client.request("GET", `/v1/office/warehouse-pallets/${id}`, {
+        officeToken: token,
+        schema: officeWarehousePalletDetailSchema,
+      });
+    },
     listWarehousePallets: (token) =>
       client.request("GET", "/v1/office/warehouse-pallets", {
         officeToken: token,

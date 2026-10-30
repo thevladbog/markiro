@@ -13,7 +13,7 @@ describe("the parts of «Поиск кодов» (plan КРТ)", () => {
       within(tabs)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Коды", "Короба", "Паллеты"]);
+    ).toEqual(["Коды", "Короба", "Палеты"]);
     expect(within(tabs).getByRole("tab", { name: "Коды" }).getAttribute("aria-selected")).toBe(
       "true",
     );
@@ -27,7 +27,7 @@ describe("the parts of «Поиск кодов» (plan КРТ)", () => {
   it("keep the menu item lit on the boxes, the pallets and a card", async () => {
     const session = packSession();
     await openCodes(session);
-    for (const tab of ["Короба", "Паллеты"] as const) {
+    for (const tab of ["Короба", "Палеты"] as const) {
       chooseTab(tab);
       await screen.findByRole("tab", { name: tab, selected: true });
       expect(
@@ -40,7 +40,7 @@ describe("the parts of «Поиск кодов» (plan КРТ)", () => {
     fireEvent.click(
       screen.getAllByRole("link", { name: "(00)146006820000000409" })[0] as HTMLElement,
     );
-    await screen.findByRole("heading", { name: "Паллета (00)146006820000000409" });
+    await screen.findByRole("heading", { name: "Палет (00)146006820000000409" });
     expect(
       within(screen.getByRole("navigation", { name: "Разделы офиса" }))
         .getByRole("link", { name: "Поиск кодов" })
@@ -70,8 +70,8 @@ describe("the parts of «Поиск кодов» (plan КРТ)", () => {
     chooseTab("Коды");
     await screen.findByRole("tab", { name: "Коды", selected: true });
     session.api.listPallets.mockClear();
-    chooseTab("Паллеты");
-    await screen.findByRole("tab", { name: "Паллеты", selected: true });
+    chooseTab("Палеты");
+    await screen.findByRole("tab", { name: "Палеты", selected: true });
     await waitFor(() =>
       expect(session.api.listPallets).toHaveBeenCalledWith(
         "office-session-token",

@@ -172,7 +172,7 @@ function lineRows(): HTMLElement[] {
 }
 
 function paste(text: string): void {
-  fireEvent.change(screen.getByLabelText("SSCC коробов или паллет"), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText("SSCC коробов или палетов"), { target: { value: text } });
 }
 
 function pickFile(file: File): void {
@@ -226,11 +226,11 @@ describe("office «Дезагрегация»: a draft document", () => {
       "12",
     ]);
     expect(cells[0]?.[5]).toContain("Готов к проведению");
-    expect(cells[1]?.slice(0, 2)).toEqual([`(00)${PALLET_SSCC}`, "Паллета"]);
+    expect(cells[1]?.slice(0, 2)).toEqual([`(00)${PALLET_SSCC}`, "Палет"]);
     expect(cells[2]?.[5]).toContain("Смена ещё открыта");
     // What is no SSCC stays as it was typed.
     expect(cells[3]?.slice(0, 5)).toEqual(["MRK-000742", "—", "—", "—", "0"]);
-    expect(cells[3]?.[5]).toContain("Короб или паллета не найдены");
+    expect(cells[3]?.[5]).toContain("Короб или палет не найдены");
     expect(
       within(lineRows()[0] as HTMLElement).getByRole("link", { name: "OCT26-003" }),
     ).toBeTruthy();
@@ -360,7 +360,7 @@ describe("office «Дезагрегация»: a draft document", () => {
       ],
       import: false,
     });
-    expect((screen.getByLabelText("SSCC коробов или паллет") as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText("SSCC коробов или палетов") as HTMLTextAreaElement).value).toBe(
       "",
     );
     expect(lineRows().length).toBe(4);
@@ -444,7 +444,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     await expectFocusedNotice(
       "Добавлено 500 из 700 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
-    const left = (screen.getByLabelText("SSCC коробов или паллет") as HTMLTextAreaElement).value;
+    const left = (screen.getByLabelText("SSCC коробов или палетов") as HTMLTextAreaElement).value;
     expect(left.split("\n")).toEqual(tokens.slice(500));
   });
 
@@ -458,7 +458,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.queryByText(/Добавлено \d+ из/)).toBeNull();
-    expect((screen.getByLabelText("SSCC коробов или паллет") as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText("SSCC коробов или палетов") as HTMLTextAreaElement).value).toBe(
       "MRK-000001",
     );
   });
@@ -814,7 +814,7 @@ describe("office «Дезагрегация»: a document that is not a draft", 
     const { session } = fake(APPLIED);
     await openDocument(session);
     expect(screen.queryByLabelText("Комментарий")).toBeNull();
-    expect(screen.queryByLabelText("SSCC коробов или паллет")).toBeNull();
+    expect(screen.queryByLabelText("SSCC коробов или палетов")).toBeNull();
     expect(screen.queryByTestId("file-drop-input")).toBeNull();
     expect(screen.queryByRole("button", { name: /Удалить строку/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Провести" })).toBeNull();

@@ -39,19 +39,19 @@ async function palletsOf(value = session(), path = "/codes/pallets") {
   return value;
 }
 
-describe("«Паллеты» (plan КРТ)", () => {
+describe("«Палеты» (plan КРТ)", () => {
   it("reads the first page with no filters and no cursor, open pallets first", async () => {
     const value = await palletsOf();
     expect(value.api.listPallets).toHaveBeenCalledWith("office-session-token", {}, null);
     expect(rows()).toHaveLength(3);
-    expect(rows()[0]?.textContent).toContain("Открытая");
-    expect(rows()[0]?.textContent).toContain("Открыта");
+    expect(rows()[0]?.textContent).toContain("Открытый");
+    expect(rows()[0]?.textContent).toContain("Открыт");
     expect(screen.getByText("Показано: 3")).toBeTruthy();
   });
 
   it("says in words that the count at the close differs from the boxes standing now", async () => {
     await palletsOf();
-    expect(rows()[1]?.textContent).toContain("Закрыта");
+    expect(rows()[1]?.textContent).toContain("Закрыт");
     expect(rows()[1]?.textContent).toContain("Состав изменился после закрытия");
     expect(rows()[2]?.textContent).not.toContain("Состав изменился после закрытия");
   });
@@ -83,7 +83,7 @@ describe("«Паллеты» (plan КРТ)", () => {
       .getByText("Состав изменился после закрытия")
       .closest("[title]");
     expect(tag?.getAttribute("title")).toBe(
-      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирований коробов этой паллеты нет, поэтому расхождение настоящее: проверьте состав паллеты.",
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирований коробов этого палета нет, поэтому расхождение настоящее: проверьте состав палета.",
     );
   });
 
@@ -129,7 +129,7 @@ describe("«Паллеты» (plan КРТ)", () => {
       .mockResolvedValueOnce({ ...PALLET_PAGE, items: make(13, 12), nextCursor: null });
     await palletsOf(value);
     await waitFor(() => expect(rows()).toHaveLength(10));
-    const pager = () => screen.getByRole("navigation", { name: "Страницы списка паллет" });
+    const pager = () => screen.getByRole("navigation", { name: "Страницы списка палетов" });
     // 12 rows are read and the host has more: the table does not yet know how many there are.
     expect(screen.getByText("Показано 1–10, есть ещё")).toBeTruthy();
     fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
@@ -188,20 +188,20 @@ describe("«Паллеты» (plan КРТ)", () => {
   it("refuses an SSCC that is not 18 digits without asking the host", async () => {
     const value = await palletsOf();
     value.api.listPallets.mockClear();
-    fireEvent.change(screen.getByLabelText("SSCC паллеты"), { target: { value: "12345" } });
+    fireEvent.change(screen.getByLabelText("SSCC палета"), { target: { value: "12345" } });
     fireEvent.click(screen.getByRole("button", { name: "Показать" }));
-    expect(await screen.findByText("SSCC паллеты — 18 цифр")).toBeTruthy();
+    expect(await screen.findByText("SSCC палета — 18 цифр")).toBeTruthy();
     expect(value.api.listPallets).not.toHaveBeenCalled();
   });
 
   it("refuses a box's SSCC: a pallet's starts with 1", async () => {
     const value = await palletsOf();
     value.api.listPallets.mockClear();
-    fireEvent.change(screen.getByLabelText("SSCC паллеты"), {
+    fireEvent.change(screen.getByLabelText("SSCC палета"), {
       target: { value: "046006820000015000" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Показать" }));
-    expect(await screen.findByText("SSCC паллеты — 18 цифр")).toBeTruthy();
+    expect(await screen.findByText("SSCC палета — 18 цифр")).toBeTruthy();
     expect(value.api.listPallets).not.toHaveBeenCalled();
   });
 
@@ -209,7 +209,7 @@ describe("«Паллеты» (plan КРТ)", () => {
     "reads a scanned label %s as the pallet's 18 digits",
     async (typed) => {
       const value = await palletsOf();
-      fireEvent.change(screen.getByLabelText("SSCC паллеты"), { target: { value: typed } });
+      fireEvent.change(screen.getByLabelText("SSCC палета"), { target: { value: typed } });
       fireEvent.click(screen.getByRole("button", { name: "Показать" }));
       await waitFor(() =>
         expect(value.api.listPallets).toHaveBeenLastCalledWith(
@@ -236,7 +236,7 @@ describe("«Паллеты» (plan КРТ)", () => {
   it("opens a pallet's card from its row", async () => {
     const value = await palletsOf();
     fireEvent.click(rows()[1] as HTMLElement);
-    await screen.findByRole("heading", { name: "Паллета (00)146006820000000409" });
+    await screen.findByRole("heading", { name: "Палет (00)146006820000000409" });
     expect(value.api.getPalletCard).toHaveBeenCalledWith(
       "office-session-token",
       "a0000000-0000-4000-8000-000000000001",
@@ -256,7 +256,7 @@ describe("«Паллеты» (plan КРТ)", () => {
     const value = packSession();
     value.api.listPallets.mockResolvedValue({ items: [], nextCursor: null, stations: [] });
     await openCodes(value, "/codes/pallets");
-    expect(await screen.findByText("Паллет по этим условиям нет")).toBeTruthy();
+    expect(await screen.findByText("Палетов по этим условиям нет")).toBeTruthy();
   });
 
   it("reads a backwards period as nothing to ask", async () => {

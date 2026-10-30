@@ -74,7 +74,7 @@ export interface ExportDialogProps {
   sourceKind?: "native" | "cloud";
   /**
    * Only this pallet's ЧЗ document (plan КРТ, the pallet's card): the dialog
-   * shows its row and its «XML паллеты», not the shift's formats.
+   * shows its row and its «XML палета», not the shift's formats.
    */
   palletId?: string;
   /**

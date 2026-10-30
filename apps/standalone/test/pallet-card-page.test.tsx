@@ -9,7 +9,7 @@ import { CARD_SHIFT, packSession, PALLET_CARD, PALLET_ROWS } from "./support/pac
 import { freezeToday } from "./support/shifts.js";
 
 const PATH = `/codes/pallet/${PALLET_CARD.id}`;
-const TITLE = "Паллета (00)146006820000000409";
+const TITLE = "Палет (00)146006820000000409";
 
 beforeEach(() => {
   freezeToday();
@@ -33,10 +33,7 @@ async function palletCard(value = packSession(), files = fakeOfficeFiles()) {
   renderOffice(value, { initialPath: PATH, files });
   await screen.findByRole("heading", { name: TITLE });
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Состав паллеты" })).toHaveProperty(
-      "disabled",
-      false,
-    ),
+    expect(screen.getByRole("button", { name: "Состав палета" })).toHaveProperty("disabled", false),
   );
   return { value, files };
 }
@@ -44,7 +41,7 @@ async function palletCard(value = packSession(), files = fakeOfficeFiles()) {
 describe("the card of a pallet (plan КРТ)", () => {
   it("lists every box that joined it, and tells the one taken apart", async () => {
     await palletCard();
-    const rows = within(section("Короба на паллете")).getAllByRole("row").slice(1);
+    const rows = within(section("Короба на палете")).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("(00)046006820000015017");
     expect(rows[0]?.textContent).toContain("Расформирован");
@@ -71,12 +68,12 @@ describe("the card of a pallet (plan КРТ)", () => {
     [
       "no box taken apart",
       0,
-      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирований коробов этой паллеты нет, поэтому расхождение настоящее: проверьте состав паллеты.",
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирований коробов этого палета нет, поэтому расхождение настоящее: проверьте состав палета.",
     ],
     [
       "a taken-apart box that does not account for it",
       3,
-      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирование объясняет не всё расхождение (расформировано: 3): проверьте состав паллеты.",
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирование объясняет не всё расхождение (расформировано: 3): проверьте состав палета.",
     ],
   ])("keeps the warning, saying the difference is real, with %s", async (_what, taken, hint) => {
     const value = packSession();
@@ -94,7 +91,7 @@ describe("the card of a pallet (plan КРТ)", () => {
     value.api.getPalletCard.mockResolvedValue({ ...PALLET_CARD, disassembledBoxes: 0 });
     value.api.getPalletReportRows.mockResolvedValue(PALLET_ROWS);
     renderOffice(value, { initialPath: PATH });
-    await screen.findByRole("heading", { name: /Паллета/ });
+    await screen.findByRole("heading", { name: /Палет/ });
     expect(await screen.findAllByText("Состав изменился после закрытия")).toHaveLength(1);
     const facts = Object.fromEntries(
       screen
@@ -115,7 +112,7 @@ describe("the card of a pallet (plan КРТ)", () => {
 
   it("opens a box's card from its row", async () => {
     const { value } = await palletCard();
-    const rows = within(section("Короба на паллете")).getAllByRole("row").slice(1);
+    const rows = within(section("Короба на палете")).getAllByRole("row").slice(1);
     fireEvent.click(rows[1] as HTMLElement);
     await screen.findByRole("heading", { name: "Короб (00)046006820000015000" });
     expect(value.api.getBoxCard).toHaveBeenCalledWith(
@@ -124,10 +121,10 @@ describe("the card of a pallet (plan КРТ)", () => {
     );
   });
 
-  it("prints «Состав паллеты» and the placard of this pallet", async () => {
+  it("prints «Состав палета» and the placard of this pallet", async () => {
     const { value } = await palletCard();
-    fireEvent.click(screen.getByRole("button", { name: "Состав паллеты" }));
-    await screen.findByRole("dialog", { name: `Состав паллеты (00)146006820000000409` });
+    fireEvent.click(screen.getByRole("button", { name: "Состав палета" }));
+    await screen.findByRole("dialog", { name: `Состав палета (00)146006820000000409` });
     expect(value.api.getPalletReportRows).toHaveBeenCalledWith(
       "office-session-token",
       CARD_SHIFT.id,
@@ -138,8 +135,8 @@ describe("the card of a pallet (plan КРТ)", () => {
       })[0] as HTMLElement,
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Ярлык паллеты" }));
-    await screen.findByRole("dialog", { name: `Ярлык паллеты (00)146006820000000409` });
+    fireEvent.click(screen.getByRole("button", { name: "Ярлык палета" }));
+    await screen.findByRole("dialog", { name: `Ярлык палета (00)146006820000000409` });
   });
 
   it("has a placard and a pallet XML only for a pallet closed and with an SSCC", async () => {
@@ -152,23 +149,23 @@ describe("the card of a pallet (plan КРТ)", () => {
     });
     value.api.getPalletReportRows.mockResolvedValue(PALLET_ROWS);
     renderOffice(value, { initialPath: PATH });
-    await screen.findByRole("heading", { name: "Паллета без SSCC" });
-    expect(screen.getByRole("button", { name: "Состав паллеты" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Ярлык паллеты" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "XML паллеты" })).toBeNull();
-    expect(screen.getByText("Открыта")).toBeTruthy();
+    await screen.findByRole("heading", { name: "Палет без SSCC" });
+    expect(screen.getByRole("button", { name: "Состав палета" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ярлык палета" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "XML палета" })).toBeNull();
+    expect(screen.getByText("Открыт")).toBeTruthy();
   });
 
   it("saves this pallet's XML, in a dialog with the pallet only and no shift formats", async () => {
     const { value, files } = await palletCard();
     value.api.recordShiftExport.mockResolvedValue(undefined);
-    fireEvent.click(screen.getByRole("button", { name: "XML паллеты" }));
-    const dialog = await screen.findByRole("dialog", { name: "XML паллеты 146006820000000409" });
-    await within(dialog).findByRole("button", { name: "XML паллеты 146006820000000409" });
+    fireEvent.click(screen.getByRole("button", { name: "XML палета" }));
+    const dialog = await screen.findByRole("dialog", { name: "XML палета 146006820000000409" });
+    await within(dialog).findByRole("button", { name: "XML палета 146006820000000409" });
     expect(within(dialog).queryByRole("radiogroup")).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Сформировать и сохранить" })).toBeNull();
-    expect(within(dialog).getAllByText(/Паллета 146006820000000409, коробов/)).toHaveLength(1);
-    fireEvent.click(within(dialog).getByRole("button", { name: "XML паллеты 146006820000000409" }));
+    expect(within(dialog).getAllByText(/Палет 146006820000000409, коробов/)).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "XML палета 146006820000000409" }));
     await within(dialog).findByText(/^Сохранено файлов: 1\./);
     expect(files.save).toHaveBeenCalledTimes(1);
     expect(files.save.mock.calls[0]?.[0].at(-1)).toMatch(/pallet_xml_gismt_aggregation$/);
@@ -207,7 +204,7 @@ describe("the card of a pallet (plan КРТ)", () => {
       new HostError({ kind: "api", code: "not_found", message: "no such pallet", status: 404 }),
     );
     renderOffice(value, { initialPath: PATH });
-    await screen.findByText("Паллета не найдена");
+    await screen.findByText("Палет не найден");
   });
 
   it("is open to a technologist", async () => {

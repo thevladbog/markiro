@@ -1263,6 +1263,7 @@ export const officeBoxSchema = z.object({
   closedAt: z.iso.datetime().nullable(),
   disassembledAt: z.iso.datetime().nullable(),
   palletId: z.string().nullable(),
+  palletKind: z.literal("warehouse").optional(),
   units: z.number().int().nonnegative(),
   itemCountReported: z.number().int().nonnegative().nullable(),
   digestMatches: z.boolean().nullable(),

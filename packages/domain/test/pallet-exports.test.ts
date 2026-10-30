@@ -50,7 +50,7 @@ describe("pallet aggregation export", () => {
       palletCount: 1,
       mimeType: "application/xml; charset=utf-8",
     });
-    expect(part.filename).toBe("Cola_2026-09-17_паллета_00134600682000000017_2_коробов.xml");
+    expect(part.filename).toBe("Cola_2026-09-17_палет_00134600682000000017_2_коробов.xml");
   });
 
   it("refuses an empty pallet, a missing INN and an unknown format", () => {

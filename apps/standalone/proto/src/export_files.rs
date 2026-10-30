@@ -59,6 +59,7 @@ impl ExportFileKind {
 pub enum ExportTargetType {
     Shift,
     Pallet,
+    WarehousePallet,
     Box,
     DisaggregationDocument,
 }
@@ -68,6 +69,7 @@ impl ExportTargetType {
         match self {
             Self::Shift => "shift",
             Self::Pallet => "pallet",
+            Self::WarehousePallet => "warehouse_pallet",
             Self::Box => "box",
             Self::DisaggregationDocument => "disaggregation_document",
         }

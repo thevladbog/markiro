@@ -116,7 +116,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
               ? request.timeZone
               : requireHistoryTimeZone(request.rows.organization.timeZone),
           ),
-        fileName: `Состав паллеты ${sscc ?? "без SSCC"}.html`,
+        fileName: `Состав палета ${sscc ?? "без SSCC"}.html`,
       };
     }
     case "placard": {
@@ -126,7 +126,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       return {
         kind: "placard",
         draw: () => renderPalletPlacardHtml(data, request.format),
-        fileName: `Ярлык паллеты ${sscc ?? ""} ${paper(request.format)}.html`,
+        fileName: `Ярлык палета ${sscc ?? ""} ${paper(request.format)}.html`,
       };
     }
     case "placards": {
@@ -135,7 +135,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       return {
         kind: "placards",
         draw: () => renderShiftPlacardsHtml(data.pallets, request.format, data.shiftNumber),
-        fileName: `Ярлыки паллет смены ${paper(request.format)}.html`,
+        fileName: `Ярлыки палетов смены ${paper(request.format)}.html`,
       };
     }
     case "task": {

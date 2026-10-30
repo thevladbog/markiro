@@ -55,6 +55,9 @@ pub struct OfficeCodeItem {
     pub box_closed_at: Option<String>,
     pub box_disassembled_at: Option<String>,
     pub pallet_id: Option<String>,
+    /// Live warehouse parent; omitted for the original production parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_kind: Option<String>,
     pub pallet_sscc: Option<String>,
     pub pallet_disassembled_at: Option<String>,
     pub shift_id: String,

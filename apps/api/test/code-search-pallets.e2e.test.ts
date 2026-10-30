@@ -327,7 +327,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
         .query({ timeZone: "Europe/Moscow" })
         .expect(200)
         .expect("Content-Type", /text\/html/);
-      expect(res.text).toContain("Состав паллеты");
+      expect(res.text).toContain("Состав палета");
       // Its own SSCC, and both member boxes underneath.
       expect(res.text).toContain("(00)");
       expect(res.text.match(/<tr class="rep-code-row">/g)?.length).toBe(2);

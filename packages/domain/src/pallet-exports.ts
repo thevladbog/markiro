@@ -29,7 +29,7 @@ export const PALLET_EXPORT_FORMATS = Object.freeze([
   Object.freeze({
     id: "pallet_xml_gismt_aggregation",
     version: 1,
-    label: "[XML][ГИСМТ] Агрегация паллеты",
+    label: "[XML][ГИСМТ] Агрегация палета",
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
   } as const),
@@ -114,7 +114,7 @@ export function renderPalletAggregationExport(
     codeCount: 0,
     boxCount,
     palletCount: 1,
-    filename: `${productName}_${input.closedDate}_паллета_00${input.pallet.sscc}_${boxCount}_коробов.${descriptor.extension}`,
+    filename: `${productName}_${input.closedDate}_палет_00${input.pallet.sscc}_${boxCount}_коробов.${descriptor.extension}`,
     mimeType: descriptor.mimeType,
     bytes: rendered.bytes,
   };

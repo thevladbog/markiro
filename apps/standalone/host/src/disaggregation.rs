@@ -35,6 +35,7 @@ pub async fn next_seq(conn: &mut SqliteConnection) -> Result<i64, ApiError> {
 pub struct Target {
     pub box_id: Option<String>,
     pub pallet_id: Option<String>,
+    pub warehouse_pallet_id: Option<String>,
     pub status: LineStatus,
     pub product_id: Option<String>,
     pub cloud: bool,
@@ -152,6 +153,16 @@ pub async fn apply_targets(
             shifts.insert(shift_id);
             applied.boxes += 1;
             applied.codes += usize::try_from(taken).map_err(ApiError::internal)?;
+        } else if let Some(pallet_id) = &target.warehouse_pallet_id {
+            let changed = sqlx::query("UPDATE warehouse_pallets SET disassembled_at=? WHERE id=? AND disassembled_at IS NULL")
+                .bind(instant).bind(pallet_id).execute(&mut *conn).await.map_err(ApiError::internal)?;
+            if changed.rows_affected() != 1 {
+                return Err(ApiError::internal("a warehouse pallet taken apart twice"));
+            }
+            crate::facts::registry_touch::warehouse_pallet_boxes(&mut *conn, pallet_id, at).await?;
+            sqlx::query("UPDATE warehouse_pallet_boxes SET removed_at=? WHERE pallet_id=? AND removed_at IS NULL")
+                .bind(instant).bind(pallet_id).execute(&mut *conn).await.map_err(ApiError::internal)?;
+            applied.pallets += 1;
         } else if let Some(pallet_id) = &target.pallet_id {
             // As a station's pallet `disassemble`: its boxes stay as they are.
             let shift_id: Option<String> = sqlx::query_scalar(
@@ -211,6 +222,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
         .map_err(ApiError::internal)?;
     if let Some((id, closed, shift_closed, disassembled, product_id, code_count)) = found {
         return Ok(Some(Target {
+            warehouse_pallet_id: None,
             box_id: Some(id),
             pallet_id: None,
             status: classify(closed, shift_closed, disassembled),
@@ -226,10 +238,25 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
         .await
         .map_err(ApiError::internal)?;
     if found.is_none() {
+        let warehouse: Option<(String,bool,bool,String,i64)> = sqlx::query_as("SELECT wp.id,wp.closed_at IS NOT NULL,wp.disassembled_at IS NOT NULL,wp.product_id,(SELECT COUNT(*) FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc=wb.box_sscc JOIN box_items i ON i.box_id=b.id AND i.removed_at IS NULL AND i.displaced_at IS NULL WHERE wb.pallet_id=wp.id AND wb.removed_at IS NULL AND b.disassembled_at IS NULL) FROM warehouse_pallets wp WHERE wp.sscc=?")
+            .bind(sscc).fetch_optional(&mut *conn).await.map_err(ApiError::internal)?;
+        if let Some((id, closed, disassembled, product_id, code_count)) = warehouse {
+            return Ok(Some(Target {
+                box_id: None,
+                pallet_id: None,
+                warehouse_pallet_id: Some(id),
+                status: classify(closed, true, disassembled),
+                product_id: Some(product_id),
+                cloud: false,
+                product_name: None,
+                code_count,
+            }));
+        }
         return crate::cloud_history::operations::resolve(conn, sscc).await;
     }
     Ok(found.map(
         |(id, closed, shift_closed, disassembled, product_id, code_count)| Target {
+            warehouse_pallet_id: None,
             box_id: None,
             pallet_id: Some(id),
             status: classify(closed, shift_closed, disassembled),

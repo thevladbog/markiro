@@ -26,8 +26,8 @@ describe("an act's folder (plan ДЗГ-О)", () => {
 
 const FORM: RenderedForm = {
   kind: "placard",
-  html: '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><style>@page { size: A5; margin: 0 }</style></head><body><p>Ярлык паллеты</p></body></html>',
-  fileName: "Ярлык паллеты 146006820000000409 A5.html",
+  html: '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><style>@page { size: A5; margin: 0 }</style></head><body><p>Ярлык палета</p></body></html>',
+  fileName: "Ярлык палета 146006820000000409 A5.html",
 };
 
 /** What a frame's window and document were asked, in order; the test's `print` pushes `print`. */
@@ -108,8 +108,8 @@ describe("printing a form (plan О-Ф)", () => {
     expect(frame?.tabIndex).toBe(-1);
     expect(printed).toHaveLength(1);
     expect(printed[0]).toContain("@page { size: A5; margin: 0 }");
-    expect(printed[0]).toContain("Ярлык паллеты");
-    expect(document.body.textContent).not.toContain("Ярлык паллеты");
+    expect(printed[0]).toContain("Ярлык палета");
+    expect(document.body.textContent).not.toContain("Ярлык палета");
   });
 
   it("replaces the frame of the form before, so there is only ever one", () => {
@@ -220,10 +220,10 @@ describe("the name of a form's file (plan О-Ф)", () => {
     for (const name of [
       "Состав короба 046006820000015000.html",
       "Состав короба без SSCC.html",
-      "Состав паллеты 146006820000000409.html",
-      "Ярлык паллеты 146006820000000409 A5.html",
-      "Ярлык паллеты  A4.html",
-      "Ярлыки паллет смены A5.html",
+      "Состав палета 146006820000000409.html",
+      "Ярлык палета 146006820000000409 A5.html",
+      "Ярлык палета  A4.html",
+      "Ярлыки палетов смены A5.html",
       "Бланк смены.html",
     ]) {
       expect(formFileName(name), name).toBe(name);

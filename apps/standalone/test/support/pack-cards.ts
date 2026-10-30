@@ -78,7 +78,7 @@ export async function openCodes(session: FakeOfficeSession, path = "/codes"): Pr
 }
 
 /** Chooses a part of «Поиск кодов» by its tab. */
-export function chooseTab(name: "Коды" | "Короба" | "Паллеты"): void {
+export function chooseTab(name: "Коды" | "Короба" | "Палеты"): void {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
 

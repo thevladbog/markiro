@@ -34,7 +34,7 @@ import { usePackDisassembly } from "./PackDisassembly.js";
 import { PackDocuments } from "./PackDocuments.js";
 import { BoxLink, PackStateChip } from "./PackLinks.js";
 
-/** The export dialog is a chunk of its own, read when «XML паллеты» is first pressed. */
+/** The export dialog is a chunk of its own, read when «XML палета» is first pressed. */
 const ExportDialog = lazy(() =>
   import("../exports/ExportDialog.js").then((module) => ({ default: module.ExportDialog })),
 );
@@ -46,8 +46,8 @@ const COUNT = new Intl.NumberFormat("ru");
  * The card of a pallet (plan КРТ, the cloud's pallet card): where it stands,
  * every box that joined it (the ones taken apart stay on the list), the
  * station's count against what stands now, the station's exceptions, and
- * its forms: «Состав паллеты», «Ярлык паллеты» on A4 or A5 and the pallet's
- * «XML паллеты».
+ * its forms: «Состав палета», «Ярлык палета» on A4 or A5 and the pallet's
+ * «XML палета».
  */
 export function PalletCardPage() {
   const { t } = useTranslation();

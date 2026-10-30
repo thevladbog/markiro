@@ -70,6 +70,11 @@ pub async fn custom_branding(
 pub const GATED: &[(&str, &str, &str)] = &[
     (
         "POST",
+        "/v1/office/warehouse-pallets",
+        "new warehouse pallets",
+    ),
+    (
+        "POST",
         "/v1/device/shifts",
         "new shifts: a station's new shift",
     ),
@@ -84,6 +89,8 @@ pub const GATED: &[(&str, &str, &str)] = &[
 /// client's data, its copies, the office and the license itself (spec
 /// §3.3). Some of them refuse an addition beyond the file ([`LIMITED`]).
 pub const NEVER: &[(&str, &str)] = &[
+    ("GET", "/v1/office/warehouse-pallets/{id}"),
+    ("POST", "/v1/office/warehouse-pallets/validate"),
     ("GET", "/v1/hello"),
     ("POST", "/v1/local-pair"),
     ("POST", "/v1/pairing/claim"),
@@ -262,6 +269,11 @@ pub const NEVER: &[(&str, &str)] = &[
 /// §4.7, `license/seats.rs`), with the seat or the feature they ask. They
 /// never disconnect what runs, and each is in [`GATED`] or [`NEVER`] too.
 pub const LIMITED: &[(&str, &str, &str)] = &[
+    (
+        "POST",
+        "/v1/office/warehouse-pallets",
+        "pallets: office warehouse pallet creation",
+    ),
     ("POST", "/v1/local-pair", "a seat of stations"),
     (
         "POST",

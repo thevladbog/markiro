@@ -54,7 +54,8 @@ const LATEST: &str = "~";
 // The parameters every search query binds, in this order: ?1 a code's
 // hash, ?2 a GTIN-14, ?3 a shift's id, ?4 a box's id, ?5 a pallet's id, ?6
 // and ?7 the period's ends (text of device instants), ?8 the limit, ?9 the
-// offset. A criterion not asked is NULL and narrows nothing.
+// offset; ?10/?11 stay reserved for cloud registry criteria, and ?12 is a live
+// warehouse pallet id. A criterion not asked is NULL and narrows nothing.
 
 /// Whether the scan `s` took its code when it arrived: its receipt is
 /// `accepted`, not `conflict` (the receipt's key, `fact_receipts`' primary
@@ -76,7 +77,10 @@ macro_rules! narrowed {
         concat!(
             " AND (?1 IS NULL OR s.code_hash = ?1) AND (?2 IS NULL OR s.gtin14 = ?2) \
              AND (?3 IS NULL OR s.shift_id = ?3) AND (?4 IS NULL OR i.box_id = ?4) \
-             AND (?5 IS NULL OR b.pallet_id = ?5) AND s.scanned_at >= ?6 AND s.scanned_at < ?7 \
+             AND (?5 IS NULL OR b.pallet_id = ?5) \
+             AND (?12 IS NULL OR EXISTS (SELECT 1 FROM warehouse_pallet_boxes wf \
+                  WHERE wf.pallet_id=?12 AND wf.box_sscc=b.sscc AND wf.removed_at IS NULL)) \
+             AND s.scanned_at >= ?6 AND s.scanned_at < ?7 \
              AND (i.scan_id IS NOT NULL OR (s.box_id IS NULL AND ",
             took_its_code!(),
             "))"
@@ -93,8 +97,10 @@ macro_rules! item_columns {
                    WHERE c.code_hash = s.code_hash AND c.loser_scan_id = s.id) \
              ELSE i.displaced_at END AS displaced_at, \
              b.id AS box_id, b.sscc AS box_sscc, b.closed_at AS box_closed_at, \
-             b.disassembled_at AS box_disassembled_at, p.id AS pallet_id, \
-             p.sscc AS pallet_sscc, p.disassembled_at AS pallet_disassembled_at, \
+             b.disassembled_at AS box_disassembled_at, COALESCE(wp.id,p.id) AS pallet_id, \
+             CASE WHEN wp.id IS NOT NULL THEN 'warehouse' END AS pallet_kind, \
+             CASE WHEN wp.id IS NOT NULL THEN wp.sscc ELSE p.sscc END AS pallet_sscc, \
+             CASE WHEN wp.id IS NOT NULL THEN wp.disassembled_at ELSE p.disassembled_at END AS pallet_disassembled_at, \
              sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
              sh.status AS shift_status, sh.production_date, pr.name AS product_name, \
              l.name AS line_name, s.device_id, d.name AS device_name, \
@@ -112,6 +118,8 @@ macro_rules! items {
             " JOIN shifts sh ON sh.id = s.shift_id JOIN products pr ON pr.id = sh.product_id \
              JOIN lines l ON l.id = sh.line_id JOIN devices d ON d.id = s.device_id \
              LEFT JOIN pallets p ON p.id = b.pallet_id \
+             LEFT JOIN warehouse_pallet_boxes wb ON wb.box_sscc=b.sscc AND wb.removed_at IS NULL \
+             LEFT JOIN warehouse_pallets wp ON wp.id=wb.pallet_id AND wp.disassembled_at IS NULL \
              LEFT JOIN operators op ON op.id = s.operator_id WHERE ",
             $driver,
             narrowed!(),
@@ -199,21 +207,33 @@ macro_rules! drivers {
                     "s.verdict = 'ok'"
                 ),
             ),
+            (
+                "warehouse pallet",
+                $emit!(
+                    "FROM warehouse_pallet_boxes membership JOIN boxes b ON b.sscc=membership.box_sscc \
+                     JOIN scans s ON s.box_id=b.id JOIN box_items i ON i.scan_id=s.id",
+                    "membership.pallet_id=?12 AND membership.removed_at IS NULL \
+                     AND b.disassembled_at IS NULL AND s.verdict='ok'"
+                ),
+            ),
         ]
     };
 }
 
 /// The rows of each driver, in [`Driver`]'s order.
-pub const ITEMS_SQL: [(&str, &str); 6] = drivers!(items);
+pub const ITEMS_SQL: [(&str, &str); 7] = drivers!(items);
 /// The counts of each driver, in [`Driver`]'s order.
-pub const COUNT_SQL: [(&str, &str); 6] = drivers!(count);
-const REGISTRY_KEYS_SQL: [(&str, &str); 6] = drivers!(registry_keys);
+pub const COUNT_SQL: [(&str, &str); 7] = drivers!(count);
+const REGISTRY_KEYS_SQL: [(&str, &str); 7] = drivers!(registry_keys);
 const REGISTRY_HYDRATE_SQL: &str = concat!(
     item_columns!(),
     " FROM scans s LEFT JOIN box_items i ON i.scan_id=s.id LEFT JOIN boxes b ON b.id=i.box_id \
      JOIN shifts sh ON sh.id=s.shift_id JOIN products pr ON pr.id=sh.product_id \
      JOIN lines l ON l.id=sh.line_id JOIN devices d ON d.id=s.device_id \
-     LEFT JOIN pallets p ON p.id=b.pallet_id LEFT JOIN operators op ON op.id=s.operator_id \
+     LEFT JOIN pallets p ON p.id=b.pallet_id \
+     LEFT JOIN warehouse_pallet_boxes wb ON wb.box_sscc=b.sscc AND wb.removed_at IS NULL \
+     LEFT JOIN warehouse_pallets wp ON wp.id=wb.pallet_id AND wp.disassembled_at IS NULL \
+     LEFT JOIN operators op ON op.id=s.operator_id \
      WHERE s.id IN (SELECT value FROM json_each(?1))"
 );
 
@@ -272,25 +292,28 @@ pub const CARD_OWNER_SQL: &str = "SELECT scan_id FROM code_owners WHERE code_has
 /// The box, else the pallet, of an SSCC.
 pub const BOX_BY_SSCC_SQL: &str = "SELECT id FROM boxes WHERE sscc = ?1";
 pub const PALLET_BY_SSCC_SQL: &str = "SELECT id FROM pallets WHERE sscc = ?1";
+pub const WAREHOUSE_PALLET_BY_SSCC_SQL: &str = "SELECT id FROM warehouse_pallets WHERE sscc = ?1";
 /// The shift of a number.
 pub const SHIFT_BY_NUMBER_SQL: &str =
     "SELECT id, created_from FROM shifts WHERE number_month_key = ?1 AND number_seq = ?2";
 
 /// Every query of this module by name, for the test that each one searches
 /// by an index.
-pub const QUERIES: [(&str, &str); 20] = [
+pub const QUERIES: [(&str, &str); 23] = [
     ITEMS_SQL[0],
     ITEMS_SQL[1],
     ITEMS_SQL[2],
     ITEMS_SQL[3],
     ITEMS_SQL[4],
     ITEMS_SQL[5],
+    ITEMS_SQL[6],
     COUNT_SQL[0],
     COUNT_SQL[1],
     COUNT_SQL[2],
     COUNT_SQL[3],
     COUNT_SQL[4],
     COUNT_SQL[5],
+    COUNT_SQL[6],
     ("card scans", CARD_SCANS_SQL),
     ("card exceptions", CARD_EXCEPTIONS_SQL),
     ("card office releases", CARD_OFFICE_RELEASES_SQL),
@@ -298,6 +321,7 @@ pub const QUERIES: [(&str, &str); 20] = [
     ("card owner", CARD_OWNER_SQL),
     ("box by sscc", BOX_BY_SSCC_SQL),
     ("pallet by sscc", PALLET_BY_SSCC_SQL),
+    ("warehouse pallet by sscc", WAREHOUSE_PALLET_BY_SSCC_SQL),
     ("shift by number", SHIFT_BY_NUMBER_SQL),
 ];
 
@@ -311,6 +335,7 @@ enum Driver {
     Shift = 3,
     Gtin = 4,
     Period = 5,
+    WarehousePallet = 6,
 }
 
 /// `GET /v1/office/codes?…`: every parameter is text, so a malformed one is
@@ -500,6 +525,7 @@ struct Resolved {
     shift_id: Option<String>,
     box_id: Option<String>,
     pallet_id: Option<String>,
+    warehouse_pallet_id: Option<String>,
 }
 
 async fn resolve(
@@ -510,6 +536,7 @@ async fn resolve(
         shift_id: None,
         box_id: None,
         pallet_id: None,
+        warehouse_pallet_id: None,
     };
     if let Some(sscc) = &criteria.sscc {
         let found: Option<String> = sqlx::query_scalar(BOX_BY_SSCC_SQL)
@@ -525,9 +552,18 @@ async fn resolve(
                 .fetch_optional(&mut *conn)
                 .await
                 .map_err(ApiError::internal)?;
-            match found {
-                Some(id) => resolved.pallet_id = Some(id),
-                None => return Ok(None),
+            if let Some(id) = found {
+                resolved.pallet_id = Some(id);
+            } else {
+                let found: Option<String> = sqlx::query_scalar(WAREHOUSE_PALLET_BY_SSCC_SQL)
+                    .bind(sscc)
+                    .fetch_optional(&mut *conn)
+                    .await
+                    .map_err(ApiError::internal)?;
+                match found {
+                    Some(id) => resolved.warehouse_pallet_id = Some(id),
+                    None => return Ok(None),
+                }
             }
         }
     }
@@ -564,6 +600,7 @@ struct ItemRow {
     box_closed_at: Option<String>,
     box_disassembled_at: Option<String>,
     pallet_id: Option<String>,
+    pallet_kind: Option<String>,
     pallet_sscc: Option<String>,
     pallet_disassembled_at: Option<String>,
     shift_id: String,
@@ -611,6 +648,7 @@ impl ItemRow {
             box_closed_at: self.box_closed_at,
             box_disassembled_at: self.box_disassembled_at,
             pallet_id: self.pallet_id,
+            pallet_kind: self.pallet_kind,
             pallet_sscc: self.pallet_sscc,
             pallet_disassembled_at: self.pallet_disassembled_at,
             shift_id: self.shift_id,
@@ -632,6 +670,7 @@ struct Binds<'a> {
     shift_id: Option<&'a str>,
     box_id: Option<&'a str>,
     pallet_id: Option<&'a str>,
+    warehouse_pallet_id: Option<&'a str>,
     from: &'a str,
     to: &'a str,
 }
@@ -653,6 +692,9 @@ async fn fetch_items(
         .bind(binds.to)
         .bind(limit)
         .bind(offset)
+        .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None)
+        .bind(binds.warehouse_pallet_id)
         .fetch_all(conn)
         .await
         .map_err(ApiError::internal)?;
@@ -674,6 +716,10 @@ async fn count_items(
         .bind(binds.from)
         .bind(binds.to)
         .bind(limit)
+        .bind(0i64)
+        .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None)
+        .bind(binds.warehouse_pallet_id)
         .fetch_one(conn)
         .await
         .map_err(ApiError::internal)
@@ -702,6 +748,8 @@ async fn search(
         Driver::Box
     } else if resolved.pallet_id.is_some() {
         Driver::Pallet
+    } else if resolved.warehouse_pallet_id.is_some() {
+        Driver::WarehousePallet
     } else if resolved.shift_id.is_some() {
         Driver::Shift
     } else if criteria.gtin.is_some() {
@@ -715,6 +763,7 @@ async fn search(
         shift_id: resolved.shift_id.as_deref(),
         box_id: resolved.box_id.as_deref(),
         pallet_id: resolved.pallet_id.as_deref(),
+        warehouse_pallet_id: resolved.warehouse_pallet_id.as_deref(),
         from: criteria.from.as_deref().unwrap_or(EARLIEST),
         to: criteria.to.as_deref().unwrap_or(LATEST),
     };
@@ -849,6 +898,7 @@ async fn card(conn: &mut SqliteConnection, code_hash: &str) -> Result<OfficeCode
         shift_id: None,
         box_id: None,
         pallet_id: None,
+        warehouse_pallet_id: None,
         from: EARLIEST,
         to: LATEST,
     };

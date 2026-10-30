@@ -612,7 +612,7 @@ async fn every_query_searches_by_an_index() {
         // Each search query is driven by the index of its criterion.
         let driving = match name {
             "code" | "card scans" | "card exceptions" => Some("scans_code_hash"),
-            "box" | "pallet" => Some("scans_ok_box"),
+            "box" | "pallet" | "warehouse pallet" => Some("scans_ok_box"),
             // `scans_shift_time` (migration 0033) is `scans_shift` with the instant after the shift:
             // the planner takes it when a period narrows the shift, and either drives the query.
             "shift" => Some("scans_shift"),

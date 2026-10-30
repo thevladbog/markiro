@@ -186,7 +186,7 @@ describe("office label templates", () => {
     ]);
     expect(cells("Паллета 100×150").slice(0, 3)).toEqual([
       "Паллета 100×150Типовой",
-      "Паллета",
+      "Палет",
       "100 × 150 мм",
     ]);
     expect(cells("Дубликат Data Matrix 58×40 [Полное наименование]")[1]).toBe("Дубликат товара");
@@ -287,7 +287,7 @@ describe("office label templates", () => {
 
   it("keeps one purpose or one state with the filters, and both together", async () => {
     await openTemplates(session());
-    chooseText("Назначение", "Паллета");
+    chooseText("Назначение", "Палет");
     expect(names()).toEqual(["Паллета 100×150"]);
     chooseText("Назначение", "Дубликат товара");
     expect(names()).toEqual(["Дубликат Data Matrix 58×40 [Полное наименование]"]);
@@ -388,7 +388,7 @@ describe("office label templates", () => {
     await openTemplates(session());
     const tag = (name: string, label: string) => within(rowOf(name)).getByText(label);
     expect(tag("Коробка 58×40", "Короб").classList.contains("mk-badge--violet")).toBe(true);
-    expect(tag("Паллета 100×150", "Паллета").classList.contains("mk-badge--magenta")).toBe(true);
+    expect(tag("Паллета 100×150", "Палет").classList.contains("mk-badge--magenta")).toBe(true);
     expect(
       tag("Дубликат Data Matrix 58×40 [Полное наименование]", "Дубликат товара").classList.contains(
         "mk-badge--teal",
@@ -406,7 +406,7 @@ describe("office label templates", () => {
     expect(screen.getByRole("group", { name: "Поиск и отбор шаблонов" })).toBeTruthy();
     // The search's hint is its placeholder: a hint under the field would lift it off the bar's line.
     expect(screen.getByPlaceholderText("Название шаблона")).toBeTruthy();
-    expect(optionTexts("Назначение")).toEqual(["Все", "Короб", "Паллета", "Дубликат товара"]);
+    expect(optionTexts("Назначение")).toEqual(["Все", "Короб", "Палет", "Дубликат товара"]);
     expect(optionTexts("Состояние")).toEqual(["Все", "Включённые", "Выключенные"]);
   });
 

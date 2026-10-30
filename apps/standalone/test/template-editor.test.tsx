@@ -303,15 +303,15 @@ describe("a new label template", () => {
 
   it("sends a disabled template, and a purpose with its own starting layout", async () => {
     const fake = session();
-    fake.api.createTemplate.mockResolvedValue(created("Паллета", { purpose: "pallet" }));
+    fake.api.createTemplate.mockResolvedValue(created("Палет", { purpose: "pallet" }));
     await openNew(fake);
-    type("Название", "Паллета");
+    type("Название", "Палет");
     chooseValue("Назначение", "pallet");
     expect(screen.getByText("Размер: 100 × 150 мм")).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
     await save();
     expect(fake.api.createTemplate.mock.calls[0]?.[1]).toStrictEqual({
-      name: "Паллета",
+      name: "Палет",
       purpose: "pallet",
       enabled: false,
       chzProductGroupCodes: null,

@@ -157,7 +157,7 @@ fn every_route_is_closed_by_the_license_or_never_and_not_both() {
 }
 
 /// Spec §3.3: the state closes exactly a planned shift's opening (its first
-/// entry) and a station's new shift; pairing, facts, closes, the license
+/// entry), a station's new shift and office warehouse pallet creation; pairing, facts, closes, the license
 /// itself and everything else never.
 #[test]
 fn the_gated_routes_are_the_ones_the_spec_names() {
@@ -170,6 +170,7 @@ fn the_gated_routes_are_the_ones_the_spec_names() {
         BTreeSet::from([
             ("POST", "/v1/device/shifts/{id}/enter"),
             ("POST", "/v1/device/shifts"),
+            ("POST", "/v1/office/warehouse-pallets"),
         ])
     );
     for route in [
@@ -205,6 +206,7 @@ fn the_limited_routes_are_the_additions_tasks_10_and_11_close() {
             ("POST", "/v1/local-pair"),
             ("POST", "/v1/pairing/claim"),
             ("POST", "/v1/device/shifts"),
+            ("POST", "/v1/office/warehouse-pallets"),
             ("POST", "/v1/device/pallet-events"),
             ("POST", "/v1/office/users"),
             ("PUT", "/v1/office/users/{id}"),

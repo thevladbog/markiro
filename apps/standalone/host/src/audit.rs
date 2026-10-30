@@ -7,6 +7,7 @@ use sqlx::SqliteConnection;
 /// Action names of `audit_log.action`. A new writer adds its name here, so
 /// the audit screen (plan 5) translates one list.
 pub mod actions {
+    pub const PALLET_CREATE: &str = "pallet.create";
     pub const HOST_BOOTSTRAP: &str = "host.bootstrap";
     pub const HOST_NETWORK_CONFIRM: &str = "host_network.confirm";
     /// `markiro-host restore` put a copy back (plan РК); the host is the

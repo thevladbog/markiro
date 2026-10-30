@@ -32,7 +32,7 @@ function current(): string[] {
 describe("«Шаблоны» as one section", () => {
   it("leads the old addresses of the sheets and the defaults to their tabs, so no link breaks", async () => {
     for (const [path, heading, tab] of [
-      ["/pallet-sheets", "Листы паллет А4", "Листы А4"],
+      ["/pallet-sheets", "Листы палетов А4", "Листы А4"],
       ["/template-defaults", "Шаблоны по умолчанию", "По умолчанию"],
       ["/templates", "Шаблоны этикеток", "Этикетки"],
     ] as const) {

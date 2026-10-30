@@ -693,7 +693,7 @@ describe("the demo data on «Обзор» (spec 2026-10-21)", () => {
     const dialog = await screen.findByRole("dialog", { name: "Удалить демо-данные?" });
     expect(
       within(dialog).getByText(
-        "Удалятся демо-товар и всё, что сделано в его сменах: смен — 1, коробов — 4, паллет — 2, кодов — 20. Отменить нельзя.",
+        "Удалятся демо-товар и всё, что сделано в его сменах: смен — 1, коробов — 4, палетов — 2, кодов — 20. Отменить нельзя.",
       ),
     ).toBeTruthy();
     session.api.getDemoData.mockResolvedValue(NO_DEMO);

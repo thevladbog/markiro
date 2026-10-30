@@ -758,3 +758,11 @@ export function updateStarted(
     source,
   };
 }
+
+/** Raw input preserves original 1-based validation line numbers. */
+export function palletValidate(codes: string[]) {
+  return { codes: [...codes] };
+}
+export function palletCreate(requestId: string, codes: string[]) {
+  return { requestId, codes: [...codes] };
+}

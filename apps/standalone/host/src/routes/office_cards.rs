@@ -30,12 +30,17 @@ pub const BOX_SQL: &str = "SELECT b.id, b.sscc, b.opened_at, b.closed_at, b.disa
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units, \
      sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
      sh.status AS shift_status, sh.production_date, pr.name AS product_name, \
-     l.name AS line_name, p.id AS pallet_id, p.sscc AS pallet_sscc, \
-     p.closed_at AS pallet_closed_at, p.disassembled_at AS pallet_disassembled_at \
+     l.name AS line_name, COALESCE(wp.id,p.id) AS pallet_id, \
+     CASE WHEN wp.id IS NOT NULL THEN 'warehouse' END AS pallet_kind, \
+     CASE WHEN wp.id IS NOT NULL THEN wp.sscc ELSE p.sscc END AS pallet_sscc, \
+     CASE WHEN wp.id IS NOT NULL THEN wp.closed_at ELSE p.closed_at END AS pallet_closed_at, \
+     CASE WHEN wp.id IS NOT NULL THEN wp.disassembled_at ELSE p.disassembled_at END AS pallet_disassembled_at \
      FROM boxes b JOIN shifts sh ON sh.id = b.shift_id \
      JOIN products pr ON pr.id = sh.product_id JOIN lines l ON l.id = sh.line_id \
      JOIN devices d ON d.id = b.device_id LEFT JOIN operators op ON op.id = b.operator_id \
-     LEFT JOIN pallets p ON p.id = b.pallet_id WHERE b.id = ?1";
+     LEFT JOIN pallets p ON p.id = b.pallet_id \
+     LEFT JOIN warehouse_pallet_boxes wb ON wb.box_sscc=b.sscc AND wb.removed_at IS NULL \
+     LEFT JOIN warehouse_pallets wp ON wp.id=wb.pallet_id AND wp.disassembled_at IS NULL WHERE b.id = ?1";
 
 /// Every item the box ever had, newest first: every accepted scan into the
 /// box names it (`scans_ok_box`, plan «Поиск кодов»), and each item is the
@@ -149,6 +154,7 @@ struct BoxRow {
     product_name: String,
     line_name: String,
     pallet_id: Option<String>,
+    pallet_kind: Option<String>,
     pallet_sscc: Option<String>,
     pallet_closed_at: Option<String>,
     pallet_disassembled_at: Option<String>,
@@ -361,6 +367,7 @@ async fn read_box(
             line_name: row.line_name,
         })?,
         pallet: row.pallet_id.map(|id| OfficePackPallet {
+            kind: row.pallet_kind,
             id,
             sscc: row.pallet_sscc,
             closed_at: row.pallet_closed_at,

@@ -178,7 +178,11 @@ export function BoxCardPage() {
               box.pallet === null ? (
                 t("office.common.none")
               ) : (
-                <PalletLinkOrOpen id={box.pallet.id} sscc={box.pallet.sscc} />
+                <PalletLinkOrOpen
+                  id={box.pallet.id}
+                  sscc={box.pallet.sscc}
+                  kind={box.pallet.kind ?? "production"}
+                />
               ),
           },
           {

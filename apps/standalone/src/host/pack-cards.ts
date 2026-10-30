@@ -22,6 +22,7 @@ export const officePackShiftSchema = z.object({
   lineName: z.string(),
 });
 export const officePackPalletSchema = z.object({
+  kind: z.literal("warehouse").optional(),
   id: z.string(),
   sscc: sscc.nullable(),
   closedAt: instant.nullable(),

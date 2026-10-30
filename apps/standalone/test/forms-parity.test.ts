@@ -134,7 +134,7 @@ function requestOf(parityCase: ParityCase): FormRequest {
 }
 
 /**
- * The one difference between the cloud's blank and the office's (plan 2b): the rule on closing a shift.
+ * The office uses its approved closing rule and masculine pallet wording.
  * The cloud's golden says «Смену закрывает станция, которая её открыла…»; the autonomous product, where
  * several devices work one shift, says each device closes its part. Every other byte is the cloud's.
  */
@@ -143,11 +143,36 @@ const CLOUD_RULE =
 const AUTONOMOUS_RULE =
   "<li>Каждая станция закрывает свою часть; смена закрывается, когда закрыли все, или из офиса.</li>";
 
-/** The bytes the office draws for a case whose cloud bytes are `html`: only a blank differs, by that one sentence. */
+/** The bytes the office draws for a case whose cloud bytes are `html`: only the explicit approved wording differs; the stored golden stays unchanged. */
 function officeBytes(form: ParityCase["form"], html: string): string {
-  if (form !== "task") return html;
+  let result = html
+    .replaceAll("Состав паллеты", "Состав палета")
+    .replaceAll("Ярлык паллеты", "Ярлык палета")
+    .replaceAll("Ярлыки паллет", "Ярлыки палетов")
+    .replaceAll("Коробов на паллете", "Коробов на палете")
+    .replaceAll("Итого по паллете", "Итого по палету")
+    .replaceAll("паллеты и коробов", "палета и коробов")
+    .replaceAll("На паллете нет коробов", "На палете нет коробов")
+    .replaceAll("Паллета</span>", "Палет</span>")
+    .replaceAll("Паллета ", "Палет ")
+    .replaceAll("РАСФОРМИРОВАНА", "РАСФОРМИРОВАН");
+  if (form === "pallet")
+    result = result
+      .replaceAll("Открыта", "Открыт")
+      .replaceAll("Закрыта", "Закрыт")
+      .replaceAll("Расформирована", "Расформирован")
+      .replaceAll("сформирована", "сформирован")
+      .replaceAll("закрыта", "закрыт");
+  if (form !== "task") return result;
   expect(html.split(CLOUD_RULE)).toHaveLength(2);
-  return html.replace(CLOUD_RULE, AUTONOMOUS_RULE);
+  return result
+    .replace(CLOUD_RULE, AUTONOMOUS_RULE)
+    .replaceAll("Агрегация с паллетами", "Агрегация с палетами")
+    .replaceAll("ПАЛЛЕТЫ", "ПАЛЕТЫ")
+    .replaceAll(
+      "Палет закрывается автоматически по достижении вместимости; закрыть её раньше",
+      "Палет закрывается автоматически по достижении вместимости; закрыть его раньше",
+    );
 }
 
 const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
@@ -163,11 +188,10 @@ describe("printed forms parity with the cloud (plan О-Ф)", () => {
       const drawn = renderForm(requestOf(parityCase));
       const expected = golden[name];
       expect(drawn?.kind).toBe(parityCase.form);
+      expect(sha256(expected?.html ?? "")).toBe(expected?.sha256);
       const bytes = officeBytes(parityCase.form, expected?.html ?? "");
       expect(drawn?.html).toBe(bytes);
-      expect(sha256(drawn?.html ?? "")).toBe(
-        parityCase.form === "task" ? sha256(bytes) : expected?.sha256,
-      );
+      expect(sha256(drawn?.html ?? "")).toBe(sha256(bytes));
     },
   );
 

@@ -1,3 +1,4 @@
+import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 
 import { Card, EmptyState, type TableColumn } from "@markiro/ui";
@@ -11,12 +12,13 @@ import { instantFormat } from "./CodeCard.js";
 const COUNT = new Intl.NumberFormat("ru");
 
 /**
- * «Складские паллеты» under the pallets of shifts (plan ТСД-Х, decision В-6): what handhelds built
- * outside shifts from closed boxes. A list only: no card, no export, no taking apart. Open ones
+ * «Складские палеты» under the pallets of shifts (plan ТСД-Х, decision В-6): what handhelds built
+ * outside shifts from closed boxes, and the pallets built in the office. Open ones
  * first, as the host sends them.
  */
 export function WarehousePalletsSection({ zone }: { zone: string }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const format = instantFormat(zone);
   const list = useOfficeQuery(officeKeys.warehousePallets, (api, token) =>
     api.listWarehousePallets(token),
@@ -26,8 +28,14 @@ export function WarehousePalletsSection({ zone }: { zone: string }) {
       key: "sscc",
       title: t("office.warehousePallets.table.sscc"),
       mono: true,
-      render: (pallet) =>
-        pallet.sscc === null ? t("office.warehousePallets.open") : `(00)${pallet.sscc}`,
+      render: (pallet) => (
+        <Link
+          to={`/codes/warehouse-pallet/${pallet.id}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {pallet.sscc === null ? t("office.warehousePallets.open") : `(00)${pallet.sscc}`}
+        </Link>
+      ),
     },
     {
       key: "productName",
@@ -76,6 +84,7 @@ export function WarehousePalletsSection({ zone }: { zone: string }) {
           columns={columns}
           rows={list.data.pallets}
           getRowKey={(pallet) => pallet.id}
+          onRowClick={(pallet) => void navigate(`/codes/warehouse-pallet/${pallet.id}`)}
           scrollLabel={t("office.warehousePallets.table.label")}
         />
       </Card>

@@ -121,7 +121,7 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
   const aggregation = data.mode === "aggregation";
   const modeTitle = aggregation
     ? data.palletsEnabled
-      ? "Агрегация с паллетами"
+      ? "Агрегация с палетами"
       : "Агрегация"
     : "Проверка";
   const organization = escapeHtml(organizationText);
@@ -160,7 +160,7 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
     ...(aggregation
       ? [
           taskFormParameter("ВМЕСТИМОСТЬ КОРОБА", boxes),
-          taskFormParameter("ПАЛЛЕТЫ", pallets),
+          taskFormParameter("ПАЛЕТЫ", pallets),
           taskFormParameter("НОМЕРА SSCC", issuer),
         ]
       : [
@@ -200,7 +200,7 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
     "<li><strong>Бланк отражает параметры на момент печати.</strong> Если мастер изменил смену, терминал покажет актуальные значения — верьте экрану.</li>",
     ...(aggregation && data.palletsEnabled && data.palletBoxCapacity !== null
       ? [
-          "<li>Паллета закрывается автоматически по достижении вместимости; закрыть её раньше можно на терминале вручную.</li>",
+          "<li>Палет закрывается автоматически по достижении вместимости; закрыть его раньше можно на терминале вручную.</li>",
         ]
       : []),
     ...(!aggregation && data.validationPrintMode === "duplicate_dm"

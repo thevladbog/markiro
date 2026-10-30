@@ -119,6 +119,11 @@ const REMOVE: &[(&str, Arg)] = &[
     ("DELETE FROM warehouse_pallet_boxes WHERE box_sscc IN (SELECT sscc FROM demo_ssccs) \
      OR pallet_id IN (SELECT id FROM warehouse_pallets WHERE product_id IN \
      (SELECT id FROM products WHERE demo = 1))", Arg::None),
+    // Warehouse documents have no shift_id: remove their bytes before their parent rows.
+    ("DELETE FROM export_files WHERE target_type='warehouse_pallet' AND target_id IN \
+     (SELECT id FROM warehouse_pallets WHERE product_id IN (SELECT id FROM products WHERE demo=1))", Arg::None),
+    ("DELETE FROM disaggregation_document_lines WHERE warehouse_pallet_id IN \
+     (SELECT id FROM warehouse_pallets WHERE product_id IN (SELECT id FROM products WHERE demo=1))", Arg::None),
     ("DELETE FROM warehouse_pallets WHERE product_id IN (SELECT id FROM products WHERE demo = 1)", Arg::None),
     ("DELETE FROM pallet_exceptions WHERE shift_id IN (SELECT id FROM demo_shift_ids)", Arg::None),
     ("DELETE FROM boxes WHERE shift_id IN (SELECT id FROM demo_shift_ids)", Arg::None),

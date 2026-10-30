@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import {
   Alert,
@@ -139,8 +139,8 @@ export interface ShiftDrawerProps {
  * derives them now, the exceptions, refused records and code conflicts of
  * plan КНФ, and the exports. Above the tabs stand the actions: the export
  * («Выгрузка», plan ЧЗ), the close, and the printed forms — «Бланк смены» until
- * the shift closes, «Ярлыки паллет смены», and in the tabs «Состав короба»,
- * «Состав паллеты» and «Ярлык паллеты» of one (pilot spec §5.5). Every role
+ * the shift closes, «Ярлыки палетов смены», and in the tabs «Состав короба»,
+ * «Состав палета» and «Ярлык палета» of one (pilot spec §5.5). Every role
  * reads it and prints; closing stays with `planShifts`. Times are written in
  * the organization's zone, as the forms write them. The tab is the link's
  * `?tab=`, so a drawer can be opened on a section.
@@ -833,6 +833,12 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
   );
   const palletLabel = (box: OfficeBox) => {
     if (box.palletId === null) return t("office.common.none");
+    if (box.palletKind === "warehouse")
+      return (
+        <Link to={`/codes/warehouse-pallet/${box.palletId}`}>
+          {t("office.warehouseCard.memberLink")}
+        </Link>
+      );
     // Not "not found" while the pallets are still coming or did not come: they are not known yet.
     if (pallets.isPending) return t("office.common.loading");
     if (pallets.isError) return t("office.shiftCard.palletsUnread");
@@ -862,7 +868,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
       minWidth: 150,
       render: (box) => at(box.closedAt),
     },
-    ...(shift.palletsEnabled
+    ...(shift.palletsEnabled || boxes.data?.some((box) => box.palletKind === "warehouse") === true
       ? [
           {
             key: "pallet",

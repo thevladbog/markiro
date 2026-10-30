@@ -53,7 +53,7 @@ async function draw(
     return {
       kind: "pallet",
       html: renderPalletReportHtml(cloudPalletReportData(rows), rows.organization.timeZone),
-      fileName: `Состав паллеты ${target.label}.html`,
+      fileName: `Состав палета ${target.label}.html`,
     };
   const data = all.map(cloudPalletPlacardData);
   if (data.length === 0 || data.some((row) => row === null)) return null;
@@ -62,7 +62,7 @@ async function draw(
     return {
       kind: "placards",
       html: renderShiftPlacardsHtml(valid, paper, target.label),
-      fileName: `Ярлыки паллет ${target.label} ${paper.toUpperCase()}.html`,
+      fileName: `Ярлыки палетов ${target.label} ${paper.toUpperCase()}.html`,
     };
   const placard = valid[0];
   return placard === undefined
@@ -70,7 +70,7 @@ async function draw(
     : {
         kind: "placard",
         html: renderPalletPlacardHtml(placard, paper),
-        fileName: `Ярлык паллеты ${target.label} ${paper.toUpperCase()}.html`,
+        fileName: `Ярлык палета ${target.label} ${paper.toUpperCase()}.html`,
       };
 }
 /** Frozen sources, null original logo; the real domain forms and standard file/print controls. */

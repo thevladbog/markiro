@@ -33,6 +33,9 @@ pub struct OfficePackShift {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficePackPallet {
+    /// A live warehouse parent; omitted for the original production parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub id: String,
     pub sscc: Option<String>,
     pub closed_at: Option<String>,

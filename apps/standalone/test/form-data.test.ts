@@ -167,7 +167,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     expect(
       renderForm({ kind: "placard", rows: MANY, palletId: MANY.pallets[0]?.id ?? "", format: "a5" })
         ?.fileName,
-    ).toBe("Ярлык паллеты 146006820000000413 A5.html");
+    ).toBe("Ярлык палета 146006820000000413 A5.html");
     expect(
       renderForm({
         kind: "placard",
@@ -177,7 +177,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
       }),
     ).toBeNull();
     expect(renderForm({ kind: "placards", rows: MANY, format: "a4" })?.fileName).toBe(
-      "Ярлыки паллет смены A4.html",
+      "Ярлыки палетов смены A4.html",
     );
     expect(
       renderForm({
@@ -186,7 +186,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
         palletId: MANY.pallets[1]?.id ?? "",
         timeZone: "UTC",
       })?.fileName,
-    ).toBe("Состав паллеты без SSCC.html");
+    ).toBe("Состав палета без SSCC.html");
     expect(
       renderForm({ kind: "pallet", rows: MANY, palletId: "missing", timeZone: "UTC" }),
     ).toBeNull();

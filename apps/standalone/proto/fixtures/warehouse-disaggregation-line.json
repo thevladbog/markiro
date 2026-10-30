@@ -1,0 +1,15 @@
+{
+  "id": "70000000-0000-4000-8000-000000000021",
+  "ssccInput": "146006820000000409",
+  "sscc": "146006820000000409",
+  "boxId": null,
+  "palletId": null,
+  "warehousePalletId": "a1000000-0000-4000-8000-000000000001",
+  "shiftId": null,
+  "shiftNumber": null,
+  "status": "ok",
+  "productId": "9f0e1d2c-3b4a-4958-8776-655443322110",
+  "productName": "Молоко 3,2% 0,9 л",
+  "codeCount": 12,
+  "validatedAt": "2026-10-30T10:00:00Z"
+}

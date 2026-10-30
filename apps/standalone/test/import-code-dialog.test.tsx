@@ -150,7 +150,7 @@ describe("the template import dialog", () => {
     ).toBeNull();
     paste(
       "JSON шаблона",
-      JSON.stringify({ name: "Паллета <b>1</b>", purpose: "pallet", spec: JSON_SPEC }),
+      JSON.stringify({ name: "Палет <b>1</b>", purpose: "pallet", spec: JSON_SPEC }),
     );
     fireEvent.click(button("Проверить код"));
     expect(screen.getByText("Предупреждения: 1")).toBeTruthy();
@@ -163,7 +163,7 @@ describe("the template import dialog", () => {
     await act(async () => {
       fireEvent.click(button("Заменить макет"));
     });
-    expect(onReplace.mock.calls[0]?.[0].name).toBe("Паллета <b>1</b>");
+    expect(onReplace.mock.calls[0]?.[0].name).toBe("Палет <b>1</b>");
   });
 
   it("says why code cannot replace the layout: the parser's message, the schema's issues, a too large element", () => {
@@ -419,7 +419,7 @@ describe("the template import dialog", () => {
       ["Дата", "{{date}}"],
       ["Годен до", "{{expiry}}"],
       ["Количество", "{{qty}}"],
-      ["Коробов на паллете", "{{qty.boxes}}"],
+      ["Коробов на палете", "{{qty.boxes}}"],
       ["Оператор", "{{operator}}"],
       ["Контрагент", "{{counterparty.name}}"],
     ];

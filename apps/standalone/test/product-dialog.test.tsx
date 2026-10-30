@@ -201,7 +201,7 @@ describe("office product dialog", () => {
     );
     expect(within(again).getAllByRole("option").length).toBeGreaterThan(2);
     fireEvent.keyDown(again, { key: "Escape" });
-    for (const label of ["Шаблон короба", "Шаблон паллеты"]) {
+    for (const label of ["Шаблон короба", "Шаблон палета"]) {
       const templates = openSelect(label);
       expect(within(templates).getByRole("searchbox", { name: "Поиск по списку" })).toBeTruthy();
       fireEvent.keyDown(templates, { key: "Escape" });
@@ -232,7 +232,7 @@ describe("office product dialog", () => {
     type("Название для печати", "   ");
     chooseValue("Товарная группа", "8");
     type("В коробе, шт.", "12");
-    type("Коробов на паллете", "40");
+    type("Коробов на палете", "40");
     type("Срок годности, дней", " 10 ");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
     expect(await screen.findByText("Товар «Молоко 2,5% 1 л» добавлен.")).toBeTruthy();
@@ -266,7 +266,7 @@ describe("office product dialog", () => {
     type("Название", "  ");
     type("Название для печати", "я".repeat(201));
     type("В коробе, шт.", "0");
-    type("Коробов на паллете", "1e3");
+    type("Коробов на палете", "1e3");
     type("Срок годности, дней", "3651");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
     expect(await screen.findByText("Неверная контрольная цифра GTIN")).toBeTruthy();
@@ -285,7 +285,7 @@ describe("office product dialog", () => {
       ["Название", "Укажите название товара, до 200 символов"],
       ["Название для печати", "Название для печати — до 200 символов"],
       ["В коробе, шт.", "Укажите целое число от 1 до 100 000 или оставьте пустым"],
-      ["Коробов на паллете", "Укажите целое число от 1 до 10 000 или оставьте пустым"],
+      ["Коробов на палете", "Укажите целое число от 1 до 10 000 или оставьте пустым"],
       ["Срок годности, дней", "Укажите целое число дней от 1 до 3650 или оставьте пустым"],
     ] as const) {
       expect(screen.getByLabelText(label).getAttribute("aria-describedby")).toBe(
@@ -393,12 +393,12 @@ describe("office product dialog", () => {
   it("shows the draft note while the group or either capacity is missing", async () => {
     await openCreate(session());
     const hint =
-      "Товар остаётся черновиком, пока не указаны товарная группа, вместимость короба и число коробов на паллете.";
+      "Товар остаётся черновиком, пока не указаны товарная группа, вместимость короба и число коробов на палете.";
     expect(screen.getByText(hint)).toBeTruthy();
     chooseValue("Товарная группа", "8");
     type("В коробе, шт.", "12");
     expect(screen.getByText(hint)).toBeTruthy();
-    type("Коробов на паллете", "40");
+    type("Коробов на палете", "40");
     await waitFor(() => expect(screen.queryByText(hint)).toBeNull());
     // Each of the three brings the line back on its own; spaces are no capacity.
     chooseValue("Товарная группа", "");
@@ -409,7 +409,7 @@ describe("office product dialog", () => {
     expect(screen.getByText(hint)).toBeTruthy();
     type("В коробе, шт.", "12");
     await waitFor(() => expect(screen.queryByText(hint)).toBeNull());
-    type("Коробов на паллете", "  ");
+    type("Коробов на палете", "  ");
     expect(screen.getByText(hint)).toBeTruthy();
   });
 
@@ -512,7 +512,7 @@ describe("office product dialog", () => {
       ["printName", "Название для печати"],
       ["chzProductGroupCode", "Товарная группа"],
       ["boxCapacity", "В коробе, шт."],
-      ["palletBoxCapacity", "Коробов на паллете"],
+      ["palletBoxCapacity", "Коробов на палете"],
     ] as const) {
       fake.api.createProduct.mockRejectedValueOnce(VALIDATION(field));
       fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
@@ -682,11 +682,11 @@ describe("office product dialog: default templates", () => {
     ).toHaveLength(2);
     // No group yet: only templates for every category fit.
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40"]);
-    expect(choices("Шаблон паллеты")).toEqual(["Не выбран", "Паллета 80×120", "Паллета 100×150"]);
+    expect(choices("Шаблон палета")).toEqual(["Не выбран", "Паллета 80×120", "Паллета 100×150"]);
     chooseValue("Товарная группа", "8");
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Молоко 58×40"]);
     chooseValue("Шаблон короба", MILK_58);
-    chooseValue("Шаблон паллеты", PALLET);
+    chooseValue("Шаблон палета", PALLET);
     // What the form chose stays a marked choice when the group stops admitting it.
     chooseValue("Товарная группа", "13");
     expect(choices("Шаблон короба")).toEqual([
@@ -754,15 +754,15 @@ describe("office product dialog: default templates", () => {
     fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultPalletTemplateId: gone }]);
     fake.api.updateProduct.mockResolvedValue({ ...MILK, rev: 81 });
     await openEdit(fake, "Молоко 3,2% 0,9 л");
-    expect(choices("Шаблон паллеты")).toEqual([
+    expect(choices("Шаблон палета")).toEqual([
       "Не выбран",
       "Паллета 100×150",
       "Шаблон 2b6d9a7f… — нет в списке",
     ]);
     // «Не выбран» holds the empty value, and the choice is made through the option itself.
-    expect(optionTextOf("Шаблон паллеты", "")).toBe("Не выбран");
-    chooseValue("Шаблон паллеты", "");
-    expect(valueOf("Шаблон паллеты")).toBe("");
+    expect(optionTextOf("Шаблон палета", "")).toBe("Не выбран");
+    chooseValue("Шаблон палета", "");
+    expect(valueOf("Шаблон палета")).toBe("");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     await screen.findByText("Изменения сохранены.");
     expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
@@ -798,7 +798,7 @@ describe("office product dialog: default templates", () => {
     await openProducts(slow);
     fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
     expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", true);
-    expect(screen.getByLabelText("Шаблон паллеты")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Шаблон палета")).toHaveProperty("disabled", true);
     expect(screen.getAllByText("Загружаем шаблоны…")).toHaveLength(2);
     expect(
       screen.queryByText("Список шаблонов не загрузился: шаблоны останутся как есть."),
@@ -865,23 +865,23 @@ describe("office product dialog: default templates", () => {
     await openProducts(fake);
     fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
     await waitFor(() =>
-      expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", false),
+      expect(screen.getByLabelText("Лист А4 палета")).toHaveProperty("disabled", false),
     );
     // Right after the pallet template, its alternative.
     const fields = within(dialog()).getAllByRole("combobox");
-    expect(fields.indexOf(selectTrigger("Лист А4 паллеты"))).toBe(
-      fields.indexOf(selectTrigger("Шаблон паллеты")) + 1,
+    expect(fields.indexOf(selectTrigger("Лист А4 палета"))).toBe(
+      fields.indexOf(selectTrigger("Шаблон палета")) + 1,
     );
-    expect(choices("Лист А4 паллеты")).toEqual([
+    expect(choices("Лист А4 палета")).toEqual([
       "Не выбран",
       "Палета А4 · вертикальная",
       "Две А5 — выключен",
     ]);
-    expect(valueOf("Лист А4 паллеты")).toBe(off);
+    expect(valueOf("Лист А4 палета")).toBe(off);
     // Pallet labels are not sheets, and the sheets are no pallet labels.
-    expect(choices("Шаблон паллеты")).not.toContain("Палета А4 · вертикальная");
-    expect(choices("Лист А4 паллеты")).not.toContain("Паллета 100×150");
-    chooseValue("Лист А4 паллеты", portrait);
+    expect(choices("Шаблон палета")).not.toContain("Палета А4 · вертикальная");
+    expect(choices("Лист А4 палета")).not.toContain("Паллета 100×150");
+    chooseValue("Лист А4 палета", portrait);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
     expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
@@ -901,7 +901,7 @@ describe("office product dialog: default templates", () => {
     expect(
       await screen.findByText("Список листов А4 не загрузился: лист останется как есть."),
     ).toBeTruthy();
-    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Лист А4 палета")).toHaveProperty("disabled", true);
     type("Название", "Молоко");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
@@ -958,7 +958,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
     chooseValue("Товарная группа", "15");
     const field = screen.getByLabelText("Код ЕГАИС");
     expect(
-      screen.getByText("Печатается на этикетке короба и паллеты. Обычно 19 цифр."),
+      screen.getByText("Печатается на этикетке короба и палета. Обычно 19 цифр."),
     ).toBeTruthy();
     type("Код ЕГАИС", ` ${EGAIS} `);
     type("GTIN", "4607001234562");
@@ -1011,7 +1011,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
   it("says when a code is not 19 digits that the A4 sheet goes without it", async () => {
     const fake = beerSession();
     await openEdit(fake, "Пиво светлое 0,5 л");
-    const note = "Код не из 19 цифр: на этикетках он напечатается, а на листе А4 паллеты — нет.";
+    const note = "Код не из 19 цифр: на этикетках он напечатается, а на листе А4 палета — нет.";
     expect(screen.queryByText(note)).toBeNull();
     type("Код ЕГАИС", "EG-01503");
     expect(screen.getByText(note)).toBeTruthy();
