@@ -203,8 +203,9 @@ async fn card_keeps_mixed_shift_dates_and_disassembled_members() {
         .execute(&admin.app.state.pool)
         .await
         .unwrap();
-    seed_office_user(&admin.app, "reader", "technologist", "ViewerPassword1!").await;
-    let token = login(&admin.app, &admin.key, "reader", "ViewerPassword1!").await;
+    let password = uuid::Uuid::new_v4().to_string();
+    seed_office_user(&admin.app, "reader", "technologist", &password).await;
+    let token = login(&admin.app, &admin.key, "reader", &password).await;
     let (status, card) = admin
         .call_as(
             &token,
