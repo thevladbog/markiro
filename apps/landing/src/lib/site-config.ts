@@ -1,4 +1,4 @@
-import { CURRENT_DEMO_CONSENT_ID } from "@markiro/legal-documents";
+import { CURRENT_DEMO_CONSENT_ID, findLegalRelease } from "@markiro/legal-documents";
 import type { Locale } from "../content/pages";
 
 export interface PublicPhone {
@@ -94,10 +94,12 @@ export function readPublicSiteConfig(
     consentVersion: CURRENT_DEMO_CONSENT_ID,
     demoEndpoint: captchaClientKey === null ? null : "/api/demo-requests",
     leadEndpoint: "/api/landing-leads",
-    legalLinks:
-      locale === "en"
-        ? { consent: "/en/personal-data-consent/", privacy: "/en/privacy/" }
-        : { consent: "/personal-data-consent/", privacy: "/privacy/" },
+    legalLinks: {
+      consent:
+        findLegalRelease("MKR-PD-02").routes[locale] ?? findLegalRelease("MKR-PD-02").routes.ru,
+      privacy:
+        findLegalRelease("MKR-PD-01").routes[locale] ?? findLegalRelease("MKR-PD-01").routes.ru,
+    },
     phone: readPhone(env.PUBLIC_PHONE),
   };
 }

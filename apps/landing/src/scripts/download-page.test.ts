@@ -64,7 +64,6 @@ describe("download page", () => {
       {
         createRequestId: () => "id",
         currentPath: () => "/skachat/",
-        firstTouch: () => ({}),
         request: vi.fn(),
         track: vi.fn(),
       },

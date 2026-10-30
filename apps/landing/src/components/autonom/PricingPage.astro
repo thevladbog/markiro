@@ -1,4 +1,5 @@
 ---
+import { findLegalRelease } from "@markiro/legal-documents";
 import { INVOICE_ANCHOR, PRICING_COPY } from "../../content/autonom";
 import { findAutonomPage } from "../../content/autonom-pages";
 import { SITE_CONTACTS } from "../../content/contacts";
@@ -38,7 +39,7 @@ const sellable = TARIFFS.filter(t => t.pricePerYear !== null);
     <div class="ax-container v4-two">
       <header class="v4-stack">
         <h2 id="invoice-description">Уже попробовали и решили купить?</h2>
-        <p>Оставьте ИНН и почту. Пришлём счёт и договор-оферту; после оплаты получите файл лицензии.</p>
+        <p>Оставьте ИНН и почту. Пришлём счёт и <a href={findLegalRelease("MKR-LIC-01").routes.ru}>договор-оферту</a>; после оплаты получите файл лицензии.</p>
         <p class="ax-note">Цены за год на одну площадку, без НДС. Условия акции проверим при подготовке счёта.</p>
       </header>
       <div class="ax-form-card">      <form

@@ -25,6 +25,10 @@ const DOCX_MEDIA_TYPE =
 const LEGAL_DOCUMENT_CODES = [
   "MKR-PD-01",
   "MKR-PD-02",
+  "MKR-LIC-01",
+  "MKR-ADV-01",
+  "MKR-PD-03",
+  "MKR-PUB-01",
   "MKR-DPA-01",
   "MKR-BRD-01",
   "MKR-INS-01",
@@ -40,7 +44,7 @@ const LEGAL_DOCUMENT_CODES = [
 ] as const;
 const LEGAL_LOCALES = ["ru", "en"] as const;
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01|ins-(?:0[1-9]|[1-9][0-9]))_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-0[123]|lic-01|adv-01|pub-01|dpa-01|brd-01|ins-(?:0[1-9]|[1-9][0-9]))_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface PublishedLegalArtifact {
@@ -249,7 +253,7 @@ function parseArtifact(value: unknown, index: number): PublishedLegalArtifact {
       candidate.code === code &&
       candidate.revision === value.revision &&
       candidate.effectiveDate === value.effectiveDate &&
-      candidate.status === "active",
+      (candidate.status === "active" || candidate.status === "superseded"),
   );
   if (!release) {
     throw new Error(`Artifact is not a current release: ${code}/${value.revision}`);
@@ -315,7 +319,7 @@ export function canonicalArtifactManifest(entries: readonly PublishedLegalArtifa
 function expectedArtifactKeys(): Set<string> {
   const keys = new Set<string>();
   for (const release of LEGAL_RELEASES) {
-    if (release.status !== "active") continue;
+    if (release.status !== "active" && release.status !== "superseded") continue;
     for (const locale of legalReleaseLocales(release.code)) {
       keys.add(`${release.code}|${release.revision}|${locale}|pdfa-2b`);
       if (legalDocumentKind(release.code) === "template") {

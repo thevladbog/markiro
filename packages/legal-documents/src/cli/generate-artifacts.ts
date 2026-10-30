@@ -969,6 +969,7 @@ function requiredPdfText(request: LegalArtifactRequest): readonly string[] {
   }
   return [
     source.title,
+    ...(source.printLayout === "compact" && request.locale === "en" ? [source.summary] : []),
     request.code,
     request.revision,
     OPERATOR_PROFILES[release.operatorProfileId].name,
@@ -1116,7 +1117,9 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
 }
 
 function currentRequests(): readonly LegalArtifactRequest[] {
-  return LEGAL_RELEASES.filter(({ status }) => status === "active").flatMap((release) =>
+  return LEGAL_RELEASES.filter(
+    ({ status }) => status === "active" || status === "superseded",
+  ).flatMap((release) =>
     legalReleaseLocales(release.code).flatMap((locale) => [
       {
         code: release.code,

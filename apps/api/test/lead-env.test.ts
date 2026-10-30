@@ -94,7 +94,7 @@ describe("landing lead environment (spec 2026-10-20 §15.4)", () => {
       { LEAD_TELEGRAM_BOT_TOKEN: "not-a-token" },
       { LEAD_TELEGRAM_CHAT_ID: "chat" },
       { LEAD_RETENTION_MONTHS: "0" },
-      { LEAD_RETENTION_MONTHS: "61" },
+      { LEAD_RETENTION_MONTHS: "13" },
     ]) {
       expect(() => loadEnv({ ...base, ...overrides })).toThrow();
     }

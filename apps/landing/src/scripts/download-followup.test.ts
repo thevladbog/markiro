@@ -19,7 +19,6 @@ it("resends the saved download with a fresh id, keeps that id on retry, and enfo
     request,
     createRequestId: () => "22222222-2222-4222-8222-222222222222",
     currentPath: () => "/skachat/",
-    firstTouch: () => ({}),
     track: vi.fn(),
   };
   const form = document.querySelector("form")!;

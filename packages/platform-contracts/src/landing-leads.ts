@@ -114,6 +114,7 @@ export const landingLeadRequestSchema = z
       .union([z.literal(""), landingLeadTariffCodeSchema])
       .optional()
       .transform((value) => (value === "" ? undefined : value)),
+    // Accepted only for old clients; intake discards attribution before persistence.
     utm: landingLeadUtmSchema.optional(),
     referrer: optionalText(2_048),
   })

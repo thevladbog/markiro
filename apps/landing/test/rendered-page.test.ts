@@ -2115,7 +2115,7 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
       .get("/skachat/")
       ?.querySelector<HTMLFormElement>("form[data-lead-form]");
     expect(form?.dataset.endpoint).toBe("/api/landing-leads");
-    expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.08/01");
+    expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.10/01");
     expect(
       [...(form?.querySelectorAll("input[name], select[name]") ?? [])].map((input) =>
         input.getAttribute("name"),

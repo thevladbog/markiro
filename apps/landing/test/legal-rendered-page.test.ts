@@ -16,6 +16,10 @@ const LEGAL_ROUTES = [
   "/personal-data-consent/",
   "/legal/tenant-data-processing/",
   "/legal/brand-letterhead/",
+  "/legal/autonom-license/",
+  "/legal/advertising-consent/",
+  "/legal/newsletter-data-consent/",
+  "/legal/logo-and-review/",
   "/en/legal/",
   "/en/privacy/",
   "/en/personal-data-consent/",
@@ -23,7 +27,20 @@ const LEGAL_ROUTES = [
   "/en/legal/brand-letterhead/",
 ] as const;
 
+const ARCHIVE_ROUTES = [
+  "/legal/archive/MKR-PD-01/2026.08/01/",
+  "/en/legal/archive/MKR-PD-01/2026.08/01/",
+  "/legal/archive/MKR-PD-02/2026.08/01/",
+  "/en/legal/archive/MKR-PD-02/2026.08/01/",
+] as const;
+
 const VERIFICATION_ROUTES = [
+  "/d/MKR-PD-01/2026.10/01/30.10.2026",
+  "/d/MKR-PD-02/2026.10/01/30.10.2026",
+  "/d/MKR-LIC-01/2026.10/01/30.10.2026",
+  "/d/MKR-ADV-01/2026.10/01/30.10.2026",
+  "/d/MKR-PD-03/2026.10/01/30.10.2026",
+  "/d/MKR-PUB-01/2026.10/01/30.10.2026",
   "/d/MKR-PD-01/2026.08/01/15.08.2026",
   "/d/MKR-PD-02/2026.08/01/15.08.2026",
   "/d/MKR-DPA-01/2026.08/01/15.08.2026",
@@ -48,7 +65,7 @@ beforeAll(() => {
     },
   );
 
-  for (const route of [...LEGAL_ROUTES, ...VERIFICATION_ROUTES]) {
+  for (const route of [...LEGAL_ROUTES, ...VERIFICATION_ROUTES, ...ARCHIVE_ROUTES]) {
     const html = readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8");
     documents.set(route, new JSDOM(html).window.document);
   }
@@ -62,21 +79,54 @@ describe("rendered legal pages", () => {
     expect(document?.querySelectorAll("h1")).toHaveLength(1);
     expect(document?.querySelector("main#main article[data-legal-document]")).not.toBeNull();
     expect(document?.querySelector("[data-legal-code]")?.textContent).toContain("MKR-");
-    expect(document?.querySelector("[data-legal-revision]")?.textContent).toContain("2026.08/01");
-    const visibleDate = route.startsWith("/en/") ? "15 August 2026" : "15.08.2026";
+    const current =
+      /privacy|personal-data-consent|autonom-license|advertising-consent|newsletter-data-consent|logo-and-review/.test(
+        route,
+      );
+    expect(document?.querySelector("[data-legal-revision]")?.textContent).toContain(
+      current ? "2026.10/01" : "2026.08/01",
+    );
+    const visibleDate = current
+      ? route.startsWith("/en/")
+        ? "30 October 2026"
+        : "30.10.2026"
+      : route.startsWith("/en/")
+        ? "15 August 2026"
+        : "15.08.2026";
     expect(document?.querySelector("[data-legal-effective-date]")?.textContent).toContain(
       visibleDate,
     );
     expect(document?.querySelector("[data-legal-effective-date]")?.getAttribute("datetime")).toBe(
-      "2026-08-15",
+      current ? "2026-10-30" : "2026-08-15",
     );
     if (!route.startsWith("/en/")) expect(document?.body.textContent).not.toContain("2026-08-15");
-    expect(document?.querySelector('link[rel="alternate"][hreflang="ru"]')).not.toBeNull();
-    expect(document?.querySelector('link[rel="alternate"][hreflang="en"]')).not.toBeNull();
+    const russianOnly = [
+      "/legal/autonom-license/",
+      "/legal/advertising-consent/",
+      "/legal/newsletter-data-consent/",
+      "/legal/logo-and-review/",
+    ].includes(route);
+    expect(document?.querySelector('link[rel="alternate"][hreflang="en"]') === null).toBe(
+      russianOnly,
+    );
+    if (!russianOnly)
+      expect(document?.querySelector('link[rel="alternate"][hreflang="ru"]')).not.toBeNull();
     expect(document?.querySelector('a[hreflang="ru"]')).not.toBeNull();
     expect(document?.querySelector('a[hreflang="en"]')).not.toBeNull();
     expect(document?.querySelector('[data-legal-status="active"]')).not.toBeNull();
     expect(document?.documentElement.outerHTML).not.toContain('data-legal-status="draft"');
+  });
+
+  it.each(ARCHIVE_ROUTES)("preserves the old document at %s", (route) => {
+    const document = documents.get(route)!;
+    expect(document.querySelector('[data-legal-status="superseded"]')).not.toBeNull();
+    expect(document.querySelector("[data-legal-revision]")?.textContent).toBe("2026.08/01");
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute("content")).toContain(
+      "noindex",
+    );
+    expect(document.querySelector('a[download$=".pdf"]')?.getAttribute("href")).toContain(
+      "2026.08-01",
+    );
   });
 
   it("lists every released document once in each localized registry", () => {
@@ -84,40 +134,32 @@ describe("rendered legal pages", () => {
       const codes = [...(documents.get(route)?.querySelectorAll("[data-registry-code]") ?? [])].map(
         (element) => element.textContent?.trim(),
       );
+      const instructions = [
+        "MKR-INS-01",
+        "MKR-INS-02",
+        "MKR-INS-03",
+        "MKR-INS-04",
+        "MKR-INS-08",
+        "MKR-INS-09",
+        "MKR-INS-10",
+        "MKR-INS-12",
+        "MKR-INS-13",
+        "MKR-INS-14",
+      ];
       const expectedCodes =
         route === "/legal/"
           ? [
-              "MKR-PD-01",
-              "MKR-PD-02",
               "MKR-DPA-01",
               "MKR-BRD-01",
-              "MKR-INS-01",
-              "MKR-INS-02",
-              "MKR-INS-03",
-              "MKR-INS-04",
-              "MKR-INS-08",
-              "MKR-INS-09",
-              "MKR-INS-10",
-              "MKR-INS-12",
-              "MKR-INS-13",
-              "MKR-INS-14",
+              "MKR-LIC-01",
+              "MKR-PD-02",
+              "MKR-ADV-01",
+              "MKR-PD-03",
+              "MKR-PD-01",
+              "MKR-PUB-01",
+              ...instructions,
             ]
-          : [
-              "MKR-PD-01",
-              "MKR-PD-02",
-              "MKR-DPA-01",
-              "MKR-BRD-01",
-              "MKR-INS-01",
-              "MKR-INS-02",
-              "MKR-INS-03",
-              "MKR-INS-04",
-              "MKR-INS-08",
-              "MKR-INS-09",
-              "MKR-INS-10",
-              "MKR-INS-12",
-              "MKR-INS-13",
-              "MKR-INS-14",
-            ];
+          : ["MKR-DPA-01", "MKR-BRD-01", "MKR-PD-02", "MKR-PD-01", ...instructions];
       expect(codes).toEqual(expectedCodes);
     }
   });
@@ -136,8 +178,8 @@ describe("rendered legal pages", () => {
       expect(document?.body.textContent).toContain(
         "353745, Краснодарский край, Ленинградский район, ст. Ленинградская, ул. Грузская, д. 26",
       );
-      expect(document?.querySelector('a[href="mailto:hello@v-b.tech"]')?.textContent).toBe(
-        "hello@v-b.tech",
+      expect(document?.querySelector('a[href="mailto:hello@markiro.app"]')?.textContent).toBe(
+        "hello@markiro.app",
       );
       expect(document?.querySelector('a[href="tel:+79343551490"]')?.textContent).toBe(
         "+7 934 355-14-90",
@@ -146,8 +188,8 @@ describe("rendered legal pages", () => {
   });
 
   it.each([
-    ["/privacy/", ["Персональные данные", "Обработка", "Тенант"]],
-    ["/en/privacy/", ["Personal data", "Processing", "Tenant"]],
+    ["/legal/archive/MKR-PD-01/2026.08/01/", ["Персональные данные", "Обработка", "Тенант"]],
+    ["/en/legal/archive/MKR-PD-01/2026.08/01/", ["Personal data", "Processing", "Tenant"]],
   ] as const)("renders every definition as term — detail at %s", (route, terms) => {
     const rows = documents.get(route)?.querySelectorAll(".legal-definitions > div") ?? [];
     expect(rows).toHaveLength(terms.length);
@@ -178,7 +220,9 @@ describe("rendered legal pages", () => {
       const document = documents.get(route)!;
       const docx = document.querySelector('a[download$=".docx"]');
       const isTemplate =
-        route.includes("tenant-data-processing") || route.includes("brand-letterhead");
+        route.includes("tenant-data-processing") ||
+        route.includes("brand-letterhead") ||
+        route.includes("logo-and-review");
       expect(docx === null).toBe(!isTemplate);
       expect(document.querySelector("[data-template-warning]") !== null).toBe(isTemplate);
     }
@@ -187,12 +231,14 @@ describe("rendered legal pages", () => {
   it("lists all localized immutable artifacts in each registry", () => {
     for (const route of ["/legal/", "/en/legal/"] as const) {
       const document = documents.get(route);
-      // Both registries list the same artifacts now that every instruction
-      // is bilingual.
-      const pdfCount = 14;
-      const shaCount = 16;
+      // Instructions are bilingual; the new offer and optional consent templates
+      // are published only in the Russian registry.
+      const pdfCount = route === "/legal/" ? 18 : 14;
+      const shaCount = route === "/legal/" ? 21 : 16;
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(pdfCount);
-      expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
+      expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(
+        route === "/legal/" ? 3 : 2,
+      );
       expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(shaCount);
     }
   });
@@ -220,14 +266,16 @@ describe("rendered legal pages", () => {
   });
 
   it.each(VERIFICATION_ROUTES)(
-    "renders the bilingual bounded verification result at %s",
+    "renders the available locales in the bounded verification result at %s",
     (route) => {
       const document = documents.get(route);
       expect(document?.querySelectorAll("h1")).toHaveLength(1);
       expect(document?.querySelector("[data-document-id]")?.textContent).toContain(
         route.split("/")[2],
       );
-      expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(2);
+      expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(
+        /MKR-(?:LIC-01|ADV-01|PD-03|PUB-01)/.test(route) ? 1 : 2,
+      );
       const literalUrl = `https://markiro.app${route}`;
       expect(
         document

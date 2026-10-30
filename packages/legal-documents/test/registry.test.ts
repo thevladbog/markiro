@@ -13,7 +13,7 @@ const cloneReleases = (): LegalDocumentRelease[] =>
   LEGAL_RELEASES.map((release) => ({ ...release, routes: { ...release.routes } }));
 
 describe("legal document registry", () => {
-  it("pins the first release set and operator snapshot", () => {
+  it("pins the published release set and original operator snapshot", () => {
     expect(LEGAL_RELEASES.map(({ code }) => code)).toEqual([
       "MKR-PD-01",
       "MKR-PD-02",
@@ -29,6 +29,12 @@ describe("legal document registry", () => {
       "MKR-INS-12",
       "MKR-INS-13",
       "MKR-INS-14",
+      "MKR-LIC-01",
+      "MKR-PD-02",
+      "MKR-ADV-01",
+      "MKR-PD-03",
+      "MKR-PD-01",
+      "MKR-PUB-01",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -38,7 +44,7 @@ describe("legal document registry", () => {
       phone: "+7 934 355-14-90",
       site: "https://markiro.app",
     });
-    expect(CURRENT_DEMO_CONSENT_ID).toBe("MKR-PD-02/2026.08/01");
+    expect(CURRENT_DEMO_CONSENT_ID).toBe("MKR-PD-02/2026.10/01");
     expect(CURRENT_DEMO_CONSENT_ID.length).toBeLessThanOrEqual(64);
   });
 
@@ -112,13 +118,14 @@ describe("legal document registry", () => {
       "MKR-INS-14": "2026.10/03",
     };
     expect(
-      LEGAL_RELEASES.every(
-        ({ code, revision }) => revision === (reissuedRevision[code] ?? "2026.08/01"),
-      ),
+      LEGAL_RELEASES.filter(
+        ({ operatorProfileId }) => operatorProfileId === "operator-2026-08-15",
+      ).every(({ code, revision }) => revision === (reissuedRevision[code] ?? "2026.08/01")),
     ).toBe(true);
     expect(
       LEGAL_RELEASES.filter(
-        ({ code }) =>
+        ({ code, operatorProfileId }) =>
+          operatorProfileId === "operator-2026-08-15" &&
           code !== "MKR-INS-01" &&
           code !== "MKR-INS-02" &&
           code !== "MKR-INS-03" &&
@@ -141,8 +148,8 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-12").effectiveDate).toBe("2026-10-30");
     expect(findLegalRelease("MKR-INS-13").effectiveDate).toBe("2026-10-30");
     expect(findLegalRelease("MKR-INS-14").effectiveDate).toBe("2026-10-30");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(28);
-    expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(36);
+    expect(findLegalRelease("MKR-PD-02").revision).toBe("2026.10/01");
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
 
@@ -200,6 +207,7 @@ describe("legal document registry", () => {
   it("rejects two active releases for one code", () => {
     const oldRelease: LegalDocumentRelease = {
       ...LEGAL_RELEASES[0]!,
+      status: "active",
       revision: "2026.07/01",
       effectiveDate: "2026-07-01",
       routes: { ru: "/legal/archive/privacy-2026-07/", en: "/en/legal/archive/privacy-2026-07/" },
@@ -228,7 +236,10 @@ describe("legal document registry", () => {
 
   it("rejects an active consent release inconsistent with the shared identifier", () => {
     const releases = cloneReleases();
-    releases[1] = { ...releases[1]!, revision: "2026.08/02" };
+    const index = releases.findIndex(
+      (release) => release.code === "MKR-PD-02" && release.status === "active",
+    );
+    releases[index] = { ...releases[index]!, revision: "2026.10/02" };
     expect(() => validateLegalRegistry(releases)).toThrow(/consent identifier/i);
   });
 

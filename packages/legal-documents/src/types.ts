@@ -7,6 +7,10 @@ export type LegalLocale = "ru" | "en";
 export type LegalDocumentCode =
   | "MKR-PD-01"
   | "MKR-PD-02"
+  | "MKR-LIC-01"
+  | "MKR-ADV-01"
+  | "MKR-PD-03"
+  | "MKR-PUB-01"
   | "MKR-DPA-01"
   | "MKR-BRD-01"
   | "MKR-INS-01"
@@ -24,7 +28,7 @@ export type LegalDocumentKind = "legal" | "template" | "instruction";
 
 export type LegalDocumentStatus = "draft" | "active" | "superseded" | "withdrawn";
 
-export type LegalOperatorProfileId = "operator-2026-08-15";
+export type LegalOperatorProfileId = "operator-2026-08-15" | "operator-2026-10-30";
 
 export type LegalBlock =
   | { readonly kind: "paragraph"; readonly text: string }
@@ -52,6 +56,8 @@ export type LegalBlock =
   | { readonly kind: "callout"; readonly tone: "info" | "warning"; readonly text: string };
 
 export interface LegalDocumentLocaleContent {
+  /** A compact document already includes its revision table in the controlled content. */
+  readonly printLayout?: "compact";
   readonly locale: LegalLocale;
   readonly title: string;
   readonly summary: string;

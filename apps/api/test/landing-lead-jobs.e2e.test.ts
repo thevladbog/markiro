@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
 import type { EmailTemplateInput } from "@markiro/email";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { landingLeadBodySchema } from "../src/modules/landing-leads/landing-lead.schema";
+import { anonymizeLead } from "../src/modules/landing-leads/lead-anonymization";
 import { LandingLeadRepository } from "../src/modules/landing-leads/landing-lead.repository";
 import {
   LandingLeadJobsService,
@@ -315,12 +316,7 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       await expect(jobs().dispatchNotifications()).resolves.toBe(1);
       await expect(jobs().dispatchNotifications()).resolves.toBe(0);
       expect(sent).toEqual([
-        [
-          "Новый лид · скачивание",
-          "ООО «Пивоварня» · пиво и сидр · 1 линия",
-          "Источник: /skachat/ · utm: yandex / cpc",
-          `${ADMIN}/leads/${lead.id}`,
-        ].join("\n"),
+        ["Новый лид · скачивание", "Откройте раздел «Заявки» в панели управления."].join("\n"),
       ]);
       // Whole values only: a short digit run like "999" also occurs in random lead UUIDs.
       for (const secret of [
@@ -343,7 +339,7 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       ]);
     });
 
-    it("titles a later invoice request of the same e-mail as a repeat with its tariff", async () => {
+    it("titles a later invoice request as a repeat without customer details", async () => {
       const lead = await submit();
       await submit({
         email: lead.email,
@@ -356,7 +352,7 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       expect(sent).toHaveLength(2);
       const invoice = sent.find((text) => text.includes("запрос счёта"));
       expect(invoice).toContain("Повторное обращение · запрос счёта");
-      expect(invoice).toContain("Тариф: line");
+      expect(invoice).not.toContain("Тариф:");
       expect(invoice).not.toContain("7707083893");
     });
 
@@ -498,8 +494,8 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
 
       await jobs().dispatchNotifications();
       const text = sent.find((entry) => entry.startsWith("Кому пора написать"));
-      expect(text).toContain("Третий день");
-      expect(text).toContain(`${ADMIN}/leads/${leads.unpaid.id}`);
+      expect(text).toContain("3-й день: получилось провести смену? (1)");
+      expect(text).not.toContain(`${ADMIN}/leads/`);
       expect(text).not.toMatch(/Свежий|Отложен|Купил|@|Анна/);
     });
 
@@ -529,6 +525,58 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       ]);
     });
 
+    it("does not recreate a mail copy while the lead is being erased", async () => {
+      const lead = await submit({}, new Date(clock.getTime() - 2 * 86_400_000));
+      const reachedEnqueue = Promise.withResolvers<void>();
+      const continueEnqueue = Promise.withResolvers<void>();
+      const enqueue = mail.enqueue.bind(mail);
+      const spy = vi.spyOn(mail, "enqueue").mockImplementation(async (...args) => {
+        if (args[1].template.kind === "landing-lead-digest") {
+          reachedEnqueue.resolve();
+          await continueEnqueue.promise;
+        }
+        return enqueue(...args);
+      });
+      const digest = jobs().sendDailyDigest();
+      let cleanup: Promise<boolean> | undefined;
+      try {
+        await reachedEnqueue.promise;
+        let erased = false;
+        cleanup = db
+          .transaction((tx) =>
+            anonymizeLead(tx, audit, {
+              leadId: lead.id,
+              reason: "manual",
+              actor: null,
+              now: clock,
+            }),
+          )
+          .then((result) => {
+            erased = true;
+            return result;
+          });
+        // Wait for either the lock or completion: the old code completed erasure before
+        // the digest inserted its stale company payload, leaving that copy behind.
+        await vi.waitFor(async () => {
+          const blocked = await connection.pool.query(
+            "SELECT 1 FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock' AND query LIKE '%FROM landing_leads%'",
+            [name],
+          );
+          expect(erased || blocked.rows.length > 0).toBe(true);
+        });
+        continueEnqueue.resolve();
+        await expect(digest).resolves.toBe("sent");
+        await expect(cleanup).resolves.toBe(true);
+        expect(await db.select().from(schema.emailDeliveries)).toEqual([]);
+        expect(await db.select().from(schema.emailOutbox)).toEqual([]);
+      } finally {
+        continueEnqueue.resolve();
+        await digest;
+        await cleanup;
+        spy.mockRestore();
+      }
+    });
+
     it("sends nothing when no section has a lead", async () => {
       await submit({ company: "Свежий" }, new Date(clock.getTime() - 3_600_000));
       await expect(jobs().sendDailyDigest()).resolves.toBe("empty");
@@ -543,9 +591,123 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
   });
 
   describe("anonymization", () => {
+    it("does not extend retention through card updates, outgoing touches or notifications", async () => {
+      const lead = await submit({}, new Date("2025-09-01T06:00:00.000Z"));
+      await db
+        .update(schema.landingLeads)
+        .set({ updatedAt: clock, status: "contacted" })
+        .where(eq(schema.landingLeads.id, lead.id));
+      await db.insert(schema.landingLeadEvents).values({
+        id: randomUUID(),
+        leadId: lead.id,
+        kind: "touch",
+        payload: {},
+        createdAt: clock,
+      });
+      await jobs().dispatchNotifications();
+      await expect(jobs().anonymizeStale()).resolves.toBe(1);
+    });
+
+    it("uses a new incoming request, not the age of the original card", async () => {
+      const lead = await submit({}, new Date("2025-09-01T06:00:00.000Z"));
+      await submit({ email: lead.email }, new Date("2026-09-01T06:00:00.000Z"));
+      await db
+        .update(schema.landingLeads)
+        .set({ updatedAt: new Date("2025-09-01T06:00:00.000Z") })
+        .where(eq(schema.landingLeads.id, lead.id));
+      await expect(jobs().anonymizeStale()).resolves.toBe(0);
+    });
+
+    it("a new inquiry after an old closure is not erased by that closure", async () => {
+      const lead = await submit({}, new Date("2025-09-01T06:00:00.000Z"));
+      await db
+        .update(schema.landingLeads)
+        .set({ status: "lost", statusChangedAt: new Date("2026-01-01T00:00:00Z") })
+        .where(eq(schema.landingLeads.id, lead.id));
+      await submit({ email: lead.email });
+      await expect(jobs().anonymizeStale()).resolves.toBe(0);
+    });
+
+    it("rechecks the incoming event after waiting for the submitter's row lock", async () => {
+      const lead = await submit({}, new Date("2025-09-01T06:00:00.000Z"));
+      const writer = await connection.pool.connect();
+      await writer.query("BEGIN");
+      await writer.query("UPDATE landing_leads SET updated_at=$2 WHERE id=$1", [lead.id, clock]);
+      const cleaning = db.transaction((tx) =>
+        anonymizeLead(tx, audit, {
+          leadId: lead.id,
+          reason: "inactive",
+          actor: null,
+          now: clock,
+          retentionMonths: 12,
+        }),
+      );
+      try {
+        let blocked = false;
+        for (let i = 0; i < 100 && !blocked; i++) {
+          const waiting = await connection.pool.query(
+            "SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM landing_leads%'",
+          );
+          blocked = waiting.rowCount !== 0;
+          if (!blocked) await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        await writer.query(
+          "INSERT INTO landing_lead_events (id,lead_id,kind,payload,created_at) VALUES ($1,$2,'download','{}',$3)",
+          [randomUUID(), lead.id, clock],
+        );
+        await writer.query("COMMIT");
+        await expect(cleaning).resolves.toBe(false);
+      } finally {
+        await writer.query("ROLLBACK");
+        writer.release();
+        await cleaning;
+      }
+      expect(
+        (await db.select().from(schema.landingLeads).where(eq(schema.landingLeads.id, lead.id)))[0]
+          ?.email,
+      ).toBe(lead.email);
+    });
+
+    it("erases linked mail copies and digests while retaining bounded consent evidence", async () => {
+      const lead = await submit(
+        { inn: "500100732259", company: "ИП Иванов", productGroup: "Иван Иванович" },
+        new Date(clock.getTime() - 2 * 86_400_000),
+      );
+      await jobs().sendDailyDigest();
+      const event = (
+        await db
+          .select()
+          .from(schema.landingLeadEvents)
+          .where(eq(schema.landingLeadEvents.leadId, lead.id))
+      )[0];
+      if (!event) throw new Error("missing inquiry");
+      await db
+        .update(schema.landingLeadEvents)
+        .set({ payload: { ...event.payload, utm: { source: "private" }, note: "private note" } })
+        .where(eq(schema.landingLeadEvents.id, event.id));
+      await db.transaction((tx) =>
+        anonymizeLead(tx, audit, { leadId: lead.id, reason: "manual", actor: null, now: clock }),
+      );
+      expect(await db.select().from(schema.emailDeliveries)).toEqual([]);
+      expect(await db.select().from(schema.emailOutbox)).toEqual([]);
+      const events = await db
+        .select()
+        .from(schema.landingLeadEvents)
+        .where(eq(schema.landingLeadEvents.id, event.id));
+      expect(events[0]?.payload).toEqual({ locale: "ru", consentVersion: "MKR-PD-02/2026.08/01" });
+      await jobs().dispatchNotifications();
+      expect(sent.join("\n")).not.toMatch(/Иван|private|http|@/);
+    });
+
+    it("expires at the calendar-year boundary", async () => {
+      await submit({}, new Date("2025-10-21T06:00:00.000Z"));
+      await expect(jobs().anonymizeStale()).resolves.toBe(1);
+    });
+
     it("clears contacts of lost and inactive leads with one exact audit row each", async () => {
       const day = 86_400_000;
-      const lost = await submit({ inn: "500100732259" });
+      const lost = await submit({ inn: "500100732259" }, new Date(clock.getTime() - 40 * day));
       const lostRecently = await submit();
       const inactive = await submit({}, new Date("2025-09-01T06:00:00.000Z"));
       const active = await submit({}, new Date("2026-10-01T06:00:00.000Z"));
@@ -574,7 +736,10 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
           phone: null,
           ownerNote: null,
           anonymizedAt: clock,
-          company: "ООО «Пивоварня»",
+          company: null,
+          productGroup: null,
+          firstUtm: null,
+          firstReferrer: null,
         });
       }
       expect(byId.get(lost.id)?.inn).toBeNull();
@@ -594,7 +759,12 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       const auditRows = await db
         .select()
         .from(schema.platformAuditEvents)
-        .where(eq(schema.platformAuditEvents.action, "landing_lead.anonymized"));
+        .where(
+          and(
+            eq(schema.platformAuditEvents.action, "landing_lead.anonymized"),
+            inArray(schema.platformAuditEvents.targetId, [lost.id, inactive.id]),
+          ),
+        );
       expect(auditRows).toHaveLength(2);
       expect(auditRows.find((row) => row.targetId === lost.id)).toMatchObject({
         actorPlatformUserId: null,

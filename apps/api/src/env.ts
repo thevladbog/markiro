@@ -271,7 +271,7 @@ const EnvSchema = z
       .regex(/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/)
       .optional(),
     // Leads without movement this long, and lost leads, lose their contacts.
-    LEAD_RETENTION_MONTHS: z.coerce.number().int().min(1).max(60).default(12),
+    LEAD_RETENTION_MONTHS: z.coerce.number().int().min(1).max(12).default(12),
     // The public release bucket's own keys, for «Выпуски автонома» (spec 2026-10-20
     // §5.4). Optional as a set: absent, the section says «не настроено» and
     // readiness never depends on it. Uploads go there from the admin's browser.

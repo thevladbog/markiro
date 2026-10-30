@@ -20,13 +20,30 @@ const SOCIAL_IMAGE_ALT = {
 } as const;
 
 const DESCRIPTION_BY_CODE = {
+  "MKR-LIC-01": {
+    ru: "Публичная оферта о предоставлении права использования программ для ЭВМ и оказании услуг.",
+    en: "Markiro Autonom software license and services offer.",
+  },
+  "MKR-ADV-01": {
+    ru: "Согласие на получение рекламных сообщений Маркиро.",
+    en: "Optional consent to advertising email.",
+  },
+  "MKR-PD-03": {
+    ru: "Согласие на обработку персональных данных для рекламной рассылки.",
+    en: "Separate consent to processing newsletter data.",
+  },
+  "MKR-PUB-01": {
+    ru: "Соглашение об использовании наименования и логотипа и подготовке отзыва.",
+    en: "Template permission to use a company logo and review.",
+  },
+
   "MKR-PD-01": {
-    ru: "Политика Маркиро об обработке персональных данных на сайте, в форме демонстрации и внутри тенантов.",
-    en: "Markiro personal-data processing policy for the website, demonstration requests, and tenant data.",
+    ru: "Политика обработки персональных данных сайта, заявок и лицензирования Маркиро.",
+    en: "Markiro personal-data policy for the website, requests, and licensing.",
   },
   "MKR-PD-02": {
-    ru: "Условия согласия на обработку данных, передаваемых через форму запроса демонстрации Маркиро.",
-    en: "Consent terms for personal data submitted through the Markiro demonstration-request form.",
+    ru: "Отдельное согласие на обработку данных заявки на установщик, демонстрацию, счёт и лицензию Маркиро.",
+    en: "Separate consent for personal data submitted with a Markiro installer, demo, invoice, or license request.",
   },
   "MKR-DPA-01": {
     ru: "Шаблон поручения, разделяющий обязанности тенанта-оператора и Маркиро как обработчика данных.",
@@ -80,6 +97,7 @@ const DESCRIPTION_BY_CODE = {
 
 export interface LegalDocumentPageDefinition {
   readonly metadata: PageMetadata;
+  readonly revision?: string;
   readonly code: LegalDocumentCode;
   readonly locale: LegalLocale;
 }
@@ -87,22 +105,28 @@ export interface LegalDocumentPageDefinition {
 export function getLegalDocumentPage(
   code: LegalDocumentCode,
   locale: LegalLocale,
+  revision?: string,
 ): LegalDocumentPageDefinition {
-  const release = findLegalRelease(code);
-  const source = findLegalDocument(code);
+  const release = findLegalRelease(code, revision);
+  const source = findLegalDocument(code, revision);
   const content = requireLegalContent(source, locale);
   const route = release.routes[locale];
   if (!route) throw new Error(`Legal route is not published for ${code}/${locale}`);
   const instruction = legalDocumentKind(code) === "instruction";
+  const alternatePath = release.routes[locale === "ru" ? "en" : "ru"];
   return {
     code,
+    revision: release.revision,
     locale,
     metadata: {
       path: route,
-      alternatePath: release.routes[locale === "ru" ? "en" : "ru"] ?? route,
+      ...(alternatePath ? { alternatePath } : {}),
       locale,
       title: `${content.title} — ${instruction ? (locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom") : locale === "ru" ? "Маркиро" : "Markiro"}`,
-      description: DESCRIPTION_BY_CODE[code][locale],
+      description:
+        release.status === "active"
+          ? DESCRIPTION_BY_CODE[code][locale]
+          : `${locale === "ru" ? "Архивная редакция" : "Archived revision"} ${release.code} ${release.revision}. ${DESCRIPTION_BY_CODE[code][locale]}`,
       socialImage: SOCIAL_IMAGE,
       socialImageAlt: instruction
         ? locale === "ru"
@@ -161,7 +185,7 @@ export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
       const page = getLegalDocumentPage(release.code, locale);
       return {
         path: page.metadata.path,
-        alternatePath: page.metadata.alternatePath,
+        ...(page.metadata.alternatePath ? { alternatePath: page.metadata.alternatePath } : {}),
         locale,
         navigationLabel: requireLegalContent(findLegalDocument(release.code), locale).title,
         description: page.metadata.description,

@@ -112,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(68);
+    expect(sitemap.match(/<url>/g)).toHaveLength(72);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -199,7 +199,7 @@ describe("SEO generators", () => {
     expect(en).not.toMatch(/[А-Яа-яЁё]/);
   });
 
-  it("discovers every active bilingual legal route exactly once", () => {
+  it("discovers every active legal route exactly once", () => {
     const sitemap = renderSitemapXml();
     const llms = renderLlmsTxt();
     const legalRoutes = [
@@ -208,6 +208,10 @@ describe("SEO generators", () => {
       "/personal-data-consent/",
       "/legal/tenant-data-processing/",
       "/legal/brand-letterhead/",
+      "/legal/autonom-license/",
+      "/legal/advertising-consent/",
+      "/legal/newsletter-data-consent/",
+      "/legal/logo-and-review/",
       "/en/legal/",
       "/en/privacy/",
       "/en/personal-data-consent/",
@@ -222,9 +226,9 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(68);
+    expect(sitemap.match(/<url>/g)).toHaveLength(72);
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-10-30<\/lastmod>/,
     );
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/en\/privacy\/<\/loc>[\s\S]*?hreflang="ru" href="https:\/\/markiro\.app\/privacy\/"/,

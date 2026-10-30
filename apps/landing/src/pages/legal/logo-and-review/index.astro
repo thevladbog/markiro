@@ -1,0 +1,6 @@
+---
+import LegalDocument from "../../../components/LegalDocument.astro";
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+const page = getLegalDocumentPage("MKR-PUB-01", "ru");
+---
+<LegalDocument page={page} />

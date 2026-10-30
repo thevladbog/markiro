@@ -348,6 +348,7 @@ export function browserDemoFormRuntime(browserWindow: Window & typeof globalThis
       const response = await browserWindow.fetch(endpoint, {
         body: JSON.stringify(payload),
         credentials: "omit",
+        referrerPolicy: "no-referrer",
         headers: { "content-type": "application/json" },
         method: "POST",
       });

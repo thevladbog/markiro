@@ -23,8 +23,8 @@ interface Props {
 }
 
 const { page } = Astro.props;
-const release = findLegalRelease(page.code);
-const documentSource = findLegalDocument(page.code);
+const release = findLegalRelease(page.code, page.revision);
+const documentSource = findLegalDocument(page.code, page.revision);
 const content = requireLegalContent(documentSource, page.locale);
 const operator = OPERATOR_PROFILES[release.operatorProfileId];
 const registryPath = page.locale === "ru" ? "/legal/" : "/en/legal/";
@@ -40,7 +40,7 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
 const tableLabel = page.locale === "ru" ? "Таблица" : "Table";
 ---
 
-<BaseLayout metadata={page.metadata} graph={graph}>
+<BaseLayout metadata={page.metadata} graph={graph} noindex={release.status !== "active"}>
   <LandingHeader page={page.metadata} phone={siteConfig.phone} />
   <main id="main" class="legal-page">
     <header class="legal-hero">
@@ -63,7 +63,7 @@ const tableLabel = page.locale === "ru" ? "Таблица" : "Table";
     <div class="container legal-layout">
       <aside class="legal-sidebar">
         <div class="legal-release-card" data-legal-status={release.status}>
-          <span>{page.locale === "ru" ? "Действует" : "Active"}</span>
+          <span>{release.status === "active" ? (page.locale === "ru" ? "Действует" : "Active") : (page.locale === "ru" ? "Архивная редакция" : "Archived revision")}</span>
           <dl>
             <div><dt>{page.locale === "ru" ? "Код" : "Code"}</dt><dd data-legal-code>{release.code}</dd></div>
             <div><dt>{page.locale === "ru" ? "Редакция" : "Revision"}</dt><dd data-legal-revision>{release.revision}</dd></div>
