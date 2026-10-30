@@ -80,10 +80,13 @@ describe("readPublicSiteConfig", () => {
     });
   });
 
-  it("rejects enabled mode without the public captcha key", () => {
-    expect(() => readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toThrow(
-      "demo submission requires",
-    );
+  it("enables lead submission without a third-party captcha key", () => {
+    expect(readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toMatchObject({
+      leadEndpoint: "/api/landing-leads",
+      captchaClientKey: null,
+      demoEndpoint: null,
+      consentVersion: "MKR-PD-02/2026.08/01",
+    });
   });
 
   it.each(["captcha-key", "ysc2_wrong-prefix", " ysc1_ "])(

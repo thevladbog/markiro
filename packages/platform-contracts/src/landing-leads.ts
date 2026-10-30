@@ -99,7 +99,8 @@ export const landingLeadRequestSchema = z
     consentVersion: z.string().trim().min(1).max(64),
     /** Honeypot: must stay empty. */
     website: z.string().max(200),
-    captchaToken: z.string().trim().min(1).max(4_096),
+    /** Accepted only for compatibility with cached legacy pages. */
+    captchaToken: z.string().trim().min(1).max(4_096).optional(),
     name: optionalText(80),
     /** Raw input; the API normalizes it with the demo-request phone rules. */
     phone: optionalText(30),

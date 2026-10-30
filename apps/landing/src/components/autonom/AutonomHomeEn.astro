@@ -319,8 +319,7 @@ const startPrice = formatRoubles(findTariff("start").priceFrom);
   </section>
 
   <FaqSection id="faq" kicker={copy.faq.kicker} title={copy.faq.title} entries={page.faq ?? []}>
-    {copy.faq.more} <a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a> {copy.faq.or}
-    <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>.
+    {copy.faq.more}{" "}<a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a>{" "}{copy.faq.or}{" "}<a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>.
   </FaqSection>
 
   <FinalCta phone={phone} id="demo" locale="en" />
