@@ -63,6 +63,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция офиса Маркиро Автоном: товары, карточка товара, GTIN и его владелец, черновик и «Активен», фото, шаблоны по умолчанию и архив.",
     en: "Printable Markiro Autonom office instruction: products, the product card, GTIN ownership, draft and active, the photo, default templates, and archiving.",
   },
+  "MKR-INS-12": {
+    ru: "Печатная инструкция по установке Маркиро Автоном: роли компьютеров, постоянный адрес хоста, служба и порт, мастер первого запуска, лицензия, подключение устройств и обновление.",
+    en: "Printable Markiro Autonom installation instruction: computer roles, the host's permanent address, the service and port, the first-start wizard, the license, pairing devices, and updates.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {

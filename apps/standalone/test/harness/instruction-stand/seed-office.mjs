@@ -39,7 +39,7 @@ const base64url = (value) => Buffer.from(value).toString("base64url");
  * (`test-private-keys.json`, kid `test-lic-1`). Only a host built with
  * `--features markiro-proto/test-keys` trusts it; a release build refuses it.
  */
-function testLicense(hostId) {
+export function testLicense(hostId) {
   const keys = JSON.parse(
     readFileSync(path.join(LICENSE_FIXTURES, "test-private-keys.json"), "utf8"),
   );
@@ -88,8 +88,14 @@ function testLicense(hostId) {
 export const testKeysHost = () =>
   process.env.STAND_HOST_BINARY !== undefined && existsSync(process.env.STAND_HOST_BINARY);
 
+/**
+ * `STAND_TRIAL=1` keeps the site on its trial period even on a test-keys host: the install
+ * instruction (MKR-INS-12) shows the trial and loads the license file itself.
+ */
+export const keepTrial = () => process.env.STAND_TRIAL === "1";
+
 export async function seedOfficeExtras({ shell, token }) {
-  if (testKeysHost()) {
+  if (testKeysHost() && !keepTrial()) {
     const license = await api(shell, token, "GET", "/v1/office/license");
     await api(shell, token, "PUT", "/v1/office/license", {
       file: testLicense(license.binding.hostId),
