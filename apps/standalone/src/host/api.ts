@@ -329,6 +329,8 @@ export function cloudShiftsPath(query: CloudShiftQuery = {}): string {
   return `/v1/office/cloud-shifts${params.size === 0 ? "" : `?${params}`}`;
 }
 export interface HostApi {
+  /** Minimal licensed branding for a paired station/office PC, without an office session. */
+  getLoginBranding: () => Promise<OrgLogoState>;
   bootstrap: (request: BootstrapRequest) => Promise<BootstrapResponse>;
   officeLogin: (request: OfficeLoginRequest) => Promise<OfficeSession>;
   officeLogout: (token: string) => Promise<void>;
@@ -780,6 +782,8 @@ const NO_CONTENT = z.null();
 
 export function createHostApi(client: HostClient): HostApi {
   return {
+    getLoginBranding: () =>
+      client.request("GET", "/v1/device/login-branding", { schema: orgLogoStateSchema }),
     bootstrap: (request) =>
       client.request("POST", "/v1/bootstrap", { body: request, schema: bootstrapResponseSchema }),
     officeLogin: (request) =>

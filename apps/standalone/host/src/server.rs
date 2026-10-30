@@ -334,6 +334,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::org_print::org_print),
         )
         .route(
+            "/v1/device/login-branding",
+            get(crate::routes::org_logo::login_branding),
+        )
+        .route(
             "/v1/device/codes/{code_hash}",
             get(crate::routes::codes::check_code),
         )

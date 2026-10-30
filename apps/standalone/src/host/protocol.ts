@@ -569,7 +569,7 @@ export const orgLogoSchema = z.object({
 });
 export type OrgLogo = z.infer<typeof orgLogoSchema>;
 
-/** Mirrors `markiro_proto::OrgLogoState`: `GET`/`PUT`/`DELETE /v1/office/org/logo`. */
+/** `markiro_proto::OrgLogoState`: office logo CRUD and the device's licensed login branding. */
 export const orgLogoStateSchema = z.object({ logo: orgLogoSchema.nullable() });
 export type OrgLogoState = z.infer<typeof orgLogoStateSchema>;
 

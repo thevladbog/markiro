@@ -2209,6 +2209,12 @@
       "wordmark": "маркиро",
       "product": "Markiro Автоном {{version}}",
       "productBare": "Markiro Автоном",
+      "edition": "Автоном",
+      "companyLogo": "Логотип организации",
+      "identityLabel": "Ваше производство",
+      "tagline": "Ваше производство.\nВаши данные.",
+      "brandBody": "Смены, коды и этикетки в одной системе.",
+      "instruction": "Используйте логин и пароль офиса.",
       "link": {
         "online": "Связь есть",
         "connecting": "Подключение",

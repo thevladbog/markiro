@@ -837,6 +837,15 @@ const CASES: Case[] = [
 ];
 
 describe("HostApi office endpoints", () => {
+  it("reads login branding with device credentials only and validates the answer", async () => {
+    const answer = fixture("org-logo.json");
+    const { api, sent } = recording(answer);
+    await expect(api.getLoginBranding()).resolves.toEqual(answer);
+    expect(sent).toEqual([
+      { method: "GET", path: "/v1/device/login-branding", body: undefined, officeToken: undefined },
+    ]);
+    await expect(recording({}).api.getLoginBranding()).rejects.toThrow();
+  });
   it.each(CASES)(
     "%s sends the office token to the right route",
     async (_name, answer, run, expected) => {

@@ -59,7 +59,7 @@ describe("the office sign-in (beta 3.2)", () => {
     expect(
       document.querySelector(".office-login__recent")?.closest(".office-login__card"),
     ).not.toBeNull();
-    expect(document.querySelector(".office-login__tagline")).toBeNull();
+    expect(screen.getByRole("region", { name: "Ваше производство" })).toBeTruthy();
   });
 
   it("switches the theme from the selector: system, light, dark; the choice persists and applies", () => {
@@ -90,11 +90,11 @@ describe("the office sign-in (beta 3.2)", () => {
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
-  it("keeps the product and its version at the top of the card: «Markiro Автоном 2.1.0»", async () => {
+  it("keeps the product and its version as a quiet brand footer: «Markiro Автоном 2.1.0»", async () => {
     renderLogin(undefined, "2.1.0");
     const product = await screen.findByText("Markiro Автоном 2.1.0");
     expect(product.className).toContain("office-login__product");
-    expect(product.closest(".office-login__card")).not.toBeNull();
+    expect(product.closest(".office-login__brand-footer")).not.toBeNull();
   });
 
   it("shows a green chip «Связь есть» when the host answers", () => {

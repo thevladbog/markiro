@@ -36,6 +36,7 @@ function unexpected(name: keyof HostApi): Promise<never> {
  */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
   return {
+    getLoginBranding: vi.fn<HostApi["getLoginBranding"]>(async () => ({ logo: null })),
     getYandexBackups: vi.fn<HostApi["getYandexBackups"]>(async () => ({
       connectionGeneration: null,
       state: "disconnected",
