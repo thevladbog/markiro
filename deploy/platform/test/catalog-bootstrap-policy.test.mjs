@@ -82,3 +82,24 @@ test("worker gets only DB connection and read-only catalog configuration, never 
   );
   assert.throws(() => workerEnvironment([...env, "DATABASE_URL=other"]));
 });
+
+test("handheld stable read bootstrap retains the same immutable admission and writer fence", () => {
+  const input = operation();
+  input.binding.identity.product = "handheld";
+  input.binding.targetVersion = "1.7.0";
+  assert.deepEqual(validateReadBootstrapOperation(input), input);
+  for (const change of [
+    (o) => (o.binding.identity.channel = "beta"),
+    (o) => (o.binding.identity.product = "signer"),
+    (o) => (o.binding.identity.product = "station"),
+    (o) => (o.binding.targetVersion = "1.7.0-beta.1"),
+    (o) => (o.writersEnabled = true),
+    (o) => (o.productSourceSha = "f".repeat(40)),
+    (o) => (o.binding.evidenceSha256 = ""),
+    (o) => o.guards.pop(),
+  ]) {
+    const invalid = structuredClone(input);
+    change(invalid);
+    assert.throws(() => validateReadBootstrapOperation(invalid));
+  }
+});
