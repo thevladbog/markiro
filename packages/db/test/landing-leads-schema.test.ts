@@ -3,6 +3,23 @@ import { describe, expect, it } from "vitest";
 import * as schema from "../src/schema.js";
 
 describe("landing leads schema (spec 2026-10-20 §15.2)", () => {
+  it("keeps platform-wide admission counters separate from lead contacts", () => {
+    const config = getTableConfig(schema.landingLeadRateWindows);
+    expect(config.columns.map((column) => column.name)).toEqual([
+      "key",
+      "window_started_at",
+      "attempts",
+    ]);
+    expect(config.columns.find((column) => column.name === "key")?.primary).toBe(true);
+    expect(config.checks.map((check) => check.name).sort()).toEqual([
+      "landing_lead_rate_windows_attempts_check",
+      "landing_lead_rate_windows_key_check",
+    ]);
+    expect(config.indexes.map((index) => index.config.name)).toContain(
+      "landing_lead_rate_windows_expiry_idx",
+    );
+  });
+
   it("keeps one lead per normalized e-mail and lets anonymization clear contacts", () => {
     const config = getTableConfig(schema.landingLeads);
     const column = (name: string) => config.columns.find((candidate) => candidate.name === name);

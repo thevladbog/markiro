@@ -10,6 +10,7 @@ function workflow(name) {
 
 test("every repository workflow has an explicit reviewed event scope", () => {
   const expectedEvents = {
+    "bootstrap-release-catalog.yml": ["workflow_dispatch"],
     "ci.yml": ["pull_request", "push", "workflow_dispatch"],
     "dependency-review.yml": ["pull_request"],
     "deploy-platform.yml": ["workflow_dispatch"],
@@ -78,5 +79,26 @@ test("the standalone load test is opt-in, read-only and fits the job limit", () 
       "a shared runner never runs a network-exposed spawned host",
     );
     if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}\b/u, "actions are pinned by SHA");
+  }
+});
+
+test("read-only catalog bootstrap keeps manual independent approval, main or exact SHA-tag first attempt and host serialization", () => {
+  const value = workflow("bootstrap-release-catalog.yml"),
+    job = value.jobs.bootstrap;
+  assert.deepEqual(Object.keys(value.on), ["workflow_dispatch"]);
+  assert.deepEqual(value.permissions, { contents: "read" });
+  assert.deepEqual(value.concurrency, {
+    group: "timeweb-platform-production",
+    "cancel-in-progress": false,
+  });
+  assert.equal(job.environment, "production-deploy");
+  assert.equal(
+    job.if,
+    "${{ github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/catalog-bootstrap-{0}', github.sha)) && github.run_attempt == 1 }}",
+  );
+  assert.deepEqual(job.permissions, { contents: "read", actions: "read" });
+  for (const step of job.steps) {
+    if (step.run) assert.doesNotMatch(step.run, /\$\{\{\s*inputs\./u);
+    if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}\b/u);
   }
 });

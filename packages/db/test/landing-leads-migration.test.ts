@@ -47,6 +47,32 @@ describe.skipIf(!databaseUrl)("landing leads migration", () => {
     await maintenance.end();
   });
 
+  it("keeps private rate windows with bounded counts and no raw source columns", async () => {
+    const columns = await pool.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name='landing_lead_rate_windows' ORDER BY ordinal_position",
+    );
+    expect(columns.rows.map((row) => row.column_name)).toEqual([
+      "key",
+      "window_started_at",
+      "attempts",
+    ]);
+    await pool.query(
+      "INSERT INTO landing_lead_rate_windows (key, window_started_at, attempts) VALUES ('global', now(), 1)",
+    );
+    for (const [key, count] of [
+      ["203.0.113.7", 1],
+      ["source:" + "a".repeat(64), 0],
+      ["source:" + "b".repeat(64), 10002],
+    ]) {
+      await expect(
+        pool.query(
+          "INSERT INTO landing_lead_rate_windows (key, window_started_at, attempts) VALUES ($1, now(), $2)",
+          [key, count],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+  });
+
   it("keeps one lead per normalized e-mail and any number of anonymized ones", async () => {
     await lead("buyer@example.invalid");
     await expect(lead(" Buyer@Example.invalid ")).rejects.toMatchObject({ code: "23505" });
