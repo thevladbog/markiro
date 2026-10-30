@@ -26,11 +26,13 @@ overrides:
   # its upload interceptors on the vulnerable copy. Keep the override on 2.x.
   # 2.4.0 made `limits.parts` an inclusive maximum (2.3.0 rejected the part
   # that reached it); apps/api/test/multipart-part-limits.test.ts pins every
-  # route that sets it.
-  "multer@2": "2.4.0"
+  # route that sets it. 2.5.0 is the first release patched for the pending
+  # async-handler DoS GHSA-q7qp-rjg7-q26m.
+  "multer@2": "2.5.0"
   # Express/body-parser/superagent and Astro retain older compatible copies
   # in the lockfile. Cover their parser and SVG sanitizer advisories too.
-  "qs@6": "6.16.0"
+  # qs 6.16.1 is the first release patched for GHSA-6pq8-jhm2-2vcw.
+  "qs@6": "6.16.1"
   "svgo@4": "4.1.0"
   postcss: "8.5.23"
   js-yaml: "5.4.1"
@@ -40,10 +42,18 @@ overrides:
   # GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and
   # GHSA-5jgf-p345-68v8: host confusion and SSRF in fast-uri < 3.1.6, then
   # GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3 and GHSA-hrr3-gc8f-f4qj, patched
-  # in 3.1.8. Reached only through ajv (nestjs/cli, ajv-formats,
-  # @hookform/resolvers, workbox-build). Dependabot cannot pass this override
-  # on its own, so bump it here when the next advisory lands.
-  fast-uri: "3.1.8"
+  # in 3.1.8, then GHSA-333x-w4r6-6crp, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h
+  # and GHSA-w74x-v6f9-j3xg, patched in 3.1.9. Reached only through ajv
+  # (nestjs/cli, ajv-formats, @hookform/resolvers, workbox-build). Dependabot
+  # cannot pass this override on its own, so bump it here when the next
+  # advisory lands.
+  fast-uri: "3.1.9"
+  # GHSA-m5mm-p8h7-m29v: XSS through unescaped output, patched in 7.1.3.
+  # Reached only through @rollup/plugin-terser (vite-plugin-pwa -> workbox),
+  # whose `^7.0.3` allows it, but `pnpm update` stays on 7.1.0 while the
+  # newest match (7.1.4) is inside the 7-day release-age window. Drop this
+  # once the lockfile resolves 7.1.3 or later on its own.
+  "@rollup/plugin-terser>serialize-javascript": "7.1.3"
 
   # GHSA-67mh-4wv8-2f99: esbuild <=0.24.2 lets any website talk to its dev
   # server. Reached only through @esbuild-kit/*, which is deprecated upstream
@@ -118,4 +128,9 @@ overrides:
   # 5.0.9 output exactly on a 50k random-pattern differential.
   "minimatch@3>brace-expansion": "5.0.12"
 patchedDependencies:
+  # GHSA-gcqx-w48m-w2h4 has no fixed release. Preserve own __proto__ keys
+  # as data instead of invoking Object.prototype setters while merging.
+  # Covers html-to-text, Rollup resolution and Nest CLI tooling; remove when
+  # upstream publishes a patched release.
+  deepmerge@4.3.1: patches/deepmerge@4.3.1.patch
   minimatch@3.1.5: patches/minimatch@3.1.5.patch

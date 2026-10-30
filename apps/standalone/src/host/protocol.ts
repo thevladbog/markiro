@@ -9,9 +9,10 @@ import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
  * Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto): 4 since
  * plan РЕЖ part A (the shift modes), 5 since its part B (the duplicate print),
  * 6 since plan ТСД (the handheld on the host: pallet events, the box registry,
- * `handheld-host-v1`), 7 since plan 2b (several devices in one shift).
+ * `handheld-host-v1`), 7 since plan 2b (several devices in one shift), 8
+ * since a handheld's disassembly of a warehouse pallet (a pallet event).
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */

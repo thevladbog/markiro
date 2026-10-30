@@ -29,7 +29,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -137,6 +139,15 @@ class PalletsViewModelTest {
         override fun observeClosedPalletCount(): Flow<Int> = closedPalletCount
 
         override fun observePrinters(): Flow<List<PrinterEntity>> = MutableStateFlow(emptyList())
+
+        /** The printer each pallet's first label went to, by pallet id. */
+        val destinations = MutableStateFlow<Map<String, String>>(emptyMap())
+        val destinationAsks = mutableListOf<String?>()
+
+        override fun observeDestinationName(palletId: String?): Flow<String?> {
+            destinationAsks += palletId
+            return destinations.map { palletId?.let(it::get) }
+        }
 
         override fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>> = members
 
@@ -282,6 +293,33 @@ class PalletsViewModelTest {
         assertEquals(listOf(Print("w1", null, allowUnknown = false, reprint = false)), gateway.prints)
         // The pallet this verdict named is closed; its banner must not survive.
         assertNull(vm.state.value.lastVerdict)
+    }
+
+    /** The close screen names the printer the label went to, as the work screen does, not «Не назначен». */
+    @Test
+    fun theCloseStepNamesThePrinterItsLabelWentTo() = runTest {
+        gateway.next = AttachResult.Attached(openPallet, 12, 12, true)
+        gateway.closeResult = ClosePalletResult.Closed(
+            openPallet.copy(sscc = "134600682000000011", closedAt = "t"), "134600682000000011", 12, "t",
+        )
+        gateway.destinations.value = mapOf("w0" to "Склад 1")
+        val vm = vm()
+        val names = mutableListOf<String?>()
+        val collector = backgroundScope.launch { vm.closeDestination.collect { names += it } }
+        advanceUntilIdle()
+        assertNull(vm.closeDestination.value)
+        scans.emit(ScanEvent("034600682000000014", null, "wedge", 0))
+        advanceUntilIdle()
+        assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
+        assertNull("no destination recorded yet", vm.closeDestination.value)
+        gateway.destinations.value = mapOf("w0" to "Склад 1", "w1" to "Zebra у ворот")
+        advanceUntilIdle()
+        assertEquals("Zebra у ворот", vm.closeDestination.value)
+        vm.dismissClose()
+        advanceUntilIdle()
+        assertNull(vm.closeDestination.value)
+        assertEquals(listOf(null, "w1", null), gateway.destinationAsks)
+        collector.cancel()
     }
 
     @Test

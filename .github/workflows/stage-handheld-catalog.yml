@@ -1,0 +1,113 @@
+name: Stage signed handheld catalog files
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful first-attempt main handheld release build containing signed 1.7.0 (16)
+        required: true
+        type: string
+      catalog_operation_id:
+        description: Independently selected new catalog UUID; never repeat after an ambiguous write
+        required: true
+        type: string
+      apk_sha256:
+        description: Independently verified SHA256 of the signed APK from that build
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: handheld-release
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.run_attempt == 1
+    environment: handheld-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install dependencies before storage credentials
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Verify and download the original signed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          node --input-type=module -e 'import assert from "node:assert/strict"; assert.match(process.env.SOURCE_RUN_ID,/^[1-9][0-9]*$/)'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/handheld-source.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/handheld-artifacts.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import {validateBuildMetadata} from './tools/handheld-release/bootstrap-stage.mjs';
+          const root=process.env.RUNNER_TEMP;
+          const run=JSON.parse(fs.readFileSync(root+'/handheld-source.json'));
+          const listing=JSON.parse(fs.readFileSync(root+'/handheld-artifacts.json'));
+          assert.equal(listing.total_count,listing.artifacts.length);
+          const artifacts=listing.artifacts.filter(a=>a.name==='markiro-tsd-1.7.0');
+          assert.equal(artifacts.length,1);
+          const artifact=artifacts[0];
+          validateBuildMetadata({run,artifact},process.env.SOURCE_RUN_ID,process.env.GITHUB_REPOSITORY_ID);
+          fs.writeFileSync(root+'/handheld-proof.json',JSON.stringify({run,artifact}),{flag:'wx',mode:0o600});
+          fs.appendFileSync(process.env.GITHUB_ENV,'HANDHELD_ARTIFACT_ID='+artifact.id+'\n');
+          NODE
+      - name: Validate artifact archive and extract only APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$HANDHELD_ARTIFACT_ID/zip" > "$RUNNER_TEMP/handheld-artifact.zip"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          proof=json.loads((root/'handheld-proof.json').read_text())
+          archive=root/'handheld-artifact.zip'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==proof['artifact']['digest'].removeprefix('sha256:')
+          with zipfile.ZipFile(archive) as z:
+            assert z.namelist()==['markiro-tsd-1.7.0.apk']
+            info=z.infolist()[0]
+            assert 0<info.file_size<=536870912
+            with (root/info.filename).open('xb') as output:
+              output.write(z.read(info))
+          PY
+      - name: Stage original signed bytes and retain exact versions
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          CATALOG_OPERATION_ID: ${{ inputs.catalog_operation_id }}
+          APK_SHA256: ${{ inputs.apk_sha256 }}
+          RELEASES_S3_BUCKET: ${{ vars.RELEASES_S3_BUCKET }}
+          RELEASES_S3_ACCESS_KEY_ID: ${{ secrets.RELEASES_S3_ACCESS_KEY_ID }}
+          RELEASES_S3_SECRET_ACCESS_KEY: ${{ secrets.RELEASES_S3_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          export APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          export AAPT="$(dirname "$APKSIGNER")/aapt"
+          node tools/handheld-release/bootstrap-stage.mjs "$RUNNER_TEMP/markiro-tsd-1.7.0.apk" "$RUNNER_TEMP/handheld-proof.json" "$RUNNER_TEMP/handheld-bootstrap"
+      - name: Preserve publication preparation receipts even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: handheld-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/handheld-bootstrap/
+          if-no-files-found: ignore
+          retention-days: 30

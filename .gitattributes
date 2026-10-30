@@ -8,6 +8,10 @@ packages/db/migrations/meta/*.json linguist-generated=true
 # must neither flag nor convert them.
 packages/domain/test/fixtures/print-forms/*.html -whitespace -text
 
+# This dependency patch preserves upstream tab-indented context and blank lines;
+# their unified-diff prefix is part of the patch, not source indentation.
+patches/deepmerge@4.3.1.patch -whitespace
+
 # The standalone app's SQL migrations: `sqlx::migrate!` embeds each file and
 # records the checksum of its bytes, so a CRLF checkout (Windows with
 # core.autocrlf) would build a host or shell whose checksums differ from every

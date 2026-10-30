@@ -1609,6 +1609,122 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("preserves the application identity and separates Windows and Android apps on V4 pages", () => {
+    for (const route of ["/", "/en/", "/skachat/", "/stoimost/"]) {
+      const page = documents.get(route);
+      const graph = JSON.parse(
+        page?.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as {
+        "@graph": Array<Record<string, unknown>>;
+      };
+      const applications = graph["@graph"].filter((node) =>
+        [node["@type"]].flat().includes("SoftwareApplication"),
+      );
+      const v4 = route !== "/en/";
+      expect(applications, route).toHaveLength(v4 ? 2 : 1);
+      const desktop = applications.find((node) => node["@id"] === "https://markiro.app/#software");
+      expect(desktop, route).toMatchObject({
+        "@id": "https://markiro.app/#software",
+        inLanguage: "ru",
+        operatingSystem: v4 ? ["Windows 10", "Windows 11"] : "Windows 10, Windows 11, Android",
+        installUrl: "https://markiro.app/skachat/",
+      });
+      for (const application of applications) {
+        expect(application).not.toHaveProperty("aggregateRating");
+        expect(application).not.toHaveProperty("softwareVersion");
+      }
+      if (v4)
+        expect(
+          applications.find((node) => node["@id"] === "https://markiro.app/#handheld-software"),
+          route,
+        ).toMatchObject({
+          operatingSystem: "Android 9+",
+          softwareRequirements: { "@id": "https://markiro.app/#software" },
+        });
+      const webPage = graph["@graph"].find((node) => node["@type"] === "WebPage");
+      expect(webPage?.about, route).toEqual(
+        v4
+          ? [
+              { "@id": "https://markiro.app/#software" },
+              { "@id": "https://markiro.app/#handheld-software" },
+            ]
+          : { "@id": "https://markiro.app/#software" },
+      );
+    }
+  });
+
+  it("describes all 20 published instruction editions using their visible content and PDFs", () => {
+    const codes = ["01", "02", "03", "04", "08", "09", "10", "12", "13", "14"];
+    for (const locale of ["ru", "en"]) {
+      const hubRoute = locale === "ru" ? "/instruktsii/" : "/en/instructions/";
+      const hub = documents.get(hubRoute);
+      const links = [...(hub?.querySelectorAll<HTMLAnchorElement>(".legal-registry a[href]") ?? [])]
+        .map((link) => link.getAttribute("href"))
+        .filter((href): href is string => href !== null && href.startsWith(hubRoute));
+      expect(links, hubRoute).toHaveLength(10);
+      const foundCodes: string[] = [];
+      for (const route of links) {
+        const page = new JSDOM(
+          readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8"),
+        ).window.document;
+        const graph = JSON.parse(
+          page.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+        ) as {
+          "@graph": Array<Record<string, unknown>>;
+        };
+        const instruction = graph["@graph"].find((node) => node["@type"] === "TechArticle");
+        const code = page.querySelector("[data-legal-code]")?.textContent?.trim() ?? "";
+        foundCodes.push(code);
+        expect(instruction, route).toMatchObject({
+          "@id": `https://markiro.app${route}#instruction`,
+          headline: page.querySelector("h1")?.textContent,
+          description: page.querySelector(".legal-hero__summary")?.textContent,
+          identifier: code,
+          version: page.querySelector("[data-legal-revision]")?.textContent,
+          datePublished: page
+            .querySelector("time[data-legal-effective-date]")
+            ?.getAttribute("datetime"),
+          dateModified: page
+            .querySelector("time[data-legal-effective-date]")
+            ?.getAttribute("datetime"),
+          inLanguage: locale,
+          about: { "@id": "https://markiro.app/#software" },
+          isPartOf: { "@id": `https://markiro.app${hubRoute}#webpage` },
+          mainEntityOfPage: { "@id": `https://markiro.app${route}#webpage` },
+        });
+        const webPage = graph["@graph"].find((node) => node["@type"] === "WebPage");
+        expect(webPage?.mainEntity, route).toEqual({ "@id": instruction?.["@id"] });
+        const pdf = page.querySelector<HTMLAnchorElement>('a[download$=".pdf"]');
+        expect(instruction?.encoding, route).toMatchObject([
+          {
+            "@type": "MediaObject",
+            contentUrl: `https://markiro.app${pdf?.getAttribute("href")}`,
+            encodingFormat: "application/pdf",
+            inLanguage: locale,
+          },
+        ]);
+        const sections = [...page.querySelectorAll(".instruction-document > section[id]")];
+        expect(instruction?.hasPart, route).toEqual(
+          sections.map((section) => ({
+            "@type": "WebPageElement",
+            "@id": `https://markiro.app${route}#${section.id}`,
+            name: section.querySelector("h2")?.textContent,
+          })),
+        );
+        if (locale === "en") {
+          const ruPath = page.querySelector('link[hreflang="ru"]')?.getAttribute("href");
+          expect(instruction?.translationOfWork, route).toEqual({ "@id": `${ruPath}#instruction` });
+        } else {
+          expect(instruction).not.toHaveProperty("translationOfWork");
+        }
+        expect(JSON.stringify(instruction?.about), route).toContain(
+          locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom",
+        );
+      }
+      expect(foundCodes.sort()).toEqual(codes.map((code) => `MKR-INS-${code}`));
+    }
+  });
+
   it("keeps FAQ structured answers identical to visible answers on every page with FAQ", () => {
     let pagesWithFaq = 0;
     for (const [route, routeDocument] of documents) {
@@ -1935,7 +2051,9 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
   });
 
   it("describes /stoimost/ prices as a Product with yearly offers in roubles", () => {
-    const product = jsonLd("/stoimost/").find((entry) => entry["@type"] === "Product") as
+    const product = jsonLd("/stoimost/").find((entry) =>
+      [entry["@type"]].flat().includes("Product"),
+    ) as
       | {
           name: string;
           offers: Array<Record<string, unknown>>;

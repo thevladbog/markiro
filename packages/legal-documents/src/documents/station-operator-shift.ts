@@ -118,7 +118,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Выберите режим, паллеты, план и даты",
-            text: "«Режим работы»: «Агрегация» — продукция собирается в короба, печатаются этикетки коробов; «Проверка» — коды сверяются при сканировании, этикетки коробов не печатаются. В режиме «Агрегация» карточка «С паллетами» включена, если в карточке товара указано, сколько коробов встаёт на паллету, — под ней видно «Коробов на паллете». Выключите её, если паллеты собирать не нужно. «В коробе, шт.» берётся из товара; «План, шт.» необязателен — смена может быть без плана. Числа набирайте на клавиатуре справа, нажав нужное поле. «Дата производства» и «Дата смены» по умолчанию сегодняшние; дату производства сверьте с продукцией. Нажмите «Далее».",
+            text: "«Режим работы»: «Агрегация» — продукция собирается в короба, печатаются этикетки коробов; «Проверка» — коды сверяются при сканировании, этикетки коробов не печатаются. В режиме «Агрегация» карточка «С паллетами» включена, если в карточке товара указано, сколько коробов встаёт на паллету, — под ней видно «Коробов на паллете». Выключите её, если паллеты собирать не нужно. «В коробе, шт.» берётся из товара; «План, шт.» необязателен — смена может быть без плана. Числа набирайте на клавиатуре справа, нажав нужное поле. «Дата производства» и «Дата смены» по умолчанию сегодняшние; дату производства сверьте с продукцией. В режиме «Агрегация» нажмите «Далее». В режиме «Проверка» без печати дубликата нажмите «Создать и открыть». Если включено «Печатать дубликат Data Matrix», нажмите «Далее», выберите «Шаблон этикетки продукции» и настройте «Обязательная проверка этикетки» перед созданием смены.",
             image: {
               id: "new-shift-pallets",
               caption: "Новая смена в режиме «Агрегация» со сборкой паллет",
@@ -126,7 +126,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           },
           {
             kind: "step",
-            title: "Проверьте шаблон этикетки короба",
+            title: "В режиме «Агрегация» проверьте шаблон этикетки короба",
             text: "На шаге «Шаблон этикетки короба» станция уже выбрала подходящий шаблон: он назван в строке над списком, а справа — предпросмотр этикетки. При необходимости выберите другой. Нажмите «Далее», а в смене без паллет — «Создать и открыть».",
             image: {
               id: "new-shift-template",
@@ -136,7 +136,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Для смены с паллетами — шаблон этикетки паллеты",
-            text: "Так же проверьте «Шаблон этикетки паллеты» и нажмите «Создать и открыть». «Предыдущий шаг» возвращает к прошлому шагу, «Другой товар» — к выбору товара.",
+            text: "Так же проверьте «Шаблон этикетки паллеты» и нажмите «Создать и открыть». Если принтер паллет настроен на А4, вместо шаблона этикетки выберите «Лист А4 паллеты»: «По умолчанию товара» или конкретный включённый лист. «Предыдущий шаг» возвращает к прошлому шагу, «Другой товар» — к выбору товара.",
             image: {
               id: "new-shift-pallet-template",
               caption: "Шаблон этикетки паллеты и кнопка «Создать и открыть»",
@@ -350,7 +350,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Choose the mode, pallets, plan and dates",
-            text: "“Режим работы” (Mode): “Агрегация” (Aggregation) — products are packed into boxes and box labels are printed; “Проверка” (Validation) — codes are checked as they are scanned and no box labels are printed. In “Агрегация” (Aggregation) the “С паллетами” (With pallets) card is on when the product card says how many boxes go on a pallet — the number shows below it as “Коробов на паллете” (Boxes per pallet). Turn it off if pallets are not needed. “В коробе, шт.” (Per box, pcs) comes from the product; “План, шт.” (Plan, pcs) is optional — a shift may have no plan. Type numbers on the keypad on the right after tapping the field. “Дата производства” (Production date) and “Дата смены” (Shift date) default to today; check the production date against the product. Tap “Далее” (Next).",
+            text: "“Режим работы” (Mode): “Агрегация” (Aggregation) — products are packed into boxes and box labels are printed; “Проверка” (Validation) — codes are checked as they are scanned and no box labels are printed. In “Агрегация” (Aggregation) the “С паллетами” (With pallets) card is on when the product card says how many boxes go on a pallet — the number shows below it as “Коробов на паллете” (Boxes per pallet). Turn it off if pallets are not needed. “В коробе, шт.” (Per box, pcs) comes from the product; “План, шт.” (Plan, pcs) is optional — a shift may have no plan. Type numbers on the keypad on the right after tapping the field. “Дата производства” (Production date) and “Дата смены” (Shift date) default to today; check the production date against the product. In “Агрегация” (Aggregation) mode tap “Далее” (Next). In “Проверка” (Validation) mode without duplicate printing tap “Создать и открыть” (Create and open). With “Печатать дубликат Data Matrix” (Print a Data Matrix duplicate) enabled, tap “Далее” (Next), choose “Шаблон этикетки продукции” (Product label template), and set “Обязательная проверка этикетки” (Mandatory label verification) before creating the shift.",
             image: {
               id: "new-shift-pallets",
               caption: "A new shift in “Агрегация” (Aggregation) mode with pallet assembly",
@@ -358,7 +358,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           },
           {
             kind: "step",
-            title: "Check the box label template",
+            title: "In Aggregation mode, check the box label template",
             text: "At the “Шаблон этикетки короба” (Box label template) step the station has already chosen a fitting template: it is named in the line above the list, with a preview of the label on the right. Pick another one if needed. Tap “Далее” (Next), or “Создать и открыть” (Create and open) on a shift without pallets.",
             image: {
               id: "new-shift-template",
@@ -368,7 +368,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "For a shift with pallets, the pallet label template",
-            text: "Check the “Шаблон этикетки паллеты” (Pallet label template) the same way and tap “Создать и открыть” (Create and open). “Предыдущий шаг” (Previous step) returns to the previous step, “Другой товар” (Another product) to the choice of product.",
+            text: "Check the “Шаблон этикетки паллеты” (Pallet label template) the same way and tap “Создать и открыть” (Create and open). If the pallet printer uses A4 sheets, choose “Лист А4 паллеты” (Pallet A4 sheet) instead: “По умолчанию товара” (Product default) or a specific enabled sheet. “Предыдущий шаг” (Previous step) returns to the previous step, “Другой товар” (Another product) to the choice of product.",
             image: {
               id: "new-shift-pallet-template",
               caption: "The pallet label template and “Создать и открыть” (Create and open)",

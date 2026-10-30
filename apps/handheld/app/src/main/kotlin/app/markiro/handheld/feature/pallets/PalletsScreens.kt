@@ -76,9 +76,9 @@ data class PalletsCallbacks(
  * is what they read when the sound was not enough.
  */
 @Composable
-fun PalletsRoute(state: PalletsUi, cb: PalletsCallbacks) {
+fun PalletsRoute(state: PalletsUi, cb: PalletsCallbacks, destinationLabel: String? = null) {
     state.blocked?.let { return PalletsBlockedScreen(it, cb.onBack) }
-    if (state.closeStep !is PalletCloseStep.Idle) return PalletCloseScreen(state.closeStep, cb.close)
+    if (state.closeStep !is PalletCloseStep.Idle) return PalletCloseScreen(state.closeStep, cb.close, destinationLabel)
     if (state.confirmEarlyClose) {
         AlertDialog(
             onDismissRequest = cb.onCancelEarlyClose,

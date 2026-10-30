@@ -43,7 +43,7 @@ fn duplicate(verification: LabelVerification) -> ValidationPrint {
 
 #[test]
 fn protocol_5_carries_the_duplicate_print() {
-    assert_eq!(PROTOCOL_VERSION, 7);
+    assert_eq!(PROTOCOL_VERSION, 8);
     assert_eq!(FactKind::UnitLabel.as_str(), "unit_label");
     assert_eq!(
         serde_json::to_value(FactKind::UnitLabel).unwrap(),

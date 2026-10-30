@@ -239,7 +239,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Продолжайте работу",
-            text: "Без связи ТСД показывает «Нет связи с хостом — работа продолжается». Сборка паллеты и печать этикеток продолжаются: записи копятся на ТСД, строка «Очередь хоста» показывает, сколько ждут отправки. На плитке «Паллеты» видно, сколько коробов не отправлено.",
+            text: "Без связи ТСД показывает «Нет связи с хостом — работа продолжается». Доступны только короба из ранее загруженного реестра; для закрытия паллет нужны оставшиеся номера SSCC. Если номера закончились, подключитесь к хосту: паллета остаётся открытой. В этих пределах сборка паллеты и печать этикеток продолжаются: записи копятся на ТСД, строка «Очередь хоста» показывает, сколько ждут отправки. На плитке «Паллеты» видно, сколько коробов не отправлено.",
             image: { id: "hub-offline", caption: "ТСД без связи с хостом" },
           },
           {
@@ -554,7 +554,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
           {
             kind: "step",
             title: "Keep working",
-            text: "Without a link the handheld shows «Нет связи с хостом — работа продолжается» (No link to the host — work continues). Pallet building and label printing go on: records collect on the handheld, and the «Очередь хоста» (Host queue) line shows how many are waiting. The «Паллеты» (Pallets) tile shows how many boxes are unsent.",
+            text: "Without a link the handheld shows «Нет связи с хостом — работа продолжается» (No link to the host — work continues). Only boxes from the previously downloaded registry are available; closing pallets requires remaining SSCC numbers. If the numbers run out, reconnect to the host: the pallet remains open. Within these limits, pallet building and label printing go on: records collect on the handheld, and the «Очередь хоста» (Host queue) line shows how many are waiting. The «Паллеты» (Pallets) tile shows how many boxes are unsent.",
             image: { id: "hub-offline", caption: "The handheld without a link to the host" },
           },
           {

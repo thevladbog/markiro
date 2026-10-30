@@ -86,7 +86,12 @@ Android tests must also verify its interpretation.
   revocation/sealing to reset business data. A failed reset stays blocked and
   retryable. Never expose a new epoch to old callbacks or resume old outboxes.
 - Off in host mode: grants, replacement, inventory, write-offs, update checks, duplicate
-  DataMatrix print (`STATION_UPDATE_REQUIRED`). Protocol fixtures are read from
+  DataMatrix print (`STATION_UPDATE_REQUIRED`). Box and pallet exceptions (step 1б) reach the host only for
+  one case: a closed warehouse pallet taken apart is frozen by `HostPalletEvents` as
+  `warehouse_pallet_disassembled` once its close is acknowledged and the last `hello` (`MetaStore.HOST_PROTOCOL`,
+  written by every heartbeat) said protocol 8 or more; an older host would refuse the kind for good, so the
+  record waits. The handheld still sends protocol header 6. Box exceptions, pallet reprints and the disassembly
+  of a shift's pallet are still never sent to the host. Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
 - Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6 and Room stays at 22):
   every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers

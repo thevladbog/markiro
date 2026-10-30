@@ -82,6 +82,15 @@ class HostHeartbeatTest {
         assertNull(meta.get(MetaStore.BOX_REGISTRY_UNTIL))
     }
 
+    /** What the pallet events may name depends on the host's protocol (a disassembly needs 8): each beat remembers it. */
+    @Test
+    fun aBeatRemembersTheHostsProtocol() = runTest {
+        heartbeat(routes("/v1/hello" to listOf(hello("e1")))).beat()
+        assertEquals("6", meta.get(MetaStore.HOST_PROTOCOL))
+        heartbeat(routes("/v1/hello" to listOf(ok(hello("e1").body.replace("\"protocol\":6", "\"protocol\":8"))))).beat()
+        assertEquals("8", meta.get(MetaStore.HOST_PROTOCOL))
+    }
+
     @Test
     fun aCloudDeviceIsNeverAskedAnything() = runTest {
         db.deviceConfigDao().upsert(HostFactsFixtures.config(db, backend = "cloud"))

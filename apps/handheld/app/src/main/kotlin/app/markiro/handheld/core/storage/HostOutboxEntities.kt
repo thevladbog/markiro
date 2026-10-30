@@ -88,6 +88,16 @@ interface HostOutboxDao {
     @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND ackedAt IS NULL ORDER BY openedAt, palletId")
     suspend fun unackedWarehousePallets(): List<PalletEntity>
 
+    /**
+     * The disassemblies of this device's warehouse pallets the host has not acknowledged, once the host holds the pallet closed (its close is
+     * acknowledged): before that the host would refuse it as `pallet_state`.
+     */
+    @Query(
+        "SELECT pe.* FROM pallet_exceptions pe JOIN pallets p ON p.palletId = pe.palletId " +
+            "WHERE pe.kind = 'disassemble' AND pe.ackedAt IS NULL AND p.kind = 'warehouse' AND p.ackedAt IS NOT NULL ORDER BY pe.id",
+    )
+    suspend fun unsentWarehouseDisassemblies(): List<PalletExceptionEntity>
+
     /** Boxes of the pallet whose events are not settled yet (frozen and unanswered, or not frozen). */
     @Query("SELECT COUNT(*) FROM pallet_memberships WHERE palletId = :palletId AND status IN ('pending', 'sent')")
     suspend fun unsettledMemberships(palletId: String): Int

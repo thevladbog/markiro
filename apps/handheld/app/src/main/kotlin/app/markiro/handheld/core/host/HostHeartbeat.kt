@@ -35,6 +35,7 @@ class HostHeartbeat(
                     if (db.recovery.observeHostDataset(hello.hostId, hello.datasetEpoch)) throw RecoveryBlocked()
                 }) { blocks.registerKnown() }.onSuccess { observation ->
                     if (observation.restored) meta.remove(MetaStore.BOX_REGISTRY_UNTIL)
+                    meta.put(MetaStore.HOST_PROTOCOL, observation.protocol.toString())
                     // A failure of this read is not the link's: the shift list asks again.
                     runCatching { device() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                     runCatching { participation() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }

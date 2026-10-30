@@ -34,6 +34,7 @@ export function buildV4ProductGraph(page: PageMetadata, shared: PageGraph["@grap
       name: facts.name,
       alternateName: ["Markiro Autonom", "Markiro"],
       url: `${origin}/`,
+      installUrl: `${origin}/skachat/`,
       description:
         "Программа для агрегации кодов маркировки на Windows. Офис управляет сменами и продукцией; станция выполняет упаковку и агрегацию. Главный ПК, офис и станция — роли одного установщика. Пробный период 14 дней со всеми функциями, без оплаты.",
       applicationCategory: facts.applicationCategory,

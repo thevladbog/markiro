@@ -303,16 +303,16 @@ function artifactEntry(
       readonly [PublishedLegalArtifact["revision"], PublishedLegalArtifact["effectiveDate"]]
     >
   > = {
-    "MKR-INS-01": ["2026.10/01", "2026-10-29"],
+    "MKR-INS-01": ["2026.10/02", "2026-10-30"],
     "MKR-INS-02": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-03": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-04": ["2026.10/01", "2026-10-29"],
+    "MKR-INS-03": ["2026.10/02", "2026-10-30"],
+    "MKR-INS-04": ["2026.10/02", "2026-10-30"],
     "MKR-INS-08": ["2026.10/01", "2026-10-29"],
     "MKR-INS-09": ["2026.10/01", "2026-10-29"],
     "MKR-INS-10": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-12": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-13": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-14": ["2026.10/01", "2026-10-29"],
+    "MKR-INS-12": ["2026.10/02", "2026-10-30"],
+    "MKR-INS-13": ["2026.10/02", "2026-10-30"],
+    "MKR-INS-14": ["2026.10/02", "2026-10-30"],
   };
   const [revision, effectiveDate] = INSTRUCTION_RELEASES[code] ?? ["2026.08/01", "2026-08-15"];
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
@@ -1294,32 +1294,32 @@ describe("legal artifact release generation", () => {
       "MKR-BRD-01|ru|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|legal-pdf|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
-      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.10/01/29.10.2026",
-      "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.10/01/29.10.2026",
+      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.10/02/30.10.2026",
+      "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.10/02/30.10.2026",
       "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.10/01/29.10.2026",
       "MKR-INS-02|en|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.10/01/29.10.2026",
-      "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.10/01/29.10.2026",
-      "MKR-INS-03|en|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.10/01/29.10.2026",
-      "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.10/01/29.10.2026",
-      "MKR-INS-04|en|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.10/01/29.10.2026",
+      "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.10/02/30.10.2026",
+      "MKR-INS-03|en|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.10/02/30.10.2026",
+      "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.10/02/30.10.2026",
+      "MKR-INS-04|en|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.10/02/30.10.2026",
       "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.10/01/29.10.2026",
       "MKR-INS-08|en|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.10/01/29.10.2026",
       "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.10/01/29.10.2026",
       "MKR-INS-09|en|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.10/01/29.10.2026",
       "MKR-INS-10|ru|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.10/01/29.10.2026",
       "MKR-INS-10|en|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.10/01/29.10.2026",
-      "MKR-INS-12|ru|legal-pdf|https://markiro.app/d/MKR-INS-12/2026.10/01/29.10.2026",
-      "MKR-INS-12|en|legal-pdf|https://markiro.app/d/MKR-INS-12/2026.10/01/29.10.2026",
-      "MKR-INS-13|ru|legal-pdf|https://markiro.app/d/MKR-INS-13/2026.10/01/29.10.2026",
-      "MKR-INS-13|en|legal-pdf|https://markiro.app/d/MKR-INS-13/2026.10/01/29.10.2026",
-      "MKR-INS-14|ru|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/01/29.10.2026",
-      "MKR-INS-14|en|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/01/29.10.2026",
+      "MKR-INS-12|ru|legal-pdf|https://markiro.app/d/MKR-INS-12/2026.10/02/30.10.2026",
+      "MKR-INS-12|en|legal-pdf|https://markiro.app/d/MKR-INS-12/2026.10/02/30.10.2026",
+      "MKR-INS-13|ru|legal-pdf|https://markiro.app/d/MKR-INS-13/2026.10/02/30.10.2026",
+      "MKR-INS-13|en|legal-pdf|https://markiro.app/d/MKR-INS-13/2026.10/02/30.10.2026",
+      "MKR-INS-14|ru|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/02/30.10.2026",
+      "MKR-INS-14|en|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/02/30.10.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
-      new Set(["2026.08/01", "2026.10/01"]),
+      new Set(["2026.08/01", "2026.10/01", "2026.10/02"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15", "2026-10-29"]),
+      new Set(["2026-08-15", "2026-10-29", "2026-10-30"]),
     );
     expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(28);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
@@ -1462,7 +1462,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(release),
       }),
-    ).toBe("markiro_mkr-ins-01_2026.10-01_ru.pdf");
+    ).toBe("markiro_mkr-ins-01_2026.10-02_ru.pdf");
     expect(
       artifactFileName({
         code: "MKR-INS-01",
@@ -1472,7 +1472,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(release),
       }),
-    ).toBe("markiro_mkr-ins-01_2026.10-01_en.pdf");
+    ).toBe("markiro_mkr-ins-01_2026.10-02_en.pdf");
     // The catalog pair completed the English series, so an instruction no
     // longer has an unpublished locale to refuse -- both now name an English
     // PDF the same way the station set does.

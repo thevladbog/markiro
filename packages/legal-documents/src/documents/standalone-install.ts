@@ -207,7 +207,7 @@ export const STANDALONE_INSTALL_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Пробный период длится 14 дней с первого запуска хоста. Когда он закончится без файла лицензии, новые смены перестанут открываться; начатые смены можно продолжать и закрывать, данные и выгрузки остаются доступны. Лицензия выдаётся на хост и ИНН организации и проверяется без интернета.",
+            text: "Пробный период длится 14 дней после завершения мастера первого запуска. Когда он закончится без файла лицензии, новые смены перестанут открываться; начатые смены можно продолжать и закрывать, данные и выгрузки остаются доступны. Лицензия выдаётся на хост и ИНН организации и проверяется без интернета.",
           },
           {
             kind: "step",
@@ -275,7 +275,7 @@ export const STANDALONE_INSTALL_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Обновления приходят файлом от Маркиро; программа сама в интернет не обращается. Пакет обновления — два файла: установщик (.exe) и подписанный манифест (.update.jws). Порядок: сначала ПК хоста, затем станции и ПК офиса, между сменами.",
+            text: "Обновления приходят файлом от Маркиро и не загружаются из интернета автоматически. Для необязательных копий на Яндекс Диск нужен интернет (MKR-INS-13). Пакет обновления — два файла: установщик (.exe) и подписанный манифест (.update.jws). Порядок: сначала ПК хоста, затем станции и ПК офиса, между сменами.",
           },
           {
             kind: "step",
@@ -543,7 +543,7 @@ export const STANDALONE_INSTALL_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "The trial period lasts 14 days from the host's first start. When it ends without a license file, new shifts stop opening; shifts already started can be continued and closed, and data and exports stay available. The license is issued to the host and the organization's INN and is checked without the internet.",
+            text: "The trial period lasts 14 days after completing the first-start wizard. When it ends without a license file, new shifts stop opening; shifts already started can be continued and closed, and data and exports stay available. The license is issued to the host and the organization's INN and is checked without the internet.",
           },
           {
             kind: "step",
@@ -611,7 +611,7 @@ export const STANDALONE_INSTALL_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Updates come as a file from Markiro; the program does not go to the internet itself. An update package is two files: the installer (.exe) and the signed manifest (.update.jws). Order: the host PC first, then stations and office PCs, between shifts.",
+            text: "Updates come as a file from Markiro and are not downloaded automatically from the internet. Optional Yandex Disk backups require internet access (MKR-INS-13). An update package is two files: the installer (.exe) and the signed manifest (.update.jws). Order: the host PC first, then stations and office PCs, between shifts.",
           },
           {
             kind: "step",
