@@ -3,10 +3,13 @@ import { CABINET_CATALOG_PRODUCT_CONTENT } from "./documents/cabinet-catalog-pro
 import { CABINET_SHIFT_PLANNING_CONTENT } from "./documents/cabinet-shift-planning.js";
 import { CABINET_SHIFT_CLOSE_CONTENT } from "./documents/cabinet-shift-close.js";
 import { CONSENT_CONTENT } from "./documents/consent.js";
+import { HANDHELD_WAREHOUSE_CONTENT } from "./documents/handheld-warehouse.js";
 import { PRIVACY_CONTENT } from "./documents/privacy.js";
 import { STATION_EXCEPTIONS_CONTENT } from "./documents/station-exceptions.js";
 import { STATION_OPERATOR_SHIFT_CONTENT } from "./documents/station-operator-shift.js";
 import { STATION_WORK_CYCLE_CONTENT } from "./documents/station-work-cycle.js";
+import { STANDALONE_BACKUPS_CONTENT } from "./documents/standalone-backups.js";
+import { STANDALONE_INSTALL_CONTENT } from "./documents/standalone-install.js";
 import { STATION_WORKSTATION_SETUP_CONTENT } from "./documents/station-workstation-setup.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
 import { formatLegalEffectiveDate, parseLegalRevision } from "./identity.js";
@@ -34,6 +37,9 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-INS-08",
   "MKR-INS-09",
   "MKR-INS-10",
+  "MKR-INS-12",
+  "MKR-INS-13",
+  "MKR-INS-14",
 ] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
 
@@ -49,6 +55,9 @@ export const LEGAL_DOCUMENT_KIND_BY_CODE = {
   "MKR-INS-08": "instruction",
   "MKR-INS-09": "instruction",
   "MKR-INS-10": "instruction",
+  "MKR-INS-12": "instruction",
+  "MKR-INS-13": "instruction",
+  "MKR-INS-14": "instruction",
 } as const satisfies Record<LegalDocumentCode, LegalDocumentKind>;
 
 export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
@@ -66,6 +75,9 @@ const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
   "MKR-INS-08",
   "MKR-INS-09",
   "MKR-INS-10",
+  "MKR-INS-12",
+  "MKR-INS-13",
+  "MKR-INS-14",
 ]);
 
 export function legalReleaseLocales(code: LegalDocumentCode): readonly LegalLocale[] {
@@ -120,8 +132,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-01",
-    revision: "2026.09/04",
-    effectiveDate: "2026-09-26",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -131,8 +143,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-02",
-    revision: "2026.09/03",
-    effectiveDate: "2026-09-26",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -142,8 +154,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-03",
-    revision: "2026.09/04",
-    effectiveDate: "2026-09-26",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -153,8 +165,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-04",
-    revision: "2026.09/01",
-    effectiveDate: "2026-09-26",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -164,8 +176,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-08",
-    revision: "2026.09/02",
-    effectiveDate: "2026-09-19",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -175,8 +187,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-09",
-    revision: "2026.09/04",
-    effectiveDate: "2026-09-19",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -186,13 +198,46 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-10",
-    revision: "2026.09/02",
-    effectiveDate: "2026-09-19",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
       ru: "/instruktsii/katalog-kartochka-tovara/",
       en: "/en/instructions/product-catalog-card/",
+    },
+  },
+  {
+    code: "MKR-INS-12",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: {
+      ru: "/instruktsii/ustanovka-i-pervyy-zapusk/",
+      en: "/en/instructions/installation-and-first-run/",
+    },
+  },
+  {
+    code: "MKR-INS-13",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: {
+      ru: "/instruktsii/rezervnye-kopii/",
+      en: "/en/instructions/backups-and-restore/",
+    },
+  },
+  {
+    code: "MKR-INS-14",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: {
+      ru: "/instruktsii/tsd/",
+      en: "/en/instructions/handheld-terminal/",
     },
   },
 ] as const satisfies readonly LegalDocumentRelease[];
@@ -202,13 +247,16 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
   { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
-  { releaseKey: "MKR-INS-01/2026.09/04", content: STATION_OPERATOR_SHIFT_CONTENT },
-  { releaseKey: "MKR-INS-02/2026.09/03", content: STATION_WORK_CYCLE_CONTENT },
-  { releaseKey: "MKR-INS-03/2026.09/04", content: STATION_EXCEPTIONS_CONTENT },
-  { releaseKey: "MKR-INS-04/2026.09/01", content: STATION_WORKSTATION_SETUP_CONTENT },
-  { releaseKey: "MKR-INS-08/2026.09/02", content: CABINET_SHIFT_PLANNING_CONTENT },
-  { releaseKey: "MKR-INS-09/2026.09/04", content: CABINET_SHIFT_CLOSE_CONTENT },
-  { releaseKey: "MKR-INS-10/2026.09/02", content: CABINET_CATALOG_PRODUCT_CONTENT },
+  { releaseKey: "MKR-INS-01/2026.10/01", content: STATION_OPERATOR_SHIFT_CONTENT },
+  { releaseKey: "MKR-INS-02/2026.10/01", content: STATION_WORK_CYCLE_CONTENT },
+  { releaseKey: "MKR-INS-03/2026.10/01", content: STATION_EXCEPTIONS_CONTENT },
+  { releaseKey: "MKR-INS-04/2026.10/01", content: STATION_WORKSTATION_SETUP_CONTENT },
+  { releaseKey: "MKR-INS-08/2026.10/01", content: CABINET_SHIFT_PLANNING_CONTENT },
+  { releaseKey: "MKR-INS-09/2026.10/01", content: CABINET_SHIFT_CLOSE_CONTENT },
+  { releaseKey: "MKR-INS-10/2026.10/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
+  { releaseKey: "MKR-INS-12/2026.10/01", content: STANDALONE_INSTALL_CONTENT },
+  { releaseKey: "MKR-INS-13/2026.10/01", content: STANDALONE_BACKUPS_CONTENT },
+  { releaseKey: "MKR-INS-14/2026.10/01", content: HANDHELD_WAREHOUSE_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {

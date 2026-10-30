@@ -50,6 +50,18 @@ function githubId(value) {
   return Number.isSafeInteger(value) && value > 0;
 }
 
+// The CI jobs a platform release requires, by the names GitHub reports. The
+// post-migration forward rehearsal left production-bundle for its own jobs:
+// both scenario runners and the job that accepts their evidence together. A
+// main push that runs production-bundle always runs them (tools/ci/affected.mjs).
+export const PLATFORM_CI_REQUIRED_JOBS = Object.freeze([
+  "production-bundle",
+  "platform-forward-recovery-scenario (healthy)",
+  "platform-forward-recovery-scenario (replacement-failure)",
+  "platform-forward-recovery",
+  "ci-required",
+]);
+
 export function validatePlatformCiEvidence(run, jobsResponse, expected) {
   if (
     !exactKeys(expected, ["repository", "sourceSha", "runId"]) ||
@@ -77,7 +89,7 @@ export function validatePlatformCiEvidence(run, jobsResponse, expected) {
     invalid();
 
   const ids = new Set();
-  const required = new Set(["production-bundle", "ci-required"]);
+  const required = new Set(PLATFORM_CI_REQUIRED_JOBS);
   const found = new Set();
   for (const job of jobsResponse.jobs) {
     if (

@@ -58,6 +58,60 @@ test("catalog bootstrap dispatch binds first attempt, actor and distinct protect
   assert.ok(f.calls[1].endsWith("/attempts/1"));
   assert.ok(f.calls[2].endsWith("/approvals"));
 });
+test("catalog bootstrap accepts the exact SHA-named release tag without consulting moving main", async () => {
+  const f = fixture();
+  f.run.head_branch = `catalog-bootstrap-${dispatch.toolingSha}`;
+  const proof = await verifyCatalogBootstrapDispatch(dispatch, "private-token", {
+    actorLogin: "publisher",
+    request: f.request,
+  });
+  assert.equal(proof.reviewerId, "12");
+  assert.equal(f.calls.length, 4);
+  assert.ok(f.calls.every((url) => url.includes("/actions/runs/123")));
+});
+for (const [name, mutate] of [
+  ["tag names another SHA", (f) => (f.run.head_branch = `catalog-bootstrap-${"b".repeat(40)}`)],
+  [
+    "tag has an extra suffix",
+    (f) => (f.run.head_branch = `catalog-bootstrap-${dispatch.toolingSha}-other`),
+  ],
+  ["tag points at another SHA", (f) => (f.run.head_sha = "b".repeat(40))],
+  ["tag has no approval", (f) => f.approvals.splice(0)],
+  ["tag has self approval", (f) => (f.approvals[0].user = actor)],
+  [
+    "tag changes during authorization",
+    (f) => {
+      const request = f.request;
+      f.request = async (url, options) => {
+        if (f.calls.length === 3) f.run.head_branch = "main-unreviewed";
+        return request(url, options);
+      };
+    },
+  ],
+])
+  test(`catalog bootstrap rejects ${name}`, async () => {
+    const f = fixture();
+    f.run.head_branch = `catalog-bootstrap-${dispatch.toolingSha}`;
+    mutate(f);
+    await assert.rejects(
+      verifyCatalogBootstrapDispatch(dispatch, "private-token", {
+        actorLogin: "publisher",
+        request: f.request,
+      }),
+    );
+  });
+test("catalog tag does not authorize a platform upgrade", async () => {
+  const { verifyUpgradeDispatch } = await import("../upgrade-dispatch.mjs");
+  const f = fixture();
+  f.run.path = ".github/workflows/upgrade-platform.yml";
+  f.run.head_branch = `catalog-bootstrap-${dispatch.toolingSha}`;
+  await assert.rejects(
+    verifyUpgradeDispatch(dispatch, "private-token", {
+      actorLogin: "publisher",
+      request: f.request,
+    }),
+  );
+});
 for (const [name, mutate] of [
   ["different run", (f) => f.run.id++],
   ["reused attempt", (f) => f.run.run_attempt++],
@@ -173,6 +227,7 @@ test("catalog physical fencing also requires absence of other active production 
     "upgrade-platform.yml",
     "station-stable-release.yml",
     "handheld-release.yml",
+    "stage-handheld-catalog.yml",
     "release-platform-images.yml",
     "signer-stable-release.yml",
     "station-release-reseed.yml",
@@ -191,7 +246,10 @@ test("writer fence covers every actual release/deployment workflow in the curren
   const { readdir } = await import("node:fs/promises");
   const { assertNoCatalogPeers } = await import("../upgrade-dispatch.mjs");
   const names = (await readdir(new URL("../../../.github/workflows/", import.meta.url))).filter(
-    (name) => /(?:release|deploy|recover|upgrade|signer-download-repair).*\.yml$/u.test(name),
+    (name) =>
+      /(?:release|deploy|recover|upgrade|signer-download-repair|stage-handheld-catalog).*\.yml$/u.test(
+        name,
+      ),
   );
   for (const name of names) {
     const request = async () => ({

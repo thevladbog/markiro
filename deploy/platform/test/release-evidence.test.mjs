@@ -40,9 +40,16 @@ const run = () => ({
   repository: { full_name: "thevladbog/markiro" },
   head_repository: { full_name: "thevladbog/markiro" },
 });
+const requiredJobs = [
+  "production-bundle",
+  "platform-forward-recovery-scenario (healthy)",
+  "platform-forward-recovery-scenario (replacement-failure)",
+  "platform-forward-recovery",
+  "ci-required",
+];
 const jobs = () => ({
-  total_count: 2,
-  jobs: ["production-bundle", "ci-required"].map((name, index) => ({
+  total_count: requiredJobs.length,
+  jobs: requiredJobs.map((name, index) => ({
     id: 1000 + index,
     name,
     run_id: 123,
@@ -115,7 +122,7 @@ test("CI rejects wrong or missing provenance and unsafe GitHub IDs", () => {
 });
 
 test("CI rejects missing, duplicate, skipped, unsuccessful or mixed-attempt required jobs", () => {
-  for (const name of ["production-bundle", "ci-required"]) {
+  for (const name of requiredJobs) {
     for (const patch of [
       { status: "queued" },
       { conclusion: "skipped" },
@@ -148,7 +155,7 @@ test("CI rejects missing, duplicate, skipped, unsuccessful or mixed-attempt requ
 });
 
 test("CI requires a complete nonduplicated job inventory for the selected attempt", () => {
-  for (const total_count of [3, 1, 0, "2", 2.5, undefined])
+  for (const total_count of [6, 4, 0, "5", 4.5, undefined])
     assert.throws(() => validatePlatformCiEvidence(run(), { ...jobs(), total_count }, expectedCi));
   const duplicateId = jobs();
   duplicateId.jobs[1].id = duplicateId.jobs[0].id;
@@ -157,7 +164,7 @@ test("CI requires a complete nonduplicated job inventory for the selected attemp
   mixed.jobs.push({ ...mixed.jobs[0], id: 5000, name: "other", run_attempt: 2 });
   mixed.total_count++;
   assert.throws(() => validatePlatformCiEvidence(run(), mixed, expectedCi));
-  for (const value of [null, [], {}, { total_count: 2, jobs: null }])
+  for (const value of [null, [], {}, { total_count: 5, jobs: null }])
     assert.throws(() => validatePlatformCiEvidence(run(), value, expectedCi));
 });
 

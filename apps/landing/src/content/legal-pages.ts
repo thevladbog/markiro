@@ -36,32 +36,44 @@ const DESCRIPTION_BY_CODE = {
     en: "Use and document-control rules for the compact Markiro branded letterhead.",
   },
   "MKR-INS-01": {
-    ru: "Печатная инструкция оператора станции сканирования: вход по бейджу, выбор или создание смены, начало работы.",
-    en: "Printable scanning-station operator instruction: badge sign-in, shift selection or creation, and starting work.",
+    ru: "Печатная инструкция оператора станции Маркиро Автоном: вход по бейджу или табельному номеру и PIN, выбор смены линии, создание смены на станции и начало работы.",
+    en: "Printable Markiro Autonom station operator instruction: sign-in with a badge or a personnel number and PIN, choosing a shift of the line, creating a shift on the station, and starting work.",
   },
   "MKR-INS-02": {
-    ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, сборка паллет, работа без сети и закрытие смены.",
-    en: "Printable operator instruction: the scanning cycle, station signals, box filling and closing, pallet assembly, offline work, and closing the shift.",
+    ru: "Печатная инструкция оператора Маркиро Автоном: сигналы сканирования, закрытие коробов и паллет, проверка этикетки, работа без связи с хостом, очередь отправки и закрытие смены.",
+    en: "Printable Markiro Autonom operator instruction: scan signals, closing boxes and pallets, the label check, working without the host connection, the send queue, and closing the shift.",
   },
   "MKR-INS-03": {
-    ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба и паллеты, сбой печати, коды, занятые другим терминалом.",
-    en: "Printable operator instruction for exceptions: label reprint, box and pallet disassembly, print recovery, and codes claimed by another terminal.",
+    ru: "Печатная инструкция оператора Маркиро Автоном для нештатных ситуаций: снятие кодов из короба, перепечатка этикетки, расформирование короба и паллеты, сбой печати и повторная печать этикеток.",
+    en: "Printable Markiro Autonom operator instruction for exceptions: removing codes from a box, label reprint, box and pallet disassembly, print failures, and reprinting labels of any shift.",
   },
   "MKR-INS-04": {
-    ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",
-    en: "Printable technician instruction: pairing the station with the cabinet, connecting the scanner and printer, sound, and station updates.",
+    ru: "Печатная инструкция наладчика Маркиро Автоном: подключение станции к хосту в локальной сети по коду из офиса, выбор линии, принтеры, сканеры, звук, обновление и отвязка станции.",
+    en: "Printable Markiro Autonom technician instruction: pairing the station with the host on the local network with a code from the office, choosing the line, printers, scanners, sound, updating and unpairing the station.",
   },
   "MKR-INS-08": {
-    ru: "Печатная инструкция менеджера: производственная линия, станции на линии, планирование смены, режимы, агрегация и запуск.",
-    en: "Printable manager instruction: production lines, stations on a line, shift planning, modes, aggregation, and launch.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: линии и число устройств в смене, станции на линии, планирование смены, агрегация, паллеты и печать дубликата.",
+    en: "Printable Markiro Autonom office instruction: lines and devices per shift, stations on a line, shift planning, aggregation, pallets, and duplicate printing.",
   },
   "MKR-INS-09": {
-    ru: "Печатная инструкция менеджера: наблюдение за производством, закрытие смены из кабинета, данные после закрытия, отчёты для ГИС МТ и разбор их отказов.",
-    en: "Printable manager instruction: production monitoring, closing a shift from the cabinet, late data, GIS MT reports, and resolving their failures.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: обзор производства, карточка смены, закрытие смены в офисе, данные после закрытия, выгрузки для ГИС МТ и 1С.",
+    en: "Printable Markiro Autonom office instruction: the production overview, the shift card, closing a shift in the office, late data, and exports for GIS MT and 1C.",
   },
   "MKR-INS-10": {
-    ru: "Печатная инструкция менеджера: каталог продукции, карточка товара, ГТИН и его владелец, доведение карточки до статуса «Активен», фотография и вывод товара из оборота.",
-    en: "Printable manager instruction: the product catalog, the product card, GTIN ownership, completing a card so it becomes active, the photo, and retiring a product.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: товары, карточка товара, GTIN и его владелец, черновик и «Активен», фото, шаблоны по умолчанию и архив.",
+    en: "Printable Markiro Autonom office instruction: products, the product card, GTIN ownership, draft and active, the photo, default templates, and archiving.",
+  },
+  "MKR-INS-12": {
+    ru: "Печатная инструкция по установке Маркиро Автоном: роли компьютеров, постоянный адрес хоста, служба и порт, мастер первого запуска, лицензия, подключение устройств и обновление.",
+    en: "Printable Markiro Autonom installation instruction: computer roles, the host's permanent address, the service and port, the first-start wizard, the license, pairing devices, and updates.",
+  },
+  "MKR-INS-13": {
+    ru: "Печатная инструкция администратора Маркиро Автоном: автоматические копии хоста, копия по кнопке, вторая папка и Яндекс Диск, восстановление на том же или новом ПК и возобновление приёма данных станций.",
+    en: "Printable Markiro Autonom administrator instruction: the host's automatic copies, a copy on request, the second folder and Yandex Disk, restoring on the same or a new PC, and resuming station data.",
+  },
+  "MKR-INS-14": {
+    ru: "Печатная инструкция склада Маркиро Автоном: привязка ТСД к хосту, вход оператора, принтер, сборка паллеты из коробов, этикетка паллеты и работа без связи.",
+    en: "Printable Markiro Autonom warehouse instruction: pairing the handheld with the host, operator sign-in, the printer, building a pallet from boxes, the pallet label, and offline work.",
   },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 

@@ -106,7 +106,9 @@ async function verifyProtectedDispatch(
       );
       ensure(
         run.head_sha === dispatch.toolingSha &&
-          run.head_branch === "main" &&
+          (run.head_branch === "main" ||
+            (workflowPath === ".github/workflows/bootstrap-release-catalog.yml" &&
+              run.head_branch === `catalog-bootstrap-${dispatch.toolingSha}`)) &&
           run.event === "workflow_dispatch",
       );
       ensure(
@@ -193,7 +195,7 @@ export async function assertNoCatalogPeers(dispatch, token, request = fetch) {
       );
       seen.add(run.id);
       const production =
-        /^\.github\/workflows\/(?:deploy-production|deploy-platform|recover-platform|upgrade-platform|release-images|release-platform-images|station-beta-release|station-stable-release|handheld-release|standalone-release|signer-stable-release|signer-download-repair|station-release-reseed|bootstrap-release-catalog)\.yml$/u.test(
+        /^\.github\/workflows\/(?:deploy-production|deploy-platform|recover-platform|upgrade-platform|release-images|release-platform-images|station-beta-release|station-stable-release|handheld-release|stage-handheld-catalog|standalone-release|signer-stable-release|signer-download-repair|station-release-reseed|bootstrap-release-catalog)\.yml$/u.test(
           run.path,
         );
       ensure(!production || String(run.id) === dispatch.runId);

@@ -112,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(62);
+    expect(sitemap.match(/<url>/g)).toHaveLength(68);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -222,7 +222,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(62);
+    expect(sitemap.match(/<url>/g)).toHaveLength(68);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -359,9 +359,9 @@ describe("SEO generators", () => {
       .sort()
       .at(-1);
 
-    // The small-screen work screen reissue of MKR-INS-01/02/03 made
-    // 2026-09-26 the newest effective date in the registry.
-    expect(newest).toBe("2026-09-26");
+    // The Markiro Autonom reissue of MKR-INS-01 made 2026-10-29 the newest
+    // effective date in the registry.
+    expect(newest).toBe("2026-10-29");
     expect(sitemap).toMatch(
       new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );

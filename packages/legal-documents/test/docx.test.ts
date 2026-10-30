@@ -479,8 +479,8 @@ describe("deterministic branded DOCX", () => {
 describe("instruction rendering", () => {
   const instructionRequest = {
     code: "MKR-INS-01",
-    revision: "2026.09/04",
-    effectiveDate: "2026-09-26",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-29",
     locale: "ru",
     kind: "legal-pdf",
     verificationUrl: legalVerificationUrl(findLegalRelease("MKR-INS-01")),
@@ -529,6 +529,34 @@ describe("instruction rendering", () => {
     expect(documentXml).toContain("Шаг 1.");
     expect(documentXml).toContain("Ожидаемый результат");
     expect(documentXml).toContain("Важно");
+  });
+
+  it("renders a portrait frame at a fixed height and a landscape one at the column width", async () => {
+    const images = instructionImages();
+    const [landscapeId, portraitId] = [...images.keys()];
+    if (landscapeId === undefined || portraitId === undefined) throw new Error("Too few images");
+    // readPngDimensions reads the IHDR width and height at bytes 16-23.
+    const sized = (bytes: Uint8Array, width: number, height: number) => {
+      const copy = bytes.slice();
+      const view = new DataView(copy.buffer);
+      view.setUint32(16, width);
+      view.setUint32(20, height);
+      return copy;
+    };
+    images.set(landscapeId, sized(images.get(landscapeId)!, 1280, 800));
+    images.set(portraitId, sized(images.get(portraitId)!, 720, 1280));
+    const documentXml = xml(
+      docxEntries(await renderLegalDocx(instructionRequest, { images })),
+      "word/document.xml",
+    );
+    const extent = (id: string) =>
+      new RegExp(`<wp:extent cx="(\\d+)" cy="(\\d+)"/>(?:(?!<wp:extent).)*?name="${id}"`, "su")
+        .exec(documentXml)
+        ?.slice(1, 3)
+        .map(Number);
+    // 9525 EMU per pixel: 600 × 375 px for 1280×800, 315 × 560 px for 720×1280.
+    expect(extent(landscapeId)).toEqual([600 * 9525, 375 * 9525]);
+    expect(extent(portraitId)).toEqual([315 * 9525, 560 * 9525]);
   });
 
   it("rejects rendering when a step image is missing", async () => {

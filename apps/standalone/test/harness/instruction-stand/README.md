@@ -41,6 +41,47 @@ the screen it reached is saved beside the frames as `<state>.failed-N.png`.
 `PLAYWRIGHT_CORE` overrides where `playwright-core` is loaded from. The default is
 `tools/production-browser`'s install.
 
+Two environment variables help the office instructions (MKR-INS-08, 09, 10):
+
+- `STAND_HOST_BINARY` points at a host built with the domain's test license keys.
+  The seed then loads a year's license signed by the TEST key of
+  `packages/domain/fixtures/standalone-license`, so office frames carry no
+  trial banner. A release build never trusts that key.
+
+  ```bash
+  cargo build -p markiro-host --features markiro-proto/test-keys \
+    --manifest-path apps/standalone/Cargo.toml --target-dir apps/standalone/target/stand
+  STAND_HOST_BINARY=$PWD/apps/standalone/target/stand/debug/markiro-host node stand.mjs seed
+  ```
+
+- `STAND_ROOT` moves the snapshot and the work directory. With `--host-port` and
+  `--vite-port` it lets two stands run on one machine.
+
+The office states live in `states-office.mjs` (prefixes `ins08/`, `ins09/`, `ins10/`)
+and their extra seed data in `seed-office.mjs`.
+
+The installation and backup states (MKR-INS-12, 13) live in `states-install.mjs`
+(prefixes `ins12/`, `ins13/`). They need a test-keys host and a snapshot that keeps the
+trial period, which `STAND_TRIAL=1` asks of the seed:
+
+```bash
+export STAND_ROOT=/tmp/claude/ins12/stand STAND_TRIAL=1 \
+  STAND_HOST_BINARY=$PWD/apps/standalone/target/stand/debug/markiro-host
+node stand.mjs seed
+node stand.mjs capture install/wizard-admin install/wizard-review ins12/wizard-org …
+```
+
+- `ins12/license-*` choose a license file signed by the test key in «Информация» →
+  «Лицензия», as an administrator would.
+- `ins13/*` load that license through the host API first, so their frames carry no trial
+  banner.
+- `ins13/hold*` stop the host, run `markiro-host restore` of its newest copy under the
+  stand's clock and start it again: the office then holds the stations' data.
+- Two things on these frames are the stand's, not the host's: the host address in
+  «Подключение устройства» is replaced by the fixed `192.168.10.5:45710` (the host lists
+  the Mac's own addresses), and the copies' folder reads
+  `C:\ProgramData\Markiro\Host\backups` (the host names the stand's temporary folder).
+
 ## What the seed builds
 
 The seed works through the product the way a site would. `site.mjs` holds every value
@@ -109,6 +150,9 @@ Add an entry to `STATES` in `states.mjs`:
 },
 ```
 
+The station's states for MKR-INS-01…04 live in `states-station.mjs`, which `states.mjs`
+spreads into `STATES`.
+
 `computer(name, role)` opens a computer of the site whose shell keeps its pairing in the
 snapshot. Use the following:
 
@@ -127,8 +171,11 @@ gets it in the seed (`seed.mjs`, `seedStationWork`). After that, run `seed` agai
   - Native file dialogs, the exports folder and opening files are canned.
 - **Hardware.**
   - There are no USB or COM devices: the scanner and printer lists are empty.
-  - A printer «Пробная печать» always succeeds, and printing never fails.
-  - A failed printer or a lost scanner needs a canned failure added to `shell.mjs`.
+  - A printer «Пробная печать» always succeeds, and printing succeeds unless a state sets
+    `shell.faults.print` to a `PrintError::code` (`not_sent`, `outcome_unknown`).
+  - `shell.faults.noLocalHost` makes a computer a station on its own PC: no host answers
+    on `127.0.0.1`, so the app offers «Подключиться к хосту в сети».
+  - A lost scanner still needs a canned failure added to `shell.mjs`.
 - **Network and host.**
   - The host's own network answers (`/v1/office/host-network`, MAC and addresses) are
     this Mac's.

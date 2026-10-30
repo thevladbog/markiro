@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "releaseId": "MKR-LEGAL-2026.10-28-2026-10-29",
-  "manifestSha256": "efdcfb886cd1c7b8027e27d978e73735bf3248b9a22e3f488b6fe7437c60b202",
+  "releaseId": "MKR-LEGAL-2026.10-38-2026-10-29",
+  "manifestSha256": "a2e78e269944b2e117cd90836c38ac22f1534fbf6b6529c878b20fa85e7dee94",
   "pdfs": [
     {
       "fileName": "markiro_mkr-brd-01_2026.08-01_en.pdf",
@@ -20,60 +20,84 @@
       "sha256": "b0c7ef9072e4c0c01bad13a11431303206ad41c710543a3faccd5da1b0cca372"
     },
     {
-      "fileName": "markiro_mkr-ins-01_2026.09-04_en.pdf",
-      "sha256": "aefc4246bf13a84f734ea00c8d3eb3c735b9da939dabc4045ab3c232bd0b40a3"
+      "fileName": "markiro_mkr-ins-01_2026.10-01_en.pdf",
+      "sha256": "94382f4088b395841ecfbec427fcd5bacdc0b1ade1f1f99dc528e57720edd3aa"
     },
     {
-      "fileName": "markiro_mkr-ins-01_2026.09-04_ru.pdf",
-      "sha256": "cbc23f01cdb51bd58d8917acaa9d037d6f23f644773a6eb2c0e9f6999424cac7"
+      "fileName": "markiro_mkr-ins-01_2026.10-01_ru.pdf",
+      "sha256": "8c5da5bcaa7503e57ce252313efa5e0c5a49ae92d562eedb7f3793d550954282"
     },
     {
-      "fileName": "markiro_mkr-ins-02_2026.09-03_en.pdf",
-      "sha256": "2afc66eb0dda3a6a4802e277c9bcb03dd5d99e960248e825978471841a828671"
+      "fileName": "markiro_mkr-ins-02_2026.10-01_en.pdf",
+      "sha256": "03e1139982dcd43345399cd78e219e00a316076d42697453e83f22ebbf308fce"
     },
     {
-      "fileName": "markiro_mkr-ins-02_2026.09-03_ru.pdf",
-      "sha256": "5a0a670a7fcd3322e4fd46a9cd5bbd0b42f53eb14c9b41e29ef23f9495fa5f52"
+      "fileName": "markiro_mkr-ins-02_2026.10-01_ru.pdf",
+      "sha256": "093f3dae72a65000fed81b6bfcbbef00ad37426699f3dfac74d16c32d1f66c8b"
     },
     {
-      "fileName": "markiro_mkr-ins-03_2026.09-04_en.pdf",
-      "sha256": "e95197693516e912b226d4e5b7787cf90cf33cc73caf230569fec8a5691d8367"
+      "fileName": "markiro_mkr-ins-03_2026.10-01_en.pdf",
+      "sha256": "d378d3d55166944cb177ec977948092cf401de90ebdec5ea9e4074d659696834"
     },
     {
-      "fileName": "markiro_mkr-ins-03_2026.09-04_ru.pdf",
-      "sha256": "71455d179b077e8849e148eb985d05d971c8e3cc2d9a7d36623b2c7f28493455"
+      "fileName": "markiro_mkr-ins-03_2026.10-01_ru.pdf",
+      "sha256": "1bce3a13929138090d0c8b8ce70443b73030bbf6116c2983f68268c5c90b07db"
     },
     {
-      "fileName": "markiro_mkr-ins-04_2026.09-01_en.pdf",
-      "sha256": "c660c54e1dd6ee441dbce5efc6fe7a50e43763b8ed2d770bf2727652b4876436"
+      "fileName": "markiro_mkr-ins-04_2026.10-01_en.pdf",
+      "sha256": "1dc16751aef5ef2f88f27c3b88ad9ce99277b899626f5a107d267a102a68509c"
     },
     {
-      "fileName": "markiro_mkr-ins-04_2026.09-01_ru.pdf",
-      "sha256": "41922d814b60d820a268d026285e0efa812537521e246ede6ff764bb3f1b2542"
+      "fileName": "markiro_mkr-ins-04_2026.10-01_ru.pdf",
+      "sha256": "8a5e49dd1535f91b4ca906fe8b7189decad2e7b95017e130f98f92913101405f"
     },
     {
-      "fileName": "markiro_mkr-ins-08_2026.09-02_en.pdf",
-      "sha256": "ade3728381f7ace8b33d5205a45052b50cea0cb4faa4e2a54229dd5be5a22a6b"
+      "fileName": "markiro_mkr-ins-08_2026.10-01_en.pdf",
+      "sha256": "398087e8385f9266ad70f1048f8466a3f4003e9211a8b69f1130b20c9dec9be6"
     },
     {
-      "fileName": "markiro_mkr-ins-08_2026.09-02_ru.pdf",
-      "sha256": "c31036c751b1a51fde75a186057d11d4a28f5c57c306ee824705bcf64ead4cf1"
+      "fileName": "markiro_mkr-ins-08_2026.10-01_ru.pdf",
+      "sha256": "cea614cff4fdd0464c9c5e087e0c2708c906325828bfa482fca872230a74a17c"
     },
     {
-      "fileName": "markiro_mkr-ins-09_2026.09-04_en.pdf",
-      "sha256": "f5fa49fd05303155c72df6c2be1a09de20da7c3c4937051d768bc52d8c0fcbc6"
+      "fileName": "markiro_mkr-ins-09_2026.10-01_en.pdf",
+      "sha256": "99d3becae7d71b38c36c2f1093a48052b615e4f83c018c96b3908e7e76e6653c"
     },
     {
-      "fileName": "markiro_mkr-ins-09_2026.09-04_ru.pdf",
-      "sha256": "e161c78feb4d7b588b4c2064326e65ce0a58bd1e333ce062ddc686914e3aaa83"
+      "fileName": "markiro_mkr-ins-09_2026.10-01_ru.pdf",
+      "sha256": "269d38c635725922402a122f4791a9ec4e8b312976ea9522d0967cbda246fb66"
     },
     {
-      "fileName": "markiro_mkr-ins-10_2026.09-02_en.pdf",
-      "sha256": "c94eb18dad5af60a6a8b0143ddc966f8b3daff4a6dcf96c8c06b008d94b5350b"
+      "fileName": "markiro_mkr-ins-10_2026.10-01_en.pdf",
+      "sha256": "5d40d576a39174fbe25b814977eed31861d2f4edf1edf01ee6cad5847e33efe2"
     },
     {
-      "fileName": "markiro_mkr-ins-10_2026.09-02_ru.pdf",
-      "sha256": "06593ab6666c717d32703ff10379d307f93ef0b9ad5d291792c6c2c99735b520"
+      "fileName": "markiro_mkr-ins-10_2026.10-01_ru.pdf",
+      "sha256": "87ac6c8bc8108a41dc90fb665318aa389c9eb477552e7dbb8935a649d1009549"
+    },
+    {
+      "fileName": "markiro_mkr-ins-12_2026.10-01_en.pdf",
+      "sha256": "d6b397cf5dfb9e87fd2b4913b247c55df6fea3cc16f8c7cdca37b1b04252c1ba"
+    },
+    {
+      "fileName": "markiro_mkr-ins-12_2026.10-01_ru.pdf",
+      "sha256": "93eb0fe131edfbd841cd3bf537a46d7bfb4cba5b31777b2236df52326dfc99f9"
+    },
+    {
+      "fileName": "markiro_mkr-ins-13_2026.10-01_en.pdf",
+      "sha256": "8d7214bc0a68ac700291884491daf27e470e96dbf34a90fd6c871dff4abf2d8a"
+    },
+    {
+      "fileName": "markiro_mkr-ins-13_2026.10-01_ru.pdf",
+      "sha256": "2a20b2acb89d1bdfe6b74f29076849949cec362fc943c2061a0f52875e149a91"
+    },
+    {
+      "fileName": "markiro_mkr-ins-14_2026.10-01_en.pdf",
+      "sha256": "d45d9f898dd6b6fedccc23aa7dff86ffd2075248a4aeab02d134025e5b809f0a"
+    },
+    {
+      "fileName": "markiro_mkr-ins-14_2026.10-01_ru.pdf",
+      "sha256": "5072a522f527c95792d55f0c5abcfe9125cb98a6c28a877a6437972a565590d7"
     },
     {
       "fileName": "markiro_mkr-pd-01_2026.08-01_en.pdf",

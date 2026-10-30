@@ -140,6 +140,8 @@ export class StandShell {
     this.lastContactAt = null;
     this.stream = null;
     this.printed = [];
+    /** Canned hardware failures a state turns on (see `print_bytes`). */
+    this.faults = {};
   }
 
   status() {
@@ -239,9 +241,14 @@ export class StandShell {
         }
       });
     });
-    request.on("error", () => {
+    // A host that stops ends the stream: the shell's link goes offline, as `connection.rs` reports it.
+    const lost = () => {
+      if (this.stream !== request) return;
       this.stream = null;
-    });
+      this.publishStatus();
+    };
+    request.on("error", lost);
+    request.on("close", lost);
     request.end();
   }
 
@@ -266,6 +273,11 @@ export class StandShell {
         this.openStream();
         return this.linkStatus();
       case "host_hello": {
+        // A station on its own PC (`shell.faults.noLocalHost`): no host on this computer, so
+        // the app offers to pair over the network; any other address reaches the stand's host.
+        if (this.faults.noLocalHost && /127\.0\.0\.1|localhost/.test(String(args.address))) {
+          throw "unreachable";
+        }
         const answer = await hostCall(this.connect, { method: "GET", path: "/v1/hello" });
         return { hello: answer.body, fingerprint: answer.fingerprint };
       }
@@ -360,6 +372,9 @@ export class StandShell {
       case "supports_windows_printing":
         return false;
       case "print_bytes":
+        // A state may make the printer fail the way `PrintError::code` names it
+        // (`not_sent`, `outcome_unknown`): `shell.faults.print = "not_sent"`.
+        if (this.faults.print) throw this.faults.print;
         this.printed.push(args);
         return null;
       // The window and the power: a development build's answers.
@@ -370,14 +385,21 @@ export class StandShell {
       case "set_system_awake":
         return null;
       // Office files.
+      // The folder is `APP_FOLDER` («Markiro») under the documents (src-tauri/src/office_files.rs).
       case "get_exports_folder":
-        return { path: null, default: "C:\\Users\\Office\\Documents\\Маркиро\\Выгрузки" };
+        return { path: null, default: "C:\\Users\\Office\\Documents\\Markiro\\Выгрузки" };
       case "set_exports_folder":
         return {
           path: args.path ?? null,
-          default: "C:\\Users\\Office\\Documents\\Маркиро\\Выгрузки",
+          default: "C:\\Users\\Office\\Documents\\Markiro\\Выгрузки",
         };
+      // Saved as `SavedFolder` says, nothing written: the office reports the folder and names.
       case "save_office_files":
+        return {
+          segments: args.segments,
+          path: ["C:\\Users\\Office\\Documents\\Markiro", ...args.segments].join("\\"),
+          files: args.files.map((file) => file.name),
+        };
       case "open_office_folder":
       case "open_office_file":
       case "open_external_link":

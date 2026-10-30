@@ -136,3 +136,12 @@ test("all third-party actions in active production workflows are commit pinned",
     }
   }
 });
+
+test("new main pushes queue instead of cancelling an executor CI; PR updates still cancel stale checks", async () => {
+  const workflow = await parse(".github/workflows/ci.yml");
+  assert.equal(workflow.concurrency.group, "ci-${{ github.ref }}");
+  assert.equal(
+    workflow.concurrency["cancel-in-progress"],
+    "${{ github.event_name == 'pull_request' }}",
+  );
+});

@@ -13,27 +13,33 @@ import {
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
-const releaseId = "MKR-LEGAL-2026.10-28-2026-10-29";
-const manifestSha256 = "efdcfb886cd1c7b8027e27d978e73735bf3248b9a22e3f488b6fe7437c60b202";
+const releaseId = "MKR-LEGAL-2026.10-38-2026-10-29";
+const manifestSha256 = "a2e78e269944b2e117cd90836c38ac22f1534fbf6b6529c878b20fa85e7dee94";
 const releasedPdfNames = [
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
   "markiro_mkr-dpa-01_2026.08-01_en.pdf",
   "markiro_mkr-dpa-01_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-01_2026.09-04_en.pdf",
-  "markiro_mkr-ins-01_2026.09-04_ru.pdf",
-  "markiro_mkr-ins-02_2026.09-03_en.pdf",
-  "markiro_mkr-ins-02_2026.09-03_ru.pdf",
-  "markiro_mkr-ins-03_2026.09-04_en.pdf",
-  "markiro_mkr-ins-03_2026.09-04_ru.pdf",
-  "markiro_mkr-ins-04_2026.09-01_en.pdf",
-  "markiro_mkr-ins-04_2026.09-01_ru.pdf",
-  "markiro_mkr-ins-08_2026.09-02_en.pdf",
-  "markiro_mkr-ins-08_2026.09-02_ru.pdf",
-  "markiro_mkr-ins-09_2026.09-04_en.pdf",
-  "markiro_mkr-ins-09_2026.09-04_ru.pdf",
-  "markiro_mkr-ins-10_2026.09-02_en.pdf",
-  "markiro_mkr-ins-10_2026.09-02_ru.pdf",
+  "markiro_mkr-ins-01_2026.10-01_en.pdf",
+  "markiro_mkr-ins-01_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-02_2026.10-01_en.pdf",
+  "markiro_mkr-ins-02_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-03_2026.10-01_en.pdf",
+  "markiro_mkr-ins-03_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-04_2026.10-01_en.pdf",
+  "markiro_mkr-ins-04_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-08_2026.10-01_en.pdf",
+  "markiro_mkr-ins-08_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-09_2026.10-01_en.pdf",
+  "markiro_mkr-ins-09_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-10_2026.10-01_en.pdf",
+  "markiro_mkr-ins-10_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-12_2026.10-01_en.pdf",
+  "markiro_mkr-ins-12_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-13_2026.10-01_en.pdf",
+  "markiro_mkr-ins-13_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-14_2026.10-01_en.pdf",
+  "markiro_mkr-ins-14_2026.10-01_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",
   "markiro_mkr-pd-01_2026.08-01_ru.pdf",
   "markiro_mkr-pd-02_2026.08-01_en.pdf",
@@ -111,12 +117,12 @@ test("committed attestation independently binds the exact released PDF set", asy
     releasedPdfNames,
   );
   assert.equal(spy.calls.length, 1);
-  assert.equal(pdfaSpy.calls.length, 22);
+  assert.equal(pdfaSpy.calls.length, 28);
   assert.deepEqual(
     pdfaSpy.calls.map((pdfPath) => path.basename(pdfPath)),
     releasedPdfNames.map((_fileName, index) => `document-${index}.pdf`),
   );
-  assert.equal(spy.calls[0].pdfaValidatedFiles.size, 22);
+  assert.equal(spy.calls[0].pdfaValidatedFiles.size, 28);
   assert.deepEqual(
     [...spy.calls[0].pdfaValidatedFiles].sort(),
     (await readJson(work.attestationPath)).pdfs.map(({ fileName }) => fileName).sort(),

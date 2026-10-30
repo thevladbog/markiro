@@ -41,7 +41,7 @@ async function waitFor(check, what, timeoutMs = 60_000) {
 
 /** `markiro-host run` over `dataDir`; resolves once `hello` answers. */
 /** `stand-clock.c` built once into the stand's cache. */
-function clockLibrary(cacheDir) {
+export function clockLibrary(cacheDir) {
   const library = path.join(cacheDir, "stand-clock.dylib");
   if (!existsSync(library)) {
     mkdirSync(cacheDir, { recursive: true });
@@ -91,7 +91,10 @@ export async function startHost({
     stop: async () => {
       child.kill("SIGTERM");
       await new Promise((resolve) =>
-        child.exitCode === null ? child.once("exit", resolve) : resolve(),
+        // A host a state already stopped has exited by its signal (`exitCode` stays null).
+        child.exitCode === null && child.signalCode === null
+          ? child.once("exit", resolve)
+          : resolve(),
       );
     },
   };

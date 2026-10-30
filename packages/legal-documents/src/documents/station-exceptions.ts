@@ -3,9 +3,9 @@ import type { LegalDocumentSource } from "../types.js";
 export const STATION_EXCEPTIONS_CONTENT = {
   ru: {
     locale: "ru",
-    title: "Станция сканирования: исключения и восстановление",
+    title: "Станция: исключения и восстановление",
     summary:
-      "Пошаговая инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба, перепечатка и расформирование паллеты, сбой печати, коды, занятые другим терминалом.",
+      "Пошаговая инструкция оператора Маркиро Автоном для нештатных ситуаций: снятие кодов из короба, перепечатка этикетки, расформирование короба и паллеты, сбой печати и повторная печать этикеток любых смен.",
     sections: [
       {
         id: "purpose",
@@ -13,228 +13,192 @@ export const STATION_EXCEPTIONS_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Инструкция описывает действия оператора в нештатных ситуациях: испорченная или потерянная этикетка короба, короб собран с ошибкой, паллету нужно перепечатать или расформировать, принтер не напечатал этикетку, станция показывает коды, занятые другим терминалом. Вход на станцию описан в инструкции MKR-INS-01, штатный рабочий цикл — в MKR-INS-02.",
+            text: "Инструкция описывает, что делать оператору станции Маркиро Автоном, когда работа идёт не по плану: в короб попал лишний код, этикетка испорчена, короб или паллету нужно расформировать, принтер не напечатал этикетку, этикетку нужно напечатать снова для уже закрытой смены. Обычный рабочий цикл описан в MKR-INS-02.",
           },
           {
             kind: "callout",
             tone: "info",
-            text: "Снимки экранов сделаны на демонстрационных данных. Номера коробов и продукты на вашей станции будут отличаться.",
+            text: "Снимки экранов сделаны на демонстрационных данных. Номера SSCC, смены и товары на вашей станции будут другими.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Каждое исключение записывается с вашим именем и причиной и уходит на хост. Расформирование нельзя отменить: перед подтверждением проверьте номер короба или паллеты.",
           },
         ],
       },
       {
-        id: "exceptions-screen",
+        id: "menu",
         heading: "2. Экран «Исключения»",
         blocks: [
           {
             kind: "step",
-            title: "Откройте экран «Исключения»",
-            text: "Нажмите кнопку «Исключения» на рабочем экране. Станция покажет действия с коробами: для открытого короба — «Отменить последний скан» и «Очистить короб», для закрытых коробов этой смены — «Перепечатать этикетку» и «Расформировать короб»; недоступное сейчас действие неактивно. Кнопка «Назад» возвращает на шаг назад, а с первого экрана — к сканированию; после выполненного действия станция предложит «Вернуться к работе». В смене с паллетами здесь же есть кнопка «Действия с паллетой» (раздел 5).",
-            image: { id: "exception-action", caption: "Экран «Исключения»: выбор действия" },
+            title: "Откройте «Исключения»",
+            text: "На рабочем экране нажмите «Исключения». Станция спросит «Что нужно сделать?» и предложит действия: «Снять последний код», «Очистить короб», «Перепечатать этикетку», «Расформировать короб», «Перепечатать этикетку паллеты» и «Расформировать паллету». Недоступные сейчас действия серые: например, действий с паллетами нет, пока в смене нет закрытых паллет. «Назад» возвращает к работе.",
+            image: { id: "exceptions", caption: "Исключения: что нужно сделать" },
           },
         ],
       },
       {
-        id: "reprint",
-        heading: "3. Перепечатка этикетки короба",
+        id: "open-box",
+        heading: "3. Открытый короб",
         blocks: [
           {
             kind: "paragraph",
-            text: "Перепечатывайте этикетку, если она повреждена, не читается сканером, испорчена принтером или её запросил контроль качества. Содержимое короба и его номер SSCC не меняются — печатается та же этикетка.",
+            text: "«Снять последний код» убирает из открытого короба последний принятый код — станция пишет «Последний код снят из короба.». Если сняли по ошибке, отсканируйте этот код снова. Кнопка «Снять последний» на рабочем экране делает то же самое.",
           },
           {
             kind: "step",
-            title: "Укажите короб",
-            text: "Выберите «Перепечатать этикетку». Станция попросит указать закрытый короб: отсканируйте его этикетку или выберите короб из списка (номер SSCC и число позиций).",
+            title: "Очистите короб, если его нужно собрать заново",
+            text: "«Очистить короб» на рабочем экране или в «Исключениях» спрашивает «Очистить короб?»: из открытого короба уйдут все коды, их можно будет отсканировать снова. Нажмите «Очистить короб» для подтверждения или «Назад».",
+            image: { id: "exception-clear", caption: "Подтверждение очистки открытого короба" },
+          },
+        ],
+      },
+      {
+        id: "closed-box",
+        heading: "4. Закрытый короб: перепечатка и расформирование",
+        blocks: [
+          {
+            kind: "step",
+            title: "Выберите короб",
+            text: "Нажмите «Перепечатать этикетку» или «Расформировать короб». Отсканируйте этикетку короба или наберите на клавиатуре последние цифры его SSCC; пока цифры не набраны, справа показаны последние закрытые короба смены. Нажмите нужный короб.",
             image: {
               id: "exception-target",
-              caption: "Выбор закрытого короба: сканом этикетки или из списка",
+              caption: "Выбор короба по SSCC: последние закрытые короба",
             },
-            expected: "Станция показала справочник причин.",
           },
           {
             kind: "step",
-            title: "Выберите причину и подтвердите",
-            text: "Укажите причину из списка: «Этикетка повреждена», «Этикетка не читается», «Замятие принтера / нет печати», «Запрос контроля качества» или «Другая причина». Затем подтвердите действие кнопкой «Подтвердить перепечатку».",
-            image: { id: "exception-reason", caption: "Справочник причин перепечатки" },
-            expected: "Принтер напечатал этикетку, станция показала «Действие выполнено».",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Старую этикетку снимите и уничтожьте. На коробе должна остаться ровно одна этикетка — два одинаковых SSCC в обороте недопустимы.",
-          },
-        ],
-      },
-      {
-        id: "disassemble",
-        heading: "4. Расформирование короба",
-        blocks: [
-          {
-            kind: "paragraph",
-            text: "Расформируйте короб, если он собран с ошибкой: неверный товар, неверное количество, повреждена упаковка или короб отклонён контролем качества. Причину вы выберете из справочника на экране; для нетипового случая есть «Другая причина».",
+            title: "Укажите причину",
+            text: "Для перепечатки — «Этикетка повреждена», «Этикетка не читается», «Замятие в принтере», «Требование контроля качества» или «Другая причина». Для расформирования — «Не тот товар», «Неверное количество», «Повреждена упаковка», «Брак по качеству» или «Другая причина». После «Другая причина» станция предложит описать причину своими словами — это необязательно.",
+            image: { id: "exception-reason", caption: "Причина перепечатки этикетки короба" },
           },
           {
             kind: "step",
-            title: "Выберите короб и причину",
-            text: "На экране «Исключения» выберите «Расформировать короб», укажите закрытый короб (сканом этикетки или из списка) и причину.",
-            expected: "Станция показала экран подтверждения.",
+            title: "Подтвердите действие",
+            text: "Станция покажет, что произойдёт. Перепечатка: новая этикетка будет с тем же SSCC — на коробе должна остаться одна. Расформирование: SSCC короба больше не будет использован, коды короба снова станут свободны, отменить это нельзя — снимите этикетку с короба. Нажмите «Перепечатать» или «Расформировать», либо «Назад».",
+            image: { id: "exception-confirm", caption: "Подтверждение расформирования короба" },
           },
           {
             kind: "step",
-            title: "Подтвердите необратимое действие",
-            text: "Станция спросит: «Расформировать короб безвозвратно?» — номер SSCC короба будет аннулирован, и его нельзя будет использовать повторно. Проверьте, что выбран нужный короб, и нажмите «Расформировать безвозвратно».",
-            image: { id: "exception-confirm", caption: "Двойное подтверждение расформирования" },
-            expected: "Станция показала «Действие выполнено», короб пропал из списка закрытых.",
-          },
-          {
-            kind: "step",
-            title: "Переупакуйте единицы",
-            text: "Единицы из расформированного короба остаются проверенными — заново отсканируйте их в новый короб обычным рабочим циклом. Новый короб получит новый номер SSCC; этикетку расформированного короба уничтожьте.",
-            image: { id: "exception-result", caption: "Результат действия" },
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Аннулированный SSCC нельзя использовать повторно, а расформирование нельзя отменить. Если короб расформирован по ошибке — сообщите мастеру и соберите содержимое в новый короб.",
+            title: "Проверьте результат",
+            text: "Станция сообщит результат, например «Этикетка отправлена на принтер.». «Вернуться к работе» возвращает к рабочему экрану, «Другое действие» — к списку исключений.",
+            image: {
+              id: "exception-result",
+              caption: "Исключение выполнено: этикетка отправлена на принтер",
+            },
+            expected: "Исключение записано; коды расформированного короба можно сканировать снова.",
           },
         ],
       },
       {
         id: "pallets",
-        heading: "5. Исключения с паллетами",
+        heading: "5. Паллеты",
         blocks: [
           {
-            kind: "paragraph",
-            text: "В смене с паллетами на экране «Исключения» под действиями с коробами есть кнопка «Действия с паллетой». Она открывает действия над закрытыми паллетами этой станции в текущей смене: «Перепечатать паллету» и «Расформировать паллету». Если закрытых паллет нет, станция сообщит «Сейчас нет закрытых паллет.», и обе кнопки будут неактивны. Кнопка «Назад» возвращает на шаг назад, а с первого экрана — к сканированию.",
-          },
-          {
             kind: "step",
-            title: "Перепечатайте этикетку паллеты",
-            text: "Выберите «Перепечатать паллету». Если закрытых паллет несколько, выберите нужную в списке «Выберите закрытую паллету» — там указаны номер SSCC и число коробов. Укажите причину — «Этикетка повреждена», «Этикетка не читается», «Замятие принтера / нет печати», «Запрос контроля качества» или «Другая причина» — и нажмите «Подтвердить». Станция напечатает ту же этикетку с тем же SSCC.",
-            expected: "Станция показала «Действие выполнено», принтер напечатал этикетку паллеты.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Убедитесь, что этикетка вышла: если принтер её не напечатал, повторите перепечатку. Старую этикетку паллеты снимите и уничтожьте — на паллете должна остаться одна.",
-          },
-          {
-            kind: "step",
-            title: "Расформируйте паллету",
-            text: "Выберите «Расформировать паллету», паллету и причину — «Поддон повреждён», «Не те короба на паллете», «Отклонено контролем качества» или «Другая причина» — и нажмите «Подтвердить». Станция спросит «Расформировать паллету безвозвратно?»: номер SSCC паллеты будет аннулирован, и его нельзя будет использовать повторно. Проверьте номер и нажмите «Расформировать безвозвратно».",
-            image: { id: "pallet-exceptions", caption: "Расформирование паллеты: выбор причины" },
-            expected: "Станция показала «Действие выполнено», паллета пропала из списка закрытых.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Расформирование нельзя отменить. Короба с расформированной паллеты остаются закрытыми и учтёнными; этикетку паллеты снимите и уничтожьте, а как дальше собирать эти короба, решает мастер.",
+            title: "Перепечатка и расформирование паллеты",
+            text: "«Перепечатать этикетку паллеты» и «Расформировать паллету» работают так же, как с коробом: отсканируйте этикетку паллеты или наберите последние цифры её SSCC, выберите паллету, укажите причину и подтвердите. При расформировании SSCC паллеты больше не используется, а её короба остаются закрытыми, со своими кодами. Снимите с паллеты её этикетку.",
+            image: { id: "pallet-exceptions", caption: "Выбор паллеты для расформирования" },
           },
         ],
       },
       {
-        id: "box-print-recovery",
-        heading: "6. Сбой печати при закрытии короба",
+        id: "print-failure",
+        heading: "6. Сбой печати",
         blocks: [
           {
             kind: "step",
-            title: "Экран «Этикетка короба не напечатана»",
-            text: "Если при закрытии короба принтер не сработал, станция показывает экран восстановления с причиной: проблема печати, для смены не выбран шаблон этикетки или этикетку не удалось подготовить. Устраните причину (проверьте ленту и замятие принтера) и нажмите «Повторить печать».",
+            title: "Этикетка не напечатана",
+            text: "Если принтер не принял задание, станция показывает «Этикетка короба не напечатана», а в шапке — «Принтер: ошибка». Работа на станции остановлена, пока вы не решите, что делать с этикеткой. Проверьте принтер — питание, бумагу, кабель или сеть — и нажмите «Напечатать снова». «Другой принтер» отправляет этикетку на другой принтер рабочего места, «Настроить принтер» открывает настройку принтеров (MKR-INS-04).",
             image: {
-              id: "box-print-failed",
-              caption: "Восстановление печати этикетки короба",
-            },
-            expected: "Принтер напечатал этикетку, работа продолжилась.",
-          },
-          {
-            kind: "step",
-            title: "Крайний случай — «Продолжить без этикетки»",
-            text: "Если печать сейчас невозможна, нажмите «Продолжить без этикетки» и подтвердите. Короб уже закрыт и учтён — его нужно будет промаркировать этикеткой позже через перепечатку (раздел 3). Пометьте такой короб, чтобы не потерять его.",
-          },
-          {
-            kind: "step",
-            title: "Если сверка не проходит",
-            text: "При сверке напечатанной этикетки сканируйте именно код SSCC с этикетки этого короба. «Это другая этикетка» — в руках этикетка от другого короба: найдите правильную или нажмите «Печатать заново». «Это не групповой код» — отсканирован код маркировки единицы, а не этикетка короба.",
-            image: {
-              id: "print-mismatch",
-              caption: "Сверка печати: в руках этикетка другого короба",
+              id: "print-failed",
+              caption: "Этикетка короба не напечатана: принтер не принял задание",
             },
           },
+          {
+            kind: "step",
+            title: "Неизвестно, напечаталась ли этикетка",
+            text: "Если связь с принтером оборвалась посреди передачи, станция не знает, вышла ли этикетка, и показывает «Неизвестно, напечаталась ли этикетка». Посмотрите на принтер. Если этикетка вышла, нажмите «Этикетка напечаталась»; если нет — «Напечатать снова». Не печатайте вторую этикетку, если первая вышла: на коробе должна быть одна.",
+            image: { id: "print-unknown", caption: "Станция просит проверить, вышла ли этикетка" },
+          },
+          {
+            kind: "paragraph",
+            text: "«Продолжить без этикетки» продолжает работу, когда принтер починить сразу нельзя. Станция переспросит «Продолжить без этикетки?»: короб уже закрыт, и его нужно будет промаркировать позже — напечатать этикетку снова можно в «Исключениях». Для паллеты всё так же.",
+          },
         ],
       },
       {
-        id: "conflicts",
-        heading: "7. Коды, занятые другим терминалом",
+        id: "reprint",
+        heading: "7. Повторная печать этикеток",
         blocks: [
           {
             kind: "paragraph",
-            text: "Если один и тот же код прошёл через две станции, код закрепляется за терминалом, отсканировавшим его раньше. На проигравшей станции такой код попадает в список расхождений, а счётчик «Конфликты» в строке состояния растёт. Это не авария и не ошибка оператора. Не путайте его со счётчиком «Дубли» в журнале смены: тот считает повторные сканы, которые отклонила сама станция.",
+            text: "Если этикетку нужно напечатать снова для короба, паллеты или единицы продукции из любой смены и с любой станции — например, на складе, — используйте «Повторная печать этикеток» на экране «Смены линии». Перепечатка не создаёт новых кодов, коробов и паллет и не меняет количество продукции. Искать коды можно только при связи с хостом.",
           },
           {
             kind: "step",
-            title: "Посмотрите список расхождений",
-            text: "Список открывает кнопка «Конфликты кодов» на экране выбора смены — туда станция возвращается после «Пауза» или закрытия смены. Для каждой позиции указано, за каким терминалом закреплён код и когда: «Закреплён за … в …».",
-            image: { id: "conflicts", caption: "Список кодов, занятых другим терминалом" },
+            title: "Подготовьте сеанс перепечатки",
+            text: "Выберите причину перепечатки: «Не напечаталась», «Повреждена» или «Утеряна» — она действует на все этикетки сеанса. При необходимости включите «Проверка распечатки повторным сканированием». В блоке «Что и на чём печатаем» проверьте шаблоны и принтеры для коробов, паллет, кодов единиц и листов А4; «Изменить» меняет их. Нажмите «Начать перепечатку».",
+            image: {
+              id: "reprint-setup",
+              caption: "Повторная печать этикеток: причина и что на чём печатается",
+            },
           },
           {
-            kind: "callout",
-            tone: "info",
-            text: "Не сканируйте такие коды повторно. Продолжайте работу — расхождение проверит менеджер в кабинете.",
+            kind: "step",
+            title: "Отсканируйте этикетку",
+            text: "Отсканируйте код единицы, короба или паллеты — или нажмите «Ввести код вручную». Станция найдёт код на хосте, покажет, что это за короб или паллета, и отправит одну новую этикетку на принтер: «Этикетка передана на принтер». «Следующий код» — к следующей этикетке, «Напечатать ещё раз» — ещё одна этикетка того же кода с новой причиной.",
+            image: { id: "reprint-session", caption: "Найден короб, этикетка передана на принтер" },
+          },
+          {
+            kind: "paragraph",
+            text: "Закончив, нажмите «Завершить сеанс» и подтвердите: записи сеанса уйдут на хост. «К сменам» возвращает к списку смен, не завершая сеанс, — его можно продолжить позже.",
           },
         ],
       },
       {
-        id: "hardware",
-        heading: "8. Оборудование посреди смены",
+        id: "queue",
+        heading: "8. Записи, не принятые хостом",
         blocks: [
           {
-            kind: "unordered-list",
-            items: [
-              "Сканер показывает «Нет связи» — остановите работу, проверьте кабель сканера. Если связь не вернулась, позовите наладчика.",
-              "«Часть сканеров недоступна» — на рабочем месте несколько сканеров, и один из них отключился. Продолжайте работу подключённым сканером и проверьте кабель второго; если связь не вернулась, позовите наладчика.",
-              "«Клавиатурный» у сканера — станция принимает сканы как ввод с клавиатуры, так работают сканеры в режиме клавиатуры. Это не ошибка; если сканы при этом не доходят до станции, позовите наладчика.",
-              "Принтер не печатает — станция сама покажет экран восстановления при закрытии короба (раздел 6). Проверьте ленту, питание и кабель принтера.",
-              "Индикатор «Принтер» в строке состояния показывает, на сколько из трёх видов этикеток (короб, дубль кода, паллета) назначен принтер, например 2 / 3. Меньше трёх — нормально, если смена эти этикетки не печатает. Если нужной этикетке принтер не назначен, при печати станция покажет «Принтер не настроен» — позовите наладчика.",
-            ],
-          },
-          {
             kind: "paragraph",
-            text: "Подключение и настройка оборудования — задача наладчика и описаны в отдельной инструкции по настройке рабочего места.",
+            text: "Если хост отклонил запись станции или она конфликтует с записью другой станции, это видно в «Синхронизация» и на экране «Очередь отправки» (MKR-INS-02) в разделах «Не приняты хостом», «Конфликты» и «Вытесненные коды». Сами такие записи не исчезнут: сообщите администратору.",
           },
         ],
       },
       {
         id: "troubleshooting",
-        heading: "9. Частые вопросы",
+        heading: "9. Частые проблемы",
         blocks: [
           {
             kind: "definition-list",
             items: [
               {
-                term: "После перепечатки на руках две этикетки",
+                term: "Короба нет в списке",
                 detail:
-                  "На коробе остаётся новая, старую уничтожьте. Обе несут один SSCC — в обороте должна быть одна.",
+                  "В списке — только закрытые короба текущей смены. Наберите больше цифр SSCC или отсканируйте этикетку. Короб из другой смены перепечатывают через «Повторная печать этикеток».",
               },
               {
-                term: "Расформировал не тот короб",
+                term: "Исключение не выполнено",
                 detail:
-                  "Отменить нельзя. Сообщите мастеру, соберите содержимое в новый короб обычным циклом — станция выдаст новый SSCC.",
+                  "Станция объясняет причину: например, этикетка короба ещё ждёт решения на рабочем экране или короб изменился, пока вы выбирали. Решите этикетку и повторите.",
               },
               {
-                term: "Короб не находится сканом на экране выбора",
+                term: "Перепечатать нельзя, шаблон обновили",
                 detail:
-                  "«Короб не найден среди закрытых коробов этой смены» — этикетка от короба другой смены или станции. Выберите короб из списка или обратитесь к мастеру.",
+                  "Шаблон этикетки обновили после её печати: перепечатать эту этикетку на рабочем экране нельзя. Используйте «Повторная печать этикеток» или обратитесь к администратору.",
               },
               {
-                term: "Счётчик «Конфликты» вырос",
+                term: "Принтер продолжает отказывать",
                 detail:
-                  "Это список кодов, занятых другим терминалом (раздел 7). Работу не останавливайте, повторно не сканируйте.",
+                  "Проверьте адрес и настройку принтера в «Рабочее место» (MKR-INS-04) или позовите наладчика.",
               },
               {
-                term: "Закрыл короб без этикетки и забыл какой",
+                term: "Повторная печать не находит код",
                 detail:
-                  "Откройте «Исключения» → «Перепечатать этикетку»: в списке видны все закрытые короба этой смены с числом позиций.",
+                  "Нет связи с хостом: найти код нельзя. Начатую печать решить можно; поиск вернётся вместе со связью.",
               },
             ],
           },
@@ -248,9 +212,9 @@ export const STATION_EXCEPTIONS_CONTENT = {
   },
   en: {
     locale: "en",
-    title: "Scanning station: exceptions and recovery",
+    title: "Station: exceptions and recovery",
     summary:
-      "This is an informational translation. The matching Russian revision is authoritative. Step-by-step operator guide for unusual situations: reprinting a label, disassembling a box, reprinting and disassembling a pallet, print failures, and codes kept by another terminal.",
+      "This is an informational translation. The matching Russian revision is authoritative. Step-by-step guide for Markiro Autonom operators for exceptions: removing codes from a box, reprinting a label, disassembling a box or a pallet, print failures, and reprinting labels of any shift.",
     sections: [
       {
         id: "purpose",
@@ -258,237 +222,199 @@ export const STATION_EXCEPTIONS_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "This instruction covers the operator's actions in unusual situations: a damaged or lost box label, a box assembled by mistake, a pallet that needs a reprint or a disassembly, a printer that did not print the label, or the station showing codes kept by another terminal. Signing in is covered by instruction MKR-INS-01, the normal work cycle by MKR-INS-02.",
+            text: "This instruction covers what a Markiro Autonom station operator does when work does not go to plan: a wrong code got into a box, a label is spoiled, a box or a pallet has to be disassembled, the printer did not print a label, or a label has to be printed again for a shift that is already closed. The normal work cycle is covered in MKR-INS-02.",
           },
           {
             kind: "callout",
             tone: "info",
-            text: "The screenshots use demo data. Box numbers and products on your station will differ.",
+            text: "The station interface is in Russian only. Screen labels are quoted in Russian, with an English translation in brackets. The screenshots use demo data: SSCC numbers, shifts and products on your station will differ.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Every exception is recorded with your name and the reason and goes to the host. A disassembly cannot be undone: check the box or pallet number before you confirm.",
           },
         ],
       },
       {
-        id: "exceptions-screen",
-        heading: "2. The “Exceptions” screen",
+        id: "menu",
+        heading: "2. The “Исключения” (Exceptions) screen",
         blocks: [
           {
             kind: "step",
-            title: "Open the “Exceptions” screen",
-            text: "Tap the “Exceptions” button on the work screen. The station shows the box actions: for the open box, “Undo last scan” and “Clear box”; for this shift's closed boxes, “Reprint label” and “Disassemble box”; an action that is not available right now is disabled. The “Back” button steps back, and from the first screen it returns to scanning; once an action is completed, the station offers “Back to work”. On a pallet shift, the screen also has a “Pallet actions” button (section 5).",
-            image: {
-              id: "exception-action",
-              caption: "The “Exceptions” screen: choosing an action",
-            },
+            title: "Open “Исключения” (Exceptions)",
+            text: "On the work screen tap “Исключения” (Exceptions). The station asks “Что нужно сделать?” (What needs to be done?) and offers: “Снять последний код” (Remove the last code), “Очистить короб” (Clear the box), “Перепечатать этикетку” (Reprint the label), “Расформировать короб” (Disassemble a box), “Перепечатать этикетку паллеты” (Reprint a pallet label) and “Расформировать паллету” (Disassemble a pallet). Actions not available right now are grey: for example, there are no pallet actions until the shift has a closed pallet. “Назад” (Back) returns to work.",
+            image: { id: "exceptions", caption: "Exceptions: what needs to be done" },
           },
         ],
       },
       {
-        id: "reprint",
-        heading: "3. Reprinting a box label",
+        id: "open-box",
+        heading: "3. The open box",
         blocks: [
           {
             kind: "paragraph",
-            text: "Reprint the label when it is damaged, cannot be read by the scanner, was spoiled by the printer, or quality control asked for it. The box contents and its SSCC number do not change — the same label is printed again.",
+            text: "“Снять последний код” (Remove the last code) takes the last accepted code out of the open box — the station says “Последний код снят из короба.” (The last code was removed from the box). If you removed it by mistake, scan the code again. The “Снять последний” (Remove last) button on the work screen does the same.",
           },
           {
             kind: "step",
-            title: "Point at the box",
-            text: "Choose “Reprint label”. The station asks you to identify the closed box: scan its label or pick the box from the list (SSCC number and item count).",
+            title: "Clear the box if it has to be packed again",
+            text: "“Очистить короб” (Clear the box) on the work screen or under “Исключения” (Exceptions) asks “Очистить короб?” (Clear the box?): every code leaves the open box and can be scanned again. Tap “Очистить короб” (Clear the box) to confirm, or “Назад” (Back).",
+            image: { id: "exception-clear", caption: "Confirming the clearing of the open box" },
+          },
+        ],
+      },
+      {
+        id: "closed-box",
+        heading: "4. A closed box: reprint and disassembly",
+        blocks: [
+          {
+            kind: "step",
+            title: "Choose the box",
+            text: "Tap “Перепечатать этикетку” (Reprint the label) or “Расформировать короб” (Disassemble a box). Scan the box label or type the last digits of its SSCC on the keypad; until you type digits, the last closed boxes of the shift are listed on the right. Tap the box.",
             image: {
               id: "exception-target",
-              caption: "Choosing a closed box: by scanning its label or from the list",
+              caption: "Choosing a box by its SSCC: the last closed boxes",
             },
-            expected: "The station showed the reason catalog.",
           },
           {
             kind: "step",
-            title: "Choose a reason and confirm",
-            text: "Pick a reason from the list: “Damaged label”, “Unreadable label”, “Printer jam / no output”, “Quality-control request” or “Other reason”. Then confirm with the “Confirm reprint” button.",
-            image: { id: "exception-reason", caption: "The reprint reason catalog" },
-            expected: "The printer printed the label and the station showed “Action completed”.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Remove and destroy the old label. Exactly one label must remain on the box — two identical SSCCs in circulation are not allowed.",
-          },
-        ],
-      },
-      {
-        id: "disassemble",
-        heading: "4. Disassembling a box",
-        blocks: [
-          {
-            kind: "paragraph",
-            text: "Disassemble a box when it was assembled by mistake: wrong product, wrong quantity, damaged packaging, or the box was rejected by quality control. You pick the reason from the on-screen catalog; for anything unusual there is “Other reason”.",
+            title: "Give the reason",
+            text: "For a reprint: “Этикетка повреждена” (Label damaged), “Этикетка не читается” (Label unreadable), “Замятие в принтере” (Printer jam), “Требование контроля качества” (Quality control request) or “Другая причина” (Other reason). For a disassembly: “Не тот товар” (Wrong product), “Неверное количество” (Wrong quantity), “Повреждена упаковка” (Packaging damaged), “Брак по качеству” (Rejected by quality) or “Другая причина” (Other reason). After “Другая причина” (Other reason) the station offers to describe the reason in your own words — this is optional.",
+            image: { id: "exception-reason", caption: "The reason for reprinting a box label" },
           },
           {
             kind: "step",
-            title: "Choose the box and the reason",
-            text: "On the “Exceptions” screen choose “Disassemble box”, identify the closed box (by scanning its label or from the list) and pick the reason.",
-            expected: "The station showed the confirmation screen.",
+            title: "Confirm the action",
+            text: "The station shows what will happen. A reprint: the new label carries the same SSCC — only one may stay on the box. A disassembly: the box's SSCC will not be used again and its codes become free again; this cannot be undone — remove the label from the box. Tap “Перепечатать” (Reprint) or “Расформировать” (Disassemble), or “Назад” (Back).",
+            image: { id: "exception-confirm", caption: "Confirming the disassembly of a box" },
           },
           {
             kind: "step",
-            title: "Confirm the irreversible action",
-            text: "The station asks: “Disassemble this box permanently?” — the box's SSCC number will be retired and cannot be reused. Check that the right box is selected and tap “Disassemble permanently”.",
-            image: { id: "exception-confirm", caption: "Double confirmation of the disassembly" },
+            title: "Check the result",
+            text: "The station reports the result, for example “Этикетка отправлена на принтер.” (The label was sent to the printer). “Вернуться к работе” (Back to work) returns to the work screen, “Другое действие” (Another action) to the list of exceptions.",
+            image: {
+              id: "exception-result",
+              caption: "Exception done: the label was sent to the printer",
+            },
             expected:
-              "The station showed “Action completed” and the box disappeared from the closed list.",
-          },
-          {
-            kind: "step",
-            title: "Repack the units",
-            text: "Units from the disassembled box remain verified — scan them into a new box using the normal work cycle. The new box gets a new SSCC number; destroy the disassembled box's label.",
-            image: { id: "exception-result", caption: "The action result" },
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "A voided SSCC cannot be reused, and a disassembly cannot be undone. If a box was disassembled by mistake, tell your supervisor and pack its contents into a new box.",
+              "The exception is recorded; the codes of a disassembled box can be scanned again.",
           },
         ],
       },
       {
         id: "pallets",
-        heading: "5. Pallet exceptions",
+        heading: "5. Pallets",
         blocks: [
           {
-            kind: "paragraph",
-            text: "On a pallet shift, the “Exceptions” screen has a “Pallet actions” button under the box actions. It opens the actions for this station's closed pallets in the current shift: “Reprint pallet” and “Disassemble pallet”. If there are no closed pallets, the station says “There are no closed pallets right now.” and both buttons are disabled. The “Back” button steps back, and from the first screen it returns to scanning.",
-          },
-          {
             kind: "step",
-            title: "Reprint a pallet label",
-            text: "Choose “Reprint pallet”. If there are several closed pallets, pick one in the “Select a closed pallet” list, which shows the SSCC number and the box count. Pick a reason — “Label damaged”, “Label unreadable”, “Printer jam / no output”, “Quality control request” or “Other reason” — and tap “Confirm”. The station prints the same label with the same SSCC.",
-            expected:
-              "The station showed “Action completed” and the printer printed the pallet label.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Make sure the label came out: if the printer did not print it, repeat the reprint. Remove and destroy the old pallet label — exactly one label must remain on the pallet.",
-          },
-          {
-            kind: "step",
-            title: "Disassemble a pallet",
-            text: "Choose “Disassemble pallet”, the pallet and a reason — “Pallet damaged”, “Wrong boxes on pallet”, “Rejected by quality control” or “Other reason” — and tap “Confirm”. The station asks “Disassemble the pallet permanently?”: the pallet's SSCC number will be retired and cannot be reused. Check the number and tap “Disassemble permanently”.",
-            image: {
-              id: "pallet-exceptions",
-              caption: "Disassembling a pallet: choosing the reason",
-            },
-            expected:
-              "The station showed “Action completed” and the pallet disappeared from the closed list.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "A disassembly cannot be undone. The boxes from a disassembled pallet stay closed and recorded; remove and destroy the pallet label, and your supervisor decides how to stack those boxes next.",
+            title: "Reprinting and disassembling a pallet",
+            text: "“Перепечатать этикетку паллеты” (Reprint a pallet label) and “Расформировать паллету” (Disassemble a pallet) work like the box actions: scan the pallet label or type the last digits of its SSCC, choose the pallet, give the reason and confirm. A disassembly retires the pallet's SSCC, while its boxes stay closed with their codes. Remove the pallet's label.",
+            image: { id: "pallet-exceptions", caption: "Choosing a pallet to disassemble" },
           },
         ],
       },
       {
-        id: "box-print-recovery",
-        heading: "6. A print failure while closing a box",
+        id: "print-failure",
+        heading: "6. Print failures",
         blocks: [
           {
             kind: "step",
-            title: "The “The box label was not printed” screen",
-            text: "If the printer fails while a box is being closed, the station shows a recovery screen with the cause: a printing problem, no label template selected for the shift, or the label could not be prepared. Fix the cause (check the ribbon and for a printer jam) and tap “Retry printing”.",
+            title: "The label was not printed",
+            text: "If the printer did not take the job, the station shows “Этикетка короба не напечатана” (The box label was not printed), and the header shows “Принтер: ошибка” (Printer: error). Work on the station stops until you decide what to do with the label. Check the printer — power, paper, cable or network — and tap “Напечатать снова” (Print again). “Другой принтер” (Another printer) sends the label to another printer of the workstation, “Настроить принтер” (Set up the printer) opens the printer setup (MKR-INS-04).",
             image: {
-              id: "box-print-failed",
-              caption: "Recovering the box label print",
+              id: "print-failed",
+              caption: "The box label was not printed: the printer did not take the job",
             },
-            expected: "The printer printed the label and work continued.",
           },
           {
             kind: "step",
-            title: "The last resort — “Continue without a label”",
-            text: "If printing is impossible right now, tap “Continue without a label” and confirm. The box is already closed and recorded — it will need to be labelled later through a reprint (section 3). Mark such a box so it does not get lost.",
+            title: "It is unknown whether the label printed",
+            text: "If the connection to the printer broke off mid-transfer, the station does not know whether the label came out and shows “Неизвестно, напечаталась ли этикетка” (Unknown whether the label printed). Look at the printer. If the label came out, tap “Этикетка напечаталась” (The label printed); if not, “Напечатать снова” (Print again). Do not print a second label if the first one came out: a box carries one label.",
+            image: {
+              id: "print-unknown",
+              caption: "The station asks you to check whether the label came out",
+            },
           },
           {
-            kind: "step",
-            title: "If the verification does not pass",
-            text: "During printed-label verification, scan the SSCC code from this box's label specifically. “This is a different label” — you are holding a label from another box: find the right one or tap “Print again”. “This is not a group code” — you scanned a unit's marking code, not a box label.",
-            image: {
-              id: "print-mismatch",
-              caption: "Print verification: the label in hand is from another box",
-            },
+            kind: "paragraph",
+            text: "“Продолжить без этикетки” (Continue without a label) carries on when the printer cannot be fixed at once. The station asks again “Продолжить без этикетки?” (Continue without a label?): the box is already closed and has to be labelled later — the label can be printed again under “Исключения” (Exceptions). The same goes for a pallet.",
           },
         ],
       },
       {
-        id: "conflicts",
-        heading: "7. Codes kept by another terminal",
+        id: "reprint",
+        heading: "7. Label reprint",
         blocks: [
           {
             kind: "paragraph",
-            text: "If the same code passed through two stations, the code is kept by the terminal that scanned it first. On the losing station the code goes into the discrepancy list, and the “Conflicts” counter in the status bar grows. This is not an emergency and not an operator error. Do not confuse it with the “Duplicates” counter in the shift journal: that one counts repeat scans the station itself rejected.",
+            text: "When a label has to be printed again for a box, a pallet or a unit from any shift and any station — for example, in the warehouse — use “Повторная печать этикеток” (Label reprint) on the “Смены линии” (Line shifts) screen. A reprint creates no new codes, boxes or pallets and does not change the quantity of products. Codes can be looked up only while the station reaches the host.",
           },
           {
             kind: "step",
-            title: "Review the discrepancy list",
-            text: "The list opens with the “Conflicts” button on the shift selection screen — the station returns there after “Pause” or after the shift is closed. Each entry shows which terminal keeps the code and when: “Kept by … at …”.",
-            image: { id: "conflicts", caption: "The list of codes kept by another terminal" },
+            title: "Prepare the reprint session",
+            text: "Choose the reason for the reprint: “Не напечаталась” (Not printed), “Повреждена” (Damaged) or “Утеряна” (Lost) — it applies to every label of the session. If needed, turn on “Проверка распечатки повторным сканированием” (Check the print by scanning it again). Under “Что и на чём печатаем” (What prints on what) check the templates and printers for boxes, pallets, unit codes and A4 sheets; “Изменить” (Change) changes them. Tap “Начать перепечатку” (Start the reprint).",
+            image: {
+              id: "reprint-setup",
+              caption: "Label reprint: the reason and what prints on what",
+            },
           },
           {
-            kind: "callout",
-            tone: "info",
-            text: "Do not rescan these codes. Keep working — a manager will review the discrepancy in the cabinet.",
+            kind: "step",
+            title: "Scan the label",
+            text: "Scan the code of a unit, a box or a pallet — or tap “Ввести код вручную” (Enter the code by hand). The station finds the code on the host, shows which box or pallet it is and sends one new label to the printer: “Этикетка передана на принтер” (The label was handed to the printer). “Следующий код” (Next code) moves on to the next label, “Напечатать ещё раз” (Print once more) prints another label of the same code with a new reason.",
+            image: {
+              id: "reprint-session",
+              caption: "A box found, its label handed to the printer",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "When you are done, tap “Завершить сеанс” (End the session) and confirm: the session's records go to the host. “К сменам” (To the shifts) returns to the shift list without ending the session — it can be continued later.",
           },
         ],
       },
       {
-        id: "hardware",
-        heading: "8. Hardware in the middle of a shift",
+        id: "queue",
+        heading: "8. Records the host did not accept",
         blocks: [
           {
-            kind: "unordered-list",
-            items: [
-              "The scanner shows “No signal” — stop working and check the scanner cable. If the connection does not come back, call a technician.",
-              "“Some scanners disconnected” — the workstation has several scanners and one of them dropped off. Keep working with the connected scanner and check the other one's cable; if the connection does not come back, call a technician.",
-              "“Keyboard” for the scanner — the station receives scans as keyboard input, which is how scanners in keyboard mode work. This is not an error; if scans do not reach the station, call a technician.",
-              "The printer does not print — the station itself shows the recovery screen when a box is closed (section 6). Check the printer's ribbon, power and cable.",
-              "The “Printer” indicator in the status bar shows how many of the three label types (box, code duplicate, pallet) have a printer assigned, for example 2 / 3. Fewer than three is fine if the shift does not print those labels. If a label the shift needs has no printer, the station shows “Printer is not configured” when printing — call a technician.",
-            ],
-          },
-          {
             kind: "paragraph",
-            text: "Connecting and configuring the hardware is the technician's job and is covered by the separate workstation setup instruction.",
+            text: "If the host refused a station record or it conflicts with another station's record, this shows under “Синхронизация” (Sync) and on the “Очередь отправки” (Send queue) screen (MKR-INS-02) in “Не приняты хостом” (Not accepted by the host), “Конфликты” (Conflicts) and “Вытесненные коды” (Displaced codes). Such records do not go away by themselves: tell an administrator.",
           },
         ],
       },
       {
         id: "troubleshooting",
-        heading: "9. Frequently asked questions",
+        heading: "9. Common problems",
         blocks: [
           {
             kind: "definition-list",
             items: [
               {
-                term: "Two labels in hand after a reprint",
+                term: "The box is not in the list",
                 detail:
-                  "The new one stays on the box; destroy the old one. Both carry the same SSCC — only one may be in circulation.",
+                  "The list holds only the closed boxes of the current shift. Type more digits of the SSCC or scan the label. A box of another shift is reprinted through “Повторная печать этикеток” (Label reprint).",
               },
               {
-                term: "Disassembled the wrong box",
+                term: "The exception was not done",
                 detail:
-                  "It cannot be undone. Tell your supervisor and pack the contents into a new box using the normal cycle — the station issues a new SSCC.",
+                  "The station explains why: for example, the box label still waits for a decision on the work screen, or the box changed while you were choosing. Settle the label and try again.",
               },
               {
-                term: "A box cannot be found by scanning on the selection screen",
+                term: "A reprint is refused because the template changed",
                 detail:
-                  "“This box is not among this shift's closed boxes” — the label belongs to a box from another shift or station. Pick the box from the list or ask your supervisor.",
+                  "The label template was updated after the label was printed: this label cannot be reprinted on the work screen. Use “Повторная печать этикеток” (Label reprint) or contact an administrator.",
               },
               {
-                term: "The “Conflicts” counter grew",
+                term: "The printer keeps failing",
                 detail:
-                  "This is the list of codes kept by another terminal (section 7). Do not stop working and do not rescan them.",
+                  "Check the printer's address and setup under “Рабочее место” (Workstation, MKR-INS-04) or call a technician.",
               },
               {
-                term: "Closed a box without a label and forgot which one",
+                term: "The label reprint does not find the code",
                 detail:
-                  "Open “Exceptions” → “Reprint label”: the list shows all of this shift's closed boxes with their item counts.",
+                  "There is no connection to the host, so codes cannot be looked up. A started print can still be settled; the lookup comes back with the connection.",
               },
             ],
           },

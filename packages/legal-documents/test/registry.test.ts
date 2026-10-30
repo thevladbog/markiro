@@ -26,6 +26,9 @@ describe("legal document registry", () => {
       "MKR-INS-08",
       "MKR-INS-09",
       "MKR-INS-10",
+      "MKR-INS-12",
+      "MKR-INS-13",
+      "MKR-INS-14",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -65,10 +68,18 @@ describe("legal document registry", () => {
       // 2026-09-26, last: creating a shift on the station gained its pallet
       // choice -- «Без паллет» / «С паллетами» with the capacity from the
       // product card and the pallet label template -- so 01 was reissued.
-      "MKR-INS-01": "2026.09/04",
-      "MKR-INS-02": "2026.09/03",
-      "MKR-INS-03": "2026.09/04",
-      "MKR-INS-04": "2026.09/01",
+      // 2026-10-29: the move to Markiro Autonom -- the station works with the
+      // site's host over the LAN, with its own sign-in, shift list and new
+      // shift form -- so 01 was rewritten and reissued with new frames, and
+      // 02 for its work cycle: SSCC blocks from the host, the sync panel and
+      // the send queue in place of the cloud server, and 03 for exceptions,
+      // print failures and the label reprint session that looks codes up on
+      // the host, and 04 for pairing with the host by a code from the office
+      // and the workstation tabs.
+      "MKR-INS-01": "2026.10/01",
+      "MKR-INS-02": "2026.10/01",
+      "MKR-INS-03": "2026.10/01",
+      "MKR-INS-04": "2026.10/01",
       // 2026-09-10: the shift cabinet was reworked -- row actions moved into
       // the details panel, the list gained an actual-output line and
       // validation shifts can duplicate the Data Matrix -- so both shift
@@ -79,11 +90,26 @@ describe("legal document registry", () => {
       // shift planning gained pallets. MKR-INS-09 (2026.09/04): the shift
       // panel gained a pallets section with placards, and the report catalog
       // grew from five formats to ten.
-      "MKR-INS-08": "2026.09/02",
-      "MKR-INS-09": "2026.09/04",
+      // 2026-10-29: Markiro Autonom replaced the cloud cabinet, so 08 was
+      // rewritten for the standalone office -- lines with a maximum of
+      // devices per shift, devices on the host, the shift side panel.
+      "MKR-INS-08": "2026.10/01",
+      // 2026-10-29: 09 followed 08 onto the standalone office -- the overview,
+      // the shift card and its tabs, the office close and the local exports.
+      "MKR-INS-09": "2026.10/01",
       // 2026-09-19: the product card gained a readiness model and category
       // attributes, so the catalog card instruction was reissued.
-      "MKR-INS-10": "2026.09/02",
+      // 2026-10-29: 10 followed onto the standalone office -- the products
+      // section, draft and active, the photo, defaults and the archive.
+      "MKR-INS-10": "2026.10/01",
+      // 2026-10-29: Markiro Autonom gained its own instruction for installing
+      // the site and its first start (12), first published on this revision.
+      "MKR-INS-12": "2026.10/01",
+      // 2026-10-29, with it: backups and restore of the host (13).
+      "MKR-INS-13": "2026.10/01",
+      // 2026-10-29: a new instruction for the handheld in Markiro Autonom --
+      // pairing with the host and building warehouse pallets.
+      "MKR-INS-14": "2026.10/01",
     };
     expect(
       LEGAL_RELEASES.every(
@@ -99,17 +125,23 @@ describe("legal document registry", () => {
           code !== "MKR-INS-04" &&
           code !== "MKR-INS-08" &&
           code !== "MKR-INS-09" &&
-          code !== "MKR-INS-10",
+          code !== "MKR-INS-10" &&
+          code !== "MKR-INS-12" &&
+          code !== "MKR-INS-13" &&
+          code !== "MKR-INS-14",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
-    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-26");
-    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-26");
-    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-26");
-    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-26");
-    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
-    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
-    expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(22);
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-12").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-13").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-14").effectiveDate).toBe("2026-10-29");
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(28);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -218,6 +250,12 @@ describe("legal document registry", () => {
     expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-10")).toEqual(["ru", "en"]);
+    expect(legalDocumentKind("MKR-INS-12")).toBe("instruction");
+    expect(legalReleaseLocales("MKR-INS-12")).toEqual(["ru", "en"]);
+    expect(legalDocumentKind("MKR-INS-13")).toBe("instruction");
+    expect(legalReleaseLocales("MKR-INS-13")).toEqual(["ru", "en"]);
+    expect(legalDocumentKind("MKR-INS-14")).toBe("instruction");
+    expect(legalReleaseLocales("MKR-INS-14")).toEqual(["ru", "en"]);
   });
 
   it("requires paired routes for every published instruction and for legal releases", () => {

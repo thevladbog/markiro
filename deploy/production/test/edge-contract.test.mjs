@@ -1148,7 +1148,7 @@ test("edge build validates every tracked legal artifact before copying landing o
     readFile("apps/landing/public/legal/artifacts.json", "utf8"),
   ]);
   const artifacts = JSON.parse(manifestSource);
-  assert.equal(artifacts.length, 26);
+  assert.equal(artifacts.length, 32);
   assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
   for (const artifact of artifacts) {
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
@@ -1542,7 +1542,7 @@ test("direct Caddy adapter moves the retired film, kiosk and instruction pages p
     "/instruktsii/smena-planirovanie/",
     "/en/instructions/",
     "/en/instructions/shift-planning/",
-    "/d/MKR-INS-01/2026.09/04/26.09.2026/",
+    "/d/MKR-INS-01/2026.10/01/29.10.2026/",
   ]) {
     assert.equal(
       permanent.some((route) => adaptedRouteMatches(route, { method: "GET", path: live })),

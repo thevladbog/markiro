@@ -1,0 +1,26 @@
+---
+import backups from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/backups.png?url";
+import backupNow from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/backup-now.png?url";
+import secondFolder from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/second-folder.png?url";
+import yandex from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/yandex.png?url";
+import restoreHelp from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/restore-help.png?url";
+import hold from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/hold.png?url";
+import holdConfirm from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/hold-confirm.png?url";
+import wizardRestore from "@markiro/legal-documents/assets/instructions/mkr-ins-13/ru/wizard-restore.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  "backups": backups,
+  "backup-now": backupNow,
+  "second-folder": secondFolder,
+  "yandex": yandex,
+  "restore-help": restoreHelp,
+  "hold": hold,
+  "hold-confirm": holdConfirm,
+  "wizard-restore": wizardRestore,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-13", "ru")} images={images} />

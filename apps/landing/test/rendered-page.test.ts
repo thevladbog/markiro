@@ -1476,9 +1476,9 @@ describe("rendered landing page", () => {
     const ruInstructionLinks = [...ruInstructions.querySelectorAll("[data-hub-item] a[href]")].map(
       (a) => a.getAttribute("href"),
     );
-    expect(ruInstructionLinks).toHaveLength(7);
+    expect(ruInstructionLinks).toHaveLength(10);
     expect(ruInstructionLinks.every((href) => href?.startsWith("/instruktsii/"))).toBe(true);
-    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(7);
+    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(10);
 
     for (const hub of [ruArticles, enArticles, ruInstructions, enInstructions]) {
       expect(hub.querySelectorAll("h1")).toHaveLength(1);

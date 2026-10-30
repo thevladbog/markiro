@@ -3,6 +3,9 @@
 // from the snapshot by the clicks and scans a person would make, then shoots it.
 import { ADMIN, markingCode, OPERATORS, PRODUCTS } from "./site.mjs";
 import { runWizard } from "./seed.mjs";
+import { INSTALL_STATES } from "./states-install.mjs";
+import { OFFICE_STATES } from "./states-office.mjs";
+import { STATION_STATES } from "./states-station.mjs";
 
 /** A HID scanner: the code's characters, GS as Ctrl+], then Enter (`createKeyboardWedgeSource`). */
 export async function scan(page, code) {
@@ -91,6 +94,7 @@ async function officeSection(page, name, heading = name) {
  * that has never been set up (the wizard).
  */
 export const STATES = {
+  ...OFFICE_STATES,
   "install/wizard-admin": {
     title: "Первый запуск хоста, шаг 1: администратор",
     empty: true,
@@ -166,4 +170,6 @@ export const STATES = {
       await shoot(office.page);
     },
   },
+  ...STATION_STATES,
+  ...INSTALL_STATES,
 };
