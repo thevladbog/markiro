@@ -30,6 +30,7 @@ export async function createDatabaseBackup({
   writerFence,
   run,
   recoveryRuntime,
+  configurationSource,
   beforeFailureCleanup,
   catalogJournal,
 }) {
@@ -61,7 +62,14 @@ export async function createDatabaseBackup({
       await privateCopy(root, config[field], join(input, name));
     await writePrivateFile(input, "request.json", Buffer.from(canonical({ operationId, target })));
     phase = "runtime";
-    runtime = await openRuntime({ root, operationId, purpose: "archive", run, recoveryRuntime });
+    runtime = await openRuntime({
+      root,
+      operationId,
+      purpose: "archive",
+      run,
+      recoveryRuntime,
+      configurationSource,
+    });
     before = fence(
       await writerFence.observe({ operationId, target, boundary: "before-snapshot" }),
       operationId,

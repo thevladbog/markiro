@@ -8,10 +8,12 @@ import { promisify } from "node:util";
 import { privateFixture } from "./host-fixtures.mjs";
 import { HOST_BUNDLE_FILES } from "../host/command.mjs";
 import { RECOVERY_BUNDLE_FILES } from "../host/recovery-command.mjs";
+import { UPGRADE_BUNDLE_FILES } from "../host/upgrade-command.mjs";
 
 for (const [kind, files, entry] of [
   ["ordinary", HOST_BUNDLE_FILES, "deploy/platform/host/command.mjs"],
   ["recovery", RECOVERY_BUNDLE_FILES, "deploy/platform/host/recovery-command-runtime.mjs"],
+  ["upgrade", UPGRADE_BUNDLE_FILES, "deploy/platform/host/upgrade-command-runtime.mjs"],
 ])
   test(`${kind} installation contains the full transitive executable closure after upgrade additions`, async (t) => {
     const f = await privateFixture(t);

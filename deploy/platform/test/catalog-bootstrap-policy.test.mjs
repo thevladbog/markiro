@@ -103,3 +103,54 @@ test("handheld stable read bootstrap retains the same immutable admission and wr
     assert.throws(() => validateReadBootstrapOperation(invalid));
   }
 });
+
+test("catalog schema v2 binds a separately accepted configuration head", () => {
+  const o = operation();
+  o.schema = 2;
+  const headId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  o.configuration = {
+    baseline: {
+      acceptedOperationId: o.acceptedOperationId,
+      api: { ...o.containers.api, id: "9".repeat(64) },
+      runtime: {
+        path: "/opt/markiro-platform/state/candidates/b793db93-0e6b-4b1c-bb5e-5afc3a16230a/runtime.env",
+        sha256: "a".repeat(64),
+      },
+    },
+    head: { operationId: headId, receiptSha256: "b".repeat(64) },
+    runtime: {
+      path: `/opt/markiro-platform/state/configuration-operations/${headId}/runtime.env`,
+      sha256: "c".repeat(64),
+    },
+  };
+  o.guards.push({
+    path: `state/configuration-operations/${headId}/receipt.json`,
+    sha256: o.configuration.head.receiptSha256,
+  });
+  o.guards.push({ path: "state/config-index.json", sha256: "d".repeat(64) });
+  assert.equal(validateReadBootstrapOperation(o), o);
+  for (const change of [
+    (v) => {
+      v.configuration.baseline.acceptedOperationId = v.configuration.head.operationId;
+    },
+    (v) => {
+      v.configuration.head.receiptSha256 = "invalid";
+    },
+    (v) => {
+      v.configuration.unknown = true;
+    },
+    (v) => {
+      v.guards.pop();
+    },
+    (v) => {
+      v.configuration.runtime.path = "/tmp/foreign/runtime.env";
+    },
+  ]) {
+    const v = structuredClone(o);
+    change(v);
+    assert.throws(() => validateReadBootstrapOperation(v));
+  }
+  const stale = structuredClone(o);
+  stale.schema = 1;
+  assert.throws(() => validateReadBootstrapOperation(stale));
+});

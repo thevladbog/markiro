@@ -200,12 +200,13 @@ async function runBoundedHostProcess(options, maxOutputBytes, maxTimeoutMs = 360
           stop("output-limit");
         else output[stream].push(bytes);
       });
-      child[stream].on("error", () => stop("exit"));
+      child[stream].on("error", () => stop("stream"));
     }
     child.on("error", () => stop("spawn"));
     child.on("exit", (code, exitSignal) => {
       exitStatus = code;
-      if (code !== 0 || exitSignal !== null) stop("exit");
+      if (exitSignal !== null) stop("signal");
+      else if (code !== 0) stop("exit");
     });
     child.on("close", () => {
       closed = true;

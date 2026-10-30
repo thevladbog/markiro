@@ -182,6 +182,23 @@ test("snapshot preserves literal secrets, optional inventory and stable sorted b
   assert.deepEqual(await readFile(result.path), bytes);
 });
 
+test("snapshot accepts optional DaData credentials without exposing them to interpolation", async (t) => {
+  const f = await privateFixture(t);
+  Object.assign(f.env, {
+    DADATA_TOKEN: String.raw`fixture$dadata#token`,
+    DADATA_SECRET: String.raw`fixture$dadata#secret`,
+  });
+  await f.writeEnv();
+  const result = await snapshotHostConfig(f);
+  const runtime = await readProtectedEnv(result.path);
+  assert.equal(runtime.DADATA_TOKEN, f.env.DADATA_TOKEN);
+  assert.equal(runtime.DADATA_SECRET, f.env.DADATA_SECRET);
+  assert.equal(Object.hasOwn(result.interpolation, "DADATA_TOKEN"), false);
+  assert.equal(Object.hasOwn(result.interpolation, "DADATA_SECRET"), false);
+  assert.equal(JSON.stringify(result).includes(f.env.DADATA_TOKEN), false);
+  assert.equal(JSON.stringify(result).includes(f.env.DADATA_SECRET), false);
+});
+
 test("snapshots reject unknown keys and invalid configuration with generic errors", async (t) => {
   const f = await privateFixture(t);
   for (const patch of [

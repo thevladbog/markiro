@@ -186,6 +186,14 @@ test("redacts nonzero exit and spawn failures", async (t) => {
   );
 });
 
+test("signal termination is distinct from a completed nonzero child exit", async (t) => {
+  const f = await privateFixture(t);
+  await assert.rejects(
+    runHostProcess(options(f, "process.kill(process.pid, 'SIGTERM')")),
+    safeError("signal"),
+  );
+});
+
 for (const stream of ["stdout", "stderr"]) {
   test(`bounds ${stream} bytes and terminates overflow`, async (t) => {
     const f = await privateFixture(t);

@@ -55,6 +55,8 @@ const runtimeKeys = new Set([
   "SMTP_FROM_EMAIL",
   "SMTP_FROM_NAME",
   "SMTP_REPLY_TO",
+  "DADATA_TOKEN",
+  "DADATA_SECRET",
   "LANDING_DEMO_SUBMISSION_ENABLED",
   "LANDING_DEMO_RECIPIENT",
   "LANDING_DEMO_REPLY_TO",
@@ -104,7 +106,7 @@ const pgFiles = [
   "MARKIRO_POSTGRES_SERVER_KEY_FILE",
   "MARKIRO_POSTGRES_PASSWORD_FILE",
 ];
-const interpolationKeys = [
+export const interpolationKeys = Object.freeze([
   "MARKIRO_API_IMAGE_DIGEST",
   "MARKIRO_PLATFORM_EDGE_IMAGE_DIGEST",
   ...domainKeys,
@@ -115,7 +117,7 @@ const interpolationKeys = [
   "MARKIRO_POSTGRES_IMAGE_DIGEST",
   ...pgFiles,
   "MARKIRO_PLATFORM_ENV_FILE",
-];
+]);
 const domain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/u;
 const digest = /^sha256:[a-f0-9]{64}$/u;
 

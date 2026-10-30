@@ -76,6 +76,7 @@ export async function verifyDatabaseRestore({
   roleMapping,
   run,
   recoveryRuntime,
+  configurationSource,
   beforeFailureCleanup,
 }) {
   ensure(beforeFailureCleanup === undefined || typeof beforeFailureCleanup === "function");
@@ -119,7 +120,14 @@ export async function verifyDatabaseRestore({
       Buffer.from(canonical({ inventory: document.inventory, roleMapping })),
       inventoryDocumentOptions,
     );
-    runtime = await openRuntime({ root, operationId, purpose: "restore", run, recoveryRuntime });
+    runtime = await openRuntime({
+      root,
+      operationId,
+      purpose: "restore",
+      run,
+      recoveryRuntime,
+      configurationSource,
+    });
     ensure(
       runtime.config.executorSha === document.executorSha &&
         runtime.config.provenance === document.provenance &&
