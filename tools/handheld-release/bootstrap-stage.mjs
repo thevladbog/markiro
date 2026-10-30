@@ -45,11 +45,17 @@ export function buildBootstrapFiles({
   assert.equal(hash(apk), expectedSha256);
   assert.match(sourceSha, /^[a-f0-9]{40}$/u);
   assert.match(certificateOutput, /(?:^|\n)Number of signers: 1(?:\r?\n|$)/u);
-  const certificates = [
-    ...certificateOutput.matchAll(/Signer #[0-9]+ certificate SHA-256 digest: ([a-f0-9]{64})/gu),
-  ];
+  // SDK37 labels its v2 certificate "V2 Signer:" instead of "Signer #1".
+  // Count every certificate digest line before accepting either exact spelling.
+  const certificates = certificateOutput
+    .split(/\r?\n/u)
+    .filter((line) => line.includes("certificate SHA-256 digest:"));
   assert.equal(certificates.length, 1);
-  assert.equal(certificates[0][1], certificate);
+  const match = /^(?:Signer #1|V2 Signer:) certificate SHA-256 digest: ([a-f0-9]{64})$/u.exec(
+    certificates[0],
+  );
+  assert(match);
+  assert.equal(match[1], certificate);
   assert.match(
     packageOutput,
     /(?:^|\n)package: name='app\.markiro\.handheld' versionCode='16' versionName='1\.7\.0'(?: |\r?\n|$)/u,

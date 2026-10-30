@@ -209,3 +209,24 @@ test("staging failure diagnostics identify the phase and child exit without priv
     },
   );
 });
+
+test("SDK37 V2 signer output admits the same exact single certificate and rejects mixed or changed signers", () => {
+  const valid = {
+    apk,
+    expectedSha256: sha(apk),
+    sourceSha: "a".repeat(40),
+    releasedAt: "2026-10-30T04:58:00Z",
+    certificateOutput: `Verifies\nVerified using v2 scheme (APK Signature Scheme v2): true\nNumber of signers: 1\nV2 Signer: certificate SHA-256 digest: ${certificate}\n`,
+    packageOutput: "package: name='app.markiro.handheld' versionCode='16' versionName='1.7.0'",
+  };
+  assert.equal(implementation.buildBootstrapFiles(valid).length, 2);
+  for (const output of [
+    valid.certificateOutput.replace(certificate, "f".repeat(64)),
+    valid.certificateOutput.replace("Number of signers: 1", "Number of signers: 2"),
+    valid.certificateOutput + `Signer #1 certificate SHA-256 digest: ${certificate}\n`,
+    valid.certificateOutput + `V3 Signer: certificate SHA-256 digest: ${certificate}\n`,
+  ])
+    assert.throws(() =>
+      implementation.buildBootstrapFiles({ ...valid, certificateOutput: output }),
+    );
+});
