@@ -599,6 +599,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(checked.manifest.manifest.version, "1.2.0");
+        // Verification holds the installer against deletion on Windows.
+        drop(checked);
         std::fs::remove_file(&target).unwrap();
         let (url, task) = server(vec![
             "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\ncorrupt".to_owned(),
