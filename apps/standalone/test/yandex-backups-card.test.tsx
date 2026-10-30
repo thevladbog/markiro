@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { YandexResume } from "../src/wizard/YandexResume.js";
 import { YandexRestoreWizard } from "../src/wizard/YandexRestoreWizard.js";
 import { yandexNative } from "../src/host/yandex-native.js";
+import { HostError } from "../src/host/client.js";
 import { renderOffice, fakeOfficeSession, TECHNOLOGIST } from "./support/office.js";
 import { HEALTHY_BACKUPS } from "./support/backups.js";
 import { openSelectOn } from "./support/select.js";
@@ -22,6 +23,49 @@ vi.mock("../src/host/yandex-native.js", () => ({
   },
 }));
 describe("Yandex connection and recovery", () => {
+  it("shows the Host's credential failure for retry instead of a Yandex network outage", async () => {
+    const session = fakeOfficeSession();
+    session.api.getBackups.mockResolvedValue(HEALTHY_BACKUPS);
+    const status = await session.api.getYandexBackups("fixture-token");
+    session.api.getYandexBackups.mockResolvedValue({
+      ...status,
+      state: "connected",
+      connectionGeneration: "11111111-1111-4111-8111-111111111111",
+    });
+    session.api.retryYandexBackup.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        status: 409,
+        code: "conflict",
+        message: "private fixture message",
+        details: { constraint: "yandex_backup", reason: "secret_unavailable" },
+      }),
+    );
+    renderOffice(session, { initialPath: "/backups" });
+    fireEvent.click(await screen.findByRole("button", { name: "Повторить загрузку" }));
+    expect(
+      await screen.findByText(
+        /Не удалось прочитать или сохранить данные подключения к Яндекс Диску на хосте/,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Яндекс недоступен/)).toBeNull();
+    expect(screen.queryByText(/private fixture message/)).toBeNull();
+  });
+
+  it("reports expired Office authorization without asking to sign in to Yandex", async () => {
+    vi.mocked(yandexNative.connect).mockRejectedValueOnce("office_session_expired");
+    const session = fakeOfficeSession();
+    session.api.getBackups.mockResolvedValue(HEALTHY_BACKUPS);
+    renderOffice(session, { initialPath: "/backups" });
+    await screen.findByRole("heading", { name: "Яндекс Диск" });
+    fireEvent.change(screen.getByLabelText("ClientID"), { target: { value: "customer-client" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /ключ хранится рядом с копией/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Подключить / заменить ClientSecret" }));
+    expect(
+      await screen.findByText("Сеанс Офиса закончился. Войдите в Офис снова и повторите действие."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Яндекс недоступен/)).toBeNull();
+  });
   it("hides recovery resume after a completed job or an ordinary service outage", async () => {
     vi.mocked(yandexNative.recoveryAvailable).mockResolvedValue(false);
     render(<YandexResume />);

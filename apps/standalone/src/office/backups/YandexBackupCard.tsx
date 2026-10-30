@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Checkbox, Input } from "@markiro/ui";
 import { yandexNative } from "../../host/yandex-native.js";
+import { yandexErrorCode } from "../../host/yandex-errors.js";
 import { useOfficeSession } from "../office-session.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useCan } from "../access.js";
@@ -30,7 +31,7 @@ export function YandexBackupCard() {
       await action();
       await query.refetch();
     } catch (e) {
-      setError(typeof e === "string" ? e : "network");
+      setError(yandexErrorCode(e));
     } finally {
       setBusy(false);
     }
@@ -69,7 +70,7 @@ export function YandexBackupCard() {
         {(error || data?.errorCode) && (
           <Alert tone="warn">
             {t(`yandex.errors.${error || data?.errorCode}`, {
-              defaultValue: t("yandex.errors.network"),
+              defaultValue: t("yandex.errors.operation_failed"),
             })}
           </Alert>
         )}

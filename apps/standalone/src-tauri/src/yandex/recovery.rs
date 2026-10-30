@@ -13,6 +13,40 @@ use std::{path::PathBuf, sync::Arc};
 use tauri::Manager;
 use tokio::sync::watch;
 
+fn settled_outbox_error(error: crate::local_db::LocalDbError) -> Error {
+    match error {
+        crate::local_db::LocalDbError::UnsentRecords { .. } => Error::Provider("unsent_facts"),
+        _ => Error::Provider("local_database_unavailable"),
+    }
+}
+fn local_storage_error(error: Error) -> Error {
+    match error {
+        Error::Io(_) | Error::SecretUnavailable => Error::Provider("local_storage_unavailable"),
+        error => error,
+    }
+}
+fn copy_unpack_error(error: Error) -> Error {
+    match error {
+        Error::Io(_) => Error::Provider("copy_unpack_failed"),
+        Error::SecretUnavailable => Error::Provider("local_storage_unavailable"),
+        error => error,
+    }
+}
+fn profile_storage_error(error: Error) -> Error {
+    match error {
+        Error::Io(_) | Error::SecretUnavailable => Error::Provider("profile_storage_failed"),
+        error => error,
+    }
+}
+#[cfg(any(windows, test))]
+fn profile_dialog_error(code: u32) -> Error {
+    if code == 0 {
+        Error::Provider("cancelled")
+    } else {
+        Error::Provider("profile_dialog_failed")
+    }
+}
+
 pub struct Session {
     client: DiskClient,
     profile: ClientProfile,
@@ -32,7 +66,7 @@ impl RequestGuard for Cancel {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async {
             if *self.0.borrow() {
-                Err(Error::InvalidAttempt)
+                Err(Error::Provider("cancelled"))
             } else {
                 Ok(())
             }
@@ -94,14 +128,14 @@ pub async fn yandex_recovery_auth<R: tauri::Runtime>(
         if hello.hello.initialized{return Err(Error::Provider("target_initialized"));}
         let mut attempt=OAuthAttempt::new(&client_id,now())?;let url=attempt.authorization_url()?.to_string();let expected=validate_authorize(&url,&client_id)?;
         let listener=CallbackListener::bind().await?;open_browser(&url)?;
-        let code=tokio::select! {v=listener.receive(&expected)=>v?,_=cancelled.wait_for(|v|*v)=>return Err(Error::InvalidAttempt)};
+        let code=tokio::select! {v=listener.receive(&expected)=>v?,_=cancelled.wait_for(|v|*v)=>return Err(Error::Provider("cancelled"))};
         let oauth=OAuthClient::new(DirectTransport::new()?);
-        let tokens=tokio::select!{value=oauth.complete(&mut attempt,code.state.expose(),code.code.expose(),now())=>value?,_=cancelled.wait_for(|v|*v)=>return Err(Error::InvalidAttempt)};
+        let tokens=tokio::select!{value=oauth.complete(&mut attempt,code.state.expose(),code.code.expose(),now())=>value?,_=cancelled.wait_for(|v|*v)=>return Err(Error::Provider("cancelled"))};
         let client=DiskClient::new(tokens.access)?;
         let checked=client.clone().with_guard(Arc::new(Cancel(cancelled.clone())));
         checked.check_folder().await?;let account=checked.account().await?;
-        let base=app.path().app_local_data_dir().map_err(|_|Error::SecretUnavailable)?;
-        let root=base.join(format!("yandex-recovery-{}",uuid::Uuid::new_v4()));envelope::private_dir(&root)?;
+        let base=app.path().app_local_data_dir().map_err(|_|Error::Provider("local_storage_unavailable"))?;
+        let root=base.join(format!("yandex-recovery-{}",uuid::Uuid::new_v4()));envelope::private_dir(&root).map_err(local_storage_error)?;
         *state.recovery.lock().await=Some(Session{client,profile,copies:vec![],root,selected:None});Ok(account.id)
     }.await;
     state.end().await;
@@ -126,7 +160,8 @@ pub async fn yandex_recovery_list(
             None,
             &s.root.join(format!("catalog-{}", uuid::Uuid::new_v4())),
         )
-        .await?;
+        .await
+        .map_err(local_storage_error)?;
         copies.sort_by(|a, b| {
             a.host_id
                 .cmp(&b.host_id)
@@ -153,32 +188,35 @@ pub async fn yandex_recovery_download(
         let chosen=s.copies.iter().find(|c|c.host_id.to_string()==host_id&&c.snapshot_id.0.to_string()==snapshot_id).ok_or(Error::InvalidAttempt)?.clone();
         s.selected=None;
         check_download_budget(&s.root,chosen.objects.values().map(|v|v.size_bytes).sum())?;
-        let folder=s.root.join("downloaded");if folder.exists(){std::fs::remove_dir_all(&folder)?;}envelope::private_dir(&folder)?;
+        let folder=s.root.join("downloaded");if folder.exists(){std::fs::remove_dir_all(&folder).map_err(|_|Error::Provider("local_storage_unavailable"))?;}envelope::private_dir(&folder).map_err(local_storage_error)?;
         let client=s.client.clone().with_guard(Arc::new(Cancel(cancelled.clone())));
         // Commit is fetched afresh, then exact object hashes/identity are verified.
-        for name in std::iter::once("complete.json").chain(OBJECTS){client.get_stream(&RemoteObject::new(chosen.host_id,chosen.snapshot_id.0,name)?,&folder.join(name)).await?;}
-        let actual=envelope::read_complete(&folder,&s.profile.client_id)?;if actual!=chosen{return Err(Error::Integrity);}
+        for name in std::iter::once("complete.json").chain(OBJECTS){client.get_stream(&RemoteObject::new(chosen.host_id,chosen.snapshot_id.0,name)?,&folder.join(name)).await.map_err(local_storage_error)?;}
+        let actual=envelope::read_complete(&folder,&s.profile.client_id).map_err(local_storage_error)?;if actual!=chosen{return Err(Error::Integrity);}
         let stage=folder.clone();let client_id=s.profile.client_id.clone();let output=s.root.join(format!("native-{}",uuid::Uuid::new_v4()));let output_copy=output.clone();
-        let task=tokio::task::spawn_blocking(move||{let result=envelope::open_copy(&stage,&client_id,&output_copy).and_then(|native|verify_downloaded_native(&native.database));let _=std::fs::remove_dir_all(output_copy);result});
-        let mut stop=cancelled.clone();tokio::select!{result=task=>result.map_err(|_|Error::Integrity)??,_=stop.wait_for(|v|*v)=>return Err(Error::InvalidAttempt)};
+        let task=tokio::task::spawn_blocking(move||{let result=envelope::open_copy(&stage,&client_id,&output_copy).map_err(copy_unpack_error).and_then(|native|verify_downloaded_native(&native.database));let _=std::fs::remove_dir_all(output_copy);result});
+        let mut stop=cancelled.clone();tokio::select!{result=task=>result.map_err(|_|Error::Provider("recovery_check_failed"))??,_=stop.wait_for(|v|*v)=>return Err(Error::Provider("cancelled"))};
         // Native SQLite/TLS validation is repeated by the elevated Host helper.
         let _=std::fs::remove_dir_all(output);
-        let profile_path=s.root.join("profile.json");if !profile_path.exists(){let mut profile=envelope::private_file(&profile_path)?;use std::io::Write;profile.write_all(&serde_json::to_vec(&s.profile).map_err(|_|Error::InvalidFormat)?)?;profile.sync_all()?;}
-        if *cancelled.borrow(){return Err(Error::InvalidAttempt);}s.selected=Some(chosen);Ok(())
+        let profile_path=s.root.join("profile.json");if !profile_path.exists(){let mut profile=envelope::private_file(&profile_path).map_err(local_storage_error)?;use std::io::Write;profile.write_all(&serde_json::to_vec(&s.profile).map_err(|_|Error::InvalidFormat)?).map_err(|_|Error::Provider("local_storage_unavailable"))?;profile.sync_all().map_err(|_|Error::Provider("local_storage_unavailable"))?;}
+        if *cancelled.borrow(){return Err(Error::Provider("cancelled"));}s.selected=Some(chosen);Ok(())
     }.await;
     state.end().await;
     result.map_err(safe_error)
 }
 #[cfg(windows)]
 fn verify_downloaded_native(database: &std::path::Path) -> Result<()> {
-    let helper = std::env::current_exe()?.with_file_name("markiro-host.exe");
+    let helper = std::env::current_exe()
+        .map_err(|_| Error::Provider("recovery_check_failed"))?
+        .with_file_name("markiro-host.exe");
     let status = std::process::Command::new(helper)
         .arg("verify-yandex-copy")
         .arg(database)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()?;
+        .status()
+        .map_err(|_| Error::Provider("recovery_check_failed"))?;
     match status.code() {
         Some(0) => Ok(()),
         Some(6) => Err(Error::Provider("incompatible_version")),
@@ -187,7 +225,7 @@ fn verify_downloaded_native(database: &std::path::Path) -> Result<()> {
 }
 #[cfg(not(windows))]
 fn verify_downloaded_native(_database: &std::path::Path) -> Result<()> {
-    Err(Error::SecretUnavailable)
+    Err(Error::Provider("windows_required"))
 }
 #[cfg(windows)]
 fn check_download_budget(path: &std::path::Path, size: u64) -> Result<()> {
@@ -216,7 +254,7 @@ fn check_download_budget(path: &std::path::Path, size: u64) -> Result<()> {
 }
 #[cfg(not(windows))]
 fn check_download_budget(_path: &std::path::Path, _size: u64) -> Result<()> {
-    Err(Error::SecretUnavailable)
+    Err(Error::Provider("windows_required"))
 }
 #[tauri::command]
 pub async fn yandex_recovery_restore(
@@ -239,23 +277,23 @@ pub async fn yandex_recovery_restore(
         let selected = s.selected.as_ref().ok_or(Error::InvalidAttempt)?;
         local
             .get()
-            .map_err(|_| Error::SecretUnavailable)?
+            .map_err(|_| Error::Provider("local_database_unavailable"))?
             .require_settled_outbox()
             .await
-            .map_err(|_| Error::Provider("unsent_facts"))?;
+            .map_err(settled_outbox_error)?;
         if local
             .get()
-            .map_err(|_| Error::SecretUnavailable)?
+            .map_err(|_| Error::Provider("local_database_unavailable"))?
             .has_recovery_copies()
             .await
-            .map_err(|_| Error::SecretUnavailable)?
+            .map_err(|_| Error::Provider("local_database_unavailable"))?
         {
             return Err(Error::Provider("local_copies_present"));
         }
         let stage = s.root.clone();
         tokio::task::spawn_blocking(move || launch_helper(Some(&stage)))
             .await
-            .map_err(|_| Error::SecretUnavailable)??;
+            .map_err(|_| Error::Provider("recovery_helper_failed"))??;
         let observation = wait_hello().await?;
         if observation.fingerprint != selected.tls_fingerprint
             || observation.hello.host_id != selected.host_id.to_string()
@@ -263,7 +301,10 @@ pub async fn yandex_recovery_restore(
         {
             return Err(Error::Integrity);
         }
-        device.forget().await.map_err(|_| Error::InvalidAttempt)?;
+        device
+            .forget()
+            .await
+            .map_err(|_| Error::Provider("local_storage_unavailable"))?;
         device
             .local_pair(
                 &crate::local_host_address(),
@@ -306,6 +347,111 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn outbox_preflight_distinguishes_unsent_facts_from_database_failure() {
+        use crate::local_db::LocalDbError;
+        assert!(matches!(
+            settled_outbox_error(LocalDbError::UnsentRecords { count: 1 }),
+            Error::Provider("unsent_facts")
+        ));
+        assert!(matches!(
+            settled_outbox_error(LocalDbError::StatementFailed),
+            Error::Provider("local_database_unavailable")
+        ));
+    }
+    #[test]
+    fn storage_context_reports_safe_codes_without_hiding_integrity_or_network_errors() {
+        for (classify, expected) in [
+            (
+                local_storage_error as fn(Error) -> Error,
+                "local_storage_unavailable",
+            ),
+            (
+                profile_storage_error as fn(Error) -> Error,
+                "profile_storage_failed",
+            ),
+        ] {
+            for error in [
+                Error::Io(std::io::Error::other("sensitive local path")),
+                Error::SecretUnavailable,
+            ] {
+                assert!(matches!(classify(error), Error::Provider(code) if code == expected));
+            }
+            assert!(matches!(classify(Error::Integrity), Error::Integrity));
+            assert!(matches!(classify(Error::Crypto), Error::Crypto));
+            assert!(matches!(classify(Error::Network), Error::Network));
+            assert!(matches!(
+                classify(Error::InvalidFormat),
+                Error::InvalidFormat
+            ));
+        }
+    }
+    #[test]
+    fn file_dialog_distinguishes_user_cancellation_from_failure() {
+        assert!(matches!(
+            profile_dialog_error(0),
+            Error::Provider("cancelled")
+        ));
+        assert!(matches!(
+            profile_dialog_error(1),
+            Error::Provider("profile_dialog_failed")
+        ));
+    }
+    #[test]
+    fn protected_envelope_storage_distinguishes_unpack_io_from_integrity_errors() {
+        assert!(matches!(
+            copy_unpack_error(Error::SecretUnavailable),
+            Error::Provider("local_storage_unavailable")
+        ));
+        assert!(matches!(
+            copy_unpack_error(Error::Io(std::io::Error::other("decryption stream"))),
+            Error::Provider("copy_unpack_failed")
+        ));
+        assert!(matches!(
+            copy_unpack_error(Error::Integrity),
+            Error::Integrity
+        ));
+        assert!(matches!(copy_unpack_error(Error::Crypto), Error::Crypto));
+        assert!(matches!(copy_unpack_error(Error::Network), Error::Network));
+    }
+    #[test]
+    fn unreadable_downloaded_manifest_reports_local_storage_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = envelope::read_complete(dir.path(), "client-id")
+            .map_err(local_storage_error)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Provider("local_storage_unavailable")
+        ));
+    }
+    #[tokio::test]
+    async fn cancelled_request_guard_retains_explicit_user_cancellation() {
+        let (_tx, rx) = watch::channel(true);
+        assert!(matches!(
+            Cancel(rx).check().await,
+            Err(Error::Provider("cancelled"))
+        ));
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn unsupported_recovery_operations_report_windows_required() {
+        for result in [
+            verify_downloaded_native(std::path::Path::new("unused.db")),
+            check_download_budget(std::path::Path::new("unused"), 0),
+            launch_helper(None),
+        ] {
+            assert!(matches!(result, Err(Error::Provider("windows_required"))));
+        }
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn unsupported_profile_import_reports_windows_required() {
+        assert!(matches!(
+            import_profile(),
+            Err(Error::Provider("windows_required"))
+        ));
+    }
     #[test]
     fn resume_is_available_only_for_a_bounded_unfinished_job() {
         let dir = tempfile::tempdir().unwrap();
@@ -374,24 +520,27 @@ pub async fn yandex_recovery_resume(
     let result = async {
         local
             .get()
-            .map_err(|_| Error::SecretUnavailable)?
+            .map_err(|_| Error::Provider("local_database_unavailable"))?
             .require_settled_outbox()
             .await
-            .map_err(|_| Error::Provider("unsent_facts"))?;
+            .map_err(settled_outbox_error)?;
         if local
             .get()
-            .map_err(|_| Error::SecretUnavailable)?
+            .map_err(|_| Error::Provider("local_database_unavailable"))?
             .has_recovery_copies()
             .await
-            .map_err(|_| Error::SecretUnavailable)?
+            .map_err(|_| Error::Provider("local_database_unavailable"))?
         {
             return Err(Error::Provider("local_copies_present"));
         }
         tokio::task::spawn_blocking(|| launch_helper(None))
             .await
-            .map_err(|_| Error::SecretUnavailable)??;
+            .map_err(|_| Error::Provider("recovery_helper_failed"))??;
         wait_hello().await?;
-        device.forget().await.map_err(|_| Error::InvalidAttempt)?;
+        device
+            .forget()
+            .await
+            .map_err(|_| Error::Provider("local_storage_unavailable"))?;
         device
             .local_pair(
                 &crate::local_host_address(),
@@ -413,7 +562,8 @@ fn launch_helper(stage: Option<&std::path::Path>) -> Result<()> {
         System::Threading::{GetExitCodeProcess, WaitForSingleObject},
         UI::Shell::*,
     };
-    let executable = std::env::current_exe()?
+    let executable = std::env::current_exe()
+        .map_err(|_| Error::Provider("recovery_helper_failed"))?
         .parent()
         .ok_or(Error::InvalidFormat)?
         .join("markiro-host.exe");
@@ -446,7 +596,7 @@ fn launch_helper(stage: Option<&std::path::Path>) -> Result<()> {
         return Err(if unsafe { GetLastError() } == ERROR_CANCELLED {
             Error::Provider("cancelled")
         } else {
-            Error::Network
+            Error::Provider("recovery_helper_failed")
         });
     }
     let wait = unsafe { WaitForSingleObject(info.hProcess, u32::MAX) };
@@ -460,14 +610,14 @@ fn launch_helper(stage: Option<&std::path::Path>) -> Result<()> {
 }
 #[cfg(not(windows))]
 fn launch_helper(_stage: Option<&std::path::Path>) -> Result<()> {
-    Err(Error::SecretUnavailable)
+    Err(Error::Provider("windows_required"))
 }
 
 #[tauri::command]
 pub async fn yandex_profile_import() -> std::result::Result<ClientProfile, String> {
     tokio::task::spawn_blocking(import_profile)
         .await
-        .map_err(|_| "secret_unavailable".to_owned())?
+        .map_err(|_| "profile_dialog_failed".to_owned())?
         .map_err(safe_error)
 }
 #[cfg(windows)]
@@ -482,18 +632,21 @@ fn import_profile() -> Result<ClientProfile> {
     dialog.lpstrFilter = filter.as_ptr();
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if unsafe { GetOpenFileNameW(&mut dialog) } == 0 {
-        return Err(Error::Provider("cancelled"));
+        return Err(profile_dialog_error(unsafe { CommDlgExtendedError() }));
     }
     let end = file
         .iter()
         .position(|c| *c == 0)
         .ok_or(Error::InvalidFormat)?;
     let path = String::from_utf16(&file[..end]).map_err(|_| Error::InvalidFormat)?;
-    ClientProfile::from_bytes(&envelope::read_bounded(std::path::Path::new(&path), 65536)?)
+    ClientProfile::from_bytes(
+        &envelope::read_bounded(std::path::Path::new(&path), 65536)
+            .map_err(profile_storage_error)?,
+    )
 }
 #[cfg(not(windows))]
 fn import_profile() -> Result<ClientProfile> {
-    Err(Error::SecretUnavailable)
+    Err(Error::Provider("windows_required"))
 }
 #[tauri::command]
 pub fn yandex_profile_export<R: tauri::Runtime>(
@@ -505,13 +658,15 @@ pub fn yandex_profile_export<R: tauri::Runtime>(
         let parent = app
             .path()
             .document_dir()
-            .map_err(|_| Error::SecretUnavailable)?;
+            .map_err(|_| Error::Provider("profile_storage_failed"))?;
         let folder = parent.join(format!("Autonom-Yandex-{}", uuid::Uuid::new_v4()));
-        envelope::private_dir(&folder)?;
+        envelope::private_dir(&folder).map_err(profile_storage_error)?;
         let path = folder.join("yandex-connection.json");
         use std::io::Write;
-        envelope::private_file(&path)?
-            .write_all(&serde_json::to_vec_pretty(&profile).map_err(|_| Error::InvalidFormat)?)?;
+        envelope::private_file(&path)
+            .map_err(profile_storage_error)?
+            .write_all(&serde_json::to_vec_pretty(&profile).map_err(|_| Error::InvalidFormat)?)
+            .map_err(|_| Error::Provider("profile_storage_failed"))?;
         Ok(path.to_string_lossy().to_string())
     })()
     .map_err(safe_error)

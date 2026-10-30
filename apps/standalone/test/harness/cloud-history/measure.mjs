@@ -95,7 +95,9 @@ async function measureReplacement() {
     .waitFor();
   assert.equal(
     await page
-      .getByText("История перенесена. Работа разрешена после завершения импорта.", { exact: true })
+      .getByText("История облачных смен перенесена. Блокировка на время переноса снята.", {
+        exact: true,
+      })
       .count(),
     0,
   );
@@ -124,7 +126,9 @@ async function measureReplacement() {
   await page.getByText("Все части проверены. Можно перенести историю.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Продолжить импорт", exact: true }).click();
   await page
-    .getByText("История перенесена. Работа разрешена после завершения импорта.", { exact: true })
+    .getByText("История облачных смен перенесена. Блокировка на время переноса снята.", {
+      exact: true,
+    })
     .waitFor();
   await page.screenshot({ path: resolve(out, "replacement-04-complete.png"), fullPage: true });
   const metrics = await page.evaluate(() => globalThis.window.historyAcceptance);
@@ -223,7 +227,9 @@ try {
       .waitFor();
     await page.getByRole("button", { name: "Импортировать историю", exact: true }).click();
     await page
-      .getByText("История перенесена. Работа разрешена после завершения импорта.", { exact: true })
+      .getByText("История облачных смен перенесена. Блокировка на время переноса снята.", {
+        exact: true,
+      })
       .waitFor();
     await page.screenshot({ path: resolve(out, "01-import-complete.png"), fullPage: true });
     await page

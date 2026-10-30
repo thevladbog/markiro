@@ -1,5 +1,18 @@
 //! Native input only. The value is never an IPC argument or result.
 use markiro_backup_cloud::{model::Secret, Error, Result};
+#[cfg(any(windows, test))]
+fn read_client_secret(buffer: &[u16]) -> Result<Secret> {
+    let end = buffer
+        .iter()
+        .position(|c| *c == 0)
+        .ok_or(Error::Provider("secret_prompt_failed"))?;
+    if end == 0 {
+        return Err(Error::Provider("client_secret_required"));
+    }
+    let value =
+        String::from_utf16(&buffer[..end]).map_err(|_| Error::Provider("secret_prompt_failed"))?;
+    Secret::client_secret(value).map_err(|_| Error::Provider("client_credentials_invalid"))
+}
 #[cfg(windows)]
 pub fn client_secret(client_id: &str) -> Result<Option<Secret>> {
     use windows_sys::Win32::{
@@ -45,16 +58,46 @@ pub fn client_secret(client_id: &str) -> Result<Option<Secret>> {
         return Ok(None);
     }
     if result != 0 {
-        return Err(Error::SecretUnavailable);
+        return Err(Error::Provider("secret_prompt_failed"));
     }
-    let end = password
-        .iter()
-        .position(|c| *c == 0)
-        .ok_or(Error::InvalidFormat)?;
-    let value = String::from_utf16(&password[..end]).map_err(|_| Error::InvalidFormat)?;
-    Ok(Some(Secret::client_secret(value)?))
+    Ok(Some(read_client_secret(&password[..])?))
 }
 #[cfg(not(windows))]
 pub fn client_secret(_client_id: &str) -> Result<Option<Secret>> {
-    Err(Error::SecretUnavailable)
+    Err(Error::Provider("windows_required"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_native_secret_buffers_report_prompt_failure() {
+        for buffer in [&[0xd800, 0][..], &[65, 66][..]] {
+            assert!(matches!(
+                read_client_secret(buffer),
+                Err(Error::Provider("secret_prompt_failed"))
+            ));
+        }
+    }
+    #[test]
+    fn missing_or_invalid_secret_reports_safe_credential_reason() {
+        assert!(matches!(
+            read_client_secret(&[0]),
+            Err(Error::Provider("client_secret_required"))
+        ));
+        assert!(matches!(
+            read_client_secret(&[32, 0]),
+            Err(Error::Provider("client_credentials_invalid"))
+        ));
+        assert!(matches!(read_client_secret(&[65, 0]), Ok(_)));
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn unsupported_secret_prompt_reports_windows_required() {
+        assert!(matches!(
+            client_secret("client-id"),
+            Err(Error::Provider("windows_required"))
+        ));
+    }
 }

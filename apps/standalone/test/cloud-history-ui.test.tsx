@@ -86,7 +86,7 @@ describe("cloud history office transfer", () => {
       await screen.findByText(/После перезапуска снова выберите тот же файл истории/),
     ).toBeTruthy();
     expect(
-      screen.queryByText("История перенесена. Работа разрешена после завершения импорта."),
+      screen.queryByText("История облачных смен перенесена. Блокировка на время переноса снята."),
     ).toBeNull();
   });
   it("streams the source preview, validates every part before import and only completes after activation", async () => {
@@ -106,7 +106,9 @@ describe("cloud history office transfer", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Импортировать историю" }));
     expect(
-      await screen.findByText("История перенесена. Работа разрешена после завершения импорта."),
+      await screen.findByText(
+        "История облачных смен перенесена. Блокировка на время переноса снята.",
+      ),
     ).toBeTruthy();
     expect(host.completeCloudHistory).toHaveBeenCalledWith(expect.any(String), {
       batchId: manifest.checksum,
@@ -156,10 +158,12 @@ describe("cloud history office transfer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Продолжить импорт" }));
     await waitFor(() => expect(host.completeCloudHistory).toHaveBeenCalledTimes(1));
     expect(
-      screen.queryByText("История перенесена. Работа разрешена после завершения импорта."),
+      screen.queryByText("История облачных смен перенесена. Блокировка на время переноса снята."),
     ).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить импорт" }));
-    await screen.findByText("История перенесена. Работа разрешена после завершения импорта.");
+    await screen.findByText(
+      "История облачных смен перенесена. Блокировка на время переноса снята.",
+    );
     expect(host.importCloudHistory.mock.calls.every(([, body]) => body.dryRun)).toBe(true);
   });
   it("requires explicit confirmation tied to pending batch and explains the canceled-file tombstone", async () => {
