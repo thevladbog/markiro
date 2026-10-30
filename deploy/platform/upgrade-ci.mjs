@@ -5,6 +5,7 @@ import { createDockerInspectChannel } from "./rehearsal-inspect-channel.mjs";
  * Never an installed production command or a production admission producer.
  */
 import assert from "node:assert/strict";
+import { createRehearsalShell } from "./rehearsal-filesystem.mjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   chmod,
@@ -410,7 +411,17 @@ export async function rehearseUpgrade(
       timeout,
     );
   const inspect = async (kind, id) => JSON.parse((await nested([kind, "inspect", id])).stdout)[0];
-  const shell = (args) => outer(["exec", containerId, ...args]);
+  let filesystemShell;
+  const shell = (args) => {
+    filesystemShell ??= createRehearsalShell({
+      endpoint,
+      containerId,
+      root: parent,
+      forward: Boolean(forwardScenario),
+      runCli: (values) => outer(["exec", containerId, ...values]),
+    });
+    return filesystemShell(args);
+  };
   const metadata = createRehearsalMetadataReader(endpoint);
   const verifyIsolation = () =>
     verifyRehearsalIsolation(
