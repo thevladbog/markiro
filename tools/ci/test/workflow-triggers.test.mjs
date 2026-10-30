@@ -12,6 +12,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
   const expectedEvents = {
     "bootstrap-release-catalog.yml": ["workflow_dispatch"],
     "ci.yml": ["pull_request", "push", "workflow_dispatch"],
+    "configure-platform-dadata.yml": ["workflow_dispatch"],
     "dependency-review.yml": ["pull_request"],
     "deploy-platform.yml": ["workflow_dispatch"],
     "handheld-release.yml": ["workflow_dispatch"],
