@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-// Updates remain local files. Optional Yandex backups use direct, guarded
-// provider calls; there are no product-server or telemetry requests. Fail on
+// Optional release downloads and Yandex backups use direct, guarded
+// provider calls; there are no site-data or telemetry requests. Fail on
 // every new network crate until its use has been reviewed and named here.
 
 const text = async (path) => (await readFile(path, "utf8")).replaceAll("\r\n", "\n");
@@ -91,6 +91,6 @@ test("no updater and no HTTP plugin in the shell, the host or the webview", asyn
 test("the guide for IT keeps its promise", async () => {
   assert.match(
     await text("docs/runbooks/standalone-install.md"),
-    /Исходящих соединений в интернет нет/u,
+    /Исходящих соединений в интернет нет без подключения необязательных копий на Яндекс Диск или явной проверки\/скачивания обновлений в офисе/u,
   );
 });

@@ -14,6 +14,7 @@
 
 pub mod fetch;
 pub mod launch;
+pub mod online;
 pub mod package;
 pub mod pending;
 pub mod rules;
@@ -217,7 +218,7 @@ impl UpdateState {
     }
 
     /// A path the last search found, or the manifest of a package this app
-    /// downloaded from the host (plan ОБН-3, `fetch::downloaded_manifest`);
+    /// downloaded from the host or the optional release channel;
     /// anything else is `invalid_request`. `update_stage` asks it too.
     pub(crate) fn found_path(&self, path: &str) -> Result<PathBuf, UpdateError> {
         let found = self
@@ -231,7 +232,9 @@ impl UpdateState {
             return Ok(found);
         }
         let downloaded = PathBuf::from(path);
-        if fetch::downloaded_manifest(&self.downloads(), &downloaded) {
+        if fetch::downloaded_manifest(&self.downloads(), &downloaded)
+            || online::downloaded_manifest(&self.data_dir, &downloaded)
+        {
             return Ok(downloaded);
         }
         Err(UpdateError::InvalidRequest)

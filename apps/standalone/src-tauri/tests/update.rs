@@ -385,3 +385,29 @@ fn a_certificate_other_than_the_paired_one_cannot_vouch_for_the_hosts_version() 
     assert_eq!(report.confirmations, vec![Confirmation::HostUnreachable]);
     host.stop();
 }
+
+#[test]
+fn an_internet_package_uses_file_compatibility_instead_of_host_version_equality() {
+    let host = Host::start();
+    let device_dir = tempfile::tempdir().unwrap();
+    let device = station_paired_at(device_dir.path(), &host.address(), &host.fingerprint());
+    let site = site("0.0.1", vec![]);
+    let data = site._dirs[0].path();
+    let current: AppVersion = HOST_VERSION.parse().unwrap();
+    let other = AppVersion {
+        minor: current.minor + 1,
+        patch: 0,
+        ..current
+    }
+    .to_string();
+    let from_host = downloaded_package(data, &other);
+    let source = data.join("updates").join(&other);
+    let destination = data.join("online-updates").join(&other);
+    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    std::fs::rename(source, &destination).unwrap();
+    let path = destination.join(std::path::Path::new(&from_host).file_name().unwrap());
+    let report = block_on(site.state.verify(&device, path.to_str().unwrap())).unwrap();
+    assert_eq!(report.refusal, None);
+    assert_eq!(report.host.unwrap().version.as_deref(), Some(HOST_VERSION));
+    host.stop();
+}

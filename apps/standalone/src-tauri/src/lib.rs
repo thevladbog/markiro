@@ -410,6 +410,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         office_files::set_exports_folder,
         folder_dialog::pick_folder,
         external_link::open_external_link,
+        update::online::update_online_check,
+        update::online::update_online_download,
         update::fetch::update_fetch,
         update::fetch::update_check_manifest,
         update::stage::update_stage,

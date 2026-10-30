@@ -18,6 +18,7 @@ import { useOfficeSession } from "../office-session.js";
 import { PageLoading } from "../page-state.js";
 import { useThisDeviceId } from "../this-device.js";
 import { DeviceVersionsBlock } from "./DeviceVersionsBlock.js";
+import { OnlineUpdateBlock } from "./OnlineUpdateBlock.js";
 import { HostUpdateBlock } from "./HostUpdateBlock.js";
 import { StageToHostButton } from "./StageToHostButton.js";
 import { useAboutData } from "./about-data.js";
@@ -31,12 +32,7 @@ import {
   type UpdatePhase,
 } from "./update-flow.js";
 import type { InstallRole } from "../../host/device.js";
-import {
-  UpdateShellError,
-  type FoundPackage,
-  type UpdateOutcome,
-  type VerifiedReport,
-} from "./update-shell.js";
+import { UpdateShellError, type UpdateOutcome, type VerifiedReport } from "./update-shell.js";
 
 export const UPDATE_PACKAGES_KEY = ["office", "about", "update", "packages"] as const;
 export const UPDATE_OUTCOME_KEY = ["office", "about", "update", "outcome"] as const;
@@ -177,6 +173,8 @@ function UpdateFromFile() {
   const thisDeviceId = useThisDeviceId();
   const shell = useUpdateShell();
   const packages = useQuery({ queryKey: UPDATE_PACKAGES_KEY, queryFn: () => shell.scan() });
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [onlineReportPath, setOnlineReportPath] = useState<string | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
   const [report, setReport] = useState<VerifiedReport | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -214,19 +212,25 @@ function UpdateFromFile() {
     void packages.refetch();
   };
 
-  const check = async (found: FoundPackage) => {
-    generation.current += 1;
-    setChecking(found.path);
+  const check = async (path: string, online = false): Promise<boolean> => {
+    const mine = ++generation.current;
+    setChecking(path);
+    setOnlineReportPath(online ? path : null);
     setReport(null);
     setPending(null);
     setFailure(null);
     try {
-      setReport(await shell.verify(found.path));
+      const checked = await shell.verify(path);
+      if (!left.current && mine === generation.current) {
+        setReport(checked);
+        return true;
+      }
     } catch (error) {
-      setFailure(error);
+      if (!left.current && mine === generation.current) setFailure(error);
     } finally {
-      setChecking(null);
+      if (!left.current && mine === generation.current) setChecking(null);
     }
+    return false;
   };
 
   const prepare = async (checked: VerifiedReport) => {
@@ -293,116 +297,135 @@ function UpdateFromFile() {
     }
   };
 
-  const busy = checking !== null || preparing || phase !== null;
+  const busy = onlineBusy || checking !== null || preparing || phase !== null;
   return (
-    <section aria-labelledby="update-from-file" className="office-stack update-from-file">
-      <div className="office-section-intro">
-        <h3 id="update-from-file">{t("office.about.update.fromFile")}</h3>
-        <p className="office-note">{t("office.about.update.hint")}</p>
-      </div>
-      <div className="office-actions">
-        <Button variant="secondary" loading={packages.isFetching} disabled={busy} onClick={search}>
-          {t("office.about.update.search")}
-        </Button>
-        <Button variant="secondary" onClick={() => void openFolder()}>
-          {t("office.about.update.openFolder")}
-        </Button>
-      </div>
-      {packages.isPending ? (
-        <PageLoading />
-      ) : packages.isError ? (
-        <Alert
-          tone={
-            packages.error instanceof UpdateShellError && packages.error.code === "unsupported"
-              ? "info"
-              : "error"
-          }
-        >
-          {packages.error instanceof UpdateShellError && packages.error.code === "unsupported"
-            ? t("office.about.update.unavailable")
-            : updateErrorText(t, packages.error)}
-        </Alert>
-      ) : packages.data.length === 0 ? (
-        <p className="office-note">{t("office.about.update.none")}</p>
-      ) : (
-        <ul className="update-packages" aria-label={t("office.about.update.found")}>
-          {packages.data.map((found) => (
-            <li key={found.path} className="update-packages__item">
-              <span>{found.fileName}</span>{" "}
-              <span>
-                (
-                {found.place === "documents"
-                  ? t("office.about.update.placeDocuments")
-                  : t("office.about.update.placeRemovable")}
-                )
-              </span>{" "}
-              {found.manifest === null ? (
-                <span>
-                  {t(`office.about.update.problem.${found.problem ?? "manifest_malformed"}`)}
-                </span>
-              ) : (
-                <>
-                  <span>
-                    {t("office.about.update.notChecked", { version: found.manifest.version })}
-                  </span>{" "}
-                  {found.manifest.channel === "beta" ? (
-                    <Badge tone="warn">{t("office.about.update.beta")}</Badge>
-                  ) : null}{" "}
-                  <Button
-                    size="compact"
-                    variant="secondary"
-                    aria-label={t("office.about.update.checkPackage", { file: found.fileName })}
-                    loading={checking === found.path}
-                    disabled={busy}
-                    onClick={() => void check(found)}
-                  >
-                    {t("office.about.update.check")}
-                  </Button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {report !== null ? (
-        <ReportCard
-          report={report}
-          busy={busy}
-          roleKnown={role !== null}
-          onInstall={() => void prepare(report)}
-        />
-      ) : null}
-      {failure !== null ? (
-        <div ref={failureRef} tabIndex={-1}>
-          <Alert tone="error">{updateErrorText(t, failure)}</Alert>
+    <div className="office-stack">
+      <OnlineUpdateBlock
+        disabled={busy}
+        onBusy={setOnlineBusy}
+        onReset={() => {
+          generation.current += 1;
+          setReport(null);
+          setPending(null);
+          setFailure(null);
+        }}
+        onDownloaded={(path) => check(path, true)}
+      />
+      <section aria-labelledby="update-from-file" className="office-stack update-from-file">
+        <div className="office-section-intro">
+          <h3 id="update-from-file">{t("office.about.update.fromFile")}</h3>
+          <p className="office-note">{t("office.about.update.hint")}</p>
         </div>
-      ) : null}
-      {/* A polite live region without the status role: the page's loading
+        <div className="office-actions">
+          <Button
+            variant="secondary"
+            loading={packages.isFetching}
+            disabled={busy}
+            onClick={search}
+          >
+            {t("office.about.update.search")}
+          </Button>
+          <Button variant="secondary" onClick={() => void openFolder()}>
+            {t("office.about.update.openFolder")}
+          </Button>
+        </div>
+        {packages.isPending ? (
+          <PageLoading />
+        ) : packages.isError ? (
+          <Alert
+            tone={
+              packages.error instanceof UpdateShellError && packages.error.code === "unsupported"
+                ? "info"
+                : "error"
+            }
+          >
+            {packages.error instanceof UpdateShellError && packages.error.code === "unsupported"
+              ? t("office.about.update.unavailable")
+              : updateErrorText(t, packages.error)}
+          </Alert>
+        ) : packages.data.length === 0 ? (
+          <p className="office-note">{t("office.about.update.none")}</p>
+        ) : (
+          <ul className="update-packages" aria-label={t("office.about.update.found")}>
+            {packages.data.map((found) => (
+              <li key={found.path} className="update-packages__item">
+                <span>{found.fileName}</span>{" "}
+                <span>
+                  (
+                  {found.place === "documents"
+                    ? t("office.about.update.placeDocuments")
+                    : t("office.about.update.placeRemovable")}
+                  )
+                </span>{" "}
+                {found.manifest === null ? (
+                  <span>
+                    {t(`office.about.update.problem.${found.problem ?? "manifest_malformed"}`)}
+                  </span>
+                ) : (
+                  <>
+                    <span>
+                      {t("office.about.update.notChecked", { version: found.manifest.version })}
+                    </span>{" "}
+                    {found.manifest.channel === "beta" ? (
+                      <Badge tone="warn">{t("office.about.update.beta")}</Badge>
+                    ) : null}{" "}
+                    <Button
+                      size="compact"
+                      variant="secondary"
+                      aria-label={t("office.about.update.checkPackage", { file: found.fileName })}
+                      loading={checking === found.path}
+                      disabled={busy}
+                      onClick={() => void check(found.path)}
+                    >
+                      {t("office.about.update.check")}
+                    </Button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {report !== null ? (
+          <ReportCard
+            report={report}
+            busy={busy}
+            roleKnown={role !== null}
+            manualStage={onlineReportPath !== report.path}
+            onInstall={() => void prepare(report)}
+          />
+        ) : null}
+        {failure !== null ? (
+          <div ref={failureRef} tabIndex={-1}>
+            <Alert tone="error">{updateErrorText(t, failure)}</Alert>
+          </div>
+        ) : null}
+        {/* A polite live region without the status role: the page's loading
           spinner is the one status there (test/about-page.test.tsx waits for it to go). */}
-      <p className="update-progress office-note" aria-live="polite">
-        {checking !== null
-          ? t("office.about.update.checking")
-          : phase !== null
-            ? t(`office.about.update.phase.${phase}`)
-            : ""}
-      </p>
-      {pending !== null ? (
-        <ConfirmDialog
-          open
-          title={t(
-            pending.warnings.reinstall
-              ? "office.about.update.confirm.reinstallTitle"
-              : "office.about.update.confirm.title",
-            { version: pending.report.manifest.version },
-          )}
-          description={<WarningList warnings={pending.warnings} />}
-          confirmLabel={t("office.about.update.confirm.go")}
-          cancelLabel={t("office.about.update.confirm.cancel")}
-          onConfirm={() => void install(pending)}
-          onCancel={() => setPending(null)}
-        />
-      ) : null}
-    </section>
+        <p className="update-progress office-note" aria-live="polite">
+          {checking !== null
+            ? t("office.about.update.checking")
+            : phase !== null
+              ? t(`office.about.update.phase.${phase}`)
+              : ""}
+        </p>
+        {pending !== null ? (
+          <ConfirmDialog
+            open
+            title={t(
+              pending.warnings.reinstall
+                ? "office.about.update.confirm.reinstallTitle"
+                : "office.about.update.confirm.title",
+              { version: pending.report.manifest.version },
+            )}
+            description={<WarningList warnings={pending.warnings} />}
+            confirmLabel={t("office.about.update.confirm.go")}
+            cancelLabel={t("office.about.update.confirm.cancel")}
+            onConfirm={() => void install(pending)}
+            onCancel={() => setPending(null)}
+          />
+        ) : null}
+      </section>
+    </div>
   );
 }
 
@@ -410,12 +433,14 @@ function ReportCard({
   report,
   busy,
   roleKnown,
+  manualStage,
   onInstall,
 }: {
   report: VerifiedReport;
   busy: boolean;
   /** Whether this PC's role is known: without it nothing is installed (the host's PC copies first). */
   roleKnown: boolean;
+  manualStage: boolean;
   onInstall: () => void;
 }) {
   const { t } = useTranslation();
@@ -471,7 +496,7 @@ function ReportCard({
         >
           {t("office.about.update.install")}
         </Button>
-        <StageToHostButton manifestPath={report.path} />
+        {manualStage && <StageToHostButton manifestPath={report.path} />}
       </div>
       <details className="office-disclosure">
         <summary>{t("office.about.update.manual")}</summary>

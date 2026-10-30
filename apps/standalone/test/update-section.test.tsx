@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, type Mock } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -12,6 +12,8 @@ import { officeShiftSchema, type DeviceRecord, type OfficeShift } from "../src/h
 import type { AboutApi } from "../src/office/info/about-api.js";
 import { AboutProvider } from "../src/office/info/about-context.js";
 import { UpdateShellProvider } from "../src/office/info/update-context.js";
+import { OnlineUpdatesProvider } from "../src/office/info/online-updates-context.js";
+import { OnlineUpdateError, type OnlineUpdatesApi } from "../src/office/info/online-updates-api.js";
 import { UpdateSection } from "../src/office/info/UpdateSection.js";
 import {
   UpdateShellError,
@@ -22,6 +24,10 @@ import {
 import { createOfficeQueryClient } from "../src/office/office-query.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { ThisDeviceProvider } from "../src/office/this-device.js";
+import { UpdateError, type UpdatesApi } from "../src/update/updates-api.js";
+import { UpdatesProvider } from "../src/update/updates-context.js";
+import { officeUpdateStatusSchema } from "../src/host/distribution.js";
+import { chooseText } from "./support/select.js";
 import { HEALTHY_BACKUPS } from "./support/backups.js";
 import { DEVICE_ID, DEVICE_STATUS, SESSION, observation } from "./support/fixtures.js";
 import {
@@ -111,12 +117,25 @@ function fakeAbout(role: "host" | "station" | "office" | "unreadable"): AboutApi
 }
 
 function renderUpdate(options: {
+  online?: OnlineUpdatesApi;
+  updates?: Partial<UpdatesApi>;
   shell?: FakeShell;
   api?: FakeHostApi;
   role?: "host" | "station" | "office" | "unreadable";
   technologist?: boolean;
 }) {
   const shell = options.shell ?? fakeShell();
+  const updates: UpdatesApi = {
+    appVersion: vi.fn(async () => "0.1.0"),
+    checkManifest: vi.fn(async () => {
+      throw new Error("unexpected manifest check");
+    }),
+    fetch: vi.fn(async () => {
+      throw new Error("unexpected host download");
+    }),
+    stage: vi.fn(async () => ({ version: MANIFEST.version, sizeBytes: 29 })),
+    ...options.updates,
+  };
   const api =
     options.api ??
     fakeHostApi({
@@ -126,14 +145,18 @@ function renderUpdate(options: {
   const session = fakeOfficeSession(
     options.technologist === true ? { api, user: TECHNOLOGIST } : { api },
   );
-  render(
+  const view = render(
     <ThemeProvider defaultTheme="dark">
       <QueryClientProvider client={createOfficeQueryClient()}>
         <OfficeSessionProvider value={session}>
           <ThisDeviceProvider deviceId={DEVICE_ID}>
             <AboutProvider value={fakeAbout(options.role ?? "station")}>
               <UpdateShellProvider value={shell}>
-                <UpdateSection />
+                <OnlineUpdatesProvider value={options.online ?? onlineApi()}>
+                  <UpdatesProvider value={updates}>
+                    <UpdateSection />
+                  </UpdatesProvider>
+                </OnlineUpdatesProvider>
               </UpdateShellProvider>
             </AboutProvider>
           </ThisDeviceProvider>
@@ -141,7 +164,7 @@ function renderUpdate(options: {
       </QueryClientProvider>
     </ThemeProvider>,
   );
-  return { shell, api };
+  return { shell, api, updates, unmount: view.unmount };
 }
 
 const RUNNING: BackupState = {
@@ -437,5 +460,303 @@ describe("«Обновление»", () => {
     const phase = await screen.findByText("Запуск установщика. Программа закроется.");
     expect(phase.getAttribute("aria-live")).toBe("polite");
     finish();
+  });
+});
+
+function onlineApi(): OnlineUpdatesApi {
+  return {
+    check: vi.fn(async () => ({
+      manifest: {
+        version: MANIFEST.version,
+        channel: "stable",
+        releasedAt: MANIFEST.releasedAt,
+        notes: MANIFEST.notes,
+        minUpgradeFrom: "0.1.0",
+        protocol: 3,
+        minProtocol: 2,
+        sizeBytes: 29,
+      },
+      newer: true,
+      compatible: true,
+    })),
+    download: vi.fn(async (_channel, _version, progress) => {
+      progress({ received: 29, total: 29 });
+      return { version: MANIFEST.version, manifestPath: PATH, sizeBytes: 29 };
+    }),
+  };
+}
+describe("online releases in the existing update section", () => {
+  it("checks explicitly, keeps manual import, downloads and requires the existing confirmation", async () => {
+    const online = onlineApi();
+    const { shell, api } = renderUpdate({
+      online,
+      role: "host",
+      api: fakeHostApi({
+        listDevices: vi.fn(async () => []),
+        listShifts: vi.fn(async () => []),
+        startBackup: vi.fn(async () => ({
+          ...HEALTHY_BACKUPS,
+          local: {
+            ...HEALTHY_BACKUPS.local,
+            lastAttempt: { at: new Date().toISOString(), trigger: "manual", ok: true, code: null },
+          },
+        })),
+        getBackups: vi.fn(async () => ({
+          ...HEALTHY_BACKUPS,
+          local: {
+            ...HEALTHY_BACKUPS.local,
+            lastAttempt: {
+              at: new Date(Date.now() + 1_000).toISOString(),
+              trigger: "manual",
+              ok: true,
+              code: null,
+            },
+          },
+        })),
+        recordUpdateStarted: vi.fn(async () => undefined),
+      }),
+    });
+    await screen.findByRole("button", { name: "Искать снова" });
+    expect(online.check).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить обновления" }));
+    await screen.findByRole("button", { name: "Скачать обновление" });
+    expect(online.check).toHaveBeenCalledWith("stable");
+    fireEvent.click(screen.getByRole("button", { name: "Скачать обновление" }));
+    await screen.findByText("Подпись проверена: выпуск Маркиро.");
+    expect(shell.verify).toHaveBeenCalledWith(PATH);
+    expect(shell.install).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Установить обновление" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(shell.install).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    expect(shell.install).not.toHaveBeenCalled();
+    expect(api.startBackup).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Установить обновление" }));
+    const confirmed = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirmed).getByRole("button", { name: "Установить" }));
+    await waitFor(() => expect(shell.install).toHaveBeenCalledWith(PATH, []));
+    expect(api.startBackup).toHaveBeenCalledOnce();
+    expect(api.recordUpdateStarted).toHaveBeenCalledOnce();
+  });
+  it("shows current version, channel selection and recoverable network errors", async () => {
+    const online = onlineApi();
+    vi.mocked(online.check)
+      .mockRejectedValueOnce(new OnlineUpdateError("unreachable"))
+      .mockResolvedValueOnce({
+        manifest: {
+          version: "0.1.0",
+          channel: "beta",
+          releasedAt: MANIFEST.releasedAt,
+          notes: [],
+          minUpgradeFrom: "0.1.0",
+          protocol: 3,
+          minProtocol: 2,
+          sizeBytes: 29,
+        },
+        newer: false,
+        compatible: true,
+      });
+    renderUpdate({ online });
+    await screen.findByRole("combobox", { name: "Канал обновлений" });
+    chooseText("Канал обновлений", "Бета-версии");
+    expect(online.check).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить обновления" }));
+    await screen.findByText(
+      "Не удалось связаться с сервером обновлений. Проверьте интернет и попробуйте снова.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Проверить обновления" }));
+    await screen.findByText("У вас установлена актуальная версия.");
+    expect(online.check).toHaveBeenLastCalledWith("beta");
+    expect(screen.queryByRole("button", { name: "Скачать обновление" })).toBeNull();
+  });
+  it("keeps a failed download retryable without exposing an install action", async () => {
+    const online = onlineApi();
+    vi.mocked(online.download).mockRejectedValueOnce(new OnlineUpdateError("interrupted"));
+    const { shell } = renderUpdate({ online });
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить обновления" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Скачать обновление" }));
+    await screen.findByText("Загрузка прервана. Повторное скачивание продолжит загрузку.");
+    expect(screen.queryByRole("button", { name: "Установить обновление" })).toBeNull();
+    expect(shell.verify).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Скачать обновление" }));
+    await screen.findByText("Подпись проверена: выпуск Маркиро.");
+    expect(online.download).toHaveBeenCalledTimes(2);
+    expect(shell.install).not.toHaveBeenCalled();
+  });
+  it("does not verify or install a download completed after leaving the section", async () => {
+    const online = onlineApi();
+    let finish: ((value: Awaited<ReturnType<OnlineUpdatesApi["download"]>>) => void) | undefined;
+    vi.mocked(online.download).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { shell, unmount } = renderUpdate({ online });
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить обновления" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Скачать обновление" }));
+    unmount();
+    finish?.({ version: "0.2.0", manifestPath: PATH, sizeBytes: 29 });
+    await Promise.resolve();
+    expect(shell.verify).not.toHaveBeenCalled();
+    expect(shell.install).not.toHaveBeenCalled();
+  });
+  it("does not offer internet access to a technologist", async () => {
+    const online = onlineApi();
+    renderUpdate({ online, technologist: true });
+    await screen.findByText("Обновление устанавливает администратор.");
+    expect(screen.queryByRole("button", { name: "Проверить обновления" })).toBeNull();
+    expect(online.check).not.toHaveBeenCalled();
+  });
+});
+
+async function downloadOnline() {
+  fireEvent.click(await screen.findByRole("button", { name: "Проверить обновления" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Скачать обновление" }));
+}
+const HOST_PACKAGE = officeUpdateStatusSchema.parse(
+  JSON.parse(
+    readFileSync(new URL("../proto/fixtures/office-update-status.json", testModuleUrl), "utf8"),
+  ),
+);
+
+describe("automatic staging after an internet download", () => {
+  it.each(["host", "office"] as const)(
+    "verifies and stages once with the administrator session on a %s PC, without installing",
+    async (role) => {
+      const { shell, updates } = renderUpdate({ role });
+      await downloadOnline();
+      await screen.findByText(
+        "Пакет 0.2.0 на хосте. Другие устройства смогут скачать его, когда хост будет работать на этой версии.",
+      );
+      expect(updates.stage).toHaveBeenCalledExactlyOnceWith(PATH, SESSION.token);
+      expect(vi.mocked(shell.verify).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(updates.stage).mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(shell.install).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Загрузить пакет на хост" })).toBeNull();
+    },
+  );
+  it("retains manual upload for a manually checked file", async () => {
+    const { updates } = renderUpdate({});
+    fireEvent.click(await screen.findByRole("button", { name: CHECK }));
+    await screen.findByText("Подпись проверена: выпуск Маркиро.");
+    expect(updates.stage).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Загрузить пакет на хост" })).toBeTruthy();
+  });
+  it("retries the local package after transfer failure without downloading it again", async () => {
+    const online = onlineApi();
+    const stage = vi
+      .fn<UpdatesApi["stage"]>()
+      .mockRejectedValueOnce(new UpdateError("unreachable", "x"))
+      .mockResolvedValueOnce({ version: MANIFEST.version, sizeBytes: 29 });
+    const { shell } = renderUpdate({ online, updates: { stage } });
+    await downloadOnline();
+    await screen.findByText(/Пакет скачан, но передать его на хост не удалось/);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить передачу на хост" }));
+    await screen.findByText(
+      "Пакет 0.2.0 на хосте. Другие устройства смогут скачать его, когда хост будет работать на этой версии.",
+    );
+    expect(stage).toHaveBeenCalledTimes(2);
+    expect(online.download).toHaveBeenCalledOnce();
+    expect(shell.verify).toHaveBeenCalledOnce();
+    expect(shell.install).not.toHaveBeenCalled();
+  });
+  it("does not stage a package whose local verification failed", async () => {
+    const shell = fakeShell({
+      verify: vi.fn(async () => {
+        throw new UpdateShellError("installer_mismatch", "x");
+      }),
+    });
+    const { updates } = renderUpdate({ shell });
+    await downloadOnline();
+    await waitFor(() => expect(shell.verify).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Проверить обновления" }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(updates.stage).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Установить обновление" })).toBeNull();
+  });
+  it("keeps installation disabled while the host transfer runs", async () => {
+    let finish: ((value: { version: string; sizeBytes: number }) => void) | undefined;
+    const stage = vi.fn<UpdatesApi["stage"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { shell } = renderUpdate({ updates: { stage } });
+    await downloadOnline();
+    await waitFor(() => expect(stage).toHaveBeenCalledOnce());
+    expect(
+      screen.getByRole("button", { name: "Установить обновление" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(shell.install).not.toHaveBeenCalled();
+    finish?.({ version: MANIFEST.version, sizeBytes: 29 });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Установить обновление" }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
+  });
+  it.each(["current", "staged"] as const)(
+    "accepts a confirmed %s copy already on the host after a repeated upload",
+    async (place) => {
+      const stage = vi.fn<UpdatesApi["stage"]>(async () => {
+        throw new UpdateError("package_not_newer", "x");
+      });
+      const api = fakeHostApi({
+        getUpdateStatus: vi.fn(async () => ({
+          ...HOST_PACKAGE,
+          package: {
+            ...HOST_PACKAGE.package,
+            version: place === "current" ? MANIFEST.version : HOST_PACKAGE.package.version,
+            staged: place === "staged" ? MANIFEST.version : null,
+          },
+        })),
+      });
+      renderUpdate({ api, updates: { stage } });
+      await downloadOnline();
+      await screen.findByText(
+        "Пакет 0.2.0 на хосте. Другие устройства смогут скачать его, когда хост будет работать на этой версии.",
+      );
+      expect(stage).toHaveBeenCalledOnce();
+    },
+  );
+  it("does not send a package when verification finishes after leaving the section", async () => {
+    let finish: ((report: VerifiedReport) => void) | undefined;
+    const shell = fakeShell({
+      verify: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    });
+    const { updates, unmount } = renderUpdate({ shell });
+    await downloadOnline();
+    await waitFor(() => expect(shell.verify).toHaveBeenCalledOnce());
+    unmount();
+    await act(async () => {
+      finish?.(REPORT);
+    });
+    expect(updates.stage).not.toHaveBeenCalled();
+    expect(shell.install).not.toHaveBeenCalled();
+  });
+  it("does not call another host version a successful transfer", async () => {
+    const stage = vi.fn<UpdatesApi["stage"]>(async () => {
+      throw new UpdateError("package_not_newer", "x");
+    });
+    const api = fakeHostApi({ getUpdateStatus: vi.fn(async () => HOST_PACKAGE) });
+    renderUpdate({ api, updates: { stage } });
+    await downloadOnline();
+    await screen.findByText(/Пакет скачан, но передать его на хост не удалось/);
+    expect(
+      screen.queryByText(
+        "Пакет 0.2.0 на хосте. Другие устройства смогут скачать его, когда хост будет работать на этой версии.",
+      ),
+    ).toBeNull();
   });
 });
