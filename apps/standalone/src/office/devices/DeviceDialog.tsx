@@ -38,7 +38,8 @@ export interface DeviceDialogProps {
 }
 
 /**
- * Renames a device and, for a station, sets its line. Only the fields that
+ * Renames a device and, for a station or a handheld, sets its line (a handheld lists and enters
+ * only its line's shifts, and only the office chooses that line: the host's `device_kinds`). Only the fields that
  * changed are sent (`deviceUpdate`). A line can be chosen only among the
  * active ones; a station's current line stays on the list even when it has
  * been archived since, and keeping it sends nothing for the line. A station
@@ -121,7 +122,7 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
         {...fieldError(errors.name?.message)}
         {...register("name")}
       />
-      {device.kind === "station" && (
+      {(device.kind === "station" || device.kind === "handheld") && (
         <Controller
           control={control}
           name="lineId"
@@ -129,7 +130,11 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
             <Select
               {...searchableSelect(t)}
               label={t("office.devices.fields.line")}
-              hint={t("office.devices.fields.lineHint")}
+              hint={t(
+                device.kind === "handheld"
+                  ? "office.devices.fields.lineHintHandheld"
+                  : "office.devices.fields.lineHint",
+              )}
               options={options}
               value={field.value}
               onValueChange={field.onChange}

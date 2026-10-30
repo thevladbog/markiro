@@ -7,7 +7,10 @@ import app.markiro.handheld.core.host.HostPalletFixtures.BOX_1
 import app.markiro.handheld.core.host.HostPalletFixtures.BOX_2
 import app.markiro.handheld.core.host.HostPalletFixtures.PALLET
 import app.markiro.handheld.core.network.host.FactReceiptDto
+import app.markiro.handheld.core.exceptions.DisassembleReason
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.MetaStore
+import app.markiro.handheld.core.storage.PalletExceptionEntity
 import app.markiro.handheld.core.storage.MembershipStatus
 import app.markiro.handheld.core.storage.PalletMembershipRemovalEntity
 import app.markiro.handheld.core.storage.RemovalStatus
@@ -75,6 +78,57 @@ class HostPalletEventsTest {
         val closed = Json.parseToJsonElement(all.single().body).jsonObject
         assertEquals(HostFactsFixtures.shape(byKind.getValue("warehouse_pallet_closed")), HostFactsFixtures.shape(closed))
         assertEquals(1, closed.getValue("data").jsonObject.getValue("boxCount").toString().toInt())
+    }
+
+    /** A closed pallet taken apart on this device, as `ExceptionEngine.disassemblePallet` leaves it. */
+    private suspend fun takenApart(closeAcked: Boolean) {
+        HostPalletFixtures.pallet(db, closedAt = "2026-10-08T07:01:00.000Z", sscc = HostPalletFixtures.palletSscc(40))
+        if (closeAcked) db.palletDao().markAcked(listOf(PALLET), "2026-10-08T07:02:00.000Z")
+        db.palletDao().markDisassembled(PALLET, "2026-10-08T07:05:00.000Z")
+        db.palletExceptionDao().insert(
+            PalletExceptionEntity(
+                kind = "disassemble", palletId = PALLET, shiftId = null, terminalId = "d1", operatorId = HostPalletFixtures.OPERATOR,
+                reason = DisassembleReason.WRONG_PRODUCT.audit, occurredAt = "2026-10-08T07:05:00.000Z", payloadJson = "{}", ackedAt = null,
+            ),
+        )
+    }
+
+    /** MKR-INS-14: the host never heard of a disassembly, so the boxes stayed «На паллете …» there. */
+    @Test
+    fun aPalletTakenApartIsSentOnceToAHostThatReadsItAfterItsClose() = runTest {
+        takenApart(closeAcked = true)
+        events("2026-10-15T10:00:00.000Z").freeze()
+        assertEquals("a host never heard is not assumed to read it", emptyList<String>(), events().map { it.kind })
+        MetaStore(db).put(MetaStore.HOST_PROTOCOL, "7")
+        events("2026-10-15T10:00:00.000Z").freeze()
+        assertEquals("a host of protocol 7 refuses the kind for good", emptyList<String>(), events().map { it.kind })
+        MetaStore(db).put(MetaStore.HOST_PROTOCOL, "8")
+        events("2026-10-15T10:00:00.000Z").freeze()
+        val sent = events()
+        assertEquals(listOf("warehouse_pallet_disassembled"), sent.map { it.kind })
+        val record = Json.parseToJsonElement(sent.single().body).jsonObject
+        val fixture = (HostFactsFixtures.fixture("pallet-events-request.json").getValue("records") as kotlinx.serialization.json.JsonArray)
+            .map { it.jsonObject }.single { it.getValue("kind").toString().trim('"') == "warehouse_pallet_disassembled" }
+        assertEquals(HostFactsFixtures.shape(fixture), HostFactsFixtures.shape(record))
+        val data = record.getValue("data").jsonObject
+        assertEquals("\"wrong_product\"", data.getValue("reasonCode").toString())
+        assertEquals("\"2026-10-08T07:05:00.000Z\"", data.getValue("disassembledAt").toString())
+        assertEquals("\"$PALLET\"", data.getValue("palletId").toString())
+        // Frozen once: a second pass makes nothing, and the host's receipt settles the source for good.
+        events("2026-10-15T10:05:00.000Z").freeze()
+        assertEquals(sent.map { it.recordId to it.body }, events().map { it.recordId to it.body })
+        HostAckMapper(db).apply(events(), events().map { FactReceiptDto(it.recordId, "accepted") })
+        events("2026-10-15T10:10:00.000Z").freeze()
+        assertEquals(emptyList<String>(), events().map { it.kind })
+        assertEquals(0, db.palletExceptionDao().unackedCount())
+    }
+
+    @Test
+    fun aDisassemblyWaitsForTheHostToAcknowledgeThePalletsClose() = runTest {
+        takenApart(closeAcked = false)
+        MetaStore(db).put(MetaStore.HOST_PROTOCOL, "8")
+        events("2026-10-15T10:00:00.000Z").freeze()
+        assertTrue("warehouse_pallet_disassembled" !in events().map { it.kind })
     }
 
     @Test

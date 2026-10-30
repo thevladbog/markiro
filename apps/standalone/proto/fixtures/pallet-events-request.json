@@ -63,6 +63,17 @@
         "outcome": "verified",
         "at": "2026-10-08T07:01:20.000Z"
       }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000007",
+      "kind": "warehouse_pallet_disassembled",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1000000-0000-4000-8000-000000000001",
+        "reasonCode": "wrong_product",
+        "reasonText": null,
+        "disassembledAt": "2026-10-08T07:05:00.000Z"
+      }
     }
   ]
 }

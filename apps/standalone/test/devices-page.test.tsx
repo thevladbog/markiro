@@ -363,7 +363,32 @@ describe("office devices", () => {
     ]);
   });
 
-  it("has no line to choose for a device that is not a station", async () => {
+  it("lets the office put a handheld on a line: its «Смена» tile lists that line's shifts", async () => {
+    const session = adminSession();
+    const handheld: DeviceRecord = {
+      ...RETIRED,
+      name: "ТСД склада",
+      lineId: null,
+      revokedAt: null,
+    };
+    session.api.listDevices.mockResolvedValue([HOST_PC, handheld]);
+    session.api.updateDevice.mockResolvedValue({ ...handheld, lineId: LINE_ID });
+    await openDevices(session);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить устройство «ТСД склада»" }));
+    expect(
+      within(dialog()).getByText(
+        "ТСД покажет смены этой линии, как только получит изменение от хоста. Без линии у него нет смен.",
+      ),
+    ).toBeTruthy();
+    chooseValue("Линия", LINE_ID);
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateDevice.mock.calls).toStrictEqual([
+      ["office-session-token", handheld.id, { lineId: LINE_ID }],
+    ]);
+  });
+
+  it("has no line to choose for a device that works no line", async () => {
     const session = adminSession();
     session.api.updateDevice.mockResolvedValue({ ...OFFICE_PC, name: "Офис склада" });
     await openDevices(session);

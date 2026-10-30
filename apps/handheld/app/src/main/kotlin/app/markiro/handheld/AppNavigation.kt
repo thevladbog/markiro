@@ -316,6 +316,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val vm: app.markiro.handheld.feature.pallets.PalletsViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val profiles by vm.printerProfiles.collectAsStateWithLifecycle()
+                val closeDestination by vm.closeDestination.collectAsStateWithLifecycle()
                 var choosingPalletPrinter by remember { mutableStateOf(false) }
                 val leave = { nav.popBackStack(Routes.HUB, inclusive = false); Unit }
                 // The view model outlives this composable: its back-stack entry
@@ -362,6 +363,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onDismiss = vm::dismissClose,
                         ),
                     ),
+                    destinationLabel = closeDestination,
                 )
                 // A dead printer must not strand a closed pallet: the label is
                 // reprintable on any profile this device knows.

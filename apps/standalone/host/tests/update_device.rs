@@ -113,7 +113,7 @@ async fn the_offer_answers_any_protocol_but_only_a_live_device_key() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/device")
-                .header(markiro_proto::PROTOCOL_HEADER, "8")
+                .header(markiro_proto::PROTOCOL_HEADER, "9")
                 .header("authorization", format!("Bearer {}", admin.key)),
         ))
         .await;

@@ -13,7 +13,10 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 7 came with plan 2b (several devices
+/// Protocol version this build speaks: 8 came with the pallet event
+/// `warehouse_pallet_disassembled` (a handheld takes a closed warehouse pallet
+/// apart, [`WarehousePalletDisassembledData`]); a handheld sends it only to a
+/// host whose `hello` says 8 or more. 7 came with plan 2b (several devices
 /// in one shift): a `shift_closed` fact closes the sender's part and the
 /// shift only with its last part, the capability `multi-station-v1`, `POST
 /// /v1/device/shifts/{id}/leave`, a shift's `participants`, `totals` and
@@ -33,7 +36,7 @@ use sha2::{Digest, Sha256};
 /// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
 /// new meaning of one raises it, because an older host refuses such a record
 /// for good.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.

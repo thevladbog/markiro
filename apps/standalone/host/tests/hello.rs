@@ -29,7 +29,7 @@ async fn hello_answers_over_tls_with_the_pinned_certificate() {
     // Protocol 7 since plan 2b (6 since plan ТСД, 5 since plan РЕЖ part B, 4
     // since its part A, 3 since plan ПЛ-Х, 2 since plan 2a1); a station of stage 1 (protocol 1) is still
     // taken.
-    assert_eq!(hello.protocol, 7);
+    assert_eq!(hello.protocol, 8);
     assert_eq!(hello.min_protocol, 1);
     assert_eq!(hello.host_id, host.host_id);
     assert_eq!(hello.version, env!("CARGO_PKG_VERSION"));

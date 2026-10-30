@@ -10,7 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import java.time.Instant
 import kotlin.math.abs
 
-data class HostObservation(val restored: Boolean, val clockSkew: Boolean, val skewMs: Long?)
+/** [protocol] is the host's own (`hello.protocol`), which says what it reads. */
+data class HostObservation(val restored: Boolean, val clockSkew: Boolean, val skewMs: Long?, val protocol: Int)
 
 /** What the screens read of the link: `reachable` is `null` before the first heartbeat. */
 data class HostLinkState(
@@ -34,7 +35,7 @@ class HostLinkMonitor(private val now: () -> Long, private val onRestore: (Strin
         if (restored) onRestore(epoch)
         val host = hello.time?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
         val skew = host?.let { it - now() }
-        val observation = HostObservation(restored, skew != null && abs(skew) > MAX_SKEW_MS, skew)
+        val observation = HostObservation(restored, skew != null && abs(skew) > MAX_SKEW_MS, skew, hello.protocol)
         mutable.value = HostLinkState(reachable = true, restoreEpochChanged = restored, clockSkewMs = skew, failure = null)
         return observation
     }

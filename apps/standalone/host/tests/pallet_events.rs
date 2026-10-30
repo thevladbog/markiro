@@ -645,3 +645,210 @@ async fn an_unknown_product_is_still_refused_when_a_pallet_opens() {
         )
     );
 }
+
+/// A closed warehouse pallet taken apart on the handheld (MKR-INS-14): the host marks it, keeps
+/// its reason and operator, frees its boxes for another pallet and wakes the office.
+#[tokio::test]
+async fn a_closed_warehouse_pallet_taken_apart_frees_its_boxes() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 2).await;
+    let key = pair_handheld(&admin).await;
+    let block = pallet_block(&admin, &key, "8f7e6d5c-4b3a-4f2e-8d1c-9b8a7f6e5d4c").await;
+    let close = |n, pallet: &str, serial: u32, boxes: u32, at: u32| {
+        event(
+            n,
+            "warehouse_pallet_closed",
+            json!({
+                "palletId": pallet, "sscc": pallet_sscc(serial), "blockId": block["id"],
+                "serial": serial, "openedAt": instant(100, 0), "closedAt": instant(at, 0),
+                "boxCount": boxes
+            }),
+        )
+    };
+    let disassembled = |n, pallet: &str, code: &str, text: Option<&str>, at: u32| {
+        event(
+            n,
+            "warehouse_pallet_disassembled",
+            json!({
+                "palletId": pallet, "reasonCode": code, "reasonText": text,
+                "disassembledAt": instant(at, 0)
+            }),
+        )
+    };
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[
+                opened(1, PALLET_A, product_of(&setup), &instant(100, 0)),
+                added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
+                added(3, PALLET_A, &box_sscc(1501), &instant(102, 0)),
+            ]
+        )
+        .await,
+        vec![accepted(1), accepted(2), accepted(3)]
+    );
+    // An open pallet is not taken apart: its boxes come off one by one.
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[disassembled(4, PALLET_A, "wrong_product", None, 105)]
+        )
+        .await,
+        vec![rejected(4, "pallet_state", None)]
+    );
+    assert_eq!(
+        receipts_of(&admin, &key, &[close(5, PALLET_A, 40, 2, 110)]).await,
+        vec![accepted(5)]
+    );
+    let rev = host_revision(&admin.app).await;
+    let batch = [disassembled(6, PALLET_A, "other", Some(" Пересорт "), 120)];
+    assert_eq!(receipts_of(&admin, &key, &batch).await, vec![accepted(6)]);
+    let row: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT disassembled_at, disassembly_reason_code, disassembly_reason_text, \
+         disassembly_operator_id FROM warehouse_pallets WHERE id = ?",
+    )
+    .bind(PALLET_A)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (
+            Some(instant(120, 0)),
+            Some("other".to_owned()),
+            Some("Пересорт".to_owned()),
+            Some(support::handheld::OPERATOR.to_owned())
+        )
+    );
+    // The boxes stood on it until the moment it was taken apart.
+    let stays: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT box_sscc, removed_at FROM warehouse_pallet_boxes WHERE pallet_id = ? ORDER BY box_sscc",
+    )
+    .bind(PALLET_A)
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stays,
+        vec![
+            (box_sscc(1500), Some(instant(120, 0))),
+            (box_sscc(1501), Some(instant(120, 0)))
+        ]
+    );
+    assert_eq!(
+        host_revision(&admin.app).await,
+        rev + 1,
+        "the office's list changed"
+    );
+    // Sent again, or again under another id: the same answer and nothing new.
+    assert_eq!(receipts_of(&admin, &key, &batch).await, vec![accepted(6)]);
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[disassembled(7, PALLET_A, "other", Some("Пересорт"), 121)]
+        )
+        .await,
+        vec![accepted(7)]
+    );
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
+    // Its boxes go onto the next pallet, which was «На паллете …» before.
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[
+                opened(8, PALLET_B, product_of(&setup), &instant(130, 0)),
+                added(9, PALLET_B, &box_sscc(1500), &instant(131, 0)),
+            ]
+        )
+        .await,
+        vec![accepted(8), accepted(9)]
+    );
+}
+
+#[tokio::test]
+async fn a_disassembly_names_a_reason_of_the_list_and_a_pallet_of_this_device() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let _ = closed_boxes(&admin, &setup, 1).await;
+    let key = pair_handheld(&admin).await;
+    let other = pair_handheld(&admin).await;
+    let block = pallet_block(&admin, &key, "8f7e6d5c-4b3a-4f2e-8d1c-9b8a7f6e5d4c").await;
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[
+                opened(1, PALLET_A, product_of(&setup), &instant(100, 0)),
+                added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
+                event(
+                    3,
+                    "warehouse_pallet_closed",
+                    json!({
+                        "palletId": PALLET_A, "sscc": pallet_sscc(40), "blockId": block["id"],
+                        "serial": 40, "openedAt": instant(100, 0), "closedAt": instant(110, 0),
+                        "boxCount": 1
+                    }),
+                ),
+            ]
+        )
+        .await,
+        vec![accepted(1), accepted(2), accepted(3)]
+    );
+    let take = |n, code: &str, text: Option<&str>| {
+        event(
+            n,
+            "warehouse_pallet_disassembled",
+            json!({
+                "palletId": PALLET_A, "reasonCode": code, "reasonText": text,
+                "disassembledAt": instant(120, 0)
+            }),
+        )
+    };
+    let field = |n, name: &str| rejected(n, "invalid_record", Some(json!({ "field": name })));
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[
+                take(4, "printer_jam", None),
+                take(5, "wrong_product", Some("слова только с «другое»")),
+                event(
+                    6,
+                    "warehouse_pallet_disassembled",
+                    json!({
+                        "palletId": PALLET_A, "reasonCode": "wrong_product", "reasonText": null,
+                        "disassembledAt": "вчера"
+                    })
+                ),
+            ]
+        )
+        .await,
+        vec![
+            field(4, "data.reasonCode"),
+            field(5, "data.reasonText"),
+            field(6, "data.disassembledAt")
+        ]
+    );
+    // Another handheld's pallet is as unknown as none.
+    assert_eq!(
+        receipts_of(&admin, &other, &[take(7, "wrong_product", None)]).await,
+        vec![rejected(7, "pallet_unknown", None)]
+    );
+    let at: Option<String> =
+        sqlx::query_scalar("SELECT disassembled_at FROM warehouse_pallets WHERE id = ?")
+            .bind(PALLET_A)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(at, None);
+}

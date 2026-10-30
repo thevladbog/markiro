@@ -15,6 +15,8 @@ import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletKind
 import app.markiro.handheld.core.storage.PalletMembershipEntity
 import app.markiro.handheld.core.storage.PalletPrint
+import app.markiro.handheld.feature.work.ClosedPalletUi
+import app.markiro.handheld.feature.work.PalletCloseStep
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -50,6 +52,14 @@ class PalletsScreensTest {
         compose.onNodeWithText("Попросите менеджера включить «Сборка паллет на ТСД» в карточке сотрудника.").assertIsDisplayed()
         compose.onNodeWithText("На главный экран").performClick()
         assertEquals(true, back)
+    }
+
+    /** The closed pallet's label names its printer (the work screen's rule), not «Не назначен». */
+    @Test
+    fun aClosedPalletNamesThePrinterItsLabelWentTo() {
+        val step = PalletCloseStep.Printed(ClosedPalletUi("w1", "134600682000000011", 12))
+        compose.setContent { MarkiroTheme { PalletsRoute(PalletsUi(closeStep = step), PalletsCallbacks(), destinationLabel = "Zebra у ворот") } }
+        compose.onNodeWithText("Паллета · Zebra у ворот").assertIsDisplayed()
     }
 
     @Test

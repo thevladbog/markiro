@@ -1821,11 +1821,12 @@ A for shift modes: the body of a shift entry, `ShiftEnter`, and a validation
 shift's `ok` scan with `boxId: null`; 3 since plan ПЛ-Х for pallets, 2 since
 plan 2a1), 6 since plan ТСД (the handheld on the host) and 7 since plan 2b
 (several devices in one shift: a `shift_closed` fact closes a part; app build
-1.1.0), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
+1.1.0) and 8 for a handheld's warehouse pallet disassembly (the pallet event
+`warehouse_pallet_disassembled`; no app build yet), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
 stage 1, of stage 2a, of pallets and of shift modes (a device of protocol 5 or
 older is accepted by a 7 host, since the minimum stays 1), and a station finds a
 host of an older protocol too old (`host_too_old` at the probe;
-`hello-future.json` stays one protocol ahead, now 8). The owner records each
+`hello-future.json` stays one protocol ahead, now 9). The owner records each
 release in `tools/standalone-release/releases.json` (for 1.1.0: version 1.1.0,
 protocol 7, minProtocol 1); the tooling does not enforce it.
 The print policy (`markiro_proto::ValidationPrint`, `validationPrintSchema`) is
@@ -1899,7 +1900,10 @@ requires it of a handheld on every entry into a shift. A handheld reads the shif
 assigns the line), gets blocks of both extensions, sends facts and closes the shift. Warehouse pallets go through
 `POST /v1/device/pallet-events` (five kinds of records, a receipt for each, `device_event_receipts`, codes
 `box_not_found`, `box_not_closed`, `box_on_pallet`, `product_mismatch`, `pallet_not_open`,
-`pallet_count_mismatch`, `feature_disabled`); the closed boxes are read through `GET /v1/device/box-registry`
+`pallet_count_mismatch`, `feature_disabled`; protocol 8 adds a sixth, `warehouse_pallet_disassembled`: a
+closed pallet of the device taken apart, `disassembled_at` with the reason code and operator (migration
+`0054`), its live box stays end at that moment so the boxes can go onto another pallet, one revision for
+the office; an open pallet is `pallet_state`, a pallet already taken apart is `accepted` and unchanged); the closed boxes are read through `GET /v1/device/box-registry`
 (`boxes.changed_at`, window `since..until`, no codes) and the organization's print data through
 `GET /v1/device/org/print`. The hold after a restore covers `pallet-events` too. `tests/box_registry_touch.rs`
 knows every writer into `boxes`; a new writer must touch `changed_at`.

@@ -23,11 +23,15 @@ import app.markiro.handheld.feature.work.PalletCloseStep
 import app.markiro.handheld.feature.work.SignalPort
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -133,6 +137,13 @@ class PalletsViewModel(
     /** Offered when a pallet label fails: the operator picks another printer rather than stopping. */
     val printerProfiles: StateFlow<List<PrinterEntity>> =
         gateway.observePrinters().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** The printer the closed pallet's label went to, for «Паллета · …» on the close screen; null while none is recorded. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val closeDestination: StateFlow<String?> = _state.map { it.closeStep.closedPallet()?.palletId }
+        .distinctUntilChanged()
+        .flatMapLatest { gateway.observeDestinationName(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val operatorId: String? get() = session.state.value.operator?.operatorId
 

@@ -595,8 +595,9 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
   };
 
   it("speaks protocol 4 and enters a shift naming what this station works", () => {
-    // Protocol 4 brought the modes, 5 the duplicate print, 6 the handheld on the host, 7 several devices in one shift.
-    expect(PROTOCOL_VERSION).toBe(7);
+    // Protocol 4 brought the modes, 5 the duplicate print, 6 the handheld on the host, 7 several devices in one shift,
+    // 8 a handheld's disassembly of a warehouse pallet.
+    expect(PROTOCOL_VERSION).toBe(8);
     expect(SHIFT_SUPPORTS).toStrictEqual({
       validation: "validation-v1",
       validationDmDuplicate: "validation-dm-duplicate-v1",
@@ -821,6 +822,16 @@ describe("request builders produce their fixtures exactly", () => {
     expect(deviceUpdate(device, { name: "Станция упаковки", lineId: null })).toStrictEqual(
       fixture("device-update.json"),
     );
+  });
+
+  it("a handheld put on a line, and an office PC that has none", () => {
+    const device = deviceRecordSchema.parse(fixture("device-record.json"));
+    const handheld = { ...device, kind: "handheld" as const, lineId: null };
+    expect(deviceUpdate(handheld, { name: handheld.name, lineId: "line-2" })).toStrictEqual({
+      lineId: "line-2",
+    });
+    const office = { ...device, kind: "office" as const, lineId: null };
+    expect(deviceUpdate(office, { name: office.name, lineId: "line-2" })).toStrictEqual({});
   });
 
   it("a new pairing code that replaces the one on screen", () => {
@@ -3531,7 +3542,7 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
   const frozen = entered.snapshot.validationPrint;
 
   it("speaks protocol 5 with the domain's names", () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+    expect(PROTOCOL_VERSION).toBe(8);
     expect(LABEL_VERIFICATIONS).toStrictEqual(["none", "required"]);
     expect(REPRINT_REASONS).toStrictEqual(["not_printed", "damaged", "lost"]);
     expect(UNIT_LABEL_EVENTS).toStrictEqual([
@@ -3931,7 +3942,7 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
   type Row = Record<string, unknown>;
 
   it("is the version of the current hello fixtures, and the future one stays ahead", () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+    expect(PROTOCOL_VERSION).toBe(8);
     for (const name of ["hello.json", "hello-restored.json", "hello-replaced.json"]) {
       expect((fixture(name) as Row).protocol, name).toBe(PROTOCOL_VERSION);
     }
