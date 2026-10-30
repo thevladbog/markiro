@@ -27,7 +27,7 @@ const STALE = "Пока вы выбирали, паллета изменилас
 const GONE = "Этой паллеты больше нет среди закрытых паллет смены. Ничего не сделано.";
 const WAITING = "Этикетка этой паллеты ещё ждёт решения на рабочем экране. Ничего не сделано.";
 const FAILED =
-  "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте исключения и числа смены, прежде чем повторять.";
+  "Не удалось подтвердить, что действие записано на этом компьютере. Перед повторной попыткой проверьте список исключений и показатели смены.";
 
 /** A valid SSCC of another number that ends with the last four digits of `sscc`. */
 function endsAlike(sscc: string): string {
@@ -276,7 +276,7 @@ describe("the choice of the pallet never acts on a guess", () => {
 
   it.each([
     ["Расформировать паллету", "Какую паллету расформировать?"],
-    ["Перепечатать этикетку паллеты", "Какую паллету перепечатать?"],
+    ["Перепечатать этикетку паллеты", "Этикетку какой паллеты перепечатать?"],
   ])(
     "ignores a tap on «%s» just after the exceptions opened, the second tap of a double tap",
     async (name, heading) => {
@@ -964,7 +964,7 @@ describe("the pallet's part of the exceptions screen by itself", () => {
     fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
     expect(screen.getByText("Укажите причину")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    expect(screen.getByText("Какую паллету перепечатать?")).toBeTruthy();
+    expect(screen.getByText("Этикетку какой паллеты перепечатать?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: option(FIRST_PALLET, 3) }));
     fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));

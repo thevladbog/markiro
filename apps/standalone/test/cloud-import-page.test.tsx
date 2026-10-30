@@ -451,7 +451,7 @@ describe("«Перенос из облака»", () => {
     fireEvent.change(chooser, { target: { files: [historyFile(HISTORY + "{}\n")] } });
     expect(
       await screen.findByText(
-        "Файл истории не принят. Выберите целую выгрузку истории без изменений.",
+        "Файл истории не принят. Выберите полный файл выгрузки истории без изменений.",
       ),
     ).toBeTruthy();
     expect(check.hasAttribute("disabled")).toBe(true);
@@ -594,7 +594,9 @@ describe("«Перенос из облака»", () => {
       ),
     ).toBeTruthy();
     expect(
-      screen.getByText("Умолчания А4-листов палетов (организации и категорий) не переносятся: 2."),
+      screen.getByText(
+        "Настройки листов палетов А4 по умолчанию для организации и категорий не переносятся: 2.",
+      ),
     ).toBeTruthy();
     expect(
       screen.getByText(
@@ -608,7 +610,9 @@ describe("«Перенос из облака»", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
     expect(
-      await screen.findByText("Проверка пройдена: перенос запишет то, что ниже."),
+      await screen.findByText(
+        "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+      ),
     ).toBeTruthy();
     const [trial] = sent(session);
     expect(trial?.dryRun).toBe(true);
@@ -694,7 +698,9 @@ describe("«Перенос из облака»", () => {
     expect(pageHolds(view)).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     expect(pageHolds(view)).toBe(false);
     const dialog = await confirm();
     expect(pageHolds(view)).toBe(false);
@@ -761,7 +767,9 @@ describe("«Перенос из облака»", () => {
     const view = await openImport(session);
     choose(GOLDEN);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     const dialog = await confirm();
     fireEvent.click(within(dialog).getByRole("button", { name: "Перенести" }));
     await waitFor(() => expect(session.api.importFromCloud).toHaveBeenCalledTimes(2));
@@ -963,7 +971,9 @@ describe("«Перенос из облака»", () => {
     await openImport(session);
     choose(GOLDEN);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     let dialog = await confirm();
     fireEvent.click(within(dialog).getByRole("button", { name: "Перенести" }));
     await waitFor(() => expect(session.api.importFromCloud).toHaveBeenCalledTimes(2));
@@ -995,12 +1005,14 @@ describe("«Перенос из облака»", () => {
     choose(rehearsal);
     expect(
       await screen.findByText(
-        "Пробный файл: облако при выгрузке не было чистым (открытая смена или станция без синхронизации). Для переключения он не годится.",
+        "Пробный файл: при выгрузке в облаке оставалась открытая смена или станция с несинхронизированными данными. Этот файл нельзя использовать для перехода на Автоном.",
       ),
     ).toBeTruthy();
     expect(screen.getByText("Смена OCT26-008/S не была закрыта в облаке.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     // A rehearsal file's confirmation says so.
     const dialog = await confirm();
     expect(
@@ -1012,10 +1024,16 @@ describe("«Перенос из облака»", () => {
     choose(GOLDEN);
     // The new file is read: the earlier file's check is gone with it.
     const check = await screen.findByRole("button", { name: "Проверить" });
-    expect(screen.queryByText("Проверка пройдена: перенос запишет то, что ниже.")).toBeNull();
+    expect(
+      screen.queryByText(
+        "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+      ),
+    ).toBeNull();
     expect(screen.queryByText(/^Пробный файл:/)).toBeNull();
     fireEvent.click(check);
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     const ids = sent(session).map((request) => request.importId);
     expect(ids).toHaveLength(2);
     expect(ids[0]).not.toBe(ids[1]);
@@ -1031,7 +1049,9 @@ describe("«Перенос из облака»", () => {
     await openImport(session);
     choose(GOLDEN);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     expect(valueOf("Линии")).toBe("новых 21, уже были 4");
     expect(valueOf("Контрагенты")).toBe("22");
     expect(valueOf("Шаблоны")).toBe("23, умолчаний 12");
@@ -1055,7 +1075,9 @@ describe("«Перенос из облака»", () => {
     await openImport(session);
     choose(GOLDEN);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Перенести" }));
     const dialog = await screen.findByRole("dialog");
     // The second half of a double click lands on the dialog's button.
@@ -1081,7 +1103,9 @@ describe("«Перенос из облака»", () => {
     choose(GOLDEN);
     const check = await screen.findByRole("button", { name: "Проверить" });
     fireEvent.click(check);
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     expect(screen.getByRole("button", { name: "Перенести" })).toHaveProperty("disabled", false);
     // Two presses in one moment, before the page has drawn the disabled button.
     act(() => {
@@ -1133,7 +1157,9 @@ describe("«Перенос из облака»", () => {
       await answer.promise;
     });
     expect(
-      await screen.findByText("Проверка пройдена: перенос запишет то, что ниже."),
+      await screen.findByText(
+        "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+      ),
     ).toBeTruthy();
   });
 
@@ -1148,7 +1174,11 @@ describe("«Перенос из облака»", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Перенести" })).toBeNull();
     expect(heldRef(view)).toBeNull();
-    expect(screen.queryByText("Проверка пройдена: перенос запишет то, что ниже.")).toBeNull();
+    expect(
+      screen.queryByText(
+        "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+      ),
+    ).toBeNull();
   });
 
   it("moves the focus to the result when the import is done", async () => {
@@ -1159,7 +1189,9 @@ describe("«Перенос из облака»", () => {
     await openImport(session);
     choose(GOLDEN);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     const dialog = await confirm();
     fireEvent.click(within(dialog).getByRole("button", { name: "Перенести" }));
     const heading = await screen.findByRole("heading", { name: "Перенос выполнен" });
@@ -1257,7 +1289,7 @@ describe("the notes of the export tool", () => {
       "brands #abcdef01: в поле «shine» убраны управляющие символы или текст сокращён до допустимой длины.",
     );
     expect(say({ code: "template_default_dropped", purpose: "label" })).toBe(
-      "Умолчание шаблона (label) не перенесено: шаблон выключен, другого назначения или не охватывает категорию.",
+      "Шаблон по умолчанию для «label» не перенесён: он выключен, имеет другое назначение или не подходит категории.",
     );
     // Every note of the golden file has its words (a missing key throws in tests).
     for (const note of file.notes) expect(noteText(t, note, file)).not.toBe("");
@@ -1297,7 +1329,9 @@ describe("a rehearsal file or an old file asks twice", () => {
     await openImport(session);
     choose(rehearsal);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     let dialog = await confirm();
     const submit = () =>
       within(dialog).getByRole("button", { name: "Перенести" }) as HTMLButtonElement;
@@ -1342,7 +1376,9 @@ describe("a rehearsal file or an old file asks twice", () => {
     await openImport(session);
     choose(GOLDEN);
     fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
-    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    await screen.findByText(
+      "Проверка пройдена. При переносе будут записаны данные, перечисленные ниже.",
+    );
     const dialog = await confirm();
     expect(within(dialog).queryByRole("checkbox")).toBeNull();
     const submit = within(dialog).getByRole("button", { name: "Перенести" }) as HTMLButtonElement;

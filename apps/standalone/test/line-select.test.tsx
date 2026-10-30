@@ -82,7 +82,7 @@ describe("LineSelect", () => {
 
   it.each<[SyncFailure, string]>([
     ["local", "Не удалось записать справочники на этом компьютере."],
-    ["feed", "Ленту изменений хоста не удалось применить."],
+    ["feed", "Не удалось применить изменения, полученные с хоста."],
   ])("explains a failed first sync by its class (%s), as the status line does", (failure, text) => {
     renderLineSelect({ ...syncState("failed", 0), failure });
     expect(screen.getByText(text)).toBeTruthy();
@@ -234,7 +234,9 @@ describe("LineSelect", () => {
       { link: { state: "online", lastContactAt: 1_790_000_000_000, lastError: null, seq: 1 } },
     );
     expect(screen.getByText("Не приняты записи справочников: 2")).toBeTruthy();
-    expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull();
+    expect(
+      screen.queryByText("Справочники не обновились. Программа повторит попытку автоматически."),
+    ).toBeNull();
   });
 
   it("keeps the failure's own alert, and no second failure line, while a retry runs with no lines listed yet", () => {
@@ -244,7 +246,9 @@ describe("LineSelect", () => {
     );
     expect(screen.getByText("Не удалось получить справочники с хоста.")).toBeTruthy();
     expect(screen.queryByText("Получаем справочники с хоста…")).toBeNull();
-    expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull();
+    expect(
+      screen.queryByText("Справочники не обновились. Программа повторит попытку автоматически."),
+    ).toBeNull();
   });
 
   it("announces a failed sync once: its alert stays mounted through the automatic retries", () => {
@@ -283,7 +287,9 @@ describe("LineSelect", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Линия 2" })).toBeTruthy();
-    expect(screen.getByText("Справочники не обновились — повторим автоматически")).toBeTruthy();
+    expect(
+      screen.getByText("Справочники не обновились. Программа повторит попытку автоматически."),
+    ).toBeTruthy();
     expect(screen.getByText("Запрос к хосту не удался.")).toBeTruthy();
   });
 

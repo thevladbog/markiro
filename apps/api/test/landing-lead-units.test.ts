@@ -21,6 +21,7 @@ import {
   TelegramClient,
   TelegramSendError,
   telegramConfigFromEnv,
+  telegramTargetsFromEnv,
 } from "../src/modules/landing-leads/telegram.client";
 import {
   digestRequestId,
@@ -240,6 +241,50 @@ describe("Telegram client (spec §15.4)", () => {
     expect(telegramConfigFromEnv(env({ LEAD_TELEGRAM_ENABLED: true, ...withSecrets() }))).toEqual(
       config,
     );
+  });
+
+  it.each([
+    ["42", "-1001234", ["42", "-1001234"]],
+    [undefined, "-1001234", ["-1001234"]],
+    ["42", undefined, ["42"]],
+    ["00042", "42", ["42"]],
+    ["@Markiro_Leads", "@markiro_leads", ["@markiro_leads"]],
+  ])("builds and deduplicates recipients %s / %s", async (primary, group, expected) => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
+    const targets = telegramTargetsFromEnv(
+      {
+        LEAD_TELEGRAM_ENABLED: true,
+        LEAD_TELEGRAM_BOT_TOKEN: config.botToken,
+        LEAD_TELEGRAM_CHAT_ID: primary,
+        LEAD_TELEGRAM_GROUP_CHAT_ID: group,
+      } as Env,
+      fetcher,
+    );
+    expect(targets).toHaveLength(expected.length);
+    expect(fetcher).not.toHaveBeenCalled();
+    for (const target of targets ?? []) {
+      expect(target.id).toMatch(/^[a-f0-9]{64}$/);
+      await target.sender.sendMessage("test");
+    }
+    expect(fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).chat_id)).toEqual(
+      expected,
+    );
+  });
+
+  it("does not construct active recipients while disabled or without a token", () => {
+    expect(
+      telegramTargetsFromEnv({
+        LEAD_TELEGRAM_ENABLED: false,
+        ...withSecrets(),
+        LEAD_TELEGRAM_GROUP_CHAT_ID: "-1001234",
+      } as Env),
+    ).toBeNull();
+    expect(
+      telegramTargetsFromEnv({
+        LEAD_TELEGRAM_ENABLED: true,
+        LEAD_TELEGRAM_GROUP_CHAT_ID: "-1001234",
+      } as Env),
+    ).toBeNull();
   });
 
   function withSecrets() {

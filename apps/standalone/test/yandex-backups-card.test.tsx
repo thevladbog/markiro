@@ -47,7 +47,7 @@ describe("Yandex connection and recovery", () => {
     });
     fireEvent.change(screen.getByLabelText("ClientID"), { target: { value: "customer-client" } });
     expect(connect.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: /ключ лежит рядом с копией/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /ключ хранится рядом с копией/ }));
     expect(connect.disabled).toBe(false);
     fireEvent.click(connect);
     await waitFor(() =>

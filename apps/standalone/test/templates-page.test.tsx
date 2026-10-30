@@ -597,7 +597,7 @@ describe("office label templates: switching on and off", () => {
     expect(screen.getByRole("dialog", { name: "Выключить шаблон?" })).toBeTruthy();
     expect(
       within(dialog()).getByText(
-        "Шаблон «Молоко 58×40» перестанет предлагаться для товаров и умолчаний, а станции получат изменение. Включить его снова можно здесь же.",
+        "Шаблон «Молоко 58×40» больше нельзя будет выбрать для товаров и в настройках шаблонов по умолчанию. Станции получат это изменение. Включить шаблон снова можно здесь же.",
       ),
     ).toBeTruthy();
     const submit = within(dialog()).getByRole("button", { name: "Выключить" });
@@ -651,7 +651,7 @@ describe("office label templates: switching on and off", () => {
     expect(screen.getByRole("dialog", { name: "Включить шаблон?" })).toBeTruthy();
     expect(
       within(dialog()).getByText(
-        "Шаблон «Вода и молоко» снова будет предлагаться для товаров и умолчаний, а станции получат изменение.",
+        "Шаблон «Вода и молоко» снова можно будет выбрать для товаров и в настройках шаблонов по умолчанию. Станции получат это изменение.",
       ),
     ).toBeTruthy();
     const submit = within(dialog()).getByRole("button", { name: "Включить" });
@@ -888,7 +888,7 @@ describe("office label templates: switching on and off", () => {
     pressRowAction(screen, `Выключить шаблон «${name}»`);
     expect(
       within(dialog()).getByText(
-        `Шаблон «${name}» перестанет предлагаться для товаров и умолчаний, а станции получат изменение. Включить его снова можно здесь же.`,
+        `Шаблон «${name}» больше нельзя будет выбрать для товаров и в настройках шаблонов по умолчанию. Станции получат это изменение. Включить шаблон снова можно здесь же.`,
       ),
     ).toBeTruthy();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
@@ -931,7 +931,7 @@ describe("office label templates: categories", () => {
     await openCategories(fake, "Коробка 100×100");
     expect(
       within(dialog()).getByText(
-        "Шаблон будет предлагаться только товарам выбранных категорий. Умолчанием организации может быть только шаблон для всех категорий.",
+        "Шаблон можно будет выбрать только для товаров выбранных категорий. Для организации по умолчанию можно выбрать только шаблон, который подходит всем категориям.",
       ),
     ).toBeTruthy();
     expect(save()).toHaveProperty("disabled", true);

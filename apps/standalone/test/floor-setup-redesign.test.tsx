@@ -241,7 +241,7 @@ describe("the keypad of the printer form", () => {
     expect((screen.getByLabelText("Адрес принтера") as HTMLInputElement).value).toBe(
       "192.168.1.256",
     );
-    expect(screen.getByText("Ошибка · октет «256» больше 255; допустимо 0–255")).toBeTruthy();
+    expect(screen.getByText("Ошибка · число «256» больше 255; допустимо от 0 до 255")).toBeTruthy();
     // «Далее: порт» and «Готово» wait while the address is wrong; the footer says why.
     expect((pad.getByRole("button", { name: "Далее: порт" }) as HTMLButtonElement).disabled).toBe(
       true,
@@ -250,7 +250,9 @@ describe("the keypad of the printer form", () => {
       "true",
     );
     expect(
-      screen.getByText("Адрес неверный: октет «256» больше 255; допустимо 0–255."),
+      screen.getByText(
+        "Неверный адрес: число «256» больше 255. Каждое число в адресе должно быть от 0 до 255.",
+      ),
     ).toBeTruthy();
     fireEvent.click(pad.getByRole("button", { name: "Стереть" }));
     expect(screen.getByText("Адрес принят")).toBeTruthy();
@@ -289,7 +291,7 @@ describe("the keypad of the printer form", () => {
     fireEvent(input, paste);
     expect(paste.defaultPrevented).toBe(true);
     expect(input.value).toBe("192.168.1.256");
-    expect(screen.getByText("Ошибка · октет «256» больше 255; допустимо 0–255")).toBeTruthy();
+    expect(screen.getByText("Ошибка · число «256» больше 255; допустимо от 0 до 255")).toBeTruthy();
   });
 
   it("keeps the scanner out of the entry while it is open, and gives the entry back when it closes", async () => {

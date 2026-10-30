@@ -66,7 +66,7 @@ describe("closing a shared shift from the office (plan 2b)", () => {
   it("says it closes the shift for every device and names those that had not closed", async () => {
     const dialog = await openWhole(shiftsSession([SHARED]));
     expect(
-      within(dialog).getByText(/^Закрытие в офисе закрывает смену для всех устройств сразу/),
+      within(dialog).getByText(/^Закрытие в офисе завершает смену для всех устройств сразу/),
     ).toBeTruthy();
     expect(
       within(dialog).getByText("Не закрыли: Станция линии 1 (работает), ТСД 1 (работает)."),

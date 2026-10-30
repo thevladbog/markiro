@@ -1,4 +1,5 @@
 import { readFirstTouch, type FirstTouch, type SessionStore } from "../lib/first-touch";
+import { isTariffCode } from "../lib/lead-form";
 import {
   type LeadErrors,
   type LeadField,
@@ -27,7 +28,11 @@ interface LeadPayloadBase {
 }
 
 export type LandingLeadPayload =
-  | (LeadPayloadBase & { readonly intent: "download"; readonly company: string })
+  | (LeadPayloadBase & {
+      readonly intent: "download";
+      readonly company: string;
+      readonly tariffCode?: string;
+    })
   | (LeadPayloadBase & {
       readonly intent: "invoice";
       readonly inn: string;
@@ -156,7 +161,8 @@ export function initLeadForm(
 ): () => void {
   let submitting = false;
   let started = false;
-  const requestId = runtime.createRequestId();
+  let requestId = runtime.createRequestId();
+  let lastAttemptBody: string | null = null;
   const intent = formIntent(form);
   const placement = intent === "invoice" ? "invoice" : "download";
 
@@ -220,9 +226,16 @@ export function initLeadForm(
       ...(touch.utm === undefined ? {} : { utm: touch.utm }),
       ...(touch.referrer === undefined ? {} : { referrer: touch.referrer }),
     };
-    const payload: LandingLeadPayload =
+    let payload: LandingLeadPayload =
       "company" in validation.value
-        ? { ...base, intent: "download", company: validation.value.company }
+        ? {
+            ...base,
+            intent: "download",
+            company: validation.value.company,
+            ...(isTariffCode(value(form, "tariffCode"))
+              ? { tariffCode: value(form, "tariffCode") }
+              : {}),
+          }
         : {
             ...base,
             intent: "invoice",
@@ -230,6 +243,12 @@ export function initLeadForm(
             tariffCode: validation.value.tariffCode,
           };
 
+    const body = JSON.stringify({ ...payload, requestId: undefined });
+    if (lastAttemptBody !== null && lastAttemptBody !== body) {
+      requestId = runtime.createRequestId();
+      payload = { ...payload, requestId };
+    }
+    lastAttemptBody = body;
     submitting = true;
     setState(form, "sending", LEAD_FORM_COPY.sending);
 
@@ -238,10 +257,12 @@ export function initLeadForm(
       if (response.ok) {
         runtime.track("landing_form_success", { placement });
         setState(form, "idle");
+        requestId = runtime.createRequestId();
+        lastAttemptBody = null;
         onAccepted({
           email: payload.email,
           intent,
-          ...(payload.intent === "invoice" ? { tariffCode: payload.tariffCode } : {}),
+          ...(payload.tariffCode === undefined ? {} : { tariffCode: payload.tariffCode }),
         });
         return;
       }

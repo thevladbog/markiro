@@ -36,11 +36,13 @@ describe("landing lead environment (spec 2026-10-20 §15.4)", () => {
       LEAD_TELEGRAM_ENABLED: "",
       LEAD_TELEGRAM_BOT_TOKEN: "",
       LEAD_TELEGRAM_CHAT_ID: "",
+      LEAD_TELEGRAM_GROUP_CHAT_ID: "",
       LEAD_RETENTION_MONTHS: "",
     });
     expect(env.LEAD_TELEGRAM_ENABLED).toBe(false);
     expect(env.LEAD_TELEGRAM_BOT_TOKEN).toBeUndefined();
     expect(env.LEAD_TELEGRAM_CHAT_ID).toBeUndefined();
+    expect(env.LEAD_TELEGRAM_GROUP_CHAT_ID).toBeUndefined();
     expect(env.LEAD_RETENTION_MONTHS).toBe(12);
   });
 
@@ -58,6 +60,32 @@ describe("landing lead environment (spec 2026-10-20 §15.4)", () => {
     expect(
       loadEnv({ ...base, LEAD_TELEGRAM_CHAT_ID: "@markiro_leads" }).LEAD_TELEGRAM_CHAT_ID,
     ).toBe("@markiro_leads");
+  });
+
+  it("accepts a group alone or alongside the legacy primary chat", () => {
+    for (const primary of [undefined, "42"]) {
+      const env = loadEnv({
+        ...base,
+        LEAD_TELEGRAM_ENABLED: "true",
+        LEAD_TELEGRAM_BOT_TOKEN: TOKEN,
+        LEAD_TELEGRAM_CHAT_ID: primary,
+        LEAD_TELEGRAM_GROUP_CHAT_ID: "-1001234567890",
+      });
+      expect(env.LEAD_TELEGRAM_GROUP_CHAT_ID).toBe("-1001234567890");
+      expect(env.LEAD_TELEGRAM_CHAT_ID).toBe(primary);
+    }
+  });
+
+  it("rejects a malformed group ID without exposing the bot token", () => {
+    expect(() =>
+      loadEnv({
+        ...base,
+        LEAD_TELEGRAM_ENABLED: "true",
+        LEAD_TELEGRAM_BOT_TOKEN: TOKEN,
+        LEAD_TELEGRAM_CHAT_ID: "42",
+        LEAD_TELEGRAM_GROUP_CHAT_ID: "not-a-chat",
+      }),
+    ).toThrow(/LEAD_TELEGRAM_GROUP_CHAT_ID/);
   });
 
   it("rejects malformed secrets, a non-boolean flag and out-of-range retention", () => {

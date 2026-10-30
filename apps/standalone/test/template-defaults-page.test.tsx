@@ -123,7 +123,8 @@ async function settle(): Promise<void> {
 }
 
 const DIRTY = "Есть несохранённые изменения.";
-const UNFIT = "Шаблон больше не подходит: его выключили, сузили или удалили. Выберите другой.";
+const UNFIT =
+  "Шаблон больше не подходит: его выключили, ограничили список категорий или удалили. Выберите другой.";
 
 describe("office template defaults: the organization's", () => {
   beforeEach(() => {
@@ -479,7 +480,9 @@ describe("office template defaults: the categories'", () => {
     await openDefaults(session(FULL_WATER));
     expect(screen.getByRole("heading", { name: "Для категорий" })).toBeTruthy();
     expect(
-      screen.getByText("Станция возьмёт умолчание категории товара раньше умолчания организации."),
+      screen.getByText(
+        "Если для категории товара выбран шаблон по умолчанию, станция использует его вместо шаблона по умолчанию для организации.",
+      ),
     ).toBeTruthy();
     expect(rows()).toEqual([
       ["Молочная продукция", "Короб"],
@@ -1653,7 +1656,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
     // Neither list offers the other's: a pallet label is no sheet.
     expect(choices("Шаблон палета")).not.toContain("Палета · две А5");
     expect(choices("Лист А4 палета")).not.toContain("Паллета 100×150");
-    expect(screen.getByText(/Палет печатается термоэтикеткой или листом А4/)).toBeTruthy();
+    expect(screen.getByText(/Для палета можно печатать термоэтикетку или лист А4/)).toBeTruthy();
     choose("Лист А4 палета", TWO_A5.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();

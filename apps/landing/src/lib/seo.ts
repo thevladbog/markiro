@@ -1,6 +1,7 @@
 import { findLegalDocument, findLegalRelease, requireLegalContent } from "@markiro/legal-documents";
 
 import { SITE_CONTACTS } from "../content/contacts";
+import { buildV4ProductGraph } from "./product-schema";
 import { LEGAL_SEARCH_PAGES, type LegalDocumentPageDefinition } from "../content/legal-pages";
 import type { PublishedLegalArtifact } from "./legal-artifacts";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
@@ -203,6 +204,7 @@ export function attachOrganizationContact(
 }
 
 export function buildPageGraph(page: SeoPageDefinition): PageGraph {
+  if (page.path === "/") return buildV4ProductGraph(page, [websiteNode(), organizationNode()]);
   const homePath = page.locale === "ru" ? "/" : "/en/";
   const graph: JsonLdObject[] = [
     websiteNode(),
@@ -377,6 +379,8 @@ export function buildAutonomPageGraph(
   page: AutonomPageDefinition,
   options: AutonomGraphOptions = {},
 ): PageGraph {
+  if (page.path === "/skachat/" || page.path === "/stoimost/")
+    return buildV4ProductGraph(page, [websiteNode(), organizationNode()]);
   const pageUrl = absoluteUrl(page.path);
   const graph: JsonLdObject[] = [
     websiteNode(),

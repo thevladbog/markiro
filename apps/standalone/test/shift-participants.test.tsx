@@ -115,8 +115,8 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
     await openCard(session, "OCT26-004", "Станции");
     await waitFor(() =>
       expect(stationsRows().map((row) => row[2])).toEqual([
-        "!Нет связиСлышали: 08.10.2026, 12:41",
-        "!Нет связиСлышали: 08.10.2026, 12:41",
+        "!Нет связиПоследняя связь: 08.10.2026, 12:41",
+        "!Нет связиПоследняя связь: 08.10.2026, 12:41",
       ]),
     );
   });

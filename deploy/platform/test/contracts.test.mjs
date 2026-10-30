@@ -410,6 +410,12 @@ test("optional lead Telegram alerts need a well-formed token and chat only when 
       LEAD_TELEGRAM_BOT_TOKEN: token,
       LEAD_TELEGRAM_CHAT_ID: "chat",
     },
+    {
+      LEAD_TELEGRAM_ENABLED: "true",
+      LEAD_TELEGRAM_BOT_TOKEN: token,
+      LEAD_TELEGRAM_CHAT_ID: "42",
+      LEAD_TELEGRAM_GROUP_CHAT_ID: "not-a-chat",
+    },
   ])
     assert.throws(() => validateConfig({ ...env(), ...patch }, manifest()));
   for (const chat of ["-1001234567890", "42", "@markiro_leads"])
@@ -420,6 +426,19 @@ test("optional lead Telegram alerts need a well-formed token and chat only when 
           LEAD_TELEGRAM_ENABLED: "true",
           LEAD_TELEGRAM_BOT_TOKEN: token,
           LEAD_TELEGRAM_CHAT_ID: chat,
+        },
+        manifest(),
+      ),
+    );
+  for (const primary of [undefined, "42"])
+    assert.doesNotThrow(() =>
+      validateConfig(
+        {
+          ...env(),
+          LEAD_TELEGRAM_ENABLED: "true",
+          LEAD_TELEGRAM_BOT_TOKEN: token,
+          LEAD_TELEGRAM_CHAT_ID: primary,
+          LEAD_TELEGRAM_GROUP_CHAT_ID: "-1001234567890",
         },
         manifest(),
       ),

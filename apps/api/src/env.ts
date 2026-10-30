@@ -266,6 +266,10 @@ const EnvSchema = z
       .string()
       .regex(/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/)
       .optional(),
+    LEAD_TELEGRAM_GROUP_CHAT_ID: z
+      .string()
+      .regex(/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/)
+      .optional(),
     // Leads without movement this long, and lost leads, lose their contacts.
     LEAD_RETENTION_MONTHS: z.coerce.number().int().min(1).max(60).default(12),
     // The public release bucket's own keys, for «Выпуски автонома» (spec 2026-10-20
@@ -459,7 +463,7 @@ const EnvSchema = z
     }
     if (env.LEAD_TELEGRAM_ENABLED) {
       for (const name of ["LEAD_TELEGRAM_BOT_TOKEN", "LEAD_TELEGRAM_CHAT_ID"] as const) {
-        if (!env[name]) {
+        if (!env[name] && (name !== "LEAD_TELEGRAM_CHAT_ID" || !env.LEAD_TELEGRAM_GROUP_CHAT_ID)) {
           ctx.addIssue({
             code: "custom",
             path: [name],
@@ -519,6 +523,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "LEAD_TELEGRAM_ENABLED",
     "LEAD_TELEGRAM_BOT_TOKEN",
     "LEAD_TELEGRAM_CHAT_ID",
+    "LEAD_TELEGRAM_GROUP_CHAT_ID",
     "LEAD_RETENTION_MONTHS",
     "RELEASE_CATALOG_S3_ENDPOINT",
     "RELEASE_CATALOG_S3_REGION",

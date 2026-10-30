@@ -126,7 +126,7 @@ describe("«Обзор» with several devices on a line (plan 2b)", () => {
       "li",
     ) as HTMLElement;
     expect(
-      within(row).getByText("Устройства не назвали причину расхождения с планом"),
+      within(row).getByText("Устройства не передали причину расхождения с планом"),
     ).toBeTruthy();
     fireEvent.click(within(row).getByRole("button", { name: /Указать/ }));
     expect(await screen.findByRole("heading", { name: "Смены", level: 1 })).toBeTruthy();

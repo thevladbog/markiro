@@ -843,7 +843,7 @@ describe("the scanners, the sound and the label check of the setup", () => {
     });
     expect(
       await screen.findByText(
-        "Настройки сохранены, но оболочка не приняла сканеры. Проверьте COM-порты.",
+        "Настройки сохранены, но подключить сканеры не удалось. Проверьте COM-порты.",
       ),
     ).toBeTruthy();
     expect((await readWorkstationSettings(local)).scanners).toEqual([{ port: "COM3", baud: 9600 }]);
@@ -1059,7 +1059,7 @@ describe("the connection of a scanner, as far as it is known", () => {
     };
     const { shell } = await setup({ local: counting, tab: "Сканеры" });
     expect(
-      screen.getByText("Оболочка ещё не открыла этот порт. Нажмите «Сохранить»."),
+      screen.getByText("Приложение ещё не открыло этот порт. Нажмите «Сохранить»."),
     ).toBeTruthy();
     const save = screen.getByRole("button", { name: "Сохранить" });
     expect(save.getAttribute("aria-disabled")).toBeNull();
@@ -1070,7 +1070,7 @@ describe("the connection of a scanner, as far as it is known", () => {
     expect(shell.hardware.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]);
     expect(batches).toEqual([]);
     // Given: what is left is the shell's own snapshot, and nothing more to press.
-    expect(screen.getByText("Оболочка ещё не открыла этот порт.")).toBeTruthy();
+    expect(screen.getByText("Приложение ещё не открыло этот порт.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Сохранить" }).getAttribute("aria-disabled")).toBe(
       "true",
     );
@@ -1097,7 +1097,7 @@ describe("the connection of a scanner, as far as it is known", () => {
       click("Сохранить");
     });
     await screen.findByText(
-      "Настройки сохранены, но оболочка не приняла сканеры. Проверьте COM-порты.",
+      "Настройки сохранены, но подключить сканеры не удалось. Проверьте COM-порты.",
     );
     expect(screen.queryByText(/invalid_scanners/)).toBeNull();
     const save = screen.getByRole("button", { name: "Сохранить" });
@@ -1131,7 +1131,7 @@ describe("the connection of a scanner, as far as it is known", () => {
       click("Сохранить");
     });
     await screen.findByText(
-      "Настройки сохранены, но оболочка не приняла сканеры. Проверьте COM-порты.",
+      "Настройки сохранены, но подключить сканеры не удалось. Проверьте COM-порты.",
     );
     expect(
       screen.getByRole("button", { name: "Сохранить" }).getAttribute("aria-disabled"),

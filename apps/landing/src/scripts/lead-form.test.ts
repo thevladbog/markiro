@@ -89,6 +89,62 @@ afterEach(() => {
 });
 
 describe("download lead form", () => {
+  it.each(["download", "invoice"])(
+    "rotates id when %s input changes after an ambiguous response",
+    async (intent) => {
+      const form = intent === "download" ? renderDownload() : renderInvoice();
+      if (intent === "invoice") {
+        (form.querySelector('[name="inn"]') as HTMLInputElement).value = "7707083893";
+        (form.querySelector('[name="email"]') as HTMLInputElement).value = "billing@example.test";
+        (form.querySelector('[name="consent"]') as HTMLInputElement).checked = true;
+      }
+      const current: LeadFormRuntime = {
+        ...runtime([new Error("response lost after commit"), { ok: true, status: 202 }]),
+        createRequestId: vi
+          .fn()
+          .mockReturnValueOnce(REQUEST_ID)
+          .mockReturnValue("22222222-2222-4222-8222-222222222222"),
+      };
+      initLeadForm(form, current, vi.fn());
+      await submit(form);
+      if (intent === "download")
+        (form.querySelector('[name="email"]') as HTMLInputElement).value = "corrected@example.test";
+      else (form.querySelector('[name="tariffCode"]') as HTMLSelectElement).value = "start";
+      await submit(form);
+      const calls = (current.request as Mock).mock.calls as [
+        string,
+        { requestId: string; email: string; tariffCode?: string },
+      ][];
+      expect(calls[0]?.[1].requestId).not.toBe(calls[1]?.[1].requestId);
+      expect(calls[1]?.[1]).toMatchObject(
+        intent === "download" ? { email: "corrected@example.test" } : { tariffCode: "start" },
+      );
+    },
+  );
+  it.each(["start", "line", "workshop"])(
+    "preserves selected %s through retry and acceptance",
+    async (tariffCode) => {
+      const form = renderDownload();
+      form.insertAdjacentHTML(
+        "beforeend",
+        `<input type="hidden" name="tariffCode" value="${tariffCode}" />`,
+      );
+      const current = runtime([new Error("offline"), { ok: true, status: 202 }]);
+      const accepted = vi.fn();
+      initLeadForm(form, current, accepted);
+      await submit(form);
+      await submit(form);
+      const calls = (current.request as Mock).mock.calls;
+      expect(calls).toHaveLength(2);
+      for (const call of calls)
+        expect(call[1]).toMatchObject({ tariffCode, requestId: REQUEST_ID, intent: "download" });
+      expect(accepted).toHaveBeenCalledWith({
+        email: "ivan@zavod.ru",
+        intent: "download",
+        tariffCode,
+      });
+    },
+  );
   it("posts the spec 15.3 body with the first-touch source and reports acceptance", async () => {
     const form = renderDownload();
     const current = runtime();

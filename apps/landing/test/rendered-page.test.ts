@@ -39,6 +39,31 @@ const SAMPLE_CLUSTER_ROUTES = [
 ] as const;
 const AUTONOM_ROUTES = ["/skachat/", "/stoimost/"] as const;
 
+it("V4 makes the manual workflow precede office management and preserves tariff trial context", () => {
+  const home = documents.get("/");
+  const work = home?.getElementById("produkt");
+  const office = home?.getElementById("bez-oblaka");
+  expect(work).toBeTruthy();
+  expect(office).toBeTruthy();
+  expect(work?.compareDocumentPosition(office!)).toBe(4);
+  expect(home?.body.textContent).toContain(
+    "Проверка кодов, сборка коробов и паллет, печать этикеток — как на станции.",
+  );
+  expect(home?.querySelector("[data-screen-dialog]")).toBeTruthy();
+  for (const route of ["/", "/stoimost/"]) {
+    const page = documents.get(route);
+    expect(
+      [...page!.querySelectorAll("[data-tariff]")]
+        .slice(0, 3)
+        .map((n) => n.getAttribute("data-tariff")),
+    ).toEqual(["start", "line", "workshop"]);
+    for (const code of ["start", "line", "workshop"])
+      expect(
+        page?.querySelector(`[data-tariff="${code}"] a[href="/skachat/?tariff=${code}"]`),
+      ).toBeTruthy();
+  }
+});
+
 beforeAll(() => {
   execFileSync(
     path.join(appRoot, "node_modules/.bin/astro"),
@@ -964,7 +989,7 @@ describe("rendered landing page", () => {
     const enDocument = documents.get("/en/");
     const ruBrandLinks = [
       ruDocument?.querySelector("header .ax-header__brand"),
-      ruDocument?.querySelector("footer .ax-footer__top > a"),
+      ruDocument?.querySelector("footer .v4-footer__grid > a"),
       ruTopic?.querySelector("header .landing-header__brand"),
       ruTopic?.querySelector("footer .landing-footer__meta > a"),
     ];
@@ -1005,6 +1030,7 @@ describe("rendered landing page", () => {
       ["/#produkt", "Продукт"],
       ["/stoimost/", "Цены"],
       ["/skachat/", "Скачать"],
+      ["/stati/", "Статьи"],
       ["/instruktsii/", "Инструкции"],
       ["/#voprosy", "Вопросы"],
     ];
@@ -1019,7 +1045,7 @@ describe("rendered landing page", () => {
       ["/", ru],
       ["/skachat/", ru],
       ["/stoimost/", ru],
-      ["/sscc-i-agregatsiya/", ru],
+      ["/sscc-i-agregatsiya/", ru.filter(([href]) => href !== "/stati/")],
       ["/en/", en],
       ["/en/sscc-and-aggregation/", en],
     ] as const) {
@@ -1091,7 +1117,7 @@ describe("rendered landing page", () => {
 
   it("keeps the words of the home headings apart for crawlers", () => {
     for (const [route, heading] of [
-      ["/", "Маркировка и агрегация. Всё на вашем ПК."],
+      ["/", "Программа для агрегации кодов маркировки"],
       ["/en/", "Serialization and aggregation. All on your PC."],
     ] as const) {
       const h1 = documents.get(route)?.querySelector("h1");
@@ -1156,7 +1182,7 @@ describe("rendered landing page", () => {
 
   it("renders the approved semantic section hierarchy", () => {
     for (const [route, sectionIds] of [
-      ["/", ["bez-oblaka", "produkt", "start", "tseny", "kto", "voprosy", "demo"]],
+      ["/", ["bez-oblaka", "produkt", "start", "tseny", "voprosy"]],
       ["/en/", ["no-cloud", "product", "start", "pricing", "people", "faq", "demo"]],
     ] as const) {
       const home = documents.get(route) as Document;
@@ -1283,7 +1309,7 @@ describe("rendered landing page", () => {
     for (const [route, lead, link, retired] of [
       [
         "/",
-        "Открыты до покупки: можно прочитать, как устроена работа на линии, ещё до установки.",
+        "Инструкции оператора и офиса",
         "Документы и реквизиты",
         "договор и регламенты опубликованы",
       ],
@@ -1299,7 +1325,10 @@ describe("rendered landing page", () => {
       expect(text, route).toContain(lead);
       expect(text, route).not.toContain(retired);
       const legalLink = [...(page?.querySelectorAll("a") ?? [])].find(
-        (anchor) => anchor.textContent?.replace("→", "").trim() === link,
+        (anchor) =>
+          (anchor.querySelector("strong")?.textContent ?? anchor.textContent)
+            ?.replace("→", "")
+            .trim() === link,
       );
       expect(legalLink?.getAttribute("href"), route).toBe(route === "/" ? "/legal/" : "/en/legal/");
     }
@@ -1310,13 +1339,11 @@ describe("rendered landing page", () => {
   it("closes both home pages with the contacts block that every call link targets", () => {
     for (const route of ["/", "/en/"] as const) {
       const home = documents.get(route) as Document;
-      const contacts = home.querySelector("section#demo.ax-final[aria-labelledby]");
+      const contacts = home.querySelector("#demo[aria-labelledby]");
       expect(contacts, route).not.toBeNull();
       expect(contacts?.querySelector('a[href="mailto:hello@markiro.app"]'), route).not.toBeNull();
       expect(contacts?.querySelector('a[href^="https://t.me/"]'), route).not.toBeNull();
-      const call = contacts?.querySelector<HTMLAnchorElement>(
-        'a[data-placement="final"][href^="mailto:"]',
-      );
+      const call = contacts?.querySelector<HTMLAnchorElement>('a[href^="mailto:"]');
       expect(call?.getAttribute("href"), route).toBe("mailto:hello@markiro.app");
       for (const link of home.querySelectorAll('main a[data-analytics="landing_demo_click"]')) {
         const href = link.getAttribute("href") ?? "";
@@ -1490,7 +1517,7 @@ describe("rendered landing page", () => {
     // Both home pages link instructions from their header and documents card and
     // articles from the footer.
     for (const [route, instructions, articles, documentsCard] of [
-      ["/", "/instruktsii/", "/stati/", "#kto"],
+      ["/", "/instruktsii/", "/stati/", "#start"],
       ["/en/", "/en/instructions/", "/en/articles/", "#people"],
     ] as const) {
       const home = documents.get(route) as Document;
@@ -1578,11 +1605,11 @@ describe("rendered landing page", () => {
         graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList"),
         route,
       ).toBe(showsBreadcrumbs);
-      expect(showsBreadcrumbs, route).toBe(!["/", "/en/", ...AUTONOM_ROUTES].includes(route));
+      expect(showsBreadcrumbs, route).toBe(!["/", "/en/"].includes(route));
     }
   });
 
-  it("describes the same Russian-language application on home, download and pricing pages", () => {
+  it("preserves the application identity and separates Windows and Android apps on V4 pages", () => {
     for (const route of ["/", "/en/", "/skachat/", "/stoimost/"]) {
       const page = documents.get(route);
       const graph = JSON.parse(
@@ -1593,17 +1620,36 @@ describe("rendered landing page", () => {
       const applications = graph["@graph"].filter((node) =>
         [node["@type"]].flat().includes("SoftwareApplication"),
       );
-      expect(applications, route).toHaveLength(1);
-      expect(applications[0], route).toMatchObject({
+      const v4 = route !== "/en/";
+      expect(applications, route).toHaveLength(v4 ? 2 : 1);
+      const desktop = applications.find((node) => node["@id"] === "https://markiro.app/#software");
+      expect(desktop, route).toMatchObject({
         "@id": "https://markiro.app/#software",
         inLanguage: "ru",
-        operatingSystem: "Windows 10, Windows 11, Android",
+        operatingSystem: v4 ? ["Windows 10", "Windows 11"] : "Windows 10, Windows 11, Android",
         installUrl: "https://markiro.app/skachat/",
       });
-      expect(applications[0]).not.toHaveProperty("aggregateRating");
-      expect(applications[0]).not.toHaveProperty("softwareVersion");
+      for (const application of applications) {
+        expect(application).not.toHaveProperty("aggregateRating");
+        expect(application).not.toHaveProperty("softwareVersion");
+      }
+      if (v4)
+        expect(
+          applications.find((node) => node["@id"] === "https://markiro.app/#handheld-software"),
+          route,
+        ).toMatchObject({
+          operatingSystem: "Android 9+",
+          softwareRequirements: { "@id": "https://markiro.app/#software" },
+        });
       const webPage = graph["@graph"].find((node) => node["@type"] === "WebPage");
-      expect(webPage?.about, route).toEqual({ "@id": "https://markiro.app/#software" });
+      expect(webPage?.about, route).toEqual(
+        v4
+          ? [
+              { "@id": "https://markiro.app/#software" },
+              { "@id": "https://markiro.app/#handheld-software" },
+            ]
+          : { "@id": "https://markiro.app/#software" },
+      );
     }
   });
 
@@ -1676,6 +1722,31 @@ describe("rendered landing page", () => {
         );
       }
       expect(foundCodes.sort()).toEqual(codes.map((code) => `MKR-INS-${code}`));
+    }
+  });
+
+  it("renders the updated handheld frames with their actual PNG dimensions", () => {
+    for (const route of ["/instruktsii/tsd/", "/en/instructions/handheld-terminal/"]) {
+      const page = new JSDOM(
+        readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8"),
+      ).window.document;
+      for (const frame of [
+        "office-devices",
+        "office-handheld-line",
+        "pallet-printed",
+        "pallet-print-failed",
+        "pallet-disassemble-scan",
+        "pallet-disassemble-reason",
+        "pallet-disassemble-confirm",
+      ]) {
+        const img = page.querySelector(`.instruction-document img[src*="/${frame}."]`);
+        expect(img, `${route}: ${frame}`).not.toBeNull();
+        const src = img?.getAttribute("src") ?? "";
+        const bytes = readFileSync(path.join(outputDirectory, src.slice(1)));
+        expect(bytes.subarray(1, 4).toString("ascii")).toBe("PNG");
+        expect(Number(img?.getAttribute("width"))).toBe(bytes.readUInt32BE(16));
+        expect(Number(img?.getAttribute("height"))).toBe(bytes.readUInt32BE(20));
+      }
     }
   });
 
@@ -1963,16 +2034,21 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
       ...home.querySelectorAll<HTMLAnchorElement>('a[data-analytics="landing_download_click"]'),
     ];
     expect(downloads.length).toBeGreaterThanOrEqual(5);
-    for (const link of downloads) expect(link.getAttribute("href")).toBe("/skachat/");
+    for (const link of downloads) {
+      const href = new URL(link.href, "https://markiro.app");
+      expect(href.pathname).toBe("/skachat/");
+      const code = link.closest("[data-tariff]")?.getAttribute("data-tariff");
+      expect(href.searchParams.get("tariff")).toBe(code ?? null);
+    }
     expect(
       [...home.querySelectorAll("a[data-invoice-tariff]")].map((link) => link.getAttribute("href")),
     ).toEqual([
+      "/stoimost/?tarif=start#schet",
       "/stoimost/?tarif=line#schet",
       "/stoimost/?tarif=workshop#schet",
-      "/stoimost/?tarif=start#schet",
     ]);
-    expect(home.querySelector('.ax-hero a[href="/stoimost/"]')?.textContent?.trim()).toBe(
-      "Цены от 60 000 ₽ в год",
+    expect(home.querySelector('.v4-hero a[href="/stoimost/"]')?.textContent?.trim()).toBe(
+      "От 60 000 ₽ в год",
     );
     expect(
       documents.get("/stoimost/")?.querySelector("section#schet form[data-lead-form]"),
@@ -1987,14 +2063,15 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
         plan.querySelector(".ax-plan__amount, .ax-plan__price--words span")?.textContent?.trim(),
       ]);
       expect(plans, route).toEqual([
+        ["start", "60 000"],
         ["line", "120 000"],
         ["workshop", "240 000"],
         ["plant", "По запросу"],
-        ["start", "60 000"],
       ]);
-      expect(page.querySelector('[data-tariff="line"]')?.getAttribute("data-theme"), route).toBe(
-        "dark",
-      );
+      expect(
+        page.querySelector('[data-tariff="line"]')?.classList.contains("ax-plan--recommended"),
+        route,
+      ).toBe(true);
     }
   });
 
@@ -2004,17 +2081,15 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
     ) as
       | {
           name: string;
-          offers: { lowPrice: number; highPrice: number; offers: Array<Record<string, unknown>> };
+          offers: Array<Record<string, unknown>>;
         }
       | undefined;
     expect(product?.name).toBe("Маркиро Автоном");
-    expect(product?.offers).toMatchObject({ lowPrice: 60_000, highPrice: 240_000 });
-    expect(
-      product?.offers.offers.map((offer) => [offer.name, offer.price, offer.priceCurrency]),
-    ).toEqual([
-      ["«Старт»", 60_000, "RUB"],
-      ["«Линия»", 120_000, "RUB"],
-      ["«Цех»", 240_000, "RUB"],
+    expect(product?.offers).toHaveLength(3);
+    expect(product?.offers.map((offer) => [offer.name, offer.price, offer.priceCurrency])).toEqual([
+      ["Тариф «Старт»", 60_000, "RUB"],
+      ["Тариф «Линия»", 120_000, "RUB"],
+      ["Тариф «Цех»", 240_000, "RUB"],
     ]);
     const visible = documents.get("/stoimost/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
     for (const price of ["60 000", "120 000", "240 000"]) expect(visible).toContain(price);
@@ -2045,7 +2120,7 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
       [...(form?.querySelectorAll("input[name], select[name]") ?? [])].map((input) =>
         input.getAttribute("name"),
       ),
-    ).toEqual(["email", "company", "website", "consent"]);
+    ).toEqual(["tariffCode", "email", "company", "website", "consent"]);
     expect(form?.querySelector('input[name="email"]')?.getAttribute("autocomplete")).toBe("email");
     expect(
       form?.querySelector('.ax-honeypot input[name="website"]')?.getAttribute("tabindex"),
@@ -2069,15 +2144,13 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
     }
   });
 
-  it("separates the Russian FAQ contact links from the surrounding words", () => {
+  it("keeps support email distinct from surrounding words", () => {
     const text = documents
       .get("/")
-      ?.querySelector("#voprosy .ax-faq__intro .ax-muted")
+      ?.querySelector('#demo a[href="mailto:hello@markiro.app"]')
       ?.textContent?.replace(/\s+/gu, " ")
       .trim();
-    expect(text).toBe(
-      "Если ответа здесь нет, напишите в Telegram @thevladbog или на hello@markiro.app.",
-    );
+    expect(text).toBe("hello@markiro.app");
   });
 
   it("separates the English FAQ contact links from the surrounding words", () => {
@@ -2110,6 +2183,15 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
     expect(form?.querySelector('input[name="inn"]')?.getAttribute("inputmode")).toBe("numeric");
   });
 
+  it("introduces the invoice form once with an accessible name", () => {
+    const page = enabledDocuments.get("/stoimost/");
+    const section = page?.querySelector(".ax-invoice");
+    const form = section?.querySelector("form");
+    expect(section?.querySelectorAll("h2")).toHaveLength(2);
+    expect(form?.getAttribute("aria-labelledby")).toBe("invoice-description");
+    expect(form?.querySelector("h2")).toBeNull();
+  });
+
   // Every page with a lead form posts its own `location.pathname` as `sourcePath`;
   // the API accepts only the paths of LANDING_LEAD_SOURCE_PATHS (spec 15.3).
   it("renders lead forms only on pages whose path the lead API accepts", () => {
@@ -2131,14 +2213,19 @@ describe("standalone pages: home, /skachat/, /stoimost/", () => {
 
   it("keeps the download result hidden until the form is accepted", () => {
     const page = documents.get("/skachat/") as Document;
+    expect(page.querySelector(".v4-download__requirements .ax-meta")?.hasAttribute("hidden")).toBe(
+      true,
+    );
     expect(page.querySelector("[data-download-start]")?.hasAttribute("hidden")).toBe(false);
     expect(page.querySelector("[data-download-ready]")?.hasAttribute("hidden")).toBe(true);
     for (const section of page.querySelectorAll("[data-download-after]")) {
       expect(section.hasAttribute("hidden")).toBe(true);
     }
-    expect(page.querySelector("[data-pending-only]")?.textContent).toContain("Версия готовится");
+    expect(page.querySelector("[data-pending-only]")?.textContent).toContain(
+      "Заявка принята. Установщик пока недоступен",
+    );
     expect(page.querySelector("[data-release-link]")).not.toBeNull();
-    expect(page.body.textContent).toContain("Get-FileHash");
+    expect(page.querySelector('[data-release="command"]')).not.toBeNull();
   });
 
   it("loads only the hero screen eagerly and gives every image alt text", () => {

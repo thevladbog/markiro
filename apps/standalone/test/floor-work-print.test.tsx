@@ -874,7 +874,7 @@ describe("a label whose state the screen could not read or write", () => {
     // Said as the program does it: it asks the operator, it does not know.
     expect(
       screen.getByText(
-        "Дождитесь ответа принтера или выйдите из смены: при возвращении программа предложит решить, вышла ли этикетка. Сама она ничего не отправит.",
+        "Дождитесь ответа принтера или выйдите из смены. Когда вы вернётесь, программа попросит указать, напечаталась ли этикетка. Повторно отправлять её автоматически программа не будет.",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Проверить, вышла ли этикетка" })).toBeNull();

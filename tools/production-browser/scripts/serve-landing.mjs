@@ -60,7 +60,7 @@ const server = createServer((request, response) => {
   if (request.method === "HEAD") response.end();
   else response.end(readFileSync(file));
 });
-server.listen(5473, "127.0.0.1");
+server.listen(Number(process.env.LANDING_TEST_PORT ?? 5473), "127.0.0.1");
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => server.close(() => process.exit(0)));

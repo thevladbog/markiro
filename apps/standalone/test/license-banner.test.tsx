@@ -68,7 +68,7 @@ function overviewAlerts(): HTMLElement {
 }
 
 const DISMISS = "Скрыть до конца сеанса";
-const FREE_RENEWAL = /Новый файл по истечении срока бесплатно запрашивается у нас\./;
+const RENEWAL_TERMS = /Лицензия продлевается согласно условиям заключённой подписки\./;
 
 /** RESTRICTED with the emergency extension running until 23.11 09:00 in Moscow. */
 const EXTENDED = licenseOf({
@@ -114,7 +114,7 @@ describe("the license's band above the office's pages", () => {
     expect(band().querySelector(".mk-alert--info")).not.toBeNull();
     const link = within(band()).getByRole("link", { name: "Открыть раздел «Лицензия»" });
     expect(link.getAttribute("href")).toBe("/about#license");
-    expect(within(band()).queryByText(FREE_RENEWAL)).toBeNull();
+    expect(within(band()).queryByText(RENEWAL_TERMS)).toBeNull();
     // No date to write: the organization's profile is not read for it.
     expect(session.api.getOrg).not.toHaveBeenCalled();
   });
@@ -215,14 +215,12 @@ describe("the license's band above the office's pages", () => {
     ["the grace", GRACE, /Срок лицензии истёк 31\.10\./],
     ["the restriction", RESTRICTED, /лицензия площадки истекла\./],
   ] as const)(
-    "adds the free new file right after a subscription's warning of %s",
+    "adds renewal terms right after a subscription's warning of %s",
     async (_, license, text) => {
       renderPage(sessionWith(license));
       const own = await within(band()).findByText(text);
-      expect(own.textContent).toMatch(
-        new RegExp(`${text.source}.*Новый файл по истечении срока бесплатно`),
-      );
-      expect(within(band()).getAllByText(FREE_RENEWAL)).toHaveLength(1);
+      expect(own.textContent).toMatch(new RegExp(`${text.source}.*${RENEWAL_TERMS.source}`));
+      expect(within(band()).getAllByText(RENEWAL_TERMS)).toHaveLength(1);
     },
   );
 
@@ -232,10 +230,10 @@ describe("the license's band above the office's pages", () => {
     ["the trial over", TRIAL_EXPIRED, /пробный период закончился/],
     ["a changed INN", INN_MISMATCH, /ИНН организации больше не совпадает/],
     ["another host", WRONG_HOST, /Лицензия выдана другому хосту/],
-  ] as const)("adds no free new file to %s", async (_, license, text) => {
+  ] as const)("adds no subscription renewal terms to %s", async (_, license, text) => {
     renderPage(sessionWith(license));
     await within(band()).findByText(text);
-    expect(within(band()).queryByText(FREE_RENEWAL)).toBeNull();
+    expect(within(band()).queryByText(RENEWAL_TERMS)).toBeNull();
   });
 
   it("says the running emergency extension instead of «не открываются», still serious", async () => {
@@ -244,7 +242,7 @@ describe("the license's band above the office's pages", () => {
     const own = await within(band()).findByText(
       /Новые смены открываются по аварийному продлению до 23\.11 09:00: лицензия площадки истекла\./,
     );
-    expect(own.textContent).toMatch(FREE_RENEWAL);
+    expect(own.textContent).toMatch(RENEWAL_TERMS);
     expect(band().textContent).not.toMatch(/не открываются/);
     expect(within(band()).getByText("Ошибка:")).toBeTruthy();
     expect(band().querySelector(".mk-alert--error")).not.toBeNull();
@@ -328,7 +326,7 @@ describe("the license's band above the office's pages", () => {
     expect(
       await within(region).findByText(/Новые смены не открываются: лицензия площадки истекла\./),
     ).toBeTruthy();
-    expect(within(region).getAllByText(FREE_RENEWAL)).toHaveLength(1);
+    expect(within(region).getAllByText(RENEWAL_TERMS)).toHaveLength(1);
     expect(within(region).queryByRole("button", { name: DISMISS })).toBeNull();
     expect(within(region).queryAllByRole("alert")).toHaveLength(0);
   });
@@ -343,7 +341,7 @@ describe("the license's band above the office's pages", () => {
     // beside it says the state in words, which is not a warning).
     expect(region.querySelectorAll(".mk-alert")).toHaveLength(2);
     expect(screen.getAllByText(/Лицензия заканчивается 31\.10\.2027\./)).toHaveLength(1);
-    expect(screen.getAllByText(FREE_RENEWAL)).toHaveLength(1);
+    expect(screen.getAllByText(RENEWAL_TERMS)).toHaveLength(1);
   });
 
   it("shows the band on the next page after «Обзор»", async () => {
@@ -395,6 +393,6 @@ describe("the license's band above the office's pages", () => {
       await within(region).findByText(/Новые смены открываются по аварийному продлению до 23\.11/),
     ).toBeTruthy();
     expect(region.textContent).not.toMatch(/не открываются/);
-    expect(within(region).getAllByText(FREE_RENEWAL)).toHaveLength(1);
+    expect(within(region).getAllByText(RENEWAL_TERMS)).toHaveLength(1);
   });
 });

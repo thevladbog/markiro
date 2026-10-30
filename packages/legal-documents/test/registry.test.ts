@@ -109,7 +109,7 @@ describe("legal document registry", () => {
       "MKR-INS-13": "2026.10/02",
       // 2026-10-29: a new instruction for the handheld in Markiro Autonom --
       // pairing with the host and building warehouse pallets.
-      "MKR-INS-14": "2026.10/02",
+      "MKR-INS-14": "2026.10/03",
     };
     expect(
       LEGAL_RELEASES.every(

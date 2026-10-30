@@ -387,11 +387,15 @@ describe("the floor's status bar", () => {
     ).toBeTruthy();
     // The sync's failure is in the details behind the dot (a tap away), not across the header.
     expect(
-      within(region).queryByText("Справочники не обновились — повторим автоматически"),
+      within(region).queryByText(
+        "Справочники не обновились. Программа повторит попытку автоматически.",
+      ),
     ).toBeNull();
     fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
     expect(
-      within(region).getByText("Справочники не обновились — повторим автоматически"),
+      within(region).getByText(
+        "Справочники не обновились. Программа повторит попытку автоматически.",
+      ),
     ).toBeTruthy();
     fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
     expect(
@@ -409,7 +413,9 @@ describe("the floor's status bar", () => {
     // A sync that cannot run is not the news now: the refusal is.
     fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
     expect(
-      within(region).queryByText("Справочники не обновились — повторим автоматически"),
+      within(region).queryByText(
+        "Справочники не обновились. Программа повторит попытку автоматически.",
+      ),
     ).toBeNull();
 
     view.rerender(bar({ local, link: online, sync: failing, refusalHeld: false }));
@@ -560,7 +566,7 @@ const COUNT_CHIPS: Record<string, string> = {
   "Отклонено хостом": "rejected",
   Конфликтов: "conflicts",
   "Вытеснено кодов": "displaced",
-  "Не отправлено прежним подключением": "stranded",
+  "Не отправлено до переподключения": "stranded",
 };
 
 describe("the outbox and the serials on the floor's status bar", () => {
@@ -902,11 +908,11 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
     const view = render(workBar({ local: executor }));
     const before = politeRegions();
-    const drops = await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 1/);
+    const drops = await screen.findByText(/Не приняты блоки номеров SSCC от хоста: 1/);
     // Heard once in the region that was there before, and called an error in words, not by colour alone.
     expect(heardOnce(before, drops)).toBe(true);
     expect(drops.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
-    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
+    await waitFor(() => expect(shown("Не отправлено до переподключения")).toBe("3"));
     // The records of the other pairing are not this pairing's unsent ones.
     expect(shown("Не отправлено")).toBe("0");
     // The drops are read again with the outbox, the stranded records are not (a walk too dear for every scan).
@@ -917,10 +923,8 @@ describe("the outbox and the serials on the floor's status bar", () => {
     ).run(PAIRING.hostId, PAIRING.deviceId);
     await unsentScans(executor, 2, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 90);
     view.rerender(workBar({ local: executor, outboxVersion: 1 }));
-    expect(
-      await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 2/),
-    ).toBeTruthy();
-    expect(shown("Не отправлено прежним подключением")).toBe("3");
+    expect(await screen.findByText(/Не приняты блоки номеров SSCC от хоста: 2/)).toBeTruthy();
+    expect(shown("Не отправлено до переподключения")).toBe("3");
   });
 
   it("says nothing of dropped blocks or older records when there are none", async () => {
@@ -930,8 +934,8 @@ describe("the outbox and the serials on the floor's status bar", () => {
     render(workBar({ local: executor }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
     await flushEffects();
-    expect(shown("Не отправлено прежним подключением")).toBeNull();
-    expect(screen.queryByText(/которые она не приняла/)).toBeNull();
+    expect(shown("Не отправлено до переподключения")).toBeNull();
+    expect(screen.queryByText(/Не приняты блоки номеров SSCC от хоста/)).toBeNull();
   });
 
   it("keeps the drops and the older records of the newest read when an older one lands late", async () => {
@@ -947,13 +951,13 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await waitFor(() => expect(heldDrops.started()).toBe(true));
     drop.run(PAIRING.hostId, PAIRING.deviceId, "b-2");
     view.rerender(workBar({ local: heldDrops.executor, outboxVersion: 1 }));
-    expect(await screen.findByText(/которые она не приняла: 2/)).toBeTruthy();
+    expect(await screen.findByText(/Не приняты блоки номеров SSCC от хоста: 2/)).toBeTruthy();
     await act(async () => {
       heldDrops.release();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     });
-    expect(screen.queryByText(/которые она не приняла: 1/)).toBeNull();
-    expect(screen.queryByText(/которые она не приняла: 2/)).toBeTruthy();
+    expect(screen.queryByText(/Не приняты блоки номеров SSCC от хоста: 1/)).toBeNull();
+    expect(screen.queryByText(/Не приняты блоки номеров SSCC от хоста: 2/)).toBeTruthy();
     view.unmount();
 
     // The older records are read per pairing: an answer for the pairing left must not land on the next.
@@ -966,12 +970,12 @@ describe("the outbox and the serials on the floor's status bar", () => {
       workBar({ local: heldOld.executor, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE } }),
     );
     await flushEffects();
-    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    expect(shown("Не отправлено до переподключения")).toBeNull();
     await act(async () => {
       heldOld.release();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     });
-    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    expect(shown("Не отправлено до переподключения")).toBeNull();
   });
 
   it("drops the older records it said when the next read of them fails, and what a failed read of the drops said", async () => {
@@ -986,10 +990,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
       transaction: (statements) => executor.transaction(statements),
     };
     const view = render(workBar({ local: flaky }));
-    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
+    await waitFor(() => expect(shown("Не отправлено до переподключения")).toBe("3"));
     failing = true;
     view.rerender(workBar({ local: flaky, pairing: { hostId: OTHER_HOST, deviceId: DEVICE_ID } }));
-    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBeNull());
+    await waitFor(() => expect(shown("Не отправлено до переподключения")).toBeNull());
   });
 
   it("drops what a failed read of the dropped blocks said", async () => {
@@ -1008,11 +1012,13 @@ describe("the outbox and the serials on the floor's status bar", () => {
       transaction: (statements) => executor.transaction(statements),
     };
     const view = render(workBar({ local }));
-    expect(await screen.findByText(/которые она не приняла: 1/)).toBeTruthy();
+    expect(await screen.findByText(/Не приняты блоки номеров SSCC от хоста: 1/)).toBeTruthy();
     failing = true;
     view.rerender(workBar({ local, outboxVersion: 1 }));
-    await waitFor(() => expect(screen.queryByText(/которые она не приняла/)).toBeNull());
-    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByText(/Не приняты блоки номеров SSCC от хоста/)).toBeNull(),
+    );
+    expect(shown("Не отправлено до переподключения")).toBeNull();
   });
 
   it("says nothing of serials outside a shift, though the pairing has none", async () => {
@@ -1597,7 +1603,7 @@ describe("the scanner on the floor's status bar", () => {
     const view = render(bar({ local, watchScanners: watching("connected") }));
     await waitFor(() => expect(shown()).toBe("Сканер готов"));
     view.rerender(bar({ local, watchScanners: watching("connected", "disconnected") }));
-    await waitFor(() => expect(shown()).toBe("Часть сканеров"));
+    await waitFor(() => expect(shown()).toBe("Часть сканеров недоступна"));
     view.rerender(bar({ local, watchScanners: watching("disconnected") }));
     await waitFor(() => expect(shown()).toBe("Сканер не на связи"));
   });
@@ -1634,7 +1640,7 @@ describe("the license on the floor's status bar (plan ЛЦ-3)", () => {
     render(bar({ local: await synced([ORG]), license: deviceLicense("grace", GRACE_END) }));
     const date = licenseDayMonth(lastMomentBefore(GRACE_END), null);
     const shown = await within(alerts()).findByText(
-      `Лицензия площадки истекла. Новые смены откроются до ${date}. Сообщите администратору.`,
+      `Лицензия площадки истекла. Новые смены можно открывать до ${date}. Сообщите администратору.`,
     );
     expect(shown.closest(".mk-alert")?.classList.contains("mk-alert--warn")).toBe(true);
     expect(alerts().getAttribute("aria-live")).toBe("polite");
@@ -1838,7 +1844,7 @@ describe("the header's chips (kit header: a glyph and a word on a tone, never a 
       expect(chips().find(([kind]) => kind === "scanner")).toEqual([
         "scanner",
         "warn",
-        "Часть сканеров",
+        "Часть сканеров недоступна",
       ]),
     );
   });
