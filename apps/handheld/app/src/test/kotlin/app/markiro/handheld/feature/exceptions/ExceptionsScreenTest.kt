@@ -90,10 +90,24 @@ class ExceptionsScreenTest {
 
     @Test
     fun theUndoConfirmationNamesTheUnitAndItsTime() {
-        render(ui(canUndo = true, undoTarget = target, openBoxId = "box-1", openBoxCount = 12, step = ExceptionsStep.ConfirmUndo))
+        render(ui(canUndo = true, undoTarget = target, openBoxId = "box-1", openBoxCount = 12, step = ExceptionsStep.ConfirmUndo("box-1", target)))
         compose.onNodeWithText("Отменить последний скан?").assertIsDisplayed()
         compose.onNode(hasText("7XQ4K2", substring = true)).assertIsDisplayed()
         compose.onNode(hasText("10:42:17", substring = true)).assertIsDisplayed()
+    }
+
+    @Test
+    fun theUndoConfirmationKeepsTheChosenUnitWhenTheLastScanChanges() {
+        val newer = UndoTarget(codeTail = "NEW999", scannedAt = "10:42:30", codeHash = "b".repeat(64))
+        render(
+            ui(
+                canUndo = true, undoTarget = newer, openBoxId = "box-1", openBoxCount = 13,
+                step = ExceptionsStep.ConfirmUndo("box-1", target),
+            ),
+        )
+        compose.onNode(hasText("7XQ4K2", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("10:42:17", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("NEW999", substring = true)).assertDoesNotExist()
     }
 
     @Test

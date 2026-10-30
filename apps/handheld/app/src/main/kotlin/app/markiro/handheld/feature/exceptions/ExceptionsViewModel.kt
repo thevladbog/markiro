@@ -41,7 +41,7 @@ data class ExceptionsUi(
 
 sealed interface ExceptionsStep {
     data object List : ExceptionsStep
-    data object ConfirmUndo : ExceptionsStep
+    data class ConfirmUndo(val boxId: String, val target: UndoTarget) : ExceptionsStep
     data object ConfirmClear : ExceptionsStep
     data class Done(val message: Int) : ExceptionsStep
     data class Refused(val message: Int) : ExceptionsStep
@@ -133,7 +133,11 @@ class ExceptionsViewModel @Inject constructor(
     )
 
     fun startUndo() {
-        if (state.value.canUndo) step.value = ExceptionsStep.ConfirmUndo
+        val current = state.value
+        val boxId = current.openBoxId ?: return
+        val undo = current.undoTarget ?: return
+        // The operator confirms this unit, even if Room publishes a newer scan while the dialog is open.
+        step.value = ExceptionsStep.ConfirmUndo(boxId, undo)
     }
 
     fun startClear() {
@@ -154,11 +158,10 @@ class ExceptionsViewModel @Inject constructor(
                 // Read at the moment it is needed rather than cached from an
                 // observer: the config arrives on Room's own threads.
                 val deviceId = db.deviceConfigDao().get()?.deviceId
-                val expected = state.value.undoTarget?.codeHash
                 step.value = when (current) {
-                    ExceptionsStep.ConfirmUndo -> when {
-                        expected == null -> ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
-                        else -> when (engine.undoLastScan(shiftId, boxId, expected, operatorId, deviceId)) {
+                    is ExceptionsStep.ConfirmUndo -> when {
+                        current.boxId != boxId -> ExceptionsStep.Refused(R.string.exceptions_undo_stale)
+                        else -> when (engine.undoLastScan(shiftId, boxId, current.target.codeHash, operatorId, deviceId)) {
                             is UndoResult.Undone -> ExceptionsStep.Done(R.string.exceptions_undone)
                             UndoResult.Stale -> ExceptionsStep.Refused(R.string.exceptions_undo_stale)
                             UndoResult.Empty -> ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
