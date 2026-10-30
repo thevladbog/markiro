@@ -1,3 +1,16 @@
+// Hosted store imports.
+import {
+  assertUsHostedRelease,
+  usHostedReleaseIdentity,
+  type VerifiedUsHostedRelease,
+} from "../../../deployment/us-hosted-release-verifier";
+import {
+  assertUsHostedMaterial,
+  usHostedApiMaterial,
+  usHostedWorkerMaterial,
+  type UsHostedMaterialOwner,
+} from "../../../deployment/us-hosted-material-owner";
+// End hosted store imports.
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -215,18 +228,59 @@ const failure = (code: UsWorkerFailureCode) => {
 };
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
+// Hosted construction admission.
+const hostedConstructionType: unique symbol = Symbol("hosted_package_construction");
+type HostedConstruction = Readonly<{ [hostedConstructionType]: true }>;
+type HostedConstructionRecord = {
+  config: UsRequestPackageArtifactStorageConfig;
+  client: UsRequestPackageArtifactS3Transport;
+  release: VerifiedUsHostedRelease;
+  material: UsHostedMaterialOwner;
+  disposed: boolean;
+  observation: ReturnType<typeof createUsRequestReadObservation> | undefined;
+};
+const hostedConstructions = new WeakMap<object, HostedConstructionRecord>();
+function assertLocalConfiguration(
+  value: unknown,
+): asserts value is UsRequestPackageArtifactStorageConfig {
+  // The existing private WeakSet is the runtime type proof, including for malformed inputs.
+  Reflect.apply(assertUsRequestPackageArtifactStorageConfig, undefined, [value]);
+}
+// End hosted construction admission.
+
 /** Internal synthetic adapter. Its scope checks grant no user or deletion authority. */
 export class UsRequestPackageArtifactStore {
+  // Hosted private state.
+  readonly #config: UsRequestPackageArtifactStorageConfig;
+  readonly #hosted: HostedConstructionRecord | undefined = undefined;
+  // End hosted private state.
   readonly #client: UsRequestPackageArtifactS3Transport;
   readonly #ownsClient: boolean;
   readonly #requestObservation: ReturnType<typeof createUsRequestReadObservation> | undefined;
   readonly #active = new Set<AbortController>();
   #destroyed = false;
+  // Hosted constructor admission.
   constructor(
-    private readonly config: UsRequestPackageArtifactStorageConfig,
+    config: UsRequestPackageArtifactStorageConfig,
     transport?: UsRequestPackageArtifactS3Transport,
-  ) {
-    assertUsRequestPackageArtifactStorageConfig(config);
+  );
+  constructor(construction: HostedConstruction);
+  constructor(config: unknown, transport?: UsRequestPackageArtifactS3Transport) {
+    const key = config && typeof config === "object" ? config : undefined;
+    const hosted = key ? hostedConstructions.get(key) : undefined;
+    if (key && hosted) {
+      hostedConstructions.delete(key);
+      this.#hosted = hosted;
+      this.#assertHosted();
+      this.#config = hosted.config;
+      this.#client = hosted.client;
+      this.#ownsClient = true;
+      this.#requestObservation = hosted.observation;
+      return;
+    }
+    assertLocalConfiguration(config);
+    this.#config = config;
+    // End hosted constructor admission.
     this.#ownsClient = transport === undefined;
     if (transport) {
       this.#client = transport;
@@ -255,6 +309,8 @@ export class UsRequestPackageArtifactStore {
     evidence: UsWorkerObjectEvidence,
     bytes: Uint8Array,
   ): Promise<void> {
+    // Hosted operation admission.
+    this.#assertHosted();
     const artifact = scopedEvidence(scope, evidence);
     if (!(bytes instanceof Uint8Array) || bytes.byteLength !== artifact.byteSize)
       throw failure("us_request_package_storage_checksum_mismatch");
@@ -264,9 +320,9 @@ export class UsRequestPackageArtifactStore {
       throw failure("us_request_package_storage_checksum_mismatch");
     await this.io(async (signal) => {
       try {
-        await this.#client.send(
+        await this.#send(
           new PutObjectCommand({
-            Bucket: this.config.bucket,
+            Bucket: this.#config.bucket,
             Key: artifact.objectKey,
             Body: copy,
             ContentType: artifact.mediaType,
@@ -287,17 +343,21 @@ export class UsRequestPackageArtifactStore {
   }
 
   async readVerified(scope: UsWorkerScope, evidence: UsWorkerObjectEvidence): Promise<Buffer> {
+    // Hosted operation admission.
+    this.#assertHosted();
     return this.readBytes(scopedEvidence(scope, evidence));
   }
 
   /** Task5 must commit its permanent, ownership-checked DB fence before calling.
    * This is an internal I/O seam, not a fence issuer or a user-authorized command. */
   async removeFenced(scope: UsWorkerScope, evidence: UsWorkerObjectEvidence): Promise<void> {
+    // Hosted operation admission.
+    this.#assertHosted();
     const artifact = scopedEvidence(scope, evidence);
     await this.io(async (signal) => {
       try {
-        await this.#client.send(
-          new DeleteObjectCommand({ Bucket: this.config.bucket, Key: artifact.objectKey }),
+        await this.#send(
+          new DeleteObjectCommand({ Bucket: this.#config.bucket, Key: artifact.objectKey }),
           { abortSignal: signal },
         );
       } catch (error) {
@@ -312,7 +372,98 @@ export class UsRequestPackageArtifactStore {
     }, "us_request_package_storage_delete_failed");
   }
 
+  // Hosted factory and operation boundary.
+  static createHosted(release: unknown, material: unknown): UsRequestPackageArtifactStore {
+    let client: S3Client | undefined;
+    let handler: NodeHttpHandler | undefined;
+    let observation: ReturnType<typeof createUsRequestReadObservation> | undefined;
+    let construction: HostedConstruction | undefined;
+    try {
+      assertUsHostedRelease(release);
+      const identity = usHostedReleaseIdentity(release);
+      assertUsHostedMaterial(material, release, identity.service);
+      const storage =
+        identity.service === "api"
+          ? usHostedApiMaterial(material, release).storage
+          : usHostedWorkerMaterial(material, release).storage;
+      const config: UsRequestPackageArtifactStorageConfig = Object.freeze({
+        endpoint: identity.config.storage.endpoint,
+        region: identity.config.storage.signingRegion,
+        bucket: identity.config.storage.bucket,
+        forcePathStyle: true,
+        accessKeyId: storage.accessKey,
+        secretAccessKey: storage.secretKey,
+      });
+      handler = new NodeHttpHandler({
+        connectionTimeout: 3_000,
+        requestTimeout: OPERATION_TIMEOUT_MS,
+        socketTimeout: 10_000,
+        throwOnRequestTimeout: true,
+        // Plain agent options preserve the pinned handler's default ownership/pooling policy.
+        httpsAgent: {
+          ca: storage.ca,
+          rejectUnauthorized: true,
+          servername: "objects.us-demo.internal",
+        },
+      });
+      client = new S3Client({
+        endpoint: config.endpoint,
+        region: config.region,
+        forcePathStyle: config.forcePathStyle,
+        maxAttempts: 1,
+        credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+        requestHandler: handler,
+      });
+      observation = createUsRequestReadObservation(handler);
+      construction = Object.freeze({ [hostedConstructionType]: true });
+      hostedConstructions.set(construction, {
+        config,
+        client,
+        release,
+        material,
+        disposed: false,
+        observation,
+      });
+      return new UsRequestPackageArtifactStore(construction);
+    } catch {
+      if (construction) hostedConstructions.delete(construction);
+      try {
+        observation?.destroy();
+      } catch {
+        /* Continue owned client cleanup. */
+      }
+      try {
+        if (client) client.destroy();
+        else handler?.destroy();
+      } catch {
+        // Cleanup cannot expose raw SDK errors or replace the fixed startup refusal.
+      }
+      throw new Error("us_request_package_hosted_invalid");
+    }
+  }
+  #assertHosted(): void {
+    const hosted = this.#hosted;
+    if (!hosted) return;
+    if (hosted.disposed) throw new Error("us_request_package_hosted_invalid");
+    assertUsHostedRelease(hosted.release);
+    assertUsHostedMaterial(
+      hosted.material,
+      hosted.release,
+      usHostedReleaseIdentity(hosted.release).service,
+    );
+  }
+  #send(
+    command: Parameters<UsRequestPackageArtifactS3Transport["send"]>[0],
+    options: { abortSignal: AbortSignal },
+  ): Promise<unknown> {
+    this.#assertHosted();
+    return this.#client.send(command, options);
+  }
+  // End hosted factory and operation boundary.
+
   destroy(): void {
+    // Hosted disposal boundary.
+    if (this.#hosted) this.#hosted.disposed = true;
     if (this.#destroyed) return;
     this.#destroyed = true;
     for (const controller of this.#active) controller.abort();
@@ -321,6 +472,8 @@ export class UsRequestPackageArtifactStore {
   }
 
   private async readBytes(artifact: UsWorkerObjectEvidence): Promise<Buffer> {
+    // Hosted operation admission.
+    this.#assertHosted();
     const readToken = {};
     readStages.set(readToken, "await_send");
     return this.io(
@@ -332,8 +485,8 @@ export class UsRequestPackageArtifactStore {
           if (signal.aborted) throw failure("us_request_package_storage_timeout");
         }
         const send = () =>
-          this.#client.send(
-            new GetObjectCommand({ Bucket: this.config.bucket, Key: artifact.objectKey }),
+          this.#send(
+            new GetObjectCommand({ Bucket: this.#config.bucket, Key: artifact.objectKey }),
             { abortSignal: signal },
           );
         const response = await (this.#requestObservation
@@ -371,6 +524,8 @@ export class UsRequestPackageArtifactStore {
     fallback: UsWorkerFailureCode,
     readToken?: object,
   ): Promise<T> {
+    // Hosted operation admission.
+    this.#assertHosted();
     if (this.#destroyed) {
       closeReadStage(readToken);
       throw failure("us_request_worker_unknown_failure");

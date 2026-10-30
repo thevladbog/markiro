@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "edition": "US",
+  "purpose": "synthetic-demo",
+  "publicOrigin": "https://us-demo.invalid",
+  "stage": ".superpowers/us-hosted-package",
+  "entrypoints": {
+    "api": "apps/api/dist/main.us-hosted.js",
+    "worker": "apps/api/dist/main.us-hosted-worker.js"
+  },
+  "trees": [
+    "apps/api/dist",
+    "packages/db/dist",
+    "packages/domain/dist",
+    "packages/platform-contracts/dist",
+    "apps/admin/dist-us",
+    "packages/db/migrations"
+  ],
+  "metadata": [
+    "pnpm-lock.yaml",
+    "apps/api/package.json",
+    "packages/db/package.json",
+    "packages/domain/package.json",
+    "packages/platform-contracts/package.json"
+  ],
+  "deploymentFiles": [
+    "deploy/us-synthetic/package-spec.json",
+    "deploy/us-synthetic/compose.synthetic.yml",
+    "deploy/us-synthetic/ingress.conf",
+    "deploy/us-synthetic/runtime.Dockerfile",
+    "deploy/us-synthetic/README.md"
+  ],
+  "deploymentReady": false,
+  "releaseEnabled": false,
+  "provisioning": "separate-reviewed-admin-contract-required"
+}

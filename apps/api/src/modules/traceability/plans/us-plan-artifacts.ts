@@ -1,3 +1,16 @@
+// Hosted store imports.
+import {
+  assertUsHostedRelease,
+  usHostedReleaseIdentity,
+  type VerifiedUsHostedRelease,
+} from "../../../deployment/us-hosted-release-verifier";
+import {
+  assertUsHostedMaterial,
+  usHostedApiMaterial,
+  usHostedWorkerMaterial,
+  type UsHostedMaterialOwner,
+} from "../../../deployment/us-hosted-material-owner";
+// End hosted store imports.
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -71,17 +84,51 @@ interface AttemptRecord {
   cleaning: boolean;
 }
 
+// Hosted construction admission.
+const hostedConstructionType: unique symbol = Symbol("hosted_plan_construction");
+type HostedConstruction = Readonly<{ [hostedConstructionType]: true }>;
+type HostedConstructionRecord = {
+  config: UsPlanArtifactStorageConfig;
+  client: UsPlanArtifactS3Transport;
+  release: VerifiedUsHostedRelease;
+  material: UsHostedMaterialOwner;
+  disposed: boolean;
+};
+const hostedConstructions = new WeakMap<object, HostedConstructionRecord>();
+function assertLocalConfiguration(value: unknown): asserts value is UsPlanArtifactStorageConfig {
+  // The existing private WeakSet is the runtime type proof, including for malformed inputs.
+  Reflect.apply(assertUsPlanArtifactStorageConfig, undefined, [value]);
+}
+// End hosted construction admission.
+
 /** Private US-only internal adapter; grants no tenant authorization or HTTP route. */
 export class UsPlanArtifactStore implements OnModuleDestroy {
+  // Hosted private state.
+  readonly #config: UsPlanArtifactStorageConfig;
+  readonly #hosted: HostedConstructionRecord | undefined = undefined;
+  // End hosted private state.
   readonly #client: UsPlanArtifactS3Transport;
   readonly #ownsClient: boolean;
   readonly #attempts = new WeakMap<UsPlanArtifactAttempt, AttemptRecord>();
 
-  constructor(
-    private readonly config: UsPlanArtifactStorageConfig,
-    client?: UsPlanArtifactS3Transport,
-  ) {
-    assertUsPlanArtifactStorageConfig(config);
+  // Hosted constructor admission.
+  constructor(config: UsPlanArtifactStorageConfig, client?: UsPlanArtifactS3Transport);
+  constructor(construction: HostedConstruction);
+  constructor(config: unknown, client?: UsPlanArtifactS3Transport) {
+    const key = config && typeof config === "object" ? config : undefined;
+    const hosted = key ? hostedConstructions.get(key) : undefined;
+    if (key && hosted) {
+      hostedConstructions.delete(key);
+      this.#hosted = hosted;
+      this.#assertHosted();
+      this.#config = hosted.config;
+      this.#client = hosted.client;
+      this.#ownsClient = true;
+      return;
+    }
+    assertLocalConfiguration(config);
+    this.#config = config;
+    // End hosted constructor admission.
     this.#ownsClient = client === undefined;
     this.#client =
       client ??
@@ -100,11 +147,87 @@ export class UsPlanArtifactStore implements OnModuleDestroy {
       });
   }
 
+  // Hosted factory and operation boundary.
+  static createHosted(release: unknown, material: unknown): UsPlanArtifactStore {
+    let client: S3Client | undefined;
+    let handler: NodeHttpHandler | undefined;
+    let construction: HostedConstruction | undefined;
+    try {
+      assertUsHostedRelease(release);
+      const identity = usHostedReleaseIdentity(release);
+      assertUsHostedMaterial(material, release, identity.service);
+      const storage =
+        identity.service === "api"
+          ? usHostedApiMaterial(material, release).storage
+          : usHostedWorkerMaterial(material, release).storage;
+      const config: UsPlanArtifactStorageConfig = Object.freeze({
+        endpoint: identity.config.storage.endpoint,
+        region: identity.config.storage.signingRegion,
+        bucket: identity.config.storage.bucket,
+        forcePathStyle: true,
+        accessKeyId: storage.accessKey,
+        secretAccessKey: storage.secretKey,
+      });
+      handler = new NodeHttpHandler({
+        connectionTimeout: 3_000,
+        requestTimeout: OPERATION_TIMEOUT_MS,
+        socketTimeout: 10_000,
+        throwOnRequestTimeout: true,
+        // Plain agent options preserve the pinned handler's default ownership/pooling policy.
+        httpsAgent: {
+          ca: storage.ca,
+          rejectUnauthorized: true,
+          servername: "objects.us-demo.internal",
+        },
+      });
+      client = new S3Client({
+        endpoint: config.endpoint,
+        region: config.region,
+        forcePathStyle: config.forcePathStyle,
+        maxAttempts: 1,
+        credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+        requestHandler: handler,
+      });
+      construction = Object.freeze({ [hostedConstructionType]: true });
+      hostedConstructions.set(construction, { config, client, release, material, disposed: false });
+      return new UsPlanArtifactStore(construction);
+    } catch {
+      if (construction) hostedConstructions.delete(construction);
+      try {
+        if (client) client.destroy();
+        else handler?.destroy();
+      } catch {
+        // Cleanup cannot expose raw SDK errors or replace the fixed startup refusal.
+      }
+      throw new Error("us_plan_artifact_hosted_invalid");
+    }
+  }
+  #assertHosted(): void {
+    const hosted = this.#hosted;
+    if (!hosted) return;
+    if (hosted.disposed) throw new Error("us_plan_artifact_hosted_invalid");
+    assertUsHostedRelease(hosted.release);
+    assertUsHostedMaterial(
+      hosted.material,
+      hosted.release,
+      usHostedReleaseIdentity(hosted.release).service,
+    );
+  }
+  #send(command: ArtifactCommand, options: { abortSignal: AbortSignal }): Promise<unknown> {
+    this.#assertHosted();
+    return this.#client.send(command, options);
+  }
+  // End hosted factory and operation boundary.
+
   onModuleDestroy(): void {
+    // Hosted disposal boundary.
+    if (this.#hosted) this.#hosted.disposed = true;
     if (this.#ownsClient) this.#client.destroy?.();
   }
 
   createAttempt(scope: Scope, pdf: UsPlanPdfResult): UsPlanArtifactAttempt {
+    // Hosted operation admission.
+    this.#assertHosted();
     assertScope(scope);
     if (
       !(pdf.bytes instanceof Uint8Array) ||
@@ -144,9 +267,9 @@ export class UsPlanArtifactStore implements OnModuleDestroy {
     record.status = "uploading";
     try {
       await bounded(async (signal) =>
-        this.#client.send(
+        this.#send(
           new PutObjectCommand({
-            Bucket: this.config.bucket,
+            Bucket: this.#config.bucket,
             Key: record.artifact.objectKey,
             Body: record.bytes,
             ContentType: "application/pdf",
@@ -178,6 +301,8 @@ export class UsPlanArtifactStore implements OnModuleDestroy {
   }
 
   async readVerified(scope: Scope, artifact: UsPlanArtifactEvidence): Promise<Buffer> {
+    // Hosted operation admission.
+    this.#assertHosted();
     assertScope(scope);
     const parsed = evidenceSchema.safeParse(artifact);
     if (!parsed.success) throw new Error("us_plan_artifact_evidence_invalid");
@@ -240,13 +365,19 @@ export class UsPlanArtifactStore implements OnModuleDestroy {
         invoked = true;
         record.status = "abandoned";
         await bounded(async (signal) => {
-          await this.#client.send(
-            new DeleteObjectCommand({ Bucket: this.config.bucket, Key: record.artifact.objectKey }),
+          await this.#send(
+            new DeleteObjectCommand({
+              Bucket: this.#config.bucket,
+              Key: record.artifact.objectKey,
+            }),
             { abortSignal: signal },
           );
           try {
-            await this.#client.send(
-              new HeadObjectCommand({ Bucket: this.config.bucket, Key: record.artifact.objectKey }),
+            await this.#send(
+              new HeadObjectCommand({
+                Bucket: this.#config.bucket,
+                Key: record.artifact.objectKey,
+              }),
               { abortSignal: signal },
             );
           } catch (error) {
@@ -273,15 +404,19 @@ export class UsPlanArtifactStore implements OnModuleDestroy {
   }
 
   private owned(attempt: UsPlanArtifactAttempt): AttemptRecord {
+    // Hosted operation admission.
+    this.#assertHosted();
     const record = this.#attempts.get(attempt);
     if (!record) throw new Error("us_plan_artifact_attempt_invalid");
     return record;
   }
 
   private async readBytes(artifact: UsPlanArtifactEvidence): Promise<Buffer> {
+    // Hosted operation admission.
+    this.#assertHosted();
     return bounded(async (signal) => {
-      const response = await this.#client.send(
-        new GetObjectCommand({ Bucket: this.config.bucket, Key: artifact.objectKey }),
+      const response = await this.#send(
+        new GetObjectCommand({ Bucket: this.#config.bucket, Key: artifact.objectKey }),
         { abortSignal: signal },
       );
       const body =

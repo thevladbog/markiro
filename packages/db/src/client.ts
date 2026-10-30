@@ -5,6 +5,7 @@ export interface DbPoolOptions {
   max?: number;
   connectionTimeoutMillis?: number;
   statement_timeout?: number;
+  ssl?: Readonly<{ ca: string; rejectUnauthorized: true; servername: string }>;
 }
 
 export function createDb(url: string, poolOptions: DbPoolOptions = {}) {

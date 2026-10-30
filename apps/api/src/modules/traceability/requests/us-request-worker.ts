@@ -222,6 +222,7 @@ export class UsRequestWorker {
     return new Date(milliseconds).toISOString();
   }
   private async active(lease: UsWorkerLease, renewal: InvocationRenewal): Promise<void> {
+    assertUsRequestWorkerExecutionIdentity(this.deps.execution);
     renewal.assertHealthy();
     await this.db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL lock_timeout='2s'`);
@@ -230,6 +231,7 @@ export class UsRequestWorker {
       // after this caller originally captured lease.expiresAt.
       await this.deps.lifecycle.assertActive(tx, lease);
     });
+    assertUsRequestWorkerExecutionIdentity(this.deps.execution);
     renewal.assertHealthy();
   }
   private outcome(state: UsWorkerRunState, scope: UsWorkerScope): UsRequestWorkerResult | null {

@@ -1,3 +1,5 @@
+import * as hostedReleaseVerifier from "../src/deployment/us-hosted-release-verifier";
+import * as hostedMaterialOwner from "../src/deployment/us-hosted-material-owner";
 import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
@@ -534,13 +536,17 @@ it("the actual adapter rejects phase, first-match and take-consumption semantic 
       "exports",
       "require",
     ])({}, (path: string): unknown =>
-      path === "./us-request-package-artifact-config"
-        ? artifactConfig
-        : path === "./us-request-worker-types"
-          ? workerTypes
-          : path === "./us-request-read-observation"
-            ? requestObservation
-            : require(path),
+      path === "../../../deployment/us-hosted-release-verifier"
+        ? hostedReleaseVerifier
+        : path === "../../../deployment/us-hosted-material-owner"
+          ? hostedMaterialOwner
+          : path === "./us-request-package-artifact-config"
+            ? artifactConfig
+            : path === "./us-request-worker-types"
+              ? workerTypes
+              : path === "./us-request-read-observation"
+                ? requestObservation
+                : require(path),
     );
     const fixture = createUsRequestWorkerStorageFixture();
     const store = new mutant.UsRequestPackageArtifactStore(fixture.config, {

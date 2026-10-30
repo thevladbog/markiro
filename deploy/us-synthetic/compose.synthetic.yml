@@ -1,0 +1,81 @@
+# Inert prerequisite profile. No pull/build/provisioning or environment policy.
+name: markiro-us-synthetic
+services:
+  api:
+    image: "markiro-us-synthetic-runtime@sha256:${US_RUNTIME_IMAGE_SHA256:?reviewed runtime image digest required}"
+    pull_policy: never
+    entrypoint: ["node", "/app/apps/api/dist/main.us-hosted.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 1m
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
+    networks:
+      private:
+        aliases: [api.us-demo.internal]
+    volumes:
+      - type: bind
+        source: ../../operator/us-synthetic-api.json
+        target: /app/us-synthetic-api.json
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ../../operator/api-secrets
+        target: /run/secrets/us-demo
+        read_only: true
+        bind: { create_host_path: false }
+  worker:
+    image: "markiro-us-synthetic-runtime@sha256:${US_RUNTIME_IMAGE_SHA256:?reviewed runtime image digest required}"
+    pull_policy: never
+    entrypoint: ["node", "/app/apps/api/dist/main.us-hosted-worker.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 1m
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
+    networks: [private]
+    volumes:
+      - type: bind
+        source: ../../operator/us-synthetic-worker.json
+        target: /app/us-synthetic-worker.json
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ../../operator/worker-secrets
+        target: /run/secrets/us-demo
+        read_only: true
+        bind: { create_host_path: false }
+  ingress:
+    image: "nginx@sha256:${US_INGRESS_IMAGE_SHA256:?reviewed ingress image digest required}"
+    pull_policy: never
+    entrypoint: ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/us-synthetic.conf"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 1m
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
+    networks: [private, edge]
+    ports: ["443:8443"]
+    volumes:
+      - type: bind
+        source: ./ingress.conf
+        target: /etc/nginx/us-synthetic.conf
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ../../app/apps/admin/dist-us
+        target: /srv/us-static
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ../../operator/ingress-secrets
+        target: /run/secrets/us-demo
+        read_only: true
+        bind: { create_host_path: false }
+networks:
+  private:
+    internal: true
+  edge: {}
