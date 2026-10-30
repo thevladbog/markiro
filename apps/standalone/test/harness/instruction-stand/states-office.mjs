@@ -83,6 +83,13 @@ async function panelToEnd(page) {
   await settle(page);
 }
 
+/** A 13-digit GTIN under the seeded counterparty's GS1 prefix 4607000 (check digit 4). */
+const COUNTERPARTY_GTIN = "4607000000014";
+/** The seeded draft (`DRAFT_PRODUCT` of seed-office.mjs). */
+const DRAFT = "Вода питьевая «Родник» негазированная 5 л";
+/** The seeded product with a photo. */
+const STILL05 = "Вода питьевая «Родник» негазированная 0,5 л";
+
 /** The shift the seed's station opened and scanned into. */
 const ACTIVE = "OCT26-001";
 /** The reason the office gives when it closes a shift a station will not finish. */
@@ -310,4 +317,42 @@ export const OFFICE_STATES = {
     },
     { boxClosed: true },
   ),
+
+  // MKR-INS-10: the products and the product card.
+  "ins10/products-list": state("10: товары", async (page) => {
+    await section(page, "Товары");
+  }),
+  "ins10/product-new": state("10: новый товар контрагента", async (page) => {
+    await section(page, "Товары");
+    await page.getByRole("button", { name: "Добавить товар" }).click();
+    await page.getByRole("dialog").getByLabel("GTIN").fill(COUNTERPARTY_GTIN);
+    await page
+      .getByRole("dialog")
+      .getByLabel("Название", { exact: true })
+      .fill("Вода питьевая «Аква» негазированная 1 л");
+    await page.getByRole("dialog").getByLabel("Название для печати").fill("Вода «Аква» 1 л");
+    await settle(page);
+  }),
+  "ins10/product-card": state("10: карточка товара с фото", async (page) => {
+    await section(page, "Товары");
+    await page.getByRole("button", { name: `Изменить товар «${STILL05}»` }).click();
+    await settle(page, 1200);
+  }),
+  "ins10/product-card-end": state("10: карточка товара, шаблоны и контрагент", async (page) => {
+    await section(page, "Товары");
+    await page.getByRole("button", { name: `Изменить товар «${STILL05}»` }).click();
+    await settle(page, 1200);
+    await panelToEnd(page);
+  }),
+  "ins10/product-archive": state("10: товар в архив", async (page) => {
+    await section(page, "Товары");
+    await rowMenu(page, STILL05, `Убрать товар «${STILL05}» в архив`);
+  }),
+  "ins10/product-draft": state("10: черновик товара", async (page) => {
+    await section(page, "Товары");
+    await page.getByRole("button", { name: `Изменить товар «${DRAFT}»` }).click();
+    await settle(page, 1200);
+    await page.getByText("Товар остаётся черновиком").scrollIntoViewIfNeeded();
+    await settle(page);
+  }),
 };

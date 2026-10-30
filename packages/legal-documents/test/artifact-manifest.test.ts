@@ -309,7 +309,7 @@ function artifactEntry(
     "MKR-INS-04": ["2026.10/01", "2026-10-29"],
     "MKR-INS-08": ["2026.10/01", "2026-10-29"],
     "MKR-INS-09": ["2026.10/01", "2026-10-29"],
-    "MKR-INS-10": ["2026.09/02", "2026-09-19"],
+    "MKR-INS-10": ["2026.10/01", "2026-10-29"],
   };
   const [revision, effectiveDate] = INSTRUCTION_RELEASES[code] ?? ["2026.08/01", "2026-08-15"];
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
@@ -1297,14 +1297,14 @@ describe("legal artifact release generation", () => {
       "MKR-INS-08|en|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.10/01/29.10.2026",
       "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.10/01/29.10.2026",
       "MKR-INS-09|en|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.10/01/29.10.2026",
-      "MKR-INS-10|ru|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/02/19.09.2026",
-      "MKR-INS-10|en|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/02/19.09.2026",
+      "MKR-INS-10|ru|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.10/01/29.10.2026",
+      "MKR-INS-10|en|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.10/01/29.10.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
-      new Set(["2026.08/01", "2026.09/02", "2026.10/01"]),
+      new Set(["2026.08/01", "2026.10/01"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15", "2026-09-19", "2026-10-29"]),
+      new Set(["2026-08-15", "2026-10-29"]),
     );
     expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(22);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
@@ -1471,7 +1471,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(cabinetRelease),
       }),
-    ).toBe("markiro_mkr-ins-10_2026.09-02_en.pdf");
+    ).toBe("markiro_mkr-ins-10_2026.10-01_en.pdf");
     expect(() =>
       artifactFileName({
         code: "MKR-INS-01",
