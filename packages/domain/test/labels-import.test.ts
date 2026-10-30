@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -282,6 +283,31 @@ describe("label code import contract", () => {
   });
 
   describe("TSPL subset", () => {
+    it.each([" ", "A"])(
+      "rejects a malicious statement padded with %j within a bounded execution budget",
+      (padding) => {
+        // Inside the 256 KiB input limit. A JS line separator makes the old
+        // overlapping command/whitespace/argument regex backtrack quadratically.
+        const source = `A${padding.repeat(200_000)}!\u2028!`;
+        expect(() =>
+          runInNewContext(
+            "parse()",
+            { parse: () => parseTsplLabel(source, 203) },
+            { timeout: 1_000 },
+          ),
+        ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
+      },
+    );
+
+    it("preserves whitespace and glued arguments while rejecting embedded line separators", () => {
+      const result = parseTsplLabel('SIZE100 mm,50 mm\nTEXT\t0,0,"0",0,12,12,"Hi"\nPRINT1', 203);
+      expect(result.spec.elements[0]).toMatchObject({ kind: "text", text: "Hi" });
+      expect(parseTsplLabel("SIZE\u2028100 mm,50 mm", 203).spec.widthMm).toBe(100);
+      expect(() =>
+        parseTsplLabel('SIZE100 mm,50 mm\nTEXT 0,0,"0",0,12,12,"A\u2028B"', 203),
+      ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
+    });
+
     it("imports text, fields, barcodes, line, and box in source order", () => {
       const source = [
         "SIZE 100 mm, 50 mm",

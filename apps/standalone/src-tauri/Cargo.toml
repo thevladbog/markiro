@@ -22,7 +22,7 @@ uuid = {version="1",features=["v4"]}
 time = "=0.3.55"
 # `stream`: the installer goes to the host as a stream of the file (plan ОБН-3).
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
-rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = "=4.9.0"
@@ -31,7 +31,7 @@ tauri = { version = "2.11", features = [] }
 tauri-plugin-single-instance = "2"
 thiserror = "2"
 # `fs`, `io-util`: the downloaded installer is written to the disk (plan ОБН-3).
-tokio = { version = "=1.53.1", features = ["sync", "macros", "time", "fs", "io-util"] }
+tokio = { version = "=1.53.3", features = ["sync", "macros", "time", "fs", "io-util"] }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_Graphics_Gdi and Win32_UI_WindowsAndMessaging: kiosk mode (lockdown.rs).
@@ -77,7 +77,7 @@ markiro-host = { path = "../host" }
 markiro-proto = { path = "../proto", features = ["test-keys"] }
 tauri = { version = "2.11", features = ["test"] }
 tempfile = "3"
-tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "=1.53.3", features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = ["custom-protocol"]
