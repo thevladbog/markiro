@@ -136,6 +136,10 @@ test("snapshot preserves literal secrets, optional inventory and stable sorted b
   const f = await privateFixture(t);
   Object.assign(f.env, {
     SMTP_PASSWORD: String.raw`literal$secret#value\\tail`,
+    LEAD_TELEGRAM_ENABLED: "true",
+    LEAD_TELEGRAM_BOT_TOKEN: "42:fixture-not-a-real-bot-token",
+    LEAD_TELEGRAM_CHAT_ID: "42",
+    LEAD_TELEGRAM_GROUP_CHAT_ID: "-1001234567890",
     SMTP_REPLY_TO: "reply@markiro.app",
     PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA: "true",
     STANDALONE_LICENSE_ISSUER: "fixture-issuer",

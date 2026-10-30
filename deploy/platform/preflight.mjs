@@ -195,15 +195,17 @@ export function validateConfig(env, manifest) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(env[key] ?? "")) fail(key);
   }
   // Landing lead alerts are optional and never gate readiness: Telegram only
-  // needs a token and a chat when it is switched on. The token is never echoed;
+  // needs a token and at least one chat when it is switched on. The token is never echoed;
   // `fail` names the key only.
   if (env.LEAD_TELEGRAM_ENABLED && !["true", "false"].includes(env.LEAD_TELEGRAM_ENABLED))
     fail("LEAD_TELEGRAM_ENABLED");
   if (env.LEAD_TELEGRAM_ENABLED === "true") {
     if (!/^\d{1,20}:[A-Za-z0-9_-]{20,100}$/u.test(env.LEAD_TELEGRAM_BOT_TOKEN ?? ""))
       fail("LEAD_TELEGRAM_BOT_TOKEN");
-    if (!/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/u.test(env.LEAD_TELEGRAM_CHAT_ID ?? ""))
+    if (!env.LEAD_TELEGRAM_CHAT_ID && !env.LEAD_TELEGRAM_GROUP_CHAT_ID)
       fail("LEAD_TELEGRAM_CHAT_ID");
+    for (const key of ["LEAD_TELEGRAM_CHAT_ID", "LEAD_TELEGRAM_GROUP_CHAT_ID"])
+      if (env[key] && !/^(?:-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/u.test(env[key])) fail(key);
   }
   if (
     env.LEAD_RETENTION_MONTHS !== undefined &&
