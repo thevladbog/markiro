@@ -218,3 +218,102 @@ for (const scenario of [
     assert.equal(events.eventNames().length, 0, "scoped render listeners are always removed");
   });
 }
+
+const localLogin = "https://saas-admin.localhost:1234/login";
+function documentFailurePage(scenario = {}) {
+  const events = new EventEmitter();
+  const mainFrame = {};
+  const original = new Error("page.goto: net::ERR_NETWORK_CHANGED");
+  let calls = 0;
+  const fail = () => {
+    const request = {
+      url: () => scenario.url ?? localLogin,
+      method: () => scenario.method ?? "GET",
+      resourceType: () => scenario.resourceType ?? "document",
+      failure: () => ({ errorText: scenario.errorText ?? "net::ERR_NETWORK_CHANGED" }),
+      ...(scenario.missingFrame ? {} : { frame: () => (scenario.subframe ? {} : mainFrame) }),
+      ...(scenario.missingNavigationFlag
+        ? {}
+        : { isNavigationRequest: () => scenario.navigation ?? true }),
+    };
+    events.emit("requestfailed", request);
+    if (scenario.pageError) events.emit("pageerror", new Error("application failed"));
+    if (scenario.httpError) events.emit("response", { status: () => 503 });
+  };
+  const page = {
+    ...(scenario.missingMainFrame ? {} : { mainFrame: () => mainFrame }),
+    on: (...args) => events.on(...args),
+    off: (...args) => events.off(...args),
+    goto: async () => {
+      calls++;
+      if (!scenario.afterNavigation && (calls === 1 || scenario.persistent)) {
+        fail();
+        throw original;
+      }
+      return { status: () => 200 };
+    },
+  };
+  return { page, events, original, fail, calls: () => calls };
+}
+test("initial document network change retries with real requestfailed ordering and readiness listeners", async () => {
+  const f = documentFailurePage();
+  let waits = 0;
+  let ready = 0;
+  const response = await navigateLocalPage(
+    f.page,
+    localLogin,
+    async () => {
+      waits++;
+    },
+    async () => {
+      ready++;
+    },
+  );
+  assert.equal(response.status(), 200);
+  assert.equal(f.calls(), 2);
+  assert.equal(waits, 1);
+  assert.equal(ready, 1);
+  assert.equal(f.events.eventNames().length, 0);
+});
+for (const scenario of [
+  { name: "foreign document", url: "https://foreign.example/login" },
+  { name: "different port", url: "https://saas-admin.localhost:4321/login" },
+  { name: "different path", url: "https://saas-admin.localhost:1234/api/login" },
+  { name: "different query", url: localLogin + "?other=1" },
+  { name: "POST", method: "POST" },
+  { name: "XHR", resourceType: "xhr" },
+  { name: "not navigation", navigation: false },
+  { name: "missing navigation flag", missingNavigationFlag: true },
+  { name: "iframe document", subframe: true },
+  { name: "missing request frame", missingFrame: true },
+  { name: "missing page main frame", missingMainFrame: true },
+  { name: "different request error", errorText: "net::ERR_CONNECTION_RESET" },
+  { name: "concurrent application error", pageError: true },
+  { name: "concurrent HTTP error", httpError: true },
+  { name: "persistent network change", persistent: true, attempts: 3 },
+  { name: "document failure after navigation", afterNavigation: true },
+]) {
+  test(`document navigation preserves failure: ${scenario.name}`, async () => {
+    const f = documentFailurePage(scenario);
+    let waits = 0;
+    await assert.rejects(
+      navigateLocalPage(
+        f.page,
+        localLogin,
+        async () => {
+          waits++;
+        },
+        async () => {
+          if (scenario.afterNavigation) {
+            f.fail();
+            throw f.original;
+          }
+        },
+      ),
+      (error) => error === f.original,
+    );
+    assert.equal(f.calls(), scenario.attempts ?? 1);
+    assert.equal(waits, (scenario.attempts ?? 1) - 1);
+    assert.equal(f.events.eventNames().length, 0);
+  });
+}

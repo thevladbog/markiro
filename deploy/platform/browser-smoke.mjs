@@ -14,6 +14,8 @@ export async function navigateLocalPage(page, url, wait = delay, ready) {
   assert.equal(target.protocol, "https:");
   assert.ok(["saas-admin.localhost", "landing.localhost"].includes(target.hostname));
   let state;
+  let navigating = false;
+  const mainFrame = page.mainFrame?.();
   const failed = (request) => {
     let asset;
     try {
@@ -30,7 +32,16 @@ export async function navigateLocalPage(page, url, wait = delay, ready) {
       request.failure()?.errorText === "net::ERR_NETWORK_CHANGED"
     ) {
       state.assetNetworkChanged = true;
-    } else {
+    } else if (!(
+      navigating &&
+      request.method() === "GET" &&
+      asset.href === target.href &&
+      request.resourceType() === "document" &&
+      request.isNavigationRequest?.() === true &&
+      mainFrame &&
+      request.frame?.() === mainFrame &&
+      request.failure()?.errorText === "net::ERR_NETWORK_CHANGED"
+    )) {
       state.blocked = true;
     }
   };
@@ -48,7 +59,7 @@ export async function navigateLocalPage(page, url, wait = delay, ready) {
   try {
     for (let attempt = 0; ; attempt++) {
       state = { assetNetworkChanged: false, blocked: false };
-      let navigating = true;
+      navigating = true;
       try {
         const response = await page.goto(url);
         navigating = false;
@@ -62,6 +73,7 @@ export async function navigateLocalPage(page, url, wait = delay, ready) {
           error.message.includes("net::ERR_NETWORK_CHANGED");
         const renderChanged =
           error instanceof Error && error.name === "TimeoutError" && state.assetNetworkChanged;
+        navigating = false;
         if (state.blocked || !(navigationChanged || renderChanged) || attempt === 2) throw error;
         await wait(1000);
       }
