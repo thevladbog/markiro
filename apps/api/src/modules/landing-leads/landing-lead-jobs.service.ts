@@ -7,6 +7,7 @@ import { sql } from "drizzle-orm";
 import type { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { MailDeliveryService } from "../mail/mail-delivery.service";
 import { anonymizeLead } from "./lead-anonymization";
+import { leadRetentionDue } from "./lead-retention";
 import {
   civilDate,
   digestIsEmpty,
@@ -40,8 +41,6 @@ export const LEAD_NOTIFICATION_MAX_ATTEMPTS = 8;
 const BATCH_SIZE = 10;
 const RETRY_BASE_SECONDS = 30;
 const RETRY_MAX_SECONDS = 3_600;
-/** A mistaken «lost» can be undone for a month before the contacts are cleared. */
-const LOST_GRACE_DAYS = 30;
 const ANONYMIZE_BATCH = 200;
 const DIGEST_CANDIDATE_LIMIT = 500;
 
@@ -59,11 +58,7 @@ type DueNotification = {
   payload: Record<string, unknown>;
   digestDate: string | null;
   leadId: string | null;
-  company: string | null;
-  productGroup: string | null;
-  linesBucket: string | null;
   eventKind: string | null;
-  eventPayload: Record<string, unknown> | null;
 };
 
 /** Deterministic public request id of a day's digest e-mail: one per civil day. */
@@ -101,6 +96,7 @@ export class LandingLeadJobsService {
     private readonly now: () => Date = () => new Date(),
     private readonly createId: () => string = randomUUID,
   ) {
+    leadRetentionDue(this.now(), options.retentionMonths);
     this.telegramTargets =
       telegram === null
         ? null
@@ -125,10 +121,8 @@ export class LandingLeadJobsService {
       const due = await tx.execute<DueNotification>(sql`
         SELECT n.id::text AS id, n.kind, n.attempts, n.payload,
           n.digest_date::text AS "digestDate", n.lead_id::text AS "leadId",
-          l.company, l.product_group AS "productGroup", l.lines_bucket AS "linesBucket",
-          e.kind AS "eventKind", e.payload AS "eventPayload"
+          e.kind AS "eventKind"
         FROM lead_notifications AS n
-        LEFT JOIN landing_leads AS l ON l.id = n.lead_id
         LEFT JOIN landing_lead_events AS e ON e.id = n.event_id
         WHERE n.status = 'pending' AND n.next_attempt_at <= ${now}
         ORDER BY n.next_attempt_at, n.id
@@ -196,43 +190,27 @@ export class LandingLeadJobsService {
         all.length === 0
           ? []
           : (
-              await tx.execute<{ id: string; company: string | null }>(sql`
-                SELECT id::text AS id, company FROM landing_leads
-                WHERE id = ANY(${`{${all.join(",")}}`}::uuid[])
+              await tx.execute<{ id: string }>(sql`
+                SELECT id::text AS id FROM landing_leads
+                WHERE id = ANY(${`{${all.join(",")}}`}::uuid[]) AND anonymized_at IS NULL
               `)
             ).rows;
-      const companies = new Map(leads.map((lead) => [lead.id, lead.company ?? NO_COMPANY]));
+      const active = new Set(leads.map((lead) => lead.id));
       const sections = Object.fromEntries(
         LANDING_LEAD_DIGEST_SECTIONS.map((section) => [
           section,
-          ids[section]
-            .filter((id) => companies.has(id))
-            .map((id) => ({
-              company: companies.get(id) ?? NO_COMPANY,
-              leadUrl: leadUrl(this.options.adminOrigin, id),
-            })),
+          ids[section].filter((id) => active.has(id)),
         ]),
-      ) as LeadDigestSections<{ company: string; leadUrl: string }>;
-      return leadDigestText(row.digestDate ?? "", sections, `${this.options.adminOrigin}/leads`);
+      ) as LeadDigestSections<string>;
+      return leadDigestText(row.digestDate ?? "", sections);
     }
     if (row.leadId === null) throw new Error("Lead notification lost its lead");
-    const payload = row.eventPayload ?? {};
     const facts: LeadAlertFacts = {
       kind:
         row.eventKind === "invoice_request" || row.eventKind === "demo_request"
           ? row.eventKind
           : "download",
       firstContact: row.payload.firstContact !== false,
-      company: row.company,
-      productGroup: row.productGroup,
-      linesBucket: row.linesBucket,
-      tariffCode: typeof payload.tariffCode === "string" ? payload.tariffCode : null,
-      sourcePath: typeof payload.sourcePath === "string" ? payload.sourcePath : null,
-      utm:
-        payload.utm && typeof payload.utm === "object"
-          ? (payload.utm as Record<string, unknown>)
-          : null,
-      leadUrl: leadUrl(this.options.adminOrigin, row.leadId),
     };
     return leadAlertText(facts);
   }
@@ -300,6 +278,8 @@ export class LandingLeadJobsService {
     tx: Pick<Db, "execute">,
     now: Date,
   ): Promise<LeadDigestCandidate[]> {
+    // Keep the selected leads locked until the digest mail is enqueued. Erasure
+    // then either excludes them here or sees and removes the committed mail copy.
     const rows = await tx.execute<{
       id: string;
       company: string | null;
@@ -321,6 +301,7 @@ export class LandingLeadJobsService {
                        AND recent.created_at >= ${new Date(now.getTime() - 12 * 86_400_000)}))
       ORDER BY l.created_at, l.id
       LIMIT ${DIGEST_CANDIDATE_LIMIT}
+      FOR UPDATE OF l
     `);
     return rows.rows.map((row) => ({
       id: row.id,
@@ -333,18 +314,13 @@ export class LandingLeadJobsService {
     }));
   }
 
-  /**
-   * Retention (spec §15.2): lost leads after a month's grace, and leads without
-   * movement for `LEAD_RETENTION_MONTHS`, lose their personal data.
-   */
+  /** Delete inquiry data after a year since the last incoming request, or 30 days after closing. */
   async anonymizeStale(): Promise<number> {
     const now = this.now();
     const candidates = await this.db.execute<{ id: string; status: string }>(sql`
-      SELECT id::text AS id, status FROM landing_leads
-      WHERE anonymized_at IS NULL
-        AND ((status = 'lost' AND status_changed_at < ${new Date(now.getTime() - LOST_GRACE_DAYS * 86_400_000)})
-          OR updated_at < (${now}::timestamptz - make_interval(months => ${this.options.retentionMonths})))
-      ORDER BY updated_at, id
+      SELECT l.id::text AS id, l.status FROM landing_leads AS l
+      WHERE ${leadRetentionDue(now, this.options.retentionMonths)}
+      ORDER BY l.created_at, l.id
       LIMIT ${ANONYMIZE_BATCH}
     `);
     let anonymized = 0;
@@ -353,6 +329,7 @@ export class LandingLeadJobsService {
         anonymizeLead(tx, this.audit, {
           leadId: candidate.id,
           reason: candidate.status === "lost" ? "lost" : "inactive",
+          retentionMonths: this.options.retentionMonths,
           actor: null,
           now,
           createId: this.createId,

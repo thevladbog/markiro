@@ -26,7 +26,7 @@ const graph = buildLegalPageGraph(metadata);
 const publishedArtifacts = await loadLegalArtifacts();
 
 const documentReleases = ACTIVE_LEGAL_RELEASES.filter(
-  ({ code }) => legalDocumentKind(code) !== "instruction",
+  ({ code }) => legalDocumentKind(code) !== "instruction" && legalReleaseLocales(code).includes(metadata.locale),
 );
 const instructionReleases = ACTIVE_LEGAL_RELEASES.filter(
   ({ code }) =>

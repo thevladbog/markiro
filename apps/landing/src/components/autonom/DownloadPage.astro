@@ -1,4 +1,5 @@
 ---
+import { findLegalRelease } from "@markiro/legal-documents";
 import { DOWNLOAD_COPY } from "../../content/autonom";
 import { findAutonomPage } from "../../content/autonom-pages";
 import { SITE_CONTACTS } from "../../content/contacts";
@@ -31,7 +32,7 @@ const copy = DOWNLOAD_COPY;
         <nav class="ax-note" aria-label="Хлебные крошки">
           <a href="/">Главная</a> / Скачать</nav>
         <h1 id="download-title">{copy.title}</h1>
-        <p>Все функции доступны 14 дней. Оплачивать заранее не нужно.</p>
+        <p>Все функции доступны <a href={findLegalRelease("MKR-LIC-01").routes.ru}>14 дней</a>. Оплачивать заранее не нужно.</p>
         <p class="v4-eyebrow">Windows 10 / 11 · x64</p>
       </header>
       <div class="ax-form-card v4-download__form">        <form

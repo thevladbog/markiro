@@ -18,14 +18,12 @@ export interface LeadContactFields {
   inn?: string;
   productGroup?: string;
   linesBucket?: "1" | "2-3" | "4+";
-  utm?: Record<string, string>;
-  referrer?: string;
 }
 
 /**
  * One lead per normalized e-mail (spec §15.3): a new e-mail creates the lead with its
- * first attribution; a known one only fills empty fields — a filled field, the status
- * and the first attribution are never overwritten. The single statement takes the row
+ * first internal page; a known one only fills empty fields — a filled field and the
+ * status are never overwritten. Optional attribution is not persisted. The single statement takes the row
  * lock, so concurrent forms with the same e-mail serialize on it.
  */
 export async function upsertLead(
@@ -34,7 +32,6 @@ export async function upsertLead(
   now: Date,
   createId: () => string = randomUUID,
 ): Promise<{ leadId: string; created: boolean }> {
-  const utm = fields.utm && Object.keys(fields.utm).length > 0 ? JSON.stringify(fields.utm) : null;
   const result = await tx.execute<{ id: string; created: boolean }>(sql`
     INSERT INTO landing_leads (
       id, email, company, name, phone, inn, product_group, lines_bucket, locale,
@@ -42,8 +39,8 @@ export async function upsertLead(
     ) VALUES (
       ${createId()}::uuid, ${fields.email}, ${fields.company ?? null}, ${fields.name ?? null},
       ${fields.phone ?? null}, ${fields.inn ?? null}, ${fields.productGroup ?? null},
-      ${fields.linesBucket ?? null}, ${fields.locale}, ${fields.sourcePath}, ${utm}::jsonb,
-      ${fields.referrer ?? null}, ${now}, ${now}, ${now}
+      ${fields.linesBucket ?? null}, ${fields.locale}, ${fields.sourcePath}, NULL,
+      NULL, ${now}, ${now}, ${now}
     )
     ON CONFLICT (lower(btrim(email))) WHERE email IS NOT NULL DO UPDATE SET
       company = coalesce(landing_leads.company, excluded.company),

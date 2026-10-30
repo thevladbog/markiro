@@ -185,6 +185,7 @@ export async function renderLegalDocx(
 ): Promise<Uint8Array> {
   assertLegalArtifactRequest(input);
   const release = findLegalRelease(input.code, input.revision);
+  const content = requireLegalContent(findLegalDocument(input.code, input.revision), input.locale);
   return renderLegalDocxDraft(
     {
       ...input,
@@ -195,7 +196,10 @@ export async function renderLegalDocx(
       operatorProfileId: release.operatorProfileId,
       legacyWordmark: isLegacyWordmarkRelease(input.code, input.revision),
       legacyUpdateFields: isLegacyUpdateFieldsRelease(input.code, input.revision),
-      content: requireLegalContent(findLegalDocument(input.code, input.revision), input.locale),
+      ...(content.printLayout === "compact"
+        ? { showMetadata: false, showSummary: input.locale === "en" }
+        : {}),
+      content,
     },
     assets,
   );

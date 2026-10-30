@@ -13,9 +13,10 @@ import {
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
-const releaseId = "MKR-LEGAL-2026.10-40-2026-10-30";
-const manifestSha256 = "7280acab080a150a736b63998ff60bb506cfb22bedb83b1917da719a99f7548f";
+const releaseId = "MKR-LEGAL-2026.10-41-2026-10-30";
+const manifestSha256 = "42af4b087219bbe1b598b34ff3cd488754a140454395e0bfe9f0284d1ca6840d";
 const releasedPdfNames = [
+  "markiro_mkr-adv-01_2026.10-01_ru.pdf",
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
   "markiro_mkr-dpa-01_2026.08-01_en.pdf",
@@ -40,10 +41,17 @@ const releasedPdfNames = [
   "markiro_mkr-ins-13_2026.10-02_ru.pdf",
   "markiro_mkr-ins-14_2026.10-03_en.pdf",
   "markiro_mkr-ins-14_2026.10-03_ru.pdf",
+  "markiro_mkr-lic-01_2026.10-01_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",
   "markiro_mkr-pd-01_2026.08-01_ru.pdf",
+  "markiro_mkr-pd-01_2026.10-01_en.pdf",
+  "markiro_mkr-pd-01_2026.10-01_ru.pdf",
   "markiro_mkr-pd-02_2026.08-01_en.pdf",
   "markiro_mkr-pd-02_2026.08-01_ru.pdf",
+  "markiro_mkr-pd-02_2026.10-01_en.pdf",
+  "markiro_mkr-pd-02_2026.10-01_ru.pdf",
+  "markiro_mkr-pd-03_2026.10-01_ru.pdf",
+  "markiro_mkr-pub-01_2026.10-01_ru.pdf",
 ];
 // The retired naming scheme separated the revision sequence with a dot rather
 // than a dash. Derive it from the revision segment itself, so a reissued
@@ -117,12 +125,12 @@ test("committed attestation independently binds the exact released PDF set", asy
     releasedPdfNames,
   );
   assert.equal(spy.calls.length, 1);
-  assert.equal(pdfaSpy.calls.length, 28);
+  assert.equal(pdfaSpy.calls.length, 36);
   assert.deepEqual(
     pdfaSpy.calls.map((pdfPath) => path.basename(pdfPath)),
     releasedPdfNames.map((_fileName, index) => `document-${index}.pdf`),
   );
-  assert.equal(spy.calls[0].pdfaValidatedFiles.size, 28);
+  assert.equal(spy.calls[0].pdfaValidatedFiles.size, 36);
   assert.deepEqual(
     [...spy.calls[0].pdfaValidatedFiles].sort(),
     (await readJson(work.attestationPath)).pdfs.map(({ fileName }) => fileName).sort(),

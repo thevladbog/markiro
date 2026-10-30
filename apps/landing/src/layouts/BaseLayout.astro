@@ -98,11 +98,11 @@ const jsonLd = serializeJsonLd(
     <ConsentPanel locale={page.locale} />
     <slot />
     <script>
-      import { captureFirstTouch } from "../lib/first-touch";
+      import { clearLegacyFirstTouch } from "../lib/first-touch";
       import { GTM_CONTAINER_ID, initConsentPanel, initTagManager } from "../scripts/tracking";
 
       try {
-        captureFirstTouch(window.sessionStorage, new URL(window.location.href), document.referrer);
+        clearLegacyFirstTouch(window.sessionStorage);
       } catch {
         // sessionStorage itself can throw when storage is blocked.
       }

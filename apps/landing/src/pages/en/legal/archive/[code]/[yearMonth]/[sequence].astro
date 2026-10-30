@@ -1,0 +1,15 @@
+---
+import { LEGAL_RELEASES, parseLegalRevision, type LegalDocumentCode } from "@markiro/legal-documents";
+import LegalDocument from "../../../../../../components/LegalDocument.astro";
+import { getLegalDocumentPage } from "../../../../../../content/legal-pages";
+export function getStaticPaths() {
+ return LEGAL_RELEASES.filter(release => release.status === "superseded").map(release => {
+ const {yearMonth, sequence} = parseLegalRevision(release.revision);
+ return {params:{code:release.code,yearMonth,sequence},props:{code:release.code,revision:release.revision}};
+ });
+}
+interface Props {code: LegalDocumentCode; revision:string;}
+const {code,revision} = Astro.props;
+const page = getLegalDocumentPage(code,"en",revision);
+---
+<LegalDocument page={page} />

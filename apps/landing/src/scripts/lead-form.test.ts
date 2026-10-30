@@ -62,10 +62,6 @@ function runtime(responses: readonly (LeadResponse | Error)[] = [{ ok: true, sta
   const value: LeadFormRuntime = {
     createRequestId: vi.fn(() => REQUEST_ID),
     currentPath: vi.fn(() => "/skachat/"),
-    firstTouch: vi.fn(() => ({
-      utm: { source: "yandex", medium: "cpc" },
-      referrer: "https://ya.ru/",
-    })),
     request: vi.fn(() => {
       const response = responses[index++] ?? responses.at(-1);
       if (response === undefined) throw new Error("no response");
@@ -145,7 +141,7 @@ describe("download lead form", () => {
       });
     },
   );
-  it("posts the spec 15.3 body with the first-touch source and reports acceptance", async () => {
+  it("posts the request without optional attribution and reports acceptance", async () => {
     const form = renderDownload();
     const current = runtime();
     const accepted = vi.fn();
@@ -158,10 +154,8 @@ describe("download lead form", () => {
       email: "ivan@zavod.ru",
       intent: "download",
       locale: "ru",
-      referrer: "https://ya.ru/",
       requestId: REQUEST_ID,
       sourcePath: "/skachat/",
-      utm: { source: "yandex", medium: "cpc" },
       website: "",
     });
     expect(accepted).toHaveBeenCalledWith({ email: "ivan@zavod.ru", intent: "download" });

@@ -47,8 +47,7 @@ export function initDownloadFollowup(
     const result = validateDownloadLead({ email: read("email"), company: read("company") });
     const version = form.dataset.consentVersion;
     if (!result.ok || !version) return;
-    const touch = runtime.firstTouch(),
-      code = read("tariffCode");
+    const code = read("tariffCode");
     saved = {
       ...result.value,
       intent: "download",
@@ -57,8 +56,6 @@ export function initDownloadFollowup(
       sourcePath: runtime.currentPath(),
       website: read("website"),
       ...(isTariffCode(code) ? { tariffCode: code } : {}),
-      ...(touch.utm ? { utm: touch.utm } : {}),
-      ...(touch.referrer ? { referrer: touch.referrer } : {}),
     };
     attempt = null;
     message("");

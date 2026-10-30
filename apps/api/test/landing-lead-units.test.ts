@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { rateLimitedError } from "../src/modules/demo-requests/demo-request.errors";
-import {
-  landingLeadBodySchema,
-  safeReferrer,
-} from "../src/modules/landing-leads/landing-lead.schema";
+import { landingLeadBodySchema } from "../src/modules/landing-leads/landing-lead.schema";
 import { LandingLeadService } from "../src/modules/landing-leads/landing-lead.service";
 import {
   civilDate,
@@ -12,11 +9,7 @@ import {
   selectDigestSections,
   type LeadDigestCandidate,
 } from "../src/modules/landing-leads/lead-digest-sections";
-import {
-  leadAlertText,
-  leadDigestText,
-  scrubContacts,
-} from "../src/modules/landing-leads/lead-telegram-message";
+import { leadAlertText, leadDigestText } from "../src/modules/landing-leads/lead-telegram-message";
 import {
   TelegramClient,
   TelegramSendError,
@@ -29,7 +22,7 @@ import {
 } from "../src/modules/landing-leads/landing-lead-jobs.service";
 import type { Env } from "../src/env";
 
-const CONSENT = "MKR-PD-02/2026.08/01";
+const CONSENT = "MKR-PD-02/2026.10/01";
 
 function body(overrides: Record<string, unknown> = {}) {
   return {
@@ -62,7 +55,6 @@ describe("landing lead body (spec §15.3)", () => {
       email: "buyer@example.test",
       company: "ООО «Пивоварня»",
       phone: "+79991234567",
-      utm: { source: "yandex" },
     });
     expect(parsed).not.toHaveProperty("name");
     expect(parsed).not.toHaveProperty("captchaToken");
@@ -79,13 +71,15 @@ describe("landing lead body (spec §15.3)", () => {
     }
   });
 
-  it("keeps only the origin and path of a referrer", () => {
-    expect(safeReferrer("https://yandex.ru/search/?text=buyer%40example.test")).toBe(
-      "https://yandex.ru/search/",
+  it("discards optional attribution from old clients before persistence", () => {
+    const parsed = landingLeadBodySchema.parse(
+      body({
+        utm: { source: "yandex", campaign: "private" },
+        referrer: "https://external.example/private?q=person",
+      }),
     );
-    expect(safeReferrer("https://user:secret@example.test/a")).toBeUndefined();
-    expect(safeReferrer("javascript:alert(1)")).toBeUndefined();
-    expect(safeReferrer("not a url")).toBeUndefined();
+    expect(parsed).not.toHaveProperty("utm");
+    expect(parsed).not.toHaveProperty("referrer");
   });
 });
 
@@ -292,85 +286,35 @@ describe("Telegram client (spec §15.4)", () => {
   }
 });
 
-describe("Telegram texts carry no personal data (spec §15.4)", () => {
-  it("formats the spec's example without contacts", () => {
-    const text = leadAlertText({
-      kind: "download",
-      firstContact: true,
-      company: "ООО «Пивоварня»",
-      productGroup: "пиво и сидр",
+describe("Telegram notifications contain only fixed service text and counts", () => {
+  it("does not send free text, attribution, identifiers or card links", () => {
+    const facts = {
+      kind: "invoice_request" as const,
+      firstContact: false,
+      company: "ИП Иванов Иван Иванович",
+      productGroup: "Пётр, Москва, улица Примерная",
       linesBucket: "1",
-      tariffCode: null,
-      sourcePath: "/skachat/",
-      utm: { source: "yandex", medium: "cpc", term: "buyer@example.test" },
-      leadUrl: "https://admin.markiro.app/leads/22222222-2222-4222-8222-222222222222",
+      tariffCode: "buyer@example.test",
+      sourcePath: "/Иванов/",
+      utm: { source: "личные сведения" },
+      leadUrl: "https://admin.markiro.app/leads/private-id",
+    };
+    expect(leadAlertText(facts)).toBe(
+      "Повторное обращение · запрос счёта\nОткройте раздел «Заявки» в панели управления.",
+    );
+  });
+
+  it("reports digest counts without companies or links", () => {
+    const text = leadDigestText("2026-10-21", {
+      new_uncontacted: [{ company: "ИП Иванов", leadUrl: "https://private/lead-id" }],
+      day_3: [],
+      day_10: [],
+      touch_due: [],
+      invoice_unpaid: [],
     });
     expect(text).toBe(
-      [
-        "Новый лид · скачивание",
-        "ООО «Пивоварня» · пиво и сидр · 1 линия",
-        "Источник: /skachat/ · utm: yandex / cpc",
-        "https://admin.markiro.app/leads/22222222-2222-4222-8222-222222222222",
-      ].join("\n"),
+      "Кому пора написать · 21.10.2026\n\nНовые без контакта (1)\n\nОткройте раздел «Заявки» в панели управления.",
     );
-  });
-
-  it("scrubs contacts that leak into company or attribution", () => {
-    const text = leadAlertText({
-      kind: "invoice_request",
-      firstContact: false,
-      company: "ИП Иванов buyer@example.test +7 999 123-45-67",
-      productGroup: null,
-      linesBucket: null,
-      tariffCode: "line",
-      sourcePath: "/stoimost/",
-      utm: { source: "mail", medium: "ivan@example.test" },
-      leadUrl: "https://admin.markiro.app/leads/x",
-    });
-    expect(text).not.toMatch(/@|999|45-67/);
-    expect(text).toContain("Повторное обращение · запрос счёта");
-    expect(text).toContain("Тариф: line");
-    expect(scrubContacts("7707083893")).toBe("…");
-  });
-
-  it("never falls back to the INN when the invoice form gave no company", () => {
-    const text = leadAlertText({
-      kind: "invoice_request",
-      firstContact: true,
-      company: null,
-      productGroup: null,
-      linesBucket: null,
-      tariffCode: "workshop",
-      sourcePath: "/stoimost/",
-      utm: null,
-      leadUrl: "https://admin.markiro.app/leads/x",
-    });
-    expect(text.split("\n")[1]).toBe("компания не указана");
-    expect(text).toContain("Тариф: workshop");
-  });
-
-  it("lists digest sections with companies and links only, within Telegram's limit", () => {
-    const many = Array.from({ length: 40 }, (_, index) => ({
-      company: `Компания ${index}`,
-      leadUrl: `https://admin.markiro.app/leads/${index}`,
-    }));
-    const text = leadDigestText(
-      "2026-10-21",
-      {
-        new_uncontacted: many,
-        day_3: [],
-        day_10: [],
-        touch_due: many.slice(0, 2),
-        invoice_unpaid: [],
-      },
-      "https://admin.markiro.app/leads",
-    );
-    expect(text.startsWith("Кому пора написать · 21.10.2026")).toBe(true);
-    expect(text).toContain("Новые без контакта (40)");
-    expect(text).toContain("…и ещё 25");
-    expect(text).toContain("Пора написать (2)");
-    expect(text).not.toContain("3-й день");
-    expect(text.length).toBeLessThanOrEqual(4096);
   });
 });
 

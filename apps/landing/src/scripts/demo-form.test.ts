@@ -498,7 +498,7 @@ describe("browserDemoFormRuntime", () => {
     expect(() => stop()).not.toThrow();
   });
 
-  it("posts JSON without credentials and exposes only the bounded public error code", async () => {
+  it("posts JSON without credentials or referrer and exposes only the bounded public error code", async () => {
     const fetch = vi.fn().mockResolvedValue({
       json: vi.fn().mockResolvedValue({ code: "captcha_invalid", detail: "do not expose" }),
       ok: false,
@@ -526,6 +526,7 @@ describe("browserDemoFormRuntime", () => {
     expect(fetch).toHaveBeenCalledWith("/api/demo-requests", {
       body: JSON.stringify(payload),
       credentials: "omit",
+      referrerPolicy: "no-referrer",
       headers: { "content-type": "application/json" },
       method: "POST",
     });

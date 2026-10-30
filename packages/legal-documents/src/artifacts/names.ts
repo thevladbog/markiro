@@ -30,7 +30,7 @@ export function assertLegalArtifactRequest(input: LegalArtifactRequest): void {
     );
   }
   if (
-    release.status !== "active" ||
+    (release.status !== "active" && release.status !== "superseded") ||
     release.revision !== input.revision ||
     release.effectiveDate !== input.effectiveDate
   ) {

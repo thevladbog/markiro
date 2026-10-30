@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -45,6 +46,92 @@ describe.skipIf(!databaseUrl)("landing leads migration", () => {
     await pool.end();
     if (created) await maintenance.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
     await maintenance.end();
+  });
+
+  it("scrubs legacy attribution and previously erased free text without changing active inquiries", async () => {
+    const active = await lead("legacy@example.invalid", {
+      first_utm: { source: "private-source" },
+      first_referrer: "https://private.example/person",
+    });
+    const erased = await lead(null, {
+      anonymized_at: new Date(),
+      company: "ИП Иванов",
+      product_group: "Иван Иванович",
+      inn: "500100732259",
+      owner_note: "private note",
+      first_utm: { source: "private" },
+    });
+    const activeRequest = randomUUID(),
+      erasedRequest = randomUUID();
+    for (const [id, requestId] of [
+      [active, activeRequest],
+      [erased, erasedRequest],
+    ]) {
+      await pool.query(
+        "INSERT INTO landing_lead_events (id, lead_id, kind, payload, public_request_id) VALUES ($1,$2,'invoice_request',$3,$4)",
+        [
+          randomUUID(),
+          id,
+          {
+            utm: { source: "private" },
+            referrer: "https://private/",
+            inn: "500100732259",
+            consentVersion: "MKR-PD-02/2026.10/01",
+            locale: "ru",
+          },
+          requestId,
+        ],
+      );
+      await pool.query(
+        "INSERT INTO email_deliveries (public_request_id,recipient,kind,encrypted_payload,payload_nonce,payload_tag) VALUES ($1,'owner@example.invalid','landing-lead-notification',decode('01','hex'),decode('02','hex'),decode('03','hex'))",
+        [requestId],
+      );
+    }
+    const migration = readFileSync(
+      new URL("../migrations/0203_landing_lead_privacy.sql", import.meta.url),
+      "utf8",
+    );
+    await pool.query(migration);
+    await pool.query(migration);
+    const rows = await pool.query(
+      "SELECT id, email, company, product_group, inn, owner_note, first_utm, first_referrer FROM landing_leads WHERE id=ANY($1::uuid[])",
+      [[active, erased]],
+    );
+    expect(rows.rows.find((row) => row.id === active)).toMatchObject({
+      email: "legacy@example.invalid",
+      company: "ООО «Пивоварня»",
+      first_utm: null,
+      first_referrer: null,
+    });
+    expect(rows.rows.find((row) => row.id === erased)).toMatchObject({
+      email: null,
+      company: null,
+      product_group: null,
+      inn: null,
+      owner_note: null,
+      first_utm: null,
+      first_referrer: null,
+    });
+    const events = await pool.query(
+      "SELECT lead_id, payload FROM landing_lead_events WHERE lead_id=ANY($1::uuid[])",
+      [[active, erased]],
+    );
+    expect(events.rows.find((row) => row.lead_id === active)?.payload).toEqual({
+      inn: "500100732259",
+      consentVersion: "MKR-PD-02/2026.10/01",
+      locale: "ru",
+    });
+    expect(events.rows.find((row) => row.lead_id === erased)?.payload).toEqual({
+      consentVersion: "MKR-PD-02/2026.10/01",
+      locale: "ru",
+    });
+    const mail = await pool.query(
+      "SELECT public_request_id, status, encrypted_payload FROM email_deliveries WHERE public_request_id=ANY($1::uuid[])",
+      [[activeRequest, erasedRequest]],
+    );
+    expect(mail.rows).toEqual([
+      { public_request_id: activeRequest, status: "canceled", encrypted_payload: null },
+    ]);
   });
 
   it("keeps private rate windows with bounded counts and no raw source columns", async () => {

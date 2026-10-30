@@ -443,11 +443,11 @@ test("optional lead Telegram alerts need a well-formed token and chat only when 
         manifest(),
       ),
     );
-  for (const months of ["1", "12", "60"])
+  for (const months of ["1", "12"])
     assert.doesNotThrow(() =>
       validateConfig({ ...env(), LEAD_RETENTION_MONTHS: months }, manifest()),
     );
-  for (const months of ["", "0", "61", "1.5", "abc"])
+  for (const months of ["", "0", "13", "60", "61", "1.5", "abc"])
     assert.throws(() => validateConfig({ ...env(), LEAD_RETENTION_MONTHS: months }, manifest()));
   // The token is a literal in the protected env file, never a Compose value.
   assert.equal(

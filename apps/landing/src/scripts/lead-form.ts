@@ -1,4 +1,3 @@
-import { readFirstTouch, type FirstTouch, type SessionStore } from "../lib/first-touch";
 import { isTariffCode } from "../lib/lead-form";
 import {
   type LeadErrors,
@@ -20,10 +19,8 @@ interface LeadPayloadBase {
   readonly consentVersion: string;
   readonly email: string;
   readonly locale: "ru";
-  readonly referrer?: string;
   readonly requestId: string;
   readonly sourcePath: string;
-  readonly utm?: FirstTouch["utm"];
   readonly website: string;
 }
 
@@ -54,7 +51,6 @@ export interface LeadAccepted {
 export interface LeadFormRuntime {
   readonly createRequestId: () => string;
   readonly currentPath: () => string;
-  readonly firstTouch: () => FirstTouch;
   readonly request: (endpoint: string, payload: LandingLeadPayload) => Promise<LeadResponse>;
   readonly track: (eventName: string, properties: Readonly<Record<string, string>>) => void;
 }
@@ -215,7 +211,6 @@ export function initLeadForm(
       return;
     }
 
-    const touch = runtime.firstTouch();
     const base: LeadPayloadBase = {
       consentVersion,
       email: validation.value.email,
@@ -223,8 +218,6 @@ export function initLeadForm(
       requestId,
       sourcePath: runtime.currentPath(),
       website: value(form, "website"),
-      ...(touch.utm === undefined ? {} : { utm: touch.utm }),
-      ...(touch.referrer === undefined ? {} : { referrer: touch.referrer }),
     };
     let payload: LandingLeadPayload =
       "company" in validation.value
@@ -297,18 +290,14 @@ export function initLeadForm(
 
 export function browserLeadFormRuntime(browserWindow: Window & typeof globalThis): LeadFormRuntime {
   const demo = browserDemoFormRuntime(browserWindow);
-  const session: SessionStore = {
-    getItem: (key) => browserWindow.sessionStorage.getItem(key),
-    setItem: (key, item) => browserWindow.sessionStorage.setItem(key, item),
-  };
   return {
     createRequestId: demo.createRequestId,
     currentPath: demo.currentPath,
-    firstTouch: () => readFirstTouch(session),
     request: async (endpoint, payload) => {
       const response = await browserWindow.fetch(endpoint, {
         body: JSON.stringify(payload),
         credentials: "omit",
+        referrerPolicy: "no-referrer",
         headers: { "content-type": "application/json" },
         method: "POST",
       });

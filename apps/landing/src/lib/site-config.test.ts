@@ -62,7 +62,7 @@ describe("readPublicSiteConfig", () => {
   it("enables only the fixed same-origin route after the complete public config passes", () => {
     expect(readPublicSiteConfig(ENABLED_ENV)).toEqual({
       captchaClientKey: "ysc1_test-client-key",
-      consentVersion: "MKR-PD-02/2026.08/01",
+      consentVersion: "MKR-PD-02/2026.10/01",
       demoEndpoint: "/api/demo-requests",
       leadEndpoint: "/api/landing-leads",
       legalLinks: {
@@ -85,7 +85,7 @@ describe("readPublicSiteConfig", () => {
       leadEndpoint: "/api/landing-leads",
       captchaClientKey: null,
       demoEndpoint: null,
-      consentVersion: "MKR-PD-02/2026.08/01",
+      consentVersion: "MKR-PD-02/2026.10/01",
     });
   });
 
@@ -107,7 +107,7 @@ describe("readPublicSiteConfig", () => {
         PUBLIC_PRIVACY_POLICY_PATH: "https://other.example/privacy",
       }),
     ).toMatchObject({
-      consentVersion: "MKR-PD-02/2026.08/01",
+      consentVersion: "MKR-PD-02/2026.10/01",
       legalLinks: {
         consent: "/personal-data-consent/",
         privacy: "/privacy/",

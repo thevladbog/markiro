@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  LEGAL_DOCUMENTS,
+  LEGAL_DOCUMENTS as ALL_LEGAL_DOCUMENTS,
   findLegalDocument,
   findLegalRelease,
   formatLegalEffectiveDate,
@@ -15,11 +15,29 @@ import {
   type LegalLocale,
 } from "../src/index.js";
 
+// Keep the assertions for the original public policy/consent as archive contracts.
+// The licensing revision has separate assertions in license-landing.test.ts.
+const LEGAL_DOCUMENTS = ALL_LEGAL_DOCUMENTS.filter(
+  ({ releaseKey }) =>
+    ![
+      "MKR-LIC-01/2026.10/01",
+      "MKR-PD-02/2026.10/01",
+      "MKR-ADV-01/2026.10/01",
+      "MKR-PD-03/2026.10/01",
+      "MKR-PD-01/2026.10/01",
+      "MKR-PUB-01/2026.10/01",
+    ].includes(releaseKey),
+);
+const sourceRevision = (code: LegalDocumentCode) =>
+  code === "MKR-PD-01" || code === "MKR-PD-02" ? "2026.08/01" : undefined;
+
 const sectionIds = (code: LegalDocumentCode, locale: LegalLocale): string[] =>
-  requireLegalContent(findLegalDocument(code), locale).sections.map(({ id }) => id);
+  requireLegalContent(findLegalDocument(code, sourceRevision(code)), locale).sections.map(
+    ({ id }) => id,
+  );
 
 const documentContent = (code: LegalDocumentCode, locale: LegalLocale) =>
-  requireLegalContent(findLegalDocument(code), locale);
+  requireLegalContent(findLegalDocument(code, sourceRevision(code)), locale);
 
 const blockText = (block: LegalBlock): string => {
   if (block.kind === "paragraph") return block.text;
@@ -89,7 +107,7 @@ function neverCode(): never {
 
 describe("bilingual legal document sources", () => {
   it("formats localized legal identity display and verification paths", () => {
-    const release = findLegalRelease("MKR-PD-01");
+    const release = findLegalRelease("MKR-PD-01", "2026.08/01");
 
     expect(formatLegalEffectiveDate(release.effectiveDate, "ru")).toBe("15.08.2026");
     expect(formatLegalEffectiveDate(release.effectiveDate, "en")).toBe("15 August 2026");
@@ -289,7 +307,7 @@ describe("bilingual legal document sources", () => {
     ["MKR-PD-01", "revisions"],
     ["MKR-BRD-01", "document-control"],
   ] as const)("keeps %s embedded control metadata aligned with its release", (code, sectionId) => {
-    const release = findLegalRelease(code);
+    const release = findLegalRelease(code, sourceRevision(code));
     for (const locale of ["ru", "en"] as const) {
       const text = sectionText(code, locale, sectionId);
       expect(text).toContain(release.code);

@@ -1,3 +1,4 @@
+import { LICENSE_SITE_CONTENT } from "./documents/license-site.js";
 import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
 import { CABINET_CATALOG_PRODUCT_CONTENT } from "./documents/cabinet-catalog-product.js";
 import { CABINET_SHIFT_PLANNING_CONTENT } from "./documents/cabinet-shift-planning.js";
@@ -23,11 +24,15 @@ import type {
   LegalLocale,
 } from "./types.js";
 
-export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08/01" as const;
+export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.10/01" as const;
 
 const LEGAL_DOCUMENT_CODES = [
   "MKR-PD-01",
   "MKR-PD-02",
+  "MKR-LIC-01",
+  "MKR-ADV-01",
+  "MKR-PD-03",
+  "MKR-PUB-01",
   "MKR-DPA-01",
   "MKR-BRD-01",
   "MKR-INS-01",
@@ -46,6 +51,10 @@ const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] a
 export const LEGAL_DOCUMENT_KIND_BY_CODE = {
   "MKR-PD-01": "legal",
   "MKR-PD-02": "legal",
+  "MKR-LIC-01": "legal",
+  "MKR-ADV-01": "legal",
+  "MKR-PD-03": "legal",
+  "MKR-PUB-01": "template",
   "MKR-DPA-01": "template",
   "MKR-BRD-01": "template",
   "MKR-INS-01": "instruction",
@@ -80,7 +89,15 @@ const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
   "MKR-INS-14",
 ]);
 
+const RUSSIAN_ONLY_LEGAL: ReadonlySet<LegalDocumentCode> = new Set([
+  "MKR-LIC-01",
+  "MKR-ADV-01",
+  "MKR-PD-03",
+  "MKR-PUB-01",
+]);
+
 export function legalReleaseLocales(code: LegalDocumentCode): readonly LegalLocale[] {
+  if (RUSSIAN_ONLY_LEGAL.has(code)) return ["ru"];
   if (legalDocumentKind(code) !== "instruction") return ["ru", "en"];
   return INSTRUCTION_EN_PUBLISHED.has(code) ? ["ru", "en"] : ["ru"];
 }
@@ -99,17 +116,23 @@ export const LEGAL_RELEASES = [
     code: "MKR-PD-01",
     revision: "2026.08/01",
     effectiveDate: "2026-08-15",
-    status: "active",
+    status: "superseded",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/privacy/", en: "/en/privacy/" },
+    routes: {
+      ru: "/legal/archive/MKR-PD-01/2026.08/01/",
+      en: "/en/legal/archive/MKR-PD-01/2026.08/01/",
+    },
   },
   {
     code: "MKR-PD-02",
     revision: "2026.08/01",
     effectiveDate: "2026-08-15",
-    status: "active",
+    status: "superseded",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/personal-data-consent/", en: "/en/personal-data-consent/" },
+    routes: {
+      ru: "/legal/archive/MKR-PD-02/2026.08/01/",
+      en: "/en/legal/archive/MKR-PD-02/2026.08/01/",
+    },
   },
   {
     code: "MKR-DPA-01",
@@ -240,9 +263,80 @@ export const LEGAL_RELEASES = [
       en: "/en/instructions/handheld-terminal/",
     },
   },
+  {
+    code: "MKR-LIC-01",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-30",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/legal/autonom-license/",
+    },
+  },
+  {
+    code: "MKR-PD-02",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-30",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/personal-data-consent/",
+      en: "/en/personal-data-consent/",
+    },
+    supersedes: "MKR-PD-02/2026.08/01",
+  },
+  {
+    code: "MKR-ADV-01",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-30",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/legal/advertising-consent/",
+    },
+  },
+  {
+    code: "MKR-PD-03",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-30",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/legal/newsletter-data-consent/",
+    },
+  },
+  {
+    code: "MKR-PD-01",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-30",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/privacy/",
+      en: "/en/privacy/",
+    },
+    supersedes: "MKR-PD-01/2026.08/01",
+  },
+  {
+    code: "MKR-PUB-01",
+    revision: "2026.10/01",
+    effectiveDate: "2026-10-30",
+    status: "active",
+    operatorProfileId: "operator-2026-10-30",
+    routes: {
+      ru: "/legal/logo-and-review/",
+    },
+  },
 ] as const satisfies readonly LegalDocumentRelease[];
 
 export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
+  { releaseKey: "MKR-LIC-01/2026.10/01", content: LICENSE_SITE_CONTENT["MKR-LIC-01"] },
+  { releaseKey: "MKR-PD-02/2026.10/01", content: LICENSE_SITE_CONTENT["MKR-PD-02"] },
+  { releaseKey: "MKR-ADV-01/2026.10/01", content: LICENSE_SITE_CONTENT["MKR-ADV-01"] },
+  { releaseKey: "MKR-PD-03/2026.10/01", content: LICENSE_SITE_CONTENT["MKR-PD-03"] },
+  { releaseKey: "MKR-PD-01/2026.10/01", content: LICENSE_SITE_CONTENT["MKR-PD-01"] },
+  { releaseKey: "MKR-PUB-01/2026.10/01", content: LICENSE_SITE_CONTENT["MKR-PUB-01"] },
+
   { releaseKey: "MKR-PD-01/2026.08/01", content: PRIVACY_CONTENT },
   { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
@@ -321,7 +415,10 @@ export function validateLegalRegistry(releases: readonly LegalDocumentRelease[])
     } catch {
       throw new Error(`Invalid legal document effective date: ${release.effectiveDate}`);
     }
-    if (release.operatorProfileId !== "operator-2026-08-15") {
+    if (
+      release.operatorProfileId !== "operator-2026-08-15" &&
+      release.operatorProfileId !== "operator-2026-10-30"
+    ) {
       throw new Error(`Unknown operator profile: ${String(release.operatorProfileId)}`);
     }
 

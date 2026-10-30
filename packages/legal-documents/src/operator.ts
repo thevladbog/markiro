@@ -1,6 +1,14 @@
 import type { LegalOperatorProfile, LegalOperatorProfileId } from "./types.js";
 
 export const OPERATOR_PROFILES = {
+  "operator-2026-10-30": {
+    name: "Индивидуальный предприниматель Богатырев Владислав Сергеевич",
+    address:
+      "353745, Краснодарский край, Ленинградский район, ст. Ленинградская, ул. Грузская, д. 26",
+    email: "hello@markiro.app",
+    phone: "+7 934 355-14-90",
+    site: "https://markiro.app",
+  },
   "operator-2026-08-15": {
     name: "Богатырев Владислав Сергеевич",
     address:

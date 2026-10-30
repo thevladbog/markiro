@@ -21,7 +21,7 @@ import type { EnqueueMailInput } from "../src/modules/mail/mail.types";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(process.env.DATABASE_URL);
-const CONSENT = "MKR-PD-02/2026.08/01";
+const CONSENT = "MKR-PD-02/2026.10/01";
 const OPTIONS = {
   recipient: "owner@example.test",
   replyTo: "hello@example.test",
@@ -172,8 +172,8 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       status: "new",
       locale: "ru",
       firstSourcePath: "/skachat/",
-      firstUtm: { source: "yandex", medium: "cpc" },
-      firstReferrer: "https://yandex.ru/search/",
+      firstUtm: null,
+      firstReferrer: null,
       anonymizedAt: null,
     });
     expect(events).toHaveLength(1);
@@ -184,11 +184,12 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       payload: {
         sourcePath: "/skachat/",
         locale: "ru",
-        utm: { source: "yandex", medium: "cpc" },
-        referrer: "https://yandex.ru/search/",
+        consentVersion: "MKR-PD-02/2026.10/01",
       },
     });
     expect(JSON.stringify(events[0]?.payload)).not.toContain("@");
+    expect(events[0]?.payload).not.toHaveProperty("utm");
+    expect(events[0]?.payload).not.toHaveProperty("referrer");
     expect(notifications).toEqual([
       expect.objectContaining({
         kind: "new_lead",
@@ -209,6 +210,8 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       firstContact: true,
       leadUrl: `https://admin.markiro.example/leads/${lead?.id}`,
     });
+    expect(owner).not.toHaveProperty("utm");
+    expect(owner).not.toHaveProperty("referrer");
     const visitor = mails.find(({ row }) => row.kind === "landing-download-link")?.template;
     expect(visitor).toMatchObject({
       downloadPageUrl: "https://markiro.example/skachat/?installer=1",
@@ -285,7 +288,7 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       inn: "7707083893",
       status: "contacted",
       firstSourcePath: "/skachat/",
-      firstUtm: { source: "yandex", medium: "cpc" },
+      firstUtm: null,
     });
     expect(events.map((event) => event.kind).sort()).toEqual(["download", "invoice_request"]);
     expect(events.find((event) => event.kind === "invoice_request")?.payload).toMatchObject({
@@ -435,7 +438,7 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
       expect.objectContaining({
         kind: "demo_request",
         publicRequestId: requestId,
-        payload: { sourcePath: "/", locale: "ru" },
+        payload: { sourcePath: "/", locale: "ru", consentVersion: "MKR-PD-02/2026.10/01" },
       }),
     ]);
     expect(notifications.map((row) => row.kind)).toEqual(["new_lead"]);

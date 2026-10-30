@@ -115,7 +115,11 @@ export class DemoRequestRepository {
           leadId,
           kind: "demo_request",
           publicRequestId: requestId,
-          payload: { sourcePath: input.sourcePath, locale: input.locale },
+          payload: {
+            sourcePath: input.sourcePath,
+            locale: input.locale,
+            consentVersion: input.consentVersion,
+          },
         },
         receivedAt,
       );

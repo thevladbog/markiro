@@ -212,7 +212,7 @@ export function validateConfig(env, manifest) {
     !(
       /^[0-9]{1,2}$/u.test(env.LEAD_RETENTION_MONTHS) &&
       Number(env.LEAD_RETENTION_MONTHS) >= 1 &&
-      Number(env.LEAD_RETENTION_MONTHS) <= 60
+      Number(env.LEAD_RETENTION_MONTHS) <= 12
     )
   )
     fail("LEAD_RETENTION_MONTHS");
