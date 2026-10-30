@@ -31,14 +31,12 @@ const config = readPublicSiteConfig(
   {
     PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
     PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
-    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
   },
   "ru",
 );
 const enabled =
   config.leadEndpoint !== null &&
   config.legalLinks !== null &&
-  config.captchaClientKey !== null &&
   config.consentVersion !== null;
 const copy = PRICING_COPY;
 const tableHeads = TARIFFS.map((tariff) => tariff.name);
@@ -206,9 +204,9 @@ const contactsLine = config.phone === null ? "" : `, ${config.phone.display}`;
           <div class="ax-field ax-field--submit">
             <LeadSubmit label={copy.invoice.submit} tone="dark" />
           </div>
-          {enabled && config.legalLinks && config.captchaClientKey && (
+          {enabled && config.legalLinks && (
             <div class="ax-form__extras">
-              <LeadConsent idPrefix="invoice" legalLinks={config.legalLinks} captchaClientKey={config.captchaClientKey} />
+              <LeadConsent idPrefix="invoice" legalLinks={config.legalLinks} />
             </div>
           )}
         </fieldset>

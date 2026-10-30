@@ -339,11 +339,95 @@ export function validateForwardRehearsalEvidence(value) {
   }
   return structuredClone(value);
 }
+const scenarioModes = Object.freeze(["healthy", "replacement-failure"]);
+const scenarioKeys = Object.freeze([
+  "version",
+  "kind",
+  "productionAdmission",
+  "invocationId",
+  "productSha",
+  "scenario",
+  "completed",
+  "isolated",
+  "cleanup",
+  "checks",
+  "problem",
+  "runs",
+]);
+/** Evidence of one scenario run on its own CI runner. It proves that scenario's
+ * isolation, cleanup and its own assertions; the full set of checks is proven
+ * only by combineForwardScenarioEvidence over both scenarios. */
+export function validateForwardScenarioEvidence(value) {
+  keys(value, scenarioKeys);
+  assert.equal(value.version, 1);
+  assert.equal(value.kind, "synthetic-only-forward-recovery-scenario");
+  assert.equal(value.productionAdmission, false);
+  assert.equal(value.productSha, forwardProduct);
+  assert.match(value.invocationId, uuid);
+  assert.ok(scenarioModes.includes(value.scenario));
+  for (const name of ["completed", "isolated", "cleanup"])
+    assert.equal(typeof value[name], "boolean");
+  keys(value.checks, checkNames);
+  for (const flag of Object.values(value.checks)) assert.equal(typeof flag, "boolean");
+  assert.ok(Array.isArray(value.runs) && value.runs.length <= 1);
+  value.runs.forEach(namespace);
+  for (const run of value.runs) assert.equal(run.mode, value.scenario);
+  if (value.completed) {
+    assert.equal(value.runs.length, 1);
+    assert.equal(value.problem, null);
+    assert.equal(value.isolated, true);
+    assert.equal(value.cleanup, true);
+  } else {
+    keys(value.problem, failureKeys);
+    assert.deepEqual(value.problem, forwardRehearsalFailure(value.problem));
+  }
+  return structuredClone(value);
+}
+/** The two scenario runners' evidence as one forward rehearsal result: both
+ * scenarios must have completed, and every check must hold in at least one of
+ * them, exactly as when rehearseForwardRecovery runs both in one process. */
+export function combineForwardScenarioEvidence(healthy, failure) {
+  const a = validateForwardScenarioEvidence(healthy),
+    b = validateForwardScenarioEvidence(failure);
+  assert.equal(a.scenario, "healthy");
+  assert.equal(b.scenario, "replacement-failure");
+  assert.ok(a.completed && b.completed, "Both forward scenarios must complete");
+  const result = validateForwardRehearsalEvidence({
+    version: 1,
+    kind: "synthetic-only-forward-recovery-rehearsal",
+    productionAdmission: false,
+    invocationId: randomUUID(),
+    productSha: forwardProduct,
+    completed: true,
+    isolated: a.isolated && b.isolated,
+    cleanup: a.cleanup && b.cleanup,
+    checks: Object.fromEntries(
+      checkNames.map((name) => [name, a.checks[name] === true || b.checks[name] === true]),
+    ),
+    problem: null,
+    runs: [...a.runs, ...b.runs],
+  });
+  assert.ok(result.completed);
+  return result;
+}
+function scenarioArgument(args) {
+  if (args.length === 1) {
+    assert.deepEqual(args, ["--local-ci"]);
+    return null;
+  }
+  assert.equal(args.length, 3);
+  assert.equal(args[0], "--local-ci");
+  assert.equal(args[1], "--scenario");
+  assert.ok(scenarioModes.includes(args[2]), "Unknown forward rehearsal scenario");
+  return args[2];
+}
 export async function rehearseForwardRecovery(args, options = {}) {
-  assert.deepEqual(args, ["--local-ci"]);
+  assert.ok(Array.isArray(args));
+  const only = scenarioArgument(args);
   keys(options, Object.hasOwn(options, "writeResult") ? ["writeResult"] : []);
   const writeResult = options.writeResult ?? (async () => {});
   assert.equal(typeof writeResult, "function");
+  if (only !== null) return rehearseForwardScenario(only, writeResult);
   const result = {
     version: 1,
     kind: "synthetic-only-forward-recovery-rehearsal",
@@ -409,6 +493,70 @@ export async function rehearseForwardRecovery(args, options = {}) {
   }
   await writeResult(validateForwardRehearsalEvidence(result));
   return validateForwardRehearsalEvidence(result);
+}
+/** One scenario on its own runner (CI matrix). The same inner rehearsal as the
+ * serial run; its evidence is combined with the other scenario's afterwards. */
+async function rehearseForwardScenario(mode, writeResult) {
+  const result = {
+    version: 1,
+    kind: "synthetic-only-forward-recovery-scenario",
+    productionAdmission: false,
+    invocationId: randomUUID(),
+    productSha: forwardProduct,
+    scenario: mode,
+    completed: false,
+    isolated: false,
+    cleanup: false,
+    checks: Object.fromEntries(checkNames.map((name) => [name, false])),
+    problem: null,
+    runs: [],
+  };
+  // Unknown isolation/cleanup until the inner harness reports its terminal state.
+  const observed = { isolated: false, cleanup: false, problem: null };
+  const scenario = createForwardScenario(mode);
+  try {
+    assert.equal(
+      process.platform,
+      "linux",
+      "Actual Linux renameat2/fsync rehearsal is required; run required Linux CI",
+    );
+    const run = await rehearseUpgrade(["--local-ci"], {
+      forwardScenario: scenario,
+      writeResult: async (evidence) => {
+        // Only fixed metadata survives the compiled harness callback.
+        observed.isolated = evidence.isolated === true;
+        observed.cleanup = evidence.cleanup === true;
+        observed.problem =
+          evidence.problem === null ? null : forwardRehearsalFailure(evidence.problem);
+      },
+    });
+    result.runs.push(safeNamespace(run.forward));
+    result.isolated = run.isolated;
+    result.cleanup = run.cleanup;
+    for (const name of checkNames) result.checks[name] = scenario.checks[name] === true;
+    result.completed = run.completed;
+    if (!result.completed)
+      throw Object.assign(new Error("Forward scenario did not complete"), {
+        code: "FORWARD_REHEARSAL_FAILED",
+      });
+    validateForwardScenarioEvidence(result);
+  } catch (error) {
+    result.completed = false;
+    result.isolated = observed.isolated;
+    result.cleanup = observed.cleanup;
+    result.problem =
+      observed.problem ??
+      forwardRehearsalFailure(rehearsalFailure("isolated forward rehearsal", error));
+    await writeResult(validateForwardScenarioEvidence(result));
+    throw Object.assign(
+      new Error(
+        "Forward rehearsal failed; preserve private evidence and inspect the exact stage. Actual Linux CI proof is required.",
+      ),
+      { code: "ERR_FORWARD_REHEARSAL" },
+    );
+  }
+  await writeResult(validateForwardScenarioEvidence(result));
+  return validateForwardScenarioEvidence(result);
 }
 if (isMainModule(import.meta.url))
   rehearseForwardRecovery(process.argv.slice(2)).catch((error) => {

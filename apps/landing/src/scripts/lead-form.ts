@@ -12,12 +12,10 @@ import { browserDemoFormRuntime, readDemoErrorCode, type DemoErrorCode } from ".
 /**
  * The two lead forms of the standalone pages: «get the installer» on /skachat/
  * and «get an invoice» on /stoimost/. Both post to `/api/landing-leads`
- * (spec 2026-10-20, section 15.3); the captcha, honeypot and consent mechanics are
- * the demo form's.
+ * with a honeypot, current published consent and server-side rate limits.
  */
 
 interface LeadPayloadBase {
-  readonly captchaToken: string;
   readonly consentVersion: string;
   readonly email: string;
   readonly locale: "ru";
@@ -52,14 +50,11 @@ export interface LeadFormRuntime {
   readonly createRequestId: () => string;
   readonly currentPath: () => string;
   readonly firstTouch: () => FirstTouch;
-  readonly loadCaptcha: () => void;
   readonly request: (endpoint: string, payload: LandingLeadPayload) => Promise<LeadResponse>;
-  readonly resetCaptcha: (form: HTMLFormElement) => void;
   readonly track: (eventName: string, properties: Readonly<Record<string, string>>) => void;
 }
 
 export const LEAD_FORM_COPY = {
-  captcha: "Подтвердите, что вы не робот, ещё раз",
   checking: "Проверьте отмеченные поля",
   consent: "Нужно согласие на обработку данных",
   networkHeading: "Не получилось отправить",
@@ -101,8 +96,6 @@ function clearErrors(form: HTMLFormElement): void {
     const message = errorElement(form, name);
     if (message !== null) message.textContent = "";
   }
-  const captchaError = form.querySelector<HTMLElement>("[data-captcha-error]");
-  if (captchaError !== null) captchaError.textContent = "";
 }
 
 function markInvalid(form: HTMLFormElement, name: string, message: string): HTMLElement | null {
@@ -155,6 +148,7 @@ function setStatus(form: HTMLFormElement, message: string): void {
   if (status !== null) status.textContent = message;
 }
 
+/** Validate consent and fields, then submit a retry-safe lead without loading third-party CAPTCHA. */
 export function initLeadForm(
   form: HTMLFormElement,
   runtime: LeadFormRuntime,
@@ -215,21 +209,8 @@ export function initLeadForm(
       return;
     }
 
-    const captchaInput = control(form, "smart-token");
-    const captchaToken = captchaInput?.value.trim() ?? "";
-    if (captchaInput === null || captchaToken.length === 0) {
-      const error = form.querySelector<HTMLElement>("[data-captcha-error]");
-      if (error !== null) {
-        error.textContent = LEAD_FORM_COPY.captcha;
-        error.focus();
-      }
-      fail("validation", LEAD_FORM_COPY.checking);
-      return;
-    }
-
     const touch = runtime.firstTouch();
     const base: LeadPayloadBase = {
-      captchaToken,
       consentVersion,
       email: validation.value.email,
       locale: "ru",
@@ -265,17 +246,7 @@ export function initLeadForm(
         return;
       }
 
-      if (response.code === "captcha_invalid") {
-        captchaInput.value = "";
-        runtime.resetCaptcha(form);
-        setState(form, "idle");
-        const error = form.querySelector<HTMLElement>("[data-captcha-error]");
-        if (error !== null) {
-          error.textContent = LEAD_FORM_COPY.captcha;
-          error.focus();
-        }
-        fail("captcha", LEAD_FORM_COPY.checking);
-      } else if (response.status === 429 || response.code === "rate_limited") {
+      if (response.status === 429 || response.code === "rate_limited") {
         setState(form, "idle");
         fail("rate_limited", LEAD_FORM_COPY.rateLimited);
       } else {
@@ -297,26 +268,9 @@ export function initLeadForm(
   form.addEventListener("input", onInput, { once: true });
   form.addEventListener("submit", handleSubmit);
 
-  // The captcha is a third party: it loads when the visitor starts on the form, never on
-  // page load or scroll, so the page sets no third-party cookies before that.
-  let captchaRequested = false;
-  const requestCaptcha = (): void => {
-    if (captchaRequested) return;
-    captchaRequested = true;
-    form.removeEventListener("focusin", requestCaptcha);
-    form.removeEventListener("pointerdown", requestCaptcha);
-    runtime.loadCaptcha();
-  };
-  if (form.querySelector(".smart-captcha") !== null) {
-    form.addEventListener("focusin", requestCaptcha);
-    form.addEventListener("pointerdown", requestCaptcha);
-  }
-
   return () => {
     form.removeEventListener("input", onInput);
     form.removeEventListener("submit", handleSubmit);
-    form.removeEventListener("focusin", requestCaptcha);
-    form.removeEventListener("pointerdown", requestCaptcha);
   };
 }
 
@@ -330,7 +284,6 @@ export function browserLeadFormRuntime(browserWindow: Window & typeof globalThis
     createRequestId: demo.createRequestId,
     currentPath: demo.currentPath,
     firstTouch: () => readFirstTouch(session),
-    loadCaptcha: demo.loadCaptcha,
     request: async (endpoint, payload) => {
       const response = await browserWindow.fetch(endpoint, {
         body: JSON.stringify(payload),
@@ -349,7 +302,6 @@ export function browserLeadFormRuntime(browserWindow: Window & typeof globalThis
         ? { ok: false, status: response.status }
         : { code, ok: false, status: response.status };
     },
-    resetCaptcha: demo.resetCaptcha,
     track: demo.track,
   };
 }

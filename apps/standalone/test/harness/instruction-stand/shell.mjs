@@ -16,7 +16,25 @@ const PROTOCOL_VERSION = 7;
 export const STATUS_EVENT = "standalone://host-status";
 export const REVISION_EVENT = "standalone://host-revision";
 
-/** One HTTPS call to the host; the certificate is read, not trusted (the stand pins it below). */
+/**
+ * TLS options that trust only this host's own certificate (`<data dir>/tls/cert.der`, which
+ * `connect.certFile` names) and pin it by SHA-256, as the shell does; the names inside the
+ * certificate do not matter. Throws while the host has not written its certificate yet.
+ */
+function pinnedTls(connect) {
+  const der = readFileSync(connect.certFile);
+  const base64 = der.toString("base64").replace(/.{1,64}/g, "$&\n");
+  const expected = createHash("sha256").update(der).digest("hex");
+  return {
+    ca: `-----BEGIN CERTIFICATE-----\n${base64}-----END CERTIFICATE-----\n`,
+    checkServerIdentity: (_name, certificate) =>
+      createHash("sha256").update(certificate.raw).digest("hex") === expected
+        ? undefined
+        : new Error("certificate_mismatch"),
+  };
+}
+
+/** One HTTPS call to the host, which must present the certificate in `connect.certFile`. */
 export function hostCall(connect, { method, path, body, headers = {}, timeoutMs = 10_000 }) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined || body === null ? undefined : JSON.stringify(body);
@@ -26,7 +44,7 @@ export function hostCall(connect, { method, path, body, headers = {}, timeoutMs 
         port: connect.port,
         method,
         path,
-        rejectUnauthorized: false,
+        ...pinnedTls(connect),
         agent: false,
         timeout: timeoutMs,
         headers: {
@@ -194,7 +212,7 @@ export class StandShell {
       port: this.connect.port,
       path: "/v1/changes/stream",
       method: "GET",
-      rejectUnauthorized: false,
+      ...pinnedTls(this.connect),
       agent: false,
       headers: {
         authorization: `Bearer ${this.device.key}`,

@@ -1415,6 +1415,13 @@
       "when": 1792807887312,
       "tag": "0201_lethal_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1793243623403,
+      "tag": "0202_landing_lead_rate_windows",
+      "breakpoints": true
     }
   ]
 }

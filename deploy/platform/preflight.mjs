@@ -113,6 +113,7 @@ function exactHttpsOrigin(value, key) {
   }
 }
 
+/** Validate platform identities and delivery routing before accepting the release configuration. */
 export function validateConfig(env, manifest) {
   if (
     env.PLATFORM_PGBOSS_PREPROVISIONED_SCHEMA !== undefined &&
@@ -192,7 +193,6 @@ export function validateConfig(env, manifest) {
   if (env.LANDING_DEMO_SUBMISSION_ENABLED === "true") {
     for (const key of ["LANDING_DEMO_RECIPIENT", "LANDING_DEMO_REPLY_TO"])
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(env[key] ?? "")) fail(key);
-    if (!env.SMARTCAPTCHA_SERVER_KEY?.startsWith("ysc2_")) fail("SMARTCAPTCHA_SERVER_KEY");
   }
   // Landing lead alerts are optional and never gate readiness: Telegram only
   // needs a token and a chat when it is switched on. The token is never echoed;
