@@ -1,16 +1,16 @@
 //! Native input only. The value is never an IPC argument or result.
 use markiro_backup_cloud::{model::Secret, Error, Result};
 #[cfg(any(windows, test))]
-fn read_client_secret(password: &[u16]) -> Result<Secret> {
-    let end = password
+fn read_client_secret(buffer: &[u16]) -> Result<Secret> {
+    let end = buffer
         .iter()
         .position(|c| *c == 0)
         .ok_or(Error::Provider("secret_prompt_failed"))?;
     if end == 0 {
         return Err(Error::Provider("client_secret_required"));
     }
-    let value = String::from_utf16(&password[..end])
-        .map_err(|_| Error::Provider("secret_prompt_failed"))?;
+    let value =
+        String::from_utf16(&buffer[..end]).map_err(|_| Error::Provider("secret_prompt_failed"))?;
     Secret::client_secret(value).map_err(|_| Error::Provider("client_credentials_invalid"))
 }
 #[cfg(windows)]
