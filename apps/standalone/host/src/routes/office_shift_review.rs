@@ -46,19 +46,19 @@ pub const EXCEPTIONS_SQL: &str = "SELECT * FROM ( \
      JOIN devices d ON d.id = e.device_id LEFT JOIN operators o ON o.id = e.operator_id \
      WHERE e.shift_id = ?1 \
      UNION ALL \
-     SELECT l.id, 'office', 'box', 'disassemble', l.box_id, b.sscc, NULL, NULL, r.name, NULL, \
-       NULL, NULL, dc.id, dc.doc_no, u.name, b.disassembled_at, dc.applied_at \
+     SELECT l.id, CASE WHEN u.device_id IS NULL THEN 'office' ELSE 'station' END, 'box', 'disassemble', l.box_id, b.sscc, NULL, NULL, r.name, u.device_id, \
+       u.device_name, u.operator_name, dc.id, dc.doc_no, CASE WHEN u.device_id IS NULL THEN u.name END, b.disassembled_at, dc.applied_at \
      FROM boxes b CROSS JOIN disaggregation_document_lines l ON l.box_id = b.id AND l.status = 'ok' \
      CROSS JOIN disaggregation_documents dc ON dc.id = l.document_id AND dc.status = 'applied' \
-     CROSS JOIN office_users u ON u.id = dc.applied_by \
+     CROSS JOIN disaggregation_authors u ON u.document_id = dc.id \
      LEFT JOIN disaggregation_reasons r ON r.id = dc.reason_id \
      WHERE b.shift_id = ?1 AND b.disassembled_at IS NOT NULL \
      UNION ALL \
-     SELECT l.id, 'office', 'pallet', 'disassemble', l.pallet_id, p.sscc, NULL, NULL, r.name, \
-       NULL, NULL, NULL, dc.id, dc.doc_no, u.name, p.disassembled_at, dc.applied_at \
+     SELECT l.id, CASE WHEN u.device_id IS NULL THEN 'office' ELSE 'station' END, 'pallet', 'disassemble', l.pallet_id, p.sscc, NULL, NULL, r.name, \
+       u.device_id, u.device_name, u.operator_name, dc.id, dc.doc_no, CASE WHEN u.device_id IS NULL THEN u.name END, p.disassembled_at, dc.applied_at \
      FROM pallets p CROSS JOIN disaggregation_document_lines l ON l.pallet_id = p.id AND l.status = 'ok' \
      CROSS JOIN disaggregation_documents dc ON dc.id = l.document_id AND dc.status = 'applied' \
-     CROSS JOIN office_users u ON u.id = dc.applied_by \
+     CROSS JOIN disaggregation_authors u ON u.document_id = dc.id \
      LEFT JOIN disaggregation_reasons r ON r.id = dc.reason_id \
      WHERE p.shift_id = ?1 AND p.disassembled_at IS NOT NULL) \
      ORDER BY occurred_at DESC, id DESC LIMIT ?2";
@@ -68,11 +68,11 @@ pub const EXCEPTIONS_COUNT_SQL: &str = "SELECT \
      (SELECT COUNT(*) FROM pallet_exceptions WHERE shift_id = ?1) + \
      (SELECT COUNT(*) FROM boxes b CROSS JOIN disaggregation_document_lines l ON l.box_id = b.id \
         AND l.status = 'ok' CROSS JOIN disaggregation_documents dc ON dc.id = l.document_id \
-        AND dc.status = 'applied' CROSS JOIN office_users u ON u.id = dc.applied_by \
+        AND dc.status = 'applied' CROSS JOIN disaggregation_authors u ON u.document_id = dc.id \
         WHERE b.shift_id = ?1 AND b.disassembled_at IS NOT NULL) + \
      (SELECT COUNT(*) FROM pallets p CROSS JOIN disaggregation_document_lines l ON l.pallet_id = p.id \
         AND l.status = 'ok' CROSS JOIN disaggregation_documents dc ON dc.id = l.document_id \
-        AND dc.status = 'applied' CROSS JOIN office_users u ON u.id = dc.applied_by \
+        AND dc.status = 'applied' CROSS JOIN disaggregation_authors u ON u.document_id = dc.id \
         WHERE p.shift_id = ?1 AND p.disassembled_at IS NOT NULL)";
 
 /// The shift's refused records, newest first; ?1 the shift, ?2 the limit.

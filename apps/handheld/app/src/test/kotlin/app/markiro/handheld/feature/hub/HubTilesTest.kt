@@ -5,11 +5,11 @@ import org.junit.Test
 
 class HubTilesTest {
     @Test
-    fun theCloudsHubKeepsAllFiveTilesAndAHostsHubDropsInventoryAndWriteoff() {
+    fun theCloudsHubKeepsAllFiveTilesAndAHostsHubOffersSiteDisassembly() {
         assertEquals(
             listOf(HubTile.SHIFT, HubTile.INVENTORY, HubTile.WRITEOFF, HubTile.PALLETS, HubTile.SETTINGS),
             visibleTiles(hostMode = false),
         )
-        assertEquals(listOf(HubTile.SHIFT, HubTile.PALLETS, HubTile.SETTINGS), visibleTiles(hostMode = true))
+        assertEquals(listOf(HubTile.SHIFT, HubTile.PALLETS, HubTile.DISASSEMBLY, HubTile.SETTINGS), visibleTiles(hostMode = true))
     }
 }

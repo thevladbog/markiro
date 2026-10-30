@@ -184,9 +184,9 @@ class HubScreenTest {
         compose.setContent {
             MarkiroTheme { HubScreen(HubUi(canBuildPallets = false), onTile = { selected = it }, onSignOut = {}) }
         }
-        compose.onNodeWithText("Паллеты").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Палеты").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("нет прав").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Паллеты").performScrollTo().performClick()
+        compose.onNodeWithText("Палеты").performScrollTo().performClick()
         assertEquals(HubTile.PALLETS, selected)
     }
 

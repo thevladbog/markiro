@@ -56,5 +56,11 @@ internal fun clearHostDatasetBusinessTables(db: HandheldDatabase) {
         buildSet { while (rows.moveToNext()) add(rows.getString(0)) }
     }
     check(tables == HOST_DATASET_BUSINESS_TABLES + HOST_DATASET_RETAINED_TABLES) { "Unclassified handheld dataset table" }
+    // Unknown disassembly outcomes are reconciliation evidence tied to their OLD
+    // owner/generation/epoch. They must survive replacement, never be rebound.
+    val evidence = sqlite.query("SELECT `key`,value FROM meta WHERE `key` LIKE 'pack_disassembly_%'").use { rows ->
+        buildList { while (rows.moveToNext()) if(rows.getString(0).startsWith("pack_disassembly_")) add(rows.getString(0) to rows.getString(1)) }
+    }
     for (table in HOST_DATASET_BUSINESS_TABLES) sqlite.execSQL("DELETE FROM `$table`")
+    for ((key,value) in evidence) sqlite.execSQL("INSERT INTO meta(`key`,value) VALUES(?,?)",arrayOf(key,value))
 }

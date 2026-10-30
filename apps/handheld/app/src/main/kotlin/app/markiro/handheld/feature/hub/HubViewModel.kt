@@ -103,7 +103,7 @@ data class HubActiveShift(
     val lineFull: app.markiro.handheld.feature.shift.LineFullNotice? = null,
 )
 
-enum class HubTile { SHIFT, INVENTORY, WRITEOFF, PALLETS, SETTINGS }
+enum class HubTile { SHIFT, INVENTORY, WRITEOFF, PALLETS, DISASSEMBLY, SETTINGS }
 
 /** Reachable = an HTTP response within the last two minutes (the station's online threshold). */
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L

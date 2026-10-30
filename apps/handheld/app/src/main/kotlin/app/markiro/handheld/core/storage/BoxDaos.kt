@@ -20,6 +20,9 @@ interface BoxDao {
     @Query("SELECT * FROM boxes WHERE boxId = :boxId")
     suspend fun get(boxId: String): BoxEntity?
 
+    @Query("SELECT * FROM boxes WHERE sscc = :sscc LIMIT 1")
+    suspend fun bySscc(sscc: String): BoxEntity?
+
     /**
      * Derived, never stored, and correlated by box rather than by shift: a code
      * scanned into a different box must never inflate this one's count.

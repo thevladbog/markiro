@@ -1,0 +1,15 @@
+{
+  "sscc": "146012345600000006",
+  "kind": "pallet",
+  "productName": "Вода",
+  "boxes": 2,
+  "units": 24,
+  "status": "ok",
+  "token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reasons": [
+    {
+      "id": "d15a0000-0000-4000-8000-000000000003",
+      "name": "Повреждена упаковка"
+    }
+  ]
+}

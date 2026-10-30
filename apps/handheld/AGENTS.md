@@ -140,3 +140,34 @@ Android tests must also verify its interpretation.
   `Closed` result leaves the row and `activeShiftId` as they are. A displacement is seen only with the next kept
   answer that carries this device's share (offline, the last one stands); the part close's `actualQty` stays the
   device's own count, uncorrected for lost or displaced codes.
+
+## Site-wide disassembly (2026-10-30)
+
+- Host-only hub route `pack-disassembly` uses `POST /v1/device/disaggregation/lookup`
+  and `/apply`. It handles boxes, production pallets and warehouse pallets from
+  any device/office of the site. It is distinct from the existing local exception
+  channels described above; do not invoke `ExceptionEngine` for a confirmed host
+  result or create a second correction event.
+- `InspectedPack` is a local authorization binding, not a wire DTO. Preserve the
+  lookup's owner, generation, dataset epoch and operator through confirmation;
+  `prepare` must reject an old inspection instead of binding it to current credentials.
+- `HostPackDisassembly` saves `pack_disassembly_pending_v1` before network and
+  compare-clears only its own definite outcome. Retain uncertain or unreadable
+  evidence. Transport freezes origin/pin/epoch and reads only the captured
+  generation's key. `HostCalls` must start BEFORE invoking the network lambda:
+  capturing generation after a late 401 could revoke a newer credential.
+- Dataset reset preserves this pending key and `pack_disassembly_evidence_v1:`
+  archives as opaque reconciliation evidence with OLD owner/generation/epoch.
+  Never rebind or automatically replay them. A sealed screen requires explicit
+  office reconciliation before moving the request into retained history.
+- After a known successful apply, invalidate the retired box's registry entry or
+  the retired pallet's server-parent fields in the SAME commit that clears the
+  intent. Preserve unrelated local claims and raw/frozen outboxes. A best-effort
+  registry walk must not be the only way the handheld learns this known result.
+- `HostReferenceSync` consumes `code_releases`: retire only the named closed local
+  box, clear its codes/registry cache, keep raw outbox sources and frozen bytes
+  until their receipts arrive. Unknown boxes still invalidate matching registry rows.
+- Shared fixtures are `proto/fixtures/device-pack-*.json`. Focused tests:
+  `HostPackApiTest`, `HostPackDisassemblyJournalTest`, `PackDisassemblyViewModelTest`,
+  `PackDisassemblyScreenTest`, `HostReferenceSyncTest`. The screen tests produce
+  ignored `app/build/disassembly-visuals` frames from actual Compose views.

@@ -145,4 +145,19 @@ class HostReferenceSyncTest {
         reference.sync().getOrThrow()
         assertEquals("Линия 2", db.deviceConfigDao().get()!!.lineName)
     }
+
+    @Test
+    fun aHostCodeReleaseFreesOnlyTheNamedClosedBoxAndKeepsThePendingRawOutbox() = runTest {
+        val box=app.markiro.handheld.core.storage.BoxEntity("box-1","shift-1","046012345600000016","2026-10-30T10:00:00Z","2026-10-30T10:01:00Z",null,"printed",null,"ack")
+        db.boxDao().insert(box)
+        db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity("hash-1","shift-1","04601234567015","one","2026-10-30T10:00:00Z","box-1"))
+        db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity("hash-2","other-shift","04601234567015","two","2026-10-30T10:00:00Z","other-box"))
+        db.outboxDao().insert(app.markiro.handheld.core.storage.OutboxEntity(shiftId="shift-1",raw="frozen-source",verdict="accepted",scannedAt="2026-10-30T10:00:00Z",operatorId=null,codeHash="hash-1",gtin14="04601234567015",serial="one",boxId="box-1"))
+        val (reference,_)=sync("""{"hostId":"$hostId","rev":58,"hasMore":false,"items":[{"entity":"code_releases","id":"box-1","rev":58,"deleted":false,"data":{"shiftId":"shift-1","documentId":"doc-1","releasedAt":"2026-10-30T10:02:00.000Z","codeCount":1}}]}""")
+        reference.sync().getOrThrow()
+        assertEquals(1,db.outboxDao().countNow())
+        assertEquals(0,db.boxDao().itemCount("box-1"))
+        assertEquals(1,db.boxDao().itemCount("other-box"))
+        assertEquals("2026-10-30T10:02:00.000Z",db.boxDao().get("box-1")?.disassembledAt)
+    }
 }

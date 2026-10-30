@@ -56,12 +56,11 @@ const DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.reason_id, r.nam
        AS line_count, \
      (SELECT COALESCE(SUM(l.code_count), 0) FROM disaggregation_document_lines l \
        WHERE l.document_id = d.id) AS code_count, \
-     d.created_by, cu.name AS created_by_name, d.created_at, d.applied_at, d.applied_by, \
-     au.name AS applied_by_name, d.cancelled_at, d.cancelled_by, d.rev \
+     d.created_by, authors.created_by_name, d.device_id, d.operator_id, d.created_at, d.applied_at, d.applied_by, \
+     authors.name AS applied_by_name, d.cancelled_at, d.cancelled_by, d.rev \
      FROM disaggregation_documents d \
      LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
-     JOIN office_users cu ON cu.id = d.created_by \
-     LEFT JOIN office_users au ON au.id = d.applied_by";
+     JOIN disaggregation_authors authors ON authors.document_id = d.id";
 
 const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.warehouse_pallet_id, l.status, \
      COALESCE(l.product_id,l.cloud_product_id) AS product_id, COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count, l.validated_at, COALESCE(s.id,cs.id) AS shift_id, \
@@ -88,7 +87,9 @@ struct DocumentRow {
     source: String,
     line_count: i64,
     code_count: i64,
-    created_by: String,
+    created_by: Option<String>,
+    device_id: Option<String>,
+    operator_id: Option<String>,
     created_by_name: String,
     created_at: String,
     applied_at: Option<String>,
@@ -112,6 +113,8 @@ impl DocumentRow {
             line_count: u32::try_from(self.line_count).map_err(ApiError::internal)?,
             code_count: u64::try_from(self.code_count).map_err(ApiError::internal)?,
             created_by: self.created_by,
+            created_by_device_id: self.device_id,
+            created_by_operator_id: self.operator_id,
             created_by_name: self.created_by_name,
             created_at: self.created_at,
             applied_at: self.applied_at,

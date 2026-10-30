@@ -66,7 +66,7 @@ class PairingScreenTest {
         // Pallets are named, not folded into the box count: a closed pallet the
         // server has not acknowledged is its own physically labelled fact, and
         // the operator deciding whether to reconnect is owed it.
-        compose.onNodeWithText("паллеты 5", substring = true).assertExists()
+        compose.onNodeWithText("палеты 5", substring = true).assertExists()
         // A queued write-off is unsent production work. Counting it in the summary
         // map but leaving it out of this line is how an operator wipes a document
         // the server has never seen while the screen says nothing is owed.

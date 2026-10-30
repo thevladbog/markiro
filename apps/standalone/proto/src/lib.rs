@@ -288,6 +288,7 @@ pub mod cloud_history;
 pub mod cloud_import;
 pub mod code_registry;
 pub mod code_search;
+pub mod device_disaggregation;
 pub mod disaggregation;
 pub mod export_files;
 pub mod handheld;

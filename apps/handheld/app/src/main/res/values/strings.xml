@@ -210,7 +210,7 @@
     <string name="shifts_loading">Загружаем смены…</string>
     <string name="shifts_mode_validation">валидация</string>
     <string name="shifts_mode_aggregation">+ агрегация</string>
-    <string name="shifts_mode_pallets">+ паллеты</string>
+    <string name="shifts_mode_pallets">+ палеты</string>
     <string name="shifts_plan">план %1$d</string>
     <string name="shifts_no_plan">без плана</string>
     <string name="shifts_tolling">для: %1$s</string>
@@ -280,7 +280,7 @@
     <string name="close_summary_errors">Ошибки</string>
     <string name="close_summary_duplicates">Дубли</string>
     <string name="close_summary_boxes">Короба</string>
-    <string name="close_summary_pallets">Паллеты</string>
+    <string name="close_summary_pallets">Палеты</string>
     <string name="close_summary_conflicts">Конфликты</string>
     <string name="close_to_hub">В хаб</string>
 
@@ -428,10 +428,10 @@
     <string name="work_box_full">КОРОБ ПОЛОН</string>
     <!-- Aggregation: pallets (06d) -->
     <string name="pallet_strip">%1$d / %2$d коробов</string>
-    <string name="work_close_pallet_early">Закрыть паллету досрочно</string>
-    <string name="pallet_close_confirm_title">Закрыть паллету досрочно?</string>
-    <string name="pallet_close_confirm_body">В паллете %1$d из %2$d коробов.</string>
-    <string name="pallet_close_confirm_confirm">Закрыть паллету</string>
+    <string name="work_close_pallet_early">Закрыть палет досрочно</string>
+    <string name="pallet_close_confirm_title">Закрыть палет досрочно?</string>
+    <string name="pallet_close_confirm_body">В палете %1$d из %2$d коробов.</string>
+    <string name="pallet_close_confirm_confirm">Закрыть палет</string>
     <plurals name="work_labels_unprinted">
         <item quantity="one">%d этикетка не напечатана</item>
         <item quantity="few">%d этикетки не напечатаны</item>
@@ -461,17 +461,17 @@
     <string name="box_refused_invalid_serial">Номер не подошёл под префикс</string>
     <string name="box_refused_invalid_serial_hint">Короб остался открытым. Попробуйте закрыть ещё раз.</string>
     <string name="box_refused_dismiss">Понятно</string>
-    <string name="pallet_close_title">Паллета закрыта</string>
+    <string name="pallet_close_title">Палет закрыт</string>
     <string name="pallet_close_boxes">%1$d коробов</string>
-    <string name="pallet_refused_empty">В паллете нет коробов</string>
-    <string name="pallet_refused_no_serials_hint">Паллета осталась открытой. Подключитесь к сети — устройство получит новый блок номеров.</string>
-    <string name="pallet_refused_invalid_serial_hint">Паллета осталась открытой. Попробуйте закрыть ещё раз.</string>
+    <string name="pallet_refused_empty">В палете нет коробов</string>
+    <string name="pallet_refused_no_serials_hint">Палет остался открытым. Подключитесь к сети — устройство получит новый блок номеров.</string>
+    <string name="pallet_refused_invalid_serial_hint">Палет остался открытым. Попробуйте закрыть ещё раз.</string>
     <string name="print_reason_no_paper">Нет бумаги</string>
     <string name="print_reason_head_open">Открыта крышка</string>
     <string name="print_reason_unreachable">Принтер не отвечает</string>
     <string name="print_reason_printer_unconfigured">Принтер не настроен</string>
     <string name="print_reason_template_missing">У смены нет шаблона этикетки</string>
-    <string name="print_reason_product_missing">Товар паллеты не найден</string>
+    <string name="print_reason_product_missing">Товар палета не найден</string>
     <string name="print_reason_template_invalid">Шаблон этикетки не читается</string>
     <string name="print_reason_render_failed">Не удалось построить этикетку</string>
     <string name="print_reason_transport_failed">Принтер отказал</string>
@@ -484,7 +484,7 @@
     <string name="label_queue_deferred">Отложена</string>
     <string name="label_queue_resolve">Этикетка напечаталась</string>
     <string name="label_queue_kind_box">Короб</string>
-    <string name="label_queue_kind_pallet">Паллета</string>
+    <string name="label_queue_kind_pallet">Палет</string>
 
     <!-- Печать дубликата Data Matrix -->
     <string name="duplicate_failed_title">Дубликат не напечатан</string>
@@ -541,27 +541,27 @@
     <string name="disassemble_not_closed">Этот короб ещё открыт — его можно очистить, а не расформировать</string>
     <string name="disassemble_already">Короб уже расформирован</string>
     <string name="disassemble_unknown_sscc">Этот SSCC не принадлежит коробу этой смены</string>
-    <!-- Расформирование паллеты (оба вида) -->
-    <string name="exceptions_disassemble_pallet">Расформировать паллету</string>
-    <string name="exceptions_no_closed_pallets">Нет закрытых паллет</string>
-    <string name="pallet_disassemble_scan_hint">Отсканируйте этикетку паллеты</string>
-    <string name="pallet_disassemble_unknown">Это не этикетка закрытой паллеты</string>
-    <string name="pallet_disassemble_not_closed">Паллета ещё открыта</string>
-    <string name="pallet_disassemble_already">Паллета уже расформирована</string>
+    <!-- Расформирование палета (оба вида) -->
+    <string name="exceptions_disassemble_pallet">Расформировать палет</string>
+    <string name="exceptions_no_closed_pallets">Нет закрытых палетов</string>
+    <string name="pallet_disassemble_scan_hint">Отсканируйте этикетку палета</string>
+    <string name="pallet_disassemble_unknown">Это не этикетка закрытого палета</string>
+    <string name="pallet_disassemble_not_closed">Палет ещё открыт</string>
+    <string name="pallet_disassemble_already">Палет уже расформирован</string>
     <string name="pallet_disassemble_unavailable">Не удалось расформировать — попробуйте ещё раз</string>
     <plurals name="pallet_disassemble_context">
-        <item quantity="one">Паллета …%1$s · %2$d короб</item>
-        <item quantity="few">Паллета …%1$s · %2$d короба</item>
-        <item quantity="many">Паллета …%1$s · %2$d коробов</item>
-        <item quantity="other">Паллета …%1$s · %2$d коробов</item>
+        <item quantity="one">Палет …%1$s · %2$d короб</item>
+        <item quantity="few">Палет …%1$s · %2$d короба</item>
+        <item quantity="many">Палет …%1$s · %2$d коробов</item>
+        <item quantity="other">Палет …%1$s · %2$d коробов</item>
     </plurals>
     <plurals name="pallet_disassemble_confirm_body">
-        <item quantity="one">Паллета …%1$s, %2$d короб. Расформировать?</item>
-        <item quantity="few">Паллета …%1$s, %2$d короба. Расформировать?</item>
-        <item quantity="many">Паллета …%1$s, %2$d коробов. Расформировать?</item>
-        <item quantity="other">Паллета …%1$s, %2$d коробов. Расформировать?</item>
+        <item quantity="one">Палет …%1$s, %2$d короб. Расформировать?</item>
+        <item quantity="few">Палет …%1$s, %2$d короба. Расформировать?</item>
+        <item quantity="many">Палет …%1$s, %2$d коробов. Расформировать?</item>
+        <item quantity="other">Палет …%1$s, %2$d коробов. Расформировать?</item>
     </plurals>
-    <string name="pallet_disassemble_done">Паллета расформирована</string>
+    <string name="pallet_disassemble_done">Палет расформирован</string>
     <string name="reason_wrong_product">Неверный товар</string>
     <string name="reason_wrong_quantity">Неверное количество</string>
     <string name="reason_damaged_package">Упаковка повреждена</string>
@@ -570,7 +570,7 @@
     <string name="reason_unreadable_label">Этикетка не читается</string>
     <string name="reason_printer_jam">Замятие принтера / нет печати</string>
     <string name="reason_quality_request">Запрос контроля качества</string>
-    <string name="reason_pallet_contents_changed">Состав паллеты изменился</string>
+    <string name="reason_pallet_contents_changed">Состав палета изменился</string>
     <string name="reprint_title">Перепечатать этикетку</string>
     <string name="reprint_last">Последняя · короб %1$d</string>
     <string name="reprint_scan">Сканировать SSCC короба</string>
@@ -586,7 +586,7 @@
     <string name="recovery_unresolved_text">Данные сохранены и закрыты для отправки. Обратитесь к администратору для проверки прежнего подключения.</string>
     <string name="recovery_connect">Подключить прежнее устройство</string>
     <string name="recovery_code_hint">Введите код, выданный администратором для этой же записи устройства.</string>
-    <string name="recovery_summary">Ожидают отправки: сканы %1$d · инвентаризация %2$d · этикетки %3$d · короба %4$d · паллеты %5$d · исключения %6$d · закрытия %7$d · списания %8$d\nКонфликты: %9$d · Неизвестный результат печати: %10$d</string>
+    <string name="recovery_summary">Ожидают отправки: сканы %1$d · инвентаризация %2$d · этикетки %3$d · короба %4$d · палеты %5$d · исключения %6$d · закрытия %7$d · списания %8$d\nКонфликты: %9$d · Неизвестный результат печати: %10$d</string>
     <string name="recovery_summary_unknown">Количество сохранённых записей пока недоступно.</string>
     <string name="recovery_mismatch">Код относится к другой организации или устройству. Данные сохранены. Нужен код прежней записи устройства.</string>
     <string name="recovery_update_required">Сервер не поддерживает безопасное восстановление. Требуется обновление сервера. Данные сохранены.</string>
@@ -625,7 +625,7 @@
     <string name="printer_assignments_hint">Один принтер для каждого вида этикетки. Один принтер может печатать все три вида.</string>
     <string name="printer_purpose_box">Короб</string>
     <string name="printer_purpose_duplicate">Дубль кода</string>
-    <string name="printer_purpose_pallet">Паллета</string>
+    <string name="printer_purpose_pallet">Палет</string>
     <string name="printer_unassigned">Не назначен</string>
     <string name="printer_choose">Выбрать принтер</string>
     <string name="printer_no_fallback">Автоматической замены нет</string>
@@ -717,7 +717,7 @@
     <string name="replacement_inventories">События инвентаризации: %1$s</string>
     <string name="replacement_closures">Закрытия смен: %1$s</string>
     <string name="replacement_labels">Этикетки изделий: %1$s</string>
-    <string name="replacement_boxes">Короба и паллеты: %1$s</string>
+    <string name="replacement_boxes">Короба и палеты: %1$s</string>
     <string name="replacement_exceptions">Исключения и списания: %1$s</string>
     <string name="replacement_conflicts">Конфликты: %1$s</string>
     <string name="replacement_prints">Неизвестный результат печати: %1$s</string>
@@ -727,8 +727,8 @@
     <string name="replacement_waiting">Устройство подключено и ожидает безопасного перехода. Новая работа станет доступна после истечения автономных разрешений старого устройства и подтверждения сервера.</string>
 
     <!-- Warehouse pallets -->
-    <string name="pallets_title">Паллеты</string>
-    <string name="hub_tile_pallets">Паллеты</string>
+    <string name="pallets_title">Палеты</string>
+    <string name="hub_tile_pallets">Палеты</string>
     <string name="hub_pallets_no_permission">нет прав</string>
     <plurals name="hub_pallets_pending">
         <item quantity="one">%d короб не отправлен</item>
@@ -736,14 +736,14 @@
         <item quantity="many">%d коробов не отправлено</item>
         <item quantity="other">%d коробов не отправлено</item>
     </plurals>
-    <string name="pallets_blocked_permission_title">Нет права собирать паллеты</string>
-    <string name="pallets_blocked_permission_text">Попросите менеджера включить «Сборка паллет на ТСД» в карточке сотрудника.</string>
+    <string name="pallets_blocked_permission_title">Нет права собирать палеты</string>
+    <string name="pallets_blocked_permission_text">Попросите менеджера включить «Сборка палетов на ТСД» в карточке сотрудника.</string>
     <string name="pallets_blocked_sync_title">Справочник ещё не загружен</string>
     <string name="pallets_blocked_sync_text">Подключитесь к сети и откройте раздел заново.</string>
     <string name="pallets_to_hub">На главный экран</string>
     <string name="pallets_refresh">Обновить реестр</string>
     <string name="pallets_empty_title">Отсканируйте короб</string>
-    <string name="pallets_empty_text">Первый короб задаёт товар паллеты.</string>
+    <string name="pallets_empty_text">Первый короб задаёт товар палета.</string>
     <plurals name="pallets_count_no_capacity">
         <item quantity="one">%d короб · ёмкость не задана</item>
         <item quantity="few">%d короба · ёмкость не задана</item>
@@ -754,42 +754,42 @@
     <string name="pallets_status_pending">в очереди</string>
     <string name="pallets_status_sent">отправляется</string>
     <string name="pallets_status_accepted">принят</string>
-    <string name="pallets_remove">Убрать с паллеты</string>
+    <string name="pallets_remove">Убрать с палета</string>
     <string name="pallets_verdict_attached">Принят …%1$s</string>
-    <string name="pallets_verdict_already">Уже на этой паллете …%1$s</string>
-    <string name="pallets_verdict_on_pallet">Уже на паллете …%1$s</string>
-    <string name="pallets_verdict_on_open_pallet">Уже на открытой паллете другого устройства</string>
-    <string name="pallets_verdict_on_local">Уже на другой паллете этого ТСД</string>
+    <string name="pallets_verdict_already">Уже на этом палете …%1$s</string>
+    <string name="pallets_verdict_on_pallet">Уже на палете …%1$s</string>
+    <string name="pallets_verdict_on_open_pallet">Уже на открытом палете другого устройства</string>
+    <string name="pallets_verdict_on_local">Уже на другом палете этого ТСД</string>
     <string name="pallets_verdict_other_product">Другой товар: %1$s</string>
     <string name="pallets_verdict_unknown_box">Короб неизвестен. Обновите реестр</string>
     <string name="pallets_verdict_unknown_product">Товар неизвестен</string>
-    <string name="pallets_verdict_is_pallet">Это паллета, не короб</string>
+    <string name="pallets_verdict_is_pallet">Это палет, не короб</string>
     <string name="pallets_verdict_unit_code">Это код единицы, нужен SSCC короба</string>
     <string name="pallets_verdict_not_a_code">Это не код</string>
     <string name="pallets_verdict_unavailable">Не удалось проверить короб — попробуйте ещё раз</string>
     <plurals name="pallets_rejected">
-        <item quantity="one">Снимите с паллеты %d короб</item>
-        <item quantity="few">Снимите с паллеты %d короба</item>
-        <item quantity="many">Снимите с паллеты %d коробов</item>
-        <item quantity="other">Снимите с паллеты %d коробов</item>
+        <item quantity="one">Снимите с палета %d короб</item>
+        <item quantity="few">Снимите с палета %d короба</item>
+        <item quantity="many">Снимите с палета %d коробов</item>
+        <item quantity="other">Снимите с палета %d коробов</item>
     </plurals>
-    <string name="pallets_reject_already_on_pallet">На паллете …%1$s</string>
-    <string name="pallets_reject_already_on_open_pallet">На открытой паллете другого устройства</string>
+    <string name="pallets_reject_already_on_pallet">На палете …%1$s</string>
+    <string name="pallets_reject_already_on_open_pallet">На открытом палете другого устройства</string>
     <string name="pallets_reject_not_found">Сервер не знает этот короб</string>
     <string name="pallets_reject_not_closed">Короб не закрыт</string>
     <string name="pallets_reject_disassembled">Короб расформирован</string>
-    <string name="pallets_reject_pallet_closed">Паллета уже закрыта на сервере</string>
+    <string name="pallets_reject_pallet_closed">Палет уже закрыт на сервере</string>
     <string name="pallets_reject_product_mismatch">Другой товар</string>
     <string name="pallets_reject_read_only">Подписка только для чтения</string>
     <string name="pallets_reject_other">Отклонено сервером</string>
     <string name="pallets_acknowledge">Принято</string>
-    <string name="pallets_rejected_pallet">Паллета …%1$s</string>
-    <string name="pallets_rejected_pallet_open">Открытая паллета</string>
-    <string name="pallets_rejection_pallet_unknown">Паллета</string>
+    <string name="pallets_rejected_pallet">Палет …%1$s</string>
+    <string name="pallets_rejected_pallet_open">Открытый палет</string>
+    <string name="pallets_rejection_pallet_unknown">Палет</string>
     <string name="pallets_reprint">Перепечатать этикетку</string>
-    <string name="pallet_refused_no_template">Нет шаблона этикетки паллеты — задайте его в кабинете</string>
-    <string name="pallet_refused_no_issuer">В организации не задан GLN — паллета не получит номер</string>
-    <string name="pallet_refused_unavailable">Не удалось закрыть паллету — попробуйте ещё раз</string>
+    <string name="pallet_refused_no_template">Нет шаблона этикетки палета — задайте его в кабинете</string>
+    <string name="pallet_refused_no_issuer">В организации не задан GLN — палет не получит номер</string>
+    <string name="pallet_refused_unavailable">Не удалось закрыть палет — попробуйте ещё раз</string>
 
     <!-- Pairing with an on-site host (Автоном), plan ТСД-А С4 -->
     <string name="host_pairing_source_title">Куда привязать ТСД</string>
@@ -850,16 +850,16 @@
     <string name="host_queue_support_title">Запись очереди Маркиро</string>
     <string name="host_queue_kind_scan">Скан</string>
     <string name="host_queue_kind_box">Короб</string>
-    <string name="host_queue_kind_pallet">Паллета смены</string>
+    <string name="host_queue_kind_pallet">Палет смены</string>
     <string name="host_queue_kind_shift_close">Закрытие смены</string>
-    <string name="host_queue_kind_wh_open">Складская паллета: открытие</string>
-    <string name="host_queue_kind_wh_add">Короб на паллету</string>
-    <string name="host_queue_kind_wh_remove">Короб снят с паллеты</string>
-    <string name="host_queue_kind_wh_close">Складская паллета: закрытие</string>
+    <string name="host_queue_kind_wh_open">Складской палет: открытие</string>
+    <string name="host_queue_kind_wh_add">Короб на палет</string>
+    <string name="host_queue_kind_wh_remove">Короб снят с палета</string>
+    <string name="host_queue_kind_wh_close">Складской палет: закрытие</string>
     <string name="host_reject_other_device">Смена закрыта на хосте или занята другим устройством</string>
     <string name="host_reject_bug">Запись изменилась после первой отправки — сообщите в поддержку</string>
-    <string name="host_reject_license">В лицензии хоста нет режима паллет</string>
-    <string name="host_reject_pallet_conflict">Короб уже на другой паллете</string>
+    <string name="host_reject_license">В лицензии хоста нет режима палетов</string>
+    <string name="host_reject_pallet_conflict">Короб уже на другом палете</string>
     <string name="host_reject_data">Хост не принял данные записи</string>
     <string name="host_dataset_reset_title">Данные хоста заменены</string>
     <string name="host_dataset_reset_body">Закройте приложение этой кнопкой и откройте его снова. Старые задания и очереди будут удалены при запуске. Подключение и настройки принтеров сохранятся.</string>
@@ -884,4 +884,48 @@
     <string name="close_summary_part_title">Ваша часть закрыта</string>
     <string name="close_summary_part_closed">Смена закроется, когда закроют остальные</string>
     <string name="close_summary_reason_missing">Смена закрыта. Причину недовыполнения плана внесёт офис</string>
+
+    <!-- Site-wide disassembly on Avtonom -->
+    <string name="pack_disassembly_title">Расформирование</string>
+    <string name="pack_disassembly_tile_hint">Короба и палеты площадки</string>
+    <string name="pack_disassembly_scan">Сканируйте SSCC упаковки</string>
+    <string name="pack_disassembly_scan_body">Короб или палет, в том числе собранный в офисе или на другом ТСД. Нужна связь с хостом.</string>
+    <string name="pack_disassembly_reason">Выберите причину</string>
+    <string name="pack_disassembly_no_reasons">На хосте нет доступных причин. Проверьте справочник причин расформирования в офисе.</string>
+    <string name="pack_disassembly_confirm">Расформировать упаковку?</string>
+    <string name="pack_disassembly_box_effect">Коды выйдут из короба и станут свободными. SSCC короба больше не используется. Это действие нельзя отменить.</string>
+    <string name="pack_disassembly_pallet_effect">Короба выйдут из палета и сохранят свои коды. Их можно собрать на другой палет. Это действие нельзя отменить.</string>
+    <string name="pack_disassembly_apply">Расформировать</string>
+    <string name="pack_disassembly_box">КОРОБ</string>
+    <string name="pack_disassembly_pallet">ПАЛЕТ</string>
+    <string name="pack_disassembly_counts">Коробов: %1$d · Кодов: %2$d</string>
+    <string name="pack_disassembly_done">Упаковка расформирована</string>
+    <string name="pack_disassembly_document">Документ %1$s проведён. Акт и XML доступны в офисе.</string>
+    <string name="pack_disassembly_next">Следующая упаковка</string>
+    <string name="pack_disassembly_working">Проверяем данные…</string>
+    <string name="pack_disassembly_wait">Дождитесь ответа хоста.</string>
+    <string name="pack_disassembly_refused">Не удалось продолжить</string>
+    <string name="pack_disassembly_invalid">Нужен SSCC с ярлыка короба или палета.</string>
+    <string name="pack_disassembly_not_found">Упаковка не найдена на этом хосте. Проверьте ярлык и подключение.</string>
+    <string name="pack_disassembly_changed">Состав или состояние изменились. Отсканируйте упаковку и подтвердите действие заново.</string>
+    <string name="pack_disassembly_shift_open">Смена ещё открыта. Закройте её перед расформированием.</string>
+    <string name="pack_disassembly_not_closed">Упаковка ещё открыта. Сначала закройте её.</string>
+    <string name="pack_disassembly_already">Упаковка уже расформирована.</string>
+    <string name="pack_disassembly_forbidden">Проверьте вход оператора и подключение ТСД. Для операции нужен активный оператор.</string>
+    <string name="pack_disassembly_restore">Хост восстанавливается из копии. Дождитесь возобновления работы в офисе.</string>
+    <string name="pack_disassembly_host_update">Обновите хост Автонома: эта версия ещё не поддерживает расформирование с ТСД.</string>
+    <string name="pack_disassembly_office_only">Эту упаковку нельзя расформировать на ТСД. Проверьте её в офисе.</string>
+    <string name="pack_disassembly_recovery">Подключение ТСД изменилось. Выполните вход или подключение заново.</string>
+    <string name="pack_disassembly_unreadable">Не удалось прочитать сохранённый запрос. Не создавайте повторную операцию: проверьте результат в офисе и обратитесь к администратору.</string>
+    <string name="pack_disassembly_unavailable">Нет достоверного ответа хоста. Проверьте связь и повторите проверку.</string>
+    <string name="pack_disassembly_unknown">Результат пока неизвестен</string>
+    <string name="pack_disassembly_unknown_body">Операция могла быть выполнена. Повторная проверка отправит тот же сохранённый запрос и вернёт исходный документ.</string>
+    <string name="pack_disassembly_check_result">Проверить результат</string>
+    <string name="pack_disassembly_request">Запрос: %1$s</string>
+    <string name="pack_disassembly_to_hub">На главный экран</string>
+    <string name="pack_disassembly_sealed">Нужна проверка в офисе</string>
+    <string name="pack_disassembly_sealed_body">Запрос относится к другому оператору, подключению или набору данных. Он не будет отправлен автоматически. Проверьте результат в офисе перед новой операцией.</string>
+    <string name="pack_disassembly_archive">Результат проверен в офисе</string>
+    <string name="pack_disassembly_archive_confirm">Сохранить запрос в историю?</string>
+    <string name="pack_disassembly_archive_body">Сведения о запросе сохранятся для сверки. Он больше не будет отправляться. Убедитесь в офисе, что упаковка имеет нужное состояние.</string>
 </resources>

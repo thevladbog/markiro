@@ -53,7 +53,8 @@ class HostReferenceSync(
                 "label_templates" -> template(item)
                 "category_template_defaults" -> categoryDefault(item)
                 "org_profile" -> organization(item)
-                else -> Unit // `site`, `code_releases`: nothing a handheld keeps
+                "code_releases" -> releaseCodes(item)
+                else -> Unit // `site`: nothing a handheld keeps
             }
         }
         rebuildPalletTemplates()
@@ -86,6 +87,20 @@ class HostReferenceSync(
     }
 
     private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+
+    private suspend fun releaseCodes(item: ChangeItemDto) {
+        check(!item.deleted) { "A code release cannot be deleted" }
+        val data=checkNotNull(item.data)
+        val shiftId=checkNotNull(data.text("shiftId"))
+        val at=checkNotNull(data.text("releasedAt"))
+        java.time.Instant.parse(at)
+        db.boxRegistryDao().removeBox(item.id)
+        val box=db.boxDao().get(item.id) ?: return
+        check(box.shiftId==shiftId && box.closedAt!=null) { "Code release does not match a closed local box" }
+        db.boxDao().markDisassembled(box.boxId,at)
+        // Keep raw outbox sources and frozen host bytes: only receipts retire those.
+        db.codeDao().deleteInBox(box.boxId)
+    }
 
     private suspend fun operator(item: ChangeItemDto) {
         val data = item.data

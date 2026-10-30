@@ -251,6 +251,7 @@ fn held_by_a_restore(path: &str) -> bool {
     path == "/v1/device/facts"
         // Its records lean on boxes and blocks a copy may lack (plan ТСД-Х).
         || path == "/v1/device/pallet-events"
+        || path.starts_with("/v1/device/disaggregation/")
         || path.starts_with("/v1/device/codes/")
         // A reprint looks up and records against shifts, boxes and codes a
         // copy may lack (plan СКЛ).
@@ -324,6 +325,14 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/device/pallet-events",
             post(crate::routes::pallet_events::receive_events),
+        )
+        .route(
+            "/v1/device/disaggregation/lookup",
+            post(crate::routes::device_disaggregation::lookup),
+        )
+        .route(
+            "/v1/device/disaggregation/apply",
+            post(crate::routes::device_disaggregation::apply),
         )
         .route(
             "/v1/device/box-registry",
