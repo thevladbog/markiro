@@ -945,7 +945,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     await openCard(session, PLANNED, vi.fn<PrintForm>(), fakeOfficeFiles());
     fireEvent.click(screen.getByRole("button", { name: "Бланк смены" }));
     const dialog = screen.getByRole("dialog", { name: "Бланк смены OCT26-005" });
-    const text = await within(dialog).findByText(/бланк не из чего собрать/);
+    const text = await within(dialog).findByText(/Без этих данных нельзя сформировать бланк/);
     expect(text.closest('[aria-live="polite"]')).not.toBeNull();
     // Not also «the blank is only of a planned or an active shift»: the blank is of one.
     expect(within(dialog).queryByText(/Бланк печатается только/)).toBeNull();

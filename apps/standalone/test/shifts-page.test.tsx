@@ -791,7 +791,7 @@ describe("office shifts: the list, boundaries and states", () => {
     // Names that came in stay names; what is missing is shown by the start of its code.
     expect(
       await screen.findByText(
-        "Не все справочники загрузились: названия, которых нет, показаны началами кодов, а смены, которые не откроются, могут быть не помечены.",
+        "Не все справочники загрузились. Вместо недоступных названий показаны первые символы идентификаторов. Некоторые смены могут не иметь отметки о том, что их нельзя открыть.",
       ),
     ).toBeTruthy();
     expect(cells("OCT26-005")[PRODUCT]).toBe("Вода 0,5 л");

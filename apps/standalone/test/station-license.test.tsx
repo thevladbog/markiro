@@ -35,7 +35,7 @@ describe("the license on the floor (spec §9.6)", () => {
     const line = floorLicenseLine(deviceLicense("grace", GRACE_END), DURING);
     expect(line?.tone).toBe("warn");
     expect(said(line)).toBe(
-      `Лицензия площадки истекла. Новые смены откроются до ${licenseDayMonth(lastMomentBefore(GRACE_END), null)}. Сообщите администратору.`,
+      `Лицензия площадки истекла. Новые смены можно открывать до ${licenseDayMonth(lastMomentBefore(GRACE_END), null)}. Сообщите администратору.`,
     );
     expect(opensBlocked(deviceLicense("grace", GRACE_END))).toBeNull();
   });

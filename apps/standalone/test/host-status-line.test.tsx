@@ -11,7 +11,7 @@ const AT_14_05 = new Date(2026, 8, 27, 14, 5).getTime();
 /** 14:05 the day before `AT_14_05`, same clock. */
 const YESTERDAY_AT_14_05 = new Date(2026, 8, 26, 14, 5).getTime();
 
-const SYNC_FAILED = "Справочники не обновились — повторим автоматически";
+const SYNC_FAILED = "Справочники не обновились. Программа повторит попытку автоматически.";
 
 function status(overrides: Partial<HostStatus>): HostStatus {
   return { state: "online", lastContactAt: AT_14_05, lastError: null, seq: 1, ...overrides };
@@ -145,7 +145,7 @@ describe("HostStatusLine", () => {
   it.each<[SyncFailure, string]>([
     ["host", "Запрос к хосту не удался."],
     ["local", "Не удалось записать справочники на этом компьютере."],
-    ["feed", "Ленту изменений хоста не удалось применить."],
+    ["feed", "Не удалось применить изменения, полученные с хоста."],
   ])(
     "warns while the host answers that the copies did not update (%s), in the live region",
     (failure, reason) => {

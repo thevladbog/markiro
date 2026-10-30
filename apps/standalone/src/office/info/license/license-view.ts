@@ -74,9 +74,9 @@ export function planText(plan: string): LicenseText {
 }
 
 /**
- * Whether the site holds a subscription file: the owner's promise that its
- * next file is free (a subscription file lasts at most a year from its issue,
- * and the file does not say why its term ends, so every one gets the line).
+ * Whether the site holds a subscription file, whose renewal follows the
+ * agreed subscription terms. The legacy translation keys use `freeRenewal`;
+ * the notice does not promise a free license file.
  * Never a demo file, the trial, or a plan a newer cloud adds.
  */
 function renewsFree(license: OfficeLicense): boolean {
@@ -353,8 +353,8 @@ const FREE_RENEWAL_NOTICES: ReadonlySet<LicenseNoticeKind> = new Set([
 ]);
 
 /**
- * The words that follow a warning's own: a subscription's warnings about its
- * term add that its next file is free (the owner's line); every other, nothing.
+ * The words that follow a warning's own: a subscription's term warnings
+ * explain that renewal follows the agreed subscription terms.
  */
 export function noticeFreeRenewal(
   notice: LicenseNotice,

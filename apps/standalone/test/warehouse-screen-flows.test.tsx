@@ -182,7 +182,7 @@ describe("a label that did not go out", () => {
     await at.press("Рабочее место");
     expect(at.props.onSetup).toHaveBeenCalledTimes(1);
     await at.scan(PALLET_SSCC);
-    expect(await screen.findByText("Сначала решите текущую печать.")).toBeTruthy();
+    expect(await screen.findByText("Сначала завершите работу с текущей этикеткой.")).toBeTruthy();
     expect(at.lookup).toHaveBeenCalledTimes(1);
     await at.press("Отменить печать");
     expect(await screen.findByText("Печать отменена")).toBeTruthy();
@@ -411,7 +411,7 @@ describe("a restart of the screen", () => {
     ]);
     await again.scanner.listening();
     await again.scan(PALLET_SSCC);
-    expect(await screen.findByText("Сначала решите текущую печать.")).toBeTruthy();
+    expect(await screen.findByText("Сначала завершите работу с текущей этикеткой.")).toBeTruthy();
     expect(again.shell.sends).toHaveLength(0);
   });
 

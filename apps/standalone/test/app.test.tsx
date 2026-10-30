@@ -723,7 +723,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     expect(
       await screen.findByText(
-        "На этом компьютере не отправлено на хост записей смен: 2. После сброса подключения они останутся на диске этого ПК, но отправить их на хост будет нельзя.",
+        "На этом компьютере остались неотправленные записи смен: 2. После сброса подключения они останутся на диске этого ПК, но отправить их на хост будет нельзя.",
       ),
     ).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
@@ -745,7 +745,7 @@ describe("App", () => {
       local: withUnsentRecords(),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Сбросить подключение" }));
-    expect(await screen.findByText(/не отправлено на хост записей смен: 3\./)).toBeTruthy();
+    expect(await screen.findByText(/остались неотправленные записи смен: 3\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([
@@ -769,7 +769,7 @@ describe("App", () => {
     });
     expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
-    expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
+    expect(await screen.findByText(/остались неотправленные записи смен: 2\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([
@@ -857,7 +857,7 @@ describe("App", () => {
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 3 });
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
-    expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
+    expect(screen.queryByText(/остались неотправленные записи смен/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
   });
 
@@ -929,7 +929,7 @@ describe("App", () => {
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сбросить, не вернув блоки" }));
-    expect(await screen.findByText(/не отправлено на хост записей смен: 1\./)).toBeTruthy();
+    expect(await screen.findByText(/остались неотправленные записи смен: 1\./)).toBeTruthy();
     // The blocks were answered for; the records are a question of their own.
     expect(screen.queryByText(OWED)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
@@ -1032,14 +1032,14 @@ describe("App", () => {
       local: withUnsentRecords(),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
-    expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
+    expect(await screen.findByText(/остались неотправленные записи смен: 2\./)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Сбросить всё равно" })).toBeTruthy();
 
     host.getChanges.mockResolvedValue(feedPage(8, [], OTHER_HOST_ID));
     await link.revision(8);
     expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
     // The count belongs to the refusal it was made for.
-    expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
+    expect(screen.queryByText(/остались неотправленные записи смен/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
     expect(device.forget.mock.calls).toEqual([[{ repair: true }]]);
   });
@@ -1075,9 +1075,7 @@ describe("App", () => {
     });
     expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(
-      screen.getByText(
-        "Это приложение говорит на более старом протоколе, чем принимает служба «Markiro Хост». Обновите приложение.",
-      ),
+      screen.getByText("Версия протокола приложения устарела. Обновите приложение."),
     ).toBeTruthy();
   });
 
@@ -1196,9 +1194,7 @@ describe("App", () => {
     });
     expect(await screen.findByText("Приложение и хост несовместимы")).toBeTruthy();
     expect(
-      screen.getByText(
-        "Это приложение говорит на более старом протоколе, чем принимает служба «Markiro Хост». Обновите приложение.",
-      ),
+      screen.getByText("Версия протокола приложения устарела. Обновите приложение."),
     ).toBeTruthy();
     expect(screen.queryByText("Вход оператора")).toBeNull();
   });
@@ -1404,11 +1400,11 @@ describe("App", () => {
       lastError: "dataset_reset_failed",
       seq: 2,
     });
-    await screen.findByText("Не удалось обновить местные данные");
+    await screen.findByText("Не удалось обновить локальные данные");
     expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(screen.queryByRole("button", { name: "Вход в офис" })).toBeNull();
     await link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 3 });
-    expect(screen.getByText("Не удалось обновить местные данные")).toBeTruthy();
+    expect(screen.getByText("Не удалось обновить локальные данные")).toBeTruthy();
   });
 
   it("names the remote host whose certificate changed on the link", async () => {
@@ -1924,7 +1920,9 @@ describe("reference sync health on screen", () => {
     });
     await openStationLinkDetails();
     expect(
-      await screen.findByText("Справочники не обновились — повторим автоматически"),
+      await screen.findByText(
+        "Справочники не обновились. Программа повторит попытку автоматически.",
+      ),
     ).toBeTruthy();
     expect(screen.getByText("Запрос к хосту не удался.")).toBeTruthy();
 
@@ -1932,13 +1930,17 @@ describe("reference sync health on screen", () => {
     await signIn();
     await screen.findByRole("heading", { name: "Обзор", level: 1 });
     expect(
-      within(openLinkDetails()).getByText("Справочники не обновились — повторим автоматически"),
+      within(openLinkDetails()).getByText(
+        "Справочники не обновились. Программа повторит попытку автоматически.",
+      ),
     ).toBeTruthy();
 
     host.getChanges.mockResolvedValue(feedPage(43));
     await link.revision(43);
     await waitFor(() =>
-      expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull(),
+      expect(
+        screen.queryByText("Справочники не обновились. Программа повторит попытку автоматически."),
+      ).toBeNull(),
     );
   });
 
@@ -2930,10 +2932,7 @@ describe("the operator on the floor", () => {
     await act(async () => {
       failProbe(new HostProbeError("host_too_old", "old"));
     });
-    await screen.findByText(
-      "Служба «Markiro Хост» говорит на более старом протоколе, чем это приложение.",
-      { exact: false },
-    );
+    await screen.findByText("Версия протокола хоста устарела.", { exact: false });
     // The floor comes back with a sign-in screen of its own, and only then
     // does the first screen's check finish: it ended with its screen.
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));

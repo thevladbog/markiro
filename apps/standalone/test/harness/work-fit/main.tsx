@@ -232,7 +232,7 @@ function Harness() {
                               data-action="box-undo"
                               aria-label="Снять последний код"
                             >
-                              Снять последний
+                              Убрать последний код
                             </Button>
                             <Button size="floor" variant="secondary" data-action="box-clear">
                               Очистить короб

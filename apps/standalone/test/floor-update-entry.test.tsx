@@ -66,7 +66,7 @@ describe("«Станция»: the version block", () => {
 
   it("says the last version is installed after a check that found nothing", () => {
     inTheme(entry({ checked: true }), <StationPanel facts={facts} />);
-    expect(screen.getByText("Обновлений нет — установлена последняя версия.")).toBeTruthy();
+    expect(screen.getByText("Хост не предлагает обновление.")).toBeTruthy();
   });
 
   it("says the update comes from the host PC when the host cannot be reached", () => {

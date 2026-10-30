@@ -66,7 +66,7 @@ function heldWith(secret: string): unknown[] {
     .filter((held) => JSON.stringify(held).includes(secret));
 }
 
-const FREE_RENEWAL = "Новый файл по истечении срока бесплатно запрашивается у нас.";
+const RENEWAL_TERMS = "Лицензия продлевается согласно условиям заключённой подписки.";
 
 beforeEach(() => {
   writeText.mockReset();
@@ -135,7 +135,7 @@ describe("«Лицензия» on «Информация»", () => {
     expect(state.classList.contains("mk-alert--ok")).toBe(true);
     expect(within(state).getByText("Действует")).toBeTruthy();
     expect(within(state).getByText("Действует по 31.10.2027 включительно.")).toBeTruthy();
-    expect(within(state).getByText(FREE_RENEWAL)).toBeTruthy();
+    expect(within(state).getByText(RENEWAL_TERMS)).toBeTruthy();
     expect(rowsOf(within(card).getByRole("region", { name: "Рабочие места" }))).toEqual([
       ["Станции и ТСД", "3", "5", "в пределах лицензии"],
       ["Пользователи офиса", "2", "3", "в пределах лицензии"],
@@ -226,11 +226,11 @@ describe("«Лицензия» on «Информация»", () => {
     [TRIAL_EXPIRED, false],
     [DEMO, false],
   ] as const)(
-    "says a new file is free for a subscription file, never for the trial or a demo (%#)",
+    "explains subscription renewal terms, never for the trial or a demo (%#)",
     async (license, free) => {
       const card = await openLicense(sessionWith(license));
-      expect(within(stateOf(card)).queryByText(FREE_RENEWAL) !== null).toBe(free);
-      expect(within(card).queryAllByText(FREE_RENEWAL)).toHaveLength(free ? 1 : 0);
+      expect(within(stateOf(card)).queryByText(RENEWAL_TERMS) !== null).toBe(free);
+      expect(within(card).queryAllByText(RENEWAL_TERMS)).toHaveLength(free ? 1 : 0);
     },
   );
 
@@ -256,7 +256,9 @@ describe("«Лицензия» on «Информация»", () => {
       "3",
       "превышено: новые не подключатся",
     ]);
-    expect(within(card).getByText(/новые не подключатся, пока лишние не отозваны/)).toBeTruthy();
+    expect(
+      within(card).getByText(/Новые рабочие места нельзя подключить, пока лишние не отозваны/),
+    ).toBeTruthy();
   });
 
   it("writes «без ограничения» for a quota without a limit", async () => {

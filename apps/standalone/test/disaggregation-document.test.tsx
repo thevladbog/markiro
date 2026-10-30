@@ -422,7 +422,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     pickFile(new File([tokens.join("\n")], "list.txt"));
     // The cause is told too, so the rest is not added blindly again.
     await expectFocusedNotice(
-      "Добавлено 500 из 1200 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз. На хосте произошла ошибка. Повторите попытку.",
+      "Добавлено 500 из 1200 SSCC. Следующую часть не удалось добавить. Добавьте оставшиеся SSCC ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
     expect(session.api.addDisaggregationLines).toHaveBeenCalledTimes(2);
     await waitFor(() =>
@@ -442,7 +442,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     paste(tokens.join("\n"));
     fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
     await expectFocusedNotice(
-      "Добавлено 500 из 700 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз. На хосте произошла ошибка. Повторите попытку.",
+      "Добавлено 500 из 700 SSCC. Следующую часть не удалось добавить. Добавьте оставшиеся SSCC ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
     const left = (screen.getByLabelText("SSCC коробов или паллет") as HTMLTextAreaElement).value;
     expect(left.split("\n")).toEqual(tokens.slice(500));
@@ -577,7 +577,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     const confirm = await screen.findByRole("alertdialog", { name: "Провести документ?" });
     expect(
       within(confirm).getByText(
-        "Будет расформировано строк: 2, кодов: 12. Коды коробов станут свободными, станции получат это при следующей связи с сервером.",
+        "Будут расформированы упаковки из 2 строк документа, кодов: 12. Коды коробов станут свободными. Станции получат это изменение при следующем подключении к серверу.",
       ),
     ).toBeTruthy();
     expect(session.api.applyDisaggregation).not.toHaveBeenCalled();

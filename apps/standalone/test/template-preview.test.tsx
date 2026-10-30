@@ -268,7 +268,7 @@ describe("the layout preview", () => {
   it("tells that a product duplicate's code is a synthetic sample", () => {
     const { tools } = drawingTools();
     const view = render(preview(ASCII, tools, "product_duplicate"));
-    const sample = "Образец с синтетическим кодом. На линии печатается код со сканера.";
+    const sample = "Образец с тестовым кодом. На линии печатается код, считанный сканером.";
     expect(screen.getByText(sample)).toBeTruthy();
     view.rerender(preview(ASCII, tools));
     expect(screen.queryByText(sample)).toBeNull();
@@ -603,7 +603,7 @@ describe("the template editor's preview", () => {
     await screen.findByRole("heading", { name: "Новый шаблон" });
     const layout = screen.getByRole("heading", { level: 2, name: "Макет" }).closest(".mk-card");
     if (!(layout instanceof HTMLElement)) throw new Error("no layout card");
-    const sample = "Образец с синтетическим кодом. На линии печатается код со сканера.";
+    const sample = "Образец с тестовым кодом. На линии печатается код, считанный сканером.";
     expect(within(layout).queryByText(sample)).toBeNull();
     chooseValue("Назначение", "product_duplicate");
     expect(within(layout).getByText(sample)).toBeTruthy();

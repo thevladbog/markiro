@@ -176,7 +176,7 @@ describe("office devices", () => {
     expect(within(retired).getByText("нет связи")).toBeTruthy();
     expect(within(retired).getByText("Отозвано")).toBeTruthy();
     expect(within(station).getByText("давно не было")).toBeTruthy();
-    expect(within(station).getByText(/^Слышали: /)).toBeTruthy();
+    expect(within(station).getByText(/^Последняя связь: /)).toBeTruthy();
     // A revoked device is a dead record: nothing to change on it.
     expect(within(retired).queryByRole("button")).toBeNull();
   });

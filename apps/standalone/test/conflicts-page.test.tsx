@@ -96,7 +96,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     const links = screen.getAllByRole("link").map((link) => link.textContent);
     expect(links[links.indexOf("Смены") + 1]).toBe("Конфликты");
     expect(value.api.listConflicts).toHaveBeenCalledWith(TOKEN, { reviewed: false, page: 1 });
-    expect(screen.getByText(/Код остаётся за самым ранним сканом/)).toBeTruthy();
+    expect(screen.getByText(/Хост закрепляет код за более ранним сканированием/)).toBeTruthy();
     expect(screen.getByText("Найдено: 2")).toBeTruthy();
     // One page: no pages to turn.
     expect(screen.queryByRole("navigation", { name: "Страницы конфликтов" })).toBeNull();
@@ -116,7 +116,9 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     };
     await openConflicts(session(unboxed));
     const kind = cell(0, "Что произошло").textContent ?? "";
-    expect(kind).toMatch(/^Вытеснение: /);
+    expect(kind).toBe(
+      "Код исключён из результатов этого сканирования: ранее он был отсканирован в другом месте",
+    );
     expect(kind).not.toContain("из короба");
     expect(cell(0, "Проигравший скан").textContent).toContain("Без короба");
     expect(within(cell(0, "Проигравший скан")).queryByRole("link", { name: /Короб/ })).toBeNull();
@@ -125,7 +127,9 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
   it("names the code by GTIN and serial and both scans with shift, station, operator, instant and box", async () => {
     await openConflicts(session());
     expect(cell(0, "Код").textContent).toBe("GTIN 04600682000013 · серийный S000007");
-    expect(cell(0, "Что произошло").textContent).toMatch(/^Вытеснение: /);
+    expect(cell(0, "Что произошло").textContent).toBe(
+      "Код исключён из короба: ранее он был отсканирован в другом месте",
+    );
     const loser = cell(0, "Проигравший скан");
     for (const text of [
       "Смена OCT26-004",
@@ -234,7 +238,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     await openConflicts(value);
     expect(
       screen.getByText(
-        "Смена, чей скан проиграл. Конфликты, где эта смена выиграла код, сюда не попадают.",
+        "Смена, чей скан не получил код из-за более раннего сканирования. Если код закреплён за этой сменой, конфликт в список не попадёт.",
       ),
     ).toBeTruthy();
     chooseState("Все");
