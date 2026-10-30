@@ -212,10 +212,16 @@ test.describe("standalone lead forms", () => {
       Object.defineProperty(window.crypto, "randomUUID", {
         value: () => "33333333-3333-4333-8333-333333333333",
       });
+      sessionStorage.setItem(
+        "markiro:first-touch",
+        JSON.stringify({ utm: { source: "legacy" }, referrer: "https://external.example/private" }),
+      );
     });
     let payload: unknown;
+    let requestHeaders: Record<string, string> | undefined;
     await page.route("**/api/landing-leads", async (route) => {
       payload = route.request().postDataJSON();
+      requestHeaders = await route.request().allHeaders();
       await route.fulfill({
         body: JSON.stringify({ accepted: true, requestId: "33333333-3333-4333-8333-333333333333" }),
         contentType: "application/json",
@@ -228,7 +234,10 @@ test.describe("standalone lead forms", () => {
     page.on("request", (request) => {
       if (request.url().endsWith("/standalone/stable/latest.json")) releaseReads += 1;
     });
-    await page.goto("/skachat/", { waitUntil: "networkidle" });
+    await page.goto("/skachat/?utm_source=private-current", { waitUntil: "networkidle" });
+    await expect
+      .poll(() => page.evaluate(() => sessionStorage.getItem("markiro:first-touch")))
+      .toBeNull();
     // The cookie panel covers the form on phones; a visitor answers it first.
     await page.locator("[data-consent-reject]").click();
     // The release bucket and the captcha are third parties: nothing is asked before the form.
@@ -255,15 +264,16 @@ test.describe("standalone lead forms", () => {
     ).toBeFocused();
     expect(payload).toEqual({
       company: "ООО «Пивоварня»",
-      consentVersion: "MKR-PD-02/2026.08/01",
+      consentVersion: "MKR-PD-02/2026.10/01",
       email: "ivan@zavod.ru",
       intent: "download",
       locale: "ru",
       requestId: "33333333-3333-4333-8333-333333333333",
       sourcePath: "/skachat/",
-      utm: { source: "yandex", medium: "cpc" },
       website: "",
     });
+    expect(requestHeaders).toBeDefined();
+    expect(requestHeaders).not.toHaveProperty("referer");
     const link = page.locator("[data-release-link]:visible");
     await expect(link).toHaveAttribute("href", LATEST_RELEASE.installer.url);
     await expect(page.locator('[data-release="sha256"]')).toHaveText(

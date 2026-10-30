@@ -527,20 +527,26 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
 
     it("does not recreate a mail copy while the lead is being erased", async () => {
       const lead = await submit({}, new Date(clock.getTime() - 2 * 86_400_000));
-      const reachedEnqueue = Promise.withResolvers<void>();
-      const continueEnqueue = Promise.withResolvers<void>();
+      let announceEnqueue = (): void => undefined;
+      let resumeEnqueue = (): void => undefined;
+      const reachedEnqueue = new Promise<void>((resolve) => {
+        announceEnqueue = resolve;
+      });
+      const continueEnqueue = new Promise<void>((resolve) => {
+        resumeEnqueue = resolve;
+      });
       const enqueue = mail.enqueue.bind(mail);
       const spy = vi.spyOn(mail, "enqueue").mockImplementation(async (...args) => {
         if (args[1].template.kind === "landing-lead-digest") {
-          reachedEnqueue.resolve();
-          await continueEnqueue.promise;
+          announceEnqueue();
+          await continueEnqueue;
         }
         return enqueue(...args);
       });
       const digest = jobs().sendDailyDigest();
       let cleanup: Promise<boolean> | undefined;
       try {
-        await reachedEnqueue.promise;
+        await reachedEnqueue;
         let erased = false;
         cleanup = db
           .transaction((tx) =>
@@ -564,13 +570,13 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
           );
           expect(erased || blocked.rows.length > 0).toBe(true);
         });
-        continueEnqueue.resolve();
+        resumeEnqueue();
         await expect(digest).resolves.toBe("sent");
         await expect(cleanup).resolves.toBe(true);
         expect(await db.select().from(schema.emailDeliveries)).toEqual([]);
         expect(await db.select().from(schema.emailOutbox)).toEqual([]);
       } finally {
-        continueEnqueue.resolve();
+        resumeEnqueue();
         await digest;
         await cleanup;
         spy.mockRestore();
