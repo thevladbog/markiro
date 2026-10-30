@@ -1017,14 +1017,14 @@ describe("the displaced codes on the queue screen (plan КНФ)", () => {
     ).toBeTruthy();
     expect(
       within(section).getByText(
-        "Код из этого короба раньше отсканирован в смене OCT26-005/S. На хосте он теперь там, а короб без него: проверьте короб.",
+        "Этот код раньше отсканировали в смене OCT26-005/S. Хост учёл его в той смене и исключил из этого короба. Проверьте содержимое короба.",
       ),
     ).toBeTruthy();
     expect(
       within(section).getByText(`Смена ${ENTERED.number} · Короб без SSCC · ${time}`),
     ).toBeTruthy();
     expect(
-      within(section).getByText(/раньше отсканирован этой станцией в смене OCT26-005\/S/),
+      within(section).getByText(/раньше отсканировали этой станцией в смене OCT26-005\/S/),
     ).toBeTruthy();
     expect(within(section).getAllByRole("button", { name: "Разобрано" })).toHaveLength(2);
   });
@@ -1040,12 +1040,12 @@ describe("the displaced codes on the queue screen (plan КНФ)", () => {
     expect(within(section).getAllByText(/^Смена .+ · Без короба · /)).toHaveLength(2);
     expect(
       within(section).getByText(
-        "Этот код раньше отсканирован в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+        "Этот код раньше отсканировали в смене OCT26-005/S. Хост учёл его в той смене. Проверьте изделие.",
       ),
     ).toBeTruthy();
     expect(
       within(section).getByText(
-        "Этот код раньше отсканирован этой станцией в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+        "Этот код раньше отсканировали этой станцией в смене OCT26-005/S. Хост учёл его в той смене. Проверьте изделие.",
       ),
     ).toBeTruthy();
     expect(within(section).queryByText(/проверьте короб/)).toBeNull();

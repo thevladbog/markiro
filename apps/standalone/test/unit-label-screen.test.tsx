@@ -217,7 +217,10 @@ function alone(node: ReactNode) {
 describe("the label panel of a shift that prints the duplicate", () => {
   it("says the frozen check before the first scan, with no job yet", async () => {
     for (const [verification, hint] of [
-      ["required", "Следующая единица доступна после проверки напечатанной этикетки."],
+      [
+        "required",
+        "Следующую единицу продукции можно сканировать после проверки напечатанной этикетки.",
+      ],
       [
         "none",
         "Проверка этикетки выключена. После отправки на принтер можно сканировать следующую единицу.",
@@ -540,7 +543,7 @@ describe("the window of the printed label's check", () => {
     // A label that does not render for the duplicate printer.
     await work.scan(km("RF1", { tail: "Zf8K" }));
     expect(lastLine()).toBe(
-      "Этикетку не удалось подготовить для принтера дубликата. Код не принят.",
+      "Не удалось подготовить этикетку для принтера, назначенного для дубликатов Data Matrix. Код не принят.",
     );
     noWindow();
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 0 }]);
@@ -928,7 +931,7 @@ describe("the duplicate printer", () => {
     expect(windowButtons(dialog)).toEqual(["Пауза", "Напечатать повторно", "Настройки принтера"]);
     expect(
       within(dialog).getByText(
-        "Проверьте подключение, язык и разрешение принтера, затем повторите печать.",
+        "Проверьте подключение принтера, его язык команд (ZPL или TSPL) и разрешение, затем повторите печать.",
       ),
     ).toBeTruthy();
     expect(work.shell.sends).toEqual([]);

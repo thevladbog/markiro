@@ -642,8 +642,8 @@ describe("the typed code", () => {
     manual("046070123400");
     expect(screen.getByText("12 / 18")).toBeTruthy();
     expect(screen.getByText(/Нужно ещё 6 цифр/)).toBeTruthy();
-    expect(screen.getByText("Пока вы вводите номер, сканер не печатает")).toBeTruthy();
-    expect(screen.getByText("Искать будем на хосте: нужен «Связь есть».")).toBeTruthy();
+    expect(screen.getByText("Пока вы вводите номер вручную, сканы не принимаются")).toBeTruthy();
+    expect(screen.getByText("Для поиска кода нужна связь с хостом.")).toBeTruthy();
   });
 
   it("types on the keypad: a digit goes on, the backspace takes one off, «Очистить» all", () => {

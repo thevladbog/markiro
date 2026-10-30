@@ -321,7 +321,9 @@ describe("office users", () => {
     type("Имя", "Павел Орлов-Старший");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(
-      await screen.findByText("Нельзя выключить или понизить последнего администратора."),
+      await screen.findByText(
+        "Нельзя отключить последнего администратора или изменить его роль на другую.",
+      ),
     ).toBeTruthy();
   });
 

@@ -101,7 +101,7 @@ describe("NetworkPairing", () => {
     await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
     const fingerprintBlock = screen
       .getByText(
-        "Сверьте отпечаток ниже с отпечатком хоста на экране офиса. Код уйдёт на хост, только если они совпадают.",
+        "Сверьте отпечаток ниже с отпечатком хоста на экране офиса. Код будет отправлен на хост только при совпадении отпечатков.",
       )
       .closest('[tabindex="-1"]');
     expect(fingerprintBlock).toBeTruthy();
@@ -204,9 +204,7 @@ describe("NetworkPairing", () => {
     const props = renderPairing({ probe });
     scan(PAYLOAD);
     expect(
-      await screen.findByText(
-        "Служба «Markiro Хост» говорит на более старом протоколе, чем это приложение. Обновите службу.",
-      ),
+      await screen.findByText("Версия протокола хоста устарела. Обновите службу «Markiro Хост»."),
     ).toBeTruthy();
     expect(props.onClaim).not.toHaveBeenCalled();
   });
@@ -432,7 +430,10 @@ describe("NetworkPairing", () => {
 
   it.each([
     ["rate_limited", "Слишком много попыток подключения. Подождите минуту и попробуйте снова."],
-    ["unreachable", "Хост не отвечает по этому адресу. Проверьте адрес и что ПК-хост включён."],
+    [
+      "unreachable",
+      "Хост не отвечает по этому адресу. Проверьте адрес и убедитесь, что компьютер хоста включён.",
+    ],
     // The license refuses before the host spends the code (plan ЛЦ-2, Д9): it stays good.
     [
       "seat_limit",
@@ -514,7 +515,7 @@ describe("NetworkPairing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
     expect(
       await screen.findByText(
-        "Хост не отвечает по этому адресу. Проверьте адрес и что ПК-хост включён.",
+        "Хост не отвечает по этому адресу. Проверьте адрес и убедитесь, что компьютер хоста включён.",
       ),
     ).toBeTruthy();
   });

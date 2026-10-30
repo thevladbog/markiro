@@ -91,7 +91,9 @@ describe("HostStatusDot", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Связь с хостом: На связи, есть замечания" }),
     );
-    expect(screen.getByText("Справочники не обновились — повторим автоматически")).toBeTruthy();
+    expect(
+      screen.getByText("Справочники не обновились. Программа повторит попытку автоматически."),
+    ).toBeTruthy();
   });
 });
 

@@ -78,8 +78,8 @@ export type LicenseNoticesProps = ShownNotices;
 
 /**
  * The warnings, one alert each with a hidden word for its tone (a screen
- * reader does not hear the colour or the glyph), a subscription's free new
- * file after its own words where it applies, and a link to «Лицензия». They
+ * reader does not hear the colour or the glyph), a subscription's renewal
+ * terms after its own words where they apply, and a link to «Лицензия». They
  * live inside a polite region their caller keeps on the screen, so they lose
  * their own `alert` role (`presentation`): each is heard once, quietly.
  * «Скрыть» removes its own button, so the focus moves to the «Скрыть» of the

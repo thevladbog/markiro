@@ -305,7 +305,7 @@ describe("«Сканирования» of a shift's drawer", () => {
     const session = scansSession();
     await openScans(session);
     await waitFor(() => expect(rows()).toHaveLength(5));
-    const tail = screen.getByLabelText("Конец серийного номера");
+    const tail = screen.getByLabelText("Последние символы серийного номера");
     fireEvent.change(tail, { target: { value: "k3Z4" } });
     // Nothing is asked per keystroke.
     expect(session.api.listShiftScans).toHaveBeenCalledTimes(1);

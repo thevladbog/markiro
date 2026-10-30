@@ -48,7 +48,7 @@ const ALL: OfficeLicense[] = [
   INN_MISMATCH,
 ];
 /** The owner's line of a subscription file: its next file costs nothing. */
-const FREE_RENEWAL = "Новый файл по истечении срока бесплатно запрашивается у нас.";
+const RENEWAL_TERMS = "Лицензия продлевается согласно условиям заключённой подписки.";
 
 function said(text: LicenseText): string {
   // `exactOptionalPropertyTypes`: i18next's `t` takes no `undefined` options.
@@ -95,23 +95,23 @@ describe("the license as the office reads it", () => {
 
   it("writes the terms in the organization's zone, the last day inclusive", () => {
     const terms = (license: OfficeLicense) => licenseTerms(license, MSK).map(said);
-    expect(terms(ACTIVE_LICENSE)).toEqual(["Действует по 31.10.2027 включительно.", FREE_RENEWAL]);
+    expect(terms(ACTIVE_LICENSE)).toEqual(["Действует по 31.10.2027 включительно.", RENEWAL_TERMS]);
     expect(terms(DEMO)).toEqual([
       "Демо-лицензия до 03.11.2026 включительно. По окончании демо новые смены не откроются.",
     ]);
     expect(terms(EXPIRING)).toEqual([
       "Действует по 31.10.2027 включительно.",
       "Осталось 20 дн.",
-      FREE_RENEWAL,
+      RENEWAL_TERMS,
     ]);
     // The trial ends at the moment the wizard began, 14 days on: a time, not a last day.
     expect(terms(TRIAL)).toEqual(["Пробный период до 24.10 12:00.", "Осталось 12 дн."]);
     expect(terms(GRACE)).toEqual([
       "Срок лицензии истёк 31.10. Новые смены открываются до 14.11.2027 включительно.",
       "Осталось 9 дн.",
-      FREE_RENEWAL,
+      RENEWAL_TERMS,
     ]);
-    expect(terms(RESTRICTED)).toEqual(["Новые смены не открываются с 15.11.2027.", FREE_RENEWAL]);
+    expect(terms(RESTRICTED)).toEqual(["Новые смены не открываются с 15.11.2027.", RENEWAL_TERMS]);
     expect(terms(TRIAL_EXPIRED)).toEqual(["Новые смены не открываются с 24.10.2026."]);
     expect(terms(WRONG_HOST)).toEqual([
       "Всё работает до 19.11.2026 включительно; затем новые смены не будут открываться.",
@@ -126,7 +126,7 @@ describe("the license as the office reads it", () => {
     ).toEqual([
       // While the extension runs, «не открываются» would contradict it (controller's fix).
       "Аварийное продление: новые смены открываются до 23.11 09:00.",
-      FREE_RENEWAL,
+      RENEWAL_TERMS,
     ]);
   });
 
@@ -161,11 +161,11 @@ describe("the license as the office reads it", () => {
     expect(licenseTerms(over, MSK).map(said)).toEqual([
       "Новые смены не открываются с 15.11.2027.",
       "Аварийное продление закончилось 23.11 09:00.",
-      FREE_RENEWAL,
+      RENEWAL_TERMS,
     ]);
   });
 
-  it("says a new file is free for a subscription file only, never for a demo or the trial", () => {
+  it("explains renewal under the subscription terms, never for a demo or the trial", () => {
     const renewal = (license: OfficeLicense) =>
       licenseTerms(license, MSK).filter((term) => term.key.endsWith(".freeRenewal"));
     expect(renewal(ACTIVE_LICENSE)).toEqual([{ key: "office.about.license.terms.freeRenewal" }]);
@@ -179,7 +179,7 @@ describe("the license as the office reads it", () => {
     for (const license of [EXPIRING, GRACE, RESTRICTED]) {
       expect(renewal(license)).toEqual([{ key: "office.about.license.terms.freeRenewal" }]);
     }
-    // A newer cloud's plan is not a subscription: the promise is the subscription's alone.
+    // A newer cloud's plan is not a subscription: the renewal notice is the subscription's alone.
     expect(
       renewal(licenseOf({ license: { ...ACTIVE_LICENSE.license!, plan: "enterprise" } })),
     ).toEqual([]);
@@ -320,24 +320,24 @@ describe("the license as the office reads it", () => {
     expect(said(noticeText(notice, extended(RESTRICTED), "UTC"))).toContain("до 23.11 06:00:");
   });
 
-  it("adds the free new file to the subscription's end warnings, to no other", () => {
+  it("adds renewal terms to the subscription's end warnings, to no other", () => {
     const addenda = (license: OfficeLicense) =>
       licenseNotices(license).map((notice) => {
         const addendum = noticeFreeRenewal(notice, license);
         return addendum === null ? null : said(addendum);
       });
-    expect(addenda(EXPIRING)).toEqual([FREE_RENEWAL]);
+    expect(addenda(EXPIRING)).toEqual([RENEWAL_TERMS]);
     expect(addenda(licenseOf({ ...DEMO, state: "expiring" }))).toEqual([null]);
     expect(addenda(TRIAL_ENDING)).toEqual([null]);
-    // The term has run out: then the free new file matters most (controller's decision).
-    expect(addenda(GRACE)).toEqual([FREE_RENEWAL]);
-    expect(addenda(RESTRICTED)).toEqual([FREE_RENEWAL]);
+    // The term has run out: then renewal still follows the subscription terms.
+    expect(addenda(GRACE)).toEqual([RENEWAL_TERMS]);
+    expect(addenda(RESTRICTED)).toEqual([RENEWAL_TERMS]);
     expect(addenda(licenseOf({ ...RESTRICTED, license: DEMO.license }))).toEqual([null]);
     expect(addenda(TRIAL_EXPIRED)).toEqual([null]);
     expect(addenda(INN_MISMATCH)).toEqual([null]);
-    // A subscription restricted, its extension running: the free new file still follows.
+    // A subscription restricted, its extension running: the subscription renewal terms still follow.
     const extension = { opensNewShifts: true, emergency: { available: false, until: GRACE.since } };
-    expect(addenda(licenseOf({ ...RESTRICTED, ...extension }))).toEqual([FREE_RENEWAL]);
+    expect(addenda(licenseOf({ ...RESTRICTED, ...extension }))).toEqual([RENEWAL_TERMS]);
     expect(addenda(licenseOf({ ...TRIAL_EXPIRED, ...extension }))).toEqual([null]);
     expect(addenda(licenseOf({ ...INN_MISMATCH, ...extension }))).toEqual([null]);
     expect(

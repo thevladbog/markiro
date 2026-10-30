@@ -114,7 +114,7 @@ describe("«Акт дезагрегации» of a document (plan ДЗГ-О)", (
     expect(radios.map((radio) => radio.getAttribute("aria-checked"))).toEqual(["true", "false"]);
     expect(within(dialog).getByRole("radio", { name: "Только коды упаковок" })).toBeTruthy();
     expect(
-      within(dialog).getByText(/Акт рисуется по данным, прочитанным в момент нажатия/),
+      within(dialog).getByText(/Акт формируется по данным на момент нажатия кнопки/),
     ).toBeTruthy();
     expect(session.api.getDisaggregationReportRows).toHaveBeenCalledWith(TOKEN, DOC.id, "boxes");
   });

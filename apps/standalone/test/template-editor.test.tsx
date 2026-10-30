@@ -1384,7 +1384,7 @@ describe("changing a label template", () => {
     stock.api.getTemplate.mockResolvedValue(milk({ stock: true }));
     view = await opening(
       stock,
-      "⧉Типовой шаблон не переименовывается и не меняет макет. Включить, выключить и сузить его можно на странице «Шаблоны», а изменить — в копии.",
+      "⧉У типового шаблона нельзя изменить название и макет. На странице «Шаблоны» его можно включить, выключить или ограничить список категорий. Чтобы изменить название или макет, создайте копию.",
     );
     fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
     await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });

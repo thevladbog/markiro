@@ -247,7 +247,7 @@ describe("a shift's review on its card (plan КНФ)", () => {
     ).toBe(`/conflicts?shift=${ACTIVE.id}&state=all`);
     const rows = await rowsOf("Конфликты");
     expect(rows[0]?.[0]).toBe("GTIN 04600682000013 · серийный S000007");
-    expect(rows[0]?.[1]).toMatch(/^Вытеснение: /);
+    expect(rows[0]?.[1]).toMatch(/^Код исключён из короба: /);
     expect(rows[0]?.[2]).toContain("Смена OCT26-005/S");
     expect(rows[0]?.[2]).toContain("Станция Б");
     expect(rows[1]?.[1]).toMatch(/^Поздний скан: /);

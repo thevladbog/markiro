@@ -21,7 +21,7 @@ import {
 
 const TOKEN = "office-session-token";
 const ACTION = "Указать причину смены OCT26-004";
-const TITLE = "Причина смены OCT26-004";
+const TITLE = "Причина расхождения с планом в смене OCT26-004";
 const UNITS = new Intl.NumberFormat("ru");
 const SUPPLIED: OfficeShift = {
   ...SHARED_NO_REASON,
