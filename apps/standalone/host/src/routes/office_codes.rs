@@ -275,7 +275,7 @@ pub const CARD_OFFICE_RELEASES_SQL: &str = "SELECT i.scan_id, dc.id AS document_
      JOIN boxes b ON b.id = i.box_id AND b.disassembled_at = i.removed_at \
      JOIN disaggregation_document_lines l ON l.box_id = b.id AND l.status = 'ok' \
      JOIN disaggregation_documents dc ON dc.id = l.document_id AND dc.status = 'applied' \
-     JOIN office_users u ON u.id = dc.applied_by \
+     JOIN disaggregation_authors u ON u.document_id = dc.id \
      LEFT JOIN disaggregation_reasons r ON r.id = dc.reason_id \
      WHERE s.code_hash = ?1 ORDER BY dc.applied_at, dc.id LIMIT ?2";
 

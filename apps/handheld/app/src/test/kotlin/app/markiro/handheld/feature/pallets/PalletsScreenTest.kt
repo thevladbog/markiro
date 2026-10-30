@@ -12,7 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The «Паллеты» app bar's disassemble action, gated on `closedPalletCount`
+ * The «Палеты» app bar's disassemble action, gated on `closedPalletCount`
  * exactly like the exceptions hub row it shares its wording with: nothing
  * closed on this device yet means the action must not open onto an instant
  * refusal screen.
@@ -29,13 +29,13 @@ class PalletsScreenTest {
     @Test
     fun noClosedPalletsDisablesTheDisassembleActionAndSaysWhy() {
         render(closedPalletCount = 0)
-        compose.onNode(hasContentDescription("Расформировать паллету", substring = true)).assertIsNotEnabled()
-        compose.onNode(hasContentDescription("Нет закрытых паллет", substring = true)).assertIsDisplayed()
+        compose.onNode(hasContentDescription("Расформировать палет", substring = true)).assertIsNotEnabled()
+        compose.onNode(hasContentDescription("Нет закрытых палетов", substring = true)).assertIsDisplayed()
     }
 
     @Test
     fun aClosedPalletEnablesTheDisassembleAction() {
         render(closedPalletCount = 1)
-        compose.onNode(hasContentDescription("Расформировать паллету", substring = true)).assertIsEnabled()
+        compose.onNode(hasContentDescription("Расформировать палет", substring = true)).assertIsEnabled()
     }
 }

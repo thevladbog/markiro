@@ -24,7 +24,7 @@ class PalletCloseScreensTest {
     @Test
     fun namesThePalletAndItsSsccOnClose() {
         compose.setContent { MarkiroTheme { PalletCloseScreen(PalletCloseStep.Printed(pallet), PalletCloseCallbacks()) } }
-        compose.onNodeWithText("Паллета закрыта").assertIsDisplayed()
+        compose.onNodeWithText("Палет закрыт").assertIsDisplayed()
         compose.onNodeWithText("103460068200000004").assertIsDisplayed()
         compose.onNodeWithText("12 коробов").assertIsDisplayed()
         compose.onNodeWithText("Напечатано").assertIsDisplayed()
@@ -74,7 +74,7 @@ class PalletCloseScreensTest {
             MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.NoSerials), PalletCloseCallbacks()) }
         }
         compose.onNodeWithText("Закончились номера SSCC").assertIsDisplayed()
-        compose.onNodeWithText("Паллета осталась открытой. Подключитесь к сети — устройство получит новый блок номеров.")
+        compose.onNodeWithText("Палет остался открытым. Подключитесь к сети — устройство получит новый блок номеров.")
             .assertIsDisplayed()
     }
 
@@ -83,6 +83,6 @@ class PalletCloseScreensTest {
         compose.setContent {
             MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.Empty), PalletCloseCallbacks()) }
         }
-        compose.onNodeWithText("В паллете нет коробов").assertIsDisplayed()
+        compose.onNodeWithText("В палете нет коробов").assertIsDisplayed()
     }
 }

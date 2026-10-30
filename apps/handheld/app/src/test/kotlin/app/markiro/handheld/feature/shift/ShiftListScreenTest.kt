@@ -80,7 +80,7 @@ class ShiftListScreenTest {
         }
         // Exactly one of the two aggregation shifts carries it.
         compose.onAllNodesWithText("+ агрегация").assertCountEquals(2)
-        compose.onAllNodesWithText("+ паллеты").assertCountEquals(1)
+        compose.onAllNodesWithText("+ палеты").assertCountEquals(1)
     }
 
     /**

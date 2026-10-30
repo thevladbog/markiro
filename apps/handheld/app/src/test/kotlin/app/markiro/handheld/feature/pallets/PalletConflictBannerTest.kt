@@ -38,13 +38,13 @@ class PalletConflictBannerTest {
     @Test
     fun aBoxTheHostHoldsOnAnotherPalletNamesThatPallet() {
         show(rejected("034600682000000014", "box_on_pallet", "134600682000000011"))
-        compose.onNodeWithText("короб …000014 — На паллете …000011").assertIsDisplayed()
+        compose.onNodeWithText("короб …000014 — На палете …000011").assertIsDisplayed()
     }
 
     @Test
     fun aBoxOnAnotherOpenPalletOfAnotherDeviceSaysSoWithoutANumber() {
         show(rejected("034600682000000014", "box_on_pallet", null))
-        compose.onNodeWithText("короб …000014 — На открытой паллете другого устройства").assertIsDisplayed()
+        compose.onNodeWithText("короб …000014 — На открытом палете другого устройства").assertIsDisplayed()
     }
 
     @Test

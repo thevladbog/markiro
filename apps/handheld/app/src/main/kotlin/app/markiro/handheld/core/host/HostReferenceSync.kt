@@ -4,6 +4,7 @@ import app.markiro.handheld.core.network.host.ChangeItemDto
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.network.host.HostApiError
 import app.markiro.handheld.core.network.host.HostFailure
+import app.markiro.handheld.core.network.host.text as stringField
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
@@ -53,7 +54,8 @@ class HostReferenceSync(
                 "label_templates" -> template(item)
                 "category_template_defaults" -> categoryDefault(item)
                 "org_profile" -> organization(item)
-                else -> Unit // `site`, `code_releases`: nothing a handheld keeps
+                "code_releases" -> releaseCodes(item)
+                else -> Unit // `site`: nothing a handheld keeps
             }
         }
         rebuildPalletTemplates()
@@ -86,6 +88,21 @@ class HostReferenceSync(
     }
 
     private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+
+    private suspend fun releaseCodes(item: ChangeItemDto) {
+        if(item.deleted) return
+        val data=item.data ?: return
+        val shiftId=data.stringField("shiftId")?.takeIf { it.isNotBlank() } ?: return
+        val at=data.stringField("releasedAt") ?: return
+        try { java.time.Instant.parse(at) } catch(_:java.time.format.DateTimeParseException) { return }
+        val box=db.boxDao().get(item.id)
+        if(box!=null && (box.shiftId!=shiftId || box.closedAt==null)) return
+        db.boxRegistryDao().removeBox(item.id)
+        if(box==null) return
+        db.boxDao().markDisassembled(box.boxId,at)
+        // Keep raw outbox sources and frozen host bytes: only receipts retire those.
+        db.codeDao().deleteInBox(box.boxId)
+    }
 
     private suspend fun operator(item: ChangeItemDto) {
         val data = item.data

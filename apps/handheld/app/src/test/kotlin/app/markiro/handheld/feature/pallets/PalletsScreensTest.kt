@@ -48,8 +48,8 @@ class PalletsScreensTest {
         compose.setContent {
             MarkiroTheme { PalletsRoute(PalletsUi(blocked = PalletsBlocked.NO_PERMISSION), PalletsCallbacks(onBack = { back = true })) }
         }
-        compose.onNodeWithText("Нет права собирать паллеты").assertIsDisplayed()
-        compose.onNodeWithText("Попросите менеджера включить «Сборка паллет на ТСД» в карточке сотрудника.").assertIsDisplayed()
+        compose.onNodeWithText("Нет права собирать палеты").assertIsDisplayed()
+        compose.onNodeWithText("Попросите менеджера включить «Сборка палетов на ТСД» в карточке сотрудника.").assertIsDisplayed()
         compose.onNodeWithText("На главный экран").performClick()
         assertEquals(true, back)
     }
@@ -59,14 +59,14 @@ class PalletsScreensTest {
     fun aClosedPalletNamesThePrinterItsLabelWentTo() {
         val step = PalletCloseStep.Printed(ClosedPalletUi("w1", "134600682000000011", 12))
         compose.setContent { MarkiroTheme { PalletsRoute(PalletsUi(closeStep = step), PalletsCallbacks(), destinationLabel = "Zebra у ворот") } }
-        compose.onNodeWithText("Паллета · Zebra у ворот").assertIsDisplayed()
+        compose.onNodeWithText("Палет · Zebra у ворот").assertIsDisplayed()
     }
 
     @Test
     fun anEmptyModeAsksForTheFirstBox() {
         compose.setContent { MarkiroTheme { PalletsRoute(PalletsUi(), PalletsCallbacks()) } }
         compose.onNodeWithText("Отсканируйте короб").assertIsDisplayed()
-        compose.onNodeWithText("Первый короб задаёт товар паллеты.").assertIsDisplayed()
+        compose.onNodeWithText("Первый короб задаёт товар палета.").assertIsDisplayed()
     }
 
     /** Spec 2026-09-18: every non-rejected box can be taken off, whatever its sync status. */
@@ -88,8 +88,8 @@ class PalletsScreensTest {
                 )
             }
         }
-        compose.onAllNodesWithContentDescription("Убрать с паллеты").assertCountEquals(3)
-        compose.onAllNodesWithContentDescription("Убрать с паллеты")[0].performClick()
+        compose.onAllNodesWithContentDescription("Убрать с палета").assertCountEquals(3)
+        compose.onAllNodesWithContentDescription("Убрать с палета")[0].performClick()
         // Rows are listed newest first.
         assertEquals(listOf("034600682000000038"), removed)
     }
@@ -137,15 +137,15 @@ class PalletsScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("Снимите с паллеты 1 короб").assertIsDisplayed()
-        compose.onNodeWithText("короб …000014 — На паллете …000011").assertIsDisplayed()
+        compose.onNodeWithText("Снимите с палета 1 короб").assertIsDisplayed()
+        compose.onNodeWithText("короб …000014 — На палете …000011").assertIsDisplayed()
         compose.onNodeWithText("Принято").performClick()
         assertEquals("w1", acknowledged)
     }
 
     /**
      * The winning pallet is still open somewhere else, so it has no number yet.
-     * «На паллете …» with an empty tail read like a bug rather than an answer.
+     * «На палете …» with an empty tail read like a bug rather than an answer.
      */
     @Test
     fun aRejectionByAnUnnumberedPalletSaysSoInWords() {
@@ -161,7 +161,7 @@ class PalletsScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("короб …000014 — На открытой паллете другого устройства").assertIsDisplayed()
+        compose.onNodeWithText("короб …000014 — На открытом палете другого устройства").assertIsDisplayed()
     }
 
     /**
@@ -189,10 +189,10 @@ class PalletsScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("Паллета …000011").assertIsDisplayed()
-        compose.onNodeWithText("Открытая паллета").assertIsDisplayed()
+        compose.onNodeWithText("Палет …000011").assertIsDisplayed()
+        compose.onNodeWithText("Открытый палет").assertIsDisplayed()
         compose.onNodeWithText("короб …000014 — Сервер не знает этот короб").assertIsDisplayed()
-        compose.onNodeWithText("короб …000021 — На открытой паллете другого устройства").assertIsDisplayed()
+        compose.onNodeWithText("короб …000021 — На открытом палете другого устройства").assertIsDisplayed()
         // One button, and it belongs to the closed pallet's section.
         compose.onAllNodesWithText("Перепечатать этикетку").assertCountEquals(1)
         compose.onNodeWithText("Перепечатать этикетку").performClick()
@@ -213,8 +213,8 @@ class PalletsScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("В паллете 7 из 12 коробов.").assertIsDisplayed()
-        compose.onNodeWithText("Закрыть паллету").performClick()
+        compose.onNodeWithText("В палете 7 из 12 коробов.").assertIsDisplayed()
+        compose.onNodeWithText("Закрыть палет").performClick()
         assertEquals(true, confirmed)
     }
 

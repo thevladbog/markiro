@@ -65,8 +65,8 @@ class PrinterCompactScreenTest {
         compose.onNodeWithText(pallet).assertIsDisplayed()
         capture(name)
     }
-    @Test fun russianDarkAssignments() = assignments(true, "ru-dark-assignments", "Паллета")
-    @Test fun russianLightAssignments() = assignments(false, "ru-light-assignments", "Паллета")
+    @Test fun russianDarkAssignments() = assignments(true, "ru-dark-assignments", "Палет")
+    @Test fun russianLightAssignments() = assignments(false, "ru-light-assignments", "Палет")
     @Test @Config(qualifiers = "en-w360dp-h640dp-mdpi")
     fun englishDarkAssignments() = assignments(true, "en-dark-assignments", "Pallet")
     @Test @Config(qualifiers = "en-w360dp-h640dp-mdpi")
@@ -117,10 +117,10 @@ class PrinterCompactScreenTest {
     @Test fun assignmentPickerSupportsExplicitUnassignedAndOneSharedPrinter() {
         var assignment: Pair<PrintPurpose, String?>? = null
         compose.setContent { MarkiroTheme { PrinterAssignmentsScreen(state, {}, { purpose, id -> assignment = purpose to id }) } }
-        compose.onNodeWithText("Паллета").performClick()
+        compose.onNodeWithText("Палет").performClick()
         compose.onNodeWithText("Не назначен").performClick()
         assertEquals(PrintPurpose.PALLET to null, assignment)
-        compose.onNodeWithText("Паллета").performClick()
+        compose.onNodeWithText("Палет").performClick()
         compose.onNodeWithText(profiles.first().name).performClick()
         assertEquals(PrintPurpose.PALLET to "box", assignment)
     }

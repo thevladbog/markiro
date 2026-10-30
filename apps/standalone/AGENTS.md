@@ -7872,3 +7872,31 @@ a re-entry. They are **not** fault injection. A backup is taken under load and a
   judged (`scenarios::NOT_JUDGED_ON_WINDOWS`, `judged_in_process`). Release-build numbers are one macOS machine; `soak`, `attach`, Linux, a real LAN or handhelds, and the workflow
   (never run on GitHub) have never run. Harness fixes made on the way: `api.rs` error classes (`net_*` metric keys) and `strip_ansi`
   in `scan_log` (the host log's colour codes hid ERROR lines).
+
+### Site-wide disassembly from handhelds (2026-10-30)
+
+`POST /v1/device/disaggregation/lookup` and `/apply` are additive protocol-8
+routes restricted to live `handheld` devices and an active operator. Both are
+held during restore; correction of existing packs belongs to license `NEVER`.
+Lookup returns no unit marking codes, only counts, pack status, active office
+reasons and a SHA-256 token of the displayed pack state/membership. Apply checks
+credential hash, dataset epoch, operator, reason and token under `BEGIN IMMEDIATE`.
+It creates one ordinary applied DSG document and invokes common `apply_targets`;
+box code releases, late-data markers, registry timestamps and warehouse membership
+removal keep the office semantics. Cloud-history/demo packs are refused.
+
+Migration `0057_device_disaggregation.sql` adds separate device/operator FK authors,
+request ID and frozen canonical request JSON to document headers. Office IDs remain
+only office IDs: `createdBy` is nullable for device documents, which expose
+`createdByDeviceId`/`createdByOperatorId`. Existing office document JSON stays the
+same. The shared `disaggregation_authors` view supplies names to cards, history and
+acts; device corrections in shift history name the actual device/operator.
+The header rebuild copies rows back AFTER recreating the parent under deferred
+FKs (a populated-table rename leaves SQLite's deferred DROP debt). Preserve rowids,
+code releases, cloud links and exact saved bytes. The request is unique per device;
+replay compares the canonical body and returns its old document without another
+number/revision/audit row. Audit actor is the device, with operator ID in details.
+
+See `docs/superpowers/specs/2026-10-30-handheld-pack-disassembly-design.md` and
+`host/tests/device_disaggregation.rs`. A host-only check proves neither Windows
+service operation nor real TSD/scanner/printer acceptance.

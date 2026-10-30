@@ -20,7 +20,7 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * A shift card with every chip, at the width of a typical phone, 411 dp.
  *
- * The number and four chips shared one row: «+ паллеты» broke in two, the
+ * The number and four chips shared one row: «+ палеты» broke in two, the
  * number dropped, and the status chip of the running shift was pushed past the
  * card's edge, so the one shift the operator was looking for read as idle.
  */
@@ -58,7 +58,7 @@ class ShiftCardPhoneWidthTest {
     @Test
     @Config(qualifiers = "ru-w411dp-h914dp-mdpi")
     fun russianChipsFitAtPhoneWidth() =
-        everyChipFitsInsideTheCard("ОКТ26-014", listOf("валидация", "+ агрегация", "+ паллеты", "идёт"))
+        everyChipFitsInsideTheCard("ОКТ26-014", listOf("валидация", "+ агрегация", "+ палеты", "идёт"))
 
     @Test
     @Config(qualifiers = "en-w411dp-h914dp-mdpi")

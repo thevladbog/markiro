@@ -33,10 +33,9 @@ use crate::server::AppState;
 /// The document with the names of its reason and of the users who made and
 /// applied it.
 pub const DOCUMENT_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.created_at, d.applied_at, \
-     d.comment, cu.name AS created_by_name, au.name AS applied_by_name, r.name AS reason_name \
+     d.comment, authors.created_by_name, authors.name AS applied_by_name, r.name AS reason_name \
      FROM disaggregation_documents d \
-     JOIN office_users cu ON cu.id = d.created_by \
-     LEFT JOIN office_users au ON au.id = d.applied_by \
+     JOIN disaggregation_authors authors ON authors.document_id = d.id \
      LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
      WHERE d.id = ?";
 

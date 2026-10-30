@@ -105,7 +105,7 @@ pub const BOX_DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.applied_at, \
      FROM disaggregation_document_lines l \
      JOIN disaggregation_documents d ON d.id = l.document_id AND d.status = 'applied' \
      LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
-     LEFT JOIN office_users u ON u.id = d.applied_by \
+     JOIN disaggregation_authors u ON u.document_id = d.id \
      WHERE l.box_id = ?1 AND l.status = 'ok' ORDER BY d.applied_at, d.id LIMIT ?2";
 
 /// The same of a pallet.
@@ -114,7 +114,7 @@ pub const PALLET_DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.applied_at, \
      FROM disaggregation_document_lines l \
      JOIN disaggregation_documents d ON d.id = l.document_id AND d.status = 'applied' \
      LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
-     LEFT JOIN office_users u ON u.id = d.applied_by \
+     JOIN disaggregation_authors u ON u.document_id = d.id \
      WHERE l.pallet_id = ?1 AND l.status = 'ok' ORDER BY d.applied_at, d.id LIMIT ?2";
 
 /// Every query of this module by name, for the test that each one searches

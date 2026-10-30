@@ -54,7 +54,7 @@ class CloseScreensTest {
         }
         compose.onNodeWithText("Короба").assertIsDisplayed()
         compose.onNodeWithText("12").assertIsDisplayed()
-        compose.onNodeWithText("Паллеты").assertIsDisplayed()
+        compose.onNodeWithText("Палеты").assertIsDisplayed()
         compose.onNodeWithText("3").assertIsDisplayed()
     }
 
@@ -69,7 +69,7 @@ class CloseScreensTest {
             MarkiroTheme { CloseScreen(CloseStep.Summary(8, 1, 0, 0, CloseOutcome.ACCEPTED), CloseCallbacks()) }
         }
         compose.onNodeWithText("Короба").assertDoesNotExist()
-        compose.onNodeWithText("Паллеты").assertDoesNotExist()
+        compose.onNodeWithText("Палеты").assertDoesNotExist()
         // The rest of the summary is unaffected.
         compose.onNodeWithText("Принято").assertIsDisplayed()
     }

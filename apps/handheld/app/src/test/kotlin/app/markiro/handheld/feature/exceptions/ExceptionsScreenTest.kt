@@ -53,15 +53,15 @@ class ExceptionsScreenTest {
         compose.onNode(hasText("Очистить короб")).assertIsNotEnabled()
         compose.onNode(hasText("Расформировать короб")).assertIsNotEnabled()
         // The pallet action explains itself the same way.
-        compose.onNodeWithText("Нет закрытых паллет").assertIsDisplayed()
-        compose.onNode(hasText("Расформировать паллету")).assertIsNotEnabled()
+        compose.onNodeWithText("Нет закрытых палетов").assertIsDisplayed()
+        compose.onNode(hasText("Расформировать палет")).assertIsNotEnabled()
     }
 
     /** A closed pallet in this shift is what makes the pallet action reachable. */
     @Test
     fun aClosedPalletEnablesThePalletAction() {
         render(ui(closedPalletCount = 1))
-        compose.onNode(hasText("Расформировать паллету")).assertIsEnabled()
+        compose.onNode(hasText("Расформировать палет")).assertIsEnabled()
     }
 
     @Test

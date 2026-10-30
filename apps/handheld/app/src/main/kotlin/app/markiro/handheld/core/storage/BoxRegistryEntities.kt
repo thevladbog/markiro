@@ -68,6 +68,13 @@ interface BoxRegistryDao {
     @Query("UPDATE box_registry SET palletId = NULL, palletSscc = NULL, palletActive = 0 WHERE sscc = :sscc")
     suspend fun clearPallet(sscc: String)
 
+    /** A host-confirmed retirement, including a pallet created on another device. Preserve unrelated local claims. */
+    @Query("UPDATE box_registry SET palletId = NULL, palletSscc = NULL, palletActive = 0 WHERE palletSscc = :palletSscc")
+    suspend fun clearRetiredPallet(palletSscc: String)
+
+    @Query("DELETE FROM box_registry WHERE boxId = :boxId")
+    suspend fun removeBox(boxId: String)
+
     /** What the host answered a refused box with: another pallet holds it (the id is known, the SSCC is `null` while that pallet is open). */
     @Query("UPDATE box_registry SET palletId = :palletId, palletSscc = :palletSscc, palletActive = 1 WHERE sscc = :sscc")
     suspend fun markOnPallet(sscc: String, palletId: String?, palletSscc: String?)

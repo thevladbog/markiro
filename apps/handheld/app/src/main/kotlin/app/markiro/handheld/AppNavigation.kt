@@ -138,6 +138,7 @@ object Routes {
     const val REPRINT = "exceptions/{shiftId}/reprint"
     const val WRITEOFF = "writeoff"
     const val PALLETS = "pallets"
+    const val PACK_DISASSEMBLY = "pack-disassembly"
 
     /**
      * The shift-less entry from the «Паллеты» mode. A route of its own rather
@@ -296,6 +297,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
                             HubTile.WRITEOFF -> nav.navigate(Routes.WRITEOFF)
                             HubTile.PALLETS -> nav.navigate(Routes.PALLETS)
+                            HubTile.DISASSEMBLY -> nav.navigate(Routes.PACK_DISASSEMBLY)
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -312,6 +314,19 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             // One ViewModel across all four steps: the step is state, so hardware
             // Back moves inside the mode instead of dropping a half-built list.
+            composable(Routes.PACK_DISASSEMBLY) {
+                val vm:app.markiro.handheld.feature.disassembly.PackDisassemblyViewModel=hiltViewModel()
+                val step by vm.step.collectAsStateWithLifecycle()
+                val back={
+                    when(step){
+                        app.markiro.handheld.feature.disassembly.PackDisassemblyStep.Loading -> Unit
+                        is app.markiro.handheld.feature.disassembly.PackDisassemblyStep.Reason,is app.markiro.handheld.feature.disassembly.PackDisassemblyStep.Confirm -> vm.reset()
+                        else -> {nav.popBackStack();Unit}
+                    }
+                }
+                BackHandler { back() }
+                app.markiro.handheld.feature.disassembly.PackDisassemblyScreen(step,back,vm::chooseReason,vm::confirm,vm::retry,vm::reset,vm::archive)
+            }
             composable(Routes.PALLETS) {
                 val vm: app.markiro.handheld.feature.pallets.PalletsViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()

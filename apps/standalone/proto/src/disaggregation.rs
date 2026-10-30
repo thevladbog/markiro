@@ -179,7 +179,12 @@ pub struct DisaggregationDocument {
     pub line_count: u32,
     /// The sum of the lines' `codeCount`.
     pub code_count: u64,
-    pub created_by: String,
+    /// Office user identity; device documents carry their own device/operator IDs.
+    pub created_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_device_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_operator_id: Option<String>,
     pub created_by_name: String,
     pub created_at: String,
     pub applied_at: Option<String>,

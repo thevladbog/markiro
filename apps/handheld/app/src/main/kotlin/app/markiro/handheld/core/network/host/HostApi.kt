@@ -152,6 +152,13 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
     suspend fun postPalletEvents(body: String): Result<List<FactReceiptDto>> =
         parse(transport.post("/v1/device/pallet-events", body), FactReceiptsDto.serializer()).map { it.receipts }
 
+    suspend fun packInspection(sscc: String, operatorId: String): Result<PackInspectionDto> =
+        parse(transport.post("/v1/device/disaggregation/lookup", buildJsonObject { put("sscc", sscc); put("operatorId", operatorId) }.toString()), PackInspectionDto.serializer())
+
+    /** The exact intent persisted before the first attempt; never reconstructed on a retry. */
+    suspend fun disassemblePack(frozenBody: String): Result<PackDisassembledDto> =
+        parse(transport.post("/v1/device/disaggregation/apply", frozenBody), PackDisassembledDto.serializer())
+
     suspend fun orgPrint(): Result<OrgPrintDto> = parse(transport.get("/v1/device/org/print"), OrgPrintDto.serializer())
 
     /** One page of the registry of closed boxes; `until` is null on the first page of a walk. */

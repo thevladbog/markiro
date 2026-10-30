@@ -551,3 +551,27 @@ knowledge bases. That is why Settings → Сканер reports the action and ex
 broadcast received, matched or not, and why a custom profile (action + data key + optional symbology
 key) can be typed there: almost every one of these services lets its action be renamed in its own
 settings, so an unknown terminal costs a field edit rather than a release.
+
+## Site-wide disassembly in Avtonom
+
+In host mode, **Расформирование** on the hub scans any local box or pallet of
+this site, including an office pallet or one built by another handheld. Select
+a reason from the office directory, inspect the pack and confirm separately.
+Production boxes/pallets require a closed shift; warehouse pallets require a
+closed pallet. Taking a pallet apart preserves its boxes and their unit codes.
+Taking a box apart frees its unit codes. The host creates a regular applied
+DSG document; its author is the operator and handheld, and the office provides
+the act/XML and stored files.
+
+Looking up a pack requires a host connection. The confirmed request is persisted
+before sending. After a timeout or process restart the screen offers **Проверить
+результат**, reusing exactly the same request ID/body. It never reports success
+from a local queue alone. Existing local/offline correction flows are unchanged.
+A changed owner, credential generation, dataset or operator prevents replay;
+check the result in the office and explicitly archive the retained evidence.
+The original request and archives survive dataset replacement. An older host
+without these routes asks for an update.
+
+Software checks include real Room database reopen, lost response/retry,
+credential/dataset changes, Compose at 360×640 dp and host API/office integration.
+These do not establish physical scanner, printer or Windows acceptance.

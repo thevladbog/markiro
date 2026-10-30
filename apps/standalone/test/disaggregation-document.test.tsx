@@ -887,3 +887,25 @@ describe("office «Дезагрегация»: a document that did not load", ()
     expect(await screen.findByRole("heading", { name: "Дезагрегация", level: 1 })).toBeTruthy();
   });
 });
+
+it("reads a handheld document without inventing an office user and keeps its act and XML actions", async () => {
+  const detail = disaggregationDetailSchema.parse({
+    ...DRAFT,
+    document: header({
+      status: "applied",
+      createdBy: null,
+      createdByDeviceId: "11111111-1111-4111-8111-111111111111",
+      createdByOperatorId: "22222222-2222-4222-8222-222222222222",
+      createdByName: "Сергей · ТСД склада",
+      appliedBy: null,
+      appliedByName: "Сергей · ТСД склада",
+      appliedAt: "2026-10-30T15:00:00Z",
+    }),
+  });
+  const { session } = fake(detail);
+  await openDocument(session);
+  expect(screen.getAllByText("Сергей · ТСД склада")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Провести" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Акт дезагрегации" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Файл для Честного знака" })).toBeTruthy();
+});
