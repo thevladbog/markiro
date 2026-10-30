@@ -14,6 +14,9 @@ const jobPairs = [
   ["tenant_team_infrastructure", "tenant-team-infrastructure"],
   ["production_bundle", "production-bundle"],
   ["platform_contracts", "platform-contracts"],
+  ["platform_forward_recovery", "platform-forward-recovery"],
+  // The two scenario runners (one matrix result) share the accepting job's output.
+  ["platform_forward_recovery", "platform-forward-recovery-scenario"],
   ["station_rust", "station-rust"],
   ["station_windows_build", "station-windows-build"],
   ["signer_rust", "signer-rust"],
@@ -54,6 +57,29 @@ function needsFixture({
 
 test("accepts successful selected jobs and intentional skips", () => {
   assert.doesNotThrow(() => assertRequiredResults(needsFixture()));
+});
+
+test("the forward rehearsal decides the gate through both of its jobs when selected", () => {
+  const selected = ["production_bundle", "platform_contracts", "platform_forward_recovery"];
+  assert.doesNotThrow(() => assertRequiredResults(needsFixture({ selected })));
+  // A failed scenario leaves the accepting job skipped: both fail a selected gate.
+  assert.throws(
+    () =>
+      assertRequiredResults(
+        needsFixture({
+          selected,
+          results: {
+            "platform-forward-recovery-scenario": "failure",
+            "platform-forward-recovery": "skipped",
+          },
+        }),
+      ),
+    /platform-forward-recovery/u,
+  );
+  // A landing change that selects production-bundle alone skips both.
+  assert.doesNotThrow(() =>
+    assertRequiredResults(needsFixture({ selected: ["production_bundle", "platform_contracts"] })),
+  );
 });
 
 test("accepts an unselected job that GitHub ran successfully", () => {

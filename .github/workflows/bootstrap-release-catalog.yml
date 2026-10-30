@@ -1,0 +1,81 @@
+name: Bootstrap read-only release catalog
+
+on:
+  workflow_dispatch:
+    inputs:
+      executor_sha:
+        description: Exact reviewed executor with successful main CI, compatible with the accepted API image
+        required: true
+        type: string
+      executor_ci_run_id:
+        description: Successful main-push CI with compiled bootstrap artifact
+        required: true
+        type: string
+      executor_ci_run_attempt:
+        description: Exact successful CI attempt (first attempt only)
+        required: true
+        type: string
+      operation_id:
+        description: Independently prepared catalog operation UUID
+        required: true
+        type: string
+      operation_sha256:
+        description: Independently verified immutable host operation file SHA256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: timeweb-platform-production
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/catalog-bootstrap-{0}', github.sha)) && github.run_attempt == 1 }}
+    environment: production-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Run exact prepared catalog bootstrap under the shared host lock
+        env:
+          TIMEWEB_PLATFORM_HOST: ${{ vars.TIMEWEB_PLATFORM_HOST }}
+          TIMEWEB_PLATFORM_SSH_PORT: ${{ vars.TIMEWEB_PLATFORM_SSH_PORT }}
+          TIMEWEB_PLATFORM_SSH_USER: ${{ vars.TIMEWEB_PLATFORM_SSH_USER }}
+          TIMEWEB_PLATFORM_KNOWN_HOSTS: ${{ vars.TIMEWEB_PLATFORM_KNOWN_HOSTS }}
+          TIMEWEB_PLATFORM_SSH_PRIVATE_KEY: ${{ secrets.TIMEWEB_PLATFORM_SSH_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DISPATCH_RUN_ID: ${{ github.run_id }}
+          DISPATCH_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXECUTOR_SHA: ${{ inputs.executor_sha }}
+          EXECUTOR_CI_RUN_ID: ${{ inputs.executor_ci_run_id }}
+          EXECUTOR_CI_RUN_ATTEMPT: ${{ inputs.executor_ci_run_attempt }}
+          OPERATION_ID: ${{ inputs.operation_id }}
+          OPERATION_SHA256: ${{ inputs.operation_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          node_bin="$(command -v node)"
+          # Builtin printf over stdin: credentials never enter argv or artifacts.
+          printf '%s\0' \
+            "$TIMEWEB_PLATFORM_HOST" "$TIMEWEB_PLATFORM_SSH_PORT" "$TIMEWEB_PLATFORM_SSH_USER" \
+            "$TIMEWEB_PLATFORM_SSH_PRIVATE_KEY" "$TIMEWEB_PLATFORM_KNOWN_HOSTS" "$GITHUB_TOKEN" "$GITHUB_ACTOR" \
+            "$DISPATCH_SHA" "$DISPATCH_RUN_ID" "$DISPATCH_RUN_ATTEMPT" \
+            "$EXECUTOR_SHA" "$EXECUTOR_CI_RUN_ID" "$EXECUTOR_CI_RUN_ATTEMPT" \
+            "$OPERATION_ID" "$OPERATION_SHA256" | \
+            /usr/bin/env -i PATH="$(dirname "$node_bin"):/usr/bin:/bin" HOME=/nonexistent LANG=C \
+            "$node_bin" deploy/platform/catalog-bootstrap-transport.mjs run

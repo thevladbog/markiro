@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchPlatformCi } from "../release-ci.mjs";
+import { PLATFORM_CI_REQUIRED_JOBS } from "../release-evidence.mjs";
 const expected = { repository: "thevladbog/markiro", sourceSha: "a".repeat(40), runId: "123" };
 const run = {
   id: 123,
@@ -20,7 +21,7 @@ const jobs = Array.from({ length: 101 }, (_, index) => ({
   run_id: 123,
   run_attempt: 3,
   head_sha: expected.sourceSha,
-  name: ["production-bundle", "ci-required"][index] ?? `job-${index}`,
+  name: PLATFORM_CI_REQUIRED_JOBS[index] ?? `job-${index}`,
   status: "completed",
   conclusion: "success",
 }));

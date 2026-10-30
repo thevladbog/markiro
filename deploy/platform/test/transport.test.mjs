@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { privateFixture } from "./host-fixtures.mjs";
 import { runHostProcess } from "../host/process.mjs";
+import { PLATFORM_CI_REQUIRED_JOBS } from "../release-evidence.mjs";
 import {
   sshArguments,
   validateTransportSelection,
@@ -302,7 +303,7 @@ async function senderFixture(t, fault) {
       repository: { full_name: "thevladbog/markiro" },
       head_repository: { full_name: "thevladbog/markiro" },
     };
-    const jobs = ["production-bundle", "ci-required"].map((name, i) => ({
+    const jobs = PLATFORM_CI_REQUIRED_JOBS.map((name, i) => ({
       id: i + 1,
       run_id: 12,
       run_attempt: 2,
@@ -311,7 +312,9 @@ async function senderFixture(t, fault) {
       status: "completed",
       conclusion: "success",
     }));
-    return new Response(JSON.stringify(url.includes("/jobs?") ? { total_count: 2, jobs } : run));
+    return new Response(
+      JSON.stringify(url.includes("/jobs?") ? { total_count: jobs.length, jobs } : run),
+    );
   };
   const runProcess = async (options) => {
     calls.push(options);

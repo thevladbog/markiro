@@ -451,7 +451,6 @@ const EnvSchema = z
         "LANDING_ORIGIN",
         "LANDING_DEMO_RECIPIENT",
         "LANDING_DEMO_REPLY_TO",
-        "SMARTCAPTCHA_SERVER_KEY",
       ] as const) {
         if (!env[name]) {
           ctx.addIssue({ code: "custom", path: [name], message: "required when enabled" });

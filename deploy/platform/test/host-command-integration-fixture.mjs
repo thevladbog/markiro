@@ -7,6 +7,7 @@ import { operationFixture } from "./host-command-fixture.mjs";
 import { dockerFixture } from "./host-observe-fixture.mjs";
 import { release, publisher, jobs } from "./admission-fixtures.mjs";
 import { digest } from "../backup/schemas.mjs";
+import { PLATFORM_CI_REQUIRED_JOBS } from "../release-evidence.mjs";
 import { runHostProcess } from "../host/process.mjs";
 
 const save = (path, value) => writeFile(path, JSON.stringify(value), { mode: 0o600 });
@@ -321,7 +322,7 @@ export async function integrationOptions(root) {
           repository: { full_name: "thevladbog/markiro" },
           head_repository: { full_name: "thevladbog/markiro" },
         };
-        value = path.endsWith("/jobs") ? jobs(run, ["production-bundle", "ci-required"]) : run;
+        value = path.endsWith("/jobs") ? jobs(run, [...PLATFORM_CI_REQUIRED_JOBS]) : run;
       }
       return new Response(JSON.stringify(value));
     },

@@ -5,15 +5,15 @@ import { createDb, schema, type Db } from "@markiro/db";
 import type { EmailTemplateInput } from "@markiro/email";
 import { eq, inArray } from "drizzle-orm";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   DEMO_REQUEST_SUBMISSION_ENABLED,
   DemoRequestSubmissionGuard,
 } from "../src/modules/demo-requests/demo-request-submission.guard";
-import { captchaInvalidError } from "../src/modules/demo-requests/demo-request.errors";
 import { DemoRequestRepository } from "../src/modules/demo-requests/demo-request.repository";
 import { LandingLeadRepository } from "../src/modules/landing-leads/landing-lead.repository";
 import { LandingLeadService } from "../src/modules/landing-leads/landing-lead.service";
+import { LandingLeadRateLimiter } from "../src/modules/landing-leads/landing-lead-rate-limiter";
 import { LandingLeadsController } from "../src/modules/landing-leads/landing-leads.controller";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
@@ -35,7 +35,6 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
   let crypto: MailCryptoService;
   let app: INestApplication;
   let disabledApp: INestApplication;
-  let captcha: "ok" | "invalid" = "ok";
   const emails = new Set<string>();
 
   function email(): string {
@@ -112,12 +111,12 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
   async function build(enabled: boolean): Promise<INestApplication> {
     const service = new LandingLeadService(
       { enabled },
-      { assertAllowed: () => undefined },
-      {
-        assertHuman: async () => {
-          if (captcha === "invalid") throw captchaInvalidError();
-        },
-      },
+      new LandingLeadRateLimiter(db, {
+        windowMs: 900_000,
+        sourceBudget: 100,
+        globalBudget: 10_000,
+        sourceKeySecret: randomUUID(),
+      }),
       repository(),
     );
     const ref = await Test.createTestingModule({
@@ -142,10 +141,6 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
     crypto = new MailCryptoService(Buffer.alloc(32, 23));
     app = await build(true);
     disabledApp = await build(false);
-  });
-
-  beforeEach(() => {
-    captcha = "ok";
   });
 
   afterAll(async () => {
@@ -333,15 +328,15 @@ describe.skipIf(!ready)("POST /landing-leads pipeline (spec 2026-10-20 §15.3)",
     expect(await deliveries(String(form.requestId))).toHaveLength(0);
   });
 
-  it("refuses a failed captcha before storing anything", async () => {
-    captcha = "invalid";
+  it("accepts a download without a captcha token", async () => {
     const form = body();
+    delete form.captchaToken;
     const response = await request(app.getHttpServer())
       .post("/landing-leads")
       .send(form)
-      .expect(400);
-    expect(response.body).toEqual({ code: "captcha_invalid" });
-    expect((await state(String(form.email))).lead).toBeUndefined();
+      .expect(202);
+    expect(response.body).toEqual({ accepted: true, requestId: form.requestId });
+    expect((await state(String(form.email))).lead).toBeDefined();
   });
 
   it("answers 404 while public submission is disabled", async () => {
