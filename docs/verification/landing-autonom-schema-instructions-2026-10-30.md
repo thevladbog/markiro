@@ -2,6 +2,8 @@
 
 Проверка от 30 октября 2026 года. База: `origin/main` / `0579c5ff3184b0510402be5141433cec582bc833` после слияния цепочки инструкций. Сопоставлены исходники всех 10 инструкций (20 редакций RU/EN), код продукта и соседние тесты. Это проверка текущих исходников, а не подтверждение установленной у заказчика версии или публикации сайта.
 
+После слияния #825 и #831 инструкция ТСД актуализирована отдельно: см. [проверку редакции MKR-INS-14 2026.10/03](handheld-instruction-after-825-2026-10-30.md). Раздел согласования ниже сохраняет исходный аудит; новый отчёт фиксирует выполненные правки.
+
 ## Разметка
 
 - Главные страницы RU/EN, скачивание и цены описывают один продукт `https://markiro.app/#software`. Язык интерфейса программы — русский; языки страниц остаются RU/EN. Указаны Windows 10/11, Android и страница установки. Версия установщика не закреплена в статической разметке, потому что её загружает каталог релизов.
@@ -98,11 +100,11 @@
 
 ## Новые PDF редакции 2026.10/02
 
-| Инструкция | Русская версия                                                                       | English version                                                                      |
-| ---------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| MKR-INS-01 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-01_2026.10-02_ru.pdf) | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-01_2026.10-02_en.pdf) |
-| MKR-INS-03 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-03_2026.10-02_ru.pdf) | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-03_2026.10-02_en.pdf) |
-| MKR-INS-04 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-04_2026.10-02_ru.pdf) | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-04_2026.10-02_en.pdf) |
-| MKR-INS-12 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-12_2026.10-02_ru.pdf) | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-12_2026.10-02_en.pdf) |
-| MKR-INS-13 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-13_2026.10-02_ru.pdf) | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-13_2026.10-02_en.pdf) |
-| MKR-INS-14 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-14_2026.10-02_ru.pdf) | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-14_2026.10-02_en.pdf) |
+| Инструкция | Русская версия                                                                                                                                                     | English version                                                                                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| MKR-INS-01 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-01_2026.10-02_ru.pdf)                                                                               | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-01_2026.10-02_en.pdf)                                                                               |
+| MKR-INS-03 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-03_2026.10-02_ru.pdf)                                                                               | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-03_2026.10-02_en.pdf)                                                                               |
+| MKR-INS-04 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-04_2026.10-02_ru.pdf)                                                                               | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-04_2026.10-02_en.pdf)                                                                               |
+| MKR-INS-12 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-12_2026.10-02_ru.pdf)                                                                               | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-12_2026.10-02_en.pdf)                                                                               |
+| MKR-INS-13 | [PDF RU](../../apps/landing/public/legal/files/markiro_mkr-ins-13_2026.10-02_ru.pdf)                                                                               | [PDF EN](../../apps/landing/public/legal/files/markiro_mkr-ins-13_2026.10-02_en.pdf)                                                                               |
+| MKR-INS-14 | [PDF RU](https://github.com/thevladbog/markiro/blob/55fe494a4a590dd50e57eef4f1e23b419cd78abe/apps/landing/public/legal/files/markiro_mkr-ins-14_2026.10-02_ru.pdf) | [PDF EN](https://github.com/thevladbog/markiro/blob/55fe494a4a590dd50e57eef4f1e23b419cd78abe/apps/landing/public/legal/files/markiro_mkr-ins-14_2026.10-02_en.pdf) |

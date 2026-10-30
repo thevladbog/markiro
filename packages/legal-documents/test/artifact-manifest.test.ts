@@ -312,7 +312,7 @@ function artifactEntry(
     "MKR-INS-10": ["2026.10/01", "2026-10-29"],
     "MKR-INS-12": ["2026.10/02", "2026-10-30"],
     "MKR-INS-13": ["2026.10/02", "2026-10-30"],
-    "MKR-INS-14": ["2026.10/02", "2026-10-30"],
+    "MKR-INS-14": ["2026.10/03", "2026-10-30"],
   };
   const [revision, effectiveDate] = INSTRUCTION_RELEASES[code] ?? ["2026.08/01", "2026-08-15"];
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
@@ -1312,11 +1312,11 @@ describe("legal artifact release generation", () => {
       "MKR-INS-12|en|legal-pdf|https://markiro.app/d/MKR-INS-12/2026.10/02/30.10.2026",
       "MKR-INS-13|ru|legal-pdf|https://markiro.app/d/MKR-INS-13/2026.10/02/30.10.2026",
       "MKR-INS-13|en|legal-pdf|https://markiro.app/d/MKR-INS-13/2026.10/02/30.10.2026",
-      "MKR-INS-14|ru|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/02/30.10.2026",
-      "MKR-INS-14|en|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/02/30.10.2026",
+      "MKR-INS-14|ru|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/03/30.10.2026",
+      "MKR-INS-14|en|legal-pdf|https://markiro.app/d/MKR-INS-14/2026.10/03/30.10.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
-      new Set(["2026.08/01", "2026.10/01", "2026.10/02"]),
+      new Set(["2026.08/01", "2026.10/01", "2026.10/02", "2026.10/03"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
       new Set(["2026-08-15", "2026-10-29", "2026-10-30"]),

@@ -1679,6 +1679,31 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("renders the updated handheld frames with their actual PNG dimensions", () => {
+    for (const route of ["/instruktsii/tsd/", "/en/instructions/handheld-terminal/"]) {
+      const page = new JSDOM(
+        readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8"),
+      ).window.document;
+      for (const frame of [
+        "office-devices",
+        "office-handheld-line",
+        "pallet-printed",
+        "pallet-print-failed",
+        "pallet-disassemble-scan",
+        "pallet-disassemble-reason",
+        "pallet-disassemble-confirm",
+      ]) {
+        const img = page.querySelector(`.instruction-document img[src*="/${frame}."]`);
+        expect(img, `${route}: ${frame}`).not.toBeNull();
+        const src = img?.getAttribute("src") ?? "";
+        const bytes = readFileSync(path.join(outputDirectory, src.slice(1)));
+        expect(bytes.subarray(1, 4).toString("ascii")).toBe("PNG");
+        expect(Number(img?.getAttribute("width"))).toBe(bytes.readUInt32BE(16));
+        expect(Number(img?.getAttribute("height"))).toBe(bytes.readUInt32BE(20));
+      }
+    }
+  });
+
   it("keeps FAQ structured answers identical to visible answers on every page with FAQ", () => {
     let pagesWithFaq = 0;
     for (const [route, routeDocument] of documents) {

@@ -13,7 +13,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Инструкция описывает работу с ТСД (терминалом сбора данных) в Маркиро Автоном. На складе ТСД собирает паллету из готовых коробов: оператор сканирует SSCC коробов, ТСД закрывает паллету и печатает её этикетку на принтер, назначенный на ТСД. Сканирование продукции и сборка коробов идут на станции линии (MKR-INS-01–03).",
+            text: "Инструкция описывает складской режим «Паллеты» на ТСД (терминале сбора данных) в Маркиро Автоном. Оператор сканирует SSCC готовых коробов, ТСД закрывает паллету и печатает её этикетку на назначенный принтер. Работа ТСД в производственной смене в эту инструкцию не входит. Работа на станции линии описана в MKR-INS-01–03.",
           },
           {
             kind: "paragraph",
@@ -87,6 +87,15 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             image: { id: "office-devices", caption: "Офис: ТСД в списке устройств" },
           },
           {
+            kind: "step",
+            title: "3.7. При необходимости назначьте линию",
+            text: "Если ТСД будет работать в производственной смене, администратор нажимает карандаш в строке ТСД, выбирает «Линия» и сохраняет изменение. ТСД получит линию при связи с хостом; плитка «Смена» покажет запланированные и активные смены этой линии. Для складского режима «Паллеты» линия не нужна. Если поля «Линия» нет, обновите приложение на ПК офиса до версии с назначением линии ТСД.",
+            image: {
+              id: "office-handheld-line",
+              caption: "Офис: назначение линии ТСД",
+            },
+          },
+          {
             kind: "table",
             caption: "Если привязка не прошла",
             columns: ["Сообщение на ТСД", "Что сделать"],
@@ -127,7 +136,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             kind: "step",
             title: "Главный экран",
             text: "После входа ТСД показывает главный экран. В строке состояния — связь с хостом («Хост на связи»), «Очередь» неотправленных записей, принтер и сканер. Плитки: «Смена», «Паллеты» и «Настройки». Кнопка выхода справа от имени завершает работу оператора.",
-            image: { id: "hub", caption: "ТСД: главный экран" },
+            image: { id: "hub", caption: "ТСД: главный экран без назначенной линии" },
           },
         ],
       },
@@ -226,6 +235,10 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             image: { id: "pallet-print-failed", caption: "ТСД: принтер не отвечает" },
           },
           {
+            kind: "paragraph",
+            text: "Над результатом закрытия показано имя принтера, записанного для этой паллеты. В прежних версиях здесь могло стоять «Не назначен» даже при настроенной печати; имя также может отсутствовать в старых данных паллеты. Проверьте назначение «Паллета» в настройках и фактическую этикетку на принтере.",
+          },
+          {
             kind: "callout",
             tone: "warning",
             text: "Если хост не принял короб, на экране «Паллеты» появится «Снимите с паллеты N короба» со списком коробов и причиной. Снимите эти коробы с паллеты и нажмите «Принято»; если паллета уже закрыта и маркирована, нажмите «Перепечатать этикетку» и замените этикетку.",
@@ -233,8 +246,50 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
         ],
       },
       {
+        id: "warehouse-disassembly",
+        heading: "7. Расформирование складской паллеты",
+        blocks: [
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Выполняйте этот порядок только после согласованного обновления ТСД и хоста: передача расформирования требует, чтобы хост поддерживал протокол 8 или выше. Совместимость проверьте с администратором. До обновления локальное расформирование может не передаваться хосту и не освобождать короба в его учёте.",
+          },
+          {
+            kind: "paragraph",
+            text: "Порядок относится только к своей закрытой складской паллете, собранной на этом ТСД. Перед операцией убедитесь с администратором, что её закрытие уже подтверждено хостом. Расформирование паллет производственной смены, исключения коробов и исключения перепечатки паллет этим порядком не охватываются: ТСД пока не передаёт их хосту.",
+          },
+          {
+            kind: "step",
+            title: "Отсканируйте паллету",
+            text: "Откройте «Паллеты» и нажмите значок слоёв «Расформировать паллету» в верхней панели. Отсканируйте этикетку своей закрытой складской паллеты. Даже если экран предлагает паллету производственной смены, не используйте для неё этот порядок.",
+            image: {
+              id: "pallet-disassemble-scan",
+              caption: "ТСД: сканирование паллеты для расформирования",
+            },
+          },
+          {
+            kind: "step",
+            title: "Выберите причину",
+            text: "На экране «Почему расформировываем?» выберите подходящую причину из списка. Над ним показаны последние цифры SSCC паллеты и число коробов.",
+            image: {
+              id: "pallet-disassemble-reason",
+              caption: "ТСД: причина расформирования складской паллеты",
+            },
+          },
+          {
+            kind: "step",
+            title: "Подтвердите и проверьте приём хостом",
+            text: "Сверьте последние цифры SSCC и число коробов и подтвердите расформирование. После сообщения «Паллета расформирована» снимите старую этикетку. Это сообщение подтверждает локальную операцию: хост освобождает короба после приёма записи. Дождитесь связи с хостом и проверьте приём с администратором; пустая очередь сразу после операции ещё не доказывает приём. При отклонении в «Очереди хоста» передайте запись администратору. На других ТСД затем нажмите «Обновить реестр», прежде чем собирать новую паллету из этих коробов.",
+            image: {
+              id: "pallet-disassemble-confirm",
+              caption: "ТСД: подтверждение SSCC и числа коробов",
+            },
+          },
+        ],
+      },
+      {
         id: "offline",
-        heading: "7. Работа без связи с хостом",
+        heading: "8. Работа без связи с хостом",
         blocks: [
           {
             kind: "step",
@@ -257,7 +312,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
       },
       {
         id: "faq",
-        heading: "8. Частые вопросы",
+        heading: "9. Частые вопросы",
         blocks: [
           {
             kind: "table",
@@ -267,7 +322,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             rows: [
               [
                 "В плитке «Смена» написано «смен нет»",
-                "ТСД показывает смены своей линии. В Маркиро Автоном линию в офисе назначают только станциям, поэтому смены на ТСД не появляются. Сканирование продукции в смене выполняйте на станции линии (MKR-INS-02).",
+                "Проверьте, назначена ли ТСД линия и есть ли на ней запланированные или активные смены. Администратор выбирает «Линия» в окне ТСД в разделе «Устройства» и сохраняет изменение; ТСД получит её при связи с хостом (шаг 3.7). Если поля нет, сначала обновите приложение на ПК офиса. Складской режим «Паллеты» работает и без назначенной линии.",
               ],
               [
                 "«Справочник ещё не загружен» в «Паллеты»",
@@ -307,7 +362,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "This instruction covers the handheld terminal (ТСД) in Markiro Autonom. In the warehouse the handheld builds a pallet from finished boxes: the operator scans the boxes' SSCC labels, and the handheld closes the pallet and prints its label on the printer assigned on the handheld. Product scanning and box building happen at the line station (MKR-INS-01–03).",
+            text: "This instruction covers the warehouse «Паллеты» (Pallets) mode on the handheld terminal (ТСД) in Markiro Autonom. The operator scans finished boxes' SSCC labels; the handheld closes the pallet and prints its label on the assigned printer. Production-shift work on the handheld is outside this instruction's scope. Line-station work is covered in MKR-INS-01–03.",
           },
           {
             kind: "paragraph",
@@ -387,6 +442,15 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             image: { id: "office-devices", caption: "Office: the handheld in the device list" },
           },
           {
+            kind: "step",
+            title: "3.7. Assign a line if needed",
+            text: "If the handheld will work in a production shift, the administrator presses the pencil in its device row, chooses «Линия» (Line), and saves the change. The handheld receives the line when connected to the host; the «Смена» (Shift) tile lists that line's planned and active shifts. The warehouse «Паллеты» (Pallets) mode needs no line. If the «Линия» field is absent, update the office PC application to a version that supports handheld line assignment.",
+            image: {
+              id: "office-handheld-line",
+              caption: "Office: assigning the handheld's line",
+            },
+          },
+          {
             kind: "table",
             caption: "If pairing fails",
             columns: ["Message on the handheld", "What to do"],
@@ -430,7 +494,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             kind: "step",
             title: "The main screen",
             text: "After sign-in the handheld shows its main screen. The status line shows the link to the host («Хост на связи», Host online), the «Очередь» (Queue) of unsent records, the printer and the scanner. The tiles are «Смена» (Shift), «Паллеты» (Pallets) and «Настройки» (Settings). The exit button to the right of the name ends the operator's session.",
-            image: { id: "hub", caption: "Handheld: the main screen" },
+            image: { id: "hub", caption: "Handheld: the main screen without an assigned line" },
           },
         ],
       },
@@ -541,6 +605,10 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             image: { id: "pallet-print-failed", caption: "Handheld: the printer does not respond" },
           },
           {
+            kind: "paragraph",
+            text: "Above the closure result, the screen names the printer recorded for this pallet. Earlier versions could show «Не назначен» (Unassigned) even when printing was configured; older pallet data may also lack the name. Check the «Паллета» (Pallet) assignment in settings and the actual label at the printer.",
+          },
+          {
             kind: "callout",
             tone: "warning",
             text: "If the host did not accept a box, the «Паллеты» (Pallets) screen shows «Снимите с паллеты N короба» (Remove N boxes from the pallet) with the boxes and the reason. Remove those boxes from the pallet and press «Принято» (Understood); if the pallet is already closed and labelled, press «Перепечатать этикетку» (Reprint label) and replace the label.",
@@ -548,8 +616,50 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
         ],
       },
       {
+        id: "warehouse-disassembly",
+        heading: "7. Disassembling a warehouse pallet",
+        blocks: [
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Follow this procedure only after a coordinated handheld and host update: transmitting disassembly requires host protocol 8 or later. Confirm compatibility with the administrator. Before the update, local disassembly may not reach the host or release the boxes in its records.",
+          },
+          {
+            kind: "paragraph",
+            text: "This procedure applies only to your own closed warehouse pallet, built on this handheld. Before the operation, confirm with the administrator that its closure has been acknowledged by the host. Production-shift pallets, box exceptions and pallet reprint exceptions are outside this procedure: the handheld does not yet transmit them to the host.",
+          },
+          {
+            kind: "step",
+            title: "Scan the pallet",
+            text: "Open «Паллеты» (Pallets) and press the layers icon, «Расформировать паллету» (Disassemble pallet), in the top bar. Scan your own closed warehouse pallet's label. Even if the screen offers a production-shift pallet, do not use this procedure for it.",
+            image: {
+              id: "pallet-disassemble-scan",
+              caption: "Handheld: scanning the pallet for disassembly",
+            },
+          },
+          {
+            kind: "step",
+            title: "Choose a reason",
+            text: "On «Почему расформировываем?» (Why disassemble?), choose the appropriate reason from the list. The pallet's final SSCC digits and box count appear above it.",
+            image: {
+              id: "pallet-disassemble-reason",
+              caption: "Handheld: warehouse pallet disassembly reason",
+            },
+          },
+          {
+            kind: "step",
+            title: "Confirm and check receipt by the host",
+            text: "Check the SSCC's final digits and box count, then confirm disassembly. After «Паллета расформирована» (Pallet disassembled), remove the old label. This message confirms the local operation: the host releases the boxes after accepting the record. Wait for a host connection and check receipt with the administrator; an empty queue immediately after the operation does not yet prove receipt. If the record is rejected in «Очередь хоста» (Host queue), pass it to the administrator. On other handhelds, then press «Обновить реестр» (Refresh registry) before building a new pallet from these boxes.",
+            image: {
+              id: "pallet-disassemble-confirm",
+              caption: "Handheld: confirming the SSCC and box count",
+            },
+          },
+        ],
+      },
+      {
         id: "offline",
-        heading: "7. Working without a link to the host",
+        heading: "8. Working without a link to the host",
         blocks: [
           {
             kind: "step",
@@ -572,7 +682,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
       },
       {
         id: "faq",
-        heading: "8. Common questions",
+        heading: "9. Common questions",
         blocks: [
           {
             kind: "table",
@@ -582,7 +692,7 @@ export const HANDHELD_WAREHOUSE_CONTENT = {
             rows: [
               [
                 "The «Смена» (Shift) tile says «смен нет» (no shifts)",
-                "The handheld shows the shifts of its line. In Markiro Autonom the office assigns a line only to stations, so no shifts appear on the handheld. Scan products during a shift at the line station (MKR-INS-02).",
+                "Check that the handheld has a line assigned and that the line has planned or active shifts. The administrator chooses «Линия» (Line) in the handheld's window under «Устройства» (Devices) and saves; the handheld receives it when connected to the host (step 3.7). If the field is absent, first update the office PC application. The warehouse «Паллеты» (Pallets) mode also works without an assigned line.",
               ],
               [
                 "«Справочник ещё не загружен» (Reference data not loaded yet) in «Паллеты» (Pallets)",
