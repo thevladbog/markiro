@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { basename } from "node:path";
 import { publisherJournal } from "../release-catalog/journal.mjs";
 import { buildHandheldManifest } from "./manifest.mjs";
 const hash = (b) => createHash("sha256").update(b).digest("hex");
@@ -44,11 +45,17 @@ export function buildBootstrapFiles({
   assert.equal(hash(apk), expectedSha256);
   assert.match(sourceSha, /^[a-f0-9]{40}$/u);
   assert.match(certificateOutput, /(?:^|\n)Number of signers: 1(?:\r?\n|$)/u);
-  const certificates = [
-    ...certificateOutput.matchAll(/Signer #[0-9]+ certificate SHA-256 digest: ([a-f0-9]{64})/gu),
-  ];
+  // SDK37 labels its v2 certificate "V2 Signer:" instead of "Signer #1".
+  // Count every certificate digest line before accepting either exact spelling.
+  const certificates = certificateOutput
+    .split(/\r?\n/u)
+    .filter((line) => line.includes("certificate SHA-256 digest:"));
   assert.equal(certificates.length, 1);
-  assert.equal(certificates[0][1], certificate);
+  const match = /^(?:Signer #1|V2 Signer:) certificate SHA-256 digest: ([a-f0-9]{64})$/u.exec(
+    certificates[0],
+  );
+  assert(match);
+  assert.equal(match[1], certificate);
   assert.match(
     packageOutput,
     /(?:^|\n)package: name='app\.markiro\.handheld' versionCode='16' versionName='1\.7\.0'(?: |\r?\n|$)/u,
@@ -131,35 +138,53 @@ export async function stageBootstrapFiles({ operationId, files, store, journal }
   await journal.write("completed.json", result);
   return result;
 }
+export function stagingFailureDiagnostic(error, { phase, tool } = {}) {
+  const problem = { phase, errorName: "Error" };
+  if (/^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(error?.name ?? "")) problem.errorName = error.name;
+  if (/^(?:ERR_[A-Z0-9_]{1,55}|E[A-Z0-9_]{1,55})$/u.test(error?.code ?? ""))
+    problem.code = error.code;
+  if (Number.isInteger(error?.status)) problem.exitStatus = error.status;
+  if (typeof tool === "string" && /^[A-Za-z0-9_.-]+$/u.test(basename(tool)))
+    problem.executable = basename(tool);
+  return problem;
+}
+let failureContext = { phase: "startup" };
 async function main() {
   const [apkPath, proofPath, journalPath] = process.argv.slice(2);
   assert.equal(process.argv.length, 5);
+  failureContext = { phase: "validate-source" };
   const proof = validateBuildMetadata(
     JSON.parse(await readFile(proofPath, "utf8")),
     process.env.SOURCE_RUN_ID,
     process.env.GITHUB_REPOSITORY_ID,
   ).run;
+  failureContext = { phase: "read-apk" };
   const apk = await readFile(apkPath);
-  const run = (tool, args) =>
-    execFileSync(tool, args, {
+  const run = (tool, args, phase) => {
+    failureContext = { phase, tool };
+    return execFileSync(tool, args, {
       encoding: "utf8",
       maxBuffer: 131072,
       timeout: 60000,
       stdio: ["ignore", "pipe", "pipe"],
     });
+  };
+  const certificateOutput = run(
+    process.env.APKSIGNER,
+    ["verify", "--verbose", "--print-certs", apkPath],
+    "verify-signature",
+  );
+  const packageOutput = run(process.env.AAPT, ["dump", "badging", apkPath], "inspect-package");
+  failureContext = { phase: "validate-apk" };
   const files = buildBootstrapFiles({
     apk,
     expectedSha256: process.env.APK_SHA256,
     sourceSha: proof.head_sha,
     releasedAt: proof.created_at,
-    certificateOutput: run(process.env.APKSIGNER, [
-      "verify",
-      "--verbose",
-      "--print-certs",
-      apkPath,
-    ]),
-    packageOutput: run(process.env.AAPT, ["dump", "badging", apkPath]),
+    certificateOutput,
+    packageOutput,
   });
+  failureContext = { phase: "storage-configuration" };
   assert.equal(process.env.RELEASES_S3_BUCKET, "markiro-releases");
   assert(process.env.RELEASES_S3_ACCESS_KEY_ID && process.env.RELEASES_S3_SECRET_ACCESS_KEY);
   const { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } =
@@ -219,6 +244,7 @@ async function main() {
         return { bytes: Buffer.concat(chunks, size), versionId: response.VersionId };
       },
     };
+    failureContext = { phase: "create-journal" };
     const journal = await publisherJournal(journalPath);
     await journal.write("source.json", {
       runId: String(proof.id),
@@ -230,6 +256,7 @@ async function main() {
       certificateSha256: certificate,
     });
     await journal.write("manifest.json", JSON.parse(files[1].body.toString("utf8")));
+    failureContext = { phase: "stage-objects" };
     await stageBootstrapFiles({
       operationId: process.env.CATALOG_OPERATION_ID,
       files,
@@ -244,7 +271,8 @@ async function main() {
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => {
+  main().catch((error) => {
+    console.error(JSON.stringify(stagingFailureDiagnostic(error, failureContext)));
     console.error("Handheld staging failed; preserve receipts and reconcile before any retry.");
     process.exitCode = 1;
   });
