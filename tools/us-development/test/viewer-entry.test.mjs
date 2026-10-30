@@ -219,8 +219,98 @@ test("CPU observation inverse rejects source or bound displacement before erasur
   }
 });
 
+// Complete new delta is verified before every older fixture hash or AST oracle.
+function withoutInitializeBoundary(
+  current,
+  helper = readFileSync(new URL("./support/viewer-initialize-boundary.mjs", import.meta.url)),
+) {
+  assert.equal(digest(current), "fc19fa99893c0c0f64f45c7a872fe6fa947a60bf3e3e141968cfbfc3c6f941c7");
+  assert.equal(digest(helper), "745caef0dd21907e591a7f96879a6a0ecf9827f24d75d8f3f91d31e9dfe228fa");
+  for (const [extension, original] of [
+    [
+      'import { parseEnv } from "node:util";\nimport { fileURLToPath } from "node:url";\nimport { startDatasetProviderObservation } from "./dataset-command-provider.mjs";\nimport {\n  openInitializeBoundarySession,\n  parseInitializeBoundary,\n  retainInitializeBoundaryFailure,\n  takeInitializeBoundaryFailure,\n} from "./viewer-initialize-boundary.mjs";\nimport {\n  datasetObjectStoreConfig,\n  datasetObjectStoreContainer,\n',
+      'import { parseEnv } from "node:util";\nimport { fileURLToPath } from "node:url";\nimport { startDatasetProviderObservation } from "./dataset-command-provider.mjs";\nimport {\n  datasetObjectStoreConfig,\n  datasetObjectStoreContainer,\n',
+    ],
+    [
+      "    projectVerificationFailure,\n    projectStorageReadFailureCode,\n    projectTransportWitness,\n    initializeBoundaryFd,\n    cwd,\n  } = {},\n) {\n",
+      "    projectVerificationFailure,\n    projectStorageReadFailureCode,\n    projectTransportWitness,\n    cwd,\n  } = {},\n) {\n",
+    ],
+    [
+      '  const process_ = spawn(file, args, {\n    env,\n    ...(cwd ? { cwd } : {}),\n    stdio: [\n      "ignore",\n      "pipe",\n      "pipe",\n      ...(initializeBoundaryFd === undefined ? [] : [initializeBoundaryFd]),\n    ],\n  });\n  let stdout = Buffer.alloc(0),\n    stderr = Buffer.alloc(0),\n',
+      '  const process_ = spawn(file, args, {\n    env,\n    ...(cwd ? { cwd } : {}),\n    stdio: ["ignore", "pipe", "pipe"],\n  });\n  let stdout = Buffer.alloc(0),\n    stderr = Buffer.alloc(0),\n',
+    ],
+    [
+      "\nexport function observeDatasetInitializeFailures(installation, sink) {\n  let pending;\n  let pendingBoundary;\n  let closed = false;\n  let emitted = false;\n  const own = (object, key) => {\n",
+      "\nexport function observeDatasetInitializeFailures(installation, sink) {\n  let pending;\n  let closed = false;\n  let emitted = false;\n  const own = (object, key) => {\n",
+    ],
+    [
+      '  const capture = (error) => {\n    try {\n      if (closed || pending) return;\n      pendingBoundary = takeInitializeBoundaryFailure(error);\n      const message = own(error, "message");\n      const kind = index(message, [\n        "us_dataset_positive_child_failed",\n',
+      '  const capture = (error) => {\n    try {\n      if (closed || pending) return;\n      const message = own(error, "message");\n      const kind = index(message, [\n        "us_dataset_positive_child_failed",\n',
+    ],
+    [
+      "    } catch {\n      /* Observation cannot mask command or disposal results. */\n    }\n    try {\n      if (pendingBoundary) sink(pendingBoundary);\n    } catch {\n      /* The separate numeric attribution cannot replace the original failure. */\n    }\n  };\n  return {\n    ...installation,\n",
+      "    } catch {\n      /* Observation cannot mask command or disposal results. */\n    }\n  };\n  return {\n    ...installation,\n",
+    ],
+    [
+      '\nasync function acquireDatasetInstallation(mode = "positive") {\n  const profileInput = datasetInstallationProfile(mode);\n  const observeInitialize = mode === "viewer";\n  const uid = process.getuid?.(),\n    gid = process.getgid?.();\n  if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0)\n',
+      '\nasync function acquireDatasetInstallation(mode = "positive") {\n  const profileInput = datasetInstallationProfile(mode);\n  const uid = process.getuid?.(),\n    gid = process.getgid?.();\n  if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0)\n',
+    ],
+    [
+      '        invoked.add(mode);\n        const timeFile = join(directory, `time-${mode}.txt`);\n        await writeFile(timeFile, "", { mode: 0o600, flag: "wx" });\n        const wantsBoundary = observeInitialize && mode === "initialize";\n        let boundary;\n        if (wantsBoundary) {\n          try {\n            boundary = await openInitializeBoundarySession(directory, root);\n          } catch {\n            // An unavailable test observer cannot prevent the original native command.\n          }\n        }\n        let result;\n        try {\n          result = await child(\n',
+      '        invoked.add(mode);\n        const timeFile = join(directory, `time-${mode}.txt`);\n        await writeFile(timeFile, "", { mode: 0o600, flag: "wx" });\n        let result;\n        try {\n          result = await child(\n',
+    ],
+    [
+      '              "-o",\n              timeFile,\n              process.execPath,\n              boundary?.script ?? resolve(root, "apps/api/dist/main.us-dataset.js"),\n              mode,\n              ...(mode === "initialize" ? ["--confirm-local-synthetic-dataset"] : []),\n              ...pairs,\n',
+      '              "-o",\n              timeFile,\n              process.execPath,\n              resolve(root, "apps/api/dist/main.us-dataset.js"),\n              mode,\n              ...(mode === "initialize" ? ["--confirm-local-synthetic-dataset"] : []),\n              ...pairs,\n',
+    ],
+    [
+      '              projectVerificationFailure: projectUsRequestVerificationFailure,\n              projectStorageReadFailureCode: projectUsRequestPackageStorageReadFailureCode,\n              projectTransportWitness: projectUsRequestPackageTransportWitness,\n              ...(boundary ? { initializeBoundaryFd: boundary.fd } : {}),\n            },\n          );\n        } catch (error) {\n          const retained = await retainDatasetPositiveCommandFailure(\n            error,\n            mode,\n            timeFile,\n            observer,\n          );\n          if (wantsBoundary) {\n            let snapshot = parseInitializeBoundary(Buffer.alloc(0));\n            try {\n              if (boundary) snapshot = await boundary.finishAfterSettled();\n            } catch {\n              // Unavailable attribution cannot replace the original child error.\n            }\n            retainInitializeBoundaryFailure(retained, snapshot);\n          }\n          throw retained;\n        } finally {\n          try {\n            await boundary?.finishAfterSettled();\n          } catch {\n            // The actual command result/error wins over observation failure.\n          }\n        }\n        const time = await readFile(timeFile, "utf8");\n        const maximumRssKiB = Number(\n',
+      '              projectVerificationFailure: projectUsRequestVerificationFailure,\n              projectStorageReadFailureCode: projectUsRequestPackageStorageReadFailureCode,\n              projectTransportWitness: projectUsRequestPackageTransportWitness,\n            },\n          );\n        } catch (error) {\n          throw await retainDatasetPositiveCommandFailure(error, mode, timeFile, observer);\n        }\n        const time = await readFile(timeFile, "utf8");\n        const maximumRssKiB = Number(\n',
+    ],
+  ]) {
+    assert.equal(current.split(extension).length, 2, "unique reviewed boundary delta");
+    current = current.replace(extension, original);
+  }
+  assert.equal(digest(current), "889ceb6e2e7caaf6183b04fe5b1f5f6181830c33f67c0464900ca56d553bc554");
+  return current;
+}
+
+test("boundary inverse refuses displaced guards, argv, fd ownership, budgets and helper bytes", () => {
+  const current = readFileSync(
+    new URL("./support/dataset-command-positive-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    digest(withoutInitializeBoundary(current)),
+    "889ceb6e2e7caaf6183b04fe5b1f5f6181830c33f67c0464900ca56d553bc554",
+  );
+  for (const [before, after] of [
+    ['const observeInitialize = mode === "viewer";', "const observeInitialize = true;"],
+    [
+      'const wantsBoundary = observeInitialize && mode === "initialize";',
+      "const wantsBoundary = true;",
+    ],
+    ["initializeBoundaryFd: boundary.fd", "initializeBoundaryFd: 1"],
+    ["await boundary?.finishAfterSettled();", "void boundary?.finishAfterSettled();"],
+    [
+      'boundary?.script ?? resolve(root, "apps/api/dist/main.us-dataset.js")',
+      'boundary?.script ?? "unreviewed-main.js"',
+    ],
+    ["cap: 900_000", "cap: 900_001"],
+    ["  assertDemoViewerRunner();", ""],
+  ]) {
+    assert.equal(current.split(before).length, 2);
+    assert.throws(() => withoutInitializeBoundary(current.replace(before, after)));
+  }
+  const helper = readFileSync(new URL("./support/viewer-initialize-boundary.mjs", import.meta.url));
+  assert.throws(() =>
+    withoutInitializeBoundary(current, Buffer.concat([helper, Buffer.from("\n")])),
+  );
+});
+
 // Verify the complete new fixture before restoring any historical oracle input.
 function withoutViewerProfile(current) {
+  current = withoutInitializeBoundary(current);
   assert.equal(digest(current), "889ceb6e2e7caaf6183b04fe5b1f5f6181830c33f67c0464900ca56d553bc554");
   for (const [extension, original] of [
     [

@@ -9,6 +9,12 @@ import { parseEnv } from "node:util";
 import { fileURLToPath } from "node:url";
 import { startDatasetProviderObservation } from "./dataset-command-provider.mjs";
 import {
+  openInitializeBoundarySession,
+  parseInitializeBoundary,
+  retainInitializeBoundaryFailure,
+  takeInitializeBoundaryFailure,
+} from "./viewer-initialize-boundary.mjs";
+import {
   datasetObjectStoreConfig,
   datasetObjectStoreContainer,
   assertDatasetObjectStoreContainer,
@@ -244,6 +250,7 @@ async function child(
     projectVerificationFailure,
     projectStorageReadFailureCode,
     projectTransportWitness,
+    initializeBoundaryFd,
     cwd,
   } = {},
 ) {
@@ -251,7 +258,12 @@ async function child(
   const process_ = spawn(file, args, {
     env,
     ...(cwd ? { cwd } : {}),
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [
+      "ignore",
+      "pipe",
+      "pipe",
+      ...(initializeBoundaryFd === undefined ? [] : [initializeBoundaryFd]),
+    ],
   });
   let stdout = Buffer.alloc(0),
     stderr = Buffer.alloc(0),
@@ -360,6 +372,7 @@ export async function createDatasetPositiveFixture(env = process.env) {
 
 export function observeDatasetInitializeFailures(installation, sink) {
   let pending;
+  let pendingBoundary;
   let closed = false;
   let emitted = false;
   const own = (object, key) => {
@@ -375,6 +388,7 @@ export function observeDatasetInitializeFailures(installation, sink) {
   const capture = (error) => {
     try {
       if (closed || pending) return;
+      pendingBoundary = takeInitializeBoundaryFailure(error);
       const message = own(error, "message");
       const kind = index(message, [
         "us_dataset_positive_child_failed",
@@ -467,6 +481,11 @@ export function observeDatasetInitializeFailures(installation, sink) {
     } catch {
       /* Observation cannot mask command or disposal results. */
     }
+    try {
+      if (pendingBoundary) sink(pendingBoundary);
+    } catch {
+      /* The separate numeric attribution cannot replace the original failure. */
+    }
   };
   return {
     ...installation,
@@ -492,6 +511,7 @@ export async function createDemoViewerInstallationFixture() {
 
 async function acquireDatasetInstallation(mode = "positive") {
   const profileInput = datasetInstallationProfile(mode);
+  const observeInitialize = mode === "viewer";
   const uid = process.getuid?.(),
     gid = process.getgid?.();
   if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0)
@@ -880,6 +900,15 @@ async function acquireDatasetInstallation(mode = "positive") {
         invoked.add(mode);
         const timeFile = join(directory, `time-${mode}.txt`);
         await writeFile(timeFile, "", { mode: 0o600, flag: "wx" });
+        const wantsBoundary = observeInitialize && mode === "initialize";
+        let boundary;
+        if (wantsBoundary) {
+          try {
+            boundary = await openInitializeBoundarySession(directory, root);
+          } catch {
+            // An unavailable test observer cannot prevent the original native command.
+          }
+        }
         let result;
         try {
           result = await child(
@@ -889,7 +918,7 @@ async function acquireDatasetInstallation(mode = "positive") {
               "-o",
               timeFile,
               process.execPath,
-              resolve(root, "apps/api/dist/main.us-dataset.js"),
+              boundary?.script ?? resolve(root, "apps/api/dist/main.us-dataset.js"),
               mode,
               ...(mode === "initialize" ? ["--confirm-local-synthetic-dataset"] : []),
               ...pairs,
@@ -902,10 +931,32 @@ async function acquireDatasetInstallation(mode = "positive") {
               projectVerificationFailure: projectUsRequestVerificationFailure,
               projectStorageReadFailureCode: projectUsRequestPackageStorageReadFailureCode,
               projectTransportWitness: projectUsRequestPackageTransportWitness,
+              ...(boundary ? { initializeBoundaryFd: boundary.fd } : {}),
             },
           );
         } catch (error) {
-          throw await retainDatasetPositiveCommandFailure(error, mode, timeFile, observer);
+          const retained = await retainDatasetPositiveCommandFailure(
+            error,
+            mode,
+            timeFile,
+            observer,
+          );
+          if (wantsBoundary) {
+            let snapshot = parseInitializeBoundary(Buffer.alloc(0));
+            try {
+              if (boundary) snapshot = await boundary.finishAfterSettled();
+            } catch {
+              // Unavailable attribution cannot replace the original child error.
+            }
+            retainInitializeBoundaryFailure(retained, snapshot);
+          }
+          throw retained;
+        } finally {
+          try {
+            await boundary?.finishAfterSettled();
+          } catch {
+            // The actual command result/error wins over observation failure.
+          }
         }
         const time = await readFile(timeFile, "utf8");
         const maximumRssKiB = Number(
