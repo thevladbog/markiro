@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, chmod, realpath, readFile, writeFile, rm } from "node:fs/promises";
+import { constants, linkSync, unlinkSync } from "node:fs";
+import { mkdtemp, chmod, realpath, readFile, open, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filesystemGuard } from "../bootstrap-runtime.mjs";
@@ -21,6 +23,34 @@ async function request(root) {
   }
   throw Error("request absent");
 }
+async function publishReply(root, value, beforePublish = async () => {}) {
+  const temporary = join(root, `${randomUUID()}.reply.tmp`),
+    destination = join(root, "1.reply.json");
+  try {
+    const file = await open(temporary, "wx", 0o600);
+    try {
+      await file.writeFile(JSON.stringify(value) + "\n");
+      await file.sync();
+      await file.chmod(0o400);
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await beforePublish();
+    // Do not yield while the published inode still has the staging link:
+    // readPrivate requires a single link as well as complete, immutable bytes.
+    linkSync(temporary, destination);
+    unlinkSync(temporary);
+    const directory = await open(root, constants.O_RDONLY | constants.O_DIRECTORY);
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
 test("runtime waits for exact nonce/binding reply, with exclusive durable requests", async (t) => {
   const root = await fixture(t),
     binding = { operationId: "test", evidenceSha256: "a".repeat(64) };
@@ -28,11 +58,11 @@ test("runtime waits for exact nonce/binding reply, with exclusive durable reques
     pending = guard(binding);
   const message = await request(root);
   assert.deepEqual(message.binding, binding);
-  await writeFile(
-    join(root, "1.reply.json"),
-    JSON.stringify({ schema: 1, sequence: 1, nonce: message.nonce, binding, approved: true }),
-    { mode: 0o400, flag: "wx" },
-  );
+  const value = { schema: 1, sequence: 1, nonce: message.nonce, binding, approved: true };
+  await publishReply(root, value, async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    await assert.rejects(readFile(join(root, "1.reply.json")), (e) => e.code === "ENOENT");
+  });
   await pending;
   await assert.rejects(filesystemGuard(root)(binding), (e) => e.code === "EEXIST");
 });
@@ -46,8 +76,10 @@ for (const mutation of ["nonce", "binding", "denied"])
     if (mutation === "nonce") reply.nonce = "wrong";
     if (mutation === "binding") reply.binding = { operationId: "other" };
     if (mutation === "denied") reply.approved = false;
-    await writeFile(join(root, "1.reply.json"), JSON.stringify(reply), { mode: 0o400, flag: "wx" });
-    await assert.rejects(pending, /bootstrap guard rejected/);
+    await Promise.all([
+      assert.rejects(pending, /bootstrap guard rejected/),
+      publishReply(root, reply),
+    ]);
   });
 
 test("database connectivity preflight enforces the existing verified TLS URL and makes only a read-only query", async () => {
