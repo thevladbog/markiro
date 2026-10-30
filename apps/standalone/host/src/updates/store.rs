@@ -630,7 +630,10 @@ impl UpdateStore {
         HostPackage {
             state,
             version,
-            staged: signed_version(&self.dir.join(STAGED), &self.keyset),
+            // Office uses this version to confirm a completed upload on retry.
+            staged: read_package(&self.dir.join(STAGED), &self.keyset, self.max_installer)
+                .ok()
+                .map(|(package, _)| package.version),
             previous: signed_version(&self.dir.join(PREVIOUS), &self.keyset),
             disk_bytes: disk_bytes(&self.dir),
         }

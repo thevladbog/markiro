@@ -106,6 +106,35 @@ fn a_staged_package_not_newer_than_the_host_goes_and_a_newer_one_waits() {
 }
 
 #[test]
+fn staged_status_requires_a_verified_installer_not_only_a_signed_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    let store = store(dir.path(), "0.3.0");
+    write_package(&updates, STAGED, "0.4.0");
+    store.open_blocking().unwrap();
+    assert_eq!(store.status_blocking().staged.as_deref(), Some("0.4.0"));
+
+    let installer = updates.join(STAGED).join(installer_name("0.4.0"));
+    flip_byte(&installer, 10);
+    assert_eq!(store.status_blocking().staged, None, "wrong SHA-256");
+
+    write_package(&updates, STAGED, "0.4.0");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&installer)
+        .unwrap()
+        .set_len(10)
+        .unwrap();
+    assert_eq!(store.status_blocking().staged, None, "wrong size");
+
+    std::fs::remove_file(&installer).unwrap();
+    assert_eq!(store.status_blocking().staged, None, "missing installer");
+
+    write_package(&updates, STAGED, "0.4.0");
+    assert_eq!(store.status_blocking().staged.as_deref(), Some("0.4.0"));
+}
+
+#[test]
 fn a_staged_package_that_does_not_check_out_is_removed_and_reported() {
     let dir = tempfile::tempdir().unwrap();
     let updates = dir.path().join("updates");
