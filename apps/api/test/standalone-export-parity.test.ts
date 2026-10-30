@@ -17,7 +17,8 @@ import type { ObjectStorageService } from "../src/modules/storage/object-storage
  * the cloud's own `ShiftExportSourceService` reads, and the cloud's own
  * `ShiftExportRunnerService` renders and "uploads" every format; the bytes
  * it uploads, its file names and counts, or the error code it records, must
- * equal `golden.json`. The standalone office's port reads the same cases as
+ * equal `golden.json`, with the approved pallet noun in new file names. The
+ * standalone office's port reads the same cases as
  * its host's rows and must produce the same golden
  * (`apps/standalone/test/export-parity.test.ts`). A legitimate change of
  * the cloud's export regenerates the golden from this test alone:
@@ -436,7 +437,21 @@ describe("the cloud's exports over the parity cases (plan ЧЗ of apps/standalon
     const golden = z.record(z.string(), outcomeSchema).parse(read("golden.json"));
     expect(Object.keys(outcomes)).toEqual(Object.keys(golden));
     for (const [key, outcome] of Object.entries(outcomes)) {
-      expect(outcome, key).toEqual(golden[key]);
+      const frozen = golden[key];
+      // Keep historical XML bytes and hashes pinned; only the approved filename noun changed.
+      const expected =
+        key.split("/")[1]?.startsWith("pallet_xml_gismt_aggregation@") &&
+        frozen !== undefined &&
+        "parts" in frozen
+          ? {
+              ...frozen,
+              parts: frozen.parts.map((part) => ({
+                ...part,
+                filename: part.filename.replace("_паллета_", "_палет_"),
+              })),
+            }
+          : frozen;
+      expect(outcome, key).toEqual(expected);
     }
   });
 });
