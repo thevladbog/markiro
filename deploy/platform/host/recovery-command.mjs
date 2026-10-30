@@ -35,6 +35,7 @@ export const RECOVERY_BUNDLE_FILES = Object.freeze([
   "deploy/platform/backup/files.mjs",
   "deploy/platform/backup/restore.mjs",
   "deploy/platform/backup/local-runtime.mjs",
+  "deploy/platform/backup/configuration-capability.mjs",
   "deploy/platform/backup/inventory.mjs",
   "deploy/platform/backup/definitions.mjs",
   "deploy/platform/backup/catalog.mjs",

@@ -1,3 +1,7 @@
+import {
+  validateConfigurationBaseline,
+  validateConfigurationRuntime,
+} from "./host/configuration-plan.mjs";
 import { canonical, ensure, keys } from "./backup/schemas.mjs";
 import { COMPATIBLE_PRODUCT_SHA } from "../../tools/release-catalog/bootstrap-artifact.mjs";
 const sha = (v) => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v);
@@ -31,9 +35,10 @@ export function validateReadBootstrapOperation(o) {
     "egressNetworkId",
     "schemaProof",
     "postgresCaSha256",
+    ...(o.schema === 2 ? ["configuration"] : []),
   ]);
   ensure(
-    o.schema === 1 &&
+    [1, 2].includes(o.schema) &&
       o.kind === "catalog-read-bootstrap" &&
       uuid(o.operationId) &&
       uuid(o.catalogOperationId) &&
@@ -102,6 +107,34 @@ export function validateReadBootstrapOperation(o) {
       sha(o.schemaProof.schemaSha256) &&
       sha(o.schemaProof.migrationSha256),
   );
+  if (o.schema === 2) {
+    canonical(o.configuration);
+    const c = o.configuration;
+    keys(c, ["baseline", "head", "runtime"]);
+    validateConfigurationBaseline(c.baseline);
+    validateConfigurationRuntime(c.runtime);
+    ensure(c.baseline.acceptedOperationId === o.acceptedOperationId);
+    keys(c.head, ["operationId", "receiptSha256"]);
+    ensure(
+      uuid(c.head.operationId) &&
+        sha(c.head.receiptSha256) &&
+        c.head.operationId !== o.acceptedOperationId,
+    );
+    const marker = c.baseline.runtime.path.indexOf("/state/");
+    ensure(
+      marker > 0 &&
+        c.runtime.path.startsWith(c.baseline.runtime.path.slice(0, marker) + "/state/") &&
+        c.runtime.path.endsWith("/runtime.env"),
+    );
+    ensure(names.has("state/config-index.json"));
+    ensure(
+      o.guards.some(
+        (g) =>
+          g.path === `state/configuration-operations/${c.head.operationId}/receipt.json` &&
+          g.sha256 === c.head.receiptSha256,
+      ),
+    );
+  }
   return o;
 }
 export function workerEnvironment(entries) {

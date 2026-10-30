@@ -1,3 +1,4 @@
+import { assertCurrentBackupConfiguration } from "./configuration-capability.mjs";
 import { carryHostFailure } from "../host/failure-diagnostic.mjs";
 import { join, dirname, relative } from "node:path";
 import { chmod, mkdir } from "node:fs/promises";
@@ -111,7 +112,15 @@ export async function readBackupRuntime(root, operationId, recoveryRuntime) {
   ensure(bytes.equals(bound.bytes));
   return bytes;
 }
-export async function openRuntime({ root, operationId, purpose, run, recoveryRuntime }) {
+export async function openRuntime({
+  root,
+  operationId,
+  purpose,
+  run,
+  recoveryRuntime,
+  configurationSource,
+}) {
+  await assertCurrentBackupConfiguration(root, configurationSource);
   assertPrivateRootSync(root);
   ensure(["archive", "restore"].includes(purpose));
   const config = runtime(JSON.parse(await readBackupRuntime(root, operationId, recoveryRuntime)));
@@ -122,6 +131,7 @@ export async function openRuntime({ root, operationId, purpose, run, recoveryRun
   assertPrivateRootSync(dockerConfig);
   const command = async (args) => {
     try {
+      await assertCurrentBackupConfiguration(root, configurationSource);
       if (recoveryRuntime !== undefined)
         await readBackupRuntime(root, operationId, recoveryRuntime);
       return await run({

@@ -55,6 +55,14 @@ multiline values or duplicate keys. Compose uses `env_file.format: raw` so `$` i
 credentials is preserved. Require Docker Compose supporting raw env files and
 `!override` in the test overlay (2.30 or later).
 
+DaData suggestions in SaaS admin require the optional server-side `DADATA_TOKEN`.
+`DADATA_SECRET` is optional and must not be supplied without a token. The host
+snapshot retains both in its private runtime file; neither belongs in Compose
+interpolation, frontend variables or build arguments. Preserve the existing
+provider credentials when migrating. An absent token produces `unconfigured`;
+a configured status only confirms presence, so verify a real organization,
+address and bank suggestion after an approved deployment.
+
 The preflight deliberately validates TLS-verified PostgreSQL only. Both the base
 external-PG profile and compact local-PG overlay preserve that requirement.
 Plaintext PostgreSQL is exercised only by the synthetic CI overlay; that overlay

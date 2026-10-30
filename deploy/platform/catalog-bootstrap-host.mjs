@@ -1,3 +1,6 @@
+import { verifyCatalogConfigurationSource } from "./catalog-configuration.mjs";
+import { containerRecipe } from "./host/container-recipe.mjs";
+export { containerRecipe } from "./host/container-recipe.mjs";
 import { constants } from "node:fs";
 import { lstat, open, realpath, chown, chmod, link, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -56,27 +59,7 @@ async function privateBytes(path, owner, mode) {
     await file.close();
   }
 }
-function sortedMounts(mounts, field) {
-  ensure(Array.isArray(mounts));
-  const names = mounts.map((m) => m[field]);
-  ensure(
-    names.every((name) => typeof name === "string" && name.startsWith("/")) &&
-      new Set(names).size === names.length,
-  );
-  return [...mounts].sort((a, b) => a[field].localeCompare(b[field]));
-}
-export function containerRecipe(container) {
-  const host = { ...container.HostConfig };
-  if (host.Mounts) host.Mounts = sortedMounts(host.Mounts, "Target");
-  return digest(
-    canonical({
-      Image: container.Image,
-      Config: container.Config,
-      HostConfig: host,
-      Mounts: sortedMounts(container.Mounts, "Destination"),
-    }),
-  );
-}
+
 export async function executeReadBootstrap({
   operationId,
   planSha256,
@@ -132,6 +115,7 @@ export async function executeReadBootstrap({
     await assertNoCatalogPeers(dispatch, token);
   };
   const verifyFiles = async () => {
+    await verifyCatalogConfigurationSource(operation, STATE);
     ensure(digest(await readPrivateFile(root, "operation.json")) === planSha256);
     ensure(digest(await privateBytes(moduleFile, 0, 0o444)) === operation.bootstrapModuleSha256);
     ensure(digest(await privateBytes(runtimeFile, 0, 0o444)) === operation.runtimeScriptSha256);
@@ -175,7 +159,7 @@ export async function executeReadBootstrap({
       })
     ).stdout.toString();
     ensure(
-      !/deploy\/platform\/(?:upgrade|recovery)-transport\.mjs (?:execute|host-command)\b/u.test(
+      !/deploy\/platform\/(?:upgrade|recovery|dadata)-transport\.mjs (?:execute|host-command)\b/u.test(
         processes,
       ),
     );
