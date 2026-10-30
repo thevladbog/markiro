@@ -1,0 +1,370 @@
+/* Approved office kit: one rounded brand surface, an unboxed form, bundled assets. */
+.office-login {
+  position: fixed;
+  inset: 0;
+  overflow: hidden auto;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+  grid-template-rows: 80px minmax(min-content, 1fr) 88px;
+  gap: 24px;
+  padding: 24px;
+  isolation: isolate;
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.office-login__brand-panel {
+  grid-column: 1;
+  grid-row: 1 / 4;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+  z-index: -1;
+}
+
+.office-login__top {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.office-login__brand {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  min-width: 0;
+  gap: 12px;
+  padding-left: 40px;
+}
+
+.office-login__brand > svg {
+  flex: none;
+}
+.office-login__wordmark {
+  font: 600 24px/1 var(--font-mono);
+  letter-spacing: -0.5px;
+}
+.office-login__edition {
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+.office-login__tools {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 24px 0 0;
+}
+.office-login__identity {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: center;
+  min-width: 0;
+  padding: 0 40px;
+}
+.office-login__hero-logo {
+  height: 320px;
+  display: flex;
+  align-items: center;
+}
+.office-login__hero-logo > svg {
+  width: 366px;
+  height: 366px;
+  max-width: 100%;
+  flex: none;
+  margin-left: -23px;
+}
+.office-login__tagline {
+  margin: 40px 0 0;
+  font: 500 28px/36px var(--font-ui);
+  white-space: pre-line;
+}
+.office-login__company-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: white;
+}
+.office-login__company-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.office-login__company-logo--header {
+  width: 180px;
+  height: 64px;
+  padding: 8px;
+  border-radius: var(--r-sm);
+}
+.office-login__company-logo--hero {
+  width: min(100%, 480px);
+  height: 208px;
+  padding: 16px;
+  border-radius: var(--r-ctl);
+}
+
+.office-login__brand-footer {
+  grid-column: 1;
+  grid-row: 3;
+  align-self: start;
+  min-width: 0;
+  padding: 0 40px;
+}
+.office-login__brand-footer > p {
+  margin: 0;
+}
+.office-login__brand-footer > p:first-child {
+  max-width: 30ch;
+  font: 400 18px/26px var(--font-ui);
+  color: var(--fg-2);
+}
+.office-login__brand-footer > .office-login__product {
+  margin: 12px 0 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.office-login__content {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-width: 0;
+  padding: 0 24px;
+}
+.office-login__card {
+  display: grid;
+  gap: 24px;
+  width: min(100%, 448px);
+}
+.office-login__main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.office-login__title {
+  margin: 0;
+  font: 600 44px/54px var(--font-ui);
+  letter-spacing: -0.03em;
+}
+.office-login__instruction {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-lg);
+}
+.office-login__form {
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.office-login__form:not([data-failed]) .mk-input:not(.mk-input--error):not(:focus-within) {
+  --mk-input-border: 1px solid var(--linectl);
+}
+.office-login__form[data-failed] .mk-input {
+  --mk-input-border: 2px solid var(--err-solid);
+}
+.office-login .office-login__ghost {
+  align-self: center;
+  min-height: 44px;
+}
+
+.office-login__recent {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.office-login__recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.office-login__recent-title {
+  margin: 0;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+}
+.office-login__recent-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.office-login .office-login__recent-pick {
+  width: 100%;
+  min-height: 44px;
+  gap: 12px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+}
+.office-login .office-login__recent-pick:hover,
+.office-login .office-login__recent-pick--selected {
+  background: var(--surface-panel);
+}
+.office-login__avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-round);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: 600 12px/1 var(--font-mono);
+}
+.office-login__recent-pick--selected .office-login__avatar {
+  background: var(--surface-card);
+}
+.office-login__recent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.office-login__go {
+  color: var(--fg-2);
+}
+.office-login__check {
+  flex: none;
+  color: var(--ok-fg);
+}
+.office-login .office-login__clear {
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+.office-login__recent .office-note {
+  margin: 0;
+  font: var(--text-caption);
+}
+
+.office-login__footer {
+  grid-column: 2;
+  grid-row: 3;
+  align-self: end;
+  min-width: 0;
+  padding: 0 24px;
+}
+.office-login__address {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 0;
+}
+.office-login__address > span {
+  font: 400 12px/18px var(--font-mono);
+}
+.office-login__address > .mk-btn {
+  min-height: 44px;
+}
+
+.theme-switcher .theme-switcher__option:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (max-width: 1100px), (max-height: 820px) {
+  .office-login {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 64px minmax(min-content, 1fr) auto;
+    padding: 40px;
+    gap: 32px;
+  }
+  .office-login__brand-panel,
+  .office-login__identity,
+  .office-login__brand-footer {
+    display: none;
+  }
+  .office-login__top {
+    grid-column: 1;
+    align-items: center;
+  }
+  .office-login__brand {
+    align-self: center;
+    padding: 0;
+  }
+  .office-login__tools {
+    padding: 0;
+  }
+  .office-login__company-logo--header {
+    height: 48px;
+    width: 144px;
+    padding: 4px;
+  }
+  .office-login__content {
+    grid-column: 1;
+    padding: 0 32px;
+  }
+  .office-login__card {
+    grid-template-columns: minmax(0, 384px) minmax(0, 368px);
+    align-items: center;
+    width: 100%;
+    max-width: 848px;
+    gap: 96px;
+  }
+  .office-login__title {
+    font-size: 40px;
+    line-height: 48px;
+  }
+  .office-login__instruction {
+    font: var(--text-body);
+  }
+  .office-login__footer {
+    grid-column: 1;
+    padding: 0;
+  }
+}
+
+@media (max-height: 700px) {
+  .office-login {
+    padding: 24px;
+    gap: 24px;
+  }
+}
+
+@media (max-width: 800px) {
+  .office-login {
+    grid-template-rows: auto 1fr auto;
+    gap: 32px;
+    padding: 24px;
+  }
+  .office-login__tools {
+    gap: 12px;
+  }
+  .office-login__tools .office-chip {
+    max-width: 140px;
+    white-space: normal;
+  }
+  .office-login__edition {
+    display: none;
+  }
+  .office-login__content {
+    padding: 0;
+  }
+  .office-login__card {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 448px;
+    gap: 24px;
+  }
+  .office-login__top {
+    flex-wrap: wrap;
+  }
+  .office-login__title {
+    font-size: 32px;
+    line-height: 40px;
+  }
+}

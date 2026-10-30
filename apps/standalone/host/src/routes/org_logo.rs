@@ -19,7 +19,7 @@ use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Entry, Outcome};
-use crate::auth::OfficeContext;
+use crate::auth::{AuthDevice, OfficeContext};
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson};
 use crate::server::AppState;
@@ -50,6 +50,23 @@ pub async fn get_logo(
     let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
     Ok(Json(OrgLogoState {
         logo: read_logo(&mut conn).await?,
+    }))
+}
+
+/// Branding before office sign-in. The paired device learns only the effective
+/// logo, never the organization's profile, license or office users.
+pub async fn login_branding(
+    State(state): State<AppState>,
+    _device: AuthDevice,
+) -> Result<Json<OrgLogoState>, ApiError> {
+    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    let allowed = crate::license::gate::custom_branding(&state, &mut conn).await?;
+    Ok(Json(OrgLogoState {
+        logo: if allowed {
+            read_logo(&mut conn).await?
+        } else {
+            None
+        },
     }))
 }
 
