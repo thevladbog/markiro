@@ -109,6 +109,7 @@ async function verifyProtectedDispatch(
       ensure(response.ok);
       return response.json();
     };
+    let sourceBranch;
     const check = (run) => {
       ensure(
         Number.isSafeInteger(run.id) && String(run.id) === dispatch.runId && run.run_attempt === 1,
@@ -117,9 +118,15 @@ async function verifyProtectedDispatch(
         run.head_sha === dispatch.toolingSha &&
           (run.head_branch === "main" ||
             (workflowPath === ".github/workflows/bootstrap-release-catalog.yml" &&
-              run.head_branch === `catalog-bootstrap-${dispatch.toolingSha}`)) &&
+              run.head_branch === `catalog-bootstrap-${dispatch.toolingSha}`) ||
+            (workflowPath === ".github/workflows/configure-platform-dadata.yml" &&
+              run.head_branch === `configuration-dadata-${dispatch.toolingSha}`)) &&
           run.event === "workflow_dispatch",
       );
+      if (workflowPath === ".github/workflows/configure-platform-dadata.yml") {
+        sourceBranch ??= run.head_branch;
+        ensure(run.head_branch === sourceBranch);
+      }
       ensure(
         run.path === workflowPath &&
           run.repository?.full_name === REPOSITORY &&

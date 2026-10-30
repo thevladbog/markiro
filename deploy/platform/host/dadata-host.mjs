@@ -9,6 +9,7 @@ import {
   assertNoCatalogPeers,
   validateUpgradeAuthorization,
 } from "../upgrade-dispatch.mjs";
+import { verifyConfigurationDispatchSource } from "../configuration-source.mjs";
 import { fetchPlatformCi } from "../release-ci.mjs";
 import { interpolationKeys } from "./config.mjs";
 import { containerRecipe } from "./container-recipe.mjs";
@@ -419,25 +420,7 @@ export async function executeConfigurationOperation(input, dependencies = {}) {
         { actorLogin, request },
       );
       await (dependencies.assertNoPeers ?? assertNoCatalogPeers)(dispatch, token, request);
-      const response = await request(
-        "https://api.github.com/repos/thevladbog/markiro/git/ref/heads/main",
-        {
-          redirect: "error",
-          signal: AbortSignal.timeout(30000),
-          headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${token}`,
-            "X-GitHub-Api-Version": "2022-11-28",
-          },
-        },
-      );
-      ensure(response.ok);
-      const ref = await response.json();
-      ensure(
-        ref.ref === "refs/heads/main" &&
-          ref.object?.type === "commit" &&
-          ref.object.sha === plan.executorSha,
-      );
+      await verifyConfigurationDispatchSource(dispatch, token, { request });
       const ci = await (dependencies.fetchCi ?? fetchPlatformCi)(
         {
           repository: "thevladbog/markiro",

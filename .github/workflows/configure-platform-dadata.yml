@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   configure:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/configuration-dadata-{0}', github.sha)) && github.run_attempt == 1 }}
     environment: production-deploy
     runs-on: ubuntu-latest
     timeout-minutes: 70

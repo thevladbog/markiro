@@ -11,6 +11,7 @@ import {
   verifyConfigurationDispatch,
 } from "./upgrade-dispatch.mjs";
 import { REPOSITORY, githubTransport } from "./admission-github.mjs";
+import { verifyConfigurationDispatchSource } from "./configuration-source.mjs";
 import { fetchPlatformCi } from "./release-ci.mjs";
 import { writePrivateFile } from "./host/files.mjs";
 import { runHostProcess } from "./host/process.mjs";
@@ -299,6 +300,7 @@ export async function runConfigurationTransport(
       dispatch,
     );
     await verifyConfigurationDispatch(dispatch, token, { actorLogin, request });
+    await verifyConfigurationDispatchSource(dispatch, token, { request });
     const ci = await fetchPlatformCi(
       { repository: REPOSITORY, sourceSha: executorSha, runId: executorCiRunId },
       token,

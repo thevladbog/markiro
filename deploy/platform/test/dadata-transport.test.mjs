@@ -188,7 +188,7 @@ test("loader bounds stdin without leaking output", async (t) => {
   assert.ok(result.stderr.length < 256);
 });
 
-test("configuration workflow pins main, native protection and private NUL transport", async () => {
+test("configuration workflow pins main or the exact SHA tag, native protection and private NUL transport", async () => {
   const workflow = load(
     await readFile(
       new URL("../../../.github/workflows/configure-platform-dadata.yml", import.meta.url),
@@ -204,7 +204,7 @@ test("configuration workflow pins main, native protection and private NUL transp
   const job = workflow.jobs.configure;
   assert.equal(
     job.if,
-    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}",
+    "${{ github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/configuration-dadata-{0}', github.sha)) && github.run_attempt == 1 }}",
   );
   assert.equal(job.environment, "production-deploy");
   assert.deepEqual(workflow.concurrency, {
@@ -289,7 +289,16 @@ test("peer fencing rejects a competing configuration workflow", async () => {
   );
 });
 
-async function githubRequest({ badCi = false, peer = false } = {}) {
+async function githubRequest({
+  badCi = false,
+  skippedCi = false,
+  mismatchedCi = false,
+  rerunCi = false,
+  peer = false,
+  tagged = false,
+  movedTag = false,
+  staleMain = false,
+} = {}) {
   const { REPOSITORY } = await import("../admission-github.mjs");
   const { PLATFORM_CI_REQUIRED_JOBS } = await import("../release-evidence.mjs");
   const actor = { type: "User", id: 1, login: "operator" };
@@ -307,14 +316,15 @@ async function githubRequest({ badCi = false, peer = false } = {}) {
     actor,
     triggering_actor: actor,
   };
+  if (tagged) active.head_branch = `configuration-dadata-${dispatch.toolingSha}`;
   const ci = {
     id: 456,
-    run_attempt: 1,
+    run_attempt: rerunCi ? 2 : 1,
     name: "CI",
     path: ".github/workflows/ci.yml",
     event: "push",
     head_branch: "main",
-    head_sha: dispatch.toolingSha,
+    head_sha: mismatchedCi ? "b".repeat(40) : dispatch.toolingSha,
     status: "completed",
     conclusion: badCi ? "failure" : "success",
     repository: { full_name: REPOSITORY },
@@ -335,6 +345,28 @@ async function githubRequest({ badCi = false, peer = false } = {}) {
           environments: [{ name: "production-deploy", id: 3 }],
         },
       ];
+    else if (url.endsWith("/git/ref/heads/main"))
+      data = {
+        ref: "refs/heads/main",
+        object: { type: "commit", sha: tagged || staleMain ? "b".repeat(40) : dispatch.toolingSha },
+      };
+    else if (url.includes("/git/ref/heads/configuration-dadata-"))
+      return new Response("{}", { status: 404 });
+    else if (url.includes("/git/ref/tags/configuration-dadata-"))
+      data = {
+        ref: `refs/tags/configuration-dadata-${dispatch.toolingSha}`,
+        object: { type: "commit", sha: movedTag ? "b".repeat(40) : dispatch.toolingSha },
+      };
+    else if (url.includes("/compare/"))
+      data = {
+        base_commit: { sha: dispatch.toolingSha },
+        merge_base_commit: { sha: dispatch.toolingSha },
+        status: "ahead",
+        ahead_by: 1,
+        behind_by: 0,
+        total_commits: 1,
+        commits: [{ sha: "b".repeat(40) }],
+      };
     else if (url.includes("/runs/123")) data = active;
     else if (url.includes("/runs/456") && url.includes("/jobs?"))
       data = {
@@ -342,11 +374,11 @@ async function githubRequest({ badCi = false, peer = false } = {}) {
         jobs: PLATFORM_CI_REQUIRED_JOBS.map((name, index) => ({
           id: index + 1,
           run_id: 456,
-          run_attempt: 1,
-          head_sha: dispatch.toolingSha,
+          run_attempt: ci.run_attempt,
+          head_sha: ci.head_sha,
           name,
           status: "completed",
-          conclusion: "success",
+          conclusion: skippedCi && index === 0 ? "skipped" : "success",
         })),
       };
     else if (url.includes("/runs/456")) data = ci;
@@ -551,4 +583,35 @@ test("reviewed host source closure imports in isolation with no checkout depende
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
   assert.deepEqual(result, { code: 0, stdout: "", stderr: "" });
+});
+
+test("runner admits only exact pinned configuration tag after main advances", async (t) => {
+  const { runConfigurationTransport } = await import("../dadata-transport.mjs");
+  const root = await fixture(t);
+  assert.deepEqual(
+    await runConfigurationTransport(privateValues, {
+      checkoutRoot: root,
+      request: await githubRequest({ tagged: true }),
+      runProcess: async () => ({
+        stdout: Buffer.from('{"configuration":"healthy"}\n'),
+        stderr: Buffer.alloc(0),
+      }),
+    }),
+    { configuration: "healthy" },
+  );
+  for (const guards of [
+    { tagged: true, movedTag: true },
+    { staleMain: true },
+    { tagged: true, badCi: true },
+    { tagged: true, skippedCi: true },
+    { tagged: true, mismatchedCi: true },
+    { tagged: true, rerunCi: true },
+  ])
+    await assert.rejects(
+      runConfigurationTransport(privateValues, {
+        checkoutRoot: root,
+        request: await githubRequest(guards),
+        runProcess: async () => assert.fail("source failure must not SSH"),
+      }),
+    );
 });

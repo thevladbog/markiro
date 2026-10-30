@@ -19,7 +19,7 @@ test("configuration executor rejects invalid admission before any child command"
   assert.equal(calls.length, 0);
 });
 
-import { mkdir, readFile, writeFile, lstat, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, access } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import { digest } from "../backup/schemas.mjs";
@@ -259,9 +259,50 @@ async function fixture(t, options = {}) {
   });
   const deps = {
     hostRoot: host,
-    request: async () => {
+    request: async (url) => {
       if (options.githubOutageAfterApply && replacements > 0)
         throw new Error("fixture-private-token");
+      if (url.includes("/actions/runs/456"))
+        return {
+          ok: true,
+          json: async () => ({
+            id: 456,
+            run_attempt: 1,
+            head_sha: plan.executorSha,
+            head_branch: options.tagged ? `configuration-dadata-${plan.executorSha}` : "main",
+            event: "workflow_dispatch",
+            path: ".github/workflows/configure-platform-dadata.yml",
+            repository: { full_name: "thevladbog/markiro" },
+            head_repository: { full_name: "thevladbog/markiro" },
+            status: "in_progress",
+            conclusion: null,
+          }),
+        };
+      if (url.includes("/git/ref/heads/configuration-dadata-")) return { ok: false, status: 404 };
+      if (url.includes("/git/ref/tags/configuration-dadata-"))
+        return {
+          ok: true,
+          json: async () => ({
+            ref: `refs/tags/configuration-dadata-${plan.executorSha}`,
+            object: {
+              type: options.annotatedTag ? "tag" : "commit",
+              sha: options.movedTag ? "e".repeat(40) : plan.executorSha,
+            },
+          }),
+        };
+      if (url.includes("/compare/"))
+        return {
+          ok: true,
+          json: async () => ({
+            base_commit: { sha: plan.executorSha },
+            merge_base_commit: { sha: options.nonancestor ? "e".repeat(40) : plan.executorSha },
+            status: "ahead",
+            ahead_by: 1,
+            behind_by: 0,
+            total_commits: 1,
+            commits: [{ sha: "e".repeat(40) }],
+          }),
+        };
       return {
         ok: true,
         json: async () => ({
@@ -269,7 +310,9 @@ async function fixture(t, options = {}) {
           object: {
             type: "commit",
             sha:
-              options.staleMain || (options.mainDriftAfterApply && replacements > 0)
+              options.tagged ||
+              options.staleMain ||
+              (options.mainDriftAfterApply && replacements > 0)
                 ? "e".repeat(40)
                 : plan.executorSha,
           },
@@ -780,3 +823,14 @@ for (const [name, mutationProcessError] of [
     await access(join(f.stateRoot, ".deploy.lock"));
     await assert.rejects(access(join(f.root, "receipt.json")));
   });
+
+test("host accepts exact pinned source after main advance and rejects broken tag provenance before replacement", async (t) => {
+  const f = await fixture(t, { tagged: true });
+  const result = await executeConfigurationOperation(f.input, f.deps);
+  assert.equal(result.status, "healthy");
+  for (const change of [{ movedTag: true }, { annotatedTag: true }, { nonancestor: true }]) {
+    const bad = await fixture(t, { tagged: true, ...change });
+    await assert.rejects(executeConfigurationOperation(bad.input, bad.deps));
+    assert.equal(bad.replacements, 0);
+  }
+});
