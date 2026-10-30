@@ -28,6 +28,7 @@ describe("legal document registry", () => {
       "MKR-INS-10",
       "MKR-INS-12",
       "MKR-INS-13",
+      "MKR-INS-14",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -106,6 +107,9 @@ describe("legal document registry", () => {
       "MKR-INS-12": "2026.10/01",
       // 2026-10-29, with it: backups and restore of the host (13).
       "MKR-INS-13": "2026.10/01",
+      // 2026-10-29: a new instruction for the handheld in Markiro Autonom --
+      // pairing with the host and building warehouse pallets.
+      "MKR-INS-14": "2026.10/01",
     };
     expect(
       LEGAL_RELEASES.every(
@@ -123,7 +127,8 @@ describe("legal document registry", () => {
           code !== "MKR-INS-09" &&
           code !== "MKR-INS-10" &&
           code !== "MKR-INS-12" &&
-          code !== "MKR-INS-13",
+          code !== "MKR-INS-13" &&
+          code !== "MKR-INS-14",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
     expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-10-29");
@@ -135,7 +140,8 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-12").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-13").effectiveDate).toBe("2026-10-29");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(26);
+    expect(findLegalRelease("MKR-INS-14").effectiveDate).toBe("2026-10-29");
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(28);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -248,6 +254,8 @@ describe("legal document registry", () => {
     expect(legalReleaseLocales("MKR-INS-12")).toEqual(["ru", "en"]);
     expect(legalDocumentKind("MKR-INS-13")).toBe("instruction");
     expect(legalReleaseLocales("MKR-INS-13")).toEqual(["ru", "en"]);
+    expect(legalDocumentKind("MKR-INS-14")).toBe("instruction");
+    expect(legalReleaseLocales("MKR-INS-14")).toEqual(["ru", "en"]);
   });
 
   it("requires paired routes for every published instruction and for legal releases", () => {

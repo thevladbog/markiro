@@ -71,6 +71,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция администратора Маркиро Автоном: автоматические копии хоста, копия по кнопке, вторая папка и Яндекс Диск, восстановление на том же или новом ПК и возобновление приёма данных станций.",
     en: "Printable Markiro Autonom administrator instruction: the host's automatic copies, a copy on request, the second folder and Yandex Disk, restoring on the same or a new PC, and resuming station data.",
   },
+  "MKR-INS-14": {
+    ru: "Печатная инструкция склада Маркиро Автоном: привязка ТСД к хосту, вход оператора, принтер, сборка паллеты из коробов, этикетка паллеты и работа без связи.",
+    en: "Printable Markiro Autonom warehouse instruction: pairing the handheld with the host, operator sign-in, the printer, building a pallet from boxes, the pallet label, and offline work.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {

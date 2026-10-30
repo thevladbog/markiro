@@ -1,0 +1,47 @@
+---
+import officePairingCode from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/office-pairing-code.png?url";
+import pairingSource from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pairing-source.png?url";
+import pairingForm from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pairing-form.png?url";
+import pairingFingerprint from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pairing-fingerprint.png?url";
+import pairingDone from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pairing-done.png?url";
+import officeDevices from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/office-devices.png?url";
+import signIn from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/sign-in.png?url";
+import hub from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/hub.png?url";
+import printerAdd from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/printer-add.png?url";
+import printerAssignments from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/printer-assignments.png?url";
+import palletEmpty from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pallet-empty.png?url";
+import palletBoxes from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pallet-boxes.png?url";
+import palletVerdict from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pallet-verdict.png?url";
+import palletCloseConfirm from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pallet-close-confirm.png?url";
+import palletPrinted from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pallet-printed.png?url";
+import palletPrintFailed from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/pallet-print-failed.png?url";
+import hubOffline from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/hub-offline.png?url";
+import hostQueue from "@markiro/legal-documents/assets/instructions/mkr-ins-14/ru/host-queue.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+// The handheld's frames are portrait screens; the office's are 1280×800.
+const images = {
+  "office-pairing-code": officePairingCode,
+  "pairing-source": { src: pairingSource, width: 720, height: 1280 },
+  "pairing-form": { src: pairingForm, width: 720, height: 1280 },
+  "pairing-fingerprint": { src: pairingFingerprint, width: 720, height: 1280 },
+  "pairing-done": { src: pairingDone, width: 720, height: 1280 },
+  "office-devices": officeDevices,
+  "sign-in": { src: signIn, width: 720, height: 1440 },
+  "hub": { src: hub, width: 720, height: 1280 },
+  "printer-add": { src: printerAdd, width: 720, height: 1280 },
+  "printer-assignments": { src: printerAssignments, width: 720, height: 1280 },
+  "pallet-empty": { src: palletEmpty, width: 720, height: 1280 },
+  "pallet-boxes": { src: palletBoxes, width: 720, height: 1280 },
+  "pallet-verdict": { src: palletVerdict, width: 720, height: 1280 },
+  "pallet-close-confirm": { src: palletCloseConfirm, width: 720, height: 1280 },
+  "pallet-printed": { src: palletPrinted, width: 720, height: 1280 },
+  "pallet-print-failed": { src: palletPrintFailed, width: 720, height: 1280 },
+  "hub-offline": { src: hubOffline, width: 720, height: 1280 },
+  "host-queue": { src: hostQueue, width: 720, height: 1280 },
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-14", "ru")} images={images} />

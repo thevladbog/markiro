@@ -36,6 +36,7 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-INS-10",
   "MKR-INS-12",
   "MKR-INS-13",
+  "MKR-INS-14",
 ] as const;
 const LEGAL_LOCALES = ["ru", "en"] as const;
 const SAFE_FILE_NAME =

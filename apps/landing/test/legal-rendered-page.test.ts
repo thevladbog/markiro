@@ -100,6 +100,7 @@ describe("rendered legal pages", () => {
               "MKR-INS-10",
               "MKR-INS-12",
               "MKR-INS-13",
+              "MKR-INS-14",
             ]
           : [
               "MKR-PD-01",
@@ -115,6 +116,7 @@ describe("rendered legal pages", () => {
               "MKR-INS-10",
               "MKR-INS-12",
               "MKR-INS-13",
+              "MKR-INS-14",
             ];
       expect(codes).toEqual(expectedCodes);
     }
@@ -187,8 +189,8 @@ describe("rendered legal pages", () => {
       const document = documents.get(route);
       // Both registries list the same artifacts now that every instruction
       // is bilingual.
-      const pdfCount = 13;
-      const shaCount = 15;
+      const pdfCount = 14;
+      const shaCount = 16;
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(pdfCount);
       expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
       expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(shaCount);
