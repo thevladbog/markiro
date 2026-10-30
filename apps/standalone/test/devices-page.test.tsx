@@ -365,7 +365,12 @@ describe("office devices", () => {
 
   it("lets the office put a handheld on a line: its «Смена» tile lists that line's shifts", async () => {
     const session = adminSession();
-    const handheld: DeviceRecord = { ...RETIRED, name: "ТСД склада", lineId: null, revokedAt: null };
+    const handheld: DeviceRecord = {
+      ...RETIRED,
+      name: "ТСД склада",
+      lineId: null,
+      revokedAt: null,
+    };
     session.api.listDevices.mockResolvedValue([HOST_PC, handheld]);
     session.api.updateDevice.mockResolvedValue({ ...handheld, lineId: LINE_ID });
     await openDevices(session);
