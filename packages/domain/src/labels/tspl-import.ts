@@ -195,7 +195,10 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
     const line = index + 1;
     const trimmed = source.trim();
     if (!trimmed) continue;
-    const match = /^([A-Za-z]+)\s*(.*)$/.exec(trimmed);
+    // Keep the command greedy without retrying shorter letter prefixes, and
+    // start arguments on a non-whitespace character. Overlapping \s* and .*
+    // backtrack quadratically on a padded line containing a JS line separator.
+    const match = /^([A-Za-z]+)(?![A-Za-z])\s*(\S.*)?$/.exec(trimmed);
     if (!match) fail(line, source, "invalid TSPL statement");
     const command = match[1]!.toUpperCase();
     const args = splitTsplArguments(match[2] ?? "", line);
