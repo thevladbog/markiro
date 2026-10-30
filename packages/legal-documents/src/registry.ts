@@ -231,7 +231,7 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-14",
-    revision: "2026.10/02",
+    revision: "2026.10/03",
     effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
@@ -256,7 +256,7 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-10/2026.10/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
   { releaseKey: "MKR-INS-12/2026.10/02", content: STANDALONE_INSTALL_CONTENT },
   { releaseKey: "MKR-INS-13/2026.10/02", content: STANDALONE_BACKUPS_CONTENT },
-  { releaseKey: "MKR-INS-14/2026.10/02", content: HANDHELD_WAREHOUSE_CONTENT },
+  { releaseKey: "MKR-INS-14/2026.10/03", content: HANDHELD_WAREHOUSE_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {
