@@ -25,7 +25,8 @@ import type { RequestWithTenant } from "../src/tenancy/tenant.guard";
  * same facts as the standalone host answers them (`host`). Here the cloud's
  * own controllers (`CodeSearchController`, `ShiftsController.taskForm`) serve
  * the `cloud` input through their query parsing and their renderer, and the
- * HTML they answer must equal `golden.json`; the standalone office maps the
+ * HTML they answer must equal the historical `golden.json` apart from the
+ * explicit approved pallet-wording corrections; the standalone office maps the
  * `host` rows and must render the same bytes
  * (`apps/standalone/test/forms-parity.test.ts`). A legitimate change of a
  * cloud form regenerates the golden from this test alone:
@@ -273,6 +274,36 @@ async function serve(parityCase: ParityCase): Promise<string> {
   return html;
 }
 
+/** Apply only approved pallet wording to the immutable historical HTML. */
+function currentPalletWording(form: ParityCase["form"], html: string): string {
+  let result = html
+    .replaceAll("Состав паллеты", "Состав палета")
+    .replaceAll("Ярлык паллеты", "Ярлык палета")
+    .replaceAll("Ярлыки паллет", "Ярлыки палетов")
+    .replaceAll("Коробов на паллете", "Коробов на палете")
+    .replaceAll("Итого по паллете", "Итого по палету")
+    .replaceAll("паллеты и коробов", "палета и коробов")
+    .replaceAll("На паллете нет коробов", "На палете нет коробов")
+    .replaceAll("Паллета</span>", "Палет</span>")
+    .replaceAll("Паллета ", "Палет ")
+    .replaceAll("РАСФОРМИРОВАНА", "РАСФОРМИРОВАН");
+  if (form === "pallet")
+    result = result
+      .replaceAll("Открыта", "Открыт")
+      .replaceAll("Закрыта", "Закрыт")
+      .replaceAll("Расформирована", "Расформирован")
+      .replaceAll("сформирована", "сформирован")
+      .replaceAll("закрыта", "закрыт");
+  if (form !== "task") return result;
+  return result
+    .replaceAll("Агрегация с паллетами", "Агрегация с палетами")
+    .replaceAll("ПАЛЛЕТЫ", "ПАЛЕТЫ")
+    .replaceAll(
+      "Палет закрывается автоматически по достижении вместимости; закрыть её раньше",
+      "Палет закрывается автоматически по достижении вместимости; закрыть его раньше",
+    );
+}
+
 describe("printed forms parity with «Markiro Автоном» (plan О-Ф)", () => {
   it("the cloud's controllers answer the golden HTML for every shared case", async () => {
     const outcomes: Golden = {};
@@ -298,7 +329,18 @@ describe("printed forms parity with «Markiro Автоном» (plan О-Ф)", ()
     const golden = goldenSchema.parse(JSON.parse(readFileSync(path, "utf8")));
     expect(Object.keys(golden)).toEqual(cases.map((parityCase) => parityCase.name));
     for (const parityCase of cases) {
-      expect(outcomes[parityCase.name], parityCase.name).toEqual(golden[parityCase.name]);
+      const frozen = golden[parityCase.name];
+      if (frozen === undefined) throw new Error(`missing golden: ${parityCase.name}`);
+      expect(Buffer.byteLength(frozen.html, "utf8"), parityCase.name).toBe(frozen.bytes);
+      expect(createHash("sha256").update(frozen.html, "utf8").digest("hex"), parityCase.name).toBe(
+        frozen.sha256,
+      );
+      const html = currentPalletWording(parityCase.form, frozen.html);
+      expect(outcomes[parityCase.name], parityCase.name).toEqual({
+        bytes: Buffer.byteLength(html, "utf8"),
+        sha256: createHash("sha256").update(html, "utf8").digest("hex"),
+        html,
+      });
     }
   });
 });

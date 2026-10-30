@@ -3,7 +3,7 @@ import { brandLogo, escapeHtml, ssccBarcode, ssccHri, type ReportOrg } from "./c
 
 /**
  * The printed pallet PLACARD (spec 2026-09-18): one page, A4 or A5, meant to
- * be taped to the stack — not the "Состав паллеты" contents list next door.
+ * be taped to the stack — not the "Состав палета" contents list next door.
  * Large GS1-128 SSCC at the bottom, the pallet's identity above it, and a
  * per-production-date summary, because a warehouse pallet carries boxes from
  * several shifts and «дата — количество» is how the stock is counted.
@@ -268,7 +268,7 @@ function renderPlacardPage(data: PalletPlacardData, format: PlacardFormat): stri
     : `<div class="pl-hri">Без SSCC</div>`;
   const watermark =
     data.status === "disassembled"
-      ? `<div class="pl-watermark" aria-hidden="true">РАСФОРМИРОВАНА</div>`
+      ? `<div class="pl-watermark" aria-hidden="true">РАСФОРМИРОВАН</div>`
       : "";
 
   return `<section class="pl-page" data-placard-sscc="${escapeHtml(data.sscc ?? "")}">
@@ -292,7 +292,7 @@ function renderPlacardPage(data: PalletPlacardData, format: PlacardFormat): stri
 /** Pure: builds the print-ready placard document for ONE pallet. */
 export function renderPalletPlacardHtml(data: PalletPlacardData, format: PlacardFormat): string {
   return renderPlacardDocument({
-    title: `Ярлык паллеты ${data.sscc ?? "без SSCC"}`,
+    title: `Ярлык палета ${data.sscc ?? "без SSCC"}`,
     format,
     pages: [renderPlacardPage(data, format)],
   });
@@ -309,7 +309,7 @@ export function renderShiftPlacardsHtml(
   shiftNumber: string | null,
 ): string {
   return renderPlacardDocument({
-    title: `Ярлыки паллет смены ${shiftNumber ?? ""}`.trim(),
+    title: `Ярлыки палетов смены ${shiftNumber ?? ""}`.trim(),
     format,
     pages: pallets.map((pallet) => renderPlacardPage(pallet, format)),
   });

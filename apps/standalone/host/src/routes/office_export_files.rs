@@ -183,13 +183,19 @@ fn clean_file_name(name: &str) -> bool {
 fn target_fits(begin: &ExportFileBegin) -> bool {
     match begin.kind {
         ExportFileKind::ShiftExport => begin.target_type == ExportTargetType::Shift,
-        ExportFileKind::PalletExport => begin.target_type == ExportTargetType::Pallet,
+        ExportFileKind::PalletExport => matches!(
+            begin.target_type,
+            ExportTargetType::Pallet | ExportTargetType::WarehousePallet
+        ),
         ExportFileKind::DisaggregationXml => {
             begin.target_type == ExportTargetType::DisaggregationDocument
         }
         ExportFileKind::Form => match begin.format_id.as_str() {
             "form_box" => begin.target_type == ExportTargetType::Box,
-            "form_pallet" | "form_placard" => begin.target_type == ExportTargetType::Pallet,
+            "form_pallet" | "form_placard" => matches!(
+                begin.target_type,
+                ExportTargetType::Pallet | ExportTargetType::WarehousePallet
+            ),
             "form_placards" | "form_task" => begin.target_type == ExportTargetType::Shift,
             "form_act" => begin.target_type == ExportTargetType::DisaggregationDocument,
             _ => false,
@@ -317,6 +323,10 @@ async fn resolve_target(
                 .fetch_optional(&mut *conn)
                 .await
                 .map_err(ApiError::internal)?
+        }
+        ExportTargetType::WarehousePallet => {
+            sqlx::query_scalar::<_, String>("SELECT id FROM warehouse_pallets WHERE id=?")
+                .bind(target_id).fetch_optional(&mut *conn).await.map_err(ApiError::internal)?.map(|_|None)
         }
         ExportTargetType::Box => {
             sqlx::query_scalar::<_, String>("SELECT shift_id FROM boxes WHERE id = ?1 UNION ALL SELECT x.shift_id FROM cloud_history_boxes x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.id=?1")
@@ -744,6 +754,16 @@ pub async fn begin(
     if let Some(shift_id) = &shift_id {
         crate::demo::refuse_gismt(&mut tx, shift_id, &begin.format_id).await?;
     }
+    if begin.target_type == ExportTargetType::WarehousePallet
+        && crate::demo::is_gismt_format(&begin.format_id)
+    {
+        let demo:bool=sqlx::query_scalar("SELECT p.demo FROM warehouse_pallets wp JOIN products p ON p.id=wp.product_id WHERE wp.id=?")
+            .bind(&begin.target_id).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+        if demo {
+            return Err(crate::demo::demo_shift());
+        }
+    }
+
     // A stale half-sent file may hold the (batch, part) this one wants.
     sweep(&mut tx, &at, None).await?;
     let taken: Option<String> =

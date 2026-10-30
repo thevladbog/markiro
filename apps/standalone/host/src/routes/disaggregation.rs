@@ -63,7 +63,7 @@ const DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.reason_id, r.nam
      JOIN office_users cu ON cu.id = d.created_by \
      LEFT JOIN office_users au ON au.id = d.applied_by";
 
-const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.status, \
+const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.warehouse_pallet_id, l.status, \
      COALESCE(l.product_id,l.cloud_product_id) AS product_id, COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count, l.validated_at, COALESCE(s.id,cs.id) AS shift_id, \
      s.number_month_key, s.number_seq, s.created_from, cs.number AS cloud_number, \
      (l.cloud_box_id IS NOT NULL OR l.cloud_pallet_id IS NOT NULL) AS cloud_history \
@@ -132,6 +132,7 @@ struct LineRow {
     sscc: Option<String>,
     box_id: Option<String>,
     pallet_id: Option<String>,
+    warehouse_pallet_id: Option<String>,
     status: String,
     product_id: Option<String>,
     product_name: Option<String>,
@@ -160,6 +161,7 @@ impl LineRow {
             sscc: self.sscc,
             box_id: self.box_id,
             pallet_id: self.pallet_id,
+            warehouse_pallet_id: self.warehouse_pallet_id,
             shift_id: self.shift_id,
             shift_number: self.cloud_number.or(shift_number),
             status: self.status.parse().map_err(ApiError::internal)?,
@@ -586,8 +588,8 @@ async fn insert_line(
 ) -> Result<(), ApiError> {
     sqlx::query(
         "INSERT INTO disaggregation_document_lines (id, document_id, position, sscc_input, sscc, \
-         box_id, pallet_id, status, product_id, code_count, validated_at, created_at, cloud_box_id, cloud_pallet_id, cloud_product_id, cloud_product_name) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         box_id, pallet_id, status, product_id, code_count, validated_at, created_at, cloud_box_id, cloud_pallet_id, cloud_product_id, cloud_product_name, warehouse_pallet_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(document_id)
@@ -605,6 +607,7 @@ async fn insert_line(
     .bind(target.filter(|t| t.cloud).and_then(|t| t.pallet_id.as_deref()))
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_id.as_deref()))
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_name.as_deref()))
+    .bind(target.and_then(|t| t.warehouse_pallet_id.as_deref()))
     .execute(conn)
     .await
     .map_err(ApiError::internal)?;
@@ -855,7 +858,7 @@ async fn revalidate_line(
     let status = target.map_or(LineStatus::NotFound, |target| target.status);
     sqlx::query(
         "UPDATE disaggregation_document_lines SET status = ?, box_id = ?, pallet_id = ?, \
-         product_id = ?, code_count = ?, validated_at = ?, cloud_box_id=?, cloud_pallet_id=?, cloud_product_id=?, cloud_product_name=? WHERE id = ?",
+         product_id = ?, code_count = ?, validated_at = ?, cloud_box_id=?, cloud_pallet_id=?, cloud_product_id=?, cloud_product_name=?, warehouse_pallet_id=? WHERE id = ?",
     )
     .bind(status.as_str())
     .bind(target.filter(|t| !t.cloud).and_then(|t| t.box_id.as_deref()))
@@ -867,6 +870,7 @@ async fn revalidate_line(
     .bind(target.filter(|t| t.cloud).and_then(|t| t.pallet_id.as_deref()))
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_id.as_deref()))
     .bind(target.filter(|t| t.cloud).and_then(|t| t.product_name.as_deref()))
+    .bind(target.and_then(|t| t.warehouse_pallet_id.as_deref()))
     .bind(line_id)
     .execute(conn)
     .await

@@ -411,7 +411,16 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/office/warehouse-pallets",
-            get(crate::routes::office_warehouse_pallets::list),
+            get(crate::routes::office_warehouse_pallets::list)
+                .post(crate::routes::office_pallet_create::create),
+        )
+        .route(
+            "/v1/office/warehouse-pallets/{id}",
+            get(crate::routes::office_warehouse_detail::get),
+        )
+        .route(
+            "/v1/office/warehouse-pallets/validate",
+            post(crate::routes::office_pallet_create::validate_codes),
         )
         .route(
             "/v1/office/demo-data",

@@ -137,7 +137,7 @@ describe("an export run (plan ЧЗ)", () => {
     });
     if (!result.ok) throw new Error(result.failure);
     expect(result.parts.map((part) => [part.filename, part.boxCount, part.palletCount])).toEqual([
-      ["Молоко_3_2_0_9_л_2026-10-08_паллета_00146006820000000409_1_коробов.xml", 1, 1],
+      ["Молоко_3_2_0_9_л_2026-10-08_палет_00146006820000000409_1_коробов.xml", 1, 1],
     ]);
     expect(
       runExport(active, { ...run, formatId: "shift_txt_flat", formatVersion: 1, palletId: null }),

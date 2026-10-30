@@ -79,9 +79,10 @@ struct Match {
     key: String,
 }
 // Reserve the legacy driver's parameter positions even when that source resolves
-// no matches. Positions 8/9 are unused legacy limit/offset slots, 10/11 cloud criteria.
+// no matches. Positions 8/9 are legacy limit/offset slots, 10/11 cloud criteria,
+// and 12 the local live warehouse pallet.
 const PARAMETERS: &str =
-    "WITH parameters AS (SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11), matches AS (";
+    "WITH parameters AS (SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12), matches AS (";
 
 fn bind<'q>(
     sql: &'q str,
@@ -102,6 +103,7 @@ fn bind<'q>(
         .bind(0i64)
         .bind(shift)
         .bind(sscc)
+        .bind(resolved.warehouse_pallet_id.as_deref())
 }
 
 async fn local_items(
@@ -230,6 +232,7 @@ pub async fn search_codes(
         shift_id: None,
         box_id: None,
         pallet_id: None,
+        warehouse_pallet_id: None,
     };
     let mut queries = Vec::new();
     if src != CodeRegistrySource::Cloud {
@@ -240,6 +243,8 @@ pub async fn search_codes(
                 Driver::Box
             } else if r.pallet_id.is_some() {
                 Driver::Pallet
+            } else if r.warehouse_pallet_id.is_some() {
+                Driver::WarehousePallet
             } else if r.shift_id.is_some() {
                 Driver::Shift
             } else if c.gtin.is_some() {

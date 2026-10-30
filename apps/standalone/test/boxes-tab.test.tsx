@@ -112,7 +112,7 @@ describe("«Короба» (plan КРТ)", () => {
     const value = await boxesOf();
     await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
     fireEvent.click(await screen.findByRole("link", { name: "(00)146006820000000409" }));
-    await screen.findByRole("heading", { name: `Паллета (00)${PALLET_CARD.sscc ?? ""}` });
+    await screen.findByRole("heading", { name: `Палет (00)${PALLET_CARD.sscc ?? ""}` });
     expect(value.api.getPalletCard).toHaveBeenCalledWith(
       "office-session-token",
       "a0000000-0000-4000-8000-000000000001",

@@ -200,24 +200,24 @@ describe("the card of a shift (plan О-Ф)", () => {
         "(00)046006820000015004",
         "12",
         "08.10.2026, 09:06",
-        "Открытая",
+        "Открытый",
         "✓Закрыт!Состав при закрытии не сошёлся",
         "Не проверялась",
         "Состав",
       ],
     ]);
-    openTab("Паллеты");
-    await waitFor(() => expect(within(section("Паллеты")).getAllByRole("row")).toHaveLength(3));
-    expect(rowsOf("Паллеты")).toEqual([
+    openTab("Палеты");
+    await waitFor(() => expect(within(section("Палеты")).getAllByRole("row")).toHaveLength(3));
+    expect(rowsOf("Палеты")).toEqual([
       [
         "(00)146006820000000409",
         "1",
         "12",
         "08.10.2026, 09:20",
-        "✓Закрыта!Число коробов по данным станции не совпадает с данными хоста",
+        "✓Закрыт!Число коробов по данным станции не совпадает с данными хоста",
         "СоставЯрлык",
       ],
-      ["Без SSCC", "1", "12", "—", "▸Открыта", "Состав"],
+      ["Без SSCC", "1", "12", "—", "▸Открыт", "Состав"],
     ]);
   });
 
@@ -235,9 +235,9 @@ describe("the card of a shift (plan О-Ф)", () => {
     fireEvent.change(tail, { target: { value: "999" } });
     expect(screen.getByText("Нет коробов с таким окончанием SSCC")).toBeTruthy();
     // A shift without pallets has no pallet column and no pallets.
-    expect(screen.queryByRole("tab", { name: "Паллеты" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Паллеты" })).toBeNull();
-    expect(within(section("Короба")).queryByRole("columnheader", { name: "Паллета" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Палеты" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Палеты" })).toBeNull();
+    expect(within(section("Короба")).queryByRole("columnheader", { name: "Палет" })).toBeNull();
   });
 
   it("opens with the box a conflict's link names already filtered (plan КНФ)", async () => {
@@ -356,9 +356,9 @@ describe("the card of a shift (plan О-Ф)", () => {
       "План, шт": "1\u00a0200",
       "Вместимость короба, шт": "12",
       "Шаблон этикетки короба": "Молоко 100×72",
-      Паллеты: "По 40 кор.",
-      "Шаблон паллеты": "Паллета 100×150",
-      "Лист паллеты А4": "По умолчанию (стандартный лист)",
+      Палеты: "По 40 кор.",
+      "Шаблон палета": "Паллета 100×150",
+      "Лист палета А4": "По умолчанию (стандартный лист)",
       Выпуск: "540 шт · 45 кор.",
       Открыта: "08.10.2026, 18:02",
       Закрыта: "—",
@@ -367,7 +367,7 @@ describe("the card of a shift (plan О-Ф)", () => {
 
   it("says a shift without pallets and without a counterparty so", async () => {
     await openCard(cardSession({ ...ACTIVE, counterpartyId: null }), "OCT26-004");
-    expect(facts()["Паллеты"]).toBe("Не собираются");
+    expect(facts()["Палеты"]).toBe("Не собираются");
     expect(facts()["Контрагент"]).toBe("—");
   });
 
@@ -389,7 +389,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     expect(facts()["Режим"]).toBe("Проверка");
     expect(facts()["Выпуск"]).toBe("1\u00a0300 шт");
     expect(facts()).not.toHaveProperty("Вместимость короба, шт");
-    expect(facts()).not.toHaveProperty("Паллеты");
+    expect(facts()).not.toHaveProperty("Палеты");
     expect(screen.queryByRole("region", { name: "Короба" })).toBeNull();
     expect(session.api.listShiftBoxes).not.toHaveBeenCalled();
     // Its figures and exports stay.
@@ -499,7 +499,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     const session = cardSession({ ...PLANNED, palletsEnabled: true, palletBoxCapacity: 40 });
     session.api.listShifts.mockResolvedValue([PLANNED]);
     await openCard(session, PLANNED.number);
-    expect(screen.queryByRole("region", { name: "Паллеты" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Палеты" })).toBeNull();
     expect(session.api.listShiftPallets).not.toHaveBeenCalled();
   });
 
@@ -511,16 +511,16 @@ describe("the card of a shift (plan О-Ф)", () => {
       boxCountReported: 2,
       disassembledAt: "2026-10-08T11:00:00.000Z",
     };
-    await openCard(cardSession(WITH_PALLETS, BOXES, [apart]), "OCT26-004", "Паллеты");
-    await waitFor(() => expect(within(section("Паллеты")).getAllByRole("row")).toHaveLength(2));
+    await openCard(cardSession(WITH_PALLETS, BOXES, [apart]), "OCT26-004", "Палеты");
+    await waitFor(() => expect(within(section("Палеты")).getAllByRole("row")).toHaveLength(2));
     // «Число коробов по данным станции не совпадает с данными хоста» is not said of it: the count is stale by design.
-    expect(rowsOf("Паллеты")).toEqual([
+    expect(rowsOf("Палеты")).toEqual([
       [
         "(00)146006820000000409",
         "—",
         "—",
         "08.10.2026, 09:20",
-        "⊘Расформирована08.10.2026, 14:00",
+        "⊘Расформирован08.10.2026, 14:00",
         "СоставЯрлык",
       ],
     ]);
@@ -542,13 +542,13 @@ describe("the card of a shift (plan О-Ф)", () => {
       closed(3, { boxCountReported: 1 }),
       closed(4, { boxCountReported: 3 }),
     ];
-    await openCard(cardSession(WITH_PALLETS, [], pallets), "OCT26-004", "Паллеты");
-    await waitFor(() => expect(within(section("Паллеты")).getAllByRole("row")).toHaveLength(5));
-    expect(rowsOf("Паллеты").map((row) => row[4])).toEqual([
-      "✓Закрыта",
-      "✓Закрыта",
-      "✓Закрыта!Число коробов по данным станции не совпадает с данными хоста",
-      "✓Закрыта!Число коробов по данным станции не совпадает с данными хоста",
+    await openCard(cardSession(WITH_PALLETS, [], pallets), "OCT26-004", "Палеты");
+    await waitFor(() => expect(within(section("Палеты")).getAllByRole("row")).toHaveLength(5));
+    expect(rowsOf("Палеты").map((row) => row[4])).toEqual([
+      "✓Закрыт",
+      "✓Закрыт",
+      "✓Закрыт!Число коробов по данным станции не совпадает с данными хоста",
+      "✓Закрыт!Число коробов по данным станции не совпадает с данными хоста",
     ]);
   });
 
@@ -567,15 +567,15 @@ describe("the card of a shift (plan О-Ф)", () => {
       boxCountReported: 3,
       disassembledBoxes: 1,
     };
-    await openCard(cardSession(WITH_PALLETS, [], [repacked, real]), "OCT26-004", "Паллеты");
-    await waitFor(() => expect(within(section("Паллеты")).getAllByRole("row")).toHaveLength(3));
-    expect(rowsOf("Паллеты").map((row) => row[4])).toEqual([
-      "✓Закрыта·Состав изменён расформированием",
-      "✓Закрыта!Число коробов по данным станции не совпадает с данными хоста",
+    await openCard(cardSession(WITH_PALLETS, [], [repacked, real]), "OCT26-004", "Палеты");
+    await waitFor(() => expect(within(section("Палеты")).getAllByRole("row")).toHaveLength(3));
+    expect(rowsOf("Палеты").map((row) => row[4])).toEqual([
+      "✓Закрыт·Состав изменён расформированием",
+      "✓Закрыт!Число коробов по данным станции не совпадает с данными хоста",
     ]);
     const neutral = screen.getByText("Состав изменён расформированием").closest("[title]");
     const note =
-      "При закрытии паллеты станция передала число коробов: 2. В базе хоста сейчас: 1. После расформирования коробов числа расходятся (расформировано: 1). Это не ошибка.";
+      "При закрытии палета станция передала число коробов: 2. В базе хоста сейчас: 1. После расформирования коробов числа расходятся (расформировано: 1). Это не ошибка.";
     expect(neutral?.getAttribute("title")).toBe(note);
     expect(neutral?.getAttribute("aria-description")).toBe(note);
     // The other is a warning that says the disassembly does not account for all of it.
@@ -585,7 +585,7 @@ describe("the card of a shift (plan О-Ф)", () => {
         .closest("[title]")
         ?.getAttribute("title"),
     ).toBe(
-      "При закрытии паллеты станция передала число коробов: 3. В базе хоста сейчас: 1. Расформирование объясняет не всё расхождение (расформировано: 1). Проверьте состав паллеты.",
+      "При закрытии палета станция передала число коробов: 3. В базе хоста сейчас: 1. Расформирование объясняет не всё расхождение (расформировано: 1). Проверьте состав палета.",
     );
   });
 
@@ -610,9 +610,9 @@ describe("the card of a shift (plan О-Ф)", () => {
     await openCard(cardSession(WITH_PALLETS, boxes), "OCT26-004", "Короба");
     await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(8));
     expect(rowsOf("Короба").map((row) => row[4])).toEqual([
-      "✓Закрыт!Закрыт после закрытия паллеты",
+      "✓Закрыт!Закрыт после закрытия палета",
       "✓Закрыт",
-      "✓Закрыт!Закрыт после закрытия паллеты",
+      "✓Закрыт!Закрыт после закрытия палета",
       "✓Закрыт",
       "⊘Расформирован08.10.2026, 10:00",
       "✓Закрыт",
@@ -646,9 +646,12 @@ describe("the card of a shift (plan О-Ф)", () => {
     expect(await within(section("Итоги")).findByText("Принято кодов")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Выгрузка" }));
     await screen.findByRole("dialog", { name: "Выгрузка смены OCT26-001/S" });
-    expect(session.api.getShiftExportSource).toHaveBeenCalledWith(
-      "office-session-token",
-      CLOSED.id,
+    // A committed dialog can precede the query observer's passive subscription.
+    await waitFor(() =>
+      expect(session.api.getShiftExportSource).toHaveBeenCalledWith(
+        "office-session-token",
+        CLOSED.id,
+      ),
     );
   });
 
@@ -671,11 +674,11 @@ describe("the card of a shift (plan О-Ф)", () => {
       ["08.10.2026, 10:30", "3", "2", "1", "3", "Иван Петров"],
       ["08.10.2026, 10:10", "0", "1", "1", "1", "—"],
     ]);
-    expect(rows[0]?.[1]).toContain("[XML][ГИСМТ] Паллетная агрегацияНе больше 2 строк в части");
+    expect(rows[0]?.[1]).toContain("[XML][ГИСМТ] Палетная агрегацияНе больше 2 строк в части");
     expect(rows[0]?.[1]).toContain("Скачать все (2)");
     // An export from before files were kept says so.
     expect(rows[1]?.[1]).toBe(
-      "[XML][ГИСМТ] Агрегация паллетыПаллетыФайл не сохранён: сформируйте выгрузку заново",
+      "[XML][ГИСМТ] Агрегация палетаПалетаФайл не сохранён: сформируйте выгрузку заново",
     );
     expect(session.api.listShiftExports).toHaveBeenCalledWith("office-session-token", CLOSED.id);
   });
@@ -706,15 +709,15 @@ describe("the card of a shift (plan О-Ф)", () => {
     await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(5));
     // The pallets of the boxes are not "not found" when the list of pallets did not load.
     expect(rowsOf("Короба").map((row) => row[3])).toEqual([
-      "Паллеты не загружены",
-      "Паллеты не загружены",
+      "Палеты не загружены",
+      "Палеты не загружены",
       "—",
-      "Паллеты не загружены",
+      "Палеты не загружены",
     ]);
-    // And «Паллеты» says so in its own place.
-    openTab("Паллеты");
+    // And «Палеты» says so in its own place.
+    openTab("Палеты");
     expect(
-      await within(section("Паллеты")).findByRole("button", { name: "Повторить" }),
+      await within(section("Палеты")).findByRole("button", { name: "Повторить" }),
     ).toBeTruthy();
   });
 
@@ -732,8 +735,8 @@ describe("the card of a shift (plan О-Ф)", () => {
     expect(palletLinks[0]?.getAttribute("href")).toBe(
       "/codes/pallet/a0000000-0000-4000-8000-000000000001",
     );
-    openTab("Паллеты");
-    const own = await within(section("Паллеты")).findByRole("link", {
+    openTab("Палеты");
+    const own = await within(section("Палеты")).findByRole("link", {
       name: "(00)146006820000000409",
     });
     expect(own.getAttribute("href")).toBe("/codes/pallet/a0000000-0000-4000-8000-000000000001");
@@ -751,11 +754,11 @@ describe("the card of a shift (plan О-Ф)", () => {
   it("opens a pallet's card from the pallet's SSCC, not the box's (plan КРТ)", async () => {
     const session = cardSession(WITH_PALLETS);
     session.api.getPalletCard.mockResolvedValue(PALLET_CARD);
-    await openCard(session, "OCT26-004", "Паллеты");
+    await openCard(session, "OCT26-004", "Палеты");
     fireEvent.click(
-      await within(section("Паллеты")).findByRole("link", { name: "(00)146006820000000409" }),
+      await within(section("Палеты")).findByRole("link", { name: "(00)146006820000000409" }),
     );
-    await screen.findByRole("heading", { name: "Паллета (00)146006820000000409" });
+    await screen.findByRole("heading", { name: "Палет (00)146006820000000409" });
     expect(session.api.getPalletCard).toHaveBeenCalledWith(
       "office-session-token",
       "a0000000-0000-4000-8000-000000000001",
@@ -769,7 +772,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(3));
     expect(rowsOf("Короба").map((row) => row[3])).toEqual([
       "(00)146006820000000409",
-      "Паллета не найдена",
+      "Палет не найден",
     ]);
   });
 
@@ -953,5 +956,20 @@ describe("what the card says of a box or a pallet", () => {
     expect(endsWithTail("046006820000015002", "")).toBe(true);
     expect(endsWithTail(null, "")).toBe(true);
     expect(endsWithTail(null, "2")).toBe(false);
+  });
+});
+
+describe("warehouse membership in a shift's box list", () => {
+  it("links to the warehouse pallet even when production pallets are disabled for the origin shift", async () => {
+    const warehouseId = "a1000000-0000-4000-8000-000000000001";
+    const shift = { ...ACTIVE, palletsEnabled: false };
+    await openCard(
+      cardSession(shift, [box(1, { palletId: warehouseId, palletKind: "warehouse" })], []),
+      shift.number,
+      "Короба",
+    );
+    expect(
+      (await screen.findByRole("link", { name: "Складской палет" })).getAttribute("href"),
+    ).toBe(`/codes/warehouse-pallet/${warehouseId}`);
   });
 });

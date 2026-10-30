@@ -77,6 +77,7 @@ export const disaggregationLineSchema = z.object({
   sscc: ssccSchema.nullable(),
   boxId: z.uuid().nullable(),
   palletId: z.uuid().nullable(),
+  warehousePalletId: z.uuid().optional(),
   shiftId: z.uuid().nullable(),
   shiftNumber: z.string().nullable(),
   status: disaggregationLineStatusSchema,

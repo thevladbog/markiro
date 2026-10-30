@@ -91,8 +91,8 @@ describe("office shifts: the list's «Открыть» and the card's «Изме
         .getAllByRole("term")
         .map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
     );
-    expect(facts["Шаблон паллеты"]).toBe("Паллета 100×150");
-    expect(facts["Лист паллеты А4"]).toBe("По умолчанию (стандартный лист)");
+    expect(facts["Шаблон палета"]).toBe("Паллета 100×150");
+    expect(facts["Лист палета А4"]).toBe("По умолчанию (стандартный лист)");
   });
 
   it.each([

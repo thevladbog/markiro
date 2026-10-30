@@ -217,7 +217,10 @@ export function CodeCardView({
         item.palletId === null ? (
           palletLabel(item, t)
         ) : (
-          <PackTextLink kind="pallet" id={item.palletId}>
+          <PackTextLink
+            kind={item.palletKind === "warehouse" ? "warehouse-pallet" : "pallet"}
+            id={item.palletId}
+          >
             {palletLabel(item, t)}
           </PackTextLink>
         ),

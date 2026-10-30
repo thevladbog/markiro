@@ -179,7 +179,7 @@ describe("a shift closed without its reason outside the period the list shows", 
     expect(hasRowAction(screen, ACTION)).toBe(true);
     expect(screen.getByText(BEYOND)).toBeTruthy();
     expect(totalsText()).toBe(
-      "Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · паллет 0",
+      "Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · палетов 0",
     );
   });
 

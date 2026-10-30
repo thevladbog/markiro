@@ -138,7 +138,7 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     expect(precedes(group, field(NEW, "Линия"))).toBe(true);
     // Aggregation shows its own fields and no validation hint.
     expect(field(NEW, "Вместимость короба, шт")).toBeTruthy();
-    expect(within(dialog(NEW)).getByRole("checkbox", { name: "С паллетами" })).toBeTruthy();
+    expect(within(dialog(NEW)).getByRole("checkbox", { name: "С палетами" })).toBeTruthy();
     expect(within(dialog(NEW)).queryByText(VALIDATION_HINT)).toBeNull();
   });
 
@@ -152,8 +152,8 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     fireEvent.click(mode(NEW, "Проверка"));
     expect(isChecked(mode(NEW, "Проверка"))).toBe(true);
     expect(within(dialog(NEW)).queryByLabelText("Вместимость короба, шт")).toBeNull();
-    expect(within(dialog(NEW)).queryByRole("checkbox", { name: "С паллетами" })).toBeNull();
-    expect(within(dialog(NEW)).queryByLabelText("Коробов на паллете")).toBeNull();
+    expect(within(dialog(NEW)).queryByRole("checkbox", { name: "С палетами" })).toBeNull();
+    expect(within(dialog(NEW)).queryByLabelText("Коробов на палете")).toBeNull();
     expect(valueOf(NEW, "Шаблон этикетки короба")).toBe(MILK_BOX.id);
     expect(messageOf(NEW, "Шаблон этикетки короба")).toBe(VALIDATION_HINT);
     fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
@@ -177,19 +177,19 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     await openCreate();
     set(NEW, "Товар", MILK.id);
     set(NEW, "Вместимость короба, шт", "10");
-    fireEvent.click(within(dialog(NEW)).getByRole("checkbox", { name: "С паллетами" }));
-    set(NEW, "Коробов на паллете", "32");
+    fireEvent.click(within(dialog(NEW)).getByRole("checkbox", { name: "С палетами" }));
+    set(NEW, "Коробов на палете", "32");
     fireEvent.click(mode(NEW, "Проверка"));
-    expect(within(dialog(NEW)).queryByLabelText("Коробов на паллете")).toBeNull();
+    expect(within(dialog(NEW)).queryByLabelText("Коробов на палете")).toBeNull();
     fireEvent.click(mode(NEW, "Агрегация"));
     expect(valueOf(NEW, "Вместимость короба, шт")).toBe("10");
     expect(
       (
-        within(dialog(NEW)).getByRole("checkbox", { name: "С паллетами" }) as HTMLButtonElement
+        within(dialog(NEW)).getByRole("checkbox", { name: "С палетами" }) as HTMLButtonElement
       ).getAttribute("aria-checked"),
     ).toBe("true");
-    expect(valueOf(NEW, "Коробов на паллете")).toBe("32");
-    expect(valueOf(NEW, "Шаблон этикетки паллеты")).toBe(PALLET.id);
+    expect(valueOf(NEW, "Коробов на палете")).toBe("32");
+    expect(valueOf(NEW, "Шаблон этикетки палета")).toBe(PALLET.id);
     expect(messageOf(NEW, "Шаблон этикетки короба")).not.toBe(VALIDATION_HINT);
   });
 
@@ -255,7 +255,7 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     const name = await openEdit(shiftsSession([validation]), validation);
     expect(isChecked(mode(name, "Проверка"))).toBe(true);
     expect(within(dialog(name)).queryByLabelText("Вместимость короба, шт")).toBeNull();
-    expect(within(dialog(name)).queryByRole("checkbox", { name: "С паллетами" })).toBeNull();
+    expect(within(dialog(name)).queryByRole("checkbox", { name: "С палетами" })).toBeNull();
     expect(messageOf(name, "Шаблон этикетки короба")).toBe(VALIDATION_HINT);
   });
 

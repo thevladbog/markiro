@@ -21,6 +21,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
         row
     {
         return Ok(Some(Target {
+            warehouse_pallet_id: None,
             box_id: Some(id),
             pallet_id: None,
             status: classify(closed, shift_closed, disassembled),
@@ -34,6 +35,7 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
         .bind(sscc).fetch_optional(conn).await.map_err(ApiError::internal)?;
     Ok(row.map(
         |(id, closed, shift_closed, disassembled, product_id, product_name, code_count)| Target {
+            warehouse_pallet_id: None,
             box_id: None,
             pallet_id: Some(id),
             status: classify(closed, shift_closed, disassembled),

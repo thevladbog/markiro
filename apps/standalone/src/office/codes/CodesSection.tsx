@@ -60,7 +60,7 @@ export function useBackToRegistry(): {
 }
 
 /**
- * «Поиск кодов» as one section (plan КРТ): «Коды», «Короба» and «Паллеты»
+ * «Поиск кодов» as one section (plan КРТ): «Коды», «Короба» and «Палеты»
  * as parts of one menu item, and the cards of a box and a pallet under it.
  */
 export function CodesSection() {

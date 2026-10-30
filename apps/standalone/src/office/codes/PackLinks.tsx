@@ -13,6 +13,7 @@ export const PACK_PHASE = {
 } as const satisfies Record<PackState, TagPhase>;
 
 interface PackLinkProps {
+  kind?: "production" | "warehouse";
   id: string;
   sscc: string | null;
 }
@@ -33,8 +34,13 @@ export function BoxLink({ id, sscc }: PackLinkProps) {
 }
 
 /** A pallet as its SSCC, a link to the pallet's card (plan КРТ). */
-export function PalletLink({ id, sscc }: PackLinkProps) {
-  return <PackLink to={`/codes/pallet/${id}`} sscc={sscc} />;
+export function PalletLink({ id, sscc, kind }: PackLinkProps) {
+  return (
+    <PackLink
+      to={`/codes/${kind === "warehouse" ? "warehouse-pallet" : "pallet"}/${id}`}
+      sscc={sscc}
+    />
+  );
 }
 
 /** Any words that name a box or a pallet, as a link to its card (the code card's own wording). */
@@ -43,7 +49,7 @@ export function PackTextLink({
   id,
   children,
 }: {
-  kind: "box" | "pallet";
+  kind: "box" | "pallet" | "warehouse-pallet";
   id: string;
   children: string;
 }) {
@@ -55,14 +61,17 @@ export function PackTextLink({
 }
 
 /** A pallet whose SSCC is not known yet is still a pallet: «Открытая». */
-export function PalletLinkOrOpen({ id, sscc }: PackLinkProps) {
+export function PalletLinkOrOpen({ id, sscc, kind }: PackLinkProps) {
   const { t } = useTranslation();
   return sscc === null ? (
-    <Link to={`/codes/pallet/${id}`} onClick={(event) => event.stopPropagation()}>
+    <Link
+      to={`/codes/${kind === "warehouse" ? "warehouse-pallet" : "pallet"}/${id}`}
+      onClick={(event) => event.stopPropagation()}
+    >
       {t("office.packs.openPallet")}
     </Link>
   ) : (
-    <PalletLink id={id} sscc={sscc} />
+    <PalletLink id={id} sscc={sscc} kind={kind ?? "production"} />
   );
 }
 

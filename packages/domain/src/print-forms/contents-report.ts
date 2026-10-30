@@ -1,7 +1,7 @@
 import { renderCode128Svg, renderDataMatrixSvg } from "../barcodes/svg.js";
 
 /**
- * The print chrome shared by the "Состав короба" and "Состав паллеты" forms:
+ * The print chrome shared by the "Состав короба" and "Состав палета" forms:
  * A4 page shell, CSS, brand lockup, barcode helpers and the fixed-height
  * pagination both use.
  *
@@ -233,7 +233,7 @@ export function emptyNoteUnit(text: string): ReportUnit {
 // ---- document --------------------------------------------------------------
 
 export interface ContentsReportDocument {
-  /** "Состав короба" / "Состав паллеты" — also the HTML title. */
+  /** "Состав короба" / "Состав палета" — also the HTML title. */
   titleLabel: string;
   /** The SSCC in HRI form, or "Без SSCC". */
   titleDoc: string;
@@ -246,7 +246,7 @@ export interface ContentsReportDocument {
   finalBlocksHtml: string;
   /** The 20-character machine SSCC repeated in the page footer, when there is one. */
   footerSscc: string | null;
-  /** "Короб" / "Паллета" — the footer's subject word. */
+  /** "Короб" / "Палет" — the footer's subject word. */
   footerSubject: string;
 }
 

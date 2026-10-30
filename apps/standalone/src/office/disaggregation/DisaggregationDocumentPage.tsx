@@ -212,7 +212,7 @@ function AddLinesCard({ busy, onPaste, onFile, onRejected }: AddLinesCardProps) 
 /** The level of a line: a box, a pallet, or nothing found. */
 function levelKey(line: DisaggregationLine): "box" | "pallet" | "unknown" {
   if (line.boxId !== null) return "box";
-  if (line.palletId !== null) return "pallet";
+  if (line.palletId !== null || line.warehousePalletId !== undefined) return "pallet";
   return "unknown";
 }
 
@@ -590,7 +590,14 @@ export function DisaggregationDocumentPage() {
       key: "sscc",
       title: t("office.disaggregation.detail.table.sscc"),
       mono: true,
-      render: (line) => lineSsccLabel(line),
+      render: (line) =>
+        line.warehousePalletId === undefined ? (
+          lineSsccLabel(line)
+        ) : (
+          <Link to={`/codes/warehouse-pallet/${line.warehousePalletId}`}>
+            {lineSsccLabel(line)}
+          </Link>
+        ),
     },
     {
       key: "level",

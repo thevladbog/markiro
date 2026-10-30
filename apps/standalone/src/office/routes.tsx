@@ -1,3 +1,4 @@
+import { WarehousePalletCardPage } from "./codes/WarehousePalletCardPage.js";
 import { Navigate, type RouteObject } from "react-router";
 
 import { BackupsPage } from "./backups/BackupsPage.js";
@@ -74,6 +75,7 @@ export const officeRoutes: RouteObject[] = [
           { path: "pallets", element: <PalletsTab /> },
           { path: "box/:id", element: <BoxCardPage /> },
           { path: "pallet/:id", element: <PalletCardPage /> },
+          { path: "warehouse-pallet/:id", element: <WarehousePalletCardPage /> },
         ],
       },
       {

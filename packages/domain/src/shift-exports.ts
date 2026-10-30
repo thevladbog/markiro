@@ -190,7 +190,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   Object.freeze({
     id: "shift_txt_pallets",
     version: 1,
-    label: "[TXT][Паллеты] Отчет смены",
+    label: "[TXT][Палеты] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "pallets",
@@ -198,7 +198,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   Object.freeze({
     id: "shift_csv_pallets",
     version: 1,
-    label: "[CSV][Паллеты] Отчет смены",
+    label: "[CSV][Палеты] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
     boxMode: "pallets",
@@ -206,7 +206,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   Object.freeze({
     id: "shift_xml_gismt_aggregation_pallets",
     version: 1,
-    label: "[XML][ГИСМТ] Паллетная агрегация",
+    label: "[XML][ГИСМТ] Палетная агрегация",
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallets",
@@ -214,7 +214,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   Object.freeze({
     id: "shift_txt_pallet_boxes",
     version: 1,
-    label: "[TXT][Паллеты → короба] Отчет смены",
+    label: "[TXT][Палеты → короба] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "pallet_boxes",
@@ -222,7 +222,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   Object.freeze({
     id: "shift_xml_gismt_pallet_boxes",
     version: 1,
-    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    label: "[XML][ГИСМТ] Агрегация палетов без кодов",
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallet_boxes",

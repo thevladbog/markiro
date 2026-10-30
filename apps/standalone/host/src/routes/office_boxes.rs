@@ -16,12 +16,15 @@ use crate::server::AppState;
 
 /// Every box of the shift, opened first first, with its live items.
 pub const BOXES_SQL: &str = "SELECT b.id, b.device_id, b.sscc, b.opened_at, b.closed_at, \
-     b.disassembled_at, b.pallet_id, \
+     b.disassembled_at, COALESCE(wp.id,b.pallet_id) AS pallet_id, \
+     CASE WHEN wp.id IS NOT NULL THEN 'warehouse' END AS pallet_kind, \
      (SELECT COUNT(*) FROM box_items i WHERE i.box_id = b.id \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units, \
      b.item_count_reported, b.digest_matches, b.print_verified_at, b.print_skipped_at, \
      op.name AS operator_name \
      FROM boxes b LEFT JOIN operators op ON op.id = b.operator_id \
+     LEFT JOIN warehouse_pallet_boxes wb ON wb.box_sscc=b.sscc AND wb.removed_at IS NULL \
+     LEFT JOIN warehouse_pallets wp ON wp.id=wb.pallet_id AND wp.disassembled_at IS NULL \
      WHERE b.shift_id = ? ORDER BY b.opened_at, b.id";
 
 /// Every pallet of the shift, opened first first, with what stands on it:
@@ -48,6 +51,7 @@ struct BoxRow {
     closed_at: Option<String>,
     disassembled_at: Option<String>,
     pallet_id: Option<String>,
+    pallet_kind: Option<String>,
     units: i64,
     item_count_reported: Option<u32>,
     digest_matches: Option<bool>,
@@ -112,6 +116,7 @@ pub async fn list_boxes(
                 closed_at: row.closed_at,
                 disassembled_at: row.disassembled_at,
                 pallet_id: row.pallet_id,
+                pallet_kind: row.pallet_kind,
                 units: u32::try_from(row.units).map_err(ApiError::internal)?,
                 item_count_reported: row.item_count_reported,
                 digest_matches: row.digest_matches,

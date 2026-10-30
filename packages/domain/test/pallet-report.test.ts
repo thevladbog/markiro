@@ -59,7 +59,7 @@ function fixture(overrides: Partial<PalletReportData> = {}): PalletReportData {
 describe("pallet contents report", () => {
   it("prints the pallet and each member box with its own SSCC and count", () => {
     const html = renderPalletReportHtml(fixture());
-    expect(html).toContain("Состав паллеты");
+    expect(html).toContain("Состав палета");
     expect(html).toContain("(00)146007034967100001");
     for (const n of [1, 2, 3]) expect(html).toContain(`(00)14600703496700000${n}`);
     expect(html.match(/<tr class="rep-code-row">/g)?.length).toBe(3);
@@ -80,14 +80,14 @@ describe("pallet contents report", () => {
     expect(html).toContain("(00)146007034967000002");
     expect(html).toContain("снят 11.09.2026 10:00");
     expect(html).toContain("коробов — 2 · единиц — 24");
-    expect(html).toContain("Коробов на паллете: 2 · единиц: 24");
+    expect(html).toContain("Коробов на палете: 2 · единиц: 24");
   });
 
   it("says so when the pallet carries no boxes", () => {
     const html = renderPalletReportHtml(fixture({ boxes: [], status: "open", closedAt: null }));
-    expect(html).toContain("На паллете нет коробов");
+    expect(html).toContain("На палете нет коробов");
     expect(html).toContain("коробов — 0 · единиц — 0");
-    expect(html).toContain("Открыта");
+    expect(html).toContain("Открыт");
   });
 
   it("survives a pallet closed without an SSCC and a box without one", () => {

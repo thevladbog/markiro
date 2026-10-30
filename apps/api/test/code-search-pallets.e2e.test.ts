@@ -327,7 +327,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
         .query({ timeZone: "Europe/Moscow" })
         .expect(200)
         .expect("Content-Type", /text\/html/);
-      expect(res.text).toContain("Состав паллеты");
+      expect(res.text).toContain("Состав палета");
       // Its own SSCC, and both member boxes underneath.
       expect(res.text).toContain("(00)");
       expect(res.text.match(/<tr class="rep-code-row">/g)?.length).toBe(2);
@@ -485,7 +485,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
         .expect(200)
         .expect("Content-Type", /text\/html/);
       expect(res.text).toContain("@page { size: A5;");
-      expect(res.text).toContain(`Ярлыки паллет смены ${shiftNumber}`);
+      expect(res.text).toContain(`Ярлыки палетов смены ${shiftNumber}`);
       // p1 is closed; p-open (see "refuses an open pallet") never closed and
       // the warehouse pallet belongs to no shift -- exactly one page.
       const pages = res.text.match(/data-placard-sscc="(\d{20})"/g) ?? [];

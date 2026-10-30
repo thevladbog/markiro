@@ -234,7 +234,7 @@ describe("office shifts: the list", () => {
     );
     expect(cells("A-5")[STATUS]).toBe("◷ЗапланированаАгрегация");
     expect(cells("A-7")[STATUS]).toBe(
-      "◷ЗапланированаАгрегация!Не откроется: шаблон паллеты выключен или не подходит товару",
+      "◷ЗапланированаАгрегация!Не откроется: шаблон палета выключен или не подходит товару",
     );
     expect(cells("A-8")[STATUS]).toBe("◷ЗапланированаАгрегация");
     expect(cells("A-6")[STATUS]).toBe("▸АктивнаАгрегация");
@@ -348,7 +348,9 @@ describe("office shifts: the list", () => {
     // OCT26-004 puts 540 in 45 boxes; OCT26-001/S puts its own; the planned one nothing.
     expect(totals()).toMatch(/^Итого по выбранным сменам: смен 3 · выпуск /);
     chooseText("Статус", "Запланирована");
-    expect(totals()).toBe("Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · паллет 0");
+    expect(totals()).toBe(
+      "Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · палетов 0",
+    );
   });
 
   it("filters by status and line and searches the number and the product's name, without case", async () => {

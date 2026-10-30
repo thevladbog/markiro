@@ -1,3 +1,6 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useCan } from "../access.js";
+import { CreatePalletDialog } from "./CreatePalletDialog.js";
 import { classifyScan } from "@markiro/domain";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,7 +36,7 @@ import { WarehousePalletsSection } from "./WarehousePalletsSection.js";
 const COUNT = new Intl.NumberFormat("ru");
 
 /**
- * «Паллеты» (plan КРТ, the cloud's pallet list): every pallet of the site,
+ * «Палеты» (plan КРТ, the cloud's pallet list): every pallet of the site,
  * open ones first, then by closing from the newest, narrowed by product,
  * line, station, the days of closing and an SSCC; a page of 100 at a time
  * with «Показать ещё». The filters live in the address, so «Назад» from a
@@ -41,6 +44,9 @@ const COUNT = new Intl.NumberFormat("ru");
  */
 export function PalletsTab() {
   const { t } = useTranslation();
+  const allowed = useCan("editCatalog");
+  const cache = useQueryClient();
+  const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const filters = palletFiltersOf(params);
@@ -194,6 +200,11 @@ export function PalletsTab() {
       <PageHeader
         title={t("office.codeSearch.title")}
         description={t("office.codeSearch.subtitle")}
+        actions={
+          allowed ? (
+            <Button onClick={() => setCreating(true)}>+ {t("office.createPallet.title")}</Button>
+          ) : undefined
+        }
       />
       <RegistryTabs active="pallets" />
       <ListCard>
@@ -292,6 +303,18 @@ export function PalletsTab() {
         {content()}
       </ListCard>
       <WarehousePalletsSection zone={zone} />
+      {creating && (
+        <CreatePalletDialog
+          onClose={() => setCreating(false)}
+          onCreated={(pallet) => {
+            void cache.invalidateQueries({ queryKey: officeKeys.warehousePallets });
+            void cache.invalidateQueries({ queryKey: ["office", "pallet-list"] });
+            void cache.invalidateQueries({ queryKey: ["office", "box-card"] });
+            setCreating(false);
+            void navigate(`/codes/warehouse-pallet/${pallet.id}`);
+          }}
+        />
+      )}
     </>
   );
 }

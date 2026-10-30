@@ -371,7 +371,7 @@ describe.skipIf(!ready)("pallet exports e2e", () => {
       partNumber: 1,
       codeCount: 0,
       boxCount: 2,
-      filename: `Cola_2026-09-17_паллета_00${productionPalletSscc}_2_коробов.xml`,
+      filename: `Cola_2026-09-17_палет_00${productionPalletSscc}_2_коробов.xml`,
       mimeType: "application/xml; charset=utf-8",
     });
 
@@ -381,7 +381,7 @@ describe.skipIf(!ready)("pallet exports e2e", () => {
       .get(`/shift-exports/${body.id}/artifacts/${artifacts[0]!.id}/download`)
       .expect(200);
     expect(download.body).toMatchObject({
-      filename: `Cola_2026-09-17_паллета_00${productionPalletSscc}_2_коробов.xml`,
+      filename: `Cola_2026-09-17_палет_00${productionPalletSscc}_2_коробов.xml`,
       expiresInSeconds: 300,
     });
 

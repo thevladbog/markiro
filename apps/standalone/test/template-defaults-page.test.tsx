@@ -167,10 +167,10 @@ describe("office template defaults: the organization's", () => {
     await openDefaults(session());
     expect(screen.getByRole("heading", { name: "Шаблоны по умолчанию" })).toBeTruthy();
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Коробка 100×100"]);
-    expect(choices("Шаблон паллеты")).toEqual(["Не выбран", "Паллета 58×40", "Паллета 100×150"]);
+    expect(choices("Шаблон палета")).toEqual(["Не выбран", "Паллета 58×40", "Паллета 100×150"]);
     expect(choices("Шаблон дубликата товара")).toEqual(["Не выбран", "Дубликат [Полное]"]);
     expect(valueOf("Шаблон короба")).toBe(BOX.id);
-    expect(valueOf("Шаблон паллеты")).toBe(PALLET.id);
+    expect(valueOf("Шаблон палета")).toBe(PALLET.id);
     expect(valueOf("Шаблон дубликата товара")).toBe("");
     expect(screen.getAllByText("Только включённые шаблоны для всех категорий")).toHaveLength(3);
   });
@@ -206,8 +206,8 @@ describe("office template defaults: the organization's", () => {
     await openDefaults(fake);
     choose("Шаблон короба", BOX_100.id);
     // The choice is made through the «Не выбран» option itself, which holds the empty value.
-    expect(optionTextOf("Шаблон паллеты", "")).toBe("Не выбран");
-    chooseText("Шаблон паллеты", "Не выбран");
+    expect(optionTextOf("Шаблон палета", "")).toBe("Не выбран");
+    chooseText("Шаблон палета", "Не выбран");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
     expect(fake.api.updateTemplateDefaults.mock.calls).toStrictEqual([
@@ -225,7 +225,7 @@ describe("office template defaults: the organization's", () => {
       ],
     ]);
     expect(valueOf("Шаблон короба")).toBe(BOX_100.id);
-    expect(valueOf("Шаблон паллеты")).toBe("");
+    expect(valueOf("Шаблон палета")).toBe("");
     expect(screen.getByRole("button", { name: "Сохранить" })).toHaveProperty("disabled", true);
     expect(screen.queryByText(DIRTY)).toBeNull();
     await settle();
@@ -238,13 +238,13 @@ describe("office template defaults: the organization's", () => {
     const cancel = screen.getByRole("button", { name: "Отменить изменения" });
     expect(save).toHaveProperty("disabled", true);
     expect(cancel).toHaveProperty("disabled", true);
-    choose("Шаблон паллеты", PALLET_58.id);
+    choose("Шаблон палета", PALLET_58.id);
     const note = screen.getByText(DIRTY);
     expect(note.getAttribute("aria-live")).toBe("polite");
     expect(save).toHaveProperty("disabled", false);
     expect(cancel).toHaveProperty("disabled", false);
     // Choosing the loaded template again is no change.
-    choose("Шаблон паллеты", PALLET.id);
+    choose("Шаблон палета", PALLET.id);
     expect(screen.queryByText(DIRTY)).toBeNull();
     expect(save).toHaveProperty("disabled", true);
     choose("Шаблон дубликата товара", DUPLICATE.id);
@@ -258,7 +258,7 @@ describe("office template defaults: the organization's", () => {
     await openDefaults(fake);
     for (const [field, label] of [
       ["defaultBoxTemplateId", "Шаблон короба"],
-      ["defaultPalletTemplateId", "Шаблон паллеты"],
+      ["defaultPalletTemplateId", "Шаблон палета"],
       ["defaultDuplicateTemplateId", "Шаблон дубликата товара"],
     ] as const) {
       fake.api.updateTemplateDefaults.mockRejectedValueOnce(
@@ -297,7 +297,7 @@ describe("office template defaults: the organization's", () => {
       ),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Загрузить заново" }));
-    await waitFor(() => expect(valueOf("Шаблон паллеты")).toBe(PALLET_58.id));
+    await waitFor(() => expect(valueOf("Шаблон палета")).toBe(PALLET_58.id));
     expect(fake.api.getTemplateDefaults).toHaveBeenCalledTimes(2);
     expect(valueOf("Шаблон короба")).toBe(BOX.id);
     expect(screen.queryByText(DIRTY)).toBeNull();
@@ -319,7 +319,7 @@ describe("office template defaults: the organization's", () => {
     choose("Шаблон короба", BOX_100.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
-    choose("Шаблон паллеты", PALLET_58.id);
+    choose("Шаблон палета", PALLET_58.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("На хосте произошла ошибка. Повторите попытку.")).toBeTruthy();
     expect(screen.queryByText("Изменения сохранены.")).toBeNull();
@@ -487,7 +487,7 @@ describe("office template defaults: the categories'", () => {
     expect(rows()).toEqual([
       ["Молочная продукция", "Короб"],
       ["Упакованная вода", "Короб"],
-      ["Упакованная вода", "Паллета"],
+      ["Упакованная вода", "Палет"],
       ["Упакованная вода", "Дубликат товара"],
     ]);
     // A category default always has a template: no «Не выбран» in its choice.
@@ -501,12 +501,12 @@ describe("office template defaults: the categories'", () => {
       "Коробка 58×40",
       "Коробка 100×100",
     ]);
-    expect(choices("Шаблон: Упакованная вода, Паллета")).toEqual([
+    expect(choices("Шаблон: Упакованная вода, Палет")).toEqual([
       "Паллета 58×40",
       "Паллета 100×150",
     ]);
     expect(
-      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Паллета" }),
+      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Палет" }),
     ).toBeTruthy();
     const purpose = within(screen.getByRole("region", { name: "Для категорий" })).getByText(
       "Дубликат товара",
@@ -525,7 +525,7 @@ describe("office template defaults: the categories'", () => {
     await openDefaults(fake);
     choose("Шаблон: Молочная продукция, Короб", BOX_100.id);
     fireEvent.click(
-      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Паллета" }),
+      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Палет" }),
     );
     expect(rows()).toHaveLength(3);
     expect(screen.getByText(DIRTY)).toBeTruthy();
@@ -558,7 +558,7 @@ describe("office template defaults: the categories'", () => {
     expect(screen.getByLabelText("Назначение")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("Шаблон")).toHaveProperty("disabled", true);
     choose("Категория", "8");
-    expect(choices("Назначение")).toEqual(["Не выбрано", "Паллета", "Дубликат товара"]);
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Палет", "Дубликат товара"]);
     choose("Назначение", "pallet");
     // A template scoped to the category fits it too.
     expect(choices("Шаблон")).toEqual([
@@ -769,12 +769,12 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     expect(screen.queryByText(UNFIT)).toBeNull();
     expect(valueOf("Шаблон короба")).toBe(BOX.id);
     expect(screen.getByLabelText("Шаблон короба").getAttribute("aria-invalid")).toBeNull();
-    choose("Шаблон паллеты", PALLET_58.id);
+    choose("Шаблон палета", PALLET_58.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await screen.findByText("На хосте произошла ошибка. Повторите попытку.");
     fireEvent.click(screen.getByRole("button", { name: "Отменить изменения" }));
     expect(screen.queryByText("На хосте произошла ошибка. Повторите попытку.")).toBeNull();
-    expect(valueOf("Шаблон паллеты")).toBe(PALLET.id);
+    expect(valueOf("Шаблон палета")).toBe(PALLET.id);
   });
 
   it("does not read the templates again after a 500 or after a stale save", async () => {
@@ -849,9 +849,9 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     if (note === null || note === undefined) throw new Error("the note about unsaved changes");
     expect(note.getAttribute("aria-live")).toBe("polite");
     expect(note.textContent).toBe("");
-    choose("Шаблон паллеты", PALLET_58.id);
+    choose("Шаблон палета", PALLET_58.id);
     expect(screen.getByText(DIRTY)).toBe(note);
-    choose("Шаблон паллеты", PALLET.id);
+    choose("Шаблон палета", PALLET.id);
     expect(note.textContent).toBe("");
     expect(note.isConnected).toBe(true);
   });
@@ -866,7 +866,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     );
     renderOffice(fake, { initialPath: DEFAULTS_PATH });
     await screen.findByRole("heading", { name: "Для организации" });
-    for (const label of ["Шаблон короба", "Шаблон паллеты", "Шаблон дубликата товара"]) {
+    for (const label of ["Шаблон короба", "Шаблон палета", "Шаблон дубликата товара"]) {
       expect(screen.getByLabelText(label), label).toHaveProperty("disabled", true);
     }
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Шаблон 7c1e4b2a…"]);
@@ -983,7 +983,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     choose("Шаблон короба", BOX_100.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
-    choose("Шаблон паллеты", PALLET_58.id);
+    choose("Шаблон палета", PALLET_58.id);
     expect(screen.getByText("Изменения сохранены.")).toBeTruthy();
     expect(screen.getByText(DIRTY)).toBeTruthy();
     await settle();
@@ -1090,7 +1090,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
     expect(table.getAllByRole("cell")[1]?.style.whiteSpace).toBe("nowrap");
     for (const [purpose, tone, count] of [
       ["Короб", "violet", 2],
-      ["Паллета", "magenta", 1],
+      ["Палет", "magenta", 1],
       ["Дубликат товара", "teal", 1],
     ] as const) {
       const tags = table.getAllByText(purpose);
@@ -1227,7 +1227,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Добавить" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(shown()).toEqual([
-      ["Альтернативная табачная продукция", "Паллета"],
+      ["Альтернативная табачная продукция", "Палет"],
       ["Молочная продукция", "Короб"],
     ]);
     // The row that was already there keeps its element, so the focus stays where the user left it.
@@ -1243,16 +1243,16 @@ describe("office template defaults: the categories', beyond the plan", () => {
     );
     dialog = openDialog();
     choose("Категория", "8");
-    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Паллета", "Дубликат товара"]);
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Палет", "Дубликат товара"]);
     await closeDialog(dialog);
     fireEvent.click(screen.getByRole("button", { name: "Отменить изменения" }));
     expect(shown()).toEqual([["Молочная продукция", "Короб"]]);
     expect(screen.queryByText(DIRTY)).toBeNull();
     openDialog();
     choose("Категория", "8");
-    expect(choices("Назначение")).toEqual(["Не выбрано", "Паллета", "Дубликат товара"]);
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Палет", "Дубликат товара"]);
     choose("Категория", "3");
-    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Паллета", "Дубликат товара"]);
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Палет", "Дубликат товара"]);
   });
 
   it("sends an empty list when the last category default is removed, which clears it on the host, and says there are none", async () => {
@@ -1393,7 +1393,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
     fake.api.updateTemplateDefaults.mockResolvedValue({ ...FOUR_DEFAULTS, rev: 70 });
     await openDefaults(fake);
     await screen.findByLabelText(MILK_ROW);
-    choose("Шаблон паллеты", PALLET_58.id);
+    choose("Шаблон палета", PALLET_58.id);
     choose(MILK_ROW, BOX.id);
     fireEvent.click(
       screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Дубликат товара" }),
@@ -1457,7 +1457,7 @@ describe("office template defaults: the final fixes", () => {
   function controls(): [string, HTMLElement][] {
     return [
       ["the box select", screen.getByLabelText("Шаблон короба")],
-      ["the pallet select", screen.getByLabelText("Шаблон паллеты")],
+      ["the pallet select", screen.getByLabelText("Шаблон палета")],
       ["the duplicate select", screen.getByLabelText("Шаблон дубликата товара")],
       ["the row's select", screen.getByLabelText(MILK_ROW)],
       ["«Убрать»", screen.getByRole("button", { name: REMOVE_MILK })],
@@ -1522,11 +1522,11 @@ describe("office template defaults: the final fixes", () => {
     await openDefaults(session(FOUR));
     // Shown: milk box, water box, water pallet, water duplicate. The middle row goes: the next row's button.
     fireEvent.click(remove("Упакованная вода, Короб"));
-    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Паллета")));
+    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Палет")));
     // The last row goes: the previous row's.
     fireEvent.click(remove("Упакованная вода, Дубликат товара"));
-    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Паллета")));
-    fireEvent.click(remove("Упакованная вода, Паллета"));
+    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Палет")));
+    fireEvent.click(remove("Упакованная вода, Палет"));
     await waitFor(() => expect(document.activeElement).toBe(remove("Молочная продукция, Короб")));
     // The only row goes: nothing is left but the card's own button.
     fireEvent.click(remove("Молочная продукция, Короб"));
@@ -1567,7 +1567,7 @@ describe("office template defaults: the final fixes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await screen.findByText(UNFIT);
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText("Шаблон паллеты")),
+      expect(document.activeElement).toBe(screen.getByLabelText("Шаблон палета")),
     );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Сохранить" })).toHaveProperty("disabled", false),
@@ -1624,7 +1624,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
 
   async function ready(): Promise<void> {
     await waitFor(() =>
-      expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", false),
+      expect(screen.getByLabelText("Лист А4 палета")).toHaveProperty("disabled", false),
     );
   }
 
@@ -1643,21 +1643,21 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
       .filter((label) => label !== "");
     expect(labels).toEqual([
       "Шаблон короба",
-      "Шаблон паллеты",
-      "Лист А4 паллеты",
+      "Шаблон палета",
+      "Лист А4 палета",
       "Шаблон дубликата товара",
     ]);
-    expect(choices("Лист А4 паллеты")).toEqual([
+    expect(choices("Лист А4 палета")).toEqual([
       "Не выбран",
       "Палета · две А5",
       "Палета А4 · вертикальная",
     ]);
-    expect(valueOf("Лист А4 паллеты")).toBe(PORTRAIT.id);
+    expect(valueOf("Лист А4 палета")).toBe(PORTRAIT.id);
     // Neither list offers the other's: a pallet label is no sheet.
-    expect(choices("Шаблон паллеты")).not.toContain("Палета · две А5");
-    expect(choices("Лист А4 паллеты")).not.toContain("Паллета 100×150");
-    expect(screen.getByText(/Для паллеты можно печатать термоэтикетку или лист А4/)).toBeTruthy();
-    choose("Лист А4 паллеты", TWO_A5.id);
+    expect(choices("Шаблон палета")).not.toContain("Палета · две А5");
+    expect(choices("Лист А4 палета")).not.toContain("Паллета 100×150");
+    expect(screen.getByText(/Для палета можно печатать термоэтикетку или лист А4/)).toBeTruthy();
+    choose("Лист А4 палета", TWO_A5.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
     expect(fake.api.updateTemplateDefaults.mock.calls[0]?.[1]).toMatchObject({
@@ -1684,15 +1684,15 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
       .getAllByRole("row")
       .slice(1)
       .map((row) => within(row).getAllByRole("cell")[1]?.textContent);
-    expect(rows).toEqual(["Короб", "Паллета", "Лист А4 паллеты"]);
+    expect(rows).toEqual(["Короб", "Палет", "Лист А4 палета"]);
     // A held sheet that is off stays a marked choice, and «Убрать» clears it.
-    expect(choices("Шаблон: Молочная продукция, Лист А4 паллеты")).toEqual([
+    expect(choices("Шаблон: Молочная продукция, Лист А4 палета")).toEqual([
       "Палета · две А5",
       "Палета А4 · вертикальная",
       "Старый лист — выключен",
     ]);
     fireEvent.click(
-      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Лист А4 паллеты" }),
+      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Лист А4 палета" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Добавить умолчание категории" }));
     const add = await screen.findByRole("dialog", { name: "Умолчание категории" });
@@ -1700,8 +1700,8 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
     expect(choices("Назначение")).toEqual([
       "Не выбрано",
       "Короб",
-      "Паллета",
-      "Лист А4 паллеты",
+      "Палет",
+      "Лист А4 палета",
       "Дубликат товара",
     ]);
     chooseValue("Назначение", "pallet_sheet");
@@ -1728,7 +1728,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
     );
     await openDefaults(fake);
     await ready();
-    choose("Лист А4 паллеты", TWO_A5.id);
+    choose("Лист А4 палета", TWO_A5.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(
       await screen.findByText(
@@ -1736,7 +1736,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
       ),
     ).toBeTruthy();
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText("Лист А4 паллеты")),
+      expect(document.activeElement).toBe(screen.getByLabelText("Лист А4 палета")),
     );
     await waitFor(() => expect(fake.api.listPalletSheets).toHaveBeenCalledTimes(2));
   });
@@ -1751,7 +1751,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
         "Список листов А4 не загрузился: листы по умолчанию сейчас не изменить.",
       ),
     ).toBeTruthy();
-    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Лист А4 палета")).toHaveProperty("disabled", true);
     choose("Шаблон короба", BOX_100.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await waitFor(() => expect(fake.api.updateTemplateDefaults).toHaveBeenCalledTimes(1));

@@ -1,6 +1,6 @@
 //! `GET /v1/office/warehouse-pallets`: the pallets handhelds built outside shifts (plan ТСД-Х,
 //! task Х5, decision В-6): open ones first, then closed newest first, the latest 200. A list only:
-//! no card, no export, no disassembly (the parity wave of the office).
+//! Cards and documents are served by `office_warehouse_detail`.
 
 use axum::extract::State;
 use axum::Json;
@@ -31,7 +31,7 @@ pub async fn list(
     _context: OfficeContext,
 ) -> Result<Json<OfficeWarehousePallets>, ApiError> {
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT wp.id AS id, wp.device_id AS device_id, d.name AS device_name, \
+        "SELECT wp.id AS id, wp.device_id AS device_id, CASE WHEN wp.source='cabinet' THEN 'Офис' ELSE d.name END AS device_name, \
          wp.product_id AS product_id, pr.name AS product_name, wp.opened_at AS opened_at, \
          wp.closed_at AS closed_at, wp.sscc AS sscc, wp.box_count_reported AS box_count_reported, \
          (SELECT COUNT(*) FROM warehouse_pallet_boxes wb \

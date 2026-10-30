@@ -203,6 +203,9 @@ pub struct DisaggregationLine {
     pub sscc: Option<String>,
     pub box_id: Option<String>,
     pub pallet_id: Option<String>,
+    /// Warehouse pallets have no production shift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warehouse_pallet_id: Option<String>,
     /// The shift of the box or the pallet, for the office's link.
     pub shift_id: Option<String>,
     pub shift_number: Option<String>,

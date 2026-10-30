@@ -207,9 +207,9 @@ describe("pallet placard", () => {
   });
 
   it("watermarks a disassembled pallet and nothing else", () => {
-    expect(renderPalletPlacardHtml(fixture(), "a4")).not.toContain("РАСФОРМИРОВАНА");
+    expect(renderPalletPlacardHtml(fixture(), "a4")).not.toContain("РАСФОРМИРОВАН");
     expect(renderPalletPlacardHtml(fixture({ status: "disassembled" }), "a4")).toContain(
-      "РАСФОРМИРОВАНА",
+      "РАСФОРМИРОВАН",
     );
   });
 
@@ -234,7 +234,7 @@ describe("pallet placard", () => {
       "a5",
       "SEP26-004/S",
     );
-    expect(html).toContain("<title>Ярлыки паллет смены SEP26-004/S</title>");
+    expect(html).toContain("<title>Ярлыки палетов смены SEP26-004/S</title>");
     const pages = html.match(/data-placard-sscc="(\d{20})"/g) ?? [];
     expect(pages).toEqual([
       'data-placard-sscc="00104600682000000019"',

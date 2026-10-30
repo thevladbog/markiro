@@ -93,8 +93,8 @@ async function openCard(
 async function formButton(name: string): Promise<HTMLElement> {
   const tab = name.startsWith("Состав короба")
     ? "Короба"
-    : /^(Состав|Ярлык) паллеты /.test(name)
-      ? "Паллеты"
+    : /^(Состав|Ярлык) палета /.test(name)
+      ? "Палеты"
       : null;
   if (tab !== null) {
     const opened = await screen.findByRole("tab", { name: tab });
@@ -323,9 +323,9 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     session.api.listShiftPallets.mockResolvedValue([...PALLETS, OPEN_PALLET]);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    await formButton("Состав паллеты Без SSCC");
-    expect(screen.queryByRole("button", { name: "Ярлык паллеты Без SSCC" })).toBeNull();
-    const placard = "Ярлык паллеты (00)146006820000000409";
+    await formButton("Состав палета Без SSCC");
+    expect(screen.queryByRole("button", { name: "Ярлык палета Без SSCC" })).toBeNull();
+    const placard = "Ярлык палета (00)146006820000000409";
     fireEvent.click(screen.getByRole("button", { name: placard }));
     let dialog = await readyDialog(placard);
     fireEvent.click(within(dialog).getByRole("radio", { name: "A5" }));
@@ -343,11 +343,11 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     );
   });
 
-  it("prints «Состав паллеты» and the shift's placards from the shift's pallet rows", async () => {
+  it("prints «Состав палета» and the shift's placards from the shift's pallet rows", async () => {
     const session = formSession(SHIFT);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    const contents = "Состав паллеты (00)146006820000000409";
+    const contents = "Состав палета (00)146006820000000409";
     fireEvent.click(await formButton(contents));
     let dialog = await readyDialog(contents);
     expect(within(dialog).queryByRole("radio")).toBeNull();
@@ -363,8 +363,8 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
       ),
     );
     closeDialog(dialog);
-    fireEvent.click(screen.getByRole("button", { name: "Ярлыки паллет смены" }));
-    dialog = await readyDialog("Ярлыки паллет смены OCT26-004");
+    fireEvent.click(screen.getByRole("button", { name: "Ярлыки палетов смены" }));
+    dialog = await readyDialog("Ярлыки палетов смены OCT26-004");
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() =>
       expect(print).toHaveBeenLastCalledWith(
@@ -383,9 +383,9 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
       })),
     });
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки паллет смены" }));
-    const dialog = screen.getByRole("dialog", { name: "Ярлыки паллет смены OCT26-004" });
-    await within(dialog).findByText("В смене нет закрытых паллет с SSCC: печатать нечего.");
+    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки палетов смены" }));
+    const dialog = screen.getByRole("dialog", { name: "Ярлыки палетов смены OCT26-004" });
+    await within(dialog).findByText("В смене нет закрытых палетов с SSCC: печатать нечего.");
     expect(within(dialog).getByRole("button", { name: "Печать" })).toHaveProperty("disabled", true);
     expect(within(dialog).getByRole("button", { name: "Открыть в браузере" })).toHaveProperty(
       "disabled",
@@ -417,7 +417,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
       ),
     );
     // A planned shift has no placards to print.
-    expect(screen.queryByRole("button", { name: "Ярлыки паллет смены" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ярлыки палетов смены" })).toBeNull();
   });
 
   it("prints the product's photo on «Бланк смены», read again at the press, and the blank without it when it does not read (plan ТОВ)", async () => {
@@ -484,7 +484,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
   it("has no blank for a closed shift", async () => {
     const closed: OfficeShift = { ...SHIFT, status: "closed", closedAt: "2026-10-08T14:00:07Z" };
     await openCard(formSession(closed), closed, vi.fn<PrintForm>(), fakeOfficeFiles());
-    await screen.findByRole("button", { name: "Ярлыки паллет смены" });
+    await screen.findByRole("button", { name: "Ярлыки палетов смены" });
     expect(screen.queryByRole("button", { name: "Бланк смены" })).toBeNull();
   });
 
@@ -707,11 +707,11 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     };
     const session = formSession(SHIFT, stillOpen);
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
-    const placard = "Ярлык паллеты (00)146006820000000409";
+    const placard = "Ярлык палета (00)146006820000000409";
     fireEvent.click(await formButton(placard));
     const dialog = screen.getByRole("dialog", { name: placard });
     const refusal = await within(dialog).findByText(
-      "Ярлык печатается только у закрытой паллеты с SSCC.",
+      "Ярлык печатается только у закрытого палета с SSCC.",
     );
     expect(refusal.closest('[aria-live="polite"]')).not.toBeNull();
     // Heard once, by the region: the message is not an alert of its own.
@@ -724,10 +724,10 @@ describe("a form is drawn from the rows read at the press, and the press is safe
   it("says a pallet is not found when the rows read lack it", async () => {
     const session = formSession(SHIFT, { ...PALLET_ROWS, pallets: [] });
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
-    const contents = "Состав паллеты (00)146006820000000409";
+    const contents = "Состав палета (00)146006820000000409";
     fireEvent.click(await formButton(contents));
     const dialog = screen.getByRole("dialog", { name: contents });
-    await within(dialog).findByText("Паллета не найдена.");
+    await within(dialog).findByText("Палет не найден.");
     expect(within(dialog).getByRole("button", { name: "Печать" })).toHaveProperty("disabled", true);
   });
 
@@ -742,13 +742,13 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     );
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    const placard = "Ярлык паллеты (00)146006820000000409";
+    const placard = "Ярлык палета (00)146006820000000409";
     fireEvent.click(await formButton(placard));
     const dialog = await readyDialog(placard);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
-    expect(print.mock.calls[0]?.[0]).toContain("РАСФОРМИРОВАНА");
-    expect(screen.queryByRole("button", { name: "Ярлыки паллет смены" })).toBeNull();
+    expect(print.mock.calls[0]?.[0]).toContain("РАСФОРМИРОВАН");
+    expect(screen.queryByRole("button", { name: "Ярлыки палетов смены" })).toBeNull();
   });
 
   it("reads the blank's records again at the press: a product renamed since the card opened is printed new", async () => {
@@ -808,9 +808,9 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    const placards = "Ярлыки паллет смены";
+    const placards = "Ярлыки палетов смены";
     fireEvent.click(await screen.findByRole("button", { name: placards }));
-    const dialog = await readyDialog("Ярлыки паллет смены OCT26-004");
+    const dialog = await readyDialog("Ярлыки палетов смены OCT26-004");
     session.api.getPalletReportRows.mockResolvedValue({
       ...PALLET_ROWS,
       pallets: PALLET_ROWS.pallets.map((pallet) => ({
@@ -819,7 +819,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
       })),
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
-    await within(dialog).findByText("В смене нет закрытых паллет с SSCC: печатать нечего.");
+    await within(dialog).findByText("В смене нет закрытых палетов с SSCC: печатать нечего.");
     await afterPaint();
     expect(print).not.toHaveBeenCalled();
   });
@@ -921,15 +921,15 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     );
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    const first = `Состав паллеты (00)${pallets[0]?.sscc}`;
+    const first = `Состав палета (00)${pallets[0]?.sscc}`;
     fireEvent.click(await formButton(first));
     let dialog = await readyDialog(first);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
     expect(print.mock.calls[0]?.[0]).toContain("0460068200" + "00000599");
     closeDialog(dialog);
-    fireEvent.click(screen.getByRole("button", { name: "Ярлыки паллет смены" }));
-    dialog = await readyDialog("Ярлыки паллет смены OCT26-004");
+    fireEvent.click(screen.getByRole("button", { name: "Ярлыки палетов смены" }));
+    dialog = await readyDialog("Ярлыки палетов смены OCT26-004");
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(2), { timeout: 20_000 });
     expect(print.mock.calls[1]?.[0]).toBe(
@@ -995,24 +995,24 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     const print = vi.fn<PrintForm>();
     const files = fakeOfficeFiles();
     await openCard(formSession(SHIFT), SHIFT, print, files);
-    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки паллет смены" }));
-    const dialog = await readyDialog("Ярлыки паллет смены OCT26-004");
+    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки палетов смены" }));
+    const dialog = await readyDialog("Ярлыки палетов смены OCT26-004");
     fireEvent.click(within(dialog).getByRole("radio", { name: "A5" }));
     const html = renderForm({ kind: "placards", rows: PALLET_ROWS, format: "a5" })?.html;
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledWith(html));
     // The print window is up: the dialog goes by itself; the next form opens it again.
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Ярлыки паллет смены OCT26-004" })).toBeNull(),
+      expect(screen.queryByRole("dialog", { name: "Ярлыки палетов смены OCT26-004" })).toBeNull(),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки паллет смены" }));
-    const again = await readyDialog("Ярлыки паллет смены OCT26-004");
+    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки палетов смены" }));
+    const again = await readyDialog("Ярлыки палетов смены OCT26-004");
     fireEvent.click(within(again).getByRole("radio", { name: "A5" }));
     fireEvent.click(within(again).getByRole("button", { name: "Открыть в браузере" }));
     await waitFor(() => expect(files.openFile).toHaveBeenCalledTimes(1));
     expect(files.save).toHaveBeenCalledWith(
       ["Формы", "OCT26-004", "2026-10-08_18-30-00_placards"],
-      [{ name: "Ярлыки паллет смены A5.html", bytes: new TextEncoder().encode(html) }],
+      [{ name: "Ярлыки палетов смены A5.html", bytes: new TextEncoder().encode(html) }],
     );
   });
 
@@ -1034,8 +1034,8 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
   it("holds the paper still while it works", async () => {
     const session = formSession(SHIFT);
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки паллет смены" }));
-    const dialog = await readyDialog("Ярлыки паллет смены OCT26-004");
+    fireEvent.click(await screen.findByRole("button", { name: "Ярлыки палетов смены" }));
+    const dialog = await readyDialog("Ярлыки палетов смены OCT26-004");
     const read = deferred<PalletReportRows>();
     session.api.getPalletReportRows.mockImplementationOnce(() => read.promise);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
@@ -1048,7 +1048,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     });
     // The print window opened: the dialog closes by itself (beta 3.2).
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Ярлыки паллет смены OCT26-004" })).toBeNull(),
+      expect(screen.queryByRole("dialog", { name: "Ярлыки палетов смены OCT26-004" })).toBeNull(),
     );
   });
 

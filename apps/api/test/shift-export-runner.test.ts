@@ -322,7 +322,7 @@ describe("ShiftExportRunnerService", () => {
         codeCount: 0,
         boxCount: 2,
         mimeType: "application/xml; charset=utf-8",
-        filename: "Вода_2026-08-13_паллета_00134600682000000017_2_коробов.xml",
+        filename: "Вода_2026-08-13_палет_00134600682000000017_2_коробов.xml",
       }),
     ]);
     expect(fake.state.audits).toEqual([

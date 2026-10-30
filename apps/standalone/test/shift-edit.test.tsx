@@ -457,9 +457,9 @@ describe("office shifts: changing a shift, the edges", () => {
     };
     session.api.updateShift.mockResolvedValue(withPallets);
     let name = await openEdit(session, PLANNED);
-    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
-    expect(valueOf(name, "Коробов на паллете")).toBe("40");
-    expect(valueOf(name, "Шаблон этикетки паллеты")).toBe(PALLET.id);
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С палетами" }));
+    expect(valueOf(name, "Коробов на палете")).toBe("40");
+    expect(valueOf(name, "Шаблон этикетки палета")).toBe(PALLET.id);
     // The list read again after the save has the shift with its pallets.
     session.api.listShifts.mockResolvedValue([withPallets, ACTIVE, CLOSED]);
     fireEvent.click(save(name));
@@ -478,9 +478,9 @@ describe("office shifts: changing a shift, the edges", () => {
         name: `Изменить смену ${PLANNED.number}`,
       }),
     );
-    await waitFor(() => expect(valueOf(name, "Коробов на паллете")).toBe("40"));
-    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
-    expect(within(dialog(name)).queryByLabelText("Коробов на паллете")).toBeNull();
+    await waitFor(() => expect(valueOf(name, "Коробов на палете")).toBe("40"));
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С палетами" }));
+    expect(within(dialog(name)).queryByLabelText("Коробов на палете")).toBeNull();
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, PLANNED.id, {
@@ -502,16 +502,16 @@ describe("office shifts: changing a shift, the edges", () => {
     session.api.listProducts.mockResolvedValue([{ ...WATER, palletBoxCapacity: null }]);
     session.api.updateShift.mockResolvedValue(PLANNED);
     const name = await openEdit(session, withPallets);
-    const pallets = within(dialog(name)).getByRole("checkbox", { name: "С паллетами" });
+    const pallets = within(dialog(name)).getByRole("checkbox", { name: "С палетами" });
     expect(pallets.getAttribute("aria-checked")).toBe("true");
     expect(isDisabled(pallets)).toBe(false);
-    expect(valueOf(name, "Коробов на паллете")).toBe("40");
-    expect(valueOf(name, "Шаблон этикетки паллеты")).toBe(PALLET.id);
+    expect(valueOf(name, "Коробов на палете")).toBe("40");
+    expect(valueOf(name, "Шаблон этикетки палета")).toBe(PALLET.id);
     // Nothing was changed: nothing is saved.
     expect(save(name).disabled).toBe(true);
     fireEvent.click(pallets);
     // Once off, a product without a pallet capacity cannot have them back.
-    expect(isDisabled(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }))).toBe(
+    expect(isDisabled(within(dialog(name)).getByRole("checkbox", { name: "С палетами" }))).toBe(
       true,
     );
     fireEvent.click(save(name));
@@ -535,10 +535,10 @@ describe("office shifts: changing a shift, the edges", () => {
       api("validation_failed", { field: "palletBoxCapacity" }),
     );
     const name = await openEdit(session, withPallets);
-    fireEvent.change(field(name, "Коробов на паллете"), { target: { value: " 32 " } });
+    fireEvent.change(field(name, "Коробов на палете"), { target: { value: " 32 " } });
     fireEvent.click(save(name));
     await waitFor(() =>
-      expect(messageOf(name, "Коробов на паллете")).toBe(
+      expect(messageOf(name, "Коробов на палете")).toBe(
         "Хост не принял это значение. Проверьте его.",
       ),
     );
@@ -547,7 +547,7 @@ describe("office shifts: changing a shift, the edges", () => {
       expectedRev: 72,
     });
     // An edit of the plan alone names no pallet field.
-    fireEvent.change(field(name, "Коробов на паллете"), { target: { value: "40" } });
+    fireEvent.change(field(name, "Коробов на палете"), { target: { value: "40" } });
     fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
     session.api.updateShift.mockResolvedValue(withPallets);
     fireEvent.click(save(name));
@@ -571,11 +571,11 @@ describe("office shifts: changing a shift, the edges", () => {
     await openShifts(session);
     const name = await startEditing(withPallets.number);
     await waitFor(() =>
-      expect(messageOf(name, "Шаблон этикетки паллеты")).toBe(
+      expect(messageOf(name, "Шаблон этикетки палета")).toBe(
         "Список шаблонов не загрузился. Закройте окно и откройте его снова.",
       ),
     );
-    expect(isDisabled(field(name, "Шаблон этикетки паллеты"))).toBe(true);
+    expect(isDisabled(field(name, "Шаблон этикетки палета"))).toBe(true);
   });
 
   it("switches «Сохранить» off again when an edit is undone", async () => {
@@ -1201,7 +1201,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("sends the sheet with the pallets a planned shift turns on", async () => {
     const session = sessionWith(PLANNED);
     const name = await openEdit(session, PLANNED);
-    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С палетами" }));
     await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
@@ -1219,7 +1219,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("sends no sheet with the pallets a planned shift turns on when «main» stays", async () => {
     const session = sessionWith(PLANNED);
     const name = await openEdit(session, PLANNED);
-    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С палетами" }));
     await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     expect(valueOf(name, "Лист А4")).toBe("");
     fireEvent.click(save(name));
@@ -1252,7 +1252,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
     await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
-    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С палетами" }));
     expect(within(dialog(name)).queryByLabelText("Лист А4")).toBeNull();
     fireEvent.click(save(name));
     await waitFor(() =>

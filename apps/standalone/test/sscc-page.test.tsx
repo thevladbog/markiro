@@ -47,7 +47,7 @@ describe("SSCC page", () => {
     expect(within(rows[0]!).getByText("460709100")).toBeTruthy();
     expect(within(rows[0]!).getByText("текущий")).toBeTruthy();
     expect(within(rows[0]!).getByText("Короба")).toBeTruthy();
-    expect(within(rows[1]!).getByText("Паллеты")).toBeTruthy();
+    expect(within(rows[1]!).getByText("Палеты")).toBeTruthy();
     expect(within(rows[2]!).getByText("460068200")).toBeTruthy();
     expect(within(rows[2]!).getByText("1500")).toBeTruthy();
     expect(screen.getByText("2000")).toBeTruthy();
@@ -77,7 +77,7 @@ describe("SSCC page", () => {
     expect(screen.queryByText("10000000")).toBeNull();
     expect(within(pallets).getAllByRole("cell")[2]?.textContent).toBe("9999999");
     expect(
-      within(pallets).getByRole("button", { name: "Изменить счётчик: Паллеты, префикс 460709100" }),
+      within(pallets).getByRole("button", { name: "Изменить счётчик: Палеты, префикс 460709100" }),
     ).toBeTruthy();
   });
 
@@ -134,7 +134,7 @@ describe("SSCC page", () => {
     });
     await openSscc(session);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Изменить счётчик: Паллеты, префикс 460709100" }),
+      await screen.findByRole("button", { name: "Изменить счётчик: Палеты, префикс 460709100" }),
     );
     type("Следующий номер", "25");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сохранить" }));
@@ -154,7 +154,7 @@ describe("SSCC page", () => {
     const session = adminSession();
     await openSscc(session);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Изменить счётчик: Паллеты, префикс 460068200" }),
+      await screen.findByRole("button", { name: "Изменить счётчик: Палеты, префикс 460068200" }),
     );
     type("Следующий номер", "39");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сохранить" }));
@@ -175,7 +175,7 @@ describe("SSCC page", () => {
     );
     await openSscc(session);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Изменить счётчик: Паллеты, префикс 460068200" }),
+      await screen.findByRole("button", { name: "Изменить счётчик: Палеты, префикс 460068200" }),
     );
     type("Следующий номер", "50");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сохранить" }));
@@ -273,7 +273,7 @@ describe("SSCC page", () => {
     await openSscc(session);
     await screen.findByLabelText("Номеров в блоке для коробов");
     type("Номеров в блоке для коробов", "100001");
-    type("Номеров в блоке для паллет", "0");
+    type("Номеров в блоке для палетов", "0");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Укажите целое число от 1 до 100 000")).toBeTruthy();
     expect(screen.getByText("Укажите целое число от 1 до 10 000")).toBeTruthy();

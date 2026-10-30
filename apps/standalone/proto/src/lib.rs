@@ -292,7 +292,16 @@ pub mod disaggregation;
 pub mod export_files;
 pub mod handheld;
 pub mod license;
+pub mod office_pallet_create;
+pub mod office_warehouse_detail;
 pub mod pack_cards;
+pub use office_pallet_create::{
+    OfficePalletCreate, OfficePalletCreated, OfficePalletInputError, OfficePalletValidate,
+    OfficePalletValidation,
+};
+pub use office_warehouse_detail::{
+    OfficeWarehousePalletDetail, OfficeWarehousePalletMember, OfficeWarehousePalletOrganization,
+};
 pub mod pairing;
 pub mod review;
 pub mod trust;
@@ -3379,6 +3388,9 @@ pub struct OfficeBox {
     pub closed_at: Option<String>,
     pub disassembled_at: Option<String>,
     pub pallet_id: Option<String>,
+    /// A live warehouse parent; omitted for a production parent or no pallet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_kind: Option<String>,
     pub units: u32,
     pub item_count_reported: Option<u32>,
     pub digest_matches: Option<bool>,

@@ -53,7 +53,7 @@ async function open(value: ReturnType<typeof session>, path: string, title: stri
 }
 
 describe.each([
-  ["a pallet", PALLET_PATH, "Паллета (00)146006820000000409", PALLET_SSCC],
+  ["a pallet", PALLET_PATH, "Палет (00)146006820000000409", PALLET_SSCC],
   ["a box", BOX_PATH, "Короб (00)046006820000015000", BOX_SSCC],
 ])("«Расформировать» on the card of %s (plan КРТ)", (_, path, title, sscc) => {
   it("makes a draft with the SSCC as its line and opens the document", async () => {
@@ -142,7 +142,7 @@ describe("where «Расформировать» is not offered (plan КРТ)", 
       const value = session();
       value.api.getPalletCard.mockResolvedValue({ ...PALLET_CARD, ...change });
       const { unmount } = renderOffice(value, { initialPath: PALLET_PATH });
-      await screen.findByRole("heading", { name: /^Паллета/ });
+      await screen.findByRole("heading", { name: /^Палет/ });
       expect(screen.queryByRole("button", { name: "Расформировать" })).toBeNull();
       expect(screen.queryByText("Расформировать можно после закрытия смены")).toBeNull();
       unmount();

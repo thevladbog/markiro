@@ -64,15 +64,15 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     when (val step = state.step) {
-        ExceptionsStep.ConfirmUndo -> {
-            val target = state.undoTarget
+        is ExceptionsStep.ConfirmUndo -> {
+            val target = step.target
             FullScreenState(
                 icon = Icons.AutoMirrored.Outlined.Undo,
                 title = stringResource(R.string.exceptions_confirm_undo_title),
                 text = stringResource(
                     R.string.exceptions_confirm_undo_body,
-                    target?.codeTail.orEmpty(),
-                    target?.scannedAt.orEmpty(),
+                    target.codeTail,
+                    target.scannedAt,
                 ),
                 primary = StateAction(stringResource(R.string.exceptions_confirm), cb.onConfirm),
                 secondary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),

@@ -34,7 +34,13 @@ export const exportFileKindSchema = z.enum([
 ]);
 export type ExportFileKind = z.infer<typeof exportFileKindSchema>;
 
-export const exportTargetTypeSchema = z.enum(["shift", "pallet", "box", "disaggregation_document"]);
+export const exportTargetTypeSchema = z.enum([
+  "shift",
+  "pallet",
+  "warehouse_pallet",
+  "box",
+  "disaggregation_document",
+]);
 export type ExportTargetType = z.infer<typeof exportTargetTypeSchema>;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);

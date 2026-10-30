@@ -43,6 +43,7 @@ export const officeCodeItemSchema = z.object({
   boxClosedAt: instant.nullable(),
   boxDisassembledAt: instant.nullable(),
   palletId: z.string().nullable(),
+  palletKind: z.literal("warehouse").optional(),
   palletSscc: z.string().nullable(),
   palletDisassembledAt: instant.nullable(),
   shiftId: z.string(),

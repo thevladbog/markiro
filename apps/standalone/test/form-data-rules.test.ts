@@ -462,10 +462,10 @@ describe("the forms' files (plan О-Ф)", () => {
   it("names a placard by its pallet's SSCC and paper, and the pallet's own form by it too", () => {
     expect(
       renderForm({ kind: "placard", rows: ROWS, palletId: PALLET.id, format: "a4" })?.fileName,
-    ).toBe("Ярлык паллеты 146006820000000409 A4.html");
+    ).toBe("Ярлык палета 146006820000000409 A4.html");
     expect(
       renderForm({ kind: "pallet", rows: ROWS, palletId: PALLET.id, timeZone: "UTC" })?.fileName,
-    ).toBe("Состав паллеты 146006820000000409.html");
+    ).toBe("Состав палета 146006820000000409.html");
   });
 
   it("writes the box's and the pallet's times in the zone it is given", () => {

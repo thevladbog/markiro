@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { EmptyState, Input, PageHeader, Select, type TableColumn } from "@markiro/ui";
 
@@ -102,7 +102,8 @@ export function BoxesTab() {
       minWidth: 150,
       render: (box) => at(box.closedAt),
     },
-    ...(shift?.palletsEnabled === true
+    ...(shift?.palletsEnabled === true ||
+    boxes.data?.some((box) => box.palletKind === "warehouse") === true
       ? [
           {
             key: "pallet",
@@ -110,6 +111,12 @@ export function BoxesTab() {
             mono: true,
             render: (box: OfficeBox) => {
               if (box.palletId === null) return t("office.common.none");
+              if (box.palletKind === "warehouse")
+                return (
+                  <Link to={`/codes/warehouse-pallet/${box.palletId}`}>
+                    {t("office.warehouseCard.memberLink")}
+                  </Link>
+                );
               const pallet = palletById.get(box.palletId);
               if (pallets.isPending) return t("office.common.loading");
               if (pallet === undefined) return t("office.shiftCard.unknownPallet");

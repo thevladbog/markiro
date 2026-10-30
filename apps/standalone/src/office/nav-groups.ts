@@ -91,7 +91,7 @@ export function crumbTrail(pathname: string, search = ""): OfficeCrumb[] {
       { labelKey: "office.header.cards.shift" },
     ];
   }
-  if (/^\/codes\/(?:box|pallet)\//.test(pathname)) {
+  if (/^\/codes\/(?:box|pallet|warehouse-pallet)\//.test(pathname)) {
     const box = pathname.startsWith("/codes/box/");
     return [
       { labelKey: "office.nav.codeSearch", to: "/codes" },

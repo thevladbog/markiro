@@ -80,7 +80,7 @@ export function boxReportData(rows: BoxReportRows, logo: string | null = null): 
 }
 
 /**
- * «Состав паллеты» of one pallet of the shift (`CodeSearchService.palletReportData`),
+ * «Состав палета» of one pallet of the shift (`CodeSearchService.palletReportData`),
  * or `null` when the rows have no such pallet. A box taken apart keeps its
  * place and its time; the form neither prints nor counts its units.
  */
@@ -134,7 +134,7 @@ function placard(rows: PalletReportRows, pallet: Pallet, logo: string | null): P
   };
 }
 
-/** «Ярлык паллеты» of one pallet (`CodeSearchService.palletPlacardData`), or `null` without one. */
+/** «Ярлык палета» of one pallet (`CodeSearchService.palletPlacardData`), or `null` without one. */
 export function palletPlacardData(
   rows: PalletReportRows,
   palletId: string,
@@ -145,7 +145,7 @@ export function palletPlacardData(
 }
 
 /**
- * The pallets «Ярлыки паллет смены» prints (`CodeSearchService.shiftPlacardsData`):
+ * The pallets «Ярлыки палетов смены» prints (`CodeSearchService.shiftPlacardsData`):
  * closed, not taken apart, with an SSCC, closed first first (then by id).
  */
 export function placardPallets(rows: PalletReportRows): Pallet[] {
@@ -160,7 +160,7 @@ function byText(a: string, b: string): number {
 }
 
 /**
- * «Ярлыки паллет смены»: the shift's number and a placard of each pallet
+ * «Ярлыки палетов смены»: the shift's number and a placard of each pallet
  * `placardPallets` names, or `null` when there is none (the cloud's
  * `SHIFT_HAS_NO_PALLETS`).
  */

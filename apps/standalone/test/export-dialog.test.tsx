@@ -162,11 +162,11 @@ describe("office shifts: an export (plan ЧЗ)", () => {
       ).toBeTruthy();
       expect(
         within(dialog()).getByText(
-          "Кодов в смене: 3, из них в закрытых коробах: 3. Закрытых коробов: 2, закрытых паллет: 1.",
+          "Кодов в смене: 3, из них в закрытых коробах: 3. Закрытых коробов: 2, закрытых палетов: 1.",
         ),
       ).toBeTruthy();
       fireEvent.click(
-        within(dialog()).getByRole("radio", { name: "[XML][ГИСМТ] Паллетная агрегация" }),
+        within(dialog()).getByRole("radio", { name: "[XML][ГИСМТ] Палетная агрегация" }),
       );
       form();
       await within(dialog()).findByText(
@@ -405,26 +405,25 @@ describe("office shifts: an export (plan ЧЗ)", () => {
         disabled: true,
       },
       {
-        label: "[TXT][Паллеты] Отчет сменыНе все коды смены распределены по закрытым коробам.",
+        label: "[TXT][Палеты] Отчет сменыНе все коды смены распределены по закрытым коробам.",
         disabled: true,
       },
       {
-        label: "[CSV][Паллеты] Отчет сменыНе все коды смены распределены по закрытым коробам.",
+        label: "[CSV][Палеты] Отчет сменыНе все коды смены распределены по закрытым коробам.",
         disabled: true,
       },
       {
-        label:
-          "[XML][ГИСМТ] Паллетная агрегацияНе все коды смены распределены по закрытым коробам.",
-        disabled: true,
-      },
-      {
-        label:
-          "[TXT][Паллеты → короба] Отчет сменыНе все коды смены распределены по закрытым коробам.",
+        label: "[XML][ГИСМТ] Палетная агрегацияНе все коды смены распределены по закрытым коробам.",
         disabled: true,
       },
       {
         label:
-          "[XML][ГИСМТ] Агрегация паллет без кодовНе все коды смены распределены по закрытым коробам.",
+          "[TXT][Палеты → короба] Отчет сменыНе все коды смены распределены по закрытым коробам.",
+        disabled: true,
+      },
+      {
+        label:
+          "[XML][ГИСМТ] Агрегация палетов без кодовНе все коды смены распределены по закрытым коробам.",
         disabled: true,
       },
     ]);
@@ -493,7 +492,7 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     const files = fakeFiles();
     const session = await openExport(CLOSED_PALLETS, rows(), files);
     fireEvent.click(
-      within(dialog()).getByRole("radio", { name: "[XML][ГИСМТ] Паллетная агрегация" }),
+      within(dialog()).getByRole("radio", { name: "[XML][ГИСМТ] Палетная агрегация" }),
     );
     form();
     await within(dialog()).findByText(/^Сохранено файлов: 1\./);
@@ -540,7 +539,7 @@ describe("office shifts: an export (plan ЧЗ)", () => {
       files,
     );
     fireEvent.click(
-      within(dialog()).getByRole("button", { name: "XML паллеты 146006820000000409" }),
+      within(dialog()).getByRole("button", { name: "XML палета 146006820000000409" }),
     );
     await within(dialog()).findByText(/^Сохранено файлов: 1\./);
     expect(session.api.beginExportFile.mock.calls[0]?.[1]).toMatchObject({
@@ -632,7 +631,7 @@ describe("office shifts: an export (plan ЧЗ)", () => {
         .hasAttribute("disabled"),
     ).toBe(true);
     fireEvent.click(
-      within(dialog()).getByRole("button", { name: "XML паллеты 146006820000000409" }),
+      within(dialog()).getByRole("button", { name: "XML палета 146006820000000409" }),
     );
     await within(dialog()).findByText(/^Сохранено файлов: 1\./);
     expect(files.save.mock.calls).toEqual([
@@ -674,7 +673,7 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     if (box2 === undefined) throw new Error("the fixture has box 2");
     box2.palletId = "a0000000-0000-4000-8000-000000000002";
     await openExport(CLOSED_PALLETS, source, fakeFiles());
-    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Паллеты] Отчет смены" }));
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Палеты] Отчет смены" }));
     expect(
       within(dialog()).getByText(
         "После закрытия смены пришли данные (08.10.2026, 19:00:00): выгрузка их содержит, а выгрузка, сделанная до этого, устарела.",
@@ -682,12 +681,12 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     ).toBeTruthy();
     expect(
       within(dialog()).getByText(
-        "Коробов на незакрытых паллетах: 1. Они выгружены без паллеты; когда паллета закроется, выгрузите смену снова.",
+        "Коробов на незакрытых палетах: 1. Они выгружены без палета; когда палет закроется, выгрузите смену снова.",
       ),
     ).toBeTruthy();
-    expect(within(dialog()).getByText("Паллета не закрыта, коробов: 1")).toBeTruthy();
+    expect(within(dialog()).getByText("Палет не закрыт, коробов: 1")).toBeTruthy();
     expect(
-      within(dialog()).getByRole("button", { name: "XML паллеты —" }).hasAttribute("disabled"),
+      within(dialog()).getByRole("button", { name: "XML палета —" }).hasAttribute("disabled"),
     ).toBe(true);
   });
 
@@ -708,7 +707,7 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     fireEvent.keyDown(dialog(), { key: "Escape" });
     form();
     fireEvent.click(
-      within(dialog()).getByRole("button", { name: "XML паллеты 146006820000000409" }),
+      within(dialog()).getByRole("button", { name: "XML палета 146006820000000409" }),
     );
     expect(files.save).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("dialog")).toBeTruthy();
@@ -758,34 +757,34 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
       "После закрытия смены пришли данные (08.10.2026, 19:00:00): выгрузка их содержит, а выгрузка, сделанная до этого, устарела.";
     expect(within(dialog()).getByText(late)).toBeTruthy();
     // The first format is flat: late data alone.
-    expect(within(dialog()).queryByText(/незакрытых паллетах/)).toBeNull();
-    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Паллеты] Отчет смены" }));
+    expect(within(dialog()).queryByText(/незакрытых палетах/)).toBeNull();
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Палеты] Отчет смены" }));
     expect(within(dialog()).getByText(late)).toBeTruthy();
     expect(
       within(dialog()).getByText(
-        "Коробов на незакрытых паллетах: 1. Они выгружены без паллеты; когда паллета закроется, выгрузите смену снова.",
+        "Коробов на незакрытых палетах: 1. Они выгружены без палета; когда палет закроется, выгрузите смену снова.",
       ),
     ).toBeTruthy();
     expect(
       within(dialog()).getByText(
-        "Расформированных паллет в документе: 1. Документ содержит их вместе с коробами. Проверьте, нужно ли загружать такой документ в Честный знак.",
+        "Расформированных палетов в документе: 1. Документ содержит их вместе с коробами. Проверьте, нужно ли загружать такой документ в Честный знак.",
       ),
     ).toBeTruthy();
     expect(
       within(dialog()).getByText(
-        "Коробов, закрытых позже своей паллеты: 1. В документе они включены в состав паллеты, но на этикетке, напечатанной при её закрытии, эти короба не учтены.",
+        "Коробов, закрытых позже своего палета: 1. В документе они включены в состав палета, но на этикетке, напечатанной при его закрытии, эти короба не учтены.",
       ),
     ).toBeTruthy();
     await within(dialog()).findByText(
-      "Паллет, у которых число коробов не совпадает с количеством, переданным станцией: 1. Документ формируется по текущему составу коробов, а не по количеству, переданному станцией.",
+      "Палетов, у которых число коробов не совпадает с количеством, переданным станцией: 1. Документ формируется по текущему составу коробов, а не по количеству, переданному станцией.",
     );
     // The pallet's own row names its late box.
-    expect(within(dialog()).getByText("Коробов, закрытых позже паллеты: 1")).toBeTruthy();
+    expect(within(dialog()).getByText("Коробов, закрытых позже палета: 1")).toBeTruthy();
     fireEvent.click(
       within(dialog()).getByRole("radio", { name: "[TXT][Без коробов] Отчет смены" }),
     );
     expect(within(dialog()).getByText(late)).toBeTruthy();
-    expect(within(dialog()).queryByText(/Коробов, закрытых позже своей паллеты/)).toBeNull();
+    expect(within(dialog()).queryByText(/Коробов, закрытых позже своего палета/)).toBeNull();
     expect(within(dialog()).queryByText(/число коробов не совпадает/)).toBeNull();
   });
 
@@ -823,7 +822,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     const warning =
       "Неразобранных конфликтов кодов в смене: 2. Короб, где проиграл скан, может отличаться от выгруженного. Проверьте их в разделе «Конфликты»; выгрузку это не запрещает.";
     expect(await within(dialog()).findByText(warning)).toBeTruthy();
-    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Паллеты] Отчет смены" }));
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Палеты] Отчет смены" }));
     expect(within(dialog()).getByText(warning)).toBeTruthy();
     const button = within(dialog()).getByRole("button", { name: "Сформировать и сохранить" });
     expect(button.hasAttribute("disabled")).toBe(false);
@@ -867,7 +866,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     await waitFor(() => expect(session.api.listShiftPallets).toHaveBeenCalledTimes(1));
     // Give the failed read the turns it needs to reach the dialog.
     await new Promise((resolve) => setTimeout(resolve, 20));
-    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Паллеты] Отчет смены" }));
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Палеты] Отчет смены" }));
     expect(within(dialog()).queryByText(/число коробов не совпадает/)).toBeNull();
     form();
     await within(dialog()).findByText(/^Сохранено файлов: 1\./);

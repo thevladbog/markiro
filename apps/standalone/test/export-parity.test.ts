@@ -222,7 +222,19 @@ describe("the office's exports over the parity cases give the cloud's golden (pl
   });
 
   it.each(runs)("%s", (key, parityCase, run) => {
-    expect(outcomeOf(parityCase, run)).toEqual(golden[key]);
+    const cloud = golden[key];
+    // Only the approved filename noun changes; XML bytes, metadata and hashes remain pinned.
+    const expected =
+      run.formatId === "pallet_xml_gismt_aggregation" && cloud !== undefined && "parts" in cloud
+        ? {
+            ...cloud,
+            parts: cloud.parts.map((part) => ({
+              ...part,
+              filename: part.filename.replace("_паллета_", "_палет_"),
+            })),
+          }
+        : cloud;
+    expect(outcomeOf(parityCase, run)).toEqual(expected);
   });
 });
 

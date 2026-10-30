@@ -28,6 +28,19 @@ changes: [AGENTS.md](AGENTS.md).
    counters and block sizes, and the office users; a technologist sees the
    organization and SSCC read-only. «Выйти в цех» ends the office session.
 
+## Create a pallet in the office
+
+Open **Поиск кодов → Палеты → Новый палет**. Enter one box SSCC per line or
+load a UTF-8 TXT/CSV file with one column and no header (up to 1 MiB and
+1000 boxes). Check the list and correct every reported error before creation.
+Boxes must be closed, intact, of one product and free of another live pallet;
+they may come from different shifts. Demo boxes cannot form a production pallet.
+
+Creation issues a new SSCC and opens the warehouse pallet card with its member
+boxes, contents sheet, A4/A5 placard, GIS MT aggregation XML and disaggregation.
+The card keeps the generated files. If the host response is lost, use
+**Повторить создание** with the same composition to recover the original result.
+
 ## Tests
 
 - Rust: `cargo test --manifest-path apps/standalone/Cargo.toml --workspace`

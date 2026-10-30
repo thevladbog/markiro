@@ -138,11 +138,37 @@ class ExceptionsViewModelTest {
         vm.startUndo()
         vm.state.first { it.step is ExceptionsStep.ConfirmUndo }
         scan(b, "2026-09-11T07:59:30.000Z")
+        // Let Room publish the newer scan before confirming; the result must not depend on observer timing.
+        val refreshed = vm.state.first { it.undoTarget?.codeHash == b }
+        val confirmation = refreshed.step as ExceptionsStep.ConfirmUndo
+        assertEquals(a, confirmation.target.codeHash)
+        assertEquals("box-1", confirmation.boxId)
         vm.confirm()
-        assertEquals(
-            R.string.exceptions_undo_stale,
-            (vm.state.first { it.step is ExceptionsStep.Refused }.step as ExceptionsStep.Refused).message,
+        val finished = vm.state.first { it.step is ExceptionsStep.Refused || it.step is ExceptionsStep.Done }
+        assertEquals(ExceptionsStep.Refused(R.string.exceptions_undo_stale), finished.step)
+        assertNotNull(db.codeDao().get(a))
+        assertNotNull(db.codeDao().get(b))
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+    }
+
+    @Test
+    fun aDifferentOpenBoxRefusesThePreviousUndoConfirmation() = runTest {
+        openBox()
+        scan(a, "2026-09-11T07:59:00.000Z")
+        val vm = vm()
+        vm.state.first { it.undoTarget?.codeHash == a }
+        vm.startUndo()
+        vm.state.first { it.step is ExceptionsStep.ConfirmUndo }
+        db.boxDao().close("box-1", "00046006820000015000", "2026-09-11T07:59:10.000Z", "op-1", null)
+        val original = requireNotNull(db.boxDao().get("box-1"))
+        db.boxDao().insert(
+            original.copy(boxId = "box-2", sscc = null, openedAt = "2026-09-11T07:59:11.000Z", closedAt = null),
         )
+        db.codeDao().insert(CodeEntity(b, "s1", "04600000000015", "new-unit", "2026-09-11T07:59:30.000Z", "box-2"))
+        vm.state.first { it.openBoxId == "box-2" && it.undoTarget?.codeHash == b }
+        vm.confirm()
+        val finished = vm.state.first { it.step is ExceptionsStep.Refused || it.step is ExceptionsStep.Done }
+        assertEquals(ExceptionsStep.Refused(R.string.exceptions_undo_stale), finished.step)
         assertNotNull(db.codeDao().get(a))
         assertNotNull(db.codeDao().get(b))
         assertEquals(0, db.boxExceptionDao().unackedCount())

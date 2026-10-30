@@ -106,7 +106,7 @@ describe("the card's tab of a shift's participants (plan 2b)", () => {
     session.api.listShiftPallets.mockResolvedValue([]);
     await openCard(session, "OCT26-004", "Станции");
     const region = screen.getByRole("region", { name: "Станции смены" });
-    expect(within(region).getAllByRole("columnheader").at(-1)?.textContent).toBe("Паллет");
+    expect(within(region).getAllByRole("columnheader").at(-1)?.textContent).toBe("Палетов");
   });
 
   it("marks a participant the host has not heard for more than ten minutes, by the host's clock, with the time it last did", async () => {

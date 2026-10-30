@@ -23,7 +23,7 @@ export interface PalletReportBox {
 
 /**
  * Everything `renderPalletReportHtml` needs for the printed A4 "Состав
- * паллеты" form.
+ * палета" form.
  *
  * A pallet holds BOXES, not unit codes, so the tree is one level shallower
  * than the box form's: the pallet row, then each member box with its own
@@ -44,9 +44,9 @@ export interface PalletReportData {
 }
 
 const STATUS_LABEL: Record<PalletReportData["status"], string> = {
-  open: "Открыта",
-  closed: "Закрыта",
-  disassembled: "Расформирована",
+  open: "Открыт",
+  closed: "Закрыт",
+  disassembled: "Расформирован",
 };
 
 /**
@@ -76,10 +76,10 @@ function metadataBlock(data: PalletReportData, timeZone: string): string {
       <span class="rep-meta-detail">Профиль организации не заполнен</span>`;
 
   const lifecycle = [
-    `сформирована ${formatDateTime(data.openedAt, timeZone)}`,
-    ...(data.closedAt ? [`закрыта ${formatDateTime(data.closedAt, timeZone)}`] : []),
+    `сформирован ${formatDateTime(data.openedAt, timeZone)}`,
+    ...(data.closedAt ? [`закрыт ${formatDateTime(data.closedAt, timeZone)}`] : []),
     ...(data.disassembledAt
-      ? [`расформирована ${formatDateTime(data.disassembledAt, timeZone)}`]
+      ? [`расформирован ${formatDateTime(data.disassembledAt, timeZone)}`]
       : []),
   ].join(" · ");
 
@@ -91,10 +91,10 @@ function metadataBlock(data: PalletReportData, timeZone: string): string {
     <div class="rep-meta-cell">
       <span class="rep-meta-label">Продукт</span>
       <span class="rep-meta-value">${data.productName ? escapeHtml(data.productName) : "—"}</span>
-      <span class="rep-meta-detail">Коробов на паллете: ${live.length} · единиц: ${totalCodes(live)}</span>
+      <span class="rep-meta-detail">Коробов на палете: ${live.length} · единиц: ${totalCodes(live)}</span>
     </div>
     <div class="rep-meta-cell">
-      <span class="rep-meta-label">Паллета</span>
+      <span class="rep-meta-label">Палет</span>
       <span class="rep-meta-value">${STATUS_LABEL[data.status]}</span>
       <span class="rep-meta-detail">${lifecycle}</span>
     </div>
@@ -105,7 +105,7 @@ function finalBlocks(data: PalletReportData): string {
   const live = liveBoxes(data);
   return `<div class="rep-final-blocks">
     <div class="rep-total">
-      <span>Итого по паллете:</span>
+      <span>Итого по палету:</span>
       <span class="mono">коробов — ${live.length} · единиц — ${totalCodes(live)}</span>
     </div>
   </div>`;
@@ -115,7 +115,7 @@ function tableHead(): string {
   return `<thead class="rep-table-head">
     <tr>
       <th>№</th>
-      <th>Код упаковки (SSCC) паллеты и коробов</th>
+      <th>Код упаковки (SSCC) палета и коробов</th>
       <th>Продукт</th>
       <th class="rep-count">Единиц, шт.</th>
       <th class="rep-barcode-heading">Штрихкод</th>
@@ -157,7 +157,7 @@ function contentsUnits(data: PalletReportData, timeZone: string): ReportUnit[] {
     { kind: "band", heightMm: parentRowHeightMm(data.productName), html: palletRow(data) },
   ];
   if (data.boxes.length === 0) {
-    units.push(emptyNoteUnit("На паллете нет коробов"));
+    units.push(emptyNoteUnit("На палете нет коробов"));
     return units;
   }
   data.boxes.forEach((box, index) => {
@@ -170,19 +170,19 @@ function contentsUnits(data: PalletReportData, timeZone: string): ReportUnit[] {
   return units;
 }
 
-/** Pure: builds the print-ready A4 "Состав паллеты" document. No I/O, no `Date.now()`. */
+/** Pure: builds the print-ready A4 "Состав палета" document. No I/O, no `Date.now()`. */
 export function renderPalletReportHtml(data: PalletReportData, timeZone = "UTC"): string {
   const titleDoc = data.sscc ? ssccHri(data.sscc) : "Без SSCC";
   return renderContentsReportHtml({
-    titleLabel: "Состав паллеты",
+    titleLabel: "Состав палета",
     titleDoc,
-    titleDetailHtml: `сформирована ${formatDateTime(data.openedAt, timeZone)} · статус: <strong>${STATUS_LABEL[data.status]}</strong>`,
+    titleDetailHtml: `сформирован ${formatDateTime(data.openedAt, timeZone)} · статус: <strong>${STATUS_LABEL[data.status]}</strong>`,
     org: data.org,
     metadataHtml: metadataBlock(data, timeZone),
     tableHeadHtml: tableHead(),
     units: contentsUnits(data, timeZone),
     finalBlocksHtml: finalBlocks(data),
     footerSscc: data.sscc,
-    footerSubject: "Паллета",
+    footerSubject: "Палет",
   });
 }
