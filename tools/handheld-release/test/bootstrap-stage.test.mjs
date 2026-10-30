@@ -175,3 +175,37 @@ test("same-byte current-head replacement is rejected when its returned VersionId
   await assert.rejects(implementation.stageBootstrapFiles({ operationId, files: files(), ...f }));
   assert(!f.entries.has("completed.json"));
 });
+
+test("staging failure diagnostics identify the phase and child exit without private output", () => {
+  const error = Object.assign(new Error("secret-key must stay private"), {
+    name: "Error",
+    code: "ENOENT",
+    status: 7,
+    stdout: "private stdout",
+    stderr: "private stderr",
+    spawnargs: ["private argv"],
+  });
+  assert.deepEqual(
+    implementation.stagingFailureDiagnostic(error, {
+      phase: "verify-signature",
+      tool: "/private/android/apksigner",
+    }),
+    {
+      phase: "verify-signature",
+      errorName: "Error",
+      code: "ENOENT",
+      exitStatus: 7,
+      executable: "apksigner",
+    },
+  );
+  assert.deepEqual(
+    implementation.stagingFailureDiagnostic(
+      { name: "bad\nsecret", code: "secret value" },
+      { phase: "startup" },
+    ),
+    {
+      phase: "startup",
+      errorName: "Error",
+    },
+  );
+});
