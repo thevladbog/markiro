@@ -11,6 +11,14 @@ export const HEAVY_JOBS = Object.freeze([
   // The deploy/platform Node contracts, split off production-bundle onto two
   // sharded runners; every change that selects production_bundle selects them.
   "platform_contracts",
+  // The post-migration forward-recovery rehearsal, split off production-bundle:
+  // two isolated scenarios of about 45-56 minutes each, on two parallel
+  // runners. It exercises the deploy/platform executor, the ICU recovery
+  // worker built from packages/db and two deploy/production modules it
+  // imports; the product images it activates are pinned, so landing, API and
+  // other app changes do not select it. A push to main selects it with
+  // production_bundle (see `releaseGate`): the platform release requires both.
+  "platform_forward_recovery",
   "station_rust",
   "station_windows_build",
   "signer_rust",
@@ -301,6 +309,10 @@ function jobsForPath(path) {
   const appMatch = /^apps\/([^/]+)\//u.exec(path);
   if (appMatch) return appJobs[appMatch[1]] ?? null;
 
+  // The forward rehearsal's ICU recovery worker carries the migrations and
+  // the migration runner (forward-ci-scenario.mjs checks that exact closure).
+  if (path.startsWith("packages/db/migrations/") || path === "packages/db/src/runtime-migrate.ts")
+    return [...sharedJobs.db, "platform_forward_recovery"];
   const packageMatch = /^packages\/([^/]+)\//u.exec(path);
   if (packageMatch) return sharedJobs[packageMatch[1]] ?? null;
 
@@ -329,16 +341,25 @@ function jobsForPath(path) {
     return [...browserJobs, galleries];
   }
   // Portable platform preparation owns the same mandatory bundle gate.
-  if (path.startsWith("deploy/platform/")) return ["production_bundle"];
+  if (path.startsWith("deploy/platform/"))
+    return ["production_bundle", "platform_forward_recovery"];
   // The platform release (release-platform-images.yml) still runs the
   // deploy/production contract suite, and the API image is built from there.
+  // The forward rehearsal imports these two deploy/production modules.
+  if (/^deploy\/production\/(?:release-manifest|cli-main)\.mjs$/u.test(path))
+    return ["production_bundle", "platform_forward_recovery"];
   if (path.startsWith("deploy/production/")) return ["production_bundle"];
   if (path === "compose.production.yml") return ["production_bundle"];
 
   return null;
 }
 
-export function classifyChangedFiles(files) {
+/**
+ * `releaseGate`: a push to main, whose CI run the platform release reads. The
+ * release requires production-bundle and the forward rehearsal together, so
+ * there every change that selects production_bundle selects the rehearsal too.
+ */
+export function classifyChangedFiles(files, { releaseGate = false } = {}) {
   if (!Array.isArray(files) || files.length === 0) {
     return buildResult(ALL_JOBS, true);
   }
@@ -358,18 +379,21 @@ export function classifyChangedFiles(files) {
     for (const job of jobs) enabled.add(job);
     if (enabled.has("production_bundle")) enabled.add("platform_contracts");
   }
+  if (releaseGate && enabled.has("production_bundle")) enabled.add("platform_forward_recovery");
 
   return buildResult(enabled);
 }
 
 function parseArguments(argv) {
-  const options = { full: false, stdinZero: false, githubOutput: undefined };
+  const options = { full: false, stdinZero: false, releaseGate: false, githubOutput: undefined };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--full") {
       options.full = true;
     } else if (argument === "--stdin-zero") {
       options.stdinZero = true;
+    } else if (argument === "--release-gate") {
+      options.releaseGate = true;
     } else if (argument === "--github-output") {
       const outputPath = argv[index + 1];
       if (!outputPath) throw new Error("--github-output requires a path");
@@ -395,6 +419,7 @@ function runCli() {
           : readFileSync(0, "utf8")
               .split(/\r?\n/u)
               .filter((path) => path.length > 0),
+        { releaseGate: options.releaseGate },
       );
 
   if (options.githubOutput) {

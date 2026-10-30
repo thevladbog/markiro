@@ -66,13 +66,11 @@ function runtime(responses: readonly (LeadResponse | Error)[] = [{ ok: true, sta
       utm: { source: "yandex", medium: "cpc" },
       referrer: "https://ya.ru/",
     })),
-    loadCaptcha: vi.fn(),
     request: vi.fn(() => {
       const response = responses[index++] ?? responses.at(-1);
       if (response === undefined) throw new Error("no response");
       return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
     }),
-    resetCaptcha: vi.fn(),
     track: vi.fn(),
   };
   return value;
@@ -99,7 +97,6 @@ describe("download lead form", () => {
     await submit(form);
 
     expect(current.request).toHaveBeenCalledWith("/api/landing-leads", {
-      captchaToken: "captcha-token",
       company: "ООО «Пивоварня»",
       consentVersion: "MKR-PD-02/2026.08/01",
       email: "ivan@zavod.ru",
@@ -140,25 +137,17 @@ describe("download lead form", () => {
     expect(form.querySelector("[data-form-status]")?.textContent).toBe(LEAD_FORM_COPY.unavailable);
   });
 
-  it("resets the captcha after the API rejects its token", async () => {
+  it("submits without captcha fields or a third-party request", async () => {
     const form = renderDownload();
-    const current = runtime([{ code: "captcha_invalid", ok: false, status: 400 }]);
-    initLeadForm(form, current, vi.fn());
-    await submit(form);
-    expect(current.resetCaptcha).toHaveBeenCalledOnce();
-    expect(form.querySelector("[data-captcha-error]")?.textContent).toBe(LEAD_FORM_COPY.captcha);
-    expect(form.querySelector<HTMLInputElement>('[name="smart-token"]')?.value).toBe("");
-  });
-
-  it("loads the captcha only when the visitor starts on the form", () => {
-    const form = renderDownload();
+    form.querySelector('[name="smart-token"]')?.remove();
+    form.querySelector(".smart-captcha")?.remove();
     const current = runtime();
-    initLeadForm(form, current, vi.fn());
-    expect(current.loadCaptcha).not.toHaveBeenCalled();
-    form
-      .querySelector<HTMLInputElement>('[name="email"]')
-      ?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-    expect(current.loadCaptcha).toHaveBeenCalledOnce();
+    const accepted = vi.fn();
+    initLeadForm(form, current, accepted);
+    form.querySelector("input")?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await submit(form);
+    expect(accepted).toHaveBeenCalledWith({ email: "ivan@zavod.ru", intent: "download" });
+    expect(current.request).toHaveBeenCalledOnce();
   });
 });
 

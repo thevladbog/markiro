@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "landing-seo.spec.ts",
+  testMatch: ["landing-seo.spec.ts", "landing-layout.spec.ts"],
   outputDir: join(tmpdir(), "markiro-landing-playwright"),
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
