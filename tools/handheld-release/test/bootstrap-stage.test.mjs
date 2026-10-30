@@ -29,9 +29,8 @@ function fixture() {
         objects.set(key, Buffer.from(body));
         return "original";
       },
-      async read(key, versionId) {
-        assert.equal(versionId, "original");
-        return objects.get(key);
+      async read(key) {
+        return { bytes: objects.get(key), versionId: "original" };
       },
     },
   };
@@ -66,7 +65,7 @@ test("APK admission requires exact installed-package identity and the existing c
   ])
     assert.throws(() => implementation.buildBootstrapFiles({ ...valid, ...patch }));
 });
-test("stage writes only unique private import keys, pins full bytes, and never publishes a pointer", async () => {
+test("stage writes only unique import keys, verifies full version-bound bytes, and never publishes a pointer", async () => {
   const f = fixture();
   const result = await implementation.stageBootstrapFiles({ operationId, files: files(), ...f });
   assert.equal(result.objects.length, 2);
@@ -100,7 +99,7 @@ test("occupied names stop before the first PUT, and ambiguous uploads are never 
 });
 test("pinned readback corruption fails without a completion receipt", async () => {
   const f = fixture();
-  f.store.read = async () => Buffer.from("wrong");
+  f.store.read = async () => ({ bytes: Buffer.from("wrong"), versionId: "original" });
   await assert.rejects(implementation.stageBootstrapFiles({ operationId, files: files(), ...f }));
   assert(!f.entries.has("completed.json"));
 });
@@ -166,4 +165,13 @@ test("staging workflow uses existing protected credentials only after original a
   assert(!JSON.stringify(job).includes("MARKIRO_HANDHELD_KEYSTORE"));
   assert(!JSON.stringify(job).includes("assembleRelease"));
   assert.equal(job.steps.at(-1).if, "always()");
+});
+test("same-byte current-head replacement is rejected when its returned VersionId differs", async () => {
+  const f = fixture();
+  f.store.read = async (key) => ({
+    bytes: Buffer.from(f.objects.get(key)),
+    versionId: "different-head",
+  });
+  await assert.rejects(implementation.stageBootstrapFiles({ operationId, files: files(), ...f }));
+  assert(!f.entries.has("completed.json"));
 });

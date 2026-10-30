@@ -112,15 +112,19 @@ export async function stageBootstrapFiles({ operationId, files, store, journal }
     );
     const object = { ...spec, versionId };
     await journal.write(`stored-${spec.name}.json`, object);
-    const bytes = await store.read(spec.key, versionId, spec.sizeBytes);
-    assert.equal(bytes.length, spec.sizeBytes);
-    assert.equal(hash(bytes), spec.sha256);
+    const readback = await store.read(spec.key, spec.sizeBytes);
+    // The uploader has GetObject, not GetObjectVersion. Reject any concurrent
+    // head replacement; the catalog reader separately probes the pinned version.
+    assert.equal(readback.versionId, versionId);
+    assert.equal(readback.bytes.length, spec.sizeBytes);
+    assert.equal(hash(readback.bytes), spec.sha256);
     objects.push(object);
   }
   const result = {
     operationId,
     objects,
-    fullPinnedReadback: true,
+    fullVersionBoundReadback: true,
+    readbackMode: "current-response-version-must-match-upload",
     catalogApplied: false,
     publicPointerChanged: false,
   };
@@ -199,9 +203,8 @@ async function main() {
         );
         return result.VersionId;
       },
-      async read(Key, VersionId, expectedSize) {
-        const response = await send(new GetObjectCommand({ Bucket: bucket, Key, VersionId }));
-        assert.equal(response.VersionId, VersionId);
+      async read(Key, expectedSize) {
+        const response = await send(new GetObjectCommand({ Bucket: bucket, Key }));
         assert.equal(response.ContentLength, expectedSize);
         const chunks = [];
         let size = 0;
@@ -213,7 +216,7 @@ async function main() {
           }
           chunks.push(chunk);
         }
-        return Buffer.concat(chunks, size);
+        return { bytes: Buffer.concat(chunks, size), versionId: response.VersionId };
       },
     };
     const journal = await publisherJournal(journalPath);
@@ -233,7 +236,9 @@ async function main() {
       store,
       journal,
     });
-    console.log("Signed handheld 1.7.0 staged and fully verified; catalog unchanged.");
+    console.log(
+      "Signed handheld 1.7.0 staged with version-bound full readback; catalog unchanged.",
+    );
   } finally {
     client.destroy();
   }
