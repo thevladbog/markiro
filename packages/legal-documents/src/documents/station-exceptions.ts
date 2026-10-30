@@ -120,7 +120,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Неизвестно, напечаталась ли этикетка",
-            text: "Если связь с принтером оборвалась посреди передачи, станция не знает, вышла ли этикетка, и показывает «Неизвестно, напечаталась ли этикетка». Посмотрите на принтер. Если этикетка вышла, нажмите «Этикетка напечаталась»; если нет — «Напечатать снова». Не печатайте вторую этикетку, если первая вышла: на коробе должна быть одна.",
+            text: "Если связь с принтером оборвалась посреди передачи, станция не знает, вышла ли этикетка, и показывает «Неизвестно, напечаталась ли этикетка». Посмотрите на принтер. При печати через драйвер Windows сначала нажмите «Проверить очередь Windows» и проверьте очередь принтера в Windows: старое задание ещё может напечататься. Отсутствие задания в очереди не подтверждает выход этикетки. Если этикетка вышла, нажмите «Этикетка напечаталась»; если нет — «Напечатать снова». Не печатайте вторую этикетку, если первая вышла: на коробе должна быть одна.",
             image: { id: "print-unknown", caption: "Станция просит проверить, вышла ли этикетка" },
           },
           {
@@ -330,7 +330,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "It is unknown whether the label printed",
-            text: "If the connection to the printer broke off mid-transfer, the station does not know whether the label came out and shows “Неизвестно, напечаталась ли этикетка” (Unknown whether the label printed). Look at the printer. If the label came out, tap “Этикетка напечаталась” (The label printed); if not, “Напечатать снова” (Print again). Do not print a second label if the first one came out: a box carries one label.",
+            text: "If the connection to the printer broke off mid-transfer, the station does not know whether the label came out and shows “Неизвестно, напечаталась ли этикетка” (Unknown whether the label printed). Look at the printer. When printing through a Windows driver, first tap “Проверить очередь Windows” (Check the Windows queue) and inspect the printer queue in Windows: the earlier job may still print. A job missing from the queue does not confirm that the label printed. If the label came out, tap “Этикетка напечаталась” (The label printed); if not, “Напечатать снова” (Print again). Do not print a second label if the first one came out: a box carries one label.",
             image: {
               id: "print-unknown",
               caption: "The station asks you to check whether the label came out",

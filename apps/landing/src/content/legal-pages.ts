@@ -3,6 +3,7 @@ import {
   findLegalDocument,
   findLegalRelease,
   legalReleaseLocales,
+  legalDocumentKind,
   legalVerificationPath,
   requireLegalContent,
   type LegalDocumentCode,
@@ -92,6 +93,7 @@ export function getLegalDocumentPage(
   const content = requireLegalContent(source, locale);
   const route = release.routes[locale];
   if (!route) throw new Error(`Legal route is not published for ${code}/${locale}`);
+  const instruction = legalDocumentKind(code) === "instruction";
   return {
     code,
     locale,
@@ -99,10 +101,21 @@ export function getLegalDocumentPage(
       path: route,
       alternatePath: release.routes[locale === "ru" ? "en" : "ru"] ?? route,
       locale,
-      title: `${content.title} — ${locale === "ru" ? "Маркиро" : "Markiro"}`,
+      title: `${content.title} — ${instruction ? (locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom") : locale === "ru" ? "Маркиро" : "Markiro"}`,
       description: DESCRIPTION_BY_CODE[code][locale],
       socialImage: SOCIAL_IMAGE,
-      socialImageAlt: SOCIAL_IMAGE_ALT[locale],
+      socialImageAlt: instruction
+        ? locale === "ru"
+          ? "Маркиро Автоном — инструкции станции, офиса и ТСД"
+          : "Markiro Autonom — station, office and handheld instructions"
+        : SOCIAL_IMAGE_ALT[locale],
+      ...(instruction
+        ? {
+            ogType: "article" as const,
+            publishedAt: release.effectiveDate,
+            modifiedAt: release.effectiveDate,
+          }
+        : {}),
     },
   };
 }

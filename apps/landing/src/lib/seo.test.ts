@@ -300,6 +300,8 @@ describe("SEO generators", () => {
     });
     expect(graph["@graph"].find((entry) => entry["@type"] === "ItemList")).toEqual({
       "@type": "ItemList",
+      "@id": "https://markiro.app/stati/#items",
+      numberOfItems: 2,
       itemListElement: [
         {
           "@type": "ListItem",
@@ -324,6 +326,25 @@ describe("SEO generators", () => {
     });
   });
 
+  it("links an instruction collection to its visible list and the Autonom application", () => {
+    const graph = buildHubPageGraph(findHubPage("/en/instructions/"), [
+      {
+        name: "Station: operator sign-in and shift start",
+        path: "/en/instructions/station-sign-in-and-shift-start/",
+      },
+    ]);
+    const collection = graph["@graph"].find((node) => node["@type"] === "CollectionPage");
+    const list = graph["@graph"].find((node) => node["@type"] === "ItemList");
+    expect(collection).toMatchObject({
+      mainEntity: { "@id": "https://markiro.app/en/instructions/#items" },
+      about: { "@id": "https://markiro.app/#software", name: "Markiro Autonom" },
+    });
+    expect(list).toMatchObject({
+      "@id": "https://markiro.app/en/instructions/#items",
+      numberOfItems: 1,
+    });
+  });
+
   it("adds an instruction breadcrumb trail to legal structured data on request", () => {
     const page = getLegalDocumentPage("MKR-INS-01", "ru");
     const graph = buildLegalPageGraph(
@@ -345,7 +366,7 @@ describe("SEO generators", () => {
         {
           "@type": "ListItem",
           position: 3,
-          name: page.metadata.title.replace(/ — Маркиро$/, ""),
+          name: "Станция: вход оператора и старт смены",
           item: "https://markiro.app/instruktsii/stantsiya-vkhod-i-start-smeny/",
         },
       ],
@@ -359,9 +380,9 @@ describe("SEO generators", () => {
       .sort()
       .at(-1);
 
-    // The Markiro Autonom reissue of MKR-INS-01 made 2026-10-29 the newest
+    // The audited Autonom instruction editions made 2026-10-30 the newest
     // effective date in the registry.
-    expect(newest).toBe("2026-10-29");
+    expect(newest).toBe("2026-10-30");
     expect(sitemap).toMatch(
       new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );
@@ -505,7 +526,7 @@ describe("SEO generators", () => {
       name: "Маркиро Автоном",
       alternateName: ["Markiro Autonom", "Markiro"],
       url: "https://markiro.app/",
-      operatingSystem: "Windows, Android",
+      operatingSystem: "Windows 10, Windows 11, Android",
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
     });
     expect(ru?.featureList).toEqual([

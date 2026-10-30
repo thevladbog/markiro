@@ -13,33 +13,33 @@ import {
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
-const releaseId = "MKR-LEGAL-2026.10-38-2026-10-29";
-const manifestSha256 = "a2e78e269944b2e117cd90836c38ac22f1534fbf6b6529c878b20fa85e7dee94";
+const releaseId = "MKR-LEGAL-2026.10-39-2026-10-30";
+const manifestSha256 = "06acc7c224e505ae3f3b79ececb8ca0d3341d06593aa5ea20bfaa4420717544a";
 const releasedPdfNames = [
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
   "markiro_mkr-dpa-01_2026.08-01_en.pdf",
   "markiro_mkr-dpa-01_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-01_2026.10-01_en.pdf",
-  "markiro_mkr-ins-01_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-01_2026.10-02_en.pdf",
+  "markiro_mkr-ins-01_2026.10-02_ru.pdf",
   "markiro_mkr-ins-02_2026.10-01_en.pdf",
   "markiro_mkr-ins-02_2026.10-01_ru.pdf",
-  "markiro_mkr-ins-03_2026.10-01_en.pdf",
-  "markiro_mkr-ins-03_2026.10-01_ru.pdf",
-  "markiro_mkr-ins-04_2026.10-01_en.pdf",
-  "markiro_mkr-ins-04_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-03_2026.10-02_en.pdf",
+  "markiro_mkr-ins-03_2026.10-02_ru.pdf",
+  "markiro_mkr-ins-04_2026.10-02_en.pdf",
+  "markiro_mkr-ins-04_2026.10-02_ru.pdf",
   "markiro_mkr-ins-08_2026.10-01_en.pdf",
   "markiro_mkr-ins-08_2026.10-01_ru.pdf",
   "markiro_mkr-ins-09_2026.10-01_en.pdf",
   "markiro_mkr-ins-09_2026.10-01_ru.pdf",
   "markiro_mkr-ins-10_2026.10-01_en.pdf",
   "markiro_mkr-ins-10_2026.10-01_ru.pdf",
-  "markiro_mkr-ins-12_2026.10-01_en.pdf",
-  "markiro_mkr-ins-12_2026.10-01_ru.pdf",
-  "markiro_mkr-ins-13_2026.10-01_en.pdf",
-  "markiro_mkr-ins-13_2026.10-01_ru.pdf",
-  "markiro_mkr-ins-14_2026.10-01_en.pdf",
-  "markiro_mkr-ins-14_2026.10-01_ru.pdf",
+  "markiro_mkr-ins-12_2026.10-02_en.pdf",
+  "markiro_mkr-ins-12_2026.10-02_ru.pdf",
+  "markiro_mkr-ins-13_2026.10-02_en.pdf",
+  "markiro_mkr-ins-13_2026.10-02_ru.pdf",
+  "markiro_mkr-ins-14_2026.10-02_en.pdf",
+  "markiro_mkr-ins-14_2026.10-02_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",
   "markiro_mkr-pd-01_2026.08-01_ru.pdf",
   "markiro_mkr-pd-02_2026.08-01_en.pdf",

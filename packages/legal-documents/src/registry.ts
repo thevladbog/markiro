@@ -132,8 +132,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-01",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.10/02",
+    effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -154,8 +154,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-03",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.10/02",
+    effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -165,8 +165,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-04",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.10/02",
+    effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -209,8 +209,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-12",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.10/02",
+    effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -220,8 +220,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-13",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.10/02",
+    effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -231,8 +231,8 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-14",
-    revision: "2026.10/01",
-    effectiveDate: "2026-10-29",
+    revision: "2026.10/02",
+    effectiveDate: "2026-10-30",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: {
@@ -247,16 +247,16 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
   { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
-  { releaseKey: "MKR-INS-01/2026.10/01", content: STATION_OPERATOR_SHIFT_CONTENT },
+  { releaseKey: "MKR-INS-01/2026.10/02", content: STATION_OPERATOR_SHIFT_CONTENT },
   { releaseKey: "MKR-INS-02/2026.10/01", content: STATION_WORK_CYCLE_CONTENT },
-  { releaseKey: "MKR-INS-03/2026.10/01", content: STATION_EXCEPTIONS_CONTENT },
-  { releaseKey: "MKR-INS-04/2026.10/01", content: STATION_WORKSTATION_SETUP_CONTENT },
+  { releaseKey: "MKR-INS-03/2026.10/02", content: STATION_EXCEPTIONS_CONTENT },
+  { releaseKey: "MKR-INS-04/2026.10/02", content: STATION_WORKSTATION_SETUP_CONTENT },
   { releaseKey: "MKR-INS-08/2026.10/01", content: CABINET_SHIFT_PLANNING_CONTENT },
   { releaseKey: "MKR-INS-09/2026.10/01", content: CABINET_SHIFT_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-10/2026.10/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
-  { releaseKey: "MKR-INS-12/2026.10/01", content: STANDALONE_INSTALL_CONTENT },
-  { releaseKey: "MKR-INS-13/2026.10/01", content: STANDALONE_BACKUPS_CONTENT },
-  { releaseKey: "MKR-INS-14/2026.10/01", content: HANDHELD_WAREHOUSE_CONTENT },
+  { releaseKey: "MKR-INS-12/2026.10/02", content: STANDALONE_INSTALL_CONTENT },
+  { releaseKey: "MKR-INS-13/2026.10/02", content: STANDALONE_BACKUPS_CONTENT },
+  { releaseKey: "MKR-INS-14/2026.10/02", content: HANDHELD_WAREHOUSE_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {

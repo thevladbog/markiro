@@ -161,7 +161,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "«Отвязать станцию» нужна, когда станцию переносят к другому хосту или выводят из работы. Станция забудет хост и свои справочники; подключить её снова можно только с новым кодом из офиса. Пока смена открыта, отвязать станцию нельзя. Перед отвязкой станция покажет, сколько записей не отправлено на хост, — после отвязки они на хост не уйдут, — и попросит подтвердить, что это вы: бейджем или табельным номером и PIN.",
+            text: "«Отвязать станцию» нужна, когда станцию переносят к другому хосту или выводят из работы. Станция забудет хост и свои справочники; подключить её снова можно только с новым кодом из офиса. Пока смена открыта, отвязать станцию нельзя. Перед отвязкой станция покажет, сколько записей не отправлено на хост, — записи останутся на диске, но при подключении как нового устройства или к другому хосту не отправятся, — и попросит подтвердить, что это вы: бейджем или табельным номером и PIN.",
           },
         ],
       },
@@ -190,7 +190,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
               {
                 term: "Хост не принимает это устройство",
                 detail:
-                  "Устройство отключили в офисе, базу хоста восстановили из копии или хост сменился. Нажмите «Подключить заново» и подключите станцию с новым кодом.",
+                  "Устройство отключили в офисе, базу хоста восстановили из копии или хост сменился. Нажмите «Подключить заново». Для повторного подключения как того же устройства в офисе откройте «Устройства», у этой станции выберите «Привязать заново» и используйте выпущенный для неё код. Отключённое в офисе устройство восстановить так нельзя. Для подключения как нового устройства выберите на станции «Подключить как новое устройство» и создайте обычный код через «Подключить устройство»; неотправленные записи прежнего устройства при этом не отправятся.",
               },
               {
                 term: "Принтер не печатает",
@@ -375,7 +375,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "“Отвязать станцию” (Unpair the station) is for moving the station to another host or taking it out of service. The station forgets the host and its reference data; it can be paired again only with a new code from the office. While a shift is open, the station cannot be unpaired. Before unpairing, the station shows how many records are not yet sent to the host — after unpairing they will not reach it — and asks you to confirm it is you: with a badge or a personnel number and PIN.",
+            text: "“Отвязать станцию” (Unpair the station) is for moving the station to another host or taking it out of service. The station forgets the host and its reference data; it can be paired again only with a new code from the office. While a shift is open, the station cannot be unpaired. Before unpairing, the station shows how many records are not yet sent to the host — records remain on disk, but will not be sent if you connect as a new device or to another host — and asks you to confirm it is you: with a badge or a personnel number and PIN.",
           },
         ],
       },
@@ -404,7 +404,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
               {
                 term: "The host does not accept this device",
                 detail:
-                  "The device was disconnected in the office, the host database was restored from a backup, or the host changed. Tap “Подключить заново” (Pair again) and pair the station with a new code.",
+                  "The device was disconnected in the office, the host database was restored from a backup, or the host changed. Tap “Подключить заново” (Pair again). To reconnect as the same device, open “Устройства” (Devices) in the office, choose “Привязать заново” (Re-pair) for this station, and use the code issued specifically for it. A device disconnected in the office cannot be recovered this way. To connect as a new device, choose “Подключить как новое устройство” (Connect as a new device) on the station and create an ordinary code with “Подключить устройство” (Connect a device); the previous device's unsent records will not be sent.",
               },
               {
                 term: "The printer does not print",

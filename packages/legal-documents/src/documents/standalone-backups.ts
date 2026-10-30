@@ -162,7 +162,7 @@ export const STANDALONE_BACKUPS_CONTENT = {
           {
             kind: "step",
             title: "Из Яндекс Диска",
-            text: "На новом компьютере хоста мастер первого запуска показывает кнопку «Восстановить из Яндекс Диска». Нажмите «Войти в Яндекс», выберите предприятие и дату копии («Выберите предприятие и дату копии»), нажмите «Скачать и проверить», подтвердите «Старый хост выключен и не будет запущен одновременно» и нажмите «Восстановить на этом ПК». Новое предприятие на этом компьютере создавать не нужно.",
+            text: "На новом компьютере хоста мастер первого запуска показывает кнопку «Восстановить из Яндекс Диска». Нажмите «Восстановить из Яндекс Диска». Введите ClientID приложения, с которым создавались копии, или загрузите сохранённый профиль кнопкой «Импорт профиля». Затем нажмите «Войти в Яндекс», выберите предприятие и дату копии («Выберите предприятие и дату копии»), нажмите «Скачать и проверить», подтвердите «Старый хост выключен и не будет запущен одновременно» и нажмите «Восстановить на этом ПК». Новое предприятие на этом компьютере создавать не нужно.",
             image: {
               id: "wizard-restore",
               caption: "Мастер первого запуска с кнопкой восстановления из Яндекс Диска",
@@ -396,7 +396,7 @@ export const STANDALONE_BACKUPS_CONTENT = {
           {
             kind: "step",
             title: "From Yandex Disk",
-            text: "On a new host computer the first-start wizard shows the “Восстановить из Яндекс Диска” (Restore from Yandex Disk) button. Press “Войти в Яндекс” (Sign in to Yandex), choose the enterprise and the copy date (“Выберите предприятие и дату копии”), press “Скачать и проверить” (Download and check), confirm “Старый хост выключен и не будет запущен одновременно” (The old host is off and will not run at the same time) and press “Восстановить на этом ПК” (Restore on this PC). There is no need to create a new enterprise on this computer.",
+            text: "On a new host computer the first-start wizard shows the “Восстановить из Яндекс Диска” (Restore from Yandex Disk) button. Press “Восстановить из Яндекс Диска” (Restore from Yandex Disk). Enter the ClientID of the application used to create the backups, or load the saved profile with “Импорт профиля” (Import profile). Then press “Войти в Яндекс” (Sign in to Yandex), choose the enterprise and the copy date (“Выберите предприятие и дату копии”), press “Скачать и проверить” (Download and check), confirm “Старый хост выключен и не будет запущен одновременно” (The old host is off and will not run at the same time) and press “Восстановить на этом ПК” (Restore on this PC). There is no need to create a new enterprise on this computer.",
             image: {
               id: "wizard-restore",
               caption: "The first-start wizard with the restore from Yandex Disk button",
