@@ -2076,6 +2076,7 @@ release key on the owner's machine.
 ## Network and TLS
 
 The webview never performs HTTP: every call to the host is a shell command.
+Optional online updates also run entirely in Rust, only after an explicit Office action.
 Rust calls the host with the aws-lc-rs provider selected explicitly
 (`src-tauri/src/tls.rs`). `host_client` trusts only the certificate whose
 SHA-256 was saved at pairing (`FingerprintPolicy::Pin`); it uses no proxy,
@@ -2972,6 +2973,28 @@ sharing on NTFS, a process started from a held file and the final path
 passive update with the hooks (`smoke.ps1` runs `/P /UPDATE` without `/R`)
 are checked by the Windows jobs (`standalone-windows-tests` runs the unit
 tests, `standalone-windows-build` the smoke test) and by hand.
+
+## Optional online release downloads
+
+The owner requested manual check/download in the existing Information → Updates section
+(2026-10-30). `src-tauri/src/update/online.rs` is the only release-network client:
+HTTPS to `https://releases.markiro.app/standalone/{stable|beta}/`, no redirects/proxy,
+public DNS only, no Host credentials, site data, telemetry, polling or automatic install.
+`latest.json` is unsigned discovery: exact product/channel/version URLs and metadata must
+match the embedded-key-verified JWS. Display signed notes only. Metadata is bounded at
+64 KiB, installers at 256 MiB; connect/read/overall timeouts and one-download gate apply.
+Partials resume only for the same signed manifest and the whole SHA-256 is checked before
+promotion. `online-updates/<version>` is separate from Host `updates/<version>`: online
+packages use the existing manual-file compatibility rules, not Host package equality.
+Office admins check/download through the injected online API; the resulting path enters
+UpdateSection's existing verification. After successful verification the Office automatically
+stages the local package on Host through the existing authenticated `update_stage` command.
+A failed transfer has a separate retry without another Internet download; `package_not_newer`
+counts as success only when a fresh Host status confirms that exact current or staged version.
+Install stays disabled during transfer and still uses the existing warnings, administrator
+confirmation, fresh Host backup and installer launch. Audit source remains `file` (a downloaded local package).
+Manual file import remains available offline. Local HTTP fixtures and host Cargo tests do
+not establish live CDN, Windows UAC/NTFS or actual installer acceptance.
 
 ## Update distribution
 

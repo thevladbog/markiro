@@ -131,7 +131,7 @@ pub struct ManifestView {
 }
 
 impl ManifestView {
-    fn of(manifest: &UpdateManifestV1) -> Self {
+    pub(crate) fn of(manifest: &UpdateManifestV1) -> Self {
         Self {
             version: manifest.version.clone(),
             channel: match manifest.channel {

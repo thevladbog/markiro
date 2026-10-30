@@ -183,6 +183,24 @@ fn an_unpaired_device_reports_null_and_refuses_host_requests() {
         ),
         Err(json!("invalid_request"))
     );
+    for command in ["update_online_check", "update_online_download"] {
+        assert_eq!(
+            invoke(
+                &webview,
+                command,
+                json!({"channel":"../../bad","version":"1.2.0"})
+            ),
+            Err(json!("invalid_request"))
+        );
+    }
+    assert_eq!(
+        invoke(
+            &webview,
+            "update_online_download",
+            json!({"channel":"stable","version":"../bad"})
+        ),
+        Err(json!("invalid_request"))
+    );
     // Plan ОБН-3: the installer never crosses IPC, and an unpaired device
     // downloads nothing.
     assert_eq!(
