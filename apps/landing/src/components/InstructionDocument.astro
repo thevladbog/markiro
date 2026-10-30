@@ -10,7 +10,7 @@ import {
 
 import { findHubPage, hubPath } from "../content/hubs";
 import type { LegalDocumentPageDefinition } from "../content/legal-pages";
-import { buildLegalPageGraph } from "../lib/seo";
+import { buildInstructionPageGraph } from "../lib/seo";
 import { readPublicSiteConfig } from "../lib/site-config";
 import { artifactsForRelease, loadLegalArtifacts } from "../lib/legal-artifacts";
 import BaseLayout from "../layouts/BaseLayout.astro";
@@ -71,11 +71,7 @@ const chrome = {
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
 const artifacts = artifactsForRelease(await loadLegalArtifacts(), release.code, release.revision, page.locale);
 const hub = findHubPage(hubPath(page.locale, "instructions"));
-const graph = buildLegalPageGraph(
-  page.metadata,
-  { published: release.effectiveDate, modified: release.effectiveDate },
-  { breadcrumbs: [{ name: hub.navigationLabel, path: hub.path }] },
-);
+const graph = buildInstructionPageGraph(page, artifacts);
 
 const imageOf = (id: string): InstructionImage => {
   const image = images[id];

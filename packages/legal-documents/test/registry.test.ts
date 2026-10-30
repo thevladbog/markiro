@@ -76,10 +76,10 @@ describe("legal document registry", () => {
       // print failures and the label reprint session that looks codes up on
       // the host, and 04 for pairing with the host by a code from the office
       // and the workstation tabs.
-      "MKR-INS-01": "2026.10/01",
+      "MKR-INS-01": "2026.10/02",
       "MKR-INS-02": "2026.10/01",
-      "MKR-INS-03": "2026.10/01",
-      "MKR-INS-04": "2026.10/01",
+      "MKR-INS-03": "2026.10/02",
+      "MKR-INS-04": "2026.10/02",
       // 2026-09-10: the shift cabinet was reworked -- row actions moved into
       // the details panel, the list gained an actual-output line and
       // validation shifts can duplicate the Data Matrix -- so both shift
@@ -104,12 +104,12 @@ describe("legal document registry", () => {
       "MKR-INS-10": "2026.10/01",
       // 2026-10-29: Markiro Autonom gained its own instruction for installing
       // the site and its first start (12), first published on this revision.
-      "MKR-INS-12": "2026.10/01",
+      "MKR-INS-12": "2026.10/02",
       // 2026-10-29, with it: backups and restore of the host (13).
-      "MKR-INS-13": "2026.10/01",
+      "MKR-INS-13": "2026.10/02",
       // 2026-10-29: a new instruction for the handheld in Markiro Autonom --
       // pairing with the host and building warehouse pallets.
-      "MKR-INS-14": "2026.10/01",
+      "MKR-INS-14": "2026.10/02",
     };
     expect(
       LEGAL_RELEASES.every(
@@ -131,16 +131,16 @@ describe("legal document registry", () => {
           code !== "MKR-INS-14",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
-    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-10-30");
     expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-10-30");
+    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-10-30");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-10-29");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-12").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-13").effectiveDate).toBe("2026-10-29");
-    expect(findLegalRelease("MKR-INS-14").effectiveDate).toBe("2026-10-29");
+    expect(findLegalRelease("MKR-INS-12").effectiveDate).toBe("2026-10-30");
+    expect(findLegalRelease("MKR-INS-13").effectiveDate).toBe("2026-10-30");
+    expect(findLegalRelease("MKR-INS-14").effectiveDate).toBe("2026-10-30");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(28);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);

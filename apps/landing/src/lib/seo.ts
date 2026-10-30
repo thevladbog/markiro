@@ -1,5 +1,8 @@
+import { findLegalDocument, findLegalRelease, requireLegalContent } from "@markiro/legal-documents";
+
 import { SITE_CONTACTS } from "../content/contacts";
-import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
+import { LEGAL_SEARCH_PAGES, type LegalDocumentPageDefinition } from "../content/legal-pages";
+import type { PublishedLegalArtifact } from "./legal-artifacts";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import { articlesForLocale } from "../content/articles";
@@ -129,6 +132,38 @@ function organizationNode(): JsonLdObject {
   };
 }
 
+/** Page translations describe the same application; the application UI is Russian. */
+function softwareReference(locale: "ru" | "en"): JsonLdObject {
+  return {
+    "@type": "SoftwareApplication",
+    "@id": `${SITE_URL}/#software`,
+    name: locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom",
+  };
+}
+
+function softwareNode(locale: "ru" | "en"): JsonLdObject {
+  const facts = SOFTWARE_FACTS[locale];
+  const homePath = locale === "ru" ? "/" : "/en/";
+  return {
+    ...softwareReference(locale),
+    alternateName:
+      locale === "ru" ? ["Markiro Autonom", "Markiro"] : ["Маркиро Автоном", "Markiro"],
+    url: absoluteUrl(homePath),
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Windows 10, Windows 11, Android",
+    description: SEO_PAGES.find((page) => page.path === homePath)?.description,
+    inLanguage: "ru",
+    installUrl: absoluteUrl("/skachat/"),
+    featureList: [...facts.features],
+    softwareHelp: {
+      "@type": "CreativeWork",
+      "@id": `${absoluteUrl(facts.helpPath)}#webpage`,
+      url: absoluteUrl(facts.helpPath),
+    },
+    provider: { "@id": `${SITE_URL}/#organization` },
+  };
+}
+
 function breadcrumbList(locale: "ru" | "en", items: readonly BreadcrumbTrailItem[]): JsonLdObject {
   const homePath = locale === "ru" ? "/" : "/en/";
   return {
@@ -169,8 +204,6 @@ export function attachOrganizationContact(
 
 export function buildPageGraph(page: SeoPageDefinition): PageGraph {
   const homePath = page.locale === "ru" ? "/" : "/en/";
-  const homePage = SEO_PAGES.find((candidate) => candidate.path === homePath);
-  const facts = SOFTWARE_FACTS[page.locale];
   const graph: JsonLdObject[] = [
     websiteNode(),
     organizationNode(),
@@ -183,23 +216,9 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
       inLanguage: page.locale,
       dateModified: page.reviewedAt,
       isPartOf: { "@id": `${SITE_URL}/#website` },
+      about: { "@id": `${SITE_URL}/#software` },
     },
-    {
-      "@type": "SoftwareApplication",
-      "@id": `${SITE_URL}/#software`,
-      // The product is «Маркиро Автоном»; "Markiro" stays the organization and an alias.
-      name: page.locale === "ru" ? "Маркиро Автоном" : "Markiro Autonom",
-      alternateName:
-        page.locale === "ru" ? ["Markiro Autonom", "Markiro"] : ["Маркиро Автоном", "Markiro"],
-      url: `${SITE_URL}/`,
-      applicationCategory: "BusinessApplication",
-      operatingSystem: "Windows, Android",
-      description: homePage?.description,
-      inLanguage: page.locale,
-      featureList: [...facts.features],
-      softwareHelp: { "@type": "CreativeWork", url: absoluteUrl(facts.helpPath) },
-      provider: { "@id": `${SITE_URL}/#organization` },
-    },
+    softwareNode(page.locale),
   ];
 
   if (page.path !== homePath) {
@@ -284,10 +303,14 @@ export function buildHubPageGraph(hub: HubPageDefinition, items: readonly HubIte
         inLanguage: hub.locale,
         dateModified: hub.reviewedAt,
         isPartOf: { "@id": `${SITE_URL}/#website` },
+        mainEntity: { "@id": `${absoluteUrl(hub.path)}#items` },
+        ...(hub.kind === "instructions" ? { about: softwareReference(hub.locale) } : {}),
       },
       breadcrumbList(hub.locale, [{ name: hub.navigationLabel, path: hub.path }]),
       {
         "@type": "ItemList",
+        "@id": `${absoluteUrl(hub.path)}#items`,
+        numberOfItems: items.length,
         itemListElement: items.map((item, index) => ({
           "@type": "ListItem",
           position: index + 1,
@@ -333,9 +356,8 @@ function productNode(page: AutonomPageDefinition): JsonLdObject {
   );
   const prices = offers.map((offer) => offer.price);
   return {
-    "@type": "Product",
-    "@id": `${pageUrl}#product`,
-    name: "Маркиро Автоном",
+    ...softwareNode(page.locale),
+    "@type": ["SoftwareApplication", "Product"],
     description:
       "Программа маркировки и агрегации для Windows: станция на линии, ТСД на складе и офис на ПК заказчика. Лицензия на площадку на год.",
     brand: { "@type": "Brand", name: "Маркиро" },
@@ -368,9 +390,10 @@ export function buildAutonomPageGraph(
       inLanguage: page.locale,
       dateModified: page.reviewedAt,
       isPartOf: { "@id": `${SITE_URL}/#website` },
+      about: { "@id": `${SITE_URL}/#software` },
     },
   ];
-  if (options.offers === true) graph.push(productNode(page));
+  graph.push(options.offers === true ? productNode(page) : softwareNode(page.locale));
   if (options.faq !== undefined) {
     graph.push({
       "@type": "FAQPage",
@@ -415,9 +438,71 @@ export function buildLegalPageGraph(
         : [
             breadcrumbList(page.locale, [
               ...options.breadcrumbs,
-              { name: page.title.replace(/ — (?:Маркиро|Markiro)$/, ""), path: page.path },
+              {
+                name: page.title.replace(/ — (?:Маркиро(?: Автоном)?|Markiro(?: Autonom)?)$/, ""),
+                path: page.path,
+              },
             ]),
           ]),
+    ],
+  };
+}
+
+/** Content, edition dates and PDF links come from the same sources as the visible instruction. */
+export function buildInstructionPageGraph(
+  page: LegalDocumentPageDefinition,
+  artifacts: readonly PublishedLegalArtifact[],
+): PageGraph {
+  const release = findLegalRelease(page.code);
+  const content = requireLegalContent(findLegalDocument(page.code), page.locale);
+  const hub = findHubPage(hubPath(page.locale, "instructions"));
+  const pageUrl = absoluteUrl(page.metadata.path);
+  const instructionId = `${pageUrl}#instruction`;
+  const graph = buildLegalPageGraph(
+    page.metadata,
+    { published: release.effectiveDate, modified: release.effectiveDate },
+    { breadcrumbs: [{ name: hub.navigationLabel, path: hub.path }] },
+  );
+  const instruction: JsonLdObject = {
+    "@type": "TechArticle",
+    "@id": instructionId,
+    url: pageUrl,
+    headline: content.title,
+    description: content.summary,
+    identifier: release.code,
+    version: release.revision,
+    datePublished: release.effectiveDate,
+    dateModified: release.effectiveDate,
+    inLanguage: page.locale,
+    about: softwareReference(page.locale),
+    isPartOf: { "@id": `${absoluteUrl(hub.path)}#webpage` },
+    mainEntityOfPage: { "@id": `${pageUrl}#webpage` },
+    author: { "@id": `${SITE_URL}/#organization` },
+    publisher: { "@id": `${SITE_URL}/#organization` },
+    hasPart: content.sections.map((section) => ({
+      "@type": "WebPageElement",
+      "@id": `${pageUrl}#${section.id}`,
+      name: section.heading,
+    })),
+    encoding: artifacts
+      .filter((artifact) => artifact.kind === "pdfa-2b")
+      .map((artifact) => ({
+        "@type": "MediaObject",
+        contentUrl: absoluteUrl(artifact.href),
+        encodingFormat: artifact.mediaType,
+        inLanguage: artifact.locale,
+      })),
+  };
+  if (page.locale === "en") {
+    instruction.translationOfWork = { "@id": `${absoluteUrl(release.routes.ru)}#instruction` };
+  }
+  return {
+    ...graph,
+    "@graph": [
+      ...graph["@graph"].map((node) =>
+        node["@type"] === "WebPage" ? { ...node, mainEntity: { "@id": instructionId } } : node,
+      ),
+      instruction,
     ],
   };
 }
