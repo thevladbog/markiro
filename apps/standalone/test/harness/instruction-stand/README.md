@@ -41,6 +41,25 @@ the screen it reached is saved beside the frames as `<state>.failed-N.png`.
 `PLAYWRIGHT_CORE` overrides where `playwright-core` is loaded from. The default is
 `tools/production-browser`'s install.
 
+Two environment variables help the office instructions (MKR-INS-08, 09, 10):
+
+- `STAND_HOST_BINARY` points at a host built with the domain's test license keys.
+  The seed then loads a year's license signed by the TEST key of
+  `packages/domain/fixtures/standalone-license`, so office frames carry no
+  trial banner. A release build never trusts that key.
+
+  ```bash
+  cargo build -p markiro-host --features markiro-proto/test-keys \
+    --manifest-path apps/standalone/Cargo.toml --target-dir apps/standalone/target/stand
+  STAND_HOST_BINARY=$PWD/apps/standalone/target/stand/debug/markiro-host node stand.mjs seed
+  ```
+
+- `STAND_ROOT` moves the snapshot and the work directory. With `--host-port` and
+  `--vite-port` it lets two stands run on one machine.
+
+The office states live in `states-office.mjs` (prefixes `ins08/`, `ins09/`, `ins10/`)
+and their extra seed data in `seed-office.mjs`.
+
 ## What the seed builds
 
 The seed works through the product the way a site would. `site.mjs` holds every value

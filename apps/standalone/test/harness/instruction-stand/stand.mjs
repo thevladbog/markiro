@@ -10,6 +10,7 @@ import { parseArgs } from "node:util";
 import { BROWSER_TIME, HOST_ADDRESS } from "./site.mjs";
 import { loadChromium, openComputer, startHost, startVite } from "./stand-lib.mjs";
 import { pairStation, runWizard, seedOffice } from "./seed.mjs";
+import { seedOfficeExtras } from "./seed-office.mjs";
 import { STATES, seedStationWork } from "./states.mjs";
 
 const { values, positionals } = parseArgs({
@@ -23,7 +24,9 @@ const { values, positionals } = parseArgs({
   },
 });
 const [command = "capture", ...requested] = positionals;
-const root = path.join(process.env.TMPDIR ?? "/tmp", "markiro-instruction-stand");
+// `STAND_ROOT` keeps two stands on one machine apart (with `--host-port` and `--vite-port`).
+const root =
+  process.env.STAND_ROOT ?? path.join(process.env.TMPDIR ?? "/tmp", "markiro-instruction-stand");
 const snapshot = path.resolve(values.snapshot ?? path.join(root, "snapshot"));
 const out = path.resolve(values.out ?? path.join(root, "frames"));
 const work = path.join(root, "work");
@@ -74,6 +77,8 @@ async function site({ empty = false, clockAt, browserClock }) {
     port: hostPort,
     clockAt,
     cacheDir: root,
+    // A host built with `--features markiro-proto/test-keys` trusts the seed's test license.
+    ...(process.env.STAND_HOST_BINARY ? { binary: process.env.STAND_HOST_BINARY } : {}),
   });
   stack.push(host.stop);
   const pages = [];
@@ -112,6 +117,7 @@ try {
     await runWizard(host.page);
     await host.page.getByRole("heading", { name: "Обзор" }).waitFor({ timeout: 30_000 });
     const seeded = await seedOffice({ page: host.page, shell: host.shell });
+    await seedOfficeExtras({ shell: host.shell, token: seeded.token });
     const station = await computer("station-1", "station", { openPage: false });
     await pairStation({
       hostShell: host.shell,

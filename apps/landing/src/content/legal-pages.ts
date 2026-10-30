@@ -52,8 +52,8 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable Markiro Autonom technician instruction: pairing the station with the host on the local network with a code from the office, choosing the line, printers, scanners, sound, updating and unpairing the station.",
   },
   "MKR-INS-08": {
-    ru: "Печатная инструкция менеджера: производственная линия, станции на линии, планирование смены, режимы, агрегация и запуск.",
-    en: "Printable manager instruction: production lines, stations on a line, shift planning, modes, aggregation, and launch.",
+    ru: "Печатная инструкция офиса Маркиро Автоном: линии и число устройств в смене, станции на линии, планирование смены, агрегация, паллеты и печать дубликата.",
+    en: "Printable Markiro Autonom office instruction: lines and devices per shift, stations on a line, shift planning, aggregation, pallets, and duplicate printing.",
   },
   "MKR-INS-09": {
     ru: "Печатная инструкция менеджера: наблюдение за производством, закрытие смены из кабинета, данные после закрытия, отчёты для ГИС МТ и разбор их отказов.",

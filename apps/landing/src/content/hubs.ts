@@ -46,15 +46,14 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     kind: "instructions",
     title: "Инструкции Markiro для операторов, наладчиков и менеджеров",
     description:
-      "Печатные инструкции Markiro: вход в станцию, цикл сканирования и агрегации, исключения, настройка рабочего места, планирование и закрытие смены, каталог.",
-    heading: "Инструкции по работе со станцией и кабинетом Markiro",
+      "Печатные инструкции Маркиро Автоном: вход и старт смены, сканирование и агрегация, исключения, подключение станции, планирование и закрытие смены, товары.",
+    heading: "Инструкции по работе со станцией и офисом Markiro",
     navigationLabel: "Инструкции",
     eyebrow: "Печатные инструкции",
     introduction:
-      "Каждая инструкция опубликована как редакция с кодом, датой вступления в силу и неизменяемым PDF/A. Здесь они собраны по рабочим местам: станция сканирования на линии и кабинет производства.",
+      "Каждая инструкция опубликована как редакция с кодом, датой вступления в силу и неизменяемым PDF/A. Здесь они собраны по рабочим местам Маркиро Автоном: станция сканирования на линии и офис.",
     socialImage: SHARED_IMAGE,
-    socialImageAlt:
-      "Markiro — печатные инструкции для станции сканирования и кабинета производства",
+    socialImageAlt: "Markiro — печатные инструкции для станции сканирования и офиса",
     reviewedAt: "2026-10-29",
   },
   {
@@ -79,16 +78,16 @@ export const HUB_PAGES: readonly HubPageDefinition[] = [
     alternatePath: "/instruktsii/",
     locale: "en",
     kind: "instructions",
-    title: "Markiro instructions for station operators and technicians",
+    title: "Markiro instructions for station operators, technicians and managers",
     description:
-      "Printable Markiro instructions: station sign-in, the scanning and aggregation cycle, exceptions and recovery, workstation setup, shift planning and closing.",
-    heading: "Instructions for the Markiro scanning station",
+      "Printable Markiro Autonom instructions: sign-in and shift start, scanning and aggregation, exceptions, station pairing, shift planning and closing, products.",
+    heading: "Instructions for the Markiro station and office",
     navigationLabel: "Instructions",
     eyebrow: "Printable instructions",
     introduction:
-      "Each instruction is published as a revision with a code, an effective date and an immutable PDF/A. English editions are informational translations of the authoritative Russian revisions.",
+      "Each instruction is published as a revision with a code, an effective date and an immutable PDF/A, grouped by Markiro Autonom workplace: the scanning station on the line and the office. English editions are informational translations of the authoritative Russian revisions.",
     socialImage: SHARED_IMAGE,
-    socialImageAlt: "Markiro — printable instructions for the scanning station",
+    socialImageAlt: "Markiro — printable instructions for the scanning station and the office",
     reviewedAt: "2026-10-29",
   },
 ];
