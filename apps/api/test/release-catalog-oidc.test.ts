@@ -11,6 +11,12 @@ beforeAll(async () => {
   f = await oidcFixture();
 });
 describe("pinned GitHub release publisher identity", () => {
+  it("accepts GitHub certificate thumbprint and its backdated not-before claim", async () => {
+    const token = await f.sign({ nbf: f.now - 600 }, { x5t: "a".repeat(27) });
+    expect((await verifyPublisherToken(token, f.config, f.now, f.resolver)).product).toBe(
+      "station",
+    );
+  });
   it("verifies signed station identity without exposing token or raw jti", async () => {
     const token = await f.sign(),
       p = await verifyPublisherToken(token, f.config, f.now, f.resolver);
@@ -109,7 +115,7 @@ describe("pinned GitHub release publisher identity", () => {
       { iat: f.now - 601 },
       { exp: f.now + 601 },
       { iat: f.now + 0.5 },
-      { nbf: f.now - 100 },
+      { nbf: f.now - 601 },
       { exp: f.now - 1 },
     ])
       await expect(
@@ -122,6 +128,7 @@ describe("pinned GitHub release publisher identity", () => {
       { jwk: { kty: "RSA" } },
       { x5u: "https://attacker.invalid" },
       { typ: "other" },
+      { x5t: "not-a-certificate-thumbprint" },
     ])
       await expect(
         verifyPublisherToken(await f.sign({}, header), f.config, f.now, f.resolver),
