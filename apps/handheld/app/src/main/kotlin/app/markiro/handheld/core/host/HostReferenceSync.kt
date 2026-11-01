@@ -136,6 +136,11 @@ class HostReferenceSync(
 
     private suspend fun product(item: ChangeItemDto) {
         val data = item.data
+        for ((kind, field) in listOf("box" to "defaultBoxTemplateId", "pallet" to "defaultPalletTemplateId")) {
+            val key = "host_reprint_product_default:${item.id}:$kind"
+            val value = if (item.deleted) null else data?.text(field)
+            if (value == null) meta.remove(key) else meta.put(key, value)
+        }
         if (item.deleted || data == null || data["archived"]?.let { (it as? JsonPrimitive)?.booleanOrNull } == true) {
             db.palletProductDao().delete(item.id)
             return
@@ -154,6 +159,10 @@ class HostReferenceSync(
     }
 
     private suspend fun template(item: ChangeItemDto) {
+        val reprintKey = "host_reprint_template:${item.id}"
+        val recordForReprint = item.data
+        if (item.deleted || recordForReprint == null || recordForReprint["enabled"]?.let { (it as? JsonPrimitive)?.booleanOrNull } != true || recordForReprint.text("purpose") !in setOf("product_duplicate", "box", "pallet")) meta.remove(reprintKey)
+        else meta.put(reprintKey, JsonObject(recordForReprint + ("rev" to JsonPrimitive(item.rev))).toString())
         val catalogId = "host:${item.id}"
         val record = item.data
         val purpose = record?.text("purpose")
@@ -190,6 +199,11 @@ class HostReferenceSync(
 
     private suspend fun organization(item: ChangeItemDto) {
         val data = item.data ?: return
+        for ((kind, field) in listOf("unit" to "defaultDuplicateTemplateId", "box" to "defaultBoxTemplateId", "pallet" to "defaultPalletTemplateId")) {
+            val key = "host_reprint_org_default:$kind"
+            val value = data.text(field)
+            if (value == null) meta.remove(key) else meta.put(key, value)
+        }
         config.get()?.let { config.upsert(it.copy(organizationName = data.text("name") ?: it.organizationName)) }
         val pallet = data.text("defaultPalletTemplateId")
         if (pallet == null) meta.remove(ORG_PALLET_TEMPLATE) else meta.put(ORG_PALLET_TEMPLATE, pallet)

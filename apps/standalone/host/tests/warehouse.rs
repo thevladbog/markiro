@@ -382,7 +382,7 @@ async fn a_lookup_of_another_shape_is_refused_by_field() {
 #[tokio::test]
 async fn only_a_station_looks_up_and_without_a_key_nothing_is_answered() {
     let (admin, _, asking, _) = closed_shift_with_a_box().await;
-    for kind in ["office", "handheld"] {
+    for kind in ["office"] {
         // A handheld pairs by a code, not locally: pair an office device and
         // store its kind as the other (the answer would carry a full code).
         let (id, other) = pair_device(&admin.app, "office").await;
@@ -1309,7 +1309,7 @@ async fn only_a_live_station_records_and_a_refused_batch_keeps_nothing() {
     let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
     let record = reprint(1, "box", &box_id(1), &sscc(1500));
     let path = "/v1/device/warehouse/reprints";
-    for kind in ["office", "handheld"] {
+    for kind in ["office"] {
         // A handheld pairs by a code, not locally: pair an office device and
         // store its kind as the other.
         let (id, other) = pair_device(&admin.app, "office").await;
@@ -1850,7 +1850,7 @@ fn the_records_are_written_in_one_immediate_transaction_after_the_station_is_che
     assert_eq!(source.matches("tx.commit()").count(), 1);
     assert_eq!(source.matches("tx.rollback()").count(), 0);
     let begun = source.find("begin_write(").unwrap();
-    let checked = source.find("require_station_in(&mut tx").unwrap();
+    let checked = source.find(".require_kinds_in(").unwrap();
     let first_record = source.find("receive(&mut tx").unwrap();
     let committed = source.find("tx.commit()").unwrap();
     assert!(begun < checked && checked < first_record && first_record < committed);
@@ -1994,4 +1994,30 @@ async fn a_lookup_answers_the_egais_code_the_shift_froze() {
             "{body}"
         );
     }
+}
+
+#[tokio::test]
+async fn handheld_reprints_a_closed_site_box_with_exact_operator_and_idempotency() {
+    let (admin, _floor, _, operator) = closed_shift_with_a_box().await;
+    let (id, key) = pair_device(&admin.app, "office").await;
+    sqlx::query("UPDATE devices SET kind='handheld' WHERE id=?")
+        .bind(&id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, found) = lookup(&admin, &key, json!({"sscc":sscc(1500)})).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["source"]["subjectId"], box_id(1));
+    let mut record = reprint(91, "box", &box_id(1), &sscc(1500));
+    record["operatorId"] = json!(operator);
+    assert_eq!(
+        send_records(&admin, &key, &[record.clone()]).await,
+        vec![accepted(&record_id(91))]
+    );
+    assert_eq!(
+        send_records(&admin, &key, &[record]).await,
+        vec![accepted(&record_id(91))]
+    );
+    let stored:(String,String,String,String,String) = sqlx::query_as("SELECT device_id,operator_id,subject_id,identity,outcome FROM warehouse_reprints WHERE record_id=?").bind(record_id(91)).fetch_one(&admin.app.state.pool).await.unwrap();
+    assert_eq!(stored, (id, operator, box_id(1), sscc(1500), "sent".into()));
 }

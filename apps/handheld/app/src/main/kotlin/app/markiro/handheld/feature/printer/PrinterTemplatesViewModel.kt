@@ -37,6 +37,7 @@ data class PrinterTemplatesUi(
 class PrinterTemplatesViewModel @Inject constructor(
     private val db: HandheldDatabase,
     private val refresher: RosterRefresher,
+    private val reprints: app.markiro.handheld.core.reprint.SiteReprintOperations? = null,
 ) : ViewModel() {
     private val local = MutableStateFlow(PrinterTemplatesUi())
     private val savedSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -58,10 +59,13 @@ class PrinterTemplatesViewModel @Inject constructor(
     }
 
     fun refresh() {
-        if (local.value.refreshing || !state.value.hostMode) return
+        if (local.value.refreshing || (!state.value.hostMode && reprints == null)) return
         local.update { it.copy(refreshing = true, refreshFailed = false) }
         viewModelScope.launch {
-            val ok = refresher.refresh()
+            val ok = if (reprints == null) refresher.refresh() else try {
+                reprints.refreshTemplates(); true
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
             local.update { it.copy(refreshing = false, refreshFailed = !ok) }
         }
     }

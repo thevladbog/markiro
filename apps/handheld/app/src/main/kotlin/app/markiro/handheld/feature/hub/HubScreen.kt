@@ -271,6 +271,11 @@ fun HubScreen(
                 HubTile.DISASSEMBLY to { modifier ->
                     MenuRow(Icons.Outlined.Inventory2,stringResource(R.string.pack_disassembly_title),stringResource(R.string.pack_disassembly_tile_hint),{onTile(HubTile.DISASSEMBLY)},modifier)
                 },
+                HubTile.REPRINT to { modifier ->
+                    MenuRow(Icons.Outlined.Print, stringResource(R.string.site_reprint_title),
+                        stringResource(R.string.site_reprint_tile_hint), { onTile(HubTile.REPRINT) }, modifier,
+                        enabled = !state.replacementBlocked)
+                },
                 HubTile.SETTINGS to { modifier ->
                     MenuRow(
                         Icons.Outlined.Print,
@@ -298,8 +303,8 @@ fun HubScreen(
 
 /** The tiles of the hub: a host has no inventory and no write-off (spec 8.7: hidden by `backend`, not deleted). */
 internal fun visibleTiles(hostMode: Boolean): List<HubTile> =
-    if (hostMode) listOf(HubTile.SHIFT, HubTile.PALLETS, HubTile.DISASSEMBLY, HubTile.SETTINGS)
-    else listOf(HubTile.SHIFT, HubTile.INVENTORY, HubTile.WRITEOFF, HubTile.PALLETS, HubTile.SETTINGS)
+    if (hostMode) listOf(HubTile.SHIFT, HubTile.PALLETS, HubTile.DISASSEMBLY, HubTile.REPRINT, HubTile.SETTINGS)
+    else listOf(HubTile.SHIFT, HubTile.INVENTORY, HubTile.WRITEOFF, HubTile.PALLETS, HubTile.REPRINT, HubTile.SETTINGS)
 
 @Composable
 internal fun shiftsLabel(count: Int?): String = when (count) {

@@ -33,6 +33,8 @@ internal val HOST_DATASET_BUSINESS_TABLES = setOf(
     "pallet_products",
     "pallets",
     "print_destinations",
+    "site_reprint_jobs",
+    "site_reprint_audit",
     "label_template_catalog",
     "printer_template_choices",
     "print_template_snapshots",
@@ -61,8 +63,9 @@ internal fun clearHostDatasetBusinessTables(db: HandheldDatabase) {
     check(tables == HOST_DATASET_BUSINESS_TABLES + HOST_DATASET_RETAINED_TABLES) { "Unclassified handheld dataset table" }
     // Unknown disassembly outcomes are reconciliation evidence tied to their OLD
     // owner/generation/epoch. They must survive replacement, never be rebound.
-    val evidence = sqlite.query("SELECT `key`,value FROM meta WHERE `key` LIKE 'pack_disassembly_%'").use { rows ->
-        buildList { while (rows.moveToNext()) if(rows.getString(0).startsWith("pack_disassembly_")) add(rows.getString(0) to rows.getString(1)) }
+    app.markiro.handheld.core.reprint.archiveSiteReprintEvidence(sqlite)
+    val evidence = sqlite.query("SELECT `key`,value FROM meta WHERE `key` LIKE 'pack_disassembly_%' OR `key` LIKE 'site_reprint_evidence:%'").use { rows ->
+        buildList { while (rows.moveToNext()) if(rows.getString(0).startsWith("pack_disassembly_") || rows.getString(0).startsWith("site_reprint_evidence:")) add(rows.getString(0) to rows.getString(1)) }
     }
     for (table in HOST_DATASET_BUSINESS_TABLES) sqlite.execSQL("DELETE FROM `$table`")
     for ((key,value) in evidence) sqlite.execSQL("INSERT INTO meta(`key`,value) VALUES(?,?)",arrayOf(key,value))

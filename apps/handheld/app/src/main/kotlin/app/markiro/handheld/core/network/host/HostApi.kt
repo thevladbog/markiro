@@ -159,6 +159,12 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
     suspend fun disassemblePack(frozenBody: String): Result<PackDisassembledDto> =
         parse(transport.post("/v1/device/disaggregation/apply", frozenBody), PackDisassembledDto.serializer())
 
+    suspend fun warehouseLookup(body: String): Result<JsonObject> =
+        parse(transport.post("/v1/device/warehouse/lookup", body), JsonObject.serializer())
+
+    suspend fun warehouseReprints(body: String): Result<JsonObject> =
+        parse(transport.post("/v1/device/warehouse/reprints", body), JsonObject.serializer())
+
     suspend fun orgPrint(): Result<OrgPrintDto> = parse(transport.get("/v1/device/org/print"), OrgPrintDto.serializer())
 
     /** One page of the registry of closed boxes; `until` is null on the first page of a walk. */

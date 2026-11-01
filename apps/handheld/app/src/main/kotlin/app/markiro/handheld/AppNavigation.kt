@@ -141,6 +141,7 @@ object Routes {
     const val WRITEOFF = "writeoff"
     const val PALLETS = "pallets"
     const val PACK_DISASSEMBLY = "pack-disassembly"
+    const val SITE_REPRINT = "site-reprint"
 
     /**
      * The shift-less entry from the «Паллеты» mode. A route of its own rather
@@ -300,6 +301,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             HubTile.WRITEOFF -> nav.navigate(Routes.WRITEOFF)
                             HubTile.PALLETS -> nav.navigate(Routes.PALLETS)
                             HubTile.DISASSEMBLY -> nav.navigate(Routes.PACK_DISASSEMBLY)
+                            HubTile.REPRINT -> nav.navigate(Routes.SITE_REPRINT)
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -313,6 +315,39 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onRepairHost = vm::repairHostLink,
                     onDismissDialog = vm::dismissDialog,
                 )
+            }
+            composable(Routes.SITE_REPRINT) { entry ->
+                val vm: app.markiro.handheld.feature.reprint.SiteReprintViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                DisposableEffect(entry, vm) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, _ ->
+                        vm.setActive(entry.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+                    }
+                    entry.lifecycle.addObserver(observer)
+                    vm.setActive(entry.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+                    onDispose { entry.lifecycle.removeObserver(observer); vm.setActive(false) }
+                }
+                val back = {
+                    when {
+                        state.busy -> Unit
+                        state.step == app.markiro.handheld.feature.reprint.SiteReprintStep.MANUAL -> vm.closeManual()
+                        state.step == app.markiro.handheld.feature.reprint.SiteReprintStep.VERIFY -> vm.stopVerification()
+                        else -> { nav.popBackStack(); Unit }
+                    }
+                }
+                BackHandler { back() }
+                app.markiro.handheld.feature.reprint.SiteReprintScreen(state,
+                    app.markiro.handheld.feature.reprint.SiteReprintCallbacks(
+                        onBack = back,
+                        onSettings = { vm.setActive(false); nav.navigate(Routes.PRINTER_GRAPH) },
+                        onReason = vm::selectReason,
+                        onBegin = vm::beginScanning,
+                        onManual = vm::openManual,
+                        onSubmit = vm::submit,
+                        onRetry = vm::retry,
+                        onVerify = vm::startVerification,
+                        onCancel = vm::cancelJob,
+                    ))
             }
             // One ViewModel across all four steps: the step is state, so hardware
             // Back moves inside the mode instead of dropping a half-built list.
@@ -810,7 +845,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     val templatesVm: app.markiro.handheld.feature.printer.PrinterTemplatesViewModel = hiltViewModel(parent)
                     val templates by templatesVm.state.collectAsStateWithLifecycle()
                     LaunchedEffect(templatesVm) { templatesVm.savedEvents.collect { nav.popBackStack() } }
-                    val purpose = PrintPurpose.entries.firstOrNull { it.wire == entry.arguments?.getString("purpose") && it != PrintPurpose.DUPLICATE }
+                    val purpose = PrintPurpose.entries.firstOrNull { it.wire == entry.arguments?.getString("purpose") }
                     val printer = state.selected
                     if (printer == null || purpose == null) {
                         app.markiro.handheld.core.design.AppBar(stringResource(R.string.printer_none), { nav.popBackStack() })

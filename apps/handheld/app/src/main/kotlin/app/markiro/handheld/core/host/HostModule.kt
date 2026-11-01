@@ -153,8 +153,11 @@ object HostModule {
     /** What the consumers of the sync engine hold: the cloud's engine or the host's, by the backend of this device at each call. */
     @Provides
     @Singleton
-    fun syncDriver(config: DeviceConfigDao, cloud: SyncEngine, host: HostSyncEngine): SyncDriver =
-        BackendSyncDriver(config, cloud, host, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+    fun syncDriver(config: DeviceConfigDao, cloud: SyncEngine, host: HostSyncEngine, db: HandheldDatabase,
+        reprints: app.markiro.handheld.core.reprint.SiteReprintOperations, recovery: DeviceRecovery): SyncDriver {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        return app.markiro.handheld.core.reprint.ReprintSyncDriver(BackendSyncDriver(config, cloud, host, scope), db, reprints, scope, recovery)
+    }
 
     @Provides
     fun hostBootstrap(

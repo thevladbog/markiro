@@ -34,6 +34,8 @@ import app.markiro.handheld.core.print.PrinterEntity
         app.markiro.handheld.core.print.CachedLabelTemplate::class,
         app.markiro.handheld.core.print.PrinterTemplateChoice::class,
         app.markiro.handheld.core.print.PrintTemplateSnapshot::class,
+        app.markiro.handheld.core.reprint.SiteReprintJob::class,
+        app.markiro.handheld.core.reprint.SiteReprintAudit::class,
         PrinterEntity::class,
         PrinterAssignmentEntity::class,
         PrintDestinationEntity::class,
@@ -72,6 +74,7 @@ abstract class HandheldDatabase : RoomDatabase() {
     }
     abstract fun deviceRecoveryDao(): DeviceRecoveryDao
     abstract fun printTemplateDao(): app.markiro.handheld.core.print.PrintTemplateDao
+    abstract fun siteReprintDao(): app.markiro.handheld.core.reprint.SiteReprintDao
     abstract fun printerDao(): PrinterDao
     abstract fun boxDao(): BoxDao
     abstract fun ssccPoolDao(): SsccPoolDao
@@ -112,4 +115,4 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun hostOutboxDao(): HostOutboxDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 23
+const val HANDHELD_DATABASE_VERSION = 24

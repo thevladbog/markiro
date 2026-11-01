@@ -18,7 +18,7 @@ object PrintModule {
 
     @Provides
     @Singleton
-    fun labelRenderer(rasterize: RasterizeText): LabelRenderer = LabelRenderer(rasterize)
+    fun labelRenderer(rasterize: RasterizeText, branding: app.markiro.handheld.core.label.OrganizationPrintBranding): LabelRenderer = LabelRenderer(rasterize, branding)
 
     @Provides
     @Singleton

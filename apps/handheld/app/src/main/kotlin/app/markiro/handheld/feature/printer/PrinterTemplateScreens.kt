@@ -60,17 +60,10 @@ fun PrinterProfileScreen(
             PrintPurpose.entries.forEach { purpose ->
                 val chosen = templates.chosen(printer.id, purpose)
                 val name = templates.catalog.firstOrNull { it.id == chosen }?.name
-                if (purpose == PrintPurpose.DUPLICATE) {
-                    if (routing.resolve(purpose)?.id == printer.id) {
-                        Text(stringResource(purposeLabel(purpose)), style = MarkiroTheme.type.strong, color = c.fg1)
-                        Text(stringResource(R.string.template_duplicate_fixed), style = MarkiroTheme.type.caption, color = c.fg2)
-                    }
-                } else {
-                    MenuRow(null, stringResource(purposeLabel(purpose)),
-                        if (routing.resolve(purpose)?.id != printer.id) stringResource(R.string.printer_unassigned)
-                        else name ?: stringResource(if (chosen == null) R.string.template_from_source else R.string.print_reason_template_incompatible),
-                        { onTemplates(purpose) })
-                }
+                MenuRow(null, stringResource(purposeLabel(purpose)),
+                    if (routing.resolve(purpose)?.id != printer.id) stringResource(R.string.printer_unassigned)
+                    else name ?: stringResource(if (chosen == null) R.string.template_from_source else R.string.print_reason_template_incompatible),
+                    { onTemplates(purpose) })
             }
             MenuRow(null, stringResource(R.string.printer_edit), printer.address, onEdit)
             SecondaryButton(stringResource(R.string.printer_test_short), onTest)
@@ -137,13 +130,13 @@ fun PrinterTemplateChooserScreen(
                 Text(stringResource(R.string.template_cached), style = MarkiroTheme.type.caption, color = c.fg2)
                 if (ui.refreshFailed) Text(stringResource(R.string.template_refresh_failed), style = MarkiroTheme.type.body, color = c.warnFg)
                 if (ui.refreshing) Text(stringResource(R.string.template_loading), style = MarkiroTheme.type.body, color = c.fg2)
-                else if (ui.hostMode) MarkiroTextButton(stringResource(R.string.template_refresh), onRefresh)
+                else MarkiroTextButton(stringResource(R.string.template_refresh), onRefresh)
             }
             if (ui.saveFailed || (preview && selected != null && chosen?.specJson != reviewedSpec)) Text(stringResource(R.string.template_save_failed), style = MarkiroTheme.type.body, color = c.errFg)
             // Inside the scroll area so keyboard/system font insets never cover this action.
             PrimaryButton(stringResource(if (preview || selected == null) R.string.template_save else R.string.template_next), {
                 if (preview || selected == null) onSave(selected, reviewedSpec) else { reviewedSpec = chosen?.specJson; preview = true }
-            }, enabled = purpose != PrintPurpose.DUPLICATE && (selected == null || (chosen != null && (!preview || chosen.specJson == reviewedSpec))))
+            }, enabled = selected == null || (chosen != null && (!preview || chosen.specJson == reviewedSpec)))
         }
     }
 }

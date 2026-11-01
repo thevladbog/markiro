@@ -51,7 +51,7 @@ describe("warehouse template reads", () => {
     const tenantId = randomUUID();
     const deviceId = randomUUID();
     const result = await new WarehouseTemplatesService(db).templates(tenantId, deviceId, [box.id]);
-    expect(conditions[0]?.params).toEqual([tenantId, deviceId, "station"]);
+    expect(conditions[0]?.params).toEqual([tenantId, deviceId, "station", "handheld"]);
     expect(conditions[1]?.params).toEqual([tenantId, true, "box", "product_duplicate", box.id]);
     expect(conditions[1]?.sql).toContain('"label_templates"."id" in');
     expect(warehouseTemplateCatalogSchema.parse(result).templates.map((t) => t.id)).toEqual([
@@ -68,7 +68,7 @@ describe("warehouse template reads", () => {
     expect(conditions[1]?.sql).not.toContain('"label_templates"."id" in');
   });
 
-  it("denies a revoked, handheld or foreign device before reading any templates", async () => {
+  it("denies a revoked or foreign device before reading any templates", async () => {
     const { db, conditions, box } = reader(false);
     await expect(
       new WarehouseTemplatesService(db).templates(randomUUID(), randomUUID(), [box.id]),

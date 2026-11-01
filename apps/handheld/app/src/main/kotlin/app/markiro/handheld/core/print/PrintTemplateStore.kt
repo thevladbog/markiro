@@ -87,12 +87,12 @@ class PrintTemplateStore(private val db: HandheldDatabase) {
     private val dao get() = db.printTemplateDao()
 
     suspend fun cache(row: CachedLabelTemplate) = db.recovery.commit {
-        if (row.purpose !in setOf("box", "pallet") || printableTemplate(row.specJson) == null) dao.removeTemplate(row.id)
+        if (row.purpose !in setOf("box", "pallet", "duplicate") || printableTemplate(row.specJson) == null) dao.removeTemplate(row.id)
         else dao.cache(row)
     }
 
     suspend fun select(printerId: String, purpose: PrintPurpose, templateId: String?, expectedSpec: String? = null): Boolean = db.recovery.commit {
-        if (purpose == PrintPurpose.DUPLICATE || db.printerDao().get(printerId) == null) return@commit false
+        if (db.printerDao().get(printerId) == null) return@commit false
         if (templateId == null) {
             dao.clearChoice(printerId, purpose.wire)
         } else {

@@ -17,9 +17,20 @@ open class LabelRenderer @Inject constructor(private val rasterize: RasterizeTex
         language: PrinterLanguage,
         dpi: Int,
     ): ByteArray {
-        val printSpec = withPrinterDpi(spec, dpi)
-        // Cache failures produce null inside loadCached; recovery/owner rejection still propagates.
+        // Rendering never fetches branding from the network.
         val logo = if (spec.elements.any { it is LabelElement.OrganizationLogo }) branding?.loadCached() else null
+        return renderWithLogo(spec, data, language, dpi, logo)
+    }
+
+    /** A historical pallet source carries its own immutable branding rather than today's logo. */
+    open suspend fun renderWithLogo(
+        spec: LabelSpec,
+        data: Map<LabelField, String>,
+        language: PrinterLanguage,
+        dpi: Int,
+        logo: RasterResult?,
+    ): ByteArray {
+        val printSpec = withPrinterDpi(spec, dpi)
         return when (language) {
             PrinterLanguage.ZPL -> generateZpl(printSpec, data, rasterize, logo).toByteArray(Charsets.ISO_8859_1)
             PrinterLanguage.TSPL -> generateTspl(printSpec, data, rasterize, logo)

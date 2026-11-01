@@ -207,6 +207,38 @@ what came out rather than being told the label printed.
 The status query runs before every send. Neither printer language acknowledges a job afterwards, so
 without asking first the only failure this app could ever report is silence.
 
+## Site-wide label reprint
+
+The hub's «Перепечать» works without entering a shift, in cloud and host modes.
+Choose a reason once, then scan a complete marking code or SSCC. Each lookup
+immediately prints the existing unit, box or pallet label, including objects made
+by other devices and closed shifts. Manual input uses one «Найти и напечатать»
+action. Unavailable, released or disassembled objects are refused; missing
+historical fields are never silently replaced with current shift data.
+
+The gear on the reason screen opens the existing printer settings. Assign
+«Коды маркировки», «Коробка» and «Паллета» there and choose their label templates.
+The catalogue can refresh from either backend without entering a production shift.
+Host mode still does not support automatic Data Matrix duplication on shift
+acceptance; the separate site-wide reprint flow supports unit labels.
+
+Room 24 stores `site_reprint_jobs` and `site_reprint_audit`. Before sending, a job
+freezes its source, operator/owner/generation, reason, printer, layout and bytes.
+A definite pre-send failure can be retried or cancelled. Unknown delivery blocks
+new jobs until an explicit repeat (with a duplicate-copy warning) or a matching
+verification scan; verification never prints. Interrupted sends recover as unknown.
+Retries replay the frozen bytes and destination even after settings change.
+
+Audit upload runs independently of printing, preserving event IDs and causal
+sequence. Its pending/rejected records appear in the existing sync queue; upload
+retries never send printer bytes. Dataset replacement archives unresolved evidence
+under `site_reprint_evidence:` with its original ownership, then clears business
+jobs; archived evidence is never rebound or automatically replayed.
+
+Automated tests cover Room migration, journal recovery, scanner lifecycle and
+native Compose layouts at 320/360 dp. Physical label readability, vendor scanning,
+printer delivery and live LAN/cloud operation require separate device acceptance.
+
 ## Duplicate Data Matrix
 
 A shift whose validation policy is `duplicate_dm` prints a copy of the marking code
