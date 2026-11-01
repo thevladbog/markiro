@@ -44,6 +44,13 @@ class OrganizationPrintBrandingTest {
         branding = OrganizationPrintBranding(context, db, api)
     }
     @After fun close() { db.close() }
+    @Test fun malformedHostLogoShapesAreRenderFailures() {
+        for (shape in listOf("[]", "1", "null", "{}", "{\"width\":1,\"height\":1}",
+            "{\"width\":[],\"height\":1,\"pixelsBase64\":\"AA==\"}")) {
+            val error = assertThrows(LabelRenderException::class.java) { hostLogoRaster(Json.parseToJsonElement(shape)) }
+            assertEquals("Invalid host logo shape", error.message)
+        }
+    }
     @Test fun hostLogoUsesTheOfflineHostCacheWithoutCallingCloud() = runTest {
         val config = checkNotNull(db.deviceConfigDao().get())
         db.deviceConfigDao().upsert(config.copy(backend = "host"))

@@ -15,6 +15,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -72,7 +73,7 @@ class OrganizationPrintBranding @Inject constructor(
                 } finally { bitmap.recycle() }
             }
         }
-        return hostLogoRaster(logo.jsonObject)
+        return hostLogoRaster(logo)
     }
 
     private fun cachedDescriptor(key: String): String? = prefs.getString(key, null)?.let {
@@ -156,10 +157,12 @@ class OrganizationPrintBranding @Inject constructor(
 }
 
 /** Host wire logos are already packed monochrome pixels, with the same row stride as ZPL. */
-internal fun hostLogoRaster(logo: kotlinx.serialization.json.JsonObject): RasterResult {
-    val width = logo.getValue("width").jsonPrimitive.int
-    val height = logo.getValue("height").jsonPrimitive.int
-    val encoded = logo.getValue("pixelsBase64").jsonPrimitive.content
+internal fun hostLogoRaster(value: kotlinx.serialization.json.JsonElement): RasterResult {
+    fun invalid(): Nothing = throw LabelRenderException("Invalid host logo shape")
+    val logo = value as? kotlinx.serialization.json.JsonObject ?: invalid()
+    val width = (logo["width"] as? kotlinx.serialization.json.JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: invalid()
+    val height = (logo["height"] as? kotlinx.serialization.json.JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: invalid()
+    val encoded = (logo["pixelsBase64"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: invalid()
     if (width !in 1..1024 || height !in 1..512 || encoded.length > 90_000) throw LabelRenderException("Invalid host logo bounds")
     val bytes = try { java.util.Base64.getDecoder().decode(encoded) } catch (_: IllegalArgumentException) {
         throw LabelRenderException("Invalid host logo encoding")

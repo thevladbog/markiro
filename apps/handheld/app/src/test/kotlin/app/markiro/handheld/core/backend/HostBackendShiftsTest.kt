@@ -88,12 +88,13 @@ class HostBackendShiftsTest {
     private val block0 = """{"id":"b1000000-0000-4000-8000-000000000001","issuerPrefix":"460068200","extension":0,"fromSerial":1500,"toSerial":3499}"""
     private val block1 = """{"id":"b1000000-0000-4000-8000-000000000002","issuerPrefix":"460068200","extension":1,"fromSerial":40,"toSerial":239}"""
 
-    private fun backend(routes: Routes, revoked: () -> Unit = {}, participation: ShiftParticipationStore? = null): HostBackend {
+    private fun backend(routes: Routes, revoked: () -> Unit = {}, participation: ShiftParticipationStore? = null, branding: Boolean = false): HostBackend {
         val api = HostApi(routes)
         val pool = SsccPool(db)
         val supplier = HostBlockSupplier(db, MetaStore(db), api, pool, SsccBlockApplier(pool), requestId = { "req-${routes.posts.size}" })
         return HostBackend(
             api = { api }, config = db.deviceConfigDao(), db = db, supplier = supplier,
+            orgPrint = if (branding) app.markiro.handheld.core.host.HostOrgPrint(api, MetaStore(db)) else null,
             calls = HostCalls { revoked() }, reference = null, operators = db.operatorDao(), participation = participation,
         )
     }
@@ -107,6 +108,17 @@ class HostBackendShiftsTest {
     }
 
     private fun oneShift(): String = Json.parseToJsonElement(fixture(participants)).jsonObject.getValue("shifts").jsonArray[0].toString()
+
+    @Test fun enteringAShiftCachesPrintBrandingWithoutPalletBootstrap() = runTest {
+        val org = """{"name":"Factory","issuerPrefix":"1234567","logo":{"width":8,"height":1,"pixelsBase64":"gA=="}}"""
+        val routes = Routes(mutableMapOf(
+            "/v1/device/org/print" to ArrayDeque(listOf(ok(org))),
+            shiftPath to ArrayDeque(listOf(ok(fixture("device-shift-entered-pallets.json")))),
+        ))
+        backend(routes, branding = true).enter(id, ShiftEntryRequest("list"))
+        val cached = checkNotNull(MetaStore(db).get(app.markiro.handheld.core.host.HostOrgPrint.KEY))
+        assertEquals(Json.parseToJsonElement(org), Json.parseToJsonElement(cached))
+    }
 
     @Test
     fun theListIsTheHostsShiftsInTheShapeTheLoadersRead() = runTest {
