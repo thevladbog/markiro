@@ -3316,6 +3316,7 @@
       "beta": "Beta channel"
     },
     "list": {
+      "technical": "Technical details",
       "latest": "Latest: {{version}}",
       "noLatest": "No latest version published",
       "latestUnreadable": "The channel's latest.json cannot be read: the site and standalone hosts may not find the latest version. Make the right version latest to rewrite the pointer.",

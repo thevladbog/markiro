@@ -42,7 +42,7 @@ function channelSection(name: string): HTMLElement {
 
 function rowOf(section: HTMLElement, version: string): HTMLElement {
   const row = within(section)
-    .getAllByRole("row")
+    .getAllByRole("article")
     .find((candidate) => within(candidate).queryByText(version, { exact: true }) !== null);
   if (!row) throw new Error(`No row for ${version}`);
   return row;

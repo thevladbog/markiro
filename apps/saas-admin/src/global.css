@@ -4960,7 +4960,7 @@ p.offer-muted {
   align-items: start;
 }
 
-/* Website leads: a filterable registry and a two-column card. */
+/* Website leads: work and journal with a contact sidebar. */
 .leads-page {
   min-width: 0;
   display: grid;
@@ -5000,8 +5000,8 @@ p.offer-muted {
 }
 .leads-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  gap: 24px;
   align-items: start;
 }
 .leads-column,
@@ -5030,6 +5030,48 @@ p.offer-muted {
 .leads-inline-form > .mk-field {
   flex: 1 1 220px;
   min-width: 0;
+}
+.lead-detail-page .mk-definition-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.lead-detail-page .mk-definition-grid__item {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.3fr);
+  gap: 8px 16px;
+  align-items: baseline;
+}
+.leads-contact {
+  align-items: baseline;
+}
+.leads-contact a {
+  overflow-wrap: anywhere;
+}
+.leads-schedule,
+.leads-contact-action {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+.leads-schedule > .mk-field {
+  width: 100%;
+}
+.leads-contact-action,
+.leads-schedule,
+.leads-note {
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.leads-note .leads-actions {
+  justify-content: space-between;
+}
+.leads-card--danger .mk-btn {
+  margin-top: 16px;
+}
+@media (max-width: 480px) {
+  .lead-detail-page .mk-definition-grid__item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
 }
 .leads-journal {
   margin: 0;
@@ -5155,6 +5197,88 @@ p.offer-muted {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+}
+.releases-history {
+  display: grid;
+  min-width: 0;
+}
+.releases-history > .releases-muted {
+  padding: 20px;
+}
+.releases-entry {
+  min-width: 0;
+  padding: 24px var(--panel-pad);
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 16px;
+}
+.releases-entry__header,
+.releases-entry__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+.releases-entry__version {
+  margin: 0;
+  font: var(--text-h3);
+  font-family: var(--font-mono);
+}
+.releases-entry__meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  font: var(--text-body-sm);
+}
+.releases-entry__meta dt {
+  color: var(--fg-3);
+  margin-bottom: 4px;
+  font: var(--text-caption);
+}
+.releases-entry__meta dd {
+  margin: 0;
+}
+.releases-entry__changes h4 {
+  margin: 0 0 8px;
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+.releases-entry .releases-notes {
+  list-style: disc;
+  padding-left: 20px;
+  max-width: 85ch;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.releases-entry__footer {
+  align-items: baseline;
+}
+.releases-entry__technical {
+  width: 100%;
+}
+.releases-entry__technical summary {
+  cursor: pointer;
+  padding: 8px 0;
+  width: fit-content;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+.releases-entry__technical summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.releases-entry__technical .releases-entry__meta {
+  padding-top: 12px;
+}
+.releases-entry__checksum {
+  width: 100%;
+  min-width: 0;
+}
+.releases-entry__checksum code {
+  min-width: 0;
 }
 .releases-progress p {
   margin: 0;
