@@ -1007,4 +1007,10 @@
     <string name="site_reprint_source_unavailable">Код освобождён или упаковка расформирована. Перепечать недоступна. Можно сканировать другую этикетку.</string>
     <string name="site_reprint_refused">Данные или состояние объекта не позволяют перепечатать этикетку. Сканируйте другую этикетку или уточните состояние объекта в офисе.</string>
     <string name="site_reprint_incomplete">Нужен полный код маркировки, включая криптохвост. Сканируйте другую этикетку.</string>
+    <string name="printer_output_mode">Выдача этикетки</string>
+    <string name="printer_output_device">Как настроено в принтере</string>
+    <string name="printer_output_normal">Обычная печать</string>
+    <string name="printer_output_peel">Отделитель с датчиком снятия</string>
+    <string name="printer_output_cutter">Обрезчик — каждая этикетка</string>
+    <string name="printer_output_hint">Для отделения или резки требуется соответствующий модуль принтера. Режим применяется к новым заданиям.</string>
 </resources>

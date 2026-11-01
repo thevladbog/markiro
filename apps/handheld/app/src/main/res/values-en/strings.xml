@@ -977,4 +977,10 @@
     <string name="site_reprint_source_unavailable">The code was released or the pack was disassembled. Reprinting is unavailable. You can scan another label.</string>
     <string name="site_reprint_refused">The object data or state does not allow reprinting. Scan another label or ask the office to check the object.</string>
     <string name="site_reprint_incomplete">A complete marking code including its crypto suffix is required. Scan another label.</string>
+    <string name="printer_output_mode">Label output</string>
+    <string name="printer_output_device">Use printer settings</string>
+    <string name="printer_output_normal">Normal printing</string>
+    <string name="printer_output_peel">Peeler with label-taken sensor</string>
+    <string name="printer_output_cutter">Cutter — every label</string>
+    <string name="printer_output_hint">Peeling or cutting requires the corresponding printer hardware. This setting applies to new jobs.</string>
 </resources>

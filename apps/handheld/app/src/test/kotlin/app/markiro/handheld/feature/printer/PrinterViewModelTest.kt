@@ -77,6 +77,36 @@ class PrinterViewModelTest {
     ) = main.track(PrinterViewModel(recovery = db.recovery, db.printerDao(), transport, LabelRenderer(rasterize), { paired }, { 1_757_000_000_000L }))
 
     @Test
+    fun newPrintersDefaultToNormalButEditingLegacyKeepsDeviceMode() = runTest {
+        val model = vm()
+        model.startAdd(TransportKind.WIFI)
+        assertEquals("normal", model.addForm.value.outputMode)
+        saveSelected(model)
+        assertEquals("normal", model.state.value.printers.single().outputMode)
+        val legacy = model.state.value.printers.single().copy(outputMode = null)
+        db.printerDao().upsert(legacy)
+        model.state.first { it.printers.single().outputMode == null }
+        model.startEdit(legacy.id)
+        assertEquals(null, model.addForm.value.outputMode)
+        model.checkAndSave()
+        model.addForm.first { it.host.isEmpty() }
+        assertEquals(null, db.printerDao().get(legacy.id)?.outputMode)
+    }
+
+    @Test fun rediscoveringLegacyPrinterDoesNotResetItsOutputMode() = runTest {
+        val model = vm()
+        saveSelected(model)
+        val original = model.state.value.printers.single().copy(outputMode = null)
+        db.printerDao().upsert(original)
+        model.state.first { it.printers.single().outputMode == null }
+        model.startAdd(TransportKind.WIFI)
+        model.editHost("192.168.1.40")
+        model.checkAndSave()
+        model.addForm.first { it.host.isEmpty() }
+        assertEquals(null, db.printerDao().get(original.id)?.outputMode)
+    }
+
+    @Test
     fun addingASecondPrinterPreservesAssignmentsAndTestsTheRequestedProfile() = runTest {
         val transport = FakeTransport()
         val model = vm(transport)

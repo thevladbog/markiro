@@ -84,7 +84,7 @@ private val PRINTER_PROBLEMS = setOf("no_paper", "head_open", "unreachable", "ot
 private suspend fun rememberStatus(dao: PrinterDao, recovery: app.markiro.handheld.core.storage.DeviceRecovery,
     printer: PrinterEntity, status: String, at: Long) = recovery.commit {
     // A response from an old snapshot must not overwrite a newly edited endpoint's status.
-    dao.setSnapshotStatus(printer.id, printer.address, printer.transport, printer.language, printer.dpi, status, at)
+    dao.setSnapshotStatus(printer.id, printer.address, printer.transport, printer.language, printer.dpi, printer.outputMode, status, at)
 }
 
 suspend fun PrinterTransport.statusRemembered(printer: PrinterEntity, dao: PrinterDao,

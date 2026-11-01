@@ -122,6 +122,13 @@ changes. Recovery may explicitly select a replacement; duplicate labels require 
 saved language/DPI and replay their original bytes with a reprint reason. Sends are
 serialized per physical endpoint, including test labels. Local destination metadata
 retires with the existing print-job retention rules and never enters server event digests.
+RAW profiles may additionally select normal output, peel with a label-taken sensor,
+or cut after every label. New profiles default to normal; absent mode in legacy
+profiles leaves device configuration unchanged. Commands are part of freshly
+prepared bytes before digesting/freezing. Saved jobs retain their original bytes
+and destination mode. Windows-driver output continues using driver settings.
+Handheld Room 26 adds nullable mode to profiles and pinned destinations without
+rewriting saved jobs. See [printer output mode acceptance](acceptance/printer-output-modes.md).
 See [device printer routing](superpowers/specs/2026-09-13-device-printer-routing-design.md).
 
 Warehouse reprinting uses one session with product, box and pallet templates selected

@@ -224,6 +224,23 @@ class DuplicateJobsTest {
         assertNull(db.productLabelJobDao().openJob("s1"))
     }
 
+    @Test fun profileModeChangesDoNotChangePreparedDuplicateBytesOrReplay() = runTest {
+        val original = checkNotNull(db.printerDao().assigned("duplicate"))
+        db.printerDao().upsert(original.copy(outputMode = "peel"))
+        val id = (accept() as DuplicateOutcome.Prepared).jobId
+        val prepared = checkNotNull(db.productLabelJobDao().get(id))
+        val bytes = android.util.Base64.decode(prepared.bytesBase64, android.util.Base64.NO_WRAP)
+        assertTrue(bytes.toString(Charsets.ISO_8859_1).contains("^MMP"))
+        assertEquals(productLabelBytesDigest(bytes), prepared.bytesDigest)
+        db.printerDao().upsert(original.copy(outputMode = "cutter"))
+        assertEquals(DuplicateSend.Sent, jobs().send(id))
+        assertTrue(bytes.contentEquals(transport.sent.single()))
+        assertEquals("peel", transport.targets.single().outputMode)
+        assertTrue(jobs().reprint(id, ReprintReason.LOST) is DuplicateOutcome.Prepared)
+        assertEquals(DuplicateSend.Sent, jobs().send(id))
+        assertTrue(bytes.contentEquals(transport.sent.last()))
+    }
+
     @Test
     fun aDeliveredSendRecordsSendingThenSent() = runTest {
         val jobId = (accept() as DuplicateOutcome.Prepared).jobId

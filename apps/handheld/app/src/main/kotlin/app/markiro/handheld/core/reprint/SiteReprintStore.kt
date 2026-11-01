@@ -13,9 +13,9 @@ import app.markiro.handheld.core.print.PrinterEntity
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class ReprintPrinter(val id: String, val name: String, val transport: String, val address: String, val language: String, val dpi: Int) {
-    fun entity() = PrinterEntity(id, name, transport, address, language, dpi, false, null, null)
-    companion object { fun of(p: PrinterEntity) = ReprintPrinter(p.id, p.name, p.transport, p.address, p.language, p.dpi) }
+data class ReprintPrinter(val id: String, val name: String, val transport: String, val address: String, val language: String, val dpi: Int, val outputMode: String? = null) {
+    fun entity() = PrinterEntity(id, name, transport, address, language, dpi, false, null, null, outputMode)
+    companion object { fun of(p: PrinterEntity) = ReprintPrinter(p.id, p.name, p.transport, p.address, p.language, p.dpi, p.outputMode) }
 }
 
 /** Complete replayable job. Neither source, destination, layout nor bytes can be edited after preparation. */

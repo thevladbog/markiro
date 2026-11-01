@@ -3,7 +3,11 @@ import {
   finishProductionPalletDelivery,
 } from "./production-delivery.js";
 import { parseOrganizationBranding } from "../organization-branding.js";
-import { productLabelBytesDigest, warehouseSourceSchema } from "@markiro/domain";
+import {
+  applyPrinterOutputMode,
+  productLabelBytesDigest,
+  warehouseSourceSchema,
+} from "@markiro/domain";
 import type { BoxPrintInput, BoxPrintAttempt } from "../box-printing.js";
 import type { CredentialGeneration } from "../credential-recovery.js";
 import { acquireCredentialCommitLease } from "../credential-recovery.js";
@@ -78,7 +82,11 @@ export async function attemptProductionPalletPrint(
       printerMode(profile) === "windows_driver"
         ? (await renderPrintArtifact(template, fields, profile, rasterizeDriverText, { logo }))
             .bytes
-        : await input.render(template, fields, profile.language, profile.dpi, logo);
+        : applyPrinterOutputMode(
+            await input.render(template, fields, profile.language, profile.dpi, logo),
+            profile.language,
+            profile.outputMode,
+          );
     try {
       const previous =
         input.explicitRetry && printerMode(profile) === "windows_driver"

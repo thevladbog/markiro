@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  applyPrinterOutputMode,
   encodeMonoRaster,
   renderMonoLabel,
   withPrinterDpi,
@@ -87,10 +88,14 @@ export async function prepareProductLabelAcceptance(
             input.rasterizeText,
           ),
         )
-      : await renderLabelBytes(policy.snapshot.spec, fields, language, input.rasterizeText, {
-          kmDataMatrix: "raster",
-          dpi: printerDpi,
-        });
+      : applyPrinterOutputMode(
+          await renderLabelBytes(policy.snapshot.spec, fields, language, input.rasterizeText, {
+            kmDataMatrix: "raster",
+            dpi: printerDpi,
+          }),
+          language,
+          input.printerOutputMode,
+        );
   const codeHash = kmHash(km);
   return parseProductLabelAcceptance({
     jobId: input.jobId,

@@ -747,3 +747,12 @@ test("the standalone Windows printer harness selects both Station native gates",
   assert.ok(jobs.includes("station_rust"));
   assert.ok(jobs.includes("station_windows_build"));
 });
+
+test("printer output byte producers select Android parity", () => {
+  for (const path of [
+    "packages/domain/src/labels/printer-output-mode.ts",
+    "packages/domain/scripts/export-printer-output-fixtures.mjs",
+    "packages/domain/test/printer-output-mode.test.ts",
+  ])
+    assert.equal(classifyChangedFiles([path]).jobs.handheld_android, true, path);
+});

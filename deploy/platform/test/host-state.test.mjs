@@ -118,7 +118,14 @@ test("lock excludes nested and distinct processes, and a terminated owner leaves
   const killed = child(
     t,
     `import { withHostState } from ${JSON.stringify(moduleUrl)};
-    await withHostState(process.argv[1], async () => { process.send("locked"); await new Promise(() => {}); });`,
+    await withHostState(process.argv[1], async () => {
+      // Keep the IPC channel referenced until the parent terminates this owner.
+      // An unresolved Promise alone lets Node exit with code 13 before SIGKILL.
+      await new Promise(resolve => {
+        process.once("message", resolve);
+        process.send("locked");
+      });
+    });`,
     [root],
   );
   assert.deepEqual(

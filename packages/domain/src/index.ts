@@ -554,3 +554,9 @@ export { isValidInn, normalizeInn } from "./inn.js";
 export * from "./signed-documents/compact-jws.js";
 export { utf16BoundedString } from "./utf16-string.js";
 export * from "./standalone-license/index.js";
+
+export {
+  applyPrinterOutputMode,
+  PRINTER_OUTPUT_MODES,
+  type PrinterOutputMode,
+} from "./labels/printer-output-mode.js";

@@ -571,3 +571,13 @@ val MIGRATION_23_24 = object : Migration(23, 24) {
 val MIGRATION_24_25 = object : Migration(24, 25) {
     override fun migrate(db: SupportSQLiteDatabase) = app.markiro.handheld.core.reprint.SiteReprintSchema.createIndexes(db)
 }
+
+/** Hardware settings and frozen destinations retain null for every legacy printer. */
+val MIGRATION_25_26 = object : Migration(25, 26) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        if ("outputMode" !in db.columnsOf("printers"))
+            db.execSQL("ALTER TABLE printers ADD COLUMN outputMode TEXT")
+        if ("printer_outputMode" !in db.columnsOf("print_destinations"))
+            db.execSQL("ALTER TABLE print_destinations ADD COLUMN printer_outputMode TEXT")
+    }
+}

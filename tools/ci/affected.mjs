@@ -218,6 +218,9 @@ function jobsForPath(path) {
   }
 
   if (
+    path === "packages/domain/src/labels/printer-output-mode.ts" ||
+    path === "packages/domain/scripts/export-printer-output-fixtures.mjs" ||
+    path === "packages/domain/test/printer-output-mode.test.ts" ||
     path === "packages/domain/src/validation-reprocessing.ts" ||
     path === "packages/domain/src/validation-reprocessing-fixtures.ts" ||
     path === "packages/domain/src/product-labels/contracts.ts" ||

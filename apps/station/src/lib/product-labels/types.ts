@@ -2,6 +2,7 @@ import type {
   EnabledValidationPrintPolicy,
   LabelField,
   PrinterLanguage,
+  PrinterOutputMode,
   ProductLabelAttemptState,
   ProductLabelEvent,
   ProductLabelJobStatus,
@@ -36,6 +37,7 @@ export type PrepareProductLabelInput = Pick<
   attemptId: string;
   language: PrinterLanguage;
   printerMode?: "raw" | "windows_driver";
+  printerOutputMode?: PrinterOutputMode;
   /** Unknown resolution must be configured before accepting the first unit. */
   printerDpi: 203 | 300 | null;
   rasterizeText: RasterizeTextFn;

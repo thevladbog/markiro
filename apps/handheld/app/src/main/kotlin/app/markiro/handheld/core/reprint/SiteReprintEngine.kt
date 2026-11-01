@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.reprint
 
+import app.markiro.handheld.core.print.applyPrinterOutputMode
+
 import app.markiro.handheld.core.duplicate.compareDuplicateKm
 import app.markiro.handheld.core.duplicate.DuplicateMatch
 import app.markiro.handheld.core.duplicate.parseDuplicateKm
@@ -112,11 +114,11 @@ class SiteReprintEngine(
                     return@work SiteReprintResult.Failed("source_fields_missing")
                 val fields = source.fields.mapKeys { LabelField.fromWire(it.key) }
                 val language = PrinterLanguage.fromWire(printer.language)
-                val bytes = if (source.kind == "pallet" && db.deviceConfigDao().get()?.backend == "cloud") {
+                val bytes = applyPrinterOutputMode(if (source.kind == "pallet" && db.deviceConfigDao().get()?.backend == "cloud") {
                     val logo = historicalReprintLogo(source, token.owner.tenantId)
                     if (logo == null && spec.elements.any { it is LabelElement.OrganizationLogo }) return@work SiteReprintResult.Failed("branding_unavailable")
                     renderer.renderWithLogo(spec, fields, language, printer.dpi, logo)
-                } else renderer.render(spec, fields, language, printer.dpi)
+                } else renderer.render(spec, fields, language, printer.dpi), printer.language, printer.outputMode)
                 if (bytes.isEmpty()) return@work SiteReprintResult.Failed("render_failed")
                 if (!authorized(operatorId)) return@work SiteReprintResult.Failed("operator_changed")
                 val at = now()

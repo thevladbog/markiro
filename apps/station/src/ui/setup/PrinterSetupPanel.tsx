@@ -1,3 +1,4 @@
+import type { PrinterOutputMode } from "@markiro/domain";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Select } from "@markiro/ui";
@@ -11,6 +12,8 @@ type PrinterTransport = PrintTarget["kind"] | "none";
 
 export interface PrinterSetupPanelProps {
   mode?: "raw" | "windows_driver";
+  outputMode?: PrinterOutputMode | undefined;
+  onOutputModeChange?: (mode: PrinterOutputMode | undefined) => void;
   windowsSupported?: boolean;
   a4Supported?: boolean;
   paper?: "a4" | undefined;
@@ -50,6 +53,8 @@ export interface PrinterSetupPanelProps {
 
 export function PrinterSetupPanel({
   mode = "raw",
+  outputMode,
+  onOutputModeChange,
   windowsSupported = false,
   a4Supported = false,
   paper,
@@ -263,27 +268,49 @@ export function PrinterSetupPanel({
           {mode === "windows_driver" && (
             <p className="setup-windows-hint">{t("setup.windowsDriverHint")}</p>
           )}
-          <fieldset
-            hidden={mode === "windows_driver"}
-            className="setup-choice-group setup-choice-group--printer-language"
-          >
-            <legend>{t("setup.printerLanguage")}</legend>
-            <div className="setup-choice-group__options setup-choice-group__options--compact">
-              {(["zpl", "tspl"] as const).map((value) => (
-                <label className="setup-touch-choice" key={value}>
-                  <input
-                    type="radio"
-                    name="printer-language"
-                    checked={language === value}
-                    disabled={disabled}
-                    onChange={() => onLanguageChange(value)}
-                  />
-                  <span>{value === "zpl" ? t("setup.languageZpl") : t("setup.languageTspl")}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
         </div>
+        {mode === "raw" && (
+          <div className="setup-printer-format">
+            <Select
+              native
+              size="floor"
+              label={t("setup.printerOutputMode")}
+              value={outputMode ?? "device"}
+              disabled={disabled || busy || transport === "none"}
+              options={[
+                ...(outputMode === undefined
+                  ? [{ value: "device", label: t("setup.printerOutputDevice") }]
+                  : []),
+                { value: "normal", label: t("setup.printerOutputNormal") },
+                { value: "peel", label: t("setup.printerOutputPeel") },
+                { value: "cutter", label: t("setup.printerOutputCutter") },
+              ]}
+              onValueChange={(value) => {
+                if (value === "normal" || value === "peel" || value === "cutter")
+                  onOutputModeChange?.(value);
+              }}
+            />
+            <fieldset className="setup-choice-group setup-choice-group--printer-language">
+              <legend>{t("setup.printerLanguage")}</legend>
+              <div className="setup-choice-group__options setup-choice-group__options--compact">
+                {(["zpl", "tspl"] as const).map((value) => (
+                  <label className="setup-touch-choice" key={value}>
+                    <input
+                      type="radio"
+                      name="printer-language"
+                      checked={language === value}
+                      disabled={disabled}
+                      onChange={() => onLanguageChange(value)}
+                    />
+                    <span>
+                      {value === "zpl" ? t("setup.languageZpl") : t("setup.languageTspl")}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+        )}
       </section>
 
       <section
@@ -297,6 +324,7 @@ export function PrinterSetupPanel({
         <p id={dpiHintId} className="setup-card__dpi-hint">
           {t("setup.printerDpiHint")}
         </p>
+        {mode === "raw" && <p className="setup-windows-hint">{t("setup.printerOutputHint")}</p>}
         {paper === "a4" && (
           <Select
             native

@@ -1,5 +1,10 @@
 import { expect, it, vi } from "vitest";
-import { productLabelValueDigest, warehouseBoxSource, warehouseBoxTemplate } from "@markiro/domain";
+import {
+  productLabelBytesDigest,
+  productLabelValueDigest,
+  warehouseBoxSource,
+  warehouseBoxTemplate,
+} from "@markiro/domain";
 import { renderWarehouseLabel } from "../src/lib/warehouse-reprint/prepare";
 import { warehousePreparedJobInput } from "./support/warehouse-reprint";
 it("renders corrected SSCC in TSPL and ZPL at both DPIs with frozen fields", async () => {
@@ -87,4 +92,27 @@ it("rasterizes ASCII frozen values as well as Cyrillic in newly prepared warehou
   expect(raster.mock.calls.map(([text]) => text)).toContain(source.fields.date);
   expect(atob(rendered.bytesBase64)).not.toContain("TEXT ");
   expect(atob(rendered.bytesBase64)).toContain("BITMAP ");
+});
+
+it("freezes output-mode commands in the warehouse bytes and digest", async () => {
+  const source = warehouseBoxSource();
+  const template = warehouseBoxTemplate();
+  const printer = {
+    id: "p",
+    name: "P",
+    target: { kind: "tcp" as const, host: "p", port: 9100 },
+    language: "tspl" as const,
+    dpi: 203 as const,
+    outputMode: "cutter" as const,
+  };
+  const out = await renderWarehouseLabel(source, template, printer, async () => ({
+    hex: "00",
+    totalBytes: 1,
+    bytesPerRow: 1,
+    width: 8,
+    height: 1,
+  }));
+  const bytes = Uint8Array.from(atob(out.bytesBase64), (c) => c.charCodeAt(0));
+  expect(new TextDecoder().decode(bytes).startsWith("SET PEEL OFF\nSET CUTTER 1\n")).toBe(true);
+  expect(out.bytesDigest).toBe(productLabelBytesDigest(bytes));
 });
