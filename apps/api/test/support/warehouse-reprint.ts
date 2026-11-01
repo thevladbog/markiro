@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { schema, type Db } from "@markiro/db";
+import { ensurePartitions, schema, type Db } from "@markiro/db";
 import {
   canonicalizeKm,
   kmHash,
@@ -100,6 +100,7 @@ export async function setupWarehouseApi(databaseUrl?: string): Promise<Warehouse
   const km = canonicalizeKm(WAREHOUSE_TEST_KM);
   const codeHash = kmHash(km);
   const scannedAt = new Date("2026-10-08T10:00:00Z");
+  await ensurePartitions(db, [scannedAt]);
   await db
     .insert(schema.codeRegistry)
     .values({ tenantId: a.tenantId, codeHash, shiftId, terminalId: randomUUID(), scannedAt });
