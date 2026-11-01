@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { BEER_MARKING_2026_ARTICLE, BEER_MARKING_2026_ARTICLE_EN } from "../content/articles";
 import { findHubPage } from "../content/hubs";
-import { findSeoPage } from "../content/pages";
+import { findSeoPage, SEO_PAGES } from "../content/pages";
 import { getLegalDocumentPage } from "../content/legal-pages";
 import {
   attachOrganizationContact,
@@ -518,6 +518,31 @@ describe("SEO generators", () => {
     expect(webPage).toMatchObject({ dateModified: "2026-10-23" });
   });
 
+  it("keeps the desktop software platform consistent on every Russian and English topic page", () => {
+    const topics = SEO_PAGES.filter((page) => page.path !== "/" && page.path !== "/en/");
+    expect(topics).toHaveLength(12);
+    for (const page of topics) {
+      const software = buildPageGraph(page)["@graph"].find(
+        (node) => node["@id"] === "https://markiro.app/#software",
+      );
+      expect(software, page.path).toMatchObject({
+        operatingSystem: ["Windows 10", "Windows 11"],
+        processorRequirements: "x64",
+        inLanguage: "ru",
+      });
+    }
+  });
+
+  it("uses the existing public brand image for the organization on both language versions", () => {
+    for (const path of ["/", "/en/"]) {
+      const organization = buildPageGraph(findSeoPage(path))["@graph"].find(
+        (n) => n["@type"] === "Organization",
+      );
+      expect(organization).toMatchObject({ image: "https://markiro.app/og-markiro.jpg" });
+      expect(organization).not.toHaveProperty("address");
+    }
+  });
+
   it("describes the software with visible facts only", () => {
     const ru = buildPageGraph(findSeoPage("/"))["@graph"].find(
       (entry) => entry["@type"] === "SoftwareApplication",
@@ -553,7 +578,7 @@ describe("SEO generators", () => {
       "Database backups stay on your own equipment",
       "Export shift results in TXT, CSV or XML for GIS MT and 1C",
     ]);
-    expect(ru).not.toHaveProperty("offers");
+    expect(ru?.offers).toMatchObject([{ price: 60000 }, { price: 120000 }, { price: 240000 }]);
     expect(ru).not.toHaveProperty("aggregateRating");
   });
 

@@ -1,6 +1,7 @@
 import { PRODUCT_FACTS, V4_HOME_FAQ } from "../content/product-facts";
 import { PRODUCT_FACTS_EN, V4_HOME_FAQ_EN } from "../content/product-facts-en";
 import { TARIFFS } from "../content/pricing";
+import { TARIFFS_EN } from "../content/autonom-en";
 import type { PageGraph, PageMetadata } from "./seo";
 
 const origin = "https://markiro.app";
@@ -43,6 +44,24 @@ export function buildV4ProductGraph(page: PageMetadata, shared: PageGraph["@grap
       description: en
         ? PRODUCT_FACTS_EN.softwareDescription
         : "Программа для агрегации кодов маркировки на Windows. Офис управляет сменами и продукцией; станция выполняет упаковку и агрегацию. Главный ПК, офис и станция — роли одного установщика. Пробный период 14 дней со всеми функциями, без оплаты.",
+      // Home pages show these annual site licences. A trial is not a free software price.
+      ...(home
+        ? {
+            offers: TARIFFS.filter((tariff) => tariff.pricePerYear !== null).map((tariff) => ({
+              "@type": "Offer",
+              name: en
+                ? `${TARIFFS_EN[tariff.code].name} — annual site licence`
+                : `Тариф «${tariff.name}» — лицензия на площадку на год`,
+              url: `${origin}/stoimost/#plan-${tariff.code}`,
+              price: tariff.pricePerYear,
+              priceCurrency: "RUB",
+              seller: ref(`${origin}/#organization`),
+              description: en
+                ? "Annual licence for one production site. Prices exclude VAT."
+                : "Годовая лицензия на одну площадку. Цены без НДС.",
+            })),
+          }
+        : {}),
       applicationCategory: facts.applicationCategory,
       operatingSystem: facts.desktop.operatingSystems,
       processorRequirements: facts.desktop.architecture,

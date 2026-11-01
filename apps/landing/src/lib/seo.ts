@@ -1,6 +1,7 @@
 import { findLegalDocument, findLegalRelease, requireLegalContent } from "@markiro/legal-documents";
 
 import { SITE_CONTACTS } from "../content/contacts";
+import { PRODUCT_FACTS } from "../content/product-facts";
 import { buildV4ProductGraph } from "./product-schema";
 import { LEGAL_SEARCH_PAGES, type LegalDocumentPageDefinition } from "../content/legal-pages";
 import type { PublishedLegalArtifact } from "./legal-artifacts";
@@ -120,6 +121,7 @@ function organizationNode(): JsonLdObject {
     name: "Markiro",
     url: `${SITE_URL}/`,
     logo: { "@type": "ImageObject", url: absoluteUrl(ORGANIZATION_LOGO_PATH) },
+    image: absoluteUrl("/og-markiro.jpg"),
     email: ORGANIZATION_EMAIL,
     areaServed: "RU",
     contactPoint: [
@@ -151,7 +153,8 @@ function softwareNode(locale: "ru" | "en"): JsonLdObject {
       locale === "ru" ? ["Markiro Autonom", "Markiro"] : ["Маркиро Автоном", "Markiro"],
     url: absoluteUrl(homePath),
     applicationCategory: "BusinessApplication",
-    operatingSystem: "Windows 10, Windows 11, Android",
+    operatingSystem: PRODUCT_FACTS.desktop.operatingSystems,
+    processorRequirements: PRODUCT_FACTS.desktop.architecture,
     description: SEO_PAGES.find((page) => page.path === homePath)?.description,
     inLanguage: "ru",
     installUrl: absoluteUrl("/skachat/"),
