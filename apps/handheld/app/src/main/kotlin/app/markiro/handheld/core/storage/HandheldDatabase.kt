@@ -115,4 +115,4 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun hostOutboxDao(): HostOutboxDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 24
+const val HANDHELD_DATABASE_VERSION = 25

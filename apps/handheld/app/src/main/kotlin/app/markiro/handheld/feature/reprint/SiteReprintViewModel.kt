@@ -144,11 +144,6 @@ class SiteReprintViewModel internal constructor(
             return
         }
         if (at.step !in setOf(SiteReprintStep.SCAN, SiteReprintStep.MANUAL) || at.pendingJobId != null || raw.isBlank()) return
-        if (at.result is SiteReprintResult.Failed) {
-            mutable.value = at.copy(busyScan = true)
-            signal(SignalKind.ERROR)
-            return
-        }
         val reason = at.reason?.takeIf { it in REASONS } ?: return
         lastRaw = raw
         val id = sessionId

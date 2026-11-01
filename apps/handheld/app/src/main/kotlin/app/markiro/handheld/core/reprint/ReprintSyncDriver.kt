@@ -52,7 +52,7 @@ class ReprintSyncDriver(private val upstream: SyncDriver, private val db: Handhe
     override suspend fun drainAll(): Boolean {
         val settled = upstream.drainAll()
         reprints.flushAudit()
-        val token = recovery.token()
+        val token = try { recovery.token() } catch (_: RecoveryBlocked) { return false }
         val remaining = db.siteReprintDao().counts(Json.encodeToString(token.owner), token.generation)
         return settled && remaining.pending == 0 && remaining.rejected == 0
     }

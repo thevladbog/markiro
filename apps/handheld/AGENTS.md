@@ -93,7 +93,7 @@ Android tests must also verify its interpretation.
   record waits. The handheld still sends protocol header 6. Box exceptions, pallet reprints and the disassembly
   of a shift's pallet are still never sent to the host. Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
-- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 24 for site-wide reprint jobs/audit):
+- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 25 for site-wide reprint jobs/audit):
   every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
   `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
   (`EnterResult.LineFull`); `HostCalls` carries the two numbers to the loaders. The host's `maxStations`,
@@ -188,7 +188,7 @@ Android tests must also verify its interpretation.
 - Reason once, then each scan prints immediately. Use existing printer/purpose
   assignments and template choices; never add per-object confirmation to the
   ordinary scan flow. Busy scans are refused visibly.
-- Room 24 freezes source, layout, printer, bytes, operator and owner/generation
+- Room 25 freezes source, layout, printer, bytes, operator and owner/generation
   before hardware I/O. Unknown delivery is never automatically repeated;
   verification scans compare the saved identity/full KM and never print.
 - Audit envelopes are independent of physical printing, ordered per job by causal

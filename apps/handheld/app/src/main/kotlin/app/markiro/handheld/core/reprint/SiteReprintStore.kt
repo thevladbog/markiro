@@ -3,6 +3,7 @@ package app.markiro.handheld.core.reprint
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Insert
+import androidx.room.Index
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
@@ -40,7 +41,7 @@ data class SiteReprintJob(
     val updatedAt: String,
 )
 
-@Entity(tableName = "site_reprint_audit")
+@Entity(tableName = "site_reprint_audit", indices = [Index(value = ["jobId"]), Index(value = ["ownerJson", "generation", "state"])])
 data class SiteReprintAudit(
     @PrimaryKey val recordId: String,
     val jobId: String,
@@ -79,6 +80,12 @@ object SiteReprintSchema {
     fun create(db: SupportSQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS site_reprint_jobs (jobId TEXT NOT NULL PRIMARY KEY, sessionId TEXT NOT NULL, ownerJson TEXT NOT NULL, generation INTEGER NOT NULL, operatorId TEXT NOT NULL, backend TEXT NOT NULL, sourceJson TEXT NOT NULL, templateJson TEXT NOT NULL, printerJson TEXT NOT NULL, bytesBase64 TEXT NOT NULL, reason TEXT NOT NULL, state TEXT NOT NULL, error TEXT, attemptId TEXT NOT NULL, attempt INTEGER NOT NULL, sequence INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS site_reprint_audit (recordId TEXT NOT NULL PRIMARY KEY, jobId TEXT NOT NULL, ownerJson TEXT NOT NULL, generation INTEGER NOT NULL, backend TEXT NOT NULL, sequence INTEGER NOT NULL, occurredAt TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL, rejection TEXT)")
+        createIndexes(db)
+    }
+
+    fun createIndexes(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_site_reprint_audit_jobId ON site_reprint_audit(jobId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_site_reprint_audit_ownerJson_generation_state ON site_reprint_audit(ownerJson,generation,state)")
     }
 }
 

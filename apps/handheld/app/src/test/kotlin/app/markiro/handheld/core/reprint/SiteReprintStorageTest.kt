@@ -21,4 +21,22 @@ class SiteReprintStorageTest {
             assertTrue("audit upload must be independent of physical print state", "site_reprint_audit" in names)
         } finally { db.close() }
     }
+    @Test fun freshSchemaIndexesTheAuditLookups() {
+        val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val columns = db.openHelper.readableDatabase.query("PRAGMA index_list('site_reprint_audit')").use { rows ->
+                buildList {
+                    while (rows.moveToNext()) {
+                        val name = rows.getString(rows.getColumnIndexOrThrow("name"))
+                        if (name.startsWith("index_")) add(db.openHelper.readableDatabase.query("PRAGMA index_info('$name')").use { info ->
+                            buildList { while (info.moveToNext()) add(info.getString(info.getColumnIndexOrThrow("name"))) }
+                        })
+                    }
+                }
+            }
+            org.junit.Assert.assertEquals(setOf(listOf("jobId"), listOf("ownerJson", "generation", "state")), columns.toSet())
+        } finally { db.close() }
+    }
+
 }

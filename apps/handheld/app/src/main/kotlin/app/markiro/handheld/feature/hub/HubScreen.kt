@@ -212,8 +212,8 @@ fun HubScreen(
             val stamp = state.countsAt?.takeIf { !state.reachable }
                 ?.let { " · " + stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
                 .orEmpty()
-            val missingPrinters = state.missingPrinterPurposes.filter { !state.hostMode || it != app.markiro.handheld.core.print.PrintPurpose.DUPLICATE }
-            val printerAttention = state.printerAttentionPurposes.filter { !state.hostMode || it != app.markiro.handheld.core.print.PrintPurpose.DUPLICATE }
+            val missingPrinters = state.missingPrinterPurposes
+            val printerAttention = state.printerAttentionPurposes
             val byTile: Map<HubTile, @Composable (Modifier) -> Unit> = mapOf(
                 HubTile.SHIFT to { modifier ->
                     MenuRow(

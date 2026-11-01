@@ -222,7 +222,8 @@ The catalogue can refresh from either backend without entering a production shif
 Host mode still does not support automatic Data Matrix duplication on shift
 acceptance; the separate site-wide reprint flow supports unit labels.
 
-Room 24 stores `site_reprint_jobs` and `site_reprint_audit`. Before sending, a job
+Room 24 introduced `site_reprint_jobs` and `site_reprint_audit`; Room 25 adds audit
+lookup indexes while preserving saved jobs and envelopes. Before sending, a job
 freezes its source, operator/owner/generation, reason, printer, layout and bytes.
 A definite pre-send failure can be retried or cancelled. Unknown delivery blocks
 new jobs until an explicit repeat (with a duplicate-copy warning) or a matching

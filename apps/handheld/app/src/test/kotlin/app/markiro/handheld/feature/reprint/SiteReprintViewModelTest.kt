@@ -111,6 +111,24 @@ class SiteReprintViewModelTest {
         vm.cancelJob(); runCurrent(); assertTrue(vm.state.value.result is SiteReprintResult.Unknown)
         vm.retry(); runCurrent(); assertEquals(listOf("job"), operations.retries); assertEquals(1, operations.prints.size)
     }
+    @Test fun aJoblessFailureAllowsTheNextScanWhileSavedFailuresRemainBlocked() = runTest {
+        val operations = Operations().apply { answer = { SiteReprintResult.Failed("printer_unconfigured") } }
+        val vm = model(operations); runCurrent(); ready(vm); scan(); runCurrent()
+        assertNull(vm.state.value.pendingJobId)
+        operations.answer = { SiteReprintResult.Printed("next", "Product") }
+        scan("next-code"); runCurrent()
+        assertEquals(listOf("046800899000000017", "next-code"), operations.prints.map { it[0] })
+        assertTrue(vm.state.value.result is SiteReprintResult.Printed)
+
+        operations.saved = savedJob("operator").copy(state = "failed", error = "no_paper")
+        operations.answer = { SiteReprintResult.Failed("no_paper", "job") }
+        scan("saved-code"); runCurrent()
+        val before = operations.prints.size
+        scan("blocked-code"); runCurrent()
+        assertEquals(before, operations.prints.size)
+        assertEquals("job", vm.state.value.pendingJobId)
+    }
+
     private fun savedJob(operator: String) = SiteReprintJob("job", "f52ff2b2-60dd-46b7-ac85-aad87065e8c9", "{}", 1, operator, "host", "{}", "{}", "{}", "", "lost", "unknown", null, "attempt", 1, 1, "2026-11-01T00:00:00Z", "2026-11-01T00:00:00Z")
     private fun operator(id: String) = OperatorRecord(id, "Сергей", "1001", "operator", "x", null, true)
 }
