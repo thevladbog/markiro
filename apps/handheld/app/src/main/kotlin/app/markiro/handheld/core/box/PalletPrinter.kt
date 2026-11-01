@@ -63,7 +63,14 @@ class PalletPrinter(
             is Source.Ready -> source
             is Source.Refused -> return fail(palletId, source.reason)
         }
-        val templateJson = ready.templateJson
+        val productId = if (pallet.kind == PalletKind.WAREHOUSE) pallet.productId else pallet.shiftId?.let { db.shiftDao().get(it)?.productId }
+        val template = app.markiro.handheld.core.print.PrintTemplateStore(db).forPrint(
+            PrintPurpose.PALLET, palletId, ready.templateJson, productId,
+            productId?.let { db.palletProductDao().byId(it)?.chzProductGroupCode },
+            recoverUnsent = pallet.printState in setOf(PalletPrint.FAILED, PalletPrint.DEFERRED) && pallet.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
+        )
+        template.reason?.let { return fail(palletId, it) }
+        val templateJson = template.specJson ?: return fail(palletId, PrintReason.TEMPLATE_MISSING)
         val destinations = PrintDestinations(db)
         if (reprint && pallet.printState == PalletPrint.PRINTED && !replaced) {
             val current = db.printerDao().assigned(PrintPurpose.PALLET) ?: return fail(palletId, PrintReason.PRINTER_UNCONFIGURED)
@@ -129,7 +136,7 @@ class PalletPrinter(
      */
     private sealed interface Source {
         data class Ready(
-            val templateJson: String,
+            val templateJson: String?,
             val input: (boxCount: Int, itemCount: Int) -> PalletLabelInput,
             val omitDates: Boolean,
         ) : Source
@@ -140,7 +147,7 @@ class PalletPrinter(
     private suspend fun shiftSource(pallet: PalletEntity, sscc: String, closedAt: String): Source {
         val shiftId = pallet.shiftId ?: return Source.Refused(PrintReason.SHIFT_MISSING)
         val shift = db.shiftDao().get(shiftId) ?: return Source.Refused(PrintReason.SHIFT_MISSING)
-        val templateJson = shift.palletLabelTemplateSpec ?: return Source.Refused(PrintReason.TEMPLATE_MISSING)
+        val templateJson = shift.palletLabelTemplateSpec
         return Source.Ready(
             templateJson,
             { boxCount, itemCount ->
@@ -175,11 +182,11 @@ class PalletPrinter(
             ?: return Source.Refused(PrintReason.PRODUCT_MISSING)
         val template = product.chzProductGroupCode?.let { db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.category(it)) }
             ?: db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.ORG)
-            ?: return Source.Refused(PrintReason.TEMPLATE_MISSING)
+
         val dates = db.palletMembershipDao().productionDates(pallet.palletId)
         val uniform = dates.singleOrNull()
         return Source.Ready(
-            template.specJson,
+            template?.specJson,
             { boxCount, itemCount ->
                 PalletLabelInput(
                     sscc = sscc,

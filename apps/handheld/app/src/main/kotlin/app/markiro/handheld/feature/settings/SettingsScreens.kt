@@ -29,6 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import app.markiro.handheld.core.design.MenuRow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -79,110 +82,122 @@ fun SettingsScreen(
     onRefreshGrants: () -> Unit = {},
 ) {
     val c = MarkiroTheme.colors
-    Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
-        AppBar(stringResource(R.string.settings_title), onBack)
-        Column(Modifier.padding(horizontal = MarkiroSizes.sp4)) {
-            SettingRow(stringResource(R.string.settings_scanner), sourceLabel(state), onScanner)
-            SettingRow(
-                stringResource(R.string.printer_title),
-                state.missingPrinterPurposes?.let { missing ->
-                    if (missing.isEmpty() && state.printerAttentionPurposes.isNotEmpty()) stringResource(R.string.printer_attention_purposes,
-                        state.printerAttentionPurposes.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
-                    else if (missing.isEmpty()) stringResource(R.string.printer_configured_purposes, 3)
-                    else stringResource(R.string.printer_missing_purposes,
-                        missing.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
-                } ?: state.printerLabel ?: stringResource(R.string.printer_none),
-                onPrinter,
-            )
-            SettingRow(stringResource(R.string.settings_language), if (state.language == "en") "English" else "Русский") {
-                onLanguage(if (state.language == "en") "ru" else "en")
+    var page by rememberSaveable { mutableStateOf("home") }
+    BackHandler(enabled = page != "home") { page = "home" }
+    val title = when (page) {
+        "about" -> R.string.settings_device_details
+        "signals" -> R.string.settings_sound_vibration
+        "appearance" -> R.string.settings_appearance
+        else -> R.string.settings_title
+    }
+    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+        AppBar(stringResource(title), { if (page == "home") onBack() else page = "home" })
+        ScreenColumn(modifier = Modifier.weight(1f), padding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (page) {
+                "home" -> {
+                    Text(stringResource(R.string.settings_equipment), style = MarkiroTheme.type.body, color = c.fg2)
+                            MenuRow(null, stringResource(R.string.settings_scanner), sourceLabel(state), onScanner)
+                    MenuRow(null,
+                        stringResource(R.string.settings_printers_labels),
+                        state.missingPrinterPurposes?.let { missing ->
+                            if (missing.isEmpty() && state.printerAttentionPurposes.isNotEmpty()) stringResource(R.string.printer_attention_purposes,
+                                state.printerAttentionPurposes.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
+                            else if (missing.isEmpty()) stringResource(R.string.printer_configured_purposes, state.printerPurposeCount - missing.size, state.printerPurposeCount)
+                            else stringResource(R.string.printer_missing_purposes,
+                                missing.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
+                        } ?: state.printerLabel ?: stringResource(R.string.printer_none),
+                        onPrinter,
+                    )
+                    Text(stringResource(R.string.settings_work), style = MarkiroTheme.type.body, color = c.fg2, modifier = Modifier.padding(top = 12.dp))
+                    MenuRow(null, stringResource(R.string.settings_sound_vibration),
+                        stringResource(R.string.settings_sound) + ": " + stringResource(if (state.soundMuted) R.string.settings_off else R.string.settings_on), { page = "signals" })
+                    MenuRow(null, stringResource(R.string.settings_appearance), if (state.language == "en") "English" else "Русский", { page = "appearance" })
+                    MenuRow(null, stringResource(R.string.settings_device_details), state.version, { page = "about" }, modifier = Modifier.padding(top = 12.dp))
+                }
+                "appearance" -> {
+                    SettingRow(stringResource(R.string.settings_language), if (state.language == "en") "English" else "Русский") {
+                        onLanguage(if (state.language == "en") "ru" else "en")
+                    }
+                    SettingRow(
+                        stringResource(R.string.settings_theme),
+                        when (state.theme) {
+                            ThemeMode.DARK -> stringResource(R.string.theme_dark)
+                            ThemeMode.LIGHT -> stringResource(R.string.theme_light)
+                            ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
+                        },
+                    ) { onTheme(ThemeMode.entries[(state.theme.ordinal + 1) % ThemeMode.entries.size]) }
+                }
+                "signals" -> {
+                    SettingRow(
+                        stringResource(R.string.settings_sound),
+                        stringResource(if (state.soundMuted) R.string.settings_off else R.string.settings_on),
+                        onToggleSound,
+                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                        Text(stringResource(R.string.settings_volume), style = MarkiroTheme.type.body, color = c.fg1)
+                        Slider(value = state.soundVolume, onValueChange = onVolume, enabled = !state.soundMuted, modifier = Modifier.weight(1f))
+                    }
+                    SettingRow(
+                        stringResource(R.string.settings_vibration),
+                        stringResource(if (state.vibrationEnabled) R.string.settings_on else R.string.settings_off),
+                        onToggleVibration,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                        TestButton(stringResource(R.string.settings_test_ok), Modifier.weight(1f)) { onTest(SignalKind.OK) }
+                        TestButton(stringResource(R.string.settings_test_duplicate), Modifier.weight(1f)) { onTest(SignalKind.DUPLICATE) }
+                        TestButton(stringResource(R.string.settings_test_error), Modifier.weight(1f)) { onTest(SignalKind.ERROR) }
+                    }
+                }
+                "about" -> {
+                    InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
+                    InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
+                    InfoRow(stringResource(R.string.settings_version), state.version)
+                    if (config?.backend != "host" && grantStatus != null) {
+                        InfoRow(stringResource(R.string.offline_grant_status_title), stringResource(when (grantStatus) {
+                            GrantStatus.OBSERVE -> R.string.offline_grant_status_observe
+                            GrantStatus.STRICT -> R.string.offline_grant_status_strict
+                            GrantStatus.REFRESH_REQUIRED -> R.string.offline_grant_status_refresh
+                            GrantStatus.CLOCK_UNTRUSTED -> R.string.offline_grant_status_clock
+                        }))
+                        SettingRow(stringResource(R.string.offline_grant_refresh), stringResource(R.string.offline_grant_recovery_available), onRefreshGrants)
+                    }
+                    evidenceStatus?.let {
+                        InfoRow(stringResource(R.string.offline_grant_evidence_title), stringResource(
+                            if (it == GrantEvidenceStatus.REVIEW_REQUIRED) R.string.offline_grant_evidence_review else R.string.offline_grant_evidence_observed,
+                        ))
+                    }
+                    // A row, not a banner: the terminal is offline most of a shift, so
+                    // this answers only when an operator asks.
+                    if (config?.backend != "host") SettingRow(stringResource(R.string.settings_update), updateLabel(state), onCheckUpdate)
+                    // Offered only here, never from the work screen: an install restarts
+                    // the app, and a line in the middle of a box should not meet it.
+                    if (config?.backend != "host" && state.update is UpdateState.Available) {
+                        SettingRow(
+                            stringResource(R.string.settings_update_install),
+                            installLabel(state),
+                            onInstallUpdate,
+                        )
+                    }
+                    InfoRow(stringResource(R.string.settings_vendor), stringResource(R.string.settings_vendor_value))
+                    InfoRow(
+                        stringResource(R.string.settings_sync),
+                        state.lastSyncAt?.let { stringResource(R.string.settings_sync_value, state.queue, TimeText.hhmm(it)) }
+                            ?: stringResource(R.string.settings_sync_never, state.queue),
+                    )
+                    InfoRow(stringResource(R.string.settings_install_id), state.installId.takeLast(8))
+                    InfoRow(
+                        stringResource(R.string.settings_operators),
+                        config?.rosterFetchedAt?.let { stringResource(R.string.settings_operators_updated, TimeText.ddmmHhmm(it)) }
+                            ?: stringResource(R.string.settings_operators_missing),
+                    )
+                    Text(
+                        stringResource(R.string.settings_unbind_note),
+                        style = MarkiroTheme.type.caption,
+                        color = c.fg3,
+                        modifier = Modifier.padding(top = MarkiroSizes.sp3),
+                    )
+                }
             }
-            SettingRow(
-                stringResource(R.string.settings_theme),
-                when (state.theme) {
-                    ThemeMode.DARK -> stringResource(R.string.theme_dark)
-                    ThemeMode.LIGHT -> stringResource(R.string.theme_light)
-                    ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
-                },
-            ) { onTheme(ThemeMode.entries[(state.theme.ordinal + 1) % ThemeMode.entries.size]) }
-            Text(
-                stringResource(R.string.settings_signals),
-                style = MarkiroTheme.type.label,
-                color = c.fg3,
-                modifier = Modifier.padding(top = MarkiroSizes.sp4, bottom = MarkiroSizes.sp2),
-            )
-            SettingRow(
-                stringResource(R.string.settings_sound),
-                stringResource(if (state.soundMuted) R.string.settings_off else R.string.settings_on),
-                onToggleSound,
-            )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Text(stringResource(R.string.settings_volume), style = MarkiroTheme.type.body, color = c.fg1)
-                Slider(value = state.soundVolume, onValueChange = onVolume, enabled = !state.soundMuted, modifier = Modifier.weight(1f))
-            }
-            SettingRow(
-                stringResource(R.string.settings_vibration),
-                stringResource(if (state.vibrationEnabled) R.string.settings_on else R.string.settings_off),
-                onToggleVibration,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                TestButton(stringResource(R.string.settings_test_ok), Modifier.weight(1f)) { onTest(SignalKind.OK) }
-                TestButton(stringResource(R.string.settings_test_duplicate), Modifier.weight(1f)) { onTest(SignalKind.DUPLICATE) }
-                TestButton(stringResource(R.string.settings_test_error), Modifier.weight(1f)) { onTest(SignalKind.ERROR) }
-            }
-            Text(
-                stringResource(R.string.settings_about),
-                style = MarkiroTheme.type.label,
-                color = c.fg3,
-                modifier = Modifier.padding(top = MarkiroSizes.sp4, bottom = MarkiroSizes.sp2),
-            )
-            InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
-            InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
-            InfoRow(stringResource(R.string.settings_version), state.version)
-            if (grantStatus != null) {
-                InfoRow(stringResource(R.string.offline_grant_status_title), stringResource(when (grantStatus) {
-                    GrantStatus.OBSERVE -> R.string.offline_grant_status_observe
-                    GrantStatus.STRICT -> R.string.offline_grant_status_strict
-                    GrantStatus.REFRESH_REQUIRED -> R.string.offline_grant_status_refresh
-                    GrantStatus.CLOCK_UNTRUSTED -> R.string.offline_grant_status_clock
-                }))
-                SettingRow(stringResource(R.string.offline_grant_refresh), stringResource(R.string.offline_grant_recovery_available), onRefreshGrants)
-            }
-            evidenceStatus?.let {
-                InfoRow(stringResource(R.string.offline_grant_evidence_title), stringResource(
-                    if (it == GrantEvidenceStatus.REVIEW_REQUIRED) R.string.offline_grant_evidence_review else R.string.offline_grant_evidence_observed,
-                ))
-            }
-            // A row, not a banner: the terminal is offline most of a shift, so
-            // this answers only when an operator asks.
-            SettingRow(stringResource(R.string.settings_update), updateLabel(state), onCheckUpdate)
-            // Offered only here, never from the work screen: an install restarts
-            // the app, and a line in the middle of a box should not meet it.
-            if (state.update is UpdateState.Available) {
-                SettingRow(
-                    stringResource(R.string.settings_update_install),
-                    installLabel(state),
-                    onInstallUpdate,
-                )
-            }
-            InfoRow(stringResource(R.string.settings_vendor), stringResource(R.string.settings_vendor_value))
-            InfoRow(
-                stringResource(R.string.settings_sync),
-                state.lastSyncAt?.let { stringResource(R.string.settings_sync_value, state.queue, TimeText.hhmm(it)) }
-                    ?: stringResource(R.string.settings_sync_never, state.queue),
-            )
-            InfoRow(stringResource(R.string.settings_install_id), state.installId.takeLast(8))
-            InfoRow(
-                stringResource(R.string.settings_operators),
-                config?.rosterFetchedAt?.let { stringResource(R.string.settings_operators_updated, TimeText.ddmmHhmm(it)) }
-                    ?: stringResource(R.string.settings_operators_missing),
-            )
-            Text(
-                stringResource(R.string.settings_unbind_note),
-                style = MarkiroTheme.type.caption,
-                color = c.fg3,
-                modifier = Modifier.padding(top = MarkiroSizes.sp3),
-            )
         }
     }
 }
@@ -408,23 +423,14 @@ private fun TestButton(label: String, modifier: Modifier, onClick: () -> Unit) {
 
 @Composable
 private fun SettingRow(label: String, value: String, onClick: () -> Unit) {
-    val c = MarkiroTheme.colors
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.controlRow).clickable(onClick = onClick).padding(vertical = MarkiroSizes.sp2),
-        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = MarkiroTheme.type.body, color = c.fg1, modifier = Modifier.weight(1f))
-        Text(value, style = MarkiroTheme.type.caption.copy(fontSize = 15.sp), color = c.fg2, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-    }
+    MenuRow(null, label, value, onClick)
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    val c = MarkiroTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(vertical = MarkiroSizes.sp2), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MarkiroTheme.type.body, color = c.fg1, modifier = Modifier.weight(1f))
-        Text(value, style = MarkiroTheme.type.caption.copy(fontSize = 15.sp), color = c.fg1, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MarkiroTheme.type.caption, color = MarkiroTheme.colors.fg2)
+        Text(value, style = MarkiroTheme.type.body, color = MarkiroTheme.colors.fg1, modifier = Modifier.fillMaxWidth())
     }
 }
 

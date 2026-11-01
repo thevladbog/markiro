@@ -92,7 +92,16 @@ interface PrinterDao {
     suspend fun setStatus(id: String, status: String?, at: Long)
 
     @Query("DELETE FROM printers WHERE id = :id")
-    suspend fun delete(id: String)
+    suspend fun deleteProfile(id: String)
+
+    @Query("DELETE FROM printer_template_choices WHERE printerId = :id")
+    suspend fun deleteTemplateChoices(id: String)
+
+    @androidx.room.Transaction
+    suspend fun delete(id: String) {
+        deleteTemplateChoices(id)
+        deleteProfile(id)
+    }
 
     @Query("DELETE FROM printers")
     suspend fun clear()

@@ -66,6 +66,22 @@ class HostReferenceSyncTest {
     }
 
     @Test
+    fun boxTemplatesReachTheOfflineCatalogueAndTombstonesRemoveThem() = runTest {
+        val spec = """{"widthMm":100,"heightMm":100,"language":"zpl","dpi":203,"elements":[]}"""
+        val (reference, _) = sync(
+            """{"hostId":"$hostId","rev":58,"hasMore":false,"items":[{"entity":"label_templates","id":"box-template","rev":58,"deleted":false,"data":{"name":"Коробка 100×100","purpose":"box","enabled":true,"chzProductGroupCodes":[1],"stock":false,"spec":$spec}}]}""",
+            """{"hostId":"$hostId","rev":59,"hasMore":false,"items":[{"entity":"label_templates","id":"box-template","rev":59,"deleted":true}]}""",
+        )
+        reference.sync().getOrThrow()
+        val cached = db.printTemplateDao().template("host:box-template")
+        assertEquals("Коробка 100×100", cached?.name)
+        assertEquals("box", cached?.purpose)
+        assertEquals("[1]", cached?.groupCodes)
+        reference.sync().getOrThrow()
+        assertNull(db.printTemplateDao().template("host:box-template"))
+    }
+
+    @Test
     fun theFeedGivesOperatorsTheirBadgesAndTheirPermissionToBuildPallets() = runTest {
         val (reference, transport) = sync(fixture("changes-people.json"))
         reference.sync().getOrThrow()

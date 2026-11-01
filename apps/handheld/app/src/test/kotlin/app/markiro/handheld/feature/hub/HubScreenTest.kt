@@ -2,6 +2,8 @@ package app.markiro.handheld.feature.hub
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
@@ -30,6 +32,36 @@ class HubScreenTest {
     val compose = createComposeRule()
 
     @Test
+    fun aMissingWorkPrinterRemainsActionableAfterMovingSettingsToTheHeader() {
+        var selected: HubTile? = null
+        compose.setContent { MarkiroTheme {
+            HubScreen(HubUi(hostMode = true, missingPrinterPurposes = listOf(app.markiro.handheld.core.print.PrintPurpose.BOX)),
+                onTile = { selected = it }, onSignOut = {})
+        } }
+        compose.onNodeWithText("Не назначено: Короб").assertIsDisplayed().performClick()
+        assertEquals(HubTile.SETTINGS, selected)
+    }
+
+    @Test
+    fun hostMenuAndSettingsFitWithoutScrollingOn320dp() {
+        var selected: HubTile? = null
+        compose.setContent {
+            MarkiroTheme {
+                Box(Modifier.size(320.dp, 520.dp)) {
+                    HubScreen(HubUi(hostMode = true, organization = "ООО", operatorName = "Богатырев Владислав Сергеевич"),
+                        onTile = { selected = it }, onSignOut = {})
+                }
+            }
+        }
+        compose.onNodeWithText("Смена").assertIsDisplayed()
+        compose.onNodeWithText("Палеты").assertIsDisplayed()
+        compose.onNodeWithText("Расформирование").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Настройки").assertIsDisplayed().performClick()
+        assertEquals(HubTile.SETTINGS, selected)
+        compose.onNodeWithText("Принтер").assertDoesNotExist()
+    }
+
+    @Test
     fun replacementBlocksNewTilesButKeepsRecoveryAndSettings() {
         var selected: HubTile? = null
         var recoveryOpened = false
@@ -45,7 +77,7 @@ class HubScreenTest {
         assertNull(selected)
         compose.onNodeWithText("Списание").performScrollTo().performClick()
         assertNull(selected)
-        compose.onNodeWithText("Настройки").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Настройки").performClick()
         assertEquals(HubTile.SETTINGS, selected)
         compose.onNodeWithText("1 этикетка не напечатана").performClick()
         assertTrue(recoveryOpened)
@@ -64,7 +96,7 @@ class HubScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("АКТИВНАЯ СМЕНА").assertIsDisplayed()
+        compose.onNodeWithText("Смена 14", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Продолжить").assertIsDisplayed().performClick()
         assertEquals("s1", resumed)
         assertNull(selected)
@@ -107,7 +139,7 @@ class HubScreenTest {
         assertTrue("the whole title must fit horizontally", layout.getLineRight(0) <= layout.size.width)
         assertTrue("the whole title must fit vertically", layout.getLineBottom(0) <= layout.size.height)
         val operatorLayouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithText("Богатырев Владислав Сергеевич · Линия 1")
+        compose.onNodeWithText("Богатырев Владислав Сергеевич")
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(operatorLayouts) }
         val operator = operatorLayouts.single()
         assertTrue("the operator name must not be clipped", operator.getLineBottom(operator.lineCount - 1) <= operator.size.height)
@@ -128,7 +160,7 @@ class HubScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Иванова Анна · Линия 2").assertIsDisplayed()
+        compose.onNodeWithText("Иванова Анна").assertIsDisplayed()
         compose.onNodeWithText("3 доступны").assertIsDisplayed()
         compose.onNodeWithText("1 задание").assertIsDisplayed()
         compose.onNodeWithText("Очередь 37").assertIsDisplayed()
@@ -150,7 +182,7 @@ class HubScreenTest {
         compose.onNodeWithText("Проверка кода").assertDoesNotExist()
         compose.onNodeWithText("АКТИВНАЯ СМЕНА").assertDoesNotExist()
         // The pallet tile made the grid taller than the screen; the tile is still there.
-        compose.onNodeWithText("Настройки").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Настройки").assertIsDisplayed()
     }
 
     @Test

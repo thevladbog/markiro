@@ -49,12 +49,30 @@ class SettingsScreenTest {
         installId = "0123456789abcdef",
     )
 
+    @Test fun configuredPrinterCountUsesTheAvailablePurposes() {
+        compose.setContent { MarkiroTheme {
+            SettingsScreen(ui.copy(missingPrinterPurposes = emptyList(), printerPurposeCount = 2),
+                config.copy(backend = "host"), onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {})
+        } }
+        compose.onNodeWithText("Назначено 2 из 2").assertIsDisplayed()
+    }
+
+    @Test fun detailsDoNotCrowdTheSettingsLanding() {
+        compose.setContent { MarkiroTheme {
+            SettingsScreen(ui, config, onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {})
+        } }
+        compose.onNodeWithText("admin.markiro.app").assertDoesNotExist()
+        compose.onNodeWithText("Об устройстве").performClick()
+        compose.onNodeWithText("admin.markiro.app").assertIsDisplayed()
+    }
+
     @Test fun observationDiagnosticIsVisibleWithoutClaimingWorkIsBlocked() {
         compose.setContent {
             MarkiroTheme {
                 SettingsScreen(ui,config,onBack={},onScanner={},onTheme={},onLanguage={})
             }
         }
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("Режим наблюдения — работа не блокируется").performScrollTo().assertExists()
         compose.onNodeWithText("Обновить офлайн-допуск").performScrollTo().assertExists()
     }
@@ -68,6 +86,7 @@ class SettingsScreenTest {
                     onRefreshGrants={refreshes++})
             }
         }
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("Время не подтверждено. Подключитесь и обновите допуск").performScrollTo().assertExists()
         compose.onNodeWithText("Сохранённые данные и синхронизация доступны").performScrollTo().assertExists()
         compose.onNodeWithText("Обновить офлайн-допуск").performScrollTo().performClick()
@@ -75,7 +94,7 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun longSyncValueKeepsAGapAndAlignsEveryLineToTheTrailingEdge() {
+    fun longSyncValueAppearsBelowItsLabelWithoutOverflow() {
         compose.setContent {
             MarkiroTheme {
                 Box(Modifier.width(320.dp)) {
@@ -84,15 +103,15 @@ class SettingsScreenTest {
                 }
             }
         }
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         val valueNode = compose.onNodeWithText("12 · последняя отправка", substring = true, useUnmergedTree = true)
         valueNode.performScrollTo()
         val label = compose.onNodeWithText("Очередь синхронизации", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val value = valueNode.fetchSemanticsNode().boundsInRoot
-        assertTrue("label and value must have a gap", value.left - label.right >= 8f)
+        assertTrue("value must be below its label", value.top >= label.bottom)
         val layouts = mutableListOf<TextLayoutResult>()
         valueNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertEquals(TextAlign.End, layouts.single().layoutInput.style.textAlign)
-        assertEquals(false, layouts.single().hasVisualOverflow)
+        assertTrue("sync value must not overflow", !layouts.single().hasVisualOverflow)
     }
 
     /**
@@ -111,6 +130,7 @@ class SettingsScreenTest {
                 )
             }
         }
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("сервер обновлений недоступен").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Обновление").performScrollTo().performClick()
         assertEquals(true, asked)
@@ -134,6 +154,7 @@ class SettingsScreenTest {
                 )
             }
         }
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("есть 0.5.0 — нажмите").performScrollTo().assertIsDisplayed()
     }
 
@@ -151,6 +172,7 @@ class SettingsScreenTest {
         }
         // The block sits below the fold on a handheld screen; scrolling to it is
         // part of the claim that an operator can actually reach it.
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("Производитель").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("v-b.tech").assertIsDisplayed()
         compose.onNodeWithText("0.1.0").assertIsDisplayed()

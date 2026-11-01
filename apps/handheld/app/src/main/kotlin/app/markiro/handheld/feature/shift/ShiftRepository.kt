@@ -273,6 +273,14 @@ class ShiftRepository(
                     leftAt = null,
                 ),
             )
+            // Bundle-only templates stay product-bound when no catalogue group scope is available.
+            if (cloud != null) for ((purpose, template) in listOf("box" to bundle.boxLabelTemplate, "pallet" to bundle.palletLabelTemplate)) {
+                if (template != null) app.markiro.handheld.core.print.PrintTemplateStore(db).cache(
+                    app.markiro.handheld.core.print.CachedLabelTemplate(
+                        "bundle:${template.id}:${bundle.product.id}", purpose, template.name, template.spec.toString(), productId = bundle.product.id,
+                    ),
+                )
+            }
             if (cloud != null) db.grants.saveProvenance(TaskKind.SHIFT,shiftId,Json { encodeDefaults=true; explicitNulls=true }.encodeToString(ShiftBundleDto.serializer(),bundle))
             // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }

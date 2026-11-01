@@ -56,6 +56,7 @@ class SettingsUpdateTest {
     @Test
     fun theInstallRowAppearsOnlyWhenSomethingIsAvailable() {
         screen(ui.copy(update = UpdateState.UpToDate))
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("скачать и установить").assertDoesNotExist()
     }
 
@@ -63,6 +64,7 @@ class SettingsUpdateTest {
     fun anAvailableUpdateCanBeInstalled() {
         var asked = false
         screen(ui.copy(update = available)) { asked = true }
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("скачать и установить").performScrollTo().performClick()
         assertEquals(true, asked)
     }
@@ -75,6 +77,7 @@ class SettingsUpdateTest {
     @Test
     fun aDeviceThatStillOwesTheServerWorkIsToldWhyItCannotInstall() {
         screen(ui.copy(update = available, install = InstallStep.QueueNotEmpty))
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("сначала дождитесь отправки очереди").performScrollTo().assertIsDisplayed()
     }
 
@@ -86,6 +89,7 @@ class SettingsUpdateTest {
                 install = InstallStep.Failed(app.markiro.handheld.core.update.DownloadResult.Failure.CORRUPT),
             ),
         )
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
         compose.onNodeWithText("файл скачался повреждённым").performScrollTo().assertIsDisplayed()
     }
 }

@@ -57,11 +57,9 @@ internal fun ActiveShiftCard(active: HubActiveShift, onContinue: () -> Unit) {
         Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard).border(1.dp, c.lineStrong, shape)
             .clickable(role = Role.Button, onClick = onContinue),
     ) {
-        Box(Modifier.fillMaxWidth().height(4.dp).background(c.accent))
-        Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-            Text(stringResource(R.string.hub_active_shift), style = t.label, color = c.accent)
+        Column(Modifier.padding(MarkiroSizes.sp2), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1)) {
             Text(title, style = t.strong, color = c.fg1)
-            Text(listOfNotNull(shift.lineName?.takeIf { it.isNotBlank() }, mode).joinToString(" · "), style = t.body.copy(fontSize = 14.sp), color = c.fg2)
+            Text(listOfNotNull(shift.lineName?.takeIf { it.isNotBlank() }, mode).joinToString(" · "), style = t.caption, color = c.fg2)
             // Said here, at entry, rather than by a refused close twenty scans in.
             shift.ssccWarning()?.let { warning ->
                 Text(stringResource(warning.label()), style = t.body.copy(fontSize = 14.sp), color = c.tone(Tone.Warn).fg)
@@ -93,9 +91,9 @@ internal fun ActiveShiftCard(active: HubActiveShift, onContinue: () -> Unit) {
                     style = t.caption, color = c.fg3,
                 )
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.hub_active_shift_continue), modifier = Modifier.weight(1f), style = t.strong.copy(fontSize = 16.sp), color = c.accent)
-                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c.accent, modifier = Modifier.size(22.dp))
+            Row(Modifier.fillMaxWidth().height(48.dp).clip(shape).background(c.accent).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.hub_active_shift_continue), modifier = Modifier.weight(1f), style = t.strong.copy(fontSize = 16.sp), color = c.fgOnAccent)
+                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c.fgOnAccent, modifier = Modifier.size(22.dp))
             }
         }
     }

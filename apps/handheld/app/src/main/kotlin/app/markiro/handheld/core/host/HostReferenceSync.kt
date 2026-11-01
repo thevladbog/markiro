@@ -154,6 +154,19 @@ class HostReferenceSync(
     }
 
     private suspend fun template(item: ChangeItemDto) {
+        val catalogId = "host:${item.id}"
+        val record = item.data
+        val purpose = record?.text("purpose")
+        if (item.deleted || record == null || record["enabled"]?.let { (it as? JsonPrimitive)?.booleanOrNull } != true || purpose !in setOf("box", "pallet")) {
+            db.printTemplateDao().removeTemplate(catalogId)
+        } else {
+            val spec = record["spec"]?.toString()
+            val groups = record["chzProductGroupCodes"]?.takeUnless { it is JsonNull }?.toString()
+            if (spec == null) db.printTemplateDao().removeTemplate(catalogId)
+            else app.markiro.handheld.core.print.PrintTemplateStore(db).cache(
+                app.markiro.handheld.core.print.CachedLabelTemplate(catalogId, checkNotNull(purpose), record.text("name") ?: item.id, spec, groupCodes = groups),
+            )
+        }
         val key = "host_template:${item.id}"
         val data = item.data
         if (item.deleted || data == null || data.text("purpose") != "pallet" || data["enabled"]?.let { (it as? JsonPrimitive)?.booleanOrNull } == false) {
