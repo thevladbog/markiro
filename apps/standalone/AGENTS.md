@@ -2656,13 +2656,14 @@ technologist role, and the message is on screen for one round trip only.
 After a successful exit the focus moves to the office page (the button that
 held it is gone; `OfficeShell` hands `WindowModeButton` a callback that
 focuses its `main`). Leaving the office locks the window again. The
-window mode lasts until a call to the host finds the office session expired
-(a page's request, or the header's re-read of the user after a change-feed
-revision): the webview has no client idle timer, and the host drops the
-session after 30 idle minutes without telling it. An administrator who walks
-away from an open office therefore leaves the window framed and closable, with
-the office on screen, for anyone on the floor (an open owner question: a
-client-side office idle lock on a station PC). Technologists work in the
+window mode lasts until the office session ends. The webview mirrors the host's
+30-minute request-idle and absolute expiry limits (`office-session-expiry.ts`):
+confirmed office calls move the idle deadline, while the absolute `expiresAt`
+never moves. Focus and visibility changes recheck the wall clock after sleep;
+there are no keepalive requests. Expiry dispatches the token-scoped
+`session_ended` action, drops the office and locks a configured station again.
+The host remains authoritative: revocation or an earlier expiry is handled by
+any request's `unauthorized` response as before. Technologists work in the
 locked window, so the template import's file chooser and the ZPL/TSPL
 `<a download>` saves open under a borderless topmost window; their behaviour
 there is unchecked. There is no local maintenance code (one more secret on the
@@ -3078,6 +3079,17 @@ dialog keeps the last available one while it is open. Releases keep the window o
 release back: `tools/standalone-release/releases.json` and its contract
 (`releases.mjs`; `prepare.mjs` refuses a release outside the window before it
 writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
+
+## Shift form scans on the station
+
+The shift list subscribes to the floor's shared HID/COM `ScanSource`. A
+`markiro:shift:v1:<uuid>` task token (optionally with an AIM prefix) chooses
+from all cached shifts of the current line, including other pages, and uses
+the same `cardAction` guards and `enterShift` path as the card button. Other
+barcode kinds are ignored. A malformed token, unread list or missing shift is
+explained without a host write. Busy entry drops further scans; leaving the
+list unsubscribes and clears pending keyboard input. No scan opens a new
+planned shift offline or bypasses the license/participation rules.
 
 ## Office pages
 

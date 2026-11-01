@@ -65,6 +65,7 @@ import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
 import { purgeAcknowledged, purgeRemovedDemo, scheduleRetention } from "../local/retention.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
+import { watchOfficeSession } from "../office/office-session-expiry.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
 import type { WindowMode } from "../office/window-mode.js";
 import { BootstrapEntry } from "../wizard/BootstrapEntry.js";
@@ -876,6 +877,24 @@ function AppScreens({
       retryProbe,
     ],
   );
+  const expiry = useRef<{
+    token: string;
+    watch: ReturnType<typeof watchOfficeSession>;
+  } | null>(null);
+  const officeToken = session?.token;
+  const officeExpiresAt = session?.expiresAt;
+  useEffect(() => {
+    if (officeToken === undefined || officeExpiresAt === undefined) return;
+    const watch = watchOfficeSession(officeExpiresAt, () => {
+      dispatch({ type: "session_ended", token: officeToken });
+    });
+    expiry.current = { token: officeToken, watch };
+    return () => {
+      watch.stop();
+      if (expiry.current?.watch === watch) expiry.current = null;
+    };
+  }, [officeToken, officeExpiresAt]);
+
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
     // Scoped to this session's token: a late failure from a session the
@@ -885,9 +904,14 @@ function AppScreens({
       const action = shellActionFor(error, session.token);
       if (action) dispatch(action);
     };
+    const confirmRequest = (startedAt: number) => {
+      if (expiry.current?.token === session.token) expiry.current.watch.confirmRequest(startedAt);
+    };
     const refreshUser = async (): Promise<void> => {
+      const startedAt = Date.now();
       try {
         const user = await hostApi.officeMe(session.token);
+        confirmRequest(startedAt);
         dispatch({ type: "office_user_refreshed", token: session.token, user });
       } catch (error) {
         route(error);
@@ -895,9 +919,16 @@ function AppScreens({
       }
     };
     const call = async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
+      const startedAt = Date.now();
       try {
-        return await operation(session.token);
+        const answer = await operation(session.token);
+        confirmRequest(startedAt);
+        return answer;
       } catch (error) {
+        // A refused business operation still passed office authentication on the host.
+        if (error instanceof HostError && error.kind === "api" && error.status !== 401) {
+          confirmRequest(startedAt);
+        }
         route(error);
         if (error instanceof HostError && error.code === "forbidden") {
           // The role changed on the host: read the user again so the menu

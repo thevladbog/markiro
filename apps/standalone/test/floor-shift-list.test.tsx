@@ -4,6 +4,14 @@ import type { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { formatShiftTaskBarcode } from "@markiro/domain";
+
+import {
+  createComScanSource,
+  createKeyboardWedgeSource,
+  type ScanSource,
+} from "../src/floor/scan-source.js";
+
 import { ThemeProvider } from "@markiro/ui";
 
 import {
@@ -67,6 +75,7 @@ const READ = { done: 1, failed: false };
 const SEEN = 1_790_000_000_000;
 
 interface Options {
+  source?: ScanSource;
   online?: boolean;
   shiftReads?: { done: number; failed: boolean };
   enter?: (id: string) => Promise<EnteredShift>;
@@ -86,6 +95,7 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
     <ThemeProvider>
       <ShiftList
         local={local}
+        {...(options.source === undefined ? {} : { source: options.source })}
         pairing={PAIRING}
         lineId={LINE_ID}
         online={options.online ?? true}
@@ -146,6 +156,81 @@ const MINE: DeviceShift = { ...ACTIVE, ownerDeviceId: DEVICE_ID };
 const ENTERED_MINE: EnteredShift = { ...ENTERED, ownerDeviceId: DEVICE_ID };
 
 describe("the shifts of the station's line", () => {
+  it("opens the planned shift from the form's DataMatrix through the keyboard scanner", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const source = createKeyboardWedgeSource();
+    const { handlers } = renderList(executor, { source });
+    await screen.findByText(PLANNED.number);
+    for (const key of `]d1${formatShiftTaskBarcode(PLANNED.id)}\r\n`.trim()) {
+      fireEvent.keyDown(window, { key });
+    }
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, expect.anything());
+  });
+
+  it("ignores unrelated scans and explains a form from another line", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const source = createKeyboardWedgeSource();
+    const { handlers } = renderList(executor, { source });
+    await screen.findByText(PLANNED.number);
+    for (const raw of ["0123456789", formatShiftTaskBarcode(OTHER_STATION)]) {
+      for (const key of raw) fireEvent.keyDown(window, { key });
+      fireEvent.keyDown(window, { key: "Enter" });
+    }
+    expect(screen.getByText(/Смена с бланка не найдена на этой линии/)).toBeTruthy();
+    expect(handlers.enter).not.toHaveBeenCalled();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+  });
+
+  it("unsubscribes from the scanner when leaving the shift list", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const source = createKeyboardWedgeSource();
+    const { handlers, view } = renderList(executor, { source });
+    await screen.findByText(PLANNED.number);
+    view.unmount();
+    for (const key of formatShiftTaskBarcode(PLANNED.id)) fireEvent.keyDown(window, { key });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(handlers.enter).not.toHaveBeenCalled();
+  });
+
+  it("opens a shift on another page from a COM scan and drops a duplicate entry", async () => {
+    const { executor } = await copiesOf([
+      { ...PLANNED, id: "8e91d5a0-27bc-4fa2-a527-111111111111", number: "A1" },
+      { ...PLANNED, id: "8e91d5a0-27bc-4fa2-a527-222222222222", number: "A2" },
+      PLANNED,
+    ]);
+    let emit = (_raw: string) => {};
+    const source = createComScanSource(async (listener) => {
+      emit = listener;
+      return () => {};
+    });
+    const { handlers } = renderList(executor, { source });
+    await screen.findByText("A1");
+    expect(screen.queryByText(PLANNED.number)).toBeNull();
+    act(() => {
+      emit(formatShiftTaskBarcode(PLANNED.id));
+      emit(formatShiftTaskBarcode(PLANNED.id));
+    });
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(handlers.enter).toHaveBeenCalledTimes(1);
+    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, expect.anything());
+  });
+
+  it.each([{ online: false }, { license: deviceLicense("restricted") }])(
+    "keeps planned-shift scan guards (%j)",
+    async (options) => {
+      const { executor } = await copiesOf([PLANNED]);
+      const source = createKeyboardWedgeSource();
+      const { handlers } = renderList(executor, { ...options, source });
+      await screen.findByText(PLANNED.number);
+      for (const key of formatShiftTaskBarcode(PLANNED.id)) fireEvent.keyDown(window, { key });
+      fireEvent.keyDown(window, { key: "Enter" });
+      expect(handlers.enter).not.toHaveBeenCalled();
+      expect(handlers.onEntered).not.toHaveBeenCalled();
+    },
+  );
+
   it("names each shift, its product, date, plan and counterparty in words", async () => {
     const { executor } = await copiesOf([PLANNED, MINE]);
     renderList(executor);

@@ -437,6 +437,20 @@ describe("App", () => {
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
   });
 
+  it("shows sign-in when the idle session expires, without a navigation click", async () => {
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31 * 60_000);
+    fireEvent.focus(window);
+    expect(await screen.findByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Обзор", level: 1 })).toBeNull();
+    expect(host.officeMe).not.toHaveBeenCalled();
+  });
+
   it("changes the office user's own password with the session token", async () => {
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
