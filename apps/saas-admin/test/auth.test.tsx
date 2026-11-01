@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { authState, fakeAuthClient, jsonResponse, readySession, renderSaasApp } from "./render.js";
 import { installOperationsApi } from "./operationsFixtures.js";
+import { installLeadsApi, LEAD_ID } from "./leads-fixtures.js";
 
 afterEach(() => {
   cleanup();
@@ -131,6 +132,43 @@ describe("platform authentication", () => {
     expect(window.sessionStorage.getItem("markiro.platform.2fa-challenge")).toBe("pending");
   });
 
+  it("opens the requested lead after password and TOTP verification", async () => {
+    installLeadsApi();
+    const state = authState({ signInResult: { data: { twoFactorRedirect: true }, error: null } });
+    const app = renderSaasApp({ initialEntry: `/leads/${LEAD_ID}`, state });
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Электронная почта"), "operator@example.invalid");
+    await user.type(screen.getByLabelText("Пароль"), "password-value");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    await user.type(await screen.findByLabelText("Код из приложения"), "123456");
+    await user.click(screen.getByRole("button", { name: "Подтвердить код" }));
+
+    expect(await screen.findByRole("heading", { name: "ООО «Пивоварня»" })).toBeDefined();
+    expect(app.router.state.location.pathname).toBe(`/leads/${LEAD_ID}`);
+  });
+
+  it.each(["challenge", "enroll"])("preserves the lead destination during %s", async (mode) => {
+    installLeadsApi();
+    if (mode === "challenge") {
+      window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");
+    }
+    const app = renderSaasApp({
+      initialEntry: `/leads/${LEAD_ID}`,
+      state: authState({ session: mode === "enroll" ? readySession(false) : null }),
+    });
+    const user = userEvent.setup();
+    if (mode === "enroll") {
+      await user.type(await screen.findByLabelText("Пароль"), "password-value");
+      await user.click(screen.getByRole("button", { name: "Создать ключ 2FA" }));
+    }
+    await user.type(await screen.findByLabelText("Код из приложения"), "123456");
+    await user.click(screen.getByRole("button", { name: "Подтвердить код" }));
+
+    expect(await screen.findByRole("heading", { name: "ООО «Пивоварня»" })).toBeDefined();
+    expect(app.router.state.location.pathname).toBe(`/leads/${LEAD_ID}`);
+  });
+
   it("restores a pending Better Auth challenge after refresh and protected-route navigation", async () => {
     window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");
     const firstRender = renderSaasApp({ initialEntry: "/catalog", state: authState() });
@@ -189,6 +227,24 @@ describe("platform authentication", () => {
     expect(await screen.findByRole("heading", { name: "Операционный обзор" })).toBeDefined();
     expect(window.sessionStorage.getItem("markiro.platform.2fa-challenge")).toBeNull();
   });
+
+  it.each(["https://outside.example/leads", "//outside.example/leads", "/\\outside.example"])(
+    "ignores an external return destination %s after TOTP",
+    async (from) => {
+      window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");
+      installOperationsApi();
+      const app = renderSaasApp({
+        initialEntry: { pathname: "/two-factor", state: { from } },
+        state: authState(),
+      });
+      const user = userEvent.setup();
+      await user.type(await screen.findByLabelText("Код из приложения"), "123456");
+      await user.click(screen.getByRole("button", { name: "Подтвердить код" }));
+
+      expect(await screen.findByRole("heading", { name: "Операционный обзор" })).toBeDefined();
+      expect(app.router.state.location.pathname).toBe("/");
+    },
+  );
 
   it("clears an expired challenge marker and returns to login", async () => {
     window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");

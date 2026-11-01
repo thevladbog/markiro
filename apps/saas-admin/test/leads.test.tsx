@@ -32,6 +32,7 @@ describe("leads rail entry", () => {
     installLeadsApi({ summary: { newCount: 3 } });
     renderSaasApp({ initialEntry: "/leads" });
 
+    await screen.findByRole("heading", { level: 1, name: "Заявки с сайта" });
     const link = await screen.findByRole("link", { name: "Заявки с сайта, 3 новых" });
     expect(link.getAttribute("href")).toBe("/leads");
     expect(within(link).getByText("3", { selector: "[aria-hidden='true']" })).toBeDefined();

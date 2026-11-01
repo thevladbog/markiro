@@ -312,11 +312,16 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
     });
 
     it("sends the alert once, without e-mail, phone or name, and marks it sent", async () => {
-      const lead = await submit();
+      const lead = await submit({}, new Date("2026-10-21T05:30:00Z"));
       await expect(jobs().dispatchNotifications()).resolves.toBe(1);
       await expect(jobs().dispatchNotifications()).resolves.toBe(0);
       expect(sent).toEqual([
-        ["Новый лид · скачивание", "Откройте раздел «Заявки» в панели управления."].join("\n"),
+        [
+          "Новый лид · скачивание",
+          "Страница: Скачать",
+          "Получено: 21.10.2026, 08:30 МСК",
+          `Открыть заявку: ${ADMIN}/leads/${lead.id}`,
+        ].join("\n"),
       ]);
       // Whole values only: a short digit run like "999" also occurs in random lead UUIDs.
       for (const secret of [
@@ -352,7 +357,9 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       expect(sent).toHaveLength(2);
       const invoice = sent.find((text) => text.includes("запрос счёта"));
       expect(invoice).toContain("Повторное обращение · запрос счёта");
-      expect(invoice).not.toContain("Тариф:");
+      expect(invoice).toContain("Тариф: Линия");
+      expect(invoice).toContain("Страница: Стоимость");
+      expect(invoice).toContain(`${ADMIN}/leads/${lead.id}`);
       expect(invoice).not.toContain("7707083893");
     });
 
@@ -495,6 +502,7 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
       await jobs().dispatchNotifications();
       const text = sent.find((entry) => entry.startsWith("Кому пора написать"));
       expect(text).toContain("3-й день: получилось провести смену? (1)");
+      expect(text).toContain(`Все заявки: ${ADMIN}/leads`);
       expect(text).not.toContain(`${ADMIN}/leads/`);
       expect(text).not.toMatch(/Свежий|Отложен|Купил|@|Анна/);
     });
@@ -703,7 +711,8 @@ describe.skipIf(!ready)("landing lead jobs (spec 2026-10-20 §15.2, §15.4, §15
         .where(eq(schema.landingLeadEvents.id, event.id));
       expect(events[0]?.payload).toEqual({ locale: "ru", consentVersion: "MKR-PD-02/2026.08/01" });
       await jobs().dispatchNotifications();
-      expect(sent.join("\n")).not.toMatch(/Иван|private|http|@/);
+      expect(sent.join("\n")).not.toMatch(/Иван|private|@/);
+      expect(sent.join("\n")).not.toContain(`${ADMIN}/leads/${lead.id}`);
     });
 
     it("expires at the calendar-year boundary", async () => {

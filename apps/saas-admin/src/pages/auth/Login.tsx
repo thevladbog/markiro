@@ -9,6 +9,7 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
 import { clearPlatformChallenge, markPlatformChallengePending } from "../../auth/challenge.js";
+import { platformReturnPath } from "../../auth/return-path.js";
 import { AuthFrame } from "./AuthFrame.js";
 
 const loginSchema = z.object({
@@ -23,6 +24,7 @@ export function Login() {
   const session = auth.useSession();
   const navigate = useNavigate();
   const location = useLocation();
+  const returnPath = platformReturnPath(location.state);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -39,13 +41,12 @@ export function Login() {
     }
     if (result.data?.twoFactorRedirect) {
       markPlatformChallengePending();
-      void navigate("/two-factor?mode=challenge", { replace: true });
+      void navigate("/two-factor?mode=challenge", { replace: true, state: { from: returnPath } });
       return;
     }
     clearPlatformChallenge();
     await session.refetch?.();
-    const requested = (location.state as { from?: unknown } | null)?.from;
-    void navigate(typeof requested === "string" ? requested : "/", { replace: true });
+    void navigate(returnPath, { replace: true });
   });
 
   return (

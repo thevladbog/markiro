@@ -10,6 +10,7 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
 import { clearPlatformChallenge, isPlatformChallengePending } from "../../auth/challenge.js";
+import { platformReturnPath } from "../../auth/return-path.js";
 import { AuthFrame } from "./AuthFrame.js";
 
 const codeSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
@@ -23,6 +24,7 @@ export function TwoFactor() {
   const session = auth.useSession();
   const navigate = useNavigate();
   const location = useLocation();
+  const returnPath = platformReturnPath(location.state);
   const [searchParams] = useSearchParams();
   const mode =
     searchParams.get("mode") === "challenge" || isPlatformChallengePending()
@@ -58,7 +60,7 @@ export function TwoFactor() {
     if (result.error) {
       if (result.error.code === "INVALID_TWO_FACTOR_COOKIE") {
         clearPlatformChallenge();
-        void navigate("/login", { replace: true });
+        void navigate("/login", { replace: true, state: { from: returnPath } });
         return;
       }
       setSubmitError(result.error.message ?? t("auth.twoFactor.codeError"));
@@ -68,7 +70,7 @@ export function TwoFactor() {
     codeForm.reset();
     setEnrollment(null);
     await session.refetch?.();
-    void navigate("/", { replace: true });
+    void navigate(returnPath, { replace: true });
   });
 
   const title =
@@ -155,7 +157,12 @@ export function TwoFactor() {
           <Link className="auth-link" to="/recovery">
             {t("auth.twoFactor.useBackup")}
           </Link>
-          <Link className="auth-link" to="/login" onClick={clearPlatformChallenge}>
+          <Link
+            className="auth-link"
+            to="/login"
+            state={{ from: returnPath }}
+            onClick={clearPlatformChallenge}
+          >
             {t("auth.twoFactor.cancel")}
           </Link>
         </div>
