@@ -139,7 +139,7 @@
 }
 .v4-screen__image {
   position: relative;
-  border-radius: 0.5rem;
+  border-radius: var(--mockup-screen-radius, 0.5rem);
   overflow: hidden;
 }
 .v4-screen picture,
@@ -172,10 +172,6 @@
   left: -117.5%;
   top: 0;
   transform: translateY(-24.57%);
-}
-.v4-screen--handheld .v4-screen__image {
-  width: min(100%, 224px);
-  align-self: center;
 }
 .v4-screen--label {
   width: 108px;
@@ -516,6 +512,17 @@
 .v4 .ax-form {
   max-width: none;
 }
+.v4-download__form .ax-form {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.v4-download__form .ax-form__title {
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
 .v4 .ax-form__fields {
   gap: 1rem;
   margin-top: 1.25rem;
@@ -569,18 +576,103 @@
   white-space: normal;
 }
 .v4-release-card {
-  max-width: 50rem;
+  width: 100%;
+  min-width: 0;
   padding: 1.5rem;
   background: var(--surface-card);
   border: 1px solid var(--line);
   border-radius: 0.75rem;
 }
-.v4-release-card h2 {
+.v4-release-card__filename {
   font: 1rem/1.5 var(--font-mono);
   overflow-wrap: anywhere;
 }
 .v4-release-card .v4-details {
   width: 100%;
+}
+.v4-download-ready > .ax-container {
+  display: grid;
+  gap: 1.5rem;
+}
+.v4-download-result {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem 2.5rem;
+}
+.v4-download-result > :is(h2, p) {
+  grid-column: 1 / -1;
+  max-width: 75ch;
+}
+.v4-download-result > h2 {
+  margin-bottom: -0.75rem;
+}
+.v4-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.v4-download-actions .ax-btn {
+  justify-content: center;
+}
+.v4-download-help {
+  min-width: 0;
+  display: grid;
+  gap: 1rem;
+  padding-block: 0.5rem;
+}
+.v4-download-help h3 {
+  font-size: 1.25rem;
+}
+.v4-download-help a {
+  text-underline-offset: 3px;
+}
+.v4-download-followup {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 1.5rem;
+}
+.v4-download-followup [data-followup-status]:not(:empty) {
+  margin-top: 0.75rem;
+}
+.v4-download-followup button.ax-link {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0.5rem;
+  color: var(--fg-1);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.v4-download-next {
+  border-top: 1px solid var(--line);
+  padding-top: 2rem;
+}
+.v4-download-next > .ax-container {
+  display: grid;
+  gap: 1rem;
+}
+.v4-download-next p {
+  max-width: 75ch;
+}
+@media (max-width: 800px) {
+  .v4-download-result {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 480px) {
+  .v4-download-actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+  .v4-download-actions .ax-btn {
+    width: 100%;
+  }
 }
 .v4-hash {
   display: block;

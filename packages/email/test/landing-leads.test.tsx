@@ -23,10 +23,13 @@ describe("landing lead e-mails (spec 2026-10-20 §15)", () => {
     expect(output.html).toContain('href="https://markiro.app/skachat/"');
     expect(output.html).not.toMatch(/\.exe|\.jws|releases\.markiro\.app/);
     expect(output.html).toContain("ООО «Пивоварня» &amp; Ко");
+    expect(output.html).toMatch(/<h2[^>]*>Пробный период<\/h2>/);
+    expect(output.html).toMatch(/<h2[^>]*>Если Windows покажет предупреждение<\/h2>/);
     expect(output.text).toContain("«Подробнее», затем «Выполнить в любом случае»");
     expect(output.text).toContain("Get-FileHash .\\<файл> -Algorithm SHA256");
     expect(output.text).toContain("14 дней с завершения мастера установки");
-    expect(output.text).toContain("Созвон на 30 минут");
+    expect(output.html).toMatch(/<h2[^>]*>Созвон на 30 минут<\/h2>/);
+    expect(output.text).toMatch(/созвон на 30 минут/iu);
     expectNoTracking(output);
   });
 

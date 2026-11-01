@@ -166,11 +166,12 @@ function NextTouchForm({ lead, busy, run }: { lead: LeadDetail; busy: boolean; r
   const saved = moscowCivilDate(lead.nextTouchAt);
   const [date, setDate] = useState(saved);
   return (
-    <div className="leads-inline-form">
+    <div className="leads-schedule">
       <DatePicker
         label={t("leads.work.nextTouch")}
         hint={t("leads.work.nextTouchHint")}
         value={date}
+        disabled={busy}
         onValueChange={(value) => setDate(value ?? "")}
         locale={i18n.language}
         placeholder={t("reports.calendar.placeholder")}
@@ -294,7 +295,7 @@ function LeadWork({
           {statusChip}
         </div>
         {lead.anonymizedAt ? null : (
-          <div className="leads-inline-form">
+          <div className="leads-contact-action">
             <Button
               disabled={busy}
               onClick={() =>
@@ -400,8 +401,10 @@ export function LeadPage() {
       {notice ? <Alert tone={notice.tone}>{t(notice.key)}</Alert> : null}
       <div className="leads-grid">
         <div className="leads-column">
-          <LeadContacts lead={detail} language={language} />
           <LeadWork lead={detail} canWrite={canWrite} busy={busy} run={run} language={language} />
+          <Card title={t("leads.journal.title")} titleAs="h2" className="leads-card">
+            <LeadJournal events={detail.events} />
+          </Card>
           <LeadTenantPanel
             lead={detail}
             canWrite={canWrite}
@@ -424,12 +427,14 @@ export function LeadPage() {
           />
         </div>
         <div className="leads-column">
+          <LeadContacts lead={detail} language={language} />
           <LeadFacts lead={detail} language={language} />
-          <Card title={t("leads.journal.title")} titleAs="h2" className="leads-card">
-            <LeadJournal events={detail.events} />
-          </Card>
           {canWrite && !detail.anonymizedAt ? (
-            <Card title={t("leads.anonymize.title")} titleAs="h2" className="leads-card">
+            <Card
+              title={t("leads.anonymize.title")}
+              titleAs="h2"
+              className="leads-card leads-card--danger"
+            >
               <p className="leads-muted">{t("leads.anonymize.hint")}</p>
               <Button
                 variant="destructive"

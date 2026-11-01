@@ -126,23 +126,25 @@ const copy = DOWNLOAD_COPY;
       <h2 tabindex="-1" data-ready-heading>Заявка принята. Проверяем установщик</h2>
       <p data-loading-copy>Читаем сведения о текущем релизе. Повторно отправлять форму не нужно.</p>
     </div>
-    <div data-release-only hidden class="v4-stack">
+    <div data-release-only hidden class="v4-download-result">
       <h2 class="v4-result-title" tabindex="-1" data-ready-heading>
         <span class="ax-only-wide">{copy.ready.title}</span>
         <span class="ax-only-narrow">{copy.ready.titlePhone}</span>
       </h2>
-      <p data-accepted-only>Заявка принята. Письмо для <strong data-ready-email>
-        </strong> поставлено в очередь отправки. На телефоне: откройте полученное письмо на ПК с Windows.</p>
+      <p data-accepted-only>Ссылка на скачивание доступна ниже. Мы также отправим её на <strong data-ready-email>
+        </strong>. Если вы открыли страницу на телефоне, перейдите по ссылке из письма на компьютере с Windows.</p>
       <div class="v4-release-card v4-stack">
-        <h2 data-release="file">
-        </h2>
+        <h3>Установщик для Windows</h3>
+        <p class="v4-release-card__filename" data-release="file"></p>
         <p>Версия <span data-release="version">
           </span> · <span data-release="date">
           </span> · <span data-release="size">
           </span> · Windows 10/11 x64</p>
+        <div class="v4-download-actions">
         <a class="ax-btn ax-btn--accent" href="#" data-release-link data-analytics="landing_installer_download" data-placement="ready">Скачать установщик <Icon name="download" size={18}/>
         </a>
         <button type="button" class="ax-btn ax-btn--outline" data-copy="link" data-copied-label="Ссылка скопирована">Скопировать ссылку</button>
+        </div>
         <details class="v4-details">
           <summary>Проверить SHA-256</summary>
           <code class="v4-hash" data-release="sha256">
@@ -154,11 +156,16 @@ const copy = DOWNLOAD_COPY;
           <button type="button" class="ax-btn ax-btn--outline" data-copy="command" data-copied-label="Команда скопирована">Скопировать команду</button>
         </details>
       </div>
+      <aside class="v4-download-help">
+      <h3>Установка и первый запуск</h3>
+      <p>Запустите установщик на главном ПК и пройдите мастер. В нём можно добавить демо-данные для пробной смены без оборудования.</p>
       <details class="v4-details">
-        <summary>Перед первым запуском Windows</summary>
+        <summary>Если Windows покажет предупреждение</summary>
         <p>Сверьте SHA-256 скачанного файла с контрольной суммой релиза. Если Windows сообщает о неизвестном издателе, сначала проверьте файл и источник загрузки. Если сведения не совпадают или остаются сомнения, остановите запуск и напишите на hello@markiro.app.</p>
         <a href="/instruktsii/ustanovka-i-pervyy-zapusk/">Инструкция по установке</a>
       </details>
+      <p>Нужна помощь с установкой или этикетками? Напишите на <a href="mailto:hello@markiro.app">hello@markiro.app</a>.</p>
+      </aside>
     </div>
     <div data-pending-only hidden class="v4-stack">
       <h2 class="v4-result-title" tabindex="-1" data-ready-heading>{copy.ready.pendingTitle}</h2>
@@ -168,12 +175,18 @@ const copy = DOWNLOAD_COPY;
       <a href="mailto:hello@markiro.app">hello@markiro.app</a>
     </div>
 <p data-email-only hidden>Установщик для Windows 10/11 x64. Пробный период 14 дней со всеми функциями. Если релиз недоступен, повторите проверку или напишите на hello@markiro.app.</p>
-<div data-accepted-only class="v4-stack"><button type="button" class="ax-btn ax-btn--outline" data-resend-link disabled>Повторить письмо через 60 с</button><p data-followup-status aria-live="polite"></p><button type="button" class="ax-link" data-change-email>Изменить почту</button></div>
+<div data-accepted-only class="v4-download-followup">
+  <div class="v4-download-actions">
+    <button type="button" class="ax-btn ax-btn--outline" data-resend-link disabled>Повторить письмо через 60 с</button>
+    <button type="button" class="ax-link" data-change-email>Изменить почту</button>
+  </div>
+  <p data-followup-status aria-live="polite"></p>
+</div>
     <p aria-live="polite" data-copy-status>
     </p>
   </div>
 </section>
-<section class="v4-section" data-download-after hidden>
+<section class="v4-section v4-download-next" data-download-after hidden>
   <div class="ax-container">
     <h2>Что дальше</h2>
     <p>Установите программу на главный ПК, пройдите мастер и проведите пробную смену со своими кодами. Подключите дополнительные станции или ТСД по локальной сети.</p>

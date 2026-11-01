@@ -7,7 +7,7 @@ import {
   type StandaloneReleaseChannel,
   type StandaloneReleaseChannelView,
 } from "@markiro/platform-contracts";
-import { Alert, Button, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import { Alert, Button, StatusChip } from "@markiro/ui";
 
 import { formatMegabytes, formatReleaseDateTime } from "./releaseFormat.js";
 
@@ -77,96 +77,6 @@ export function ChannelReleases({
     );
   };
 
-  const columns: TableColumn<StandaloneRelease>[] = [
-    {
-      key: "version",
-      title: t("standaloneReleases.list.version"),
-      mono: true,
-      render: (release) => release.version,
-    },
-    {
-      key: "releasedAt",
-      title: t("standaloneReleases.list.releasedAt"),
-      render: (release) => formatReleaseDateTime(release.releasedAt, language),
-    },
-    {
-      key: "registeredAt",
-      title: t("standaloneReleases.list.registeredAt"),
-      render: (release) => formatReleaseDateTime(release.registeredAt, language),
-    },
-    {
-      key: "size",
-      title: t("standaloneReleases.list.size"),
-      align: "right",
-      mono: true,
-      render: (release) =>
-        t("standaloneReleases.list.megabytes", {
-          value: formatMegabytes(release.installer.sizeBytes, language),
-        }),
-    },
-    {
-      key: "sha256",
-      title: t("standaloneReleases.list.sha256"),
-      render: (release) => (
-        <span className="releases-sha">
-          <code className="releases-hash" title={release.installer.sha256}>
-            {`${release.installer.sha256.slice(0, 12)}…`}
-          </code>
-          <Button
-            size="compact"
-            variant="ghost"
-            aria-label={t("standaloneReleases.list.copyShaFor", { version: release.version })}
-            onClick={() => copyText(release.installer.sha256)}
-          >
-            {t("standaloneReleases.list.copy")}
-          </Button>
-        </span>
-      ),
-    },
-    {
-      key: "kid",
-      title: t("standaloneReleases.list.kid"),
-      mono: true,
-      render: (release) => release.kid,
-    },
-    {
-      key: "notes",
-      title: t("standaloneReleases.list.notes"),
-      wrap: true,
-      minWidth: 220,
-      render: (release) =>
-        release.notes.length === 0 ? (
-          "—"
-        ) : (
-          <ul className="releases-notes">
-            {release.notes.map((note, index) => (
-              <li key={index}>{note}</li>
-            ))}
-          </ul>
-        ),
-    },
-    {
-      key: "files",
-      title: t("standaloneReleases.list.files"),
-      render: (release) => (
-        <span className="releases-files">
-          <a href={release.installer.url} rel="noreferrer">
-            {t("standaloneReleases.list.installerLink")}
-          </a>
-          <a href={release.manifest.url} rel="noreferrer">
-            {t("standaloneReleases.list.manifestLink")}
-          </a>
-        </span>
-      ),
-    },
-    {
-      key: "action",
-      title: t("standaloneReleases.list.action"),
-      stickyEnd: true,
-      render: action,
-    },
-  ];
-
   return (
     <section className="commerce-ledger releases-channel" aria-labelledby={headingId}>
       <header className="commerce-ledger__header">
@@ -202,15 +112,97 @@ export function ChannelReleases({
           </Alert>
         ) : null}
       </div>
-      <Table
-        scrollLabel={t("standaloneReleases.list.tableRegion", {
-          channel: t(`standaloneReleases.channel.${channel}`),
-        })}
-        rows={view.releases}
-        columns={columns}
-        getRowKey={(release) => release.version}
-        empty={t("standaloneReleases.list.empty")}
-      />
+      <div className="releases-history">
+        {view.releases.length === 0 ? (
+          <p className="releases-muted">{t("standaloneReleases.list.empty")}</p>
+        ) : (
+          view.releases.map((release) => (
+            <article className="releases-entry" key={release.version} aria-label={release.version}>
+              <header className="releases-entry__header">
+                <h3 className="releases-entry__version">{release.version}</h3>
+                <div className="releases-actions">{action(release)}</div>
+              </header>
+              <dl className="releases-entry__meta">
+                <div>
+                  <dt>{t("standaloneReleases.list.releasedAt")}</dt>
+                  <dd>
+                    <time dateTime={release.releasedAt}>
+                      {formatReleaseDateTime(release.releasedAt, language)}
+                    </time>
+                  </dd>
+                </div>
+                <div>
+                  <dt>{t("standaloneReleases.list.size")}</dt>
+                  <dd>
+                    {t("standaloneReleases.list.megabytes", {
+                      value: formatMegabytes(release.installer.sizeBytes, language),
+                    })}
+                  </dd>
+                </div>
+              </dl>
+              {release.notes.length > 0 ? (
+                <section
+                  className="releases-entry__changes"
+                  aria-label={t("standaloneReleases.list.notes")}
+                >
+                  <h4>{t("standaloneReleases.list.notes")}</h4>
+                  <ul className="releases-notes">
+                    {release.notes.map((note, index) => (
+                      <li key={index}>{note}</li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              <footer className="releases-entry__footer">
+                <span className="releases-files">
+                  <a href={release.installer.url} rel="noreferrer">
+                    {t("standaloneReleases.list.installerLink")}
+                  </a>
+                  <a href={release.manifest.url} rel="noreferrer">
+                    {t("standaloneReleases.list.manifestLink")}
+                  </a>
+                </span>
+                <details className="releases-entry__technical">
+                  <summary>{t("standaloneReleases.list.technical")}</summary>
+                  <dl className="releases-entry__meta">
+                    <div>
+                      <dt>{t("standaloneReleases.list.registeredAt")}</dt>
+                      <dd>{formatReleaseDateTime(release.registeredAt, language)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("standaloneReleases.list.kid")}</dt>
+                      <dd>
+                        <code>{release.kid}</code>
+                      </dd>
+                    </div>
+                    <div className="releases-entry__checksum">
+                      <dt>{t("standaloneReleases.list.sha256")}</dt>
+                      <dd className="releases-sha">
+                        <code
+                          className="releases-hash releases-hash--full"
+                          title={release.installer.sha256}
+                        >
+                          {release.installer.sha256}
+                        </code>
+                        <Button
+                          size="compact"
+                          variant="secondary"
+                          aria-label={t("standaloneReleases.list.copyShaFor", {
+                            version: release.version,
+                          })}
+                          onClick={() => copyText(release.installer.sha256)}
+                        >
+                          {t("standaloneReleases.list.copy")}
+                        </Button>
+                      </dd>
+                    </div>
+                  </dl>
+                </details>
+              </footer>
+            </article>
+          ))
+        )}
+      </div>
     </section>
   );
 }
