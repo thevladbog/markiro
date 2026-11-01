@@ -7,6 +7,7 @@ import { Link } from "react-router";
 import {
   Alert,
   Button,
+  Combobox,
   FileDropZone,
   SectionHeader,
   StatusChip,
@@ -15,6 +16,7 @@ import {
 } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { listInvoices } from "../billing/api.js";
 import {
   importPayments,
   listPaymentMatches,
@@ -192,17 +194,31 @@ function PaymentMatchCard({ match, canWrite }: { match: PaymentMatch; canWrite: 
       ]);
     },
   });
-  const canMatch = match.tenantId !== null && match.invoiceId !== null;
-  const pendingDecision = match.status === "suggested" || match.status === "needs_review";
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const unmatched = match.status === "unmatched";
+  const invoices = useQuery({
+    queryKey: ["platform", "invoices"],
+    queryFn: listInvoices,
+    enabled: canWrite && unmatched,
+  });
+  const eligibleInvoices = (invoices.data?.items ?? []).filter(
+    (invoice) => invoice.status === "issued" || invoice.status === "partially_paid",
+  );
+  const selectedInvoice = eligibleInvoices.find((invoice) => invoice.id === selectedInvoiceId);
+  const tenantId = unmatched ? selectedInvoice?.tenantId : match.tenantId;
+  const invoiceId = unmatched ? selectedInvoice?.id : match.invoiceId;
+  const canMatch = Boolean(tenantId && invoiceId);
+  const pendingDecision =
+    unmatched || match.status === "suggested" || match.status === "needs_review";
   const reference = match.bankReference ?? match.sourceRowId;
 
   const confirm = async () => {
-    if (!canMatch || match.tenantId === null || match.invoiceId === null) return;
+    if (!tenantId || !invoiceId) return;
     await resolve.mutateAsync({
       decision: "matched",
-      tenantId: match.tenantId,
-      invoiceId: match.invoiceId,
-      tenantBankAccountId: match.tenantBankAccountId,
+      tenantId,
+      invoiceId,
+      tenantBankAccountId: unmatched ? null : match.tenantBankAccountId,
       reason,
     });
   };
@@ -255,6 +271,25 @@ function PaymentMatchCard({ match, canWrite }: { match: PaymentMatch; canWrite: 
       {resolve.error ? <Alert tone="error">{t("payments.review.resolveError")}</Alert> : null}
       {canWrite && pendingDecision ? (
         <div className="payment-match-actions">
+          {unmatched ? (
+            <Combobox
+              label={t("payments.review.invoice", { reference })}
+              options={eligibleInvoices.map((invoice) => ({
+                value: invoice.id,
+                label: invoice.number,
+                description: `${invoice.tenantName} · ${invoice.total} ${invoice.currency}`,
+              }))}
+              {...(selectedInvoiceId ? { value: selectedInvoiceId } : {})}
+              onValueChange={setSelectedInvoiceId}
+              placeholder={t("payments.review.selectInvoice")}
+              searchPlaceholder={t("payments.review.searchInvoice")}
+              emptyText={t("payments.review.noInvoices")}
+              loadingText={t("payments.review.loadingInvoices")}
+              loading={invoices.isPending}
+              disabled={resolve.isPending}
+              {...(invoices.error ? { error: t("payments.review.invoicesError") } : {})}
+            />
+          ) : null}
           <label>
             <span>{t("payments.review.reason", { reference })}</span>
             <input

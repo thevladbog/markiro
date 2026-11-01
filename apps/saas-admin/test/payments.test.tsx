@@ -2,7 +2,7 @@ import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ACCOUNTANT_ME, jsonResponse, renderSaasApp, TENANT_ID } from "./render.js";
+import { ACCOUNTANT_ME, jsonResponse, renderSaasApp, SUPPORT_ME, TENANT_ID } from "./render.js";
 
 const MATCH_ID = "81111111-1111-4111-8111-111111111111";
 const INVOICE_ID = "82111111-1111-4111-8111-111111111111";
@@ -104,6 +104,72 @@ describe("payments registry", () => {
         },
       }),
     );
+  });
+
+  it.each(["issued", "partially_paid"] as const)(
+    "manually assigns an unmatched contract payment to a %s invoice",
+    async (status) => {
+      const calls = mockUnmatchedPayment(status);
+      const user = userEvent.setup();
+      renderSaasApp({ initialEntry: "/payments" });
+
+      const selector = await screen.findByRole("combobox", { name: "Счёт для платежа REF-C" });
+      await user.click(selector);
+      const option = await screen.findByRole("option", { name: /MRK-INV-000021/ });
+      expect(screen.queryByRole("option", { name: /DRAFT|CANCELLED|PAID/ })).toBeNull();
+      await user.click(option);
+      const confirm = screen.getByRole("button", { name: "Подтвердить без добавления счёта" });
+      expect(confirm.hasAttribute("disabled")).toBe(true);
+      await user.type(screen.getByLabelText("Причина решения REF-C"), "Проверено по договору");
+      await user.click(confirm);
+      await waitFor(() =>
+        expect(calls).toContainEqual({
+          decision: "matched",
+          tenantId: TENANT_ID,
+          invoiceId: INVOICE_ID,
+          tenantBankAccountId: null,
+          reason: "Проверено по договору",
+        }),
+      );
+      await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
+    },
+  );
+
+  it("allows rejecting an unmatched own-funds transfer without choosing an invoice", async () => {
+    const calls = mockUnmatchedPayment("issued");
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: "/payments" });
+    await user.type(
+      await screen.findByLabelText("Причина решения REF-C"),
+      "Перевод собственных средств",
+    );
+    await user.click(screen.getByRole("button", { name: "Отклонить" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        decision: "rejected",
+        reason: "Перевод собственных средств",
+      }),
+    );
+  });
+
+  it("keeps unmatched payments read-only for support without loading invoices", async () => {
+    const calls = mockUnmatchedPayment("issued", { readOnly: true });
+    renderSaasApp({ initialEntry: "/payments" });
+    await screen.findByText("Оплата по договору №MRK-LLC-2026/001");
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByLabelText("Причина решения REF-C")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отклонить" })).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it("shows an invoice loading error while still allowing rejection", async () => {
+    mockUnmatchedPayment("issued", { invoicesFail: true });
+    renderSaasApp({ initialEntry: "/payments" });
+    expect(
+      await screen.findByText("Не удалось загрузить счета. Обновите страницу и повторите попытку."),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Подтвердить без добавления счёта" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Отклонить" })).toBeDefined();
   });
 
   it("accepts and decodes a Windows-1251 1C TXT statement before import", async () => {
@@ -209,4 +275,91 @@ function unknownMatch() {
     decidedAt: null,
     createdAt: CREATED_AT,
   } as const;
+}
+
+function mockUnmatchedPayment(
+  status: "issued" | "partially_paid",
+  { readOnly = false, invoicesFail = false } = {},
+) {
+  const calls: unknown[] = [];
+  let match = {
+    ...unknownMatch(),
+    tenantId: null,
+    invoiceId: null,
+    invoiceNumber: null,
+    status: "unmatched",
+    score: 0,
+    reason: "invoice_not_found",
+    paymentPurpose: "Оплата по договору №MRK-LLC-2026/001",
+  };
+  const invoice = {
+    id: INVOICE_ID,
+    tenantId: TENANT_ID,
+    tenantName: "ООО Фабрика",
+    number: "MRK-INV-000021",
+    status,
+    issueDate: CREATED_AT,
+    dueDate: null,
+    currency: "RUB",
+    sellerSnapshot: {},
+    buyerSnapshot: {},
+    subtotal: "30000.00",
+    vatTotal: "0.00",
+    total: "30000.00",
+    applicationMode: "manual",
+    createdByPlatformUserId: "user-1",
+    issuedByPlatformUserId: "user-1",
+    issuedAt: CREATED_AT,
+    paidAt: null,
+    cancelledAt: null,
+    createdAt: CREATED_AT,
+    updatedAt: CREATED_AT,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const path = String(input);
+      if (path.endsWith("/api/platform/me"))
+        return jsonResponse(200, readOnly ? SUPPORT_ME : ACCOUNTANT_ME);
+      if (path.endsWith("/api/platform/payments")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/platform/payments/matches"))
+        return jsonResponse(200, { items: [match] });
+      if (path.endsWith("/api/platform/invoices") && readOnly) {
+        calls.push("unexpected_invoice_request");
+        return jsonResponse(403, { code: "forbidden" });
+      }
+      if (path.endsWith("/api/platform/invoices") && invoicesFail) return jsonResponse(500, {});
+      if (path.endsWith("/api/platform/invoices"))
+        return jsonResponse(200, {
+          items: [
+            invoice,
+            ...(["draft", "cancelled", "paid"] as const).map((state, index) => ({
+              ...invoice,
+              id: `92111111-1111-4111-8111-11111111111${index}`,
+              number: state.toUpperCase(),
+              status: state,
+              ...(state === "draft"
+                ? {
+                    issueDate: null,
+                    sellerSnapshot: null,
+                    buyerSnapshot: null,
+                    issuedByPlatformUserId: null,
+                    issuedAt: null,
+                  }
+                : {}),
+              paidAt: state === "paid" ? CREATED_AT : null,
+              cancelledAt: state === "cancelled" ? CREATED_AT : null,
+            })),
+          ],
+        });
+      if (path.endsWith(`/api/platform/payments/matches/${MATCH_ID}`) && init.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        calls.push(body);
+        match = { ...match, status: body.decision };
+        return jsonResponse(200, match);
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${path}`);
+    }),
+  );
+  return calls;
 }
