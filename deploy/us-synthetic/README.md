@@ -81,6 +81,32 @@ Normal shutdown must await native HTTP/worker settlement before closing clients,
 pool and material. Worker `force_exit` is not closure proof. Container timeout or
 SIGKILL is not successful draining; retain the failure and investigate pending work.
 
+## Administrative admission remains execution-locked
+
+The package additionally contains `app/us-synthetic-admin-release.json`. This
+supplement binds the raw runtime-manifest SHA256 and the administrative executable
+already hashed in both the descriptor and B1 inventory. It is a separate protected
+control document, excluded from that inventory to avoid a self-hash cycle. Verify
+its actual bytes and source along with all other package evidence.
+
+`node /app/apps/api/dist/main.us-hosted-admin.js migrate` admits only a protected
+installation and the matching `operation:migrate` configuration. The other literal
+arguments are `seed` and `provision`; extra arguments refuse. The separately supplied
+`/app/us-synthetic-admin.json` pins source, raw runtime-manifest and raw supplemental
+manifest digests. All administrative controls require the same protected ownership,
+read-only modes and ancestor rules as runtime controls. Their absence does not add
+an administrative prerequisite to API/worker admission. Compose does not mount or
+launch an administrative service in this increment.
+
+All three commands remain deliberately locked: even valid admission disposes its
+handle, prints `us_hosted_provisioning_required` and exits nonzero. Invalid admission
+prints only `us_hosted_admin_startup_refused`. These commands do not read secret
+files or password stdin, connect to database/storage, migrate, seed, provision an
+identity or unlock readiness. A valid configuration is an expectation, not verified
+material, actual database privilege or execution authority. Do not mount short-lived
+administrative credentials into long-lived API/worker services or treat this entry
+as an executable migration/provisioning runbook.
+
 ## Remaining release gates
 
 Separate reviewed contracts are required for migration, seed/provisioning,

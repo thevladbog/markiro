@@ -269,3 +269,65 @@ test("the source-admission prefix refuses dirty Git before artifact work", (cont
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "us_hosted_package_refused\n");
 });
+
+test("administrative supplement binds raw manifest bytes and the checked descriptor entry without an inventory cycle", () => {
+  const source = readFileSync(new URL("../../../" + script, import.meta.url), "utf8");
+  const start = source.indexOf("function buildAdministrativeSupplement(");
+  const end = source.indexOf("\nasync function absent(", start);
+  assert.ok(start >= 0 && end > start, "administrative supplement producer missing");
+  const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const make = compileFunction("return (" + source.slice(start, end) + ");", ["sha", "refuse"])(
+    sha,
+    () => {
+      throw new Error("us_hosted_package_refused");
+    },
+  );
+  const sourceSha = "a".repeat(40);
+  const manifestBytes = Buffer.from('{"synthetic":"public"}\n');
+  const entry = {
+    path: "apps/api/dist/main.us-hosted-admin.js",
+    byteSize: 123,
+    sha256: "b".repeat(64),
+  };
+  const files = [entry];
+  const descriptorEntry = {
+    tree: "api",
+    path: "main.us-hosted-admin.js",
+    byteSize: 123,
+    sha256: entry.sha256,
+  };
+  const descriptor = { files: [descriptorEntry] };
+  const before = JSON.stringify({ files, descriptor });
+  const supplement = make(sourceSha, manifestBytes, files, descriptor);
+  assert.deepEqual(supplement, {
+    schemaVersion: 1,
+    edition: "US",
+    purpose: "synthetic-demo",
+    sourceSha,
+    runtimeManifestSha256: sha(manifestBytes),
+    entrypoint: entry,
+  });
+  assert.equal(JSON.stringify({ files, descriptor }), before);
+  assert.notEqual(
+    make(sourceSha, Buffer.from('{"synthetic":"public"}'), files, descriptor).runtimeManifestSha256,
+    supplement.runtimeManifestSha256,
+  );
+  assert.throws(() => make(sourceSha, manifestBytes, [], descriptor), /us_hosted_package_refused/);
+  assert.throws(
+    () => make(sourceSha, manifestBytes, [entry, entry], descriptor),
+    /us_hosted_package_refused/,
+  );
+  for (const next of [
+    [],
+    [{ ...descriptorEntry, tree: "db" }],
+    [{ ...descriptorEntry, path: "other.js" }],
+    [{ ...descriptorEntry, byteSize: 124 }],
+    [{ ...descriptorEntry, sha256: "c".repeat(64) }],
+    [descriptorEntry, descriptorEntry],
+  ])
+    assert.throws(
+      () => make(sourceSha, manifestBytes, files, { files: next }),
+      /us_hosted_package_refused/,
+    );
+  assert.ok(!files.some((file) => file.path === "us-synthetic-admin-release.json"));
+});

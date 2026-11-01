@@ -198,7 +198,19 @@ it("refuses either absent required capture snapshot instead of silently skipping
   expect(missingCaptureRecords).toEqual({ result: [1, 1], created: 1, removed: 1 });
 });
 
+function restoreAdministrativeControls(source: string): string {
+  const addition =
+    '  ["us-synthetic-admin.json", 16_384],\n  ["us-synthetic-admin-release.json", 1024 * 1024],\n';
+  if (!source.includes('  ["us-synthetic-admin.json",')) return source;
+  expect(source.split(addition)).toHaveLength(2);
+  const restored = source.replace(addition, "");
+  expect(createHash("sha256").update(restored).digest("hex")).toBe(
+    "e341ec75c73c3df0250c3a0a6ff3cedabfe8cc53a2c06dea73a99c911427f587",
+  );
+  return restored;
+}
 function restoreAsyncMetadata(source: string): string {
+  source = restoreAdministrativeControls(source);
   if (!source.includes("lstatSync")) return source;
   expect(source.split("lstatSync(")).toHaveLength(19);
   expect(source.split("readlinkSync(")).toHaveLength(2);
@@ -284,4 +296,56 @@ beforeAll(() => {
 });
 it("preserves ordered native metadata observations and rejected promises without async metadata dispatch", () => {
   expect(metadataTrace).toEqual({ result: [1, 1, 1, 1, 1, 1], created: 1, removed: 1 });
+});
+
+function administrativeControlFixture(kind: "good" | "oversized" | "writable"): unknown {
+  const moduleSource = ts.transpileModule(
+    readFileSync(resolve(__dirname, "../src/deployment/us-hosted-release-files.ts"), "utf8"),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } },
+  ).outputText;
+  const setup = `const fs=require('node:fs');for(const [name,size] of [['us-synthetic-admin.json',16384],['us-synthetic-admin-release.json',1048576]]){const path='/app/'+name;fs.writeFileSync(path,Buffer.alloc(size+Number(${JSON.stringify(kind)}==='oversized'),32),{mode:${kind === "writable" ? "0o666" : "0o444"}});}`;
+  const exercise = `const fs=require('node:fs');const {UsHostedReleaseFiles}=require('/app/apps/api/dist/reader.cjs');(async()=>{const result=[];for(const [name,size] of [['us-synthetic-admin.json',16384],['us-synthetic-admin-release.json',1048576]]){const reader=new UsHostedReleaseFiles();try{const bytes=await reader.read(name,size*2);result.push(Number(${JSON.stringify(kind)}==='good'&&bytes.length===size));await reader.assertUnchanged();const inventory=await reader.inventory();result.push(Number(JSON.stringify(inventory)===JSON.stringify(['apps/api/dist/reader.cjs'])));reader.dispose();result.push(Number(bytes.every(value=>value===0)));}catch(e){if(${JSON.stringify(kind)}==='good')result.push(0,0,0);else result.push(Number(e instanceof Error&&e.message==='us_hosted_release_file_invalid'));}finally{reader.dispose();}if(${JSON.stringify(kind)}==='good'){const fenced=new UsHostedReleaseFiles();const original=fs.lstatSync;try{await fenced.read(name,size);fs.lstatSync=function(path,...args){const stat=original.call(fs,path,...args);return path==='/app/'+name?new Proxy(stat,{get(target,key,receiver){return key==='mtimeNs'?target.mtimeNs+1n:Reflect.get(target,key,receiver);}}):stat;};try{await fenced.assertUnchanged();result.push(0);}catch(e){result.push(Number(e instanceof Error&&e.message==='us_hosted_release_file_invalid'));}}catch{result.push(0);}finally{fs.lstatSync=original;fenced.dispose();}}}console.log(JSON.stringify(result));})().catch(()=>{process.stderr.write('administrative_controls_failed');process.exitCode=1;});`;
+  return JSON.parse(
+    execFileSync(
+      process.execPath,
+      [resolve(__dirname, "support/us-hosted-installed-fixture.mjs")],
+      {
+        input: JSON.stringify({ moduleSource, setup, exercise }),
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    ),
+  );
+}
+let adminControls: unknown;
+let adminOversized: unknown;
+let adminWritable: unknown;
+beforeAll(() => {
+  adminControls = administrativeControlFixture("good");
+});
+beforeAll(() => {
+  adminOversized = administrativeControlFixture("oversized");
+});
+beforeAll(() => {
+  adminWritable = administrativeControlFixture("writable");
+});
+it("protects both optional administrative controls with byte bounds, fences and buffer disposal", () => {
+  expect(adminControls).toEqual({ result: Array(8).fill(1), created: 1, removed: 1 });
+  expect(adminOversized).toEqual({ result: [1, 1], created: 1, removed: 1 });
+  expect(adminWritable).toEqual({ result: [1, 1], created: 1, removed: 1 });
+});
+
+it("preserves the complete installed helper except the explicitly pinned cached Node24 image", () => {
+  const source = readFileSync(
+    resolve(__dirname, "support/us-hosted-installed-fixture.mjs"),
+    "utf8",
+  );
+  const image = '"sha256:9be410e06dadc1794f44aa4c0fd107a7ecb2edb5cb6bcc6a71c7888caf3cfa12"';
+  expect(source.split(image)).toHaveLength(2);
+  expect(
+    createHash("sha256")
+      .update(source.replace(image, '"node:24.21.0-bookworm-slim"'))
+      .digest("hex"),
+  ).toBe("0f15c30af6a219b7d695c07f163a511e9e7e1ea36f8899016d5db4bed22e4bc3");
 });

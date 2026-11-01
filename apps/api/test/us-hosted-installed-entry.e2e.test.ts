@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { Script } from "node:vm";
 import {
@@ -725,6 +726,10 @@ describe.skipIf(!existsSync(receiptPath))("genuine installed hosted prerequisite
         for(const name of forbidden) assert.equal(fs.existsSync('/run/secrets/us-demo/'+name),false);
         const r=await release.verifyUsHostedRelease(service);
         const identity=release.usHostedReleaseIdentity(r);
+        const administrative=require('/app/apps/api/dist/deployment/us-hosted-admin-release.js');
+        assert.throws(()=>administrative.assertUsHostedAdminRelease(r));
+        assert.throws(()=>administrative.usHostedAdminReleaseIdentity(r));
+        assert.throws(()=>administrative.disposeUsHostedAdminRelease(r));
         assert.equal(identity.sourceSha,${JSON.stringify(receipt.fixtureSha)});
         assert.equal(identity.manifestSha256,${JSON.stringify(receipt.manifestSha256)});
         const m=await material.collectUsHostedMaterial(r);
@@ -783,4 +788,340 @@ describe.skipIf(!existsSync(receiptPath))("genuine installed hosted prerequisite
     );
     expect(result).toEqual([1, 1, 1, 1]);
   });
+});
+
+// Separate immutable operation installations. These locators are TEST ownership evidence only.
+const adminReceiptPath = resolve(
+  __dirname,
+  "../../../.superpowers/sdd/2026-10-22-us-11-demo-viewer/installed-fixtures/admin-current.json",
+);
+const adminReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    purpose: z.literal("synthetic-test-only"),
+    baseSha: sha,
+    patchSha256: digest,
+    fixtureSha: sha,
+    manifestSha256: digest,
+    adminManifestSha256: digest,
+    operations: z.object({ migrate: container, seed: container, provision: container }).strict(),
+    variants: z.object({ wrongSupplementEntry: container, wrongDescriptor: container }).strict(),
+  })
+  .strict()
+  .refine((value) => {
+    const instances = [...Object.values(value.operations), ...Object.values(value.variants)];
+    return (
+      new Set(instances.map((entry) => entry.containerId)).size === 5 &&
+      new Set(instances.map((entry) => entry.owner)).size === 5
+    );
+  });
+
+it("requires distinct administrative operation and negative installations", () => {
+  const instance = {
+    containerId: "a".repeat(64),
+    owner: "us-hosted-complete-11111111-1111-4111-8111-111111111111",
+  };
+  const distinct = Array.from({ length: 5 }, (_, index) => ({
+    containerId: String(index + 1).repeat(64),
+    owner: `us-hosted-complete-11111111-1111-4111-8111-00000000000${index + 1}`,
+  }));
+  const [migrate, seed, provision, wrongSupplementEntry, wrongDescriptor] = distinct;
+  expect(
+    adminReceiptSchema.safeParse({
+      schemaVersion: 1,
+      purpose: "synthetic-test-only",
+      baseSha: "b".repeat(40),
+      patchSha256: "c".repeat(64),
+      fixtureSha: "d".repeat(40),
+      manifestSha256: "e".repeat(64),
+      adminManifestSha256: "f".repeat(64),
+      operations: { migrate, seed, provision },
+      variants: { wrongSupplementEntry, wrongDescriptor },
+    }).success,
+  ).toBe(true);
+  expect(
+    adminReceiptSchema.safeParse({
+      schemaVersion: 1,
+      purpose: "synthetic-test-only",
+      baseSha: "b".repeat(40),
+      patchSha256: "c".repeat(64),
+      fixtureSha: "d".repeat(40),
+      manifestSha256: "e".repeat(64),
+      adminManifestSha256: "f".repeat(64),
+      operations: { migrate: instance, seed: instance, provision: instance },
+      variants: { wrongSupplementEntry: instance, wrongDescriptor: instance },
+    }).success,
+  ).toBe(false);
+});
+
+describe.skipIf(!existsSync(adminReceiptPath))("genuine installed administrative admission", () => {
+  let receipt: z.infer<typeof adminReceiptSchema>;
+  const operations = ["migrate", "seed", "provision"] as const;
+  const installations = [...operations, "wrongSupplementEntry", "wrongDescriptor"] as const;
+  const owned = (name: (typeof installations)[number]) =>
+    name === "wrongSupplementEntry" || name === "wrongDescriptor"
+      ? receipt.variants[name]
+      : receipt.operations[name];
+  const children = new Map<string, Set<number>>();
+  beforeAll(async () => {
+    receipt = adminReceiptSchema.parse(JSON.parse(readFileSync(adminReceiptPath, "utf8")));
+    const runtime = existsSync(receiptPath)
+      ? receiptSchema.parse(JSON.parse(readFileSync(receiptPath, "utf8")))
+      : undefined;
+    for (const operation of installations) {
+      const instance = owned(operation);
+      children.set(operation, new Set());
+      expect(
+        (
+          await runTestClient("docker", [
+            "inspect",
+            "--format",
+            '{{index .Config.Labels "us-fixture-owner"}}',
+            instance.containerId,
+          ])
+        ).trim(),
+      ).toBe(instance.owner);
+      expect(
+        (
+          await runTestClient("docker", [
+            "inspect",
+            "--format",
+            "{{.HostConfig.NetworkMode}}",
+            instance.containerId,
+          ])
+        ).trim(),
+      ).toBe("none");
+      if (runtime)
+        for (const existing of Object.values(runtime.services)) {
+          expect(existing.containerId).not.toBe(instance.containerId);
+          expect(existing.owner).not.toBe(instance.owner);
+        }
+    }
+  });
+  afterAll(async () => {
+    await Promise.allSettled([...activeClients]);
+    if (!receipt) return;
+    for (const operation of installations) {
+      const rows = (
+        await runTestClient("docker", ["top", owned(operation).containerId, "-eo", "pid,comm"])
+      )
+        .trim()
+        .split("\n")
+        .slice(1)
+        .map((line) => line.trim().split(/\s+/));
+      const processes = rows.filter((row) => row[1] !== "ps");
+      if (
+        rows.filter((row) => row[1] === "ps").length > 1 ||
+        processes.length !== 1 ||
+        processes[0]?.[0] !== "1"
+      )
+        throw Error("us_hosted_actual_child_settlement_pending");
+      children.get(operation)?.clear();
+    }
+  });
+  const exercise = async (
+    operation: (typeof installations)[number],
+    body: string,
+  ): Promise<number[]> => {
+    const program = `process.stdout.write(JSON.stringify({pid:process.pid})+'\\n');
+      const assert=require('node:assert/strict');
+      const admin=require('/app/apps/api/dist/deployment/us-hosted-admin-release.js');
+      const operation=${JSON.stringify(operation === "wrongSupplementEntry" || operation === "wrongDescriptor" ? "migrate" : operation)};
+      (async()=>{${body}})().catch(()=>{process.stderr.write('us_hosted_admin_installed_exercise_failed\\n');process.exitCode=1;});`;
+    let prefix = "",
+      observed = false;
+    const pending = children.get(operation);
+    const output = await runTestClient(
+      "docker",
+      ["exec", "-i", "--user", "10001:10001", owned(operation).containerId, "node"],
+      program,
+      (chunk) => {
+        if (observed) return;
+        prefix = (prefix + chunk).slice(0, 1024);
+        const newline = prefix.indexOf("\n");
+        if (newline < 0) return;
+        try {
+          const parsed = z
+            .object({ pid: z.number().int().min(2).safe() })
+            .strict()
+            .safeParse(JSON.parse(prefix.slice(0, newline)));
+          if (parsed.success) {
+            pending?.add(parsed.data.pid);
+            observed = true;
+          }
+        } catch {
+          /* Completion and actual remote settlement remain required. */
+        }
+      },
+    );
+    const lines = output.trimEnd().split("\n");
+    if (lines.length !== 2) throw invalidExercise();
+    const pid = z
+      .object({ pid: z.number().int().min(2).safe() })
+      .strict()
+      .parse(JSON.parse(lines[0] ?? ""));
+    const flags = z
+      .array(z.union([z.literal(0), z.literal(1)]))
+      .max(16)
+      .parse(JSON.parse(lines[1] ?? ""));
+    pending?.delete(pid.pid);
+    return flags;
+  };
+  it.each(operations)(
+    "issues only immutable %s administrative provenance and invalidates disposal",
+    async (operation) => {
+      const flags = await exercise(
+        operation,
+        `
+      const handle=await admin.verifyUsHostedAdminRelease(operation);
+      const identity=admin.usHostedAdminReleaseIdentity(handle);
+      assert.equal(identity.operation,operation);assert.equal(identity.config.operation,operation);
+      assert.equal(identity.sourceSha,${JSON.stringify(receipt.fixtureSha)});
+      assert.equal(identity.manifestSha256,${JSON.stringify(receipt.manifestSha256)});
+      assert.equal(identity.adminManifestSha256,${JSON.stringify(receipt.adminManifestSha256)});
+      for(const value of [handle,identity,identity.config,identity.config.database,identity.config.release,identity.build])assert.ok(Object.isFrozen(value));
+      if(operation==='seed')assert.ok(Object.isFrozen(identity.config.storage));
+      const copy=Object.freeze({...handle});
+      assert.throws(()=>admin.assertUsHostedAdminRelease(copy));assert.throws(()=>admin.usHostedAdminReleaseIdentity(copy));
+      const runtime=require('/app/apps/api/dist/deployment/us-hosted-release-verifier.js');
+      assert.throws(()=>runtime.assertUsHostedRelease(handle));
+      const material=require('/app/apps/api/dist/deployment/us-hosted-material-owner.js');
+      await assert.rejects(material.collectUsHostedMaterial(handle));
+      admin.disposeUsHostedAdminRelease(handle);assert.throws(()=>admin.assertUsHostedAdminRelease(handle));
+      assert.throws(()=>admin.usHostedAdminReleaseIdentity(handle));
+      console.log(JSON.stringify([1,1,1,1]));`,
+      );
+      expect(flags).toEqual([1, 1, 1, 1]);
+    },
+  );
+  it.each(operations)(
+    "refuses operation substitution in the %s installation before package capture",
+    async (operation) => {
+      const flags = await exercise(
+        operation,
+        `
+      const {UsHostedReleaseFiles}=require('/app/apps/api/dist/deployment/us-hosted-release-files.js');
+      const original=UsHostedReleaseFiles.prototype.capturePackage;let captures=0;
+      UsHostedReleaseFiles.prototype.capturePackage=async function(...args){captures++;return original.apply(this,args);};
+      let refused=false;try{await admin.verifyUsHostedAdminRelease(operation==='seed'?'migrate':'seed');}catch(e){refused=e instanceof Error&&e.message==='us_hosted_admin_release_invalid';}
+      finally{UsHostedReleaseFiles.prototype.capturePackage=original;}
+      console.log(JSON.stringify([Number(refused),Number(captures===0)]));`,
+      );
+      expect(flags).toEqual([1, 1]);
+    },
+  );
+  it.each(["us-synthetic-admin.json", "us-synthetic-admin-release.json"])(
+    "refuses consumed native-stat replacement of %s at the final fence",
+    async (control) => {
+      const mutant = process.env.US_HOSTED_TEST_ADMIN_FINAL_FENCE_MUTANT === "1";
+      const flags = await exercise(
+        "migrate",
+        `
+      const fs=require('node:fs');const {UsHostedReleaseFiles}=require('/app/apps/api/dist/deployment/us-hosted-release-files.js');
+      const manifest=JSON.parse(fs.readFileSync('/app/us-synthetic-release.json','utf8'));
+      const proto=UsHostedReleaseFiles.prototype,original={read:proto.read,fence:proto.assertUnchanged,stat:fs.lstatSync};
+      const seen=new Set();let armed=false,reached=false,consumed=false,resolved=false,refused=false,selected=admin;
+      if(${JSON.stringify(mutant)}){const Module=require('node:module'),filename='/app/apps/api/dist/deployment/us-hosted-admin-release.js';
+        const source=fs.readFileSync(filename,'utf8'),line='await files.assertUnchanged();';assert.equal(source.split(line).length,2);
+        const candidate=new Module(filename,module);candidate.filename=filename;candidate.paths=Module._nodeModulePaths(require('node:path').dirname(filename));
+        candidate._compile(source.replace(line,''),filename);selected=candidate.exports;}
+      proto.read=async function(path,...args){const bytes=await original.read.call(this,path,...args);seen.add(path);return bytes;};
+      proto.assertUnchanged=async function(...args){if(manifest.files.every(file=>seen.has(file.path))){reached=true;armed=true;}return original.fence.apply(this,args);};
+      fs.lstatSync=function(path,...args){const value=original.stat.call(fs,path,...args);if(armed&&path===${JSON.stringify("/app/" + control)}){consumed=true;return new Proxy(value,{get(target,key){if(key==='mtimeNs')return target.mtimeNs+1n;const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});}return value;};
+      try{const handle=await selected.verifyUsHostedAdminRelease('migrate');resolved=true;selected.disposeUsHostedAdminRelease(handle);}catch(e){refused=e instanceof Error&&e.message==='us_hosted_admin_release_invalid';}
+      finally{proto.read=original.read;proto.assertUnchanged=original.fence;fs.lstatSync=original.stat;}
+      console.log(JSON.stringify([Number(reached),Number(consumed),Number(refused),Number(!resolved)]));`,
+      );
+      expect(flags).toEqual([1, 1, 1, 1]);
+    },
+  );
+
+  it.each(operations)(
+    "keeps the actual compiled %s executable locked after admission",
+    async (operation) => {
+      expect(
+        await exercise(
+          operation,
+          `
+      const result=require('node:child_process').spawnSync(process.execPath,['/app/apps/api/dist/main.us-hosted-admin.js',operation],
+        {encoding:'utf8',timeout:5000,maxBuffer:1024,env:{PATH:process.env.PATH}});
+      assert.equal(result.status,1);assert.equal(result.signal,null);assert.equal(result.error,undefined);
+      assert.equal(result.stdout,'');assert.equal(result.stderr,'us_hosted_provisioning_required\\n');
+      console.log(JSON.stringify([1,1,1,1]));`,
+        ),
+      ).toEqual([1, 1, 1, 1]);
+    },
+  );
+  it.each(["wrongSupplementEntry", "wrongDescriptor"] as const)(
+    "refuses the independently prepared %s package variant",
+    async (variant) => {
+      const entryMutant =
+        variant === "wrongSupplementEntry" && process.env.US_HOSTED_TEST_ADMIN_ENTRY_MUTANT === "1";
+      expect(
+        await exercise(
+          variant,
+          `
+      const fs=require('node:fs'),{UsHostedReleaseFiles}=require('/app/apps/api/dist/deployment/us-hosted-release-files.js');
+      const manifest=JSON.parse(fs.readFileSync('/app/us-synthetic-release.json','utf8'));
+      const original=UsHostedReleaseFiles.prototype.read,seen=new Set();
+      UsHostedReleaseFiles.prototype.read=async function(path,...args){const bytes=await original.call(this,path,...args);seen.add(path);return bytes;};
+      let selected=admin,resolved=false,refused=false;
+      if(${JSON.stringify(entryMutant)}){const Module=require('node:module'),filename='/app/apps/api/dist/deployment/us-hosted-admin-release.js';
+        const source=fs.readFileSync(filename,'utf8'),begin=source.indexOf('if (!entrypoint'),end=source.indexOf('await files.assertUnchanged();',begin);
+        assert.ok(begin>=0&&end>begin);const candidate=new Module(filename,module);candidate.filename=filename;candidate.paths=Module._nodeModulePaths(require('node:path').dirname(filename));
+        candidate._compile(source.slice(0,begin)+source.slice(end),filename);selected=candidate.exports;}
+      try{const handle=await selected.verifyUsHostedAdminRelease('migrate');resolved=true;selected.disposeUsHostedAdminRelease(handle);}
+      catch(e){refused=e instanceof Error&&e.message==='us_hosted_admin_release_invalid';}
+      finally{UsHostedReleaseFiles.prototype.read=original;}
+      console.log(JSON.stringify([Number(refused),Number(!resolved),Number(${JSON.stringify(variant)}!=='wrongSupplementEntry'||manifest.files.every(file=>seen.has(file.path)))]));`,
+        ),
+      ).toEqual([1, 1, 1]);
+    },
+  );
+  it.each(["extra", "missing"])(
+    "consumes the exact inventory result before administrative issuance (%s)",
+    async (difference) => {
+      const mutant = process.env.US_HOSTED_TEST_ADMIN_INVENTORY_MUTANT === "1";
+      expect(
+        await exercise(
+          "migrate",
+          `
+      const fs=require('node:fs'),{UsHostedReleaseFiles}=require('/app/apps/api/dist/deployment/us-hosted-release-files.js');
+      const original=UsHostedReleaseFiles.prototype.inventory;let consumed=false,resolved=false,refused=false,selected=admin;
+      UsHostedReleaseFiles.prototype.inventory=async function(...args){const value=await original.apply(this,args);consumed=true;assert.ok(value.includes('pnpm-lock.yaml'));return ${JSON.stringify(difference)}==='extra'?[...value,'apps/api/dist/unlisted-admin-simulation.js'].sort():value.filter(path=>path!=='pnpm-lock.yaml');};
+      if(${JSON.stringify(mutant)}){const Module=require('node:module'),path=require('node:path');
+        const filename='/app/apps/api/dist/deployment/us-hosted-package-verification.js',source=fs.readFileSync(filename,'utf8');
+        const declaration='const inventory = await files.inventory();',start=source.indexOf(declaration),end=source.indexOf('for (const file of manifest.files)',start);
+        assert.ok(start>=0&&end>start);const candidate=new Module(filename,module);candidate.filename=filename;candidate.paths=Module._nodeModulePaths(path.dirname(filename));
+        candidate._compile(source.slice(0,start)+declaration+'\\n'+source.slice(end),filename);
+        const previous=require.cache[filename];require.cache[filename]=candidate;
+        try{const issuer='/app/apps/api/dist/deployment/us-hosted-admin-release.js',compiled=new Module(issuer,module);compiled.filename=issuer;compiled.paths=Module._nodeModulePaths(path.dirname(issuer));compiled._compile(fs.readFileSync(issuer,'utf8'),issuer);selected=compiled.exports;}
+        finally{require.cache[filename]=previous;}}
+      try{const handle=await selected.verifyUsHostedAdminRelease('migrate');resolved=true;selected.disposeUsHostedAdminRelease(handle);}
+      catch(e){refused=e instanceof Error&&e.message==='us_hosted_admin_release_invalid';}
+      finally{UsHostedReleaseFiles.prototype.inventory=original;}
+      console.log(JSON.stringify([Number(consumed),Number(refused),Number(!resolved)]));`,
+        ),
+      ).toEqual([1, 1, 1]);
+    },
+  );
+});
+
+it("preserves the complete prior installed suite and all original budgets/assertions by literal inverse", () => {
+  const source = readFileSync(resolve(__dirname, "us-hosted-installed-entry.e2e.test.ts"), "utf8");
+  const marker = "// Separate immutable operation installations.";
+  expect(source.split(marker)).toHaveLength(3);
+  let restored = source.slice(0, source.indexOf(marker));
+  expect(restored.endsWith("});\n\n")).toBe(true);
+  restored = restored.slice(0, -1);
+  const imported = 'import { createHash } from "node:crypto";\n';
+  expect(restored.startsWith(imported)).toBe(true);
+  restored = restored.slice(imported.length);
+  const addition =
+    "        const administrative=require('/app/apps/api/dist/deployment/us-hosted-admin-release.js');\n        assert.throws(()=>administrative.assertUsHostedAdminRelease(r));\n        assert.throws(()=>administrative.usHostedAdminReleaseIdentity(r));\n        assert.throws(()=>administrative.disposeUsHostedAdminRelease(r));\n";
+  expect(restored.split(addition)).toHaveLength(2);
+  restored = restored.replace(addition, "");
+  expect(createHash("sha256").update(restored).digest("hex")).toBe(
+    "9adfb6102cf1a655ce3ba88057f47b6e7f76728119fd92400f133c83cc50bb84",
+  );
 });

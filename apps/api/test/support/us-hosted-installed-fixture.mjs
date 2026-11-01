@@ -62,7 +62,7 @@ try {
     "/tmp:rw,nosuid,nodev,noexec,mode=0700",
     "--user",
     "0:0",
-    "node:24.21.0-bookworm-slim",
+    "sha256:9be410e06dadc1794f44aa4c0fd107a7ecb2edb5cb6bcc6a71c7888caf3cfa12",
     "node",
     "-e",
     "setInterval(() => {}, 1000)",

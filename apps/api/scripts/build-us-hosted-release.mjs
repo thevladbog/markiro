@@ -56,6 +56,29 @@ const dependencies = [
   "packages/platform-contracts/node_modules",
 ];
 
+function buildAdministrativeSupplement(sourceSha, manifestBytes, files, descriptor) {
+  const entries = files.filter((file) => file.path === "apps/api/dist/main.us-hosted-admin.js");
+  if (entries.length !== 1) refuse();
+  const entrypoint = entries[0];
+  const described = descriptor.files.filter(
+    (file) => file.tree === "api" && file.path === "main.us-hosted-admin.js",
+  );
+  if (
+    described.length !== 1 ||
+    described[0].byteSize !== entrypoint.byteSize ||
+    described[0].sha256 !== entrypoint.sha256
+  )
+    refuse();
+  return {
+    schemaVersion: 1,
+    edition: "US",
+    purpose: "synthetic-demo",
+    sourceSha,
+    runtimeManifestSha256: sha(manifestBytes),
+    entrypoint,
+  };
+}
+
 async function absent(path) {
   try {
     await lstat(path);
@@ -282,6 +305,16 @@ try {
   );
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
   await writeFile(join(app, "us-synthetic-release.json"), manifestBytes, { flag: "wx" });
+  const adminManifest = buildAdministrativeSupplement(sourceSha, manifestBytes, files, descriptor);
+  const { parseUsHostedAdminManifest } = await import(
+    pathToFileURL(join(root, "apps/api/dist/deployment/us-hosted-admin-manifest.js"))
+  );
+  parseUsHostedAdminManifest(JSON.stringify(adminManifest));
+  await writeFile(
+    join(app, "us-synthetic-admin-release.json"),
+    `${JSON.stringify(adminManifest)}\n`,
+    { flag: "wx" },
+  );
   // Dependencies are a separate byte/link inventory, not part of B1 and not a
   // fabricated OCI digest. Never follow links back to this checkout's outputs.
   const dependencyFiles = [];

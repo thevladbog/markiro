@@ -26,6 +26,8 @@ const controls = new Map([
   ["us-synthetic-api.json", 16_384],
   ["us-synthetic-worker.json", 16_384],
   ["us-synthetic-release.json", 1024 * 1024],
+  ["us-synthetic-admin.json", 16_384],
+  ["us-synthetic-admin-release.json", 1024 * 1024],
 ]);
 const invalid = () => new Error("us_hosted_release_file_invalid");
 function same(a: BigIntStats, b: BigIntStats): boolean {
