@@ -2,41 +2,45 @@
 import { CALL_HREF, invoiceHref } from "../../content/autonom";
 import { TARIFFS, formatRoubles, monthlyEquivalent } from "../../content/pricing";
 import { PRODUCT_FACTS } from "../../content/product-facts";
+import { CALL_HREF_EN, TARIFFS_EN } from "../../content/autonom-en";
+import { PRODUCT_FACTS_EN } from "../../content/product-facts-en";
 import Icon from "./Icon.astro";
-interface Props { headingLevel?: 2 | 3; compact?: boolean; }
-const { headingLevel = 3, compact = false } = Astro.props;
+interface Props { headingLevel?: 2 | 3; compact?: boolean; locale?: "ru" | "en"; }
+const { headingLevel = 3, compact = false, locale = "ru" } = Astro.props;
+const en = locale === "en";
+const text = en ? { recommended: "Recommended", year: "RUB / year", month: "RUB per month", trial: "Try for 14 days", invoice: "Request an invoice" } : { recommended: "Рекомендуем", year: "₽ / год", month: "₽ в месяц", trial: "Попробовать 14 дней", invoice: "Получить счёт" };
 const Heading = headingLevel === 2 ? "h2" : "h3";
-const grid = TARIFFS.filter(t => t.pricePerYear !== null);
+const grid = TARIFFS.filter(t => t.pricePerYear !== null).map(t => ({ ...t, ...(en ? TARIFFS_EN[t.code] : {}) }));
 ---
 
 <div class:list={["ax-prices", "v4-prices", {"v4-prices--compact":compact}]}>
   <div class="ax-prices__grid">{grid.map(t=>
     <article class:list={["ax-plan",{"ax-plan--recommended":t.recommended}]} data-tariff={t.code} aria-labelledby={`plan-${t.code}`}>
       <div class="ax-plan__head">
-        <Heading id={`plan-${t.code}`}>{t.name}</Heading>{t.recommended && <span class="ax-plan__badge">Рекомендуем</span>}</div>
+        <Heading id={`plan-${t.code}`}>{t.name}</Heading>{t.recommended && <span class="ax-plan__badge">{text.recommended}</span>}</div>
       <p class="ax-plan__audience">{t.audience}</p>
       <p class="ax-plan__price">
         <span class="ax-plan__amount">{formatRoubles(t.pricePerYear ?? 0)}</span>
-        <span class="ax-plan__unit">₽ / год</span>{!compact&&<small class="ax-plan__month">≈ {formatRoubles(monthlyEquivalent(t.pricePerYear ?? 0))} ₽ в месяц</small>}</p>
-      <ul class="ax-checklist">{(compact ? [t.features.slice(0,2).join(" · "), t.features.find(f=>f.includes("пользовател")) ?? ""] : t.features).map(f=>
+        <span class="ax-plan__unit">{text.year}</span>{!compact&&<small class="ax-plan__month">≈ {formatRoubles(monthlyEquivalent(t.pricePerYear ?? 0))} {text.month}</small>}</p>
+      <ul class="ax-checklist">{(compact ? [t.features.slice(0,2).join(" · "), t.features.find(f=>f.includes(en ? "office users" : "пользовател")) ?? ""] : t.features).map(f=>
         <li>
           <Icon name="check" size={16}/>{f}</li>)}</ul>
       <div class="ax-plan__actions">
-        <a class:list={["ax-btn","ax-btn--block",t.recommended?"ax-btn--accent":"ax-btn--outline"]} href={`/skachat/?tariff=${t.code}`} data-analytics="landing_download_click" data-placement={`plan_${t.code}`}>Попробовать 14 дней</a>
-        <a class="ax-plan__invoice" href={invoiceHref(t.code)} data-invoice-tariff={t.code}>Получить счёт <Icon name="arrow-up-right" size={16}/>
+        <a class:list={["ax-btn","ax-btn--block",t.recommended?"ax-btn--accent":"ax-btn--outline"]} href={`/skachat/?tariff=${t.code}`} hreflang={en ? "ru" : undefined} data-analytics="landing_download_click" data-placement={`plan_${t.code}`}>{text.trial}</a>
+        <a class="ax-plan__invoice" href={invoiceHref(t.code)} hreflang={en ? "ru" : undefined} data-invoice-tariff={en ? undefined : t.code}>{text.invoice} <Icon name="arrow-up-right" size={16}/>
         </a>
       </div>
     </article>)}</div>
   <div class="v4-plant" data-tariff="plant">
     <div>
-      <h3>Завод · от четырёх линий</h3>
+      <h3>{en ? "Plant · four lines or more" : "Завод · от четырёх линий"}</h3>
       <p>
         <span class="ax-plan__price--words">
-          <span>По запросу</span>
-        </span> · Цену и условия запуска согласуем отдельно.</p>
+          <span>{en ? "On request" : "По запросу"}</span>
+        </span> · {en ? "Pricing and launch terms agreed individually." : "Цену и условия запуска согласуем отдельно."}</p>
     </div>
-    <a class="ax-link" href={CALL_HREF}>Обсудить условия <Icon name="arrow-up-right" size={16}/>
+    <a class="ax-link" href={en ? CALL_HREF_EN : CALL_HREF}>{en ? "Discuss your requirements" : "Обсудить условия"} <Icon name="arrow-up-right" size={16}/>
     </a>
   </div>
-  <p class="ax-note">{PRODUCT_FACTS.seats}</p>
+  <p class="ax-note">{en ? PRODUCT_FACTS_EN.seats : PRODUCT_FACTS.seats}</p>
 </div>

@@ -204,7 +204,8 @@ export function attachOrganizationContact(
 }
 
 export function buildPageGraph(page: SeoPageDefinition): PageGraph {
-  if (page.path === "/") return buildV4ProductGraph(page, [websiteNode(), organizationNode()]);
+  if (page.path === "/" || page.path === "/en/")
+    return buildV4ProductGraph(page, [websiteNode(), organizationNode()]);
   const homePath = page.locale === "ru" ? "/" : "/en/";
   const graph: JsonLdObject[] = [
     websiteNode(),
@@ -223,20 +224,18 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
     softwareNode(page.locale),
   ];
 
-  if (page.path !== homePath) {
-    graph.push({
-      "@type": "BreadcrumbList",
-      itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Markiro", item: absoluteUrl(homePath) },
-        {
-          "@type": "ListItem",
-          position: 2,
-          name: page.navigationLabel,
-          item: absoluteUrl(page.path),
-        },
-      ],
-    });
-  }
+  graph.push({
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Markiro", item: absoluteUrl(homePath) },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: page.navigationLabel,
+        item: absoluteUrl(page.path),
+      },
+    ],
+  });
 
   if (page.faq !== undefined) {
     graph.push({

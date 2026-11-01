@@ -546,12 +546,12 @@ describe("SEO generators", () => {
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/en/instructions/" },
     });
     expect(en?.featureList).toEqual([
-      "Data Matrix code verification on the line",
-      "Case and pallet aggregation with SSCC",
-      "ZPL and TSPL label printing",
-      "No internet needed: the software and the database run on the plant's PCs",
-      "Pallet building on an Android handheld",
-      "Shift exports in TXT, CSV and XML for GIS MT and 1C",
+      "Office on PC: shifts, products and production results.",
+      "Station: code checks, case and pallet aggregation, and SSCC label printing.",
+      "Build cases and pallets in one aggregation shift, on a station or a handheld.",
+      "The application and database run on your production PC without internet access",
+      "Database backups stay on your own equipment",
+      "Export shift results in TXT, CSV or XML for GIS MT and 1C",
     ]);
     expect(ru).not.toHaveProperty("offers");
     expect(ru).not.toHaveProperty("aggregateRating");

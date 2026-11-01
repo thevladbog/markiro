@@ -1,42 +1,43 @@
 ---
 import BrandMark from "../BrandMark.astro";
 import { SITE_CONTACTS, operatorRequisites } from "../../content/contacts";
-interface Props { variant: "full" | "short"; }
-const { variant } = Astro.props;
+interface Props { variant: "full" | "short"; locale?: "ru" | "en"; }
+const { variant, locale = "ru" } = Astro.props;
+const en = locale === "en";
 ---
 
 <footer class:list={["v4-footer", "ax-footer", {"v4-footer--short":variant==='short'}]}>
   <div class="ax-container">
     {variant==='full'&&<div class="v4-footer__grid">
-      <a href="/" aria-label="Маркиро, на главную страницу">
-        <BrandMark locale="ru"/>
+      <a href={en ? "/en/" : "/"} aria-label={en ? "Markiro home page" : "Маркиро, на главную страницу"}>
+        <BrandMark locale={locale}/>
       </a>
-      <nav aria-label="Продукт">
-        <strong>Продукт</strong>
-        <a href="/rabochee-mesto-upakovki/">Пост упаковки</a>
-        <a href="/sscc-i-agregatsiya/">Короба и паллеты</a>
-        <a href="/oflayn-rabota/">Без интернета</a>
-        <a href="/integratsiya-1c/">Выгрузки в 1С</a>
-        <a href="/stati/">Статьи</a>
+      <nav aria-label={en ? "Product" : "Продукт"}>
+        <strong>{en ? "Product" : "Продукт"}</strong>
+        <a href={en ? "/en/packing-workstation/" : "/rabochee-mesto-upakovki/"}>{en ? "Packing workstation" : "Пост упаковки"}</a>
+        <a href={en ? "/en/sscc-and-aggregation/" : "/sscc-i-agregatsiya/"}>{en ? "Cases and pallets" : "Короба и паллеты"}</a>
+        <a href={en ? "/en/offline-production/" : "/oflayn-rabota/"}>{en ? "Offline work" : "Без интернета"}</a>
+        <a href={en ? "/en/1c-integration/" : "/integratsiya-1c/"}>{en ? "Exports for 1C" : "Выгрузки в 1С"}</a>
+        <a href={en ? "/en/articles/" : "/stati/"}>{en ? "Articles" : "Статьи"}</a>
       </nav>
       <div>
-        <strong>Владислав Богатырев</strong>
+        <strong>{en ? "Vladislav Bogatyrev" : "Владислав Богатырев"}</strong>
         <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
         <a href={SITE_CONTACTS.telegram.href}>@{SITE_CONTACTS.telegram.handle}</a>
       </div>
-      <nav aria-label="Документы">
-        <a href="/instruktsii/">Инструкции</a>
-        <a href="/legal/">Документы</a>
-        <a href="/privacy/">Политика обработки данных</a>
-        <button type="button" data-consent-settings>Настройки cookies</button>
+      <nav aria-label={en ? "Documents" : "Документы"}>
+        <a href={en ? "/en/instructions/" : "/instruktsii/"}>{en ? "Instructions" : "Инструкции"}</a>
+        <a href={en ? "/en/legal/" : "/legal/"}>{en ? "Documents" : "Документы"}</a>
+        <a href={en ? "/en/privacy/" : "/privacy/"}>{en ? "Data processing policy" : "Политика обработки данных"}</a>
+        <button type="button" data-consent-settings>{en ? "Cookie settings" : "Настройки cookies"}</button>
       </nav>
     </div>}
     <div class="v4-footer__bottom">
-      <p>© Маркиро, 2026 · {operatorRequisites("ru")}</p>
-      <a href="/en/" hreflang="en" lang="en">English</a>{variant==='short'&&<>
-      <a href="/privacy/">Политика обработки данных</a>
+      <p>© {en ? "Markiro" : "Маркиро"}, 2026 · {operatorRequisites(locale)}</p>
+      <a href={en ? "/" : "/en/"} hreflang={en ? "ru" : "en"} lang={en ? "ru" : "en"}>{en ? "RU" : "English"}</a>{en && <a href="/en/" hreflang="en" lang="en" aria-current="page">EN</a>}{variant==='short'&&<>
+      <a href={en ? "/en/privacy/" : "/privacy/"}>{en ? "Data processing policy" : "Политика обработки данных"}</a>
       <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
-      <button type="button" data-consent-settings>Настройки cookies</button>
+      <button type="button" data-consent-settings>{en ? "Cookie settings" : "Настройки cookies"}</button>
     </>}</div>
   </div>
 </footer>

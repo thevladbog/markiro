@@ -1,6 +1,6 @@
 import { PRODUCT_FACTS } from "./product-facts";
 import { HOME_FAQ } from "./autonom";
-import { HOME_FAQ_EN } from "./autonom-en";
+import { PRODUCT_FACTS_EN, V4_HOME_FAQ_EN } from "./product-facts-en";
 import { findTariff, formatRoubles } from "./pricing";
 
 export type CanonicalPath =
@@ -787,14 +787,12 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/",
     alternatePath: "/",
     locale: "en",
-    title: "Markiro Autonom: Chestny ZNAK serialization on your own PC",
-    description:
-      "A line station checks every code and builds cases and pallets with SSCC. Software and database run on your own PCs, no internet needed. 14-day free trial.",
-    heading: "Serialization and aggregation. All on your PC.",
+    title: "Aggregation software for manual packing | Markiro Autonom",
+    description: PRODUCT_FACTS_EN.description,
+    heading: PRODUCT_FACTS_EN.heading,
     navigationLabel: "Markiro",
     eyebrow: "Markiro Autonom · for Windows",
-    introduction:
-      "A station on the line checks every code before it goes into a case and builds cases and pallets with SSCC. The software, the database and the backups run on your own computers: a shift needs no internet.",
+    introduction: PRODUCT_FACTS_EN.description,
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
     reviewedAt: "2026-10-23",
@@ -806,7 +804,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
     relatedArticlePaths: [],
     sections: [],
-    faq: HOME_FAQ_EN,
+    faq: V4_HOME_FAQ_EN,
   },
   {
     path: "/en/chestny-znak-serialization/",
