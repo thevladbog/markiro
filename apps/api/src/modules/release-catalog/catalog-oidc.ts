@@ -141,7 +141,9 @@ export async function verifyPublisherToken(
       typeof header.kid !== "string" ||
       header.kid.length < 1 ||
       header.kid.length > 256 ||
-      Object.keys(header).some((k) => !["alg", "typ", "kid"].includes(k))
+      (header.x5t !== undefined &&
+        (typeof header.x5t !== "string" || !/^[A-Za-z0-9_-]{27}$/.test(header.x5t))) ||
+      Object.keys(header).some((k) => !["alg", "typ", "kid", "x5t"].includes(k))
     )
       throw new CatalogFault("forbidden");
     const verified = await jwtVerify(
@@ -184,7 +186,7 @@ export async function verifyPublisherToken(
       c.iat > now + 30 ||
       c.iat < now - 600 ||
       c.nbf > now + 30 ||
-      c.nbf < c.iat - 30 ||
+      c.nbf < c.iat - 600 ||
       c.exp <= now ||
       c.exp <= c.iat ||
       c.exp - c.iat > 600
