@@ -852,7 +852,7 @@
     },
     "review": {
       "title": "Payment reconciliation",
-      "help": "Unknown and archived accounts need an explicit decision. New bank details are never created automatically.",
+      "help": "Unknown and archived accounts need an explicit decision. New bank details are never created automatically. For an unmatched payment, select an issued or partially paid invoice manually. Own-funds transfers can be rejected.",
       "empty": "No payments need review",
       "loadError": "Could not load payments for review",
       "payerUnavailable": "Payer not provided",
@@ -861,7 +861,13 @@
       "confirm": "Confirm match",
       "confirmUnknown": "Confirm without adding account",
       "reject": "Reject",
-      "resolveError": "Could not save the decision"
+      "resolveError": "Could not save the decision",
+      "invoice": "Invoice for payment {{reference}}",
+      "selectInvoice": "Select an invoice for this payment",
+      "searchInvoice": "Invoice number or customer",
+      "noInvoices": "No issued or partially paid invoices",
+      "loadingInvoices": "Loading invoices…",
+      "invoicesError": "Could not load invoices. Refresh the page and try again."
     },
     "recorded": {
       "title": "Recorded payments",
