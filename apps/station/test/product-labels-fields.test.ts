@@ -209,3 +209,17 @@ describe("duplicate label preparation", () => {
     await expect(prepareProductLabelAcceptance(value)).rejects.toThrow("raster unavailable");
   });
 });
+
+it.each(["zpl", "tspl"] as const)(
+  "freezes peel mode into duplicate bytes before digesting (%s)",
+  async (language) => {
+    const out = await prepareProductLabelAcceptance({
+      ...input(),
+      language,
+      printerOutputMode: "peel",
+    });
+    const bytes = Uint8Array.from(Buffer.from(out.bytesBase64, "base64"));
+    expect(new TextDecoder().decode(bytes)).toContain(language === "zpl" ? "^MMP" : "SET PEEL ON");
+    expect(out.preparedEvent.bytesDigest).toBe(productLabelBytesDigest(bytes));
+  },
+);

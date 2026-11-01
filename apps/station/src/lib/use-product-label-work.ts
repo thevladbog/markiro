@@ -529,6 +529,7 @@ export function useProductLabelWork(input: {
               },
               language: deps.language,
               printerDpi: deps.dpi,
+              ...(deps.profile?.outputMode ? { printerOutputMode: deps.profile.outputMode } : {}),
               printerMode: deps.profile ? printerMode(deps.profile) : "raw",
               rasterizeText:
                 deps.profile && printerMode(deps.profile) === "windows_driver"

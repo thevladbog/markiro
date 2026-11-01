@@ -6,7 +6,12 @@ import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
-import { sampleLabelData, parseScannedSscc, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  sampleLabelData,
+  parseScannedSscc,
+  type PrinterOutputMode,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
 import { playSignalTone, saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
 import type {
   HardwareContract,
@@ -137,6 +142,9 @@ export function WorkstationSetup({
   const [usbPrinter, setUsbPrinter] = useState("");
   const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
+  const [printerOutputMode, setPrinterOutputMode] = useState<PrinterOutputMode | undefined>(
+    "normal",
+  );
   const [printMode, setPrintMode] = useState<"raw" | "windows_driver">("raw");
   const [windowsSupported, setWindowsSupported] = useState(false);
   const [a4Supported, setA4Supported] = useState(false);
@@ -316,6 +324,7 @@ export function WorkstationSetup({
     setPrinterBaud(String(printer?.target.kind === "serial" ? printer.target.baud : DEFAULT_BAUD));
     setUsbPrinter(printer?.target.kind === "usb" ? printer.target.printer : "");
     setPrinterLanguage(printer?.language ?? "zpl");
+    setPrinterOutputMode(printer ? printer.outputMode : "normal");
     setPrintMode(printer ? printerMode(printer) : "raw");
     setPrinterPaper(printer?.paper);
     setRasterPreview(null);
@@ -369,6 +378,7 @@ export function WorkstationSetup({
       name,
       target,
       language: printerLanguage,
+      ...(printerOutputMode ? { outputMode: printerOutputMode } : {}),
       dpi: printerDpi,
       ...(printMode === "windows_driver" && printerPaper === "a4" ? { paper: "a4", dpi: 300 } : {}),
       ...(printMode === "windows_driver" ? { mode: printMode } : {}),
@@ -738,6 +748,13 @@ export function WorkstationSetup({
                 setTestResult(null);
               }}
               onModeChange={setPrintMode}
+              outputMode={printerOutputMode}
+              onOutputModeChange={(value) => {
+                setPrinterOutputMode(value);
+                setPrintedTestCode(null);
+                setPrinterCheck(null);
+                setTestResult(null);
+              }}
               language={printerLanguage}
               printerDpi={printerDpi}
               onPrinterDpiChange={setPrinterDpi}

@@ -1,3 +1,4 @@
+import { applyPrinterOutputMode } from "@markiro/domain";
 import { renderPrintArtifact } from "./print-artifact.js";
 import { rasterizeDriverText } from "./rasterizer.js";
 import {
@@ -118,6 +119,8 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
                 (await logoOptions()).logo,
               )
             : await input.render(template, input.fields, printer.language, printer.dpi);
+    if (printerMode(printer) === "raw")
+      bytes = applyPrinterOutputMode(bytes, printer.language, printer.outputMode);
   } catch {
     console.error("station: box label render failed");
     return { kind: "failed", code: "render_failed" };

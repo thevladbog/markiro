@@ -143,3 +143,15 @@ describe("Windows driver profile", () => {
     ).toBeNull();
   });
 });
+
+describe("printer output mode compatibility", () => {
+  it("retains the selected mode but preserves absent legacy mode", () => {
+    expect(parsePrinterProfile({ ...box, outputMode: "peel" })).toMatchObject({
+      outputMode: "peel",
+    });
+    expect(parsePrinterProfile(box)).toEqual(box);
+  });
+  it("rejects unsupported output modes", () => {
+    expect(parsePrinterProfile({ ...box, outputMode: "arbitrary command" })).toBeNull();
+  });
+});

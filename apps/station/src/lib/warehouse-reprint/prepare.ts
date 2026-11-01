@@ -1,4 +1,5 @@
 import {
+  applyPrinterOutputMode,
   encodeMonoRaster,
   renderMonoLabel,
   withPrinterDpi,
@@ -71,6 +72,10 @@ export async function renderWarehouseLabel(
     rasterizeText,
     ...options,
   });
-  const bytes = latin1ToBytes(emitLabelRenderPlan(plan));
+  const bytes = applyPrinterOutputMode(
+    latin1ToBytes(emitLabelRenderPlan(plan)),
+    printer.language,
+    printer.outputMode,
+  );
   return { fields, bytesBase64: bytesToBase64(bytes), bytesDigest: productLabelBytesDigest(bytes) };
 }

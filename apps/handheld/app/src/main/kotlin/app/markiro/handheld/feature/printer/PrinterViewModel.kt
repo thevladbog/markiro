@@ -18,6 +18,7 @@ import app.markiro.handheld.core.print.PrinterDao
 import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.applyPrinterOutputMode
 import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
@@ -54,6 +55,8 @@ data class AddPrinterForm(
     val port: String = WifiPrinterConnector.DEFAULT_PORT.toString(),
     val language: PrinterLanguage = PrinterLanguage.ZPL,
     val dpi: Int = 203,
+    val outputMode: String? = "normal",
+    val outputModeChanged: Boolean = false,
     val checking: Boolean = false,
     /** Set when the check came back with something other than a ready printer. */
     val error: NotReadyReason? = null,
@@ -131,7 +134,7 @@ class PrinterViewModel(
         val (host, port) = if (printer.transport == "wifi") WifiPrinterConnector.parseAddress(printer.address) else printer.address to 9100
         _addForm.value = AddPrinterForm(id = id, name = printer.name,
             transport = if (printer.transport == "wifi") TransportKind.WIFI else TransportKind.BLUETOOTH,
-            host = host, port = port.toString(), language = PrinterLanguage.fromWire(printer.language), dpi = printer.dpi)
+            host = host, port = port.toString(), language = PrinterLanguage.fromWire(printer.language), dpi = printer.dpi, outputMode = printer.outputMode)
     }
 
     fun editName(value: String) = _addForm.update { it.copy(name = value, error = null) }
@@ -152,6 +155,11 @@ class PrinterViewModel(
     fun editPort(value: String) = _addForm.update { it.copy(port = value.filter(Char::isDigit), error = null) }
 
     fun setLanguage(language: PrinterLanguage) = _addForm.update { it.copy(language = language, error = null) }
+
+    fun setOutputMode(mode: String?) {
+        require(mode == null || mode in listOf("normal", "peel", "cutter"))
+        _addForm.update { it.copy(outputMode = mode, outputModeChanged = true, error = null) }
+    }
 
     fun setDpi(dpi: Int) = _addForm.update { it.copy(dpi = dpi, error = null) }
 
@@ -183,6 +191,7 @@ class PrinterViewModel(
                 address = address,
                 language = form.language.wire,
                 dpi = form.dpi,
+                outputMode = if (form.id == null && existing != null && !form.outputModeChanged) existing.outputMode else form.outputMode,
                 selected = false,
                 lastStatus = null,
                 lastSeenAt = null,
@@ -230,6 +239,7 @@ class PrinterViewModel(
                 address = normalizedPrinterAddress("bluetooth", device.address),
                 language = form.language.wire,
                 dpi = form.dpi,
+                outputMode = if (form.id == null && existing != null && !form.outputModeChanged) existing.outputMode else form.outputMode,
                 selected = false,
                 lastStatus = null,
                 lastSeenAt = null,
@@ -262,12 +272,12 @@ class PrinterViewModel(
                 _testStep.value = TestPrintStep.Failed(status.reason)
                 return@work
             }
-            val document = renderer.render(
+            val document = applyPrinterOutputMode(renderer.render(
                 TestLabel.spec(),
                 TestLabel.data(),
                 PrinterLanguage.fromWire(printer.language),
                 printer.dpi,
-            )
+            ), printer.language, printer.outputMode)
             _testStep.value = recovery.printing { when (val outcome = transport.sendRemembered(printer, document, printers, recovery, clock())) {
                 is SendOutcome.Delivered -> TestPrintStep.Sent("${printer.name} · ${printer.address}")
                 is SendOutcome.Refused -> TestPrintStep.Failed(outcome.reason)

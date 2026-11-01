@@ -1,4 +1,5 @@
 import {
+  applyPrinterOutputMode,
   encodeMonoRaster,
   renderMonoLabel,
   withPrinterDpi,
@@ -36,9 +37,13 @@ export async function renderPrintArtifact(
   return {
     format: profile.language,
     dpi: profile.dpi ?? spec.dpi,
-    bytes: await renderLabelBytes(spec, fields, profile.language, rasterizeText, {
-      ...options,
-      dpi: profile.dpi,
-    }),
+    bytes: applyPrinterOutputMode(
+      await renderLabelBytes(spec, fields, profile.language, rasterizeText, {
+        ...options,
+        dpi: profile.dpi,
+      }),
+      profile.language,
+      profile.outputMode,
+    ),
   };
 }

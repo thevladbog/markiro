@@ -14,6 +14,7 @@ import app.markiro.handheld.core.print.assigned
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.applyPrinterOutputMode
 import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
@@ -193,7 +194,7 @@ class DuplicateJobs(
             return DuplicateOutcome.Refused(DuplicateReason.CODE_INCOMPLETE)
         }
         val bytes = try {
-            renderer.render(spec, fields, PrinterLanguage.fromWire(printer.language), printer.dpi)
+            applyPrinterOutputMode(renderer.render(spec, fields, PrinterLanguage.fromWire(printer.language), printer.dpi), printer.language, printer.outputMode)
         } catch (_: LabelRenderException) {
             return DuplicateOutcome.Refused(DuplicateReason.RENDER_FAILED)
         }

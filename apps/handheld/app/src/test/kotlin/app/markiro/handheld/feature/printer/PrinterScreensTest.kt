@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
@@ -29,6 +30,16 @@ class PrinterScreensTest {
         "p2", "Zebra ZQ320", "bluetooth", "AA:BB", "tspl", 203,
         selected = false, lastStatus = null, lastSeenAt = null,
     )
+
+    @Test fun outputModeCanBeSelectedFromTheCompactForm() {
+        var selected: String? = null
+        compose.setContent { MarkiroTheme {
+            AddPrinterScreen(AddPrinterForm(outputMode = null), AddPrinterCallbacks(onOutputMode = { selected = it }))
+        } }
+        compose.onNodeWithText("Как настроено в принтере").performScrollTo().performClick()
+        compose.onNodeWithText("Отделитель с датчиком снятия").performClick()
+        assertEquals("peel", selected)
+    }
 
     @Test
     fun theListShowsProfilesAndPurposeSettingsWithoutAGlobalSelection() {

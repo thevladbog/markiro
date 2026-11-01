@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -70,6 +72,7 @@ data class AddPrinterCallbacks(
     val onPort: (String) -> Unit = {},
     val onLanguage: (PrinterLanguage) -> Unit = {},
     val onDpi: (Int) -> Unit = {},
+    val onOutputMode: (String?) -> Unit = {},
     val onCheck: () -> Unit = {},
     val onBluetooth: () -> Unit = {},
 )
@@ -253,6 +256,7 @@ fun AddPrinterScreen(form: AddPrinterForm, cb: AddPrinterCallbacks) {
             form.error?.let { reason ->
                 Text(stringResource(reasonLabel(reason)), style = t.strong, color = c.tone(Tone.Err).fg)
             }
+            PrinterOutputModePicker(form.outputMode, cb.onOutputMode)
         }
         Column(Modifier.fillMaxWidth().padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PrimaryButton(stringResource(R.string.printer_check), cb.onCheck, enabled = !form.checking && form.host.isNotBlank())
@@ -482,4 +486,32 @@ private fun SettingRow(label: String, value: String, onClick: () -> Unit) {
         Text(label, style = t.body, color = c.fg1)
         Text(value, style = t.caption, color = c.fg2)
     }
+}
+
+@Composable
+private fun PrinterOutputModePicker(mode: String?, onMode: (String?) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val choices = listOf(
+        "normal" to R.string.printer_output_normal,
+        "peel" to R.string.printer_output_peel,
+        "cutter" to R.string.printer_output_cutter,
+    )
+    val label = choices.firstOrNull { it.first == mode }?.second ?: R.string.printer_output_device
+    Text(stringResource(R.string.printer_output_mode), style = MarkiroTheme.type.label, color = MarkiroTheme.colors.fg3)
+    Box(Modifier.fillMaxWidth()) {
+        SecondaryButton(stringResource(label), { expanded = true })
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (mode == null) DropdownMenuItem(
+                text = { Text(stringResource(R.string.printer_output_device)) },
+                onClick = { expanded = false; onMode(null) },
+            )
+            choices.forEach { (value, title) ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(title)) },
+                    onClick = { expanded = false; onMode(value) },
+                )
+            }
+        }
+    }
+    Text(stringResource(R.string.printer_output_hint), style = MarkiroTheme.type.caption, color = MarkiroTheme.colors.fg2)
 }

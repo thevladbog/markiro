@@ -314,3 +314,31 @@ it("replays an uncertain Windows delivery from frozen logo bytes while offline",
     w.close();
   }
 });
+
+it.each(["zpl", "tspl"] as const)(
+  "includes selected output mode in working box bytes (%s)",
+  async (language) => {
+    const input = configuredInput();
+    const bytes = new TextEncoder().encode(
+      language === "zpl" ? "^XA\n^XZ\n" : "SIZE 10 mm,10 mm\nPRINT 1\n",
+    );
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const profile: PrinterProfile = {
+      id: "p",
+      name: "P",
+      target: PRINT_TARGET,
+      language,
+      dpi: 203,
+      outputMode: "cutter",
+    };
+    const result = await attemptBoxPrint({
+      ...input,
+      printing: { ...profile, profile, print },
+      render: async () => bytes,
+    });
+    expect(result.kind).toBe("printed");
+    expect(new TextDecoder().decode(print.mock.calls[0]?.[1])).toContain(
+      language === "zpl" ? "^MMC" : "SET CUTTER 1",
+    );
+  },
+);

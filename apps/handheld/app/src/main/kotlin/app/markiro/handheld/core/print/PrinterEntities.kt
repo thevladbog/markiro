@@ -29,6 +29,8 @@ data class PrinterEntity(
     /** What the printer last reported, for the list subtitle. */
     val lastStatus: String?,
     val lastSeenAt: Long?,
+    /** Null in legacy profiles: preserve printer configuration. */
+    val outputMode: String? = null,
 )
 
 @Dao
@@ -85,8 +87,8 @@ interface PrinterDao {
     @Query("UPDATE printers SET selected = (id = :id)")
     suspend fun select(id: String)
 
-    @Query("UPDATE printers SET lastStatus = :status, lastSeenAt = :at WHERE id = :id AND address = :address AND transport = :transport AND language = :language AND dpi = :dpi")
-    suspend fun setSnapshotStatus(id: String, address: String, transport: String, language: String, dpi: Int, status: String, at: Long)
+    @Query("UPDATE printers SET lastStatus = :status, lastSeenAt = :at WHERE id = :id AND address = :address AND transport = :transport AND language = :language AND dpi = :dpi AND outputMode IS :outputMode")
+    suspend fun setSnapshotStatus(id: String, address: String, transport: String, language: String, dpi: Int, outputMode: String?, status: String, at: Long)
 
     @Query("UPDATE printers SET lastStatus = :status, lastSeenAt = :at WHERE id = :id")
     suspend fun setStatus(id: String, status: String?, at: Long)

@@ -890,6 +890,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                                 onPort = vm::editPort,
                                 onLanguage = vm::setLanguage,
                                 onDpi = vm::setDpi,
+                                onOutputMode = vm::setOutputMode,
                                 onCheck = vm::checkAndSave,
                                 // The form has to know it went to Bluetooth, or backing out of
                                 // pairing returns to a screen still asking for a network address.

@@ -10,6 +10,7 @@ import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.applyPrinterOutputMode
 import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
@@ -104,7 +105,7 @@ class PalletPrinter(
 
         pallets.setPrintState(palletId, PalletPrint.PRINTING, null)
         val document = try {
-            renderer.render(spec, fields, PrinterLanguage.fromWire(printer.language), printer.dpi)
+            applyPrinterOutputMode(renderer.render(spec, fields, PrinterLanguage.fromWire(printer.language), printer.dpi), printer.language, printer.outputMode)
         } catch (_: LabelRenderException) {
             return fail(palletId, PrintReason.RENDER_FAILED)
         }

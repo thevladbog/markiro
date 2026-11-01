@@ -1887,3 +1887,63 @@ describe("A4 setup test printing", () => {
     },
   );
 });
+
+describe("printer output mode setup", () => {
+  it("defaults new profiles to normal and sends the selected mode in a test label", async () => {
+    const printed: Uint8Array[] = [];
+    render(
+      <WorkstationSetup
+        hw={hardware({
+          print: async (_target, bytes) => {
+            printed.push(bytes);
+          },
+        })}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
+    fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM9" } });
+    const mode = screen.getByRole("combobox", { name: "Label output" });
+    expect((mode as HTMLSelectElement).value).toBe("normal");
+    fireEvent.change(mode, { target: { value: "peel" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+    await waitFor(() => expect(printed).toHaveLength(1));
+    expect(new TextDecoder().decode(printed[0])).toContain("^MMP");
+  });
+});
+
+it("preserves device mode when a legacy printer is edited and saved", async () => {
+  const onConfigChange = vi.fn();
+  const exec = await storedHardwareExec({
+    scanner: null,
+    printer: { kind: "tcp", host: "old-printer", port: 9100 },
+    printerLanguage: "zpl",
+    printerDpi: 203,
+    verifyPrintedLabel: false,
+  });
+  render(
+    <WorkstationSetup
+      hw={hardware()}
+      exec={exec}
+      sound={{ muted: false, volume: 1 }}
+      onSoundChange={() => {}}
+      onConfigChange={onConfigChange}
+      onDone={() => {}}
+    />,
+  );
+  await selectSetupTab("Printer");
+  expect((screen.getByRole("combobox", { name: "Label output" }) as HTMLSelectElement).value).toBe(
+    "device",
+  );
+  fireEvent.change(screen.getByLabelText("Printer name"), { target: { value: "Renamed" } });
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+  const saved = onConfigChange.mock.calls.at(-1)?.[0] as HardwareConfig;
+  expect(saved.printerRouting?.printers[0]).toMatchObject({ name: "Renamed" });
+  expect(saved.printerRouting?.printers[0]).not.toHaveProperty("outputMode");
+});

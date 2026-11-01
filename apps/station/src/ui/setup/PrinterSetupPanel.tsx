@@ -1,3 +1,4 @@
+import type { PrinterOutputMode } from "@markiro/domain";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Select } from "@markiro/ui";
@@ -11,6 +12,8 @@ type PrinterTransport = PrintTarget["kind"] | "none";
 
 export interface PrinterSetupPanelProps {
   mode?: "raw" | "windows_driver";
+  outputMode?: PrinterOutputMode | undefined;
+  onOutputModeChange?: (mode: PrinterOutputMode | undefined) => void;
   windowsSupported?: boolean;
   a4Supported?: boolean;
   paper?: "a4" | undefined;
@@ -50,6 +53,8 @@ export interface PrinterSetupPanelProps {
 
 export function PrinterSetupPanel({
   mode = "raw",
+  outputMode,
+  onOutputModeChange,
   windowsSupported = false,
   a4Supported = false,
   paper,
@@ -262,6 +267,30 @@ export function PrinterSetupPanel({
           )}
           {mode === "windows_driver" && (
             <p className="setup-windows-hint">{t("setup.windowsDriverHint")}</p>
+          )}
+          {mode === "raw" && (
+            <>
+              <Select
+                native
+                size="floor"
+                label={t("setup.printerOutputMode")}
+                value={outputMode ?? "device"}
+                disabled={disabled || busy || transport === "none"}
+                options={[
+                  ...(outputMode === undefined
+                    ? [{ value: "device", label: t("setup.printerOutputDevice") }]
+                    : []),
+                  { value: "normal", label: t("setup.printerOutputNormal") },
+                  { value: "peel", label: t("setup.printerOutputPeel") },
+                  { value: "cutter", label: t("setup.printerOutputCutter") },
+                ]}
+                onValueChange={(value) => {
+                  if (value === "normal" || value === "peel" || value === "cutter")
+                    onOutputModeChange?.(value);
+                }}
+              />
+              <p className="setup-windows-hint">{t("setup.printerOutputHint")}</p>
+            </>
           )}
           <fieldset
             hidden={mode === "windows_driver"}

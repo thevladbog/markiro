@@ -1,3 +1,4 @@
+import { PRINTER_OUTPUT_MODES, type PrinterOutputMode } from "@markiro/domain";
 import type { HardwareConfig, PrinterLanguage } from "./hardware-config.js";
 import type { PrintTarget } from "./hardware.js";
 
@@ -6,6 +7,8 @@ export type PrintPurpose = (typeof PRINT_PURPOSES)[number];
 export interface PrinterProfile {
   id: string;
   mode?: "raw" | "windows_driver";
+  /** Absent for legacy profiles: preserve device settings. */
+  outputMode?: PrinterOutputMode;
   paper?: "a4";
   name: string;
   target: PrintTarget;
@@ -87,7 +90,12 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
     (row.paper !== "a4" || row.mode !== "windows_driver" || row.dpi !== 300)
   )
     return null;
+  if (row.outputMode !== undefined && !PRINTER_OUTPUT_MODES.some((mode) => mode === row.outputMode))
+    return null;
   return {
+    ...(row.outputMode === "normal" || row.outputMode === "peel" || row.outputMode === "cutter"
+      ? { outputMode: row.outputMode }
+      : {}),
     id,
     name,
     target,
