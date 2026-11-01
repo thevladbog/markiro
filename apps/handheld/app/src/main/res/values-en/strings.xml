@@ -612,7 +612,7 @@
     <string name="printer_name">Printer name</string>
     <string name="printer_remove">Remove printer</string>
     <string name="printer_missing_purposes">Unassigned: %1$s</string>
-    <string name="printer_configured_purposes">%1$d of 3 purposes assigned</string>
+    <string name="printer_configured_purposes">%1$d of %2$d purposes assigned</string>
     <string name="printer_recovery_hint">Choose a printer for this label. Other jobs keep their destinations.</string>
     <string name="printer_duplicate_compatible">Only printers with matching language and DPI are shown. The saved label will be replayed unchanged.</string>
     <string name="printer_replacement_label">Reprint on %1$s. Choose a reason below.</string>

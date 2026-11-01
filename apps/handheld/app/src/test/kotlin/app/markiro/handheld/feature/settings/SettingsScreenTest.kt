@@ -49,6 +49,14 @@ class SettingsScreenTest {
         installId = "0123456789abcdef",
     )
 
+    @Test fun configuredPrinterCountUsesTheAvailablePurposes() {
+        compose.setContent { MarkiroTheme {
+            SettingsScreen(ui.copy(missingPrinterPurposes = emptyList(), printerPurposeCount = 2),
+                config.copy(backend = "host"), onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {})
+        } }
+        compose.onNodeWithText("Назначено 2 из 2").assertIsDisplayed()
+    }
+
     @Test fun detailsDoNotCrowdTheSettingsLanding() {
         compose.setContent { MarkiroTheme {
             SettingsScreen(ui, config, onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {})
@@ -86,7 +94,7 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun longSyncValueKeepsAGapAndAlignsEveryLineToTheTrailingEdge() {
+    fun longSyncValueAppearsBelowItsLabelWithoutOverflow() {
         compose.setContent {
             MarkiroTheme {
                 Box(Modifier.width(320.dp)) {
@@ -103,8 +111,7 @@ class SettingsScreenTest {
         assertTrue("value must be below its label", value.top >= label.bottom)
         val layouts = mutableListOf<TextLayoutResult>()
         valueNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertTrue(layouts.single().lineCount >= 1)
-        assertTrue("value layout: ${layouts.single().size}, lines=${layouts.single().lineCount}, height=${layouts.single().multiParagraph.height}, text=${layouts.single().layoutInput.text}", !layouts.single().hasVisualOverflow)
+        assertTrue("sync value must not overflow", !layouts.single().hasVisualOverflow)
     }
 
     /**

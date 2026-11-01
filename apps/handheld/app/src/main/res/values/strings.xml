@@ -632,7 +632,7 @@
     <string name="printer_name">Название принтера</string>
     <string name="printer_remove">Удалить принтер</string>
     <string name="printer_missing_purposes">Не назначено: %1$s</string>
-    <string name="printer_configured_purposes">Назначено %1$d из 3</string>
+    <string name="printer_configured_purposes">Назначено %1$d из %2$d</string>
     <string name="printer_recovery_hint">Выберите принтер для этой этикетки. Назначения остальных заданий не изменятся.</string>
     <string name="printer_duplicate_compatible">Показаны принтеры с тем же языком и DPI. Сохранённая этикетка будет повторена без изменений.</string>
     <string name="printer_replacement_label">Повторная печать: %1$s. Выберите основание ниже.</string>

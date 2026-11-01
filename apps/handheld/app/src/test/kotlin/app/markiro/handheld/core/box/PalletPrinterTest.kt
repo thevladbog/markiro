@@ -173,6 +173,22 @@ class PalletPrinterTest {
     }
 
     @Test
+    fun deferredTemplateRefusalCanRecoverAfterCorrectingItsChoice() = runTest {
+        seedShift()
+        seedClosedPallet()
+        val store = app.markiro.handheld.core.print.PrintTemplateStore(db)
+        store.cache(app.markiro.handheld.core.print.CachedLabelTemplate("wrong", "pallet", "Other product", template, productId = "other"))
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.PALLET, "wrong")
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.TEMPLATE_INCOMPATIBLE), printer(transport).print("pal-1"))
+        assertEquals(null, transport.sent)
+        printer(transport).defer("pal-1")
+        assertEquals(PalletPrint.DEFERRED, db.palletDao().get("pal-1")!!.printState)
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.PALLET, null)
+        assertEquals(PrintOutcome.Printed, printer(transport).print("pal-1"))
+    }
+
+    @Test
     fun palletRoutingNeverFallsBackToTheConfiguredBoxPrinter() = runTest {
         seedShift()
         seedClosedPallet()

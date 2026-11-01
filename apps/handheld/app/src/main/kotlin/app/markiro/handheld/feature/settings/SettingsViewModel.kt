@@ -61,6 +61,7 @@ data class SettingsUi(
     /** `null` until a printer is configured; the settings row falls back to a hint. */
     val printerLabel: String? = null,
     val missingPrinterPurposes: List<PrintPurpose>? = null,
+    val printerPurposeCount: Int = PrintPurpose.entries.size,
     val printerAttentionPurposes: List<PrintPurpose> = emptyList(),
     /** `null` until the check has answered; it is read-only and never blocks a screen. */
     val update: UpdateState? = null,
@@ -119,8 +120,11 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch { val id = meta.installId(); _state.update { it.copy(installId = id) } }
         viewModelScope.launch {
-            printers.observeRouting().collect { routing ->
-                _state.update { it.copy(missingPrinterPurposes = routing.missing, printerAttentionPurposes = routing.attention) }
+            combine(printers.observeRouting(), this@SettingsViewModel.config) { routing, device ->
+                val purposes = PrintPurpose.entries.filter { device?.backend != "host" || it != PrintPurpose.DUPLICATE }
+                Triple(routing.missing.filter { it in purposes }, routing.attention.filter { it in purposes }, purposes.size)
+            }.collect { (missing, attention, count) ->
+                _state.update { it.copy(missingPrinterPurposes = missing, printerAttentionPurposes = attention, printerPurposeCount = count) }
             }
         }
     }

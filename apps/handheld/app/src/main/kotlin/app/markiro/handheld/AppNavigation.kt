@@ -758,12 +758,18 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 composable(Routes.PRINTER) { entry ->
                     val vm = printerViewModel(nav, entry)
                     val state by vm.state.collectAsStateWithLifecycle()
+                    val parent = remember(entry) { nav.getBackStackEntry(Routes.PRINTER_GRAPH) }
+                    val templatesVm: app.markiro.handheld.feature.printer.PrinterTemplatesViewModel = hiltViewModel(parent)
                     PrinterListScreen(
                         state,
                         PrinterListCallbacks(
                             onBack = { nav.popBackStack() },
                             onAssignments = { nav.navigate(Routes.PRINTER_ASSIGNMENTS) },
-                            onSelect = { id -> vm.select(id); nav.navigate(Routes.PRINTER_PROFILE) },
+                            onSelect = { id ->
+                                templatesVm.beginChoice()
+                                vm.select(id)
+                                nav.navigate(Routes.PRINTER_PROFILE)
+                            },
                             onEdit = { id -> vm.startEdit(id); nav.navigate(Routes.PRINTER_ADD) },
                             onTest = { id ->
                                 vm.select(id)

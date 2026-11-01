@@ -89,7 +89,7 @@ class BoxPrinter(
         val template = app.markiro.handheld.core.print.PrintTemplateStore(db).forPrint(
             PrintPurpose.BOX, boxId, shift.boxLabelTemplate, shift.productId,
             db.palletProductDao().byId(shift.productId)?.chzProductGroupCode,
-            recoverUnsent = box.printState == BoxPrint.FAILED && box.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
+            recoverUnsent = box.printState in setOf(BoxPrint.FAILED, BoxPrint.DEFERRED) && box.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
         )
         template.reason?.let { return fail(boxId, it) }
         val templateJson = template.specJson ?: return fail(boxId, PrintReason.TEMPLATE_MISSING)

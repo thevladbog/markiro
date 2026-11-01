@@ -119,6 +119,22 @@ class BoxPrinterTest {
     }
 
     @Test
+    fun deferredTemplateRefusalCanRecoverAfterCorrectingItsChoice() = runTest {
+        seedClosedBox()
+        val store = app.markiro.handheld.core.print.PrintTemplateStore(db)
+        store.cache(app.markiro.handheld.core.print.CachedLabelTemplate("wrong", "box", "Wrong product", template, productId = "different"))
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.BOX, "wrong")
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.TEMPLATE_INCOMPATIBLE), printer(transport).print("box-1"))
+        assertNull(transport.sent)
+        printer(transport).defer("box-1")
+        assertEquals(BoxPrint.DEFERRED, db.boxDao().get("box-1")!!.printState)
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.BOX, null)
+        assertEquals(PrintOutcome.Printed, printer(transport).print("box-1"))
+        org.junit.Assert.assertNotNull(transport.sent)
+    }
+
+    @Test
     fun aChosenLayoutIsPrintedAndSurvivesLaterChoiceChanges() = runTest {
         seedClosedBox()
         val store = app.markiro.handheld.core.print.PrintTemplateStore(db)

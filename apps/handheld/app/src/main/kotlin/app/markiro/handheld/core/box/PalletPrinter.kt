@@ -67,7 +67,7 @@ class PalletPrinter(
         val template = app.markiro.handheld.core.print.PrintTemplateStore(db).forPrint(
             PrintPurpose.PALLET, palletId, ready.templateJson, productId,
             productId?.let { db.palletProductDao().byId(it)?.chzProductGroupCode },
-            recoverUnsent = pallet.printState == PalletPrint.FAILED && pallet.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
+            recoverUnsent = pallet.printState in setOf(PalletPrint.FAILED, PalletPrint.DEFERRED) && pallet.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
         )
         template.reason?.let { return fail(palletId, it) }
         val templateJson = template.specJson ?: return fail(palletId, PrintReason.TEMPLATE_MISSING)

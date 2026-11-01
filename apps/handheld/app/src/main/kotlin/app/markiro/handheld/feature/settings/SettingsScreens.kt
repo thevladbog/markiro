@@ -102,7 +102,7 @@ fun SettingsScreen(
                         state.missingPrinterPurposes?.let { missing ->
                             if (missing.isEmpty() && state.printerAttentionPurposes.isNotEmpty()) stringResource(R.string.printer_attention_purposes,
                                 state.printerAttentionPurposes.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
-                            else if (missing.isEmpty()) stringResource(R.string.printer_configured_purposes, 3)
+                            else if (missing.isEmpty()) stringResource(R.string.printer_configured_purposes, state.printerPurposeCount - missing.size, state.printerPurposeCount)
                             else stringResource(R.string.printer_missing_purposes,
                                 missing.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
                         } ?: state.printerLabel ?: stringResource(R.string.printer_none),
