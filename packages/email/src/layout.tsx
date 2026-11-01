@@ -61,9 +61,9 @@ const logoGrid = Array.from({ length: 9 }, (_, y) =>
 
 const responsiveStyles = `
   @media (max-width: 480px) {
-    .mk-email-hero { padding-left: 24px !important; padding-right: 24px !important; }
-    .mk-email-content { padding-left: 24px !important; padding-right: 24px !important; }
-    .mk-email-footer { padding-left: 24px !important; padding-right: 24px !important; }
+    .mk-email-hero > tbody > tr > td,
+    .mk-email-content > tbody > tr > td,
+    .mk-email-footer > tbody > tr > td { padding-left: 24px !important; padding-right: 24px !important; }
   }
 `;
 

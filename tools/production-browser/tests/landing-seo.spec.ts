@@ -279,7 +279,21 @@ test.describe("standalone lead forms", () => {
     await expect(page.locator('[data-release="sha256"]')).toHaveText(
       LATEST_RELEASE.installer.sha256,
     );
-    await expect(page.getByText("Перед первым запуском Windows", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Установка и первый запуск", exact: true }),
+    ).toBeVisible();
+    const windowsWarning = page.getByText("Если Windows покажет предупреждение", { exact: true });
+    await expect(windowsWarning).toBeVisible();
+    await windowsWarning.click();
+    const installationGuide = page.getByRole("link", {
+      name: "Инструкция по установке",
+      exact: true,
+    });
+    await expect(installationGuide).toBeVisible();
+    await expect(installationGuide).toHaveAttribute(
+      "href",
+      "/instruktsii/ustanovka-i-pervyy-zapusk/",
+    );
     await expect(page.locator("[data-download-ready]")).toContainText(
       isMobile ? "Заявка принята" : "Ссылка готова",
     );
