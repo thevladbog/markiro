@@ -1,4 +1,5 @@
 import { PRODUCT_FACTS, V4_HOME_FAQ } from "../content/product-facts";
+import { PRODUCT_FACTS_EN, V4_HOME_FAQ_EN } from "../content/product-facts-en";
 import { TARIFFS } from "../content/pricing";
 import type { PageGraph, PageMetadata } from "./seo";
 
@@ -11,8 +12,12 @@ const ref = (id: string) => ({ "@id": id });
 /** The three V4 commercial surfaces share identities and public facts. Legal/instruction graphs are untouched. */
 export function buildV4ProductGraph(page: PageMetadata, shared: PageGraph["@graph"]): PageGraph {
   const facts = PRODUCT_FACTS;
+  const en = page.locale === "en";
+  const copy = en ? PRODUCT_FACTS_EN : facts;
+  const homePath = en ? "/en/" : "/";
+  const faqId = `${origin}${homePath}#faq`;
   const pricing = page.path === "/stoimost/";
-  const home = page.path === "/";
+  const home = page.path === "/" || page.path === "/en/";
   const pageUrl = `${origin}${page.path}`;
   const graph: PageGraph["@graph"] = [
     ...shared,
@@ -20,52 +25,68 @@ export function buildV4ProductGraph(page: PageMetadata, shared: PageGraph["@grap
       "@type": "WebPage",
       "@id": `${pageUrl}#webpage`,
       url: pageUrl,
-      name: home ? facts.heading : pricing ? "Тарифы Маркиро" : "Маркиро Автоном для Windows",
+      name: home ? copy.heading : pricing ? "Тарифы Маркиро" : "Маркиро Автоном для Windows",
       description: page.description,
-      inLanguage: "ru",
+      inLanguage: page.locale,
       isPartOf: ref(`${origin}/#website`),
       mainEntity: ref(pricing ? productId : softwareId),
       about: [ref(softwareId), ref(handheldId)],
-      ...(home ? { hasPart: ref(`${origin}/#faq`) } : { breadcrumb: ref(`${pageUrl}#breadcrumb`) }),
+      ...(home ? { hasPart: ref(faqId) } : { breadcrumb: ref(`${pageUrl}#breadcrumb`) }),
     },
     {
       "@type": "SoftwareApplication",
       "@id": softwareId,
-      name: facts.name,
-      alternateName: ["Markiro Autonom", "Markiro"],
-      url: `${origin}/`,
+      name: copy.name,
+      alternateName: en ? ["Маркиро Автоном", "Markiro"] : ["Markiro Autonom", "Markiro"],
+      url: `${origin}${homePath}`,
       installUrl: `${origin}/skachat/`,
-      description:
-        "Программа для агрегации кодов маркировки на Windows. Офис управляет сменами и продукцией; станция выполняет упаковку и агрегацию. Главный ПК, офис и станция — роли одного установщика. Пробный период 14 дней со всеми функциями, без оплаты.",
+      description: en
+        ? PRODUCT_FACTS_EN.softwareDescription
+        : "Программа для агрегации кодов маркировки на Windows. Офис управляет сменами и продукцией; станция выполняет упаковку и агрегацию. Главный ПК, офис и станция — роли одного установщика. Пробный период 14 дней со всеми функциями, без оплаты.",
       applicationCategory: facts.applicationCategory,
       operatingSystem: facts.desktop.operatingSystems,
       processorRequirements: facts.desktop.architecture,
       inLanguage: "ru",
       publisher: ref(`${origin}/#organization`),
-      softwareHelp: { "@type": "CreativeWork", url: `${origin}/instruktsii/` },
+      softwareHelp: {
+        "@type": "CreativeWork",
+        url: `${origin}${en ? "/en/instructions/" : "/instruktsii/"}`,
+      },
       featureList: [
-        facts.office,
-        facts.station,
-        "Собирайте короба и паллеты в одной смене агрегации — на станции или ТСД.",
-        "Программа и база на ПК производства, работа без интернета",
-        "Резервные копии базы на оборудовании производства",
-        "Выгрузки смены в TXT, CSV или XML для ГИС МТ и 1С",
+        copy.office,
+        copy.station,
+        en
+          ? "Build cases and pallets in one aggregation shift, on a station or a handheld."
+          : "Собирайте короба и паллеты в одной смене агрегации — на станции или ТСД.",
+        en
+          ? "The application and database run on your production PC without internet access"
+          : "Программа и база на ПК производства, работа без интернета",
+        en
+          ? "Database backups stay on your own equipment"
+          : "Резервные копии базы на оборудовании производства",
+        en
+          ? "Export shift results in TXT, CSV or XML for GIS MT and 1C"
+          : "Выгрузки смены в TXT, CSV или XML для ГИС МТ и 1С",
       ],
     },
     {
       "@type": "SoftwareApplication",
       "@id": handheldId,
-      name: "Маркиро Автоном — приложение ТСД",
-      description: facts.handheld.description,
+      name: en ? "Markiro Autonom — handheld application" : "Маркиро Автоном — приложение ТСД",
+      description: copy.handheld.description,
       applicationCategory: facts.applicationCategory,
       operatingSystem: `Android ${facts.handheld.minimumAndroidVersion}+`,
       inLanguage: "ru",
       publisher: ref(`${origin}/#organization`),
       softwareRequirements: ref(softwareId),
       featureList: [
-        facts.handheld.description,
-        "Короба и паллеты в одной смене агрегации",
-        "Отдельное приложение. Связь с главным ПК по локальной сети.",
+        copy.handheld.description,
+        en
+          ? "Cases and pallets in one aggregation shift"
+          : "Короба и паллеты в одной смене агрегации",
+        en
+          ? "Separate application. Connects to the main PC over the local network."
+          : "Отдельное приложение. Связь с главным ПК по локальной сети.",
       ],
     },
   ];
@@ -101,8 +122,8 @@ export function buildV4ProductGraph(page: PageMetadata, shared: PageGraph["@grap
   if (home)
     graph.push({
       "@type": "FAQPage",
-      "@id": `${origin}/#faq`,
-      mainEntity: V4_HOME_FAQ.map((f) => ({
+      "@id": faqId,
+      mainEntity: (en ? V4_HOME_FAQ_EN : V4_HOME_FAQ).map((f) => ({
         "@type": "Question",
         name: f.question,
         acceptedAnswer: { "@type": "Answer", text: f.answer },

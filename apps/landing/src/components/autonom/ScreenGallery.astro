@@ -1,7 +1,12 @@
+---
+interface Props { locale?: "ru" | "en"; }
+const { locale = "ru" } = Astro.props;
+const title = locale === "en" ? "Application screen" : "Экран программы";
+---
 <dialog class="v4-gallery" data-screen-dialog aria-labelledby="screen-dialog-title">
   <div class="v4-gallery__head">
-    <h2 id="screen-dialog-title">Экран программы</h2>
-    <button type="button" class="ax-btn ax-btn--outline" data-screen-close>Закрыть</button>
+    <h2 id="screen-dialog-title">{title}</h2>
+    <button type="button" class="ax-btn ax-btn--outline" data-screen-close>{locale === "en" ? "Close" : "Закрыть"}</button>
   </div>
   <img data-screen-image alt="" />
 </dialog>
@@ -15,7 +20,7 @@
       if (button && dialog && image && button.dataset.screenSrc) {
         trigger = button;
         image.src = button.dataset.screenSrc;
-        image.alt = button.dataset.screenAlt ?? "Экран программы";
+        image.alt = button.dataset.screenAlt ?? image.alt;
         const heading = dialog.querySelector("h2");
         if (heading) heading.textContent = image.alt;
         dialog.showModal();

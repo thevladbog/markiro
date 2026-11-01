@@ -217,7 +217,7 @@ export const TARIFFS_EN: Readonly<
   },
   line: {
     name: "Line",
-    audience: "a line and a warehouse with a handheld",
+    audience: "packing station + mobile handheld",
     features: [
       "1 line",
       "2 workstations: a station and a handheld",

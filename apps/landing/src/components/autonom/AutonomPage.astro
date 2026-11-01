@@ -16,7 +16,7 @@ interface Props {
 }
 
 const { metadata, graph, phone, footer = "full" } = Astro.props;
-const v4 = ["/", "/skachat/", "/stoimost/"].includes(metadata.path);
+const v4 = ["/", "/en/", "/skachat/", "/stoimost/"].includes(metadata.path);
 ---
 
 <BaseLayout metadata={metadata} graph={graph} theme="auto">
@@ -25,7 +25,7 @@ const v4 = ["/", "/skachat/", "/stoimost/"].includes(metadata.path);
     <main id="main" class="ax-main">
       <slot />
     </main>
-    {v4 ? <V4Footer variant={footer}/> : <SiteFooter variant={footer} locale={metadata.locale} />}
+    {v4 ? <V4Footer variant={footer} locale={metadata.locale}/> : <SiteFooter variant={footer} locale={metadata.locale} />}
   </div>
 
   <script>
