@@ -45,6 +45,23 @@ describe("operational overview", () => {
     expect(screen.getByText("tenant.created")).toBeDefined();
   });
 
+  it.each([
+    ["failure", "Ошибка"],
+    ["rejected", "Отклонено"],
+    ["duplicate", "Повтор"],
+  ])("renders persisted %s activity without losing the overview", async (outcome, label) => {
+    installOperationsApi({
+      overview: {
+        ...OPERATIONS_OVERVIEW,
+        recentActivity: OPERATIONS_OVERVIEW.recentActivity.map((event) => ({ ...event, outcome })),
+      },
+    });
+    renderSaasApp({ initialEntry: "/" });
+
+    expect(await screen.findByText("tenant.created")).toBeDefined();
+    expect(screen.getByText(label)).toBeDefined();
+  });
+
   it("keeps health visible when the overview contract is invalid", async () => {
     installOperationsApi({ overview: { activeTenants: "not-a-number" } });
     renderSaasApp({ initialEntry: "/" });

@@ -9,7 +9,12 @@ afterEach(() => {
 });
 
 describe("platform audit page", () => {
-  it("presents audit events as a named operational register", async () => {
+  it.each([
+    ["success", "Успешно"],
+    ["failure", "Ошибка"],
+    ["rejected", "Отклонено"],
+    ["duplicate", "Повтор"],
+  ])("presents %s audit events as a named operational register", async (outcome, label) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -23,7 +28,7 @@ describe("platform audit page", () => {
                 actorPlatformUserId: "platform-admin",
                 actorRole: "platform_admin",
                 action: "tenant.created",
-                outcome: "success",
+                outcome,
                 tenantId: TENANT_ID,
                 targetType: "tenant",
                 targetId: TENANT_ID,
@@ -48,5 +53,6 @@ describe("platform audit page", () => {
     expect(await screen.findByText("Неизменяемый журнал событий")).toBeDefined();
     expect(await screen.findByRole("region", { name: "Журнал аудита" })).toBeDefined();
     expect(screen.getByText("tenant.created")).toBeDefined();
+    expect(screen.getByText(label)).toBeDefined();
   });
 });

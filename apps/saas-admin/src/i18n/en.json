@@ -1410,7 +1410,10 @@
     "outcomes": {
       "success": "Success",
       "failed": "Failed",
-      "denied": "Denied"
+      "denied": "Denied",
+      "failure": "Failed",
+      "rejected": "Rejected",
+      "duplicate": "Duplicate"
     }
   },
   "catalog": {

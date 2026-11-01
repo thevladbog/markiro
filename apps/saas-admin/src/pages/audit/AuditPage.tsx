@@ -3,22 +3,17 @@ import { useTranslation } from "react-i18next";
 import { Alert, SectionHeader, Spinner, StatusChip, Table, type TagPhase } from "@markiro/ui";
 import { listAuditEvents, type AuditEvent } from "./api.js";
 
-/**
- * Общий union у аудита платформы — `success` | `failed` | `denied`
- * (`platformAuditEventSchema` в `packages/platform-contracts/src/
- * platform-auth.ts` и `operationsAuditEventSummarySchema` в `operations.ts`
- * для ленты активности на обзорной странице — те же три значения). Запись
- * аудита неизменяема: `success` — завершённое штатно действие (`done`), а не
- * «идёт прямо сейчас». `denied` — отказ в доступе, заметный факт, но не
- * системная ошибка (`attention`).
- */
-export function auditOutcomePhase(outcome: "success" | "failed" | "denied"): TagPhase {
+/** Preserve the outcomes recorded by each workflow when displaying immutable audit facts. */
+export function auditOutcomePhase(outcome: AuditEvent["outcome"]): TagPhase {
   switch (outcome) {
     case "success":
+    case "duplicate":
       return "done";
     case "denied":
+    case "rejected":
       return "attention";
     case "failed":
+    case "failure":
       return "failed";
   }
 }

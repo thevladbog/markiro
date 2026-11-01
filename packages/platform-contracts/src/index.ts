@@ -472,6 +472,7 @@ export {
   platformActivationSuccessSchema,
   platformAuditContracts,
   platformAuditEventSchema,
+  platformAuditOutcomeSchema,
   platformAuditQuerySchema,
   platformAuditResponseSchema,
   platformAuthContracts,
