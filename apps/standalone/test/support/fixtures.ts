@@ -47,5 +47,5 @@ export const SESSION: OfficeSession = {
     name: "Ирина Смирнова",
     role: "admin",
   },
-  expiresAt: "2026-09-26T21:15:00Z",
+  expiresAt: new Date(Date.now() + 12 * 60 * 60_000).toISOString(),
 };

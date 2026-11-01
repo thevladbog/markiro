@@ -614,6 +614,7 @@ export function FloorApp({
   }
   return (
     <ShiftList
+      source={source}
       key={turnedBack}
       local={local}
       pairing={{ hostId, deviceId }}

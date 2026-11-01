@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { parseShiftTaskBarcode, SHIFT_TASK_BARCODE_PREFIX } from "@markiro/domain";
+
 import { Alert } from "@markiro/ui";
 
 import type { DeviceLicense, EnteredShift, ShiftEnter } from "../../host/protocol.js";
@@ -16,6 +18,8 @@ import {
   sharedParticipation,
   type Participation,
 } from "./shift-participation.js";
+import type { ScanSource } from "../scan-source.js";
+import { cardAction } from "./ShiftCard.js";
 import { opensBlocked } from "../license.js";
 import { queueBadge } from "./hub-layout.js";
 import { readAcceptedCounts } from "./shift-accepted.js";
@@ -23,6 +27,7 @@ import { readLostCodes } from "../work/work-reads.js";
 import { ShiftHubView, type HubCopies } from "./ShiftHub.js";
 
 export interface ShiftListProps {
+  source?: ScanSource;
   local: LocalExecutor;
   pairing: Pairing;
   /** The station's line: the list shows its shifts. */
@@ -70,6 +75,7 @@ export interface ShiftListProps {
  * begin on the page after the work screen or the new shift is gone.
  */
 export function ShiftList({
+  source,
   local,
   pairing,
   lineId,
@@ -94,6 +100,7 @@ export function ShiftList({
   const [refusal, setRefusal] = useState<{ reason: EntryRefusal; line: LineSlots | null } | null>(
     null,
   );
+  const [scanError, setScanError] = useState<string | null>(null);
   const [requestedPage, setRequestedPage] = useState(1);
   const [outbox, setOutbox] = useState<OutboxStatus | null>(null);
   const alive = useRef(true);
@@ -180,6 +187,7 @@ export function ShiftList({
     running.current = true;
     setEntering(copy.id);
     setRefusal(null);
+    setScanError(null);
     try {
       const result = await enterShift(
         {
@@ -208,6 +216,71 @@ export function ShiftList({
       if (alive.current) setEntering(null);
     }
   };
+
+  const scan = useRef<(raw: string) => void>(() => undefined);
+  useLayoutEffect(() => {
+    scan.current = (raw) => {
+      if (running.current) return;
+      const token = raw.trim().replace(/^\][A-Za-z][0-9]/, "");
+      if (!token.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
+      const id = parseShiftTaskBarcode(token);
+      setRefusal(null);
+      if (id === null) {
+        setScanError(t("floor.shifts.scanInvalid"));
+        return;
+      }
+      if (copies.kind !== "ready") {
+        setScanError(t("floor.shifts.scanNotReady"));
+        return;
+      }
+      const copy = copies.copies.find((copy) => copy.id === id);
+      if (!copy) {
+        setScanError(t("floor.shifts.scanNotOnLine"));
+        return;
+      }
+      const action = cardAction(
+        copy,
+        deviceId,
+        online,
+        blocked,
+        copies.participation?.get(id) ?? null,
+      );
+      switch (action.kind) {
+        case "open":
+        case "continue":
+        case "join":
+          if (!action.enabled) {
+            setScanError(t("floor.shifts.refused.no_link"));
+            return;
+          }
+          break;
+        case "finish":
+          break;
+        case "blocked":
+          setScanError(t(`floor.shifts.refused.${action.refusal}`));
+          return;
+        case "part_closed":
+          setScanError(t("floor.shifts.refused.part_closed"));
+          return;
+        case "busy":
+          setScanError(t("floor.shifts.refused.busy"));
+          return;
+        case "closing":
+          setScanError(t("floor.shifts.refused.closed"));
+          return;
+      }
+      void choose(copy);
+    };
+  });
+  useEffect(() => {
+    if (!source) return;
+    source.clearPendingInput();
+    const stop = source.start((raw) => scan.current(raw));
+    return () => {
+      stop();
+      source.clearPendingInput();
+    };
+  }, [source]);
 
   const busy = entering !== null;
   // Not alerts as well (`role="presentation"` drops the component's own role):
@@ -246,6 +319,11 @@ export function ShiftList({
       onPageChange={setRequestedPage}
       messages={
         <>
+          {scanError !== null && (
+            <Alert tone="error" role="presentation">
+              {scanError}
+            </Alert>
+          )}
           {standing}
           {linkState}
           {busy && <p>{t("floor.shifts.entering")}</p>}
