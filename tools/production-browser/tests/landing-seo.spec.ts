@@ -185,7 +185,7 @@ test("GTM stays offline until analytics consent and loads only once after permis
 // /skachat/ and /stoimost/, and «Разобрать линию» leads to the contacts of the home page.
 for (const [route, label] of [
   ["/", "hello@markiro.app"],
-  ["/en/", "Walk through your line in 30 minutes"],
+  ["/en/", "hello@markiro.app"],
 ] as const) {
   test(`${route} has no call form and leads the line review to its contacts`, async ({ page }) => {
     await page.goto(route);
@@ -478,7 +478,7 @@ test("article hero keeps a clear heading hierarchy", async ({ page }) => {
 
 for (const [route, wordmark, headerTheme, footerTheme] of [
   ["/", "маркиро", "light", "light"],
-  ["/en/", "MARKIRO", "light", "dark"],
+  ["/en/", "MARKIRO", "light", "light"],
   ["/sscc-i-agregatsiya/", "маркиро", "dark", "dark"],
   ["/en/sscc-and-aggregation/", "MARKIRO", "dark", "dark"],
 ] as const) {
