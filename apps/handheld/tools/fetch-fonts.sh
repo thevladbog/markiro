@@ -16,4 +16,5 @@ fetch plex_sans_bold.ttf plex-sans/fonts/complete/ttf/IBMPlexSans-Bold.ttf
 fetch plex_mono_regular.ttf plex-mono/fonts/complete/ttf/IBMPlexMono-Regular.ttf
 fetch plex_mono_medium.ttf plex-mono/fonts/complete/ttf/IBMPlexMono-Medium.ttf
 fetch plex_mono_semibold.ttf plex-mono/fonts/complete/ttf/IBMPlexMono-SemiBold.ttf
+fetch plex_mono_bold.ttf plex-mono/fonts/complete/ttf/IBMPlexMono-Bold.ttf
 file "$target"/*.ttf

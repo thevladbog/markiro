@@ -87,6 +87,7 @@ class HostBackend(
     }
 
     override suspend fun enter(shiftId: String, body: ShiftEntryRequest): ShiftDto {
+        orgPrint?.let { calls.run { it.fetch() } }
         val entered = calls.run { api().enter(shiftId) }
         keep { save(entered) }
         // A closed part is read back without a bundle to work: nothing to keep for `bundle`, and an earlier entry must not feed it.

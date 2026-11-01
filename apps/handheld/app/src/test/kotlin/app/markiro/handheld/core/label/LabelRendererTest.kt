@@ -14,7 +14,7 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class LabelRendererTest {
-    private val rasterizer = AndroidTextRasterizer()
+    private val rasterizer = AndroidTextRasterizer(androidx.test.core.app.ApplicationProvider.getApplicationContext())
 
     /** Ten units per character, so the expectations below are arithmetic rather than typography. */
     private val tenPerChar: (String) -> Double = { it.length * 10.0 }
