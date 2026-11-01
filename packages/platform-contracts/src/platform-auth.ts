@@ -169,6 +169,16 @@ export const platformActivationSuccessSchema = z
   .strict();
 export type PlatformActivationSuccess = z.infer<typeof platformActivationSuccessSchema>;
 
+/** Outcomes already persisted by platform workflows; preserve their historical meaning. */
+export const platformAuditOutcomeSchema = z.enum([
+  "success",
+  "failed",
+  "denied",
+  "failure",
+  "rejected",
+  "duplicate",
+]);
+
 export const platformAuditQuerySchema = z.object({
   tenantId: platformTenantIdSchema.optional(),
   actorId: platformUserIdSchema.optional(),
@@ -179,7 +189,7 @@ export const platformAuditQuerySchema = z.object({
     .max(120)
     .regex(/^[a-z0-9_.-]+$/)
     .optional(),
-  outcome: z.enum(["success", "failed", "denied"]).optional(),
+  outcome: platformAuditOutcomeSchema.optional(),
   from: z.iso
     .datetime()
     .transform((value) => new Date(value))
@@ -203,7 +213,7 @@ export const platformAuditEventSchema = z
     actorPlatformUserId: nullablePlatformUserIdSchema,
     actorRole: platformRoleSchema.nullable(),
     action: z.string().min(1).max(120),
-    outcome: z.enum(["success", "failed", "denied"]),
+    outcome: platformAuditOutcomeSchema,
     tenantId: platformTenantIdSchema.nullable(),
     targetType: z.string().min(1).max(120),
     targetId: z.string().min(1).max(128).nullable(),

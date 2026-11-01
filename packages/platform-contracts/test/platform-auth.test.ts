@@ -4,6 +4,7 @@ import {
   platformActivationCompleteRequestSchema,
   platformActivationSuccessSchema,
   platformAuditContracts,
+  operationsAuditEventSummarySchema,
   platformAuditResponseSchema,
   platformCapabilitiesForRole,
   platformMutationAcknowledgementSchema,
@@ -171,6 +172,36 @@ describe("platform identity contracts", () => {
         token: request.token,
       }).success,
     ).toBe(false);
+  });
+
+  it.each(["success", "failed", "denied", "failure", "rejected", "duplicate"])(
+    "preserves persisted %s outcomes in the audit register and overview",
+    (outcome) => {
+      const summary = {
+        id: "31111111-1111-4111-8111-111111111111",
+        actorPlatformUserId: null,
+        actorRole: null,
+        action: "standalone.diagnostics.ingest",
+        outcome,
+        tenantId: null,
+        targetType: "standalone_support_diagnostic",
+        targetId: null,
+        createdAt: "2026-11-01T10:00:00.000Z",
+      };
+      expect(operationsAuditEventSummarySchema.parse(summary).outcome).toBe(outcome);
+      expect(platformAuditContracts.list.query.parse({ outcome }).outcome).toBe(outcome);
+      const response = platformAuditResponseSchema.parse({
+        items: [{ ...summary, reason: null, before: null, after: null, requestId: null }],
+        nextOffset: null,
+      });
+      expect(response.items[0]?.outcome).toBe(outcome);
+    },
+  );
+
+  it("rejects unknown audit outcomes", () => {
+    expect(platformAuditContracts.list.query.safeParse({ outcome: "unexpected" }).success).toBe(
+      false,
+    );
   });
 
   it("normalizes audit pagination with nullable metadata fields", () => {

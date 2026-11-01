@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { platformRoleSchema } from "./platform-auth.js";
+import { platformAuditOutcomeSchema, platformRoleSchema } from "./platform-auth.js";
 import {
   platformTenantIdSchema,
   platformTimestampSchema,
@@ -127,7 +127,7 @@ export const operationsAuditEventSummarySchema = z
     actorPlatformUserId: z.string().min(1).max(128).nullable(),
     actorRole: platformRoleSchema.nullable(),
     action: z.string().min(1).max(120),
-    outcome: z.enum(["success", "failed", "denied"]),
+    outcome: platformAuditOutcomeSchema,
     tenantId: platformTenantIdSchema.nullable(),
     targetType: z.string().min(1).max(120),
     targetId: z.string().min(1).max(128).nullable(),

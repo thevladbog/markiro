@@ -1412,7 +1412,10 @@
     "outcomes": {
       "success": "Успешно",
       "failed": "Ошибка",
-      "denied": "Отказано"
+      "denied": "Отказано",
+      "failure": "Ошибка",
+      "rejected": "Отклонено",
+      "duplicate": "Повтор"
     }
   },
   "catalog": {
