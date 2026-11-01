@@ -2590,6 +2590,7 @@ body,
 }
 
 .setup-printer-identity,
+.setup-printer-format,
 .setup-printer-connection {
   display: grid;
   min-width: 0;
@@ -2602,8 +2603,13 @@ body,
   grid-template-columns: minmax(0, 1fr) minmax(185px, 0.7fr);
 }
 
+.setup-printer-format,
 .setup-printer-connection {
   grid-template-columns: minmax(0, 1fr) 176px;
+}
+
+.setup-printer-connection > .setup-panel__fields:only-child {
+  grid-column: 1 / -1;
 }
 
 .setup-printer-connection .setup-touch-choice {
