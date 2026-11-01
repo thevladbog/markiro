@@ -61,6 +61,38 @@ describe("V4 public product graph", () => {
       valueAddedTaxIncluded: false,
     });
   });
+  it("exposes the published yearly site licence prices on both home pages without inventing a handheld price", () => {
+    for (const path of ["/", "/en/"]) {
+      const nodes = buildPageGraph(findSeoPage(path))["@graph"];
+      const software = nodes.find((n) => n["@id"] === "https://markiro.app/#software");
+      expect(software?.offers).toMatchObject(
+        [
+          { price: 60000, code: "start" },
+          { price: 120000, code: "line" },
+          { price: 240000, code: "workshop" },
+        ].map(({ price, code }) => ({
+          "@type": "Offer",
+          price,
+          priceCurrency: "RUB",
+          url: `https://markiro.app/stoimost/#plan-${code}`,
+          description:
+            path === "/en/"
+              ? "Annual licence for one production site. Prices exclude VAT."
+              : "Годовая лицензия на одну площадку. Цены без НДС.",
+        })),
+      );
+      const offers = software?.offers;
+      if (!Array.isArray(offers)) throw new Error("Expected published licence offers");
+      offers.forEach((offer: unknown) => {
+        expect(offer).not.toMatchObject({
+          priceSpecification: { "@type": "UnitPriceSpecification" },
+        });
+      });
+      expect(
+        nodes.find((n) => n["@id"] === "https://markiro.app/#handheld-software"),
+      ).not.toHaveProperty("offers");
+    }
+  });
   it("uses the final manual-packing headline", () => {
     expect(findSeoPage("/").heading).toBe("Программа для агрегации кодов маркировки");
   });
