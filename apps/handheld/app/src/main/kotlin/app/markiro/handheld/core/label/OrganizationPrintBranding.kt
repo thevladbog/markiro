@@ -46,9 +46,35 @@ class OrganizationPrintBranding @Inject constructor(
     }
     /** Cache only: label rendering cannot make a network request. */
     suspend fun loadCached(): RasterResult? = db.recovery.work {
+        if (db.deviceConfigDao().get()?.backend == "host") return@work loadHostCached()
         val key = ownerKey()
         try { cached(key) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
     }
+    private suspend fun loadHostCached(): RasterResult? {
+        val saved = app.markiro.handheld.core.storage.MetaStore(db).get(app.markiro.handheld.core.host.HostOrgPrint.KEY)
+            ?: return null
+        val org = Json { ignoreUnknownKeys = true }.decodeFromString(
+            app.markiro.handheld.core.network.host.OrgPrintDto.serializer(), saved)
+        val logo = org.logo
+        if (logo == null || logo is JsonNull) {
+            return withContext(Dispatchers.IO) {
+                val bitmap = context.assets.open("markiro-print-logo.png").use { BitmapFactory.decodeStream(it) }
+                    ?: throw LabelRenderException("Invalid bundled logo")
+                try {
+                    val paper = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+                    try {
+                        Canvas(paper).apply { drawColor(Color.WHITE); drawBitmap(bitmap, 0f, 0f, null) }
+                        val pixels = IntArray(paper.width * paper.height)
+                        paper.getPixels(pixels, 0, paper.width, 0, 0, paper.width, paper.height)
+                        val packed = bitmapToZplHex(convertToMonochrome(pixels, paper.width, paper.height), paper.width, paper.height)
+                        RasterResult(packed.hex, packed.totalBytes, packed.bytesPerRow, paper.width, paper.height)
+                    } finally { paper.recycle() }
+                } finally { bitmap.recycle() }
+            }
+        }
+        return hostLogoRaster(logo.jsonObject)
+    }
+
     private fun cachedDescriptor(key: String): String? = prefs.getString(key, null)?.let {
         Json.parseToJsonElement(it).jsonObject["descriptor"]?.jsonPrimitive?.content
     }
@@ -127,4 +153,20 @@ class OrganizationPrintBranding @Inject constructor(
         }
         raster
     }
+}
+
+/** Host wire logos are already packed monochrome pixels, with the same row stride as ZPL. */
+internal fun hostLogoRaster(logo: kotlinx.serialization.json.JsonObject): RasterResult {
+    val width = logo.getValue("width").jsonPrimitive.int
+    val height = logo.getValue("height").jsonPrimitive.int
+    val encoded = logo.getValue("pixelsBase64").jsonPrimitive.content
+    if (width !in 1..1024 || height !in 1..512 || encoded.length > 90_000) throw LabelRenderException("Invalid host logo bounds")
+    val bytes = try { java.util.Base64.getDecoder().decode(encoded) } catch (_: IllegalArgumentException) {
+        throw LabelRenderException("Invalid host logo encoding")
+    }
+    val stride = (width + 7) / 8
+    if (bytes.size != stride * height) throw LabelRenderException("Invalid host logo size")
+    val padding = (1 shl ((8 - width % 8) % 8)) - 1
+    if ((0 until height).any { (bytes[it * stride + stride - 1].toInt() and padding) != 0 }) throw LabelRenderException("Invalid host logo padding")
+    return RasterResult(bytes.joinToString("") { "%02X".format(it.toInt() and 255) }, bytes.size, stride, width, height)
 }

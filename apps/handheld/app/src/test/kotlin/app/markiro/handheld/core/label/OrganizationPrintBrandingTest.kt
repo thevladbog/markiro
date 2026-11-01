@@ -44,6 +44,20 @@ class OrganizationPrintBrandingTest {
         branding = OrganizationPrintBranding(context, db, api)
     }
     @After fun close() { db.close() }
+    @Test fun hostLogoUsesTheOfflineHostCacheWithoutCallingCloud() = runTest {
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(config.copy(backend = "host"))
+        app.markiro.handheld.core.storage.MetaStore(db).put("host_org_print",
+            """{"name":"Factory","issuerPrefix":"1234567","logo":{"width":10,"height":2,"pixelsBase64":"8MAPQA=="}}""")
+        val raster = checkNotNull(branding.loadCached())
+        assertEquals("F0C00F40", raster.hex)
+        assertEquals(2, raster.bytesPerRow)
+        assertEquals(0, requests)
+    }
+    @Test fun hostLogoRejectsNonzeroPadding() {
+        val logo = Json.parseToJsonElement("""{"width":10,"height":2,"pixelsBase64":"8MAPQQ=="}""") as kotlinx.serialization.json.JsonObject
+        assertThrows(LabelRenderException::class.java) { hostLogoRaster(logo) }
+    }
     @Test fun confirmedAbsenceUsesBundledLogoAndWorksOffline() = runTest {
         val first = branding.load()
         assertTrue(first.width > 0 && first.totalBytes > 0)
@@ -76,7 +90,7 @@ class OrganizationPrintBrandingTest {
         assertEquals(0, requests)
         val spec = LabelSpecCodec.parse("""{"widthMm":75,"heightMm":120,"dpi":203,"language":"zpl","elements":[{"id":"logo","kind":"organization_logo","source":"organization","fallback":"markiro","xMm":4,"yMm":3,"widthMm":30,"heightMm":7},{"id":"sscc","kind":"barcode","xMm":4,"yMm":80,"format":"code128","data":"sscc","sizeMm":32,"moduleWidthMm":0.3754}]}""")
         val data = mapOf(LabelField.SSCC to "046012345600007778")
-        val renderer = LabelRenderer(AndroidTextRasterizer(), branding)
+        val renderer = LabelRenderer(AndroidTextRasterizer(androidx.test.core.app.ApplicationProvider.getApplicationContext()), branding)
         for (language in listOf(PrinterLanguage.ZPL, PrinterLanguage.TSPL)) {
             assertArrayEquals(renderer.render(spec.copy(elements=spec.elements.filterNot { it is LabelElement.OrganizationLogo }), data, language,203), renderer.render(spec,data,language,203))
         }

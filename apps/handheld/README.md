@@ -146,7 +146,8 @@ The handheld renders labels itself. `core/label` is a Kotlin port of the ZPL and
 
 Text inside printable ASCII is emitted as native printer commands and matches the TypeScript source
 character for character. Text outside it, which on this market means every Cyrillic product name, is
-rasterized with Android's own font engine and cannot match the station's pixels: the station and the
+rasterized with Android's font engine using the same bundled IBM Plex Sans/Mono regular and bold
+fonts as the station. Glyph antialiasing can differ between engines: the station and the
 cabinet editor share one implementation and are deliberately identical to each other, and this is a
 third. The fixtures pin command framing and bitmap dimensions for those cases, never glyph pixels.
 

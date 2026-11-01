@@ -250,6 +250,7 @@ class WorkViewModel(
         }
     },
     private val scannerLabel: () -> String = { "" },
+    hostReachability: Flow<Boolean?> = kotlinx.coroutines.flow.flowOf(null),
 ) : ViewModel() {
     @Inject
     constructor(
@@ -272,10 +273,12 @@ class WorkViewModel(
         palletPrinter: PalletPrinter,
         exceptions: ExceptionEngine,
         scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
+        hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
     ) : this(
         handle, db, recorder, scans, { signaller.play(it) }, sync, session, reachability, team, repository,
         boxes, closer, boxPrinter, duplicates, pallets, closePallet, palletPrinter, exceptions,
         scannerLabel = { scannerLabel() },
+        hostReachability = hostLink.state.map { it.reachable },
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -397,6 +400,7 @@ class WorkViewModel(
         boxRefusal,
         db.deviceConfigDao().observe(),
         participation,
+        hostReachability,
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
@@ -415,7 +419,8 @@ class WorkViewModel(
             duplicates = c.duplicates,
             feed = values[3] as List<ScanEventEntity>,
             sync = values[4] as SyncState,
-            reachable = lastOk != null && System.currentTimeMillis() - lastOk <= REACHABLE_WINDOW_MS,
+            reachable = if ((values[15] as app.markiro.handheld.core.storage.DeviceConfigEntity?)?.backend == "host")
+                values[17] == true else lastOk != null && System.currentTimeMillis() - lastOk <= REACHABLE_WINDOW_MS,
             team = teamNow,
             operatorId = operator?.operatorId,
             box = values[8] as BoxUi?,

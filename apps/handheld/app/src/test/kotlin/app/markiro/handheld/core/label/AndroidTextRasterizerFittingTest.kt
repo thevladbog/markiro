@@ -13,7 +13,18 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AndroidTextRasterizerFittingTest {
-    private val rasterizer = AndroidTextRasterizer()
+    private val rasterizer = AndroidTextRasterizer(androidx.test.core.app.ApplicationProvider.getApplicationContext())
+
+    @Test fun labelTextUsesBundledPlexMetricsInsteadOfTheSystemFont() = runTest {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val text = "ДИКИЙ КРЕСТ 0123456789"
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 32f
+            typeface = context.resources.getFont(app.markiro.handheld.R.font.plex_sans_regular)
+        }
+        val raster = rasterizer.rasterize(text, RasterOptions("sans-serif", 32, false, null, 1))
+        assertEquals(kotlin.math.ceil(paint.measureText(text).toDouble()).toInt(), raster.width)
+    }
 
     @Test
     fun minimumFontDoesNotShrinkOrRejectMultilineWrapping() = runTest {

@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.ceil
@@ -17,11 +16,8 @@ import javax.inject.Singleton
  * Draws a text run with the platform's own font engine and hands the pixels to the shared packing
  * code. The only Android-dependent file in `core/label`.
  *
- * This output is not byte-comparable to the station's. The station and the cabinet editor share one
- * browser canvas implementation and are deliberately pixel-identical to each other so that preview
- * equals print; this is a third implementation. The same text lands at the same size in the same
- * place, and the glyph pixels differ. That is expected and is why the fixtures pin framing rather
- * than pixels.
+ * Uses the same bundled IBM Plex Sans/Mono families and weights as the station.
+ * Android and browser font engines may still differ in glyph antialiasing.
  *
  * The line box and baseline mirror `apps/admin/src/labels/rasterizer.ts`: a box one and a half times
  * the font size, with the glyphs centred in it. A rasterized run therefore sits slightly lower than
@@ -54,12 +50,17 @@ internal fun rasterLayout(text: String, options: RasterOptions, measure: (String
 }
 
 @Singleton
-class AndroidTextRasterizer @Inject constructor() : RasterizeText {
+class AndroidTextRasterizer @Inject constructor(@dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context) : RasterizeText {
     override suspend fun rasterize(text: String, options: RasterOptions): RasterResult =
         withContext(Dispatchers.Default) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 textSize = options.fontSizePx.toFloat()
-                typeface = Typeface.create(if (options.fontFamily == "monospace") Typeface.MONOSPACE else Typeface.SANS_SERIF, if (options.bold) Typeface.BOLD else Typeface.NORMAL)
+                typeface = context.resources.getFont(when {
+                    options.fontFamily == "monospace" && options.bold -> app.markiro.handheld.R.font.plex_mono_bold
+                    options.fontFamily == "monospace" -> app.markiro.handheld.R.font.plex_mono_regular
+                    options.bold -> app.markiro.handheld.R.font.plex_sans_bold
+                    else -> app.markiro.handheld.R.font.plex_sans_regular
+                })
                 color = Color.BLACK
             }
             var fitted = options

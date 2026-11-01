@@ -141,7 +141,7 @@ class WorkViewModelTest {
         }
     }
 
-    private fun vm(team: TeamRefresher = TeamRefresher { null }, repository: ShiftRepository? = null): WorkViewModel {
+    private fun vm(team: TeamRefresher = TeamRefresher { null }, repository: ShiftRepository? = null, hostReachability: kotlinx.coroutines.flow.Flow<Boolean?> = flowOf(null)): WorkViewModel {
         val engine = SyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
@@ -165,9 +165,21 @@ class WorkViewModelTest {
                 boxes, CloseBox(db, boxes, pool, pallets, closePallet, palletLock),
                 BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
                 DuplicateJobs(db, LabelRenderer(rasterize), transport),
-                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit),
+                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit), hostReachability = hostReachability,
             ),
         )
+    }
+
+    @Test fun hostHeartbeatControlsReachabilityWithoutCloudRequests() = runTest {
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.deviceConfigDao().upsert(config.copy(backend = "host"))
+        val link = kotlinx.coroutines.flow.MutableStateFlow<Boolean?>(true)
+        val model = vm(hostReachability = link)
+        model.state.first { it.hostMode && it.reachable }
+        link.value = false
+        model.state.first { it.hostMode && !it.reachable }
+        link.value = true
+        model.state.first { it.hostMode && it.reachable }
     }
 
     @Test
