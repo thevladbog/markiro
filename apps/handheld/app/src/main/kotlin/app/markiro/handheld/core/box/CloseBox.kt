@@ -171,6 +171,7 @@ class CloseBox(
                         throw AlreadyClosed()
                     }
 
+                    app.markiro.handheld.core.print.PrintTemplateStore(db).freezeBox(box.boxId, shiftId)
                     db.grants.complete(TaskKind.SHIFT,shiftId,"shift.box.close:${box.boxId}",GrantEventType.SHIFT_BOX_CLOSE,containers=1,
                     executionFingerprint=db.shiftDao().get(shiftId)?.copy(ssccIssuerPrefix=issuerPrefix)?.let(GrantTaskMatcher::fingerprint))
                     BoxOutcome(

@@ -93,7 +93,7 @@ Android tests must also verify its interpretation.
   record waits. The handheld still sends protocol header 6. Box exceptions, pallet reprints and the disassembly
   of a shift's pallet are still never sent to the host. Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
-- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6 and Room stays at 22):
+- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 23 for printer-template snapshots):
   every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
   `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
   (`EnterResult.LineFull`); `HostCalls` carries the two numbers to the loaders. The host's `maxStations`,
@@ -171,3 +171,11 @@ Android tests must also verify its interpretation.
   `HostPackApiTest`, `HostPackDisassemblyJournalTest`, `PackDisassemblyViewModelTest`,
   `PackDisassemblyScreenTest`, `HostReferenceSyncTest`. The screen tests produce
   ignored `app/build/disassembly-visuals` frames from actual Compose views.
+
+## Printer templates and compact screens (2026-11-01)
+
+- Room 23 stores `label_template_catalog`, `printer_template_choices` and `print_template_snapshots`. These contain business data and are cleared on dataset replacement; printer profiles and purpose assignments remain retained hardware settings.
+- A box or pallet closure freezes both layout JSON and the assigned printer in the same transaction. Catalogue updates, choice changes and explicit destination replacement must not overwrite a valid frozen layout. Duplicate Data Matrix rendering is unchanged.
+- A retry of a definite pre-render template refusal may recover a missing/incompatible layout after configuration is corrected. `unknown`/sent states never enable that path. Legacy missing-source rows can acquire their original source, never a later local override.
+- Host alternatives come from the reference feed, with purpose/group constraints and tombstones. Bundle-only catalogue entries are cloud-only and product-bound; never create host bundle aliases that survive feed deletion. Cloud alternatives are obtained by entering shifts; do not offer an operator-roster refresh as a template refresh.
+- Login reveals readiness/errors, never roster counts or fetch timestamps. Compact menu/settings must retain actionable printer, queue, recovery and grant warnings. Short screens and enlarged text scroll instead of shrinking touch targets below 48 dp.

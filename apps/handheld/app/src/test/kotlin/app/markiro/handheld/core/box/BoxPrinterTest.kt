@@ -105,6 +105,36 @@ class BoxPrinterTest {
     }
 
     @Test
+    fun definitelyUnsentIncompatibleJobCanBeRetriedAfterCorrectingItsTemplate() = runTest {
+        seedClosedBox()
+        val store = app.markiro.handheld.core.print.PrintTemplateStore(db)
+        store.cache(app.markiro.handheld.core.print.CachedLabelTemplate("wrong", "box", "Wrong product", template, productId = "different"))
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.BOX, "wrong")
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.TEMPLATE_INCOMPATIBLE), printer(transport).print("box-1"))
+        assertNull(transport.sent)
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.BOX, null)
+        assertEquals(PrintOutcome.Printed, printer(transport).print("box-1"))
+        org.junit.Assert.assertNotNull(transport.sent)
+    }
+
+    @Test
+    fun aChosenLayoutIsPrintedAndSurvivesLaterChoiceChanges() = runTest {
+        seedClosedBox()
+        val store = app.markiro.handheld.core.print.PrintTemplateStore(db)
+        val local = template.replace("\"elements\":[", "\"elements\":[{\"kind\":\"text\",\"id\":\"local\",\"xMm\":2,\"yMm\":25,\"text\":\"LOCAL\",\"fontSizePt\":8},")
+        store.cache(app.markiro.handheld.core.print.CachedLabelTemplate("local", "box", "Local", local))
+        assertTrue(store.select("p1", app.markiro.handheld.core.print.PrintPurpose.BOX, "local"))
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Printed, printer(transport).print("box-1"))
+        val first = checkNotNull(transport.sent)
+        assertTrue(first.toString(Charsets.ISO_8859_1).contains("LOCAL"))
+        store.select("p1", app.markiro.handheld.core.print.PrintPurpose.BOX, null)
+        assertEquals(PrintOutcome.Printed, printer(transport).print("box-1", reprint = true))
+        org.junit.Assert.assertArrayEquals(first, transport.sent)
+    }
+
+    @Test
     fun legacySelectedFlagAloneDoesNotRouteANewDatabase() = runTest {
         seedClosedBox()
         db.printerDao().assign(app.markiro.handheld.core.print.PrinterAssignmentEntity("box", null))

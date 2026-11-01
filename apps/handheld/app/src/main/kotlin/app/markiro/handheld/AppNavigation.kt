@@ -123,6 +123,8 @@ object Routes {
     const val PRINTER_GRAPH = "settings/printer-graph"
     const val PRINTER = "settings/printer"
     const val PRINTER_ASSIGNMENTS = "settings/printer/assignments"
+    const val PRINTER_PROFILE = "settings/printer/profile"
+    const val PRINTER_TEMPLATE = "settings/printer/template/{purpose}"
     const val PRINTER_ADD = "settings/printer/add"
     const val PRINTER_BLUETOOTH = "settings/printer/bluetooth"
     const val PRINTER_TEST = "settings/printer/test"
@@ -761,6 +763,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         PrinterListCallbacks(
                             onBack = { nav.popBackStack() },
                             onAssignments = { nav.navigate(Routes.PRINTER_ASSIGNMENTS) },
+                            onSelect = { id -> vm.select(id); nav.navigate(Routes.PRINTER_PROFILE) },
                             onEdit = { id -> vm.startEdit(id); nav.navigate(Routes.PRINTER_ADD) },
                             onTest = { id ->
                                 vm.select(id)
@@ -772,6 +775,42 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                                 nav.navigate(Routes.PRINTER_ADD)
                             },
                         ),
+                    )
+                }
+                composable(Routes.PRINTER_PROFILE) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    val parent = remember(entry) { nav.getBackStackEntry(Routes.PRINTER_GRAPH) }
+                    val templatesVm: app.markiro.handheld.feature.printer.PrinterTemplatesViewModel = hiltViewModel(parent)
+                    val templates by templatesVm.state.collectAsStateWithLifecycle()
+                    val printer = state.selected
+                    if (printer == null) {
+                        app.markiro.handheld.core.design.AppBar(stringResource(R.string.printer_none), { nav.popBackStack() })
+                    } else app.markiro.handheld.feature.printer.PrinterProfileScreen(
+                        printer, app.markiro.handheld.core.print.PrinterRouting(state.printers, state.assignments), templates,
+                        onBack = { nav.popBackStack() },
+                        onEdit = { vm.startEdit(printer.id); nav.navigate(Routes.PRINTER_ADD) },
+                        onTest = { vm.printTest(printer.id); nav.navigate(Routes.PRINTER_TEST) },
+                        onTemplates = { purpose ->
+                            templatesVm.beginChoice()
+                            nav.navigate("settings/printer/template/${purpose.wire}")
+                        },
+                    )
+                }
+                composable(Routes.PRINTER_TEMPLATE) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    val parent = remember(entry) { nav.getBackStackEntry(Routes.PRINTER_GRAPH) }
+                    val templatesVm: app.markiro.handheld.feature.printer.PrinterTemplatesViewModel = hiltViewModel(parent)
+                    val templates by templatesVm.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(templatesVm) { templatesVm.savedEvents.collect { nav.popBackStack() } }
+                    val purpose = PrintPurpose.entries.firstOrNull { it.wire == entry.arguments?.getString("purpose") && it != PrintPurpose.DUPLICATE }
+                    val printer = state.selected
+                    if (printer == null || purpose == null) {
+                        app.markiro.handheld.core.design.AppBar(stringResource(R.string.printer_none), { nav.popBackStack() })
+                    } else app.markiro.handheld.feature.printer.PrinterTemplateChooserScreen(
+                        printer, purpose, templates, onBack = { nav.popBackStack() },
+                        onSave = { id, spec -> templatesVm.save(printer.id, purpose, id, spec) }, onRefresh = templatesVm::refresh,
                     )
                 }
                 composable(Routes.PRINTER_ASSIGNMENTS) { entry ->

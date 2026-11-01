@@ -137,6 +137,7 @@ class ClosePallet(
                 if (db.palletDao().close(pallet.palletId, sscc, closedAt, operatorId) == 0) {
                     throw AlreadyClosed()
                 }
+                app.markiro.handheld.core.print.PrintTemplateStore(db).freezePallet(pallet)
                 db.grants.complete(TaskKind.SHIFT,shiftId,"shift.pallet.close:${pallet.palletId}",GrantEventType.SHIFT_PALLET_CLOSE,containers=1,
                     executionFingerprint=db.shiftDao().get(shiftId)?.copy(ssccIssuerPrefix=issuerPrefix)?.let(GrantTaskMatcher::fingerprint))
                 ClosePalletResult.Closed(
@@ -201,6 +202,7 @@ class ClosePallet(
                 if (db.palletDao().close(pallet.palletId, sscc, closedAt, operatorId) == 0) {
                     throw AlreadyClosed()
                 }
+                app.markiro.handheld.core.print.PrintTemplateStore(db).freezePallet(pallet)
                 ClosePalletResult.Closed(
                     pallet = pallet.copy(
                         sscc = sscc,

@@ -549,3 +549,17 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
         db.execSQL("ALTER TABLE device_recovery ADD COLUMN datasetResetEpoch TEXT")
     }
 }
+
+/** Freeze legacy queue layouts before per-printer overrides become available. */
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS label_template_catalog (id TEXT NOT NULL, purpose TEXT NOT NULL, name TEXT NOT NULL, specJson TEXT NOT NULL, productId TEXT, groupCodes TEXT, PRIMARY KEY(id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS printer_template_choices (printerId TEXT NOT NULL, purpose TEXT NOT NULL, templateId TEXT NOT NULL, PRIMARY KEY(printerId,purpose))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS print_template_snapshots (purpose TEXT NOT NULL, jobId TEXT NOT NULL, specJson TEXT, reason TEXT, PRIMARY KEY(purpose,jobId))")
+        db.execSQL("INSERT OR IGNORE INTO print_template_snapshots (purpose,jobId,specJson,reason) SELECT 'box',b.boxId,s.boxLabelTemplate,NULL FROM boxes b LEFT JOIN shift_mirror s ON s.id=b.shiftId WHERE b.closedAt IS NOT NULL")
+        db.execSQL("INSERT OR IGNORE INTO print_template_snapshots (purpose,jobId,specJson,reason) SELECT 'pallet',p.palletId, CASE WHEN p.kind='warehouse' THEN COALESCE((SELECT specJson FROM pallet_label_templates WHERE `key`='category:' || (SELECT chzProductGroupCode FROM pallet_products WHERE id=p.productId)),(SELECT specJson FROM pallet_label_templates WHERE `key`='org')) ELSE s.palletLabelTemplateSpec END,NULL FROM pallets p LEFT JOIN shift_mirror s ON s.id=p.shiftId WHERE p.closedAt IS NOT NULL")
+        db.execSQL("INSERT OR IGNORE INTO print_destinations (purpose,jobId,attemptId,printer_id,printer_name,printer_transport,printer_address,printer_language,printer_dpi,printer_selected,printer_lastStatus,printer_lastSeenAt) SELECT t.purpose,t.jobId,'initial',p.id,p.name,p.transport,p.address,p.language,p.dpi,p.selected,p.lastStatus,p.lastSeenAt FROM print_template_snapshots t JOIN printer_assignments a ON a.purpose=t.purpose JOIN printers p ON p.id=a.printerId")
+        // Replay the existing reference feed to obtain box templates as well as pallet defaults.
+        db.execSQL("UPDATE device_config SET hostRev=0 WHERE backend='host'")
+    }
+}

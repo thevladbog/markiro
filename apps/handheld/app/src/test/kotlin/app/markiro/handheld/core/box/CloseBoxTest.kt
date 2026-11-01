@@ -53,6 +53,19 @@ class CloseBoxTest {
         pool.addRange(ServerRange("468008990", 0, from, to, null))
 
     @Test
+    fun closeFreezesTheLayoutEvenBeforeTheFirstPrint() = runTest {
+        seedPool()
+        val shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1")
+        db.shiftDao().upsert(shift)
+        val box = boxes.currentBox("s1")
+        scanInto(box.boxId, "h1")
+        closer.close("s1", "468008990", "op1")
+        val frozen = db.printTemplateDao().snapshot("box", box.boxId)
+        assertEquals(shift.boxLabelTemplate, frozen?.specJson)
+        org.junit.Assert.assertNotNull(frozen)
+    }
+
+    @Test
     fun anEmptyBoxCostsNoSerial() = runTest {
         seedPool()
         boxes.currentBox("s1")

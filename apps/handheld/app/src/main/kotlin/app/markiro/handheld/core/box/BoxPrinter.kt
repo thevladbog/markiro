@@ -41,6 +41,7 @@ object PrintReason {
 
     /** A warehouse pallet whose product is no longer in the bootstrap cache: nothing to name on the label. */
     const val PRODUCT_MISSING = "product_missing"
+    const val TEMPLATE_INCOMPATIBLE = "template_incompatible"
     const val TEMPLATE_INVALID = "template_invalid"
     const val PRINTER_UNCONFIGURED = "printer_unconfigured"
     const val RENDER_FAILED = "render_failed"
@@ -85,7 +86,13 @@ class BoxPrinter(
         val closedAt = box.closedAt ?: return fail(boxId, PrintReason.BOX_OPEN)
         val sscc = box.sscc ?: return fail(boxId, PrintReason.BOX_OPEN)
         val shift = db.shiftDao().get(box.shiftId) ?: return fail(boxId, PrintReason.SHIFT_MISSING)
-        val templateJson = shift.boxLabelTemplate ?: return fail(boxId, PrintReason.TEMPLATE_MISSING)
+        val template = app.markiro.handheld.core.print.PrintTemplateStore(db).forPrint(
+            PrintPurpose.BOX, boxId, shift.boxLabelTemplate, shift.productId,
+            db.palletProductDao().byId(shift.productId)?.chzProductGroupCode,
+            recoverUnsent = box.printState == BoxPrint.FAILED && box.printReason in setOf(PrintReason.TEMPLATE_INVALID, PrintReason.TEMPLATE_INCOMPATIBLE),
+        )
+        template.reason?.let { return fail(boxId, it) }
+        val templateJson = template.specJson ?: return fail(boxId, PrintReason.TEMPLATE_MISSING)
         val destinations = PrintDestinations(db)
         if (reprint && box.printState == BoxPrint.PRINTED && !replaced) {
             val current = db.printerDao().assigned(PrintPurpose.BOX) ?: return fail(boxId, PrintReason.PRINTER_UNCONFIGURED)

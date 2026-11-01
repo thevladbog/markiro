@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.printer
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -121,7 +122,7 @@ fun PrinterListScreen(state: PrinterUi, cb: PrinterListCallbacks) {
             state.printers.forEach { printer ->
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(MarkiroSizes.radius))
                     .background(c.surfaceCard).border(1.dp, c.line, RoundedCornerShape(MarkiroSizes.radius))
-                    .padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    .clickable { cb.onSelect(printer.id) }.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(printer.name, style = t.strong, color = c.fg1)
                     Text("${if (printer.transport == "bluetooth") "Bluetooth" else "Wi-Fi"} · ${printer.address}", style = t.caption, color = c.fg2)
                     Text(stringResource(R.string.printer_language_dpi_value, printer.language.uppercase(), printer.dpi), style = t.caption, color = c.fg3)
@@ -130,6 +131,7 @@ fun PrinterListScreen(state: PrinterUi, cb: PrinterListCallbacks) {
                     Text(if (purposes.isEmpty()) stringResource(R.string.printer_no_purposes)
                         else purposes.map { stringResource(purposeLabel(it)) }.joinToString(" · "), style = t.caption, color = c.accent)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ProfileAction(stringResource(R.string.template_profile_action), Modifier.weight(1f)) { cb.onSelect(printer.id) }
                         ProfileAction(stringResource(R.string.printer_edit), Modifier.weight(1f)) { cb.onEdit(printer.id) }
                         ProfileAction(stringResource(R.string.printer_test_short), Modifier.weight(1f)) { cb.onTest(printer.id) }
                     }

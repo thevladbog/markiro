@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -99,14 +100,29 @@ class SignInScreenTest {
             }
         }
         compose.onNodeWithText("Нет связи с хостом — список операторов не загружен").assertIsDisplayed()
-        compose.onNodeWithText("Обновить список").performClick()
+        compose.onNodeWithContentDescription("Обновить список").performClick()
         assertEquals(1, refreshed)
     }
 
     @Test
-    fun aLoadedRosterShowsItsCountAndTime() {
+    fun aLoadedRosterDoesNotDiscloseItsCountOrFetchTime() {
         compose.setContent { MarkiroTheme { SignInScreen(SignInUi.Login(), SignInCallbacks(), RosterInfo(count = 12, fetchedAt = 1_700_000_000_000L)) } }
-        compose.onNodeWithText("Операторов в списке: 12", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Операторов в списке:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("обновлено", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun badgeAndConfirmFitAShortHandheldWithoutScrolling() {
+        compose.setContent {
+            MarkiroTheme {
+                Box(Modifier.size(320.dp, 520.dp)) {
+                    SignInScreen(SignInUi.Login("41"), SignInCallbacks(), RosterInfo(count = 12))
+                }
+            }
+        }
+        compose.onNodeWithText("Сканируйте бейдж").assertIsDisplayed()
+        compose.onNodeWithText("OK").assertIsDisplayed()
+        compose.onNodeWithText("Найти по имени").assertIsDisplayed()
     }
 
     @Test

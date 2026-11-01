@@ -42,14 +42,14 @@ class PrinterRoutingMigrationTest {
         }
         old.close()
         val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).allowMainThreadQueries().build()
+            .addMigrations(MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23).allowMainThreadQueries().build()
         try {
             assertEquals(HANDHELD_DATABASE_VERSION, upgraded.openHelper.readableDatabase.version)
             PrintPurpose.entries.forEach { assertEquals("b", upgraded.printerDao().assigned(it)?.id) }
             assertEquals(listOf("a", "b"), upgraded.printerDao().all().map { it.id })
             assertEquals("unknown", upgraded.boxDao().get("box")?.printState)
             assertEquals("link lost", upgraded.boxDao().get("box")?.printReason)
-            assertNull(upgraded.printerDao().destination("box", "box", "initial"))
+            assertEquals("b", upgraded.printerDao().destination("box", "box", "initial")?.printer?.id)
             upgraded.printerDao().assign(PrinterAssignmentEntity("pallet", null))
             MIGRATION_12_13.migrate(upgraded.openHelper.writableDatabase)
             assertNull(upgraded.printerDao().assigned(PrintPurpose.PALLET))

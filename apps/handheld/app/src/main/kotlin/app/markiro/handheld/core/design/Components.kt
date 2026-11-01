@@ -184,21 +184,21 @@ fun MarkiroTextButton(label: String, onClick: () -> Unit, tone: Tone = Tone.Acce
 }
 
 @Composable
-fun Keypad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, onConfirm: () -> Unit, confirmEnabled: Boolean) {
+fun Keypad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, onConfirm: () -> Unit, confirmEnabled: Boolean, keyHeight: Dp = MarkiroSizes.key) {
     val backspaceLabel = stringResource(R.string.common_backspace)
     Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), modifier = Modifier.fillMaxWidth()) {
         listOf("123", "456", "789").forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), modifier = Modifier.fillMaxWidth()) {
-                row.forEach { digit -> Key(Modifier.weight(1f), onClick = { onDigit(digit) }) { KeyLabel(digit.toString()) } }
+                row.forEach { digit -> Key(Modifier.weight(1f), onClick = { onDigit(digit) }, height = keyHeight) { KeyLabel(digit.toString()) } }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), modifier = Modifier.fillMaxWidth()) {
-            Key(Modifier.weight(1f).semantics { contentDescription = backspaceLabel }, onClick = onBackspace) {
+            Key(Modifier.weight(1f).semantics { contentDescription = backspaceLabel }, onClick = onBackspace, height = keyHeight) {
                 Icon(Icons.Outlined.Backspace, contentDescription = null, tint = MarkiroTheme.colors.fg1, modifier = Modifier.size(26.dp))
             }
-            Key(Modifier.weight(1f), onClick = { onDigit('0') }) { KeyLabel("0") }
-            Key(Modifier.weight(1f), onClick = onConfirm, accent = true, enabled = confirmEnabled) {
-                Text("OK", style = MarkiroTheme.type.strong.copy(fontSize = 20.sp), color = MarkiroTheme.colors.fgOnAccent)
+            Key(Modifier.weight(1f), onClick = { onDigit('0') }, height = keyHeight) { KeyLabel("0") }
+            Key(Modifier.weight(1f), onClick = onConfirm, accent = true, enabled = confirmEnabled, height = keyHeight) {
+                Text("OK", style = MarkiroTheme.type.strong.copy(fontSize = 20.sp), color = if (confirmEnabled) MarkiroTheme.colors.fgOnAccent else MarkiroTheme.colors.fgDisabled)
             }
         }
     }
@@ -208,11 +208,11 @@ fun Keypad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, onConfirm: () -> Un
 private fun KeyLabel(text: String) = Text(text, style = MarkiroTheme.type.key, color = MarkiroTheme.colors.fg1)
 
 @Composable
-private fun Key(modifier: Modifier, onClick: () -> Unit, accent: Boolean = false, enabled: Boolean = true, content: @Composable () -> Unit) {
+private fun Key(modifier: Modifier, onClick: () -> Unit, accent: Boolean = false, enabled: Boolean = true, height: Dp = MarkiroSizes.key, content: @Composable () -> Unit) {
     val c = MarkiroTheme.colors
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Box(
-        modifier = modifier.height(MarkiroSizes.key).clip(shape)
+        modifier = modifier.height(height).clip(shape)
             .background(if (accent) (if (enabled) c.accent else c.surfacePanel) else c.surfaceCard)
             .then(if (accent) Modifier else Modifier.border(1.dp, c.line, shape))
             .clickable(enabled = enabled, onClick = onClick),

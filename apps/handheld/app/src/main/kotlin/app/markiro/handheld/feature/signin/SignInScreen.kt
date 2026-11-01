@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,6 +19,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Sync
+import app.markiro.handheld.core.design.IconAction
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -72,30 +75,31 @@ fun SignInScreen(state: SignInUi, callbacks: SignInCallbacks, roster: RosterInfo
 private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks, roster: RosterInfo) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-        // First, so it stays in view on a short display: what the device holds, and the retry.
-        RosterLine(roster, cb.onRefreshRoster)
-        Column(
-            Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
-                .border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg1, modifier = Modifier.size(36.dp))
-            Text(stringResource(R.string.signin_scan_badge), style = t.strong, color = c.fg1)
-            Text(
-                stringResource(R.string.signin_scan_hint),
-                style = t.caption,
-                color = c.fg3,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
-            )
+    BoxWithConstraints {
+        val keyHeight = if (maxHeight < 560.dp) 48.dp else 56.dp
+        Column(Modifier.fillMaxSize()) {
+            AppBar(stringResource(R.string.signin_title), actions = {
+                IconAction(Icons.Outlined.Sync, stringResource(R.string.signin_refresh), enabled = !roster.refreshing, onClick = cb.onRefreshRoster)
+            })
+            ScreenColumn(modifier = Modifier.weight(1f), padding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                RosterLine(roster)
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(MarkiroSizes.radius))
+                        .background(c.surfaceCard).border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)).padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg1, modifier = Modifier.size(28.dp))
+                    Column {
+                        Text(stringResource(R.string.signin_scan_badge), style = t.strong, color = c.fg1)
+                        Text(stringResource(R.string.signin_scan_trigger), style = t.caption, color = c.fg2)
+                    }
+                }
+                Message(state.error, state.busy)
+                Field(label = stringResource(R.string.signin_login_field), value = state.login)
+                Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.login.isNotEmpty(), keyHeight = keyHeight)
+                MarkiroTextButton(stringResource(R.string.signin_find_by_name), cb.onOpenSearch)
+            }
         }
-        // Every scan and every number ends here, in words: never a silent screen.
-        Message(state.error, state.busy)
-        Field(label = stringResource(R.string.signin_login_field), value = state.login)
-        Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.login.isNotEmpty())
-        MarkiroTextButton(stringResource(R.string.signin_find_by_name), cb.onOpenSearch)
     }
 }
 
@@ -105,7 +109,7 @@ private fun PinStep(state: SignInUi.Pin, cb: SignInCallbacks) {
     val t = MarkiroTheme.type
     ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
         Column(
-            Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp),
+            Modifier.fillMaxWidth().heightIn(min = 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -130,7 +134,7 @@ private fun PinStep(state: SignInUi.Pin, cb: SignInCallbacks) {
             Text(stringResource(R.string.signin_pin), style = t.body.copy(fontSize = 15.sp), color = c.fg3)
             PinDots(total = maxOf(4, state.pin.length), filled = state.pin.length)
         }
-        Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.pin.length >= 4)
+        Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.pin.length >= 4, keyHeight = 48.dp)
         MarkiroTextButton(
             if (state.lockMode) stringResource(R.string.signin_switch_operator) else stringResource(R.string.signin_not_me),
             if (state.lockMode) cb.onSwitchOperator else cb.onBack,
@@ -173,14 +177,13 @@ private fun SearchStep(state: SignInUi.Search, cb: SignInCallbacks) {
 private fun Field(label: String, value: String) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Row(
-        Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
-            .border(1.dp, c.line, RoundedCornerShape(MarkiroSizes.radius)).padding(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = t.body.copy(fontSize = 15.sp), color = c.fg3)
-        Text(value, style = t.code.copy(fontSize = 22.sp), color = c.fg1)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = t.caption, color = c.fg2)
+        Row(
+            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
+                .border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { Text(value, style = t.code.copy(fontSize = 22.sp), color = c.fg1) }
     }
 }
 
@@ -219,25 +222,16 @@ private fun Message(error: SignInError?, busy: Boolean) {
     )
 }
 
-/** What the device holds: the number of operators and when they were read, or that nothing is loaded; with the retry. */
+/** Authentication readiness only: never disclose roster size or refresh timestamps before sign-in. */
 @Composable
-private fun RosterLine(roster: RosterInfo, onRefresh: () -> Unit) {
-    val c = MarkiroTheme.colors
-    val t = MarkiroTheme.type
-    val empty = (roster.count ?: 0) == 0
+private fun RosterLine(roster: RosterInfo) {
     val text = when {
         roster.refreshing -> stringResource(R.string.signin_roster_refreshing)
-        empty && roster.failed -> stringResource(R.string.signin_roster_none_failed)
-        empty -> stringResource(R.string.signin_roster_none)
-        roster.fetchedAt != null -> stringResource(R.string.signin_roster_summary_at, roster.count ?: 0, TimeText.ddmmHhmm(roster.fetchedAt))
-        else -> stringResource(R.string.signin_roster_summary, roster.count ?: 0)
+        roster.count == 0 && roster.failed -> stringResource(R.string.signin_roster_none_failed)
+        roster.count == 0 -> stringResource(R.string.signin_roster_none)
+        roster.failed -> stringResource(R.string.signin_roster_stale)
+        else -> return
     }
-    // The button is full width (a touch target), so the text gets its own lines above it instead of a row it would be squeezed out of.
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text, style = t.caption, color = if (empty && !roster.refreshing) c.warnFg else c.fg3, textAlign = TextAlign.Center)
-        if (!empty && roster.failed && !roster.refreshing) {
-            Text(stringResource(R.string.signin_roster_stale), style = t.caption, color = c.warnFg, textAlign = TextAlign.Center)
-        }
-        MarkiroTextButton(stringResource(R.string.signin_refresh), onRefresh)
-    }
+    Text(text, style = MarkiroTheme.type.caption, color = MarkiroTheme.colors.warnFg,
+        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite })
 }

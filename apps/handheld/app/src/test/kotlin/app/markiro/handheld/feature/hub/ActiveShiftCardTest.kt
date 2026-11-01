@@ -102,7 +102,6 @@ class ActiveShiftCardTest {
     @Config(qualifiers = "en-w320dp-h640dp-mdpi")
     fun theLightEnglishCardUsesEnglishLabelsAndNumberGrouping() {
         show(HubActiveShift(shift.copy(productPrintName = "Water 0.5 L", lineName = "Line 2"), 1240), dark = false)
-        compose.onNodeWithText("ACTIVE SHIFT").assertIsDisplayed()
         compose.onNodeWithText("Shift 14 · Water 0.5 L").assertIsDisplayed()
         compose.onNodeWithText("1,240 / 3,000").assertIsDisplayed()
         compose.onNodeWithText("On this handheld").assertIsDisplayed()

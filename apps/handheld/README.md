@@ -575,3 +575,17 @@ without these routes asks for an update.
 Software checks include real Room database reopen, lost response/retry,
 credential/dataset changes, Compose at 360×640 dp and host API/office integration.
 These do not establish physical scanner, printer or Windows acceptance.
+
+## Compact navigation and printer templates
+
+The sign-in screen does not display roster size or fetch timestamps. Refresh remains in the header. Login/PIN keys retain at least 48 dp targets and overflow scrolls rather than compressing the badge block. The hub uses compact operation rows; Settings stays in the header and tapping the operator opens the profile. Equipment, sound/vibration, display/language and device diagnostics are separate settings pages. Host-only and cloud-only operations keep their existing boundaries.
+
+Settings → Printers and labels → a connected printer → Labels opens its profile. Choose Box or Pallet, select a cached template, review its dimensions and preview, then explicitly assign it. This also assigns the printer to that label purpose. The source/default option retains the shift/catalog template. Duplicate Data Matrix printing continues to replay its original format.
+
+Host templates are received and refreshed through the existing reference feed, including purpose and product-group scope. Cloud alternatives are cached from shift bundles when entering shifts and remain product-bound. Refreshing while offline retains the cache; the cloud operator refresh does not download templates of shifts never entered. Unsupported layouts are not offered. Preview sample values and barcode placeholders never become production data.
+
+Room version 23 adds the template catalogue, per-printer choices and immutable print-template snapshots. Box and pallet closure freezes the selected or source template in the same transaction. Changing settings, catalogue contents, or the physical recovery printer does not change a queued label's layout. The 22→23 migration freezes source templates for existing closed jobs without changing unknown/deferred states, credentials, printer profiles or assignments. A legacy missing template may acquire its original source later, never a new override. Dataset replacement clears template business data along with jobs while preserving printer profiles and purpose assignments.
+
+Automated native renders are produced by `HandheldRedesignVisualTest` under ignored `app/build/redesign-visuals`. They are not Honeywell or physical-printer acceptance.
+
+A definite pre-render template refusal is recoverable: correct the template choice and explicitly retry the failed label. A valid frozen layout or an unknown send result is never re-resolved through current settings. The frozen destination remains the original printer unless the operator explicitly chooses another one.
