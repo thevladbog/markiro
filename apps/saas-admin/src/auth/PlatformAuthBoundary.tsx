@@ -38,6 +38,7 @@ export function PlatformAuthBoundary() {
   const auth = useAuthClient();
   const session = auth.useSession();
   const location = useLocation();
+  const returnState = { from: location.pathname + location.search + location.hash };
   const principal = useQuery({
     queryKey: ["platform", "me", session.data?.user.id],
     queryFn: () => platformApiFetch("/me", { responseSchema: platformAuthContracts.me.response }),
@@ -68,13 +69,13 @@ export function PlatformAuthBoundary() {
 
   if (!session.data) {
     if (isPlatformChallengePending()) {
-      return <Navigate to="/two-factor?mode=challenge" replace />;
+      return <Navigate to="/two-factor?mode=challenge" replace state={returnState} />;
     }
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    return <Navigate to="/login" replace state={returnState} />;
   }
 
   if (session.data.user.twoFactorEnabled === false) {
-    return <Navigate to="/two-factor?mode=enroll" replace />;
+    return <Navigate to="/two-factor?mode=enroll" replace state={returnState} />;
   }
 
   if (principal.isPending) {
@@ -94,7 +95,7 @@ export function PlatformAuthBoundary() {
         ? principal.error
         : null;
     if (authorizationError?.status === 401) {
-      return <Navigate to="/login" replace />;
+      return <Navigate to="/login" replace state={returnState} />;
     }
     if (authorizationError?.status === 403) {
       return (
@@ -120,7 +121,7 @@ export function PlatformAuthBoundary() {
   }
 
   if (!principal.data?.twoFactorReady) {
-    return <Navigate to="/two-factor?mode=enroll" replace />;
+    return <Navigate to="/two-factor?mode=enroll" replace state={returnState} />;
   }
 
   return (

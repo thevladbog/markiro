@@ -491,6 +491,19 @@ jobs:
           compression-level: 0
       - name: Verify isolated failed-activation recovery integration
         run: sudo --preserve-env=RUNNER_TEMP,GITHUB_SHA "$(command -v node)" deploy/platform/recovery-ci.mjs --local-ci
+      # The nested VFS daemon copies complete parent layers while pulling the
+      # accepted runtime. Run 41274202437 exhausted disk on its API image pull.
+      # Worker builds leave default-builder cache after the separate image-cache
+      # builder was removed. Reclaim only that disposable cache; retain candidate
+      # images, recovery worker images and their already uploaded tar/JSON exports.
+      - name: Reclaim disposable CI build cache
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          df -h "$RUNNER_TEMP"
+          docker system df
+          docker buildx prune --builder default --all --force
+          df -h "$RUNNER_TEMP"
+          docker system df
       - name: Rehearse exact old-runtime return before migration
         run: |
           docker pull --platform linux/amd64 docker:28-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac

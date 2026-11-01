@@ -286,34 +286,53 @@ describe("Telegram client (spec §15.4)", () => {
   }
 });
 
-describe("Telegram notifications contain only fixed service text and counts", () => {
-  it("does not send free text, attribution, identifiers or card links", () => {
+describe("Telegram notifications link to protected leads without customer details", () => {
+  it("includes request context and a card link, ignoring personal and free-text fields", () => {
     const facts = {
       kind: "invoice_request" as const,
       firstContact: false,
       company: "ИП Иванов Иван Иванович",
       productGroup: "Пётр, Москва, улица Примерная",
       linesBucket: "1",
-      tariffCode: "buyer@example.test",
-      sourcePath: "/Иванов/",
+      tariffCode: "line",
+      sourcePath: "/stoimost/",
+      receivedAt: new Date("2026-10-21T21:35:00Z"),
       utm: { source: "личные сведения" },
       leadUrl: "https://admin.markiro.app/leads/private-id",
     };
     expect(leadAlertText(facts)).toBe(
-      "Повторное обращение · запрос счёта\nОткройте раздел «Заявки» в панели управления.",
+      "Повторное обращение · запрос счёта\nТариф: Линия\nСтраница: Стоимость\nПолучено: 22.10.2026, 00:35 МСК\nОткрыть заявку: https://admin.markiro.app/leads/private-id",
     );
   });
 
-  it("reports digest counts without companies or links", () => {
-    const text = leadDigestText("2026-10-21", {
-      new_uncontacted: [{ company: "ИП Иванов", leadUrl: "https://private/lead-id" }],
-      day_3: [],
-      day_10: [],
-      touch_due: [],
-      invoice_unpaid: [],
+  it("omits unrecognized tariff and page values instead of forwarding free text", () => {
+    const text = leadAlertText({
+      kind: "download",
+      firstContact: true,
+      tariffCode: "buyer@example.test",
+      sourcePath: "/Иванов/",
+      receivedAt: new Date("2026-10-21T06:00:00Z"),
+      leadUrl: "https://admin.markiro.app/leads/private-id",
     });
+    expect(text).toContain("Новый лид · скачивание");
+    expect(text).toContain("Открыть заявку: https://admin.markiro.app/leads/private-id");
+    expect(text).not.toMatch(/buyer|Иванов|Тариф:|Страница:/);
+  });
+
+  it("reports digest counts with a section link and no customer details", () => {
+    const text = leadDigestText(
+      "2026-10-21",
+      {
+        new_uncontacted: [{ company: "ИП Иванов", leadUrl: "https://private/lead-id" }],
+        day_3: [],
+        day_10: [],
+        touch_due: [],
+        invoice_unpaid: [],
+      },
+      "https://admin.markiro.app/leads",
+    );
     expect(text).toBe(
-      "Кому пора написать · 21.10.2026\n\nНовые без контакта (1)\n\nОткройте раздел «Заявки» в панели управления.",
+      "Кому пора написать · 21.10.2026\n\nНовые без контакта (1)\n\nВсе заявки: https://admin.markiro.app/leads",
     );
   });
 });

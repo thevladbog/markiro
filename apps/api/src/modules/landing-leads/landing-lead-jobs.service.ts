@@ -59,6 +59,8 @@ type DueNotification = {
   digestDate: string | null;
   leadId: string | null;
   eventKind: string | null;
+  eventPayload: Record<string, unknown> | null;
+  receivedAt: Date | string;
 };
 
 /** Deterministic public request id of a day's digest e-mail: one per civil day. */
@@ -121,7 +123,8 @@ export class LandingLeadJobsService {
       const due = await tx.execute<DueNotification>(sql`
         SELECT n.id::text AS id, n.kind, n.attempts, n.payload,
           n.digest_date::text AS "digestDate", n.lead_id::text AS "leadId",
-          e.kind AS "eventKind"
+          e.kind AS "eventKind", e.payload AS "eventPayload",
+          coalesce(e.created_at, n.created_at) AS "receivedAt"
         FROM lead_notifications AS n
         LEFT JOIN landing_lead_events AS e ON e.id = n.event_id
         WHERE n.status = 'pending' AND n.next_attempt_at <= ${now}
@@ -202,15 +205,24 @@ export class LandingLeadJobsService {
           ids[section].filter((id) => active.has(id)),
         ]),
       ) as LeadDigestSections<string>;
-      return leadDigestText(row.digestDate ?? "", sections);
+      return leadDigestText(
+        row.digestDate ?? "",
+        sections,
+        `${this.options.adminOrigin.replace(/\/$/, "")}/leads`,
+      );
     }
     if (row.leadId === null) throw new Error("Lead notification lost its lead");
+    const payload = row.eventPayload ?? {};
     const facts: LeadAlertFacts = {
       kind:
         row.eventKind === "invoice_request" || row.eventKind === "demo_request"
           ? row.eventKind
           : "download",
       firstContact: row.payload.firstContact !== false,
+      tariffCode: typeof payload.tariffCode === "string" ? payload.tariffCode : null,
+      sourcePath: typeof payload.sourcePath === "string" ? payload.sourcePath : null,
+      receivedAt: new Date(row.receivedAt),
+      leadUrl: leadUrl(this.options.adminOrigin, row.leadId),
     };
     return leadAlertText(facts);
   }
