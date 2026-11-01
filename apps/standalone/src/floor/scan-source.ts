@@ -65,8 +65,10 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
         // focused button would also take it as a click. `preventDefault`
         // stops that; filtering by the event's target instead would drop
         // the scan itself, which is worse.
-        event.preventDefault();
-        if (payload.length > 0) listener(payload, "keyboard");
+        if (payload.length > 0) {
+          event.preventDefault();
+          listener(payload, "keyboard");
+        }
         payload = "";
         return;
       }

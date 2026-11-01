@@ -725,6 +725,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_cards::pallet_card),
         )
         .route(
+            "/v1/office/search",
+            post(crate::routes::office_search::search),
+        )
+        .route(
             "/v1/office/code-registry",
             get(crate::routes::office_codes::registry::search_codes),
         )

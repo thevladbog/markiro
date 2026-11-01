@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button, VisuallyHidden } from "@markiro/ui";
 
 import type { HostStatus } from "../host/protocol.js";
-import type { StatusDotTone } from "../lib/StatusDot.js";
+import { StatusDot, type StatusDotTone } from "../lib/StatusDot.js";
 import { OfficeIcon, type OfficeIconName } from "../office/OfficeIcon.js";
 import { HostStatusLine } from "./HostStatusLine.js";
 import type { SyncState } from "./shell.js";
@@ -47,6 +47,8 @@ export function hostChipView(
 export interface HostStatusDotProps {
   status: HostStatus | null;
   sync: SyncState | null;
+  /** Office headers may collapse a healthy link to its accessible dot. */
+  compactWhenHealthy?: boolean;
 }
 
 /**
@@ -56,7 +58,7 @@ export interface HostStatusDotProps {
  * sync, records not accepted). Escape or a press outside closes it. A hidden
  * live region says a change of state to a screen reader, as the chip did.
  */
-export function HostStatusDot({ status, sync }: HostStatusDotProps) {
+export function HostStatusDot({ status, sync, compactWhenHealthy = false }: HostStatusDotProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -72,6 +74,7 @@ export function HostStatusDot({ status, sync }: HostStatusDotProps) {
           : t("link.offline");
   const label = t("office.header.link", { state });
   const chip = hostChipView(status, sync);
+  const compact = compactWhenHealthy && tone === "ok";
 
   useEffect(() => {
     if (!open) return;
@@ -95,17 +98,21 @@ export function HostStatusDot({ status, sync }: HostStatusDotProps) {
     <div className="host-dot" ref={root}>
       <Button
         variant="plain"
-        className="host-dot__button"
+        className={compact ? "host-dot__button host-dot__button--compact" : "host-dot__button"}
         aria-label={label}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         title={label}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className={`office-chip office-chip--${chip.tone}`}>
-          <OfficeIcon name={chip.icon} size={16} />
-          <span>{t(chip.textKey)}</span>
-        </span>
+        {compact ? (
+          <StatusDot tone="ok" label={label} decorative />
+        ) : (
+          <span className={`office-chip office-chip--${chip.tone}`}>
+            <OfficeIcon name={chip.icon} size={16} />
+            <span>{t(chip.textKey)}</span>
+          </span>
+        )}
       </Button>
       <div aria-live="polite" role="status">
         <VisuallyHidden>{label}</VisuallyHidden>

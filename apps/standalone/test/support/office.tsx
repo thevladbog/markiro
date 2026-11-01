@@ -315,6 +315,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       more: false,
     })),
+    searchOffice: vi.fn<HostApi["searchOffice"]>(() => unexpected("searchOffice")),
     searchCodes: vi.fn<HostApi["searchCodes"]>(() => unexpected("searchCodes")),
     getCodeCard: vi.fn<HostApi["getCodeCard"]>(() => unexpected("getCodeCard")),
     searchCodeRegistry: vi.fn<HostApi["searchCodeRegistry"]>(() =>

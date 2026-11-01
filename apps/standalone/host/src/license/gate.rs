@@ -89,6 +89,7 @@ pub const GATED: &[(&str, &str, &str)] = &[
 /// client's data, its copies, the office and the license itself (spec
 /// §3.3). Some of them refuse an addition beyond the file ([`LIMITED`]).
 pub const NEVER: &[(&str, &str)] = &[
+    ("POST", "/v1/office/search"),
     ("GET", "/v1/office/warehouse-pallets/{id}"),
     ("POST", "/v1/office/warehouse-pallets/validate"),
     ("GET", "/v1/hello"),

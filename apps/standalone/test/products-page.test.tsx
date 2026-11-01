@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+import { MemoryRouter } from "react-router";
 
 import { HostError } from "../src/host/client.js";
 import type { OfficeProduct, ProductGroup } from "../src/host/protocol.js";
@@ -124,6 +125,90 @@ function pagerNav(): HTMLElement {
 }
 
 describe("office products", () => {
+  it("opens the product found by global search and removes the selection when closed", async () => {
+    renderOffice(session(), { initialPath: `/products?product=${MILK.id}` });
+    const dialog = await screen.findByRole("dialog", {
+      name: /Молоко|Изменить товар|Редактировать товар/,
+    });
+    expect(within(dialog).getByDisplayValue(MILK.name)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("opens a demo product deep link as one read-only row, with no editable drawer", async () => {
+    const demo: OfficeProduct = {
+      ...MILK,
+      id: "0d5e3c1a-7b2f-4c8d-9e0a-1b2c3d4e5f60",
+      name: "Демо: вода",
+      printName: null,
+      demo: true,
+    };
+    const fake = session([MILK, demo]);
+    renderOffice(fake, { initialPath: `/products?product=${demo.id}` });
+    await screen.findByText(demo.name);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(names()).toEqual([demo.name]);
+    expect(screen.getByRole("textbox", { name: "Поиск" }).getAttribute("value")).toBe(demo.name);
+    expect(hasRowAction(within(rowOf(demo.name)), /Изменить/)).toBe(false);
+    expect(fake.api.updateProduct).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Поиск" }), { target: { value: "" } });
+    expect(names()).toEqual([demo.name, MILK.name]);
+  });
+
+  it("replaces a previous catalog filter when global search selects a demo on the same page", async () => {
+    const demo: OfficeProduct = {
+      ...MILK,
+      id: "0d5e3c1a-7b2f-4c8d-9e0a-1b2c3d4e5f60",
+      name: "Демо: вода",
+      printName: null,
+      demo: true,
+    };
+    const fake = session([MILK, AYRAN, demo]);
+    fake.api.searchOffice.mockResolvedValue({
+      truncated: false,
+      items: [
+        { id: demo.id, label: demo.name, detail: null, target: { kind: "product", id: demo.id } },
+      ],
+    });
+    await openProducts(fake);
+    chooseText("Состояние", "В архиве");
+    fireEvent.change(screen.getByRole("textbox", { name: "Поиск" }), {
+      target: { value: "Айран" },
+    });
+    expect(names()).toEqual([AYRAN.name]);
+    fireEvent.click(screen.getByRole("button", { name: "Поиск по системе" }));
+    const results = await screen.findByRole("dialog", { name: "Поиск по системе" });
+    fireEvent.change(within(results).getByRole("textbox", { name: "Поиск по системе" }), {
+      target: { value: "Демо" },
+    });
+    fireEvent.click(within(results).getByRole("button", { name: "Найти" }));
+    fireEvent.click(await within(results).findByRole("button", { name: demo.name }));
+    await waitFor(() => expect(names()).toEqual([demo.name]));
+    expect(screen.getByRole("textbox", { name: "Поиск" }).getAttribute("value")).toBe(demo.name);
+    expect(hasRowAction(within(rowOf(demo.name)), /Изменить/)).toBe(false);
+    // Re-selecting the same URL is a new result, even though its product ID is unchanged.
+    fireEvent.change(screen.getByRole("textbox", { name: "Поиск" }), {
+      target: { value: "Айран" },
+    });
+    expect(names()).toEqual([AYRAN.name]);
+    fireEvent.click(screen.getByRole("button", { name: "Поиск по системе" }));
+    const repeatedResults = await screen.findByRole("dialog", { name: "Поиск по системе" });
+    fireEvent.change(within(repeatedResults).getByRole("textbox", { name: "Поиск по системе" }), {
+      target: { value: "Демо" },
+    });
+    fireEvent.click(within(repeatedResults).getByRole("button", { name: "Найти" }));
+    fireEvent.click(await within(repeatedResults).findByRole("button", { name: demo.name }));
+    await waitFor(() => expect(names()).toEqual([demo.name]));
+    expect(screen.getByRole("textbox", { name: "Поиск" }).getAttribute("value")).toBe(demo.name);
+  });
+
+  it("keeps archived non-demo product deep links editable", async () => {
+    renderOffice(session(), { initialPath: `/products?product=${AYRAN.id}` });
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByDisplayValue(AYRAN.name)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Сохранить" })).toBeTruthy();
+  });
+
   beforeEach(() => {
     localStorage.removeItem("markiro.theme");
   });
@@ -567,7 +652,9 @@ describe("office products", () => {
     render(
       <QueryClientProvider client={queryClient}>
         <OfficeSessionProvider value={session(many)}>
-          <ProductsPage />
+          <MemoryRouter>
+            <ProductsPage />
+          </MemoryRouter>
         </OfficeSessionProvider>
       </QueryClientProvider>,
     );

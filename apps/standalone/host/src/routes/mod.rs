@@ -60,3 +60,5 @@ pub mod warehouse;
 pub mod yandex_backups;
 
 pub mod device_disaggregation;
+
+pub mod office_search;

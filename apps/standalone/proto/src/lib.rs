@@ -294,6 +294,7 @@ pub mod export_files;
 pub mod handheld;
 pub mod license;
 pub mod office_pallet_create;
+pub mod office_search;
 pub mod office_warehouse_detail;
 pub mod pack_cards;
 pub use office_pallet_create::{

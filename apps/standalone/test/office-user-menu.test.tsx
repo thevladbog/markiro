@@ -3,10 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { UserMenu } from "../src/office/UserMenu.js";
 
-function mount() {
+function mount(withFloor = false) {
   const onProfile = vi.fn();
   const onChangePassword = vi.fn();
   const onSignOut = vi.fn();
+  const onToFloor = vi.fn();
   render(
     <div>
       <UserMenu
@@ -18,15 +19,37 @@ function mount() {
         onProfile={onProfile}
         onChangePassword={onChangePassword}
         onSignOut={onSignOut}
+        {...(withFloor ? { onToFloor } : {})}
       />
       <p>вне</p>
     </div>,
   );
   const trigger = screen.getByRole("button", { name: /Иван Петров/ });
-  return { trigger, onProfile, onChangePassword, onSignOut };
+  return { trigger, onProfile, onChangePassword, onSignOut, onToFloor };
 }
 
 describe("UserMenu", () => {
+  it("offers exit to the floor only inside the opened profile menu, then closes it", () => {
+    const { trigger, onToFloor, onSignOut } = mount(true);
+    expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Выйти в цех" })).toBeNull();
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Профиль", "Сменить пароль", "Выйти в цех", "Выйти из офиса"]);
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    const floor = within(menu).getByRole("menuitem", { name: "Выйти в цех" });
+    expect(document.activeElement).toBe(floor);
+    fireEvent.click(floor);
+    expect(onToFloor).toHaveBeenCalledOnce();
+    expect(onSignOut).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("shows the person on the trigger and keeps the menu closed", () => {
     const { trigger } = mount();
     expect(trigger.getAttribute("aria-haspopup")).toBe("menu");

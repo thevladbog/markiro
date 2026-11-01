@@ -28,6 +28,7 @@ import type { FloorAppProps } from "../src/floor/FloorApp.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
 import {
   DEFAULT_WORKSTATION_SETTINGS,
+  readWorkstationSettings,
   saveWorkstationSettings,
 } from "../src/floor/setup/workstation-settings.js";
 import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
@@ -431,7 +432,7 @@ describe("App", () => {
       password: "correct horse battery",
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
   });
@@ -557,7 +558,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledTimes(1);
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
@@ -575,7 +576,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
     // The swallow itself is guarded by Vitest failing the run on an unhandled rejection.
@@ -1219,7 +1220,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
     await waitFor(() => expect(host.getOrg).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
@@ -2526,7 +2527,7 @@ describe("the operator on the floor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByRole("heading", { name: "Обзор", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Отсканируйте бейдж")).toBeTruthy();
   });
 
@@ -4129,7 +4130,7 @@ describe("kiosk mode", () => {
     // The office is a mouse-and-keyboard app: it never fills the screen.
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() =>
       expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
@@ -4154,7 +4155,7 @@ describe("kiosk mode", () => {
     // The failed lock may have left the window half-locked: the office's own
     // exit is sent whatever the confirmed mode says.
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     await waitFor(() =>
       expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
     );
@@ -4172,7 +4173,7 @@ describe("kiosk mode", () => {
     await signIn();
     expect(await screen.findByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -4193,7 +4194,7 @@ describe("kiosk mode", () => {
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
     expect(host.officeMe).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() =>
       expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
@@ -4302,7 +4303,7 @@ describe("kiosk mode", () => {
     expect(screen.getByText("Перейти в оконный режим?")).toBeTruthy();
     // The failed exit may have changed some properties: «Выйти в цех» locks again.
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await chooseFromUserMenu("Выйти в цех");
     await waitFor(() =>
       expect(kiosk.commands).toEqual([
         "enter_lockdown",
@@ -4470,6 +4471,36 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(device.installRole).toHaveBeenCalled();
     expect(kiosk.commands).toEqual([]);
+  });
+
+  it("opens device-local scanner setup on an Office-only PC and saves COM configuration without floor processing", async () => {
+    const local = openLocalDb().executor;
+    const shell = fakeHardware();
+    const host = fakeHost();
+    renderApp({
+      probe: probeAnswering(true),
+      device: officePc(),
+      host,
+      local,
+      hardware: shell.hardware,
+    });
+    await signIn();
+    await screen.findByRole("heading", { name: "Обзор", level: 1 });
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки сканера" }));
+    await screen.findByRole("heading", { name: "Сканеры" });
+    expect(screen.getByText("Сканер в режиме клавиатуры")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Принтеры" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("COM-порт"), { target: { value: "COM5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(shell.hardware.configureScanners).toHaveBeenCalledWith([{ port: "COM5", baud: 9600 }]),
+    );
+    expect((await readWorkstationSettings(local)).scanners).toEqual([{ port: "COM5", baud: 9600 }]);
+    expect(shell.hardware.printBytes).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
   });
 
   /** The host refuses this office PC for its age, and says its own version. */
@@ -4697,7 +4728,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
       await signIn();
       await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
-      fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+      await chooseFromUserMenu("Выйти в цех");
       await waitFor(() =>
         expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
       );
@@ -4737,8 +4768,10 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.getByRole("button", { name: "Сменить адрес хоста" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "В цех" })).toBeTruthy();
     await signIn();
-    expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
-    // «Выйти из офиса» returns to the office sign-in; it is in the user menu, «Выйти в цех» stays on the bar.
+    expect(
+      within(await openUserMenu()).getByRole("menuitem", { name: "Выйти в цех" }),
+    ).toBeTruthy();
+    // Both exit actions belong to the profile menu; only the destination differs.
     expect(
       within(await openUserMenu()).getByRole("menuitem", { name: "Выйти из офиса" }),
     ).toBeTruthy();

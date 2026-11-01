@@ -370,7 +370,7 @@ describe("the workstation setup", () => {
     });
     await waitFor(() =>
       expect(
-        screen.getByText("Настройки не сохранились: база этого компьютера не ответила."),
+        screen.getByText("Не удалось сохранить настройки: база данных на этом ПК не отвечает."),
       ).toBeTruthy(),
     );
     expect(screen.getByText("Сеть: zebra.local:9100 · ZPL · 203 dpi")).toBeTruthy();
@@ -810,12 +810,12 @@ describe("the scanners, the sound and the label check of the setup", () => {
     type("COM-порт", "COM3");
     type("Скорость, бод", "0");
     click("Добавить");
-    expect(screen.getByText("Скорость — целое число больше нуля.")).toBeTruthy();
+    expect(screen.getByText("Укажите скорость целым числом больше нуля.")).toBeTruthy();
     type("Скорость, бод", "9600");
     click("Добавить");
     type("COM-порт", "com3");
     click("Добавить");
-    expect(screen.getByText("Сканер на COM3 уже есть.")).toBeTruthy();
+    expect(screen.getByText("Сканер с портом COM3 уже добавлен.")).toBeTruthy();
   });
 
   it("lists the computer's COM ports on request, and says when they cannot be read", async () => {
@@ -825,9 +825,9 @@ describe("the scanners, the sound and the label check of the setup", () => {
       .mockRejectedValueOnce(new Error("serial_unavailable"));
     await setup({ shell, tab: "Сканеры" });
     // The screen asks once by itself when the tab opens.
-    expect(await screen.findByText("COM-порты этого компьютера: COM3, COM4.")).toBeTruthy();
+    expect(await screen.findByText("COM-порты на этом компьютере: COM3, COM4.")).toBeTruthy();
     click("Обновить список портов");
-    expect(await screen.findByText("Список COM-портов не прочитался.")).toBeTruthy();
+    expect(await screen.findByText("Не удалось получить список COM-портов.")).toBeTruthy();
   });
 
   it("keeps the saved settings when the shell refuses the scanners, and says so", async () => {
@@ -913,7 +913,9 @@ describe("a COM port is one thing's at a time", () => {
     type("COM-порт", "com4");
     click("Добавить");
     expect(
-      screen.getByText("Порт COM4 занят принтером «TSC на COM4»: сканер и принтер не делят порт."),
+      screen.getByText(
+        "Порт COM4 использует принтер «TSC на COM4». Выберите для сканера другой порт.",
+      ),
     ).toBeTruthy();
     expect(screen.queryByText("COM4, 9600 бод")).toBeNull();
     type("COM-порт", "");
@@ -954,16 +956,16 @@ describe("what the shell would refuse is refused here first", () => {
     type("COM-порт", "COM\u00853");
     click("Добавить");
     expect(
-      screen.getByText("Название порта — до 256 символов, без служебных знаков."),
+      screen.getByText("Введите название порта длиной до 256 символов без служебных знаков."),
     ).toBeTruthy();
     type("COM-порт", "C".repeat(257));
     click("Добавить");
     expect(
-      screen.getByText("Название порта — до 256 символов, без служебных знаков."),
+      screen.getByText("Введите название порта длиной до 256 символов без служебных знаков."),
     ).toBeTruthy();
     type("COM-порт", "COM33");
     click("Добавить");
-    expect(screen.getByText("Сканеров может быть не больше 32.")).toBeTruthy();
+    expect(screen.getByText("Можно добавить не больше 32 сканеров.")).toBeTruthy();
     expect(screen.queryByText("COM33, 9600 бод")).toBeNull();
   });
 
@@ -976,13 +978,13 @@ describe("what the shell would refuse is refused here first", () => {
       fireEvent.click(save);
     });
     expect(
-      screen.getByText("Нажмите «Добавить» или очистите поле порта: сканер ещё не добавлен."),
+      screen.getByText("Сканер ещё не добавлен. Нажмите «Добавить» или очистите поле порта."),
     ).toBeTruthy();
     expect(shell.hardware.configureScanners).not.toHaveBeenCalled();
     expect((await readWorkstationSettings(local)).scanners).toEqual([]);
     type("COM-порт", "");
     expect(
-      screen.queryByText("Нажмите «Добавить» или очистите поле порта: сканер ещё не добавлен."),
+      screen.queryByText("Сканер ещё не добавлен. Нажмите «Добавить» или очистите поле порта."),
     ).toBeNull();
   });
 
@@ -1042,7 +1044,7 @@ describe("the connection of a scanner, as far as it is known", () => {
     cleanup();
     vi.mocked(shell.hardware.watchScanners).mockRejectedValueOnce(new Error("invalid_response"));
     await setup({ local, shell, tab: "Сканеры" });
-    expect(await screen.findByText("Состояние связи не прочиталось.")).toBeTruthy();
+    expect(await screen.findByText("Не удалось проверить подключение.")).toBeTruthy();
     expect(screen.queryByText(/invalid_response/)).toBeNull();
   });
 
@@ -1205,17 +1207,17 @@ describe("the list of COM ports", () => {
       .mockReturnValueOnce(second.promise);
     // The first ask is the screen's own, as the tab opens; the second is the button's.
     await setup({ shell, tab: "Сканеры" });
-    expect(screen.getByText("Спрашиваем у системы список COM-портов…")).toBeTruthy();
+    expect(screen.getByText("Получаем список COM-портов…")).toBeTruthy();
     click("Обновить список портов");
     await act(async () => {
       second.resolve(["COM8"]);
     });
-    expect(await screen.findByText("COM-порты этого компьютера: COM8.")).toBeTruthy();
-    expect(screen.queryByText("Спрашиваем у системы список COM-портов…")).toBeNull();
+    expect(await screen.findByText("COM-порты на этом компьютере: COM8.")).toBeTruthy();
+    expect(screen.queryByText("Получаем список COM-портов…")).toBeNull();
     await act(async () => {
       first.resolve(["COM1"]);
     });
-    expect(screen.getByText("COM-порты этого компьютера: COM8.")).toBeTruthy();
+    expect(screen.getByText("COM-порты на этом компьютере: COM8.")).toBeTruthy();
   });
 
   it("does not let an old failure undo a newer list, and says when there is no port", async () => {
@@ -1234,7 +1236,7 @@ describe("the list of COM ports", () => {
     await act(async () => {
       first.reject(new Error("serial_unavailable"));
     });
-    expect(screen.queryByText("Список COM-портов не прочитался.")).toBeNull();
+    expect(screen.queryByText("Не удалось получить список COM-портов.")).toBeNull();
     expect(screen.getByText("COM-портов не найдено.")).toBeTruthy();
   });
 });
@@ -1388,7 +1390,7 @@ describe("what the scanners, the sound and the check say to a reader of them", (
     expect(empty.closest('[role="alert"]')).toBeNull();
     expect(empty.closest("[role]")?.getAttribute("role")).toBe("presentation");
     click("Обновить список портов");
-    const ports = await screen.findByText("COM-порты этого компьютера: COM3.");
+    const ports = await screen.findByText("COM-порты на этом компьютере: COM3.");
     expect(ports.closest('[aria-live="polite"]')).not.toBeNull();
     type("COM-порт", "COM3");
     click("Добавить");
@@ -1643,7 +1645,7 @@ describe("the COM port is chosen from the computer's ports (owner feedback, beta
     const shell = fakeHardware();
     vi.mocked(shell.hardware.listSerialPorts).mockResolvedValue(["COM3", "COM7"]);
     const { local } = await setup({ shell, tab: "Сканеры" });
-    await screen.findByText("COM-порты этого компьютера: COM3, COM7.");
+    await screen.findByText("COM-порты на этом компьютере: COM3, COM7.");
     expect(document.querySelectorAll("select")).toHaveLength(0);
     expect(choicesOf("COM-порт")).toEqual(["Выберите порт", "COM3", "COM7", "Ввести вручную…"]);
     setField("COM-порт", "COM7");
@@ -1660,7 +1662,7 @@ describe("the COM port is chosen from the computer's ports (owner feedback, beta
     const shell = fakeHardware();
     vi.mocked(shell.hardware.listSerialPorts).mockResolvedValue(["COM3"]);
     await setup({ shell, tab: "Сканеры" });
-    await screen.findByText("COM-порты этого компьютера: COM3.");
+    await screen.findByText("COM-порты на этом компьютере: COM3.");
     setField("COM-порт", "Ввести вручную…");
     type("Название порта", "COM12");
     click("Добавить");

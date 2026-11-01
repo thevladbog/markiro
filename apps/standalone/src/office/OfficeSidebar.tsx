@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
 
-import { cn } from "@markiro/ui";
+import { Button, cn } from "@markiro/ui";
 
 import { menuPathFor, type NavGroup } from "./nav-groups.js";
 import { OfficeBrandMark } from "./OfficeBrand.js";
@@ -13,6 +13,7 @@ export interface OfficeSidebarProps {
   /** Icons only; each entry keeps its name (hidden text, a tooltip on hover and focus). */
   collapsed: boolean;
   id: string;
+  onSearch?: () => void;
 }
 
 /**
@@ -22,7 +23,7 @@ export interface OfficeSidebarProps {
  * document for a screen reader and show as a tooltip. A section stays marked on its sub-pages
  * («Шаблоны» on `/templates/new`); «Обзор» matches only `/`, cloud history belongs to «Смены».
  */
-export function OfficeSidebar({ groups, collapsed, id }: OfficeSidebarProps) {
+export function OfficeSidebar({ groups, collapsed, id, onSearch }: OfficeSidebarProps) {
   const { t } = useTranslation();
   const pathname = menuPathFor(useLocation().pathname);
   return (
@@ -36,6 +37,20 @@ export function OfficeSidebar({ groups, collapsed, id }: OfficeSidebarProps) {
         <span className="office-menu__wordmark">{t("office.login.wordmark")}</span>
       </div>
       <ul className="office-menu__list">
+        {onSearch && (
+          <li className="office-menu__search">
+            <Button
+              variant="plain"
+              className="office-menu__link"
+              aria-label={t("office.search.title")}
+              title={collapsed ? t("office.search.title") : undefined}
+              onClick={onSearch}
+            >
+              <OfficeIcon name="search" />
+              <span className="office-menu__label">{t("office.search.menu")}</span>
+            </Button>
+          </li>
+        )}
         {groups.map((group) => (
           <Fragment key={group.sectionKey}>
             {group.ruleBefore && <li className="office-menu__rule" role="separator" />}

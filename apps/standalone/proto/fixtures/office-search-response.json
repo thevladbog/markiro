@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "local:code:a",
+      "label": "aaaaaaaaaaaa",
+      "detail": null,
+      "target": {
+        "kind": "code",
+        "codeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source": "local"
+      }
+    },
+    {
+      "id": "cloud:shift:s",
+      "label": "OCT26-001",
+      "detail": "Молоко",
+      "target": {
+        "kind": "shift",
+        "id": "c8dd47d0-ad87-4b72-9d53-d7889feac6b1",
+        "source": "cloud"
+      }
+    },
+    {
+      "id": "local:document:d",
+      "label": "export.xml",
+      "detail": null,
+      "target": {
+        "kind": "document",
+        "id": "d",
+        "targetType": "shift",
+        "targetId": "c8dd47d0-ad87-4b72-9d53-d7889feac6b1",
+        "source": "local"
+      }
+    }
+  ],
+  "truncated": false
+}

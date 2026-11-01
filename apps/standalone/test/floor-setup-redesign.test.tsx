@@ -334,7 +334,7 @@ describe("the scanners tab", () => {
   it("holds the connection and the check side by side, and the speed's keypad takes the check's place", async () => {
     await setup();
     tab("Сканеры");
-    expect(screen.getByText("Клавиатурный сканер")).toBeTruthy();
+    expect(screen.getByText("Сканер в режиме клавиатуры")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Проверка сканера" })).toBeTruthy();
     expect(screen.getByText("Ждём скан")).toBeTruthy();
     fireEvent.pointerDown(screen.getByLabelText("Скорость, бод"));

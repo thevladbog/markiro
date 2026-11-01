@@ -66,6 +66,8 @@ fn dataset_write(parts: &Parts) -> bool {
     .any(|p| path == *p || path.starts_with(&format!("{p}/")))
         && path != "/v1/office/login"
         && path != "/v1/office/logout"
+        // Search uses a body to keep scanner input out of URLs, but is read-only.
+        && path != "/v1/office/search"
 }
 
 impl FromRequestParts<AppState> for AuthDevice {

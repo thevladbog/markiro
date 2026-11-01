@@ -1703,6 +1703,29 @@ async fn secrets_never_reach_the_process_log() {
         assert_eq!(read.status(), 200);
     }
 
+    // The global search sends scanner criteria in a POST body. Both successful
+    // hashes/SSCCs and rejected raw marking-code input stay out of process logs.
+    for (query, expected) in [
+        (json!({"kind":"code","codeHash":km_a.hash}), 200),
+        (json!({"kind":"sscc","sscc":sscc_one}), 200),
+        (json!({"kind":"code","codeHash":km_a.canonical}), 400),
+    ] {
+        let result = client
+            .post(format!("{base}/v1/office/search"))
+            .header(protocol.0, &protocol.1)
+            .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+            .bearer_auth(&key)
+            .json(&query)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(result.status(), expected);
+        if expected == 200 {
+            let body: serde_json::Value = result.json().await.unwrap();
+            assert!(!body["items"].as_array().unwrap().is_empty(), "{body}");
+        }
+    }
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
