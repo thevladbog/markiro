@@ -139,7 +139,7 @@
 }
 .v4-screen__image {
   position: relative;
-  border-radius: 0.5rem;
+  border-radius: var(--mockup-screen-radius, 0.5rem);
   overflow: hidden;
 }
 .v4-screen picture,
@@ -172,10 +172,6 @@
   left: -117.5%;
   top: 0;
   transform: translateY(-24.57%);
-}
-.v4-screen--handheld .v4-screen__image {
-  width: min(100%, 224px);
-  align-self: center;
 }
 .v4-screen--label {
   width: 108px;
