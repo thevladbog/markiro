@@ -32,6 +32,20 @@ for (const locale of ["ru", "en"]) {
       const choice = page.getByRole("radio", { name });
       await expect(choice).toBeVisible();
       await expect(choice.locator("..")).toBeInViewport({ ratio: 1 });
+      const textFits = await choice
+        .locator("..")
+        .locator("span")
+        .evaluate(async (span) => {
+          const style = getComputedStyle(span);
+          const faces = await document.fonts.load(
+            `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,
+            "ZPL TSPL",
+          );
+          if (faces.length === 0) throw new Error("Missing bundled printer language font");
+          await document.fonts.ready;
+          return span.scrollWidth <= span.clientWidth;
+        });
+      expect(textFits, `${name} text fits after loading bundled font`).toBe(true);
       expect(
         await choice.evaluate((element) => {
           const rect = element.getBoundingClientRect();

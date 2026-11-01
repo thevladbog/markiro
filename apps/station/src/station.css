@@ -2603,7 +2603,10 @@ body,
   grid-template-columns: minmax(0, 1fr) minmax(185px, 0.7fr);
 }
 
-.setup-printer-format,
+.setup-printer-format {
+  grid-template-columns: minmax(0, 1fr) 224px;
+}
+
 .setup-printer-connection {
   grid-template-columns: minmax(0, 1fr) 176px;
 }
