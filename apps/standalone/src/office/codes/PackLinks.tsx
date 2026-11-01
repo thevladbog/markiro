@@ -79,6 +79,10 @@ export function PalletLinkOrOpen({ id, sscc, kind }: PackLinkProps) {
 export function PackStateChip({ state, kind }: { state: PackState; kind: "box" | "pallet" }) {
   const { t } = useTranslation();
   return (
-    <StatusChip phase={PACK_PHASE[state]} label={t(`office.shiftCard.${kind}State.${state}`)} />
+    <StatusChip
+      className="pack-state-chip"
+      phase={PACK_PHASE[state]}
+      label={t(`office.shiftCard.${kind}State.${state}`)}
+    />
   );
 }

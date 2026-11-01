@@ -48,7 +48,7 @@ describe("«Проверить сканер»", () => {
     expect(screen.getByRole("heading", { name: "Проверка сканера" })).toBeTruthy();
     expect(screen.getByTestId("self-test-symbol").querySelector("svg")).toBeTruthy();
     expect(screen.getByText("ТЕСТ")).toBeTruthy();
-    expect(screen.getByText(/Не код продукции/)).toBeTruthy();
+    expect(screen.getByText(/Это тестовый код/)).toBeTruthy();
     expect(screen.getByTestId("self-test-code").textContent).toContain(GS_MARK);
     expect(screen.getByTestId("self-test-code").textContent).not.toContain(GS);
     expect(screen.getByTestId("self-test-expected-structure").textContent).toContain("AI 92");
@@ -63,7 +63,7 @@ describe("«Проверить сканер»", () => {
     expect(verdict.getAttribute("data-tone")).toBe("ok");
     expect(within(verdict).getByText(/ОК/)).toBeTruthy();
     expect(within(verdict).getByText("COM-порт")).toBeTruthy();
-    expect(within(verdict).getByText("пришло 2 из 2")).toBeTruthy();
+    expect(within(verdict).getByText("получено 2 из 2")).toBeTruthy();
     expect(within(verdict).getByText("код маркировки (КМ)")).toBeTruthy();
     expect(screen.getByTestId("self-test-structure").textContent).toContain(
       "контрольная цифра верна",
@@ -81,7 +81,7 @@ describe("«Проверить сканер»", () => {
     expect(verdict.getAttribute("data-tone")).toBe("problem");
     expect(within(verdict).getByText(/ПРОБЛЕМА/)).toBeTruthy();
     expect(screen.getByTestId("self-test-reason").textContent).toContain(
-      "Разделители групп (GS) не пришли",
+      "Сканер не передал разделители групп (GS)",
     );
     expect(screen.getByTestId("self-test-reason").textContent).toContain("Ctrl+]");
   });
@@ -131,7 +131,7 @@ describe("«Проверить сканер»", () => {
     const print = vi.fn(async () => "sent" as const);
     render(<Harness save={save} print={print} />);
     fireEvent.click(screen.getByRole("button", { name: "Скачать PDF" }));
-    await screen.findByText("Файл сохранён в загрузки.");
+    await screen.findByText("Файл сохранён в папку загрузок.");
     expect(save.mock.calls[0]?.[1]).toBe("markiro-test-datamatrix.pdf");
     fireEvent.click(screen.getByRole("button", { name: "Печать на: Zebra у линии" }));
     await screen.findByText("Тестовый код отправлен на печать.");

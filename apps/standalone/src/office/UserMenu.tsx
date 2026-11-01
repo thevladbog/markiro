@@ -16,11 +16,13 @@ export interface UserMenuProps {
   onProfile: () => void;
   onChangePassword: () => void;
   onSignOut: () => void;
+  /** Available on a station PC; absent on an Office-only PC. */
+  onToFloor?: (() => void) | null;
 }
 
 /**
  * The signed-in person in the office's top bar: name and role on a trigger that opens a menu of
- * «Профиль», «Сменить пароль» and «Выйти из офиса» (it replaces the two separate buttons). Menu semantics:
+ * profile, password and exit actions. A station PC also offers «Выйти в цех». Menu semantics:
  * the first entry takes the focus on opening, the arrows, Home and End move, Escape closes and
  * returns to the trigger, Tab and a press outside close.
  */
@@ -33,6 +35,7 @@ export function UserMenu({
   onProfile,
   onChangePassword,
   onSignOut,
+  onToFloor = null,
 }: UserMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -147,6 +150,18 @@ export function UserMenu({
             <OfficeIcon name="key" />
             {t("office.password.open")}
           </Button>
+          {onToFloor !== null && (
+            <Button
+              variant="plain"
+              role="menuitem"
+              tabIndex={-1}
+              className="user-menu__item"
+              onClick={() => run(onToFloor)}
+            >
+              <OfficeIcon name="signOut" />
+              {t("office.header.logout")}
+            </Button>
+          )}
           <Button
             variant="plain"
             role="menuitem"

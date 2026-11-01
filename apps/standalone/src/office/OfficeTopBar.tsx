@@ -2,7 +2,8 @@ import { useTranslation } from "react-i18next";
 import { Fragment } from "react";
 import { Link } from "react-router";
 
-import { IconButton, Button } from "@markiro/ui";
+import { IconButton, VisuallyHidden } from "@markiro/ui";
+import { StatusDot } from "../lib/StatusDot.js";
 
 import { HostStatusDot } from "../app/HostStatusDot.js";
 import type { OfficeUser } from "../host/protocol.js";
@@ -13,6 +14,7 @@ import { ThemeSwitcher } from "./ThemeSwitcher.js";
 import { UserMenu } from "./UserMenu.js";
 import { WindowModeButton } from "./WindowModeButton.js";
 import { useOfficeLink } from "./office-link.js";
+import { useOfficeScanner } from "./scanner/office-scanner-context.js";
 
 export interface OfficeTopBarProps {
   user: OfficeUser;
@@ -31,9 +33,8 @@ export interface OfficeTopBarProps {
 }
 
 /**
- * The office's top bar: the menu toggle and the crumbs at the left; at the right the link and sync
- * chips (an icon and a word each), the theme selector, «Оконный режим» (administrator, locked
- * window), «Выйти в цех» (the main way out, always in view) and the user menu.
+ * The office header keeps breadcrumbs and account/device controls visible.
+ * Healthy connection and synchronization states use compact dots.
  */
 export function OfficeTopBar({
   user,
@@ -49,6 +50,7 @@ export function OfficeTopBar({
   onWindowLeft,
 }: OfficeTopBarProps) {
   const { t } = useTranslation();
+  const scanner = useOfficeScanner();
   const link = useOfficeLink();
   const doneAt = useLastSyncTime(link.sync);
   const sync = syncChipModel(link.sync, doneAt);
@@ -91,20 +93,33 @@ export function OfficeTopBar({
         )}
       </div>
       <div className="office-header__actions">
-        <HostStatusDot status={link.status} sync={link.sync} />
-        {sync !== null && (
-          <span className={`office-chip office-chip--${sync.tone} office-chip--static`}>
-            <OfficeIcon name="sync" size={16} />
-            <span>{t(sync.labelKey, { time: sync.time })}</span>
-          </span>
+        {scanner.canConfigure && (
+          <IconButton
+            variant="ghost"
+            icon={<OfficeIcon name="qrCode" />}
+            aria-label={t("office.search.scannerSettings")}
+            onClick={scanner.openSettings}
+          />
         )}
+        <HostStatusDot status={link.status} sync={link.sync} compactWhenHealthy />
+        {sync !== null &&
+          (sync.tone === "ok" ? (
+            <span
+              className="office-sync-dot"
+              role="status"
+              title={t(sync.labelKey, { time: sync.time })}
+            >
+              <StatusDot tone="ok" label={t(sync.labelKey, { time: sync.time })} decorative />
+              <VisuallyHidden>{t(sync.labelKey, { time: sync.time })}</VisuallyHidden>
+            </span>
+          ) : (
+            <span className={`office-chip office-chip--${sync.tone} office-chip--static`}>
+              <OfficeIcon name="sync" size={16} />
+              <span>{t(sync.labelKey, { time: sync.time })}</span>
+            </span>
+          ))}
         <ThemeSwitcher />
         <WindowModeButton onLeft={onWindowLeft} />
-        {onToFloor !== null && (
-          <Button variant="secondary" icon={<OfficeIcon name="signOut" />} onClick={onToFloor}>
-            {t("office.header.logout")}
-          </Button>
-        )}
         <UserMenu
           userId={user.id}
           avatarVersion={user.avatarVersion}
@@ -114,6 +129,7 @@ export function OfficeTopBar({
           onProfile={onProfile}
           onChangePassword={onChangePassword}
           onSignOut={onSignOut}
+          onToFloor={onToFloor}
         />
       </div>
     </header>

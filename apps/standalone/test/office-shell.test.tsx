@@ -98,12 +98,13 @@ describe("HostStatusDot", () => {
 });
 
 describe("the office top bar and menu (design 2026-10)", () => {
-  it("shows the host link as a chip with an icon and a word, beside the user's controls", async () => {
+  it("shows a healthy host link as an accessible green dot beside the user's controls", async () => {
     renderOffice(fakeOfficeSession(), { link: ONLINE });
     const header = (await screen.findByRole("banner")) as HTMLElement;
     const chip = within(header).getByRole("button", { name: "Связь с хостом: На связи с хостом" });
-    expect(within(chip).getByText("Хост на связи")).toBeTruthy();
-    expect(chip.querySelector("svg")).not.toBeNull();
+    expect(chip.querySelector(".status-dot--ok")).not.toBeNull();
+    expect(within(chip).queryByText("Хост на связи")).toBeNull();
+    expect(chip.title).toBe("Связь с хостом: На связи с хостом");
     expect(header.querySelector(".host-status")).toBeNull();
     expect(header.querySelector(".office-header__actions .host-dot")).not.toBeNull();
   });

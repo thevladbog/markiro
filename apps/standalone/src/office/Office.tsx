@@ -21,6 +21,7 @@ import { OfficeLinkProvider } from "./office-link.js";
 import { createOfficeQueryClient, officeKeys } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
 import { officeRoutes } from "./routes.js";
+import { OfficeScannerProvider, type OfficeScanner } from "./scanner/office-scanner-context.js";
 import {
   BROWSER_LABEL_RENDERING,
   LabelRenderingProvider,
@@ -73,6 +74,8 @@ export interface OfficeProps {
   updateOffer?: HostUpdateOffer;
   /** The shell's update commands (plan ОБН-3); a test passes its own. */
   updates?: UpdatesApi;
+  /** This physical PC’s shared USB keyboard and COM scanners and local setup. */
+  scanner?: OfficeScanner | null;
 }
 
 const NO_UPDATE: HostUpdateOffer = { kind: "none" };
@@ -95,6 +98,7 @@ export function Office({
   initialPath = "/",
   updateOffer = NO_UPDATE,
   updates = TAURI_UPDATES,
+  scanner = null,
 }: OfficeProps) {
   const { t } = useTranslation();
   // The word that opens a field's error message (`list.css` draws it before the text): dialogs and
@@ -139,7 +143,9 @@ export function Office({
                     <LicenseDismissalsProvider>
                       <UpdatesProvider value={updates}>
                         <UpdateOfferProvider value={updateOffer}>
-                          <RouterProvider router={router} />
+                          <OfficeScannerProvider scanner={scanner}>
+                            <RouterProvider router={router} />
+                          </OfficeScannerProvider>
                         </UpdateOfferProvider>
                       </UpdatesProvider>
                     </LicenseDismissalsProvider>

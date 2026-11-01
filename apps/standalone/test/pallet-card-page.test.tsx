@@ -98,8 +98,8 @@ describe("the card of a pallet (plan КРТ)", () => {
         .getAllByRole("term")
         .map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
     );
-    expect(facts["Коробов стоит"]).toBe("1");
-    expect(facts["Станция насчитала при закрытии"]).toBe("2");
+    expect(facts["Коробов на палете"]).toBe("1");
+    expect(facts["По данным станции при закрытии"]).toBe("2");
     expect(facts["Кодов"]).toBe("1");
     expect(facts["Смена"]).toBe("OCT26-003");
   });
@@ -107,7 +107,7 @@ describe("the card of a pallet (plan КРТ)", () => {
   it("tells the station's exceptions in words", async () => {
     await palletCard();
     const item = within(section("Исключения")).getByRole("listitem");
-    expect(item.textContent).toContain("Перепечатка ярлыка (причина — Этикетка повреждена)");
+    expect(item.textContent).toContain("Перепечатка ярлыка (причина: Этикетка повреждена)");
   });
 
   it("opens a box's card from its row", async () => {

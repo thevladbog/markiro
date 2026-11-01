@@ -127,10 +127,12 @@ describe("Office", () => {
     expect(await screen.findByText("Технолог")).toBeTruthy();
   });
 
-  it("leaves for the floor from the header, ending the session", async () => {
+  it("leaves for the floor from the profile menu, ending the session", async () => {
     const session = fakeOfficeSession();
     renderOffice(session);
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+    expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Выйти в цех" })).toBeNull();
+    await chooseFromUserMenu("Выйти в цех");
     expect(session.logout).toHaveBeenCalledTimes(1);
     expect(session.signOut).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
@@ -140,12 +142,12 @@ describe("Office", () => {
     const session = fakeOfficeSession();
     renderOffice(session);
     const menu = await openUserMenu();
-    // The three entries replace the separate buttons of the old bar.
+    // Profile and exit actions share the account menu.
     expect(
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Профиль", "Сменить пароль", "Выйти из офиса"]);
+    ).toEqual(["Профиль", "Сменить пароль", "Выйти в цех", "Выйти из офиса"]);
     expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Сменить пароль" })).toBeNull();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Выйти из офиса" }));
@@ -156,6 +158,9 @@ describe("Office", () => {
   it("has one way out on an office PC, which has no floor: «Выйти из офиса»", async () => {
     const session = { ...fakeOfficeSession(), exitTo: "sign_in" as const };
     renderOffice(session);
+    expect(
+      within(await openUserMenu()).queryByRole("menuitem", { name: "Выйти в цех" }),
+    ).toBeNull();
     await chooseFromUserMenu("Выйти из офиса");
     expect(session.logout).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
@@ -226,7 +231,9 @@ describe("«Оконный режим» in the office header", () => {
       [SESSION.user, null],
     ] as const) {
       const view = renderOffice(fakeOfficeSession({ user }), { windowMode: mode });
-      expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
+      expect(
+        within(await openUserMenu()).getByRole("menuitem", { name: "Выйти в цех" }),
+      ).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
       view.unmount();
     }

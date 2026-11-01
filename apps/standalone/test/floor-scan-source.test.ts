@@ -211,6 +211,17 @@ describe("the COM scanners as a scan source", () => {
 });
 
 describe("the keyboard and the COM scanners together", () => {
+  it("leaves an Enter without scan data to the focused control", () => {
+    const target = new EventTarget();
+    const scan = vi.fn();
+    const stop = createKeyboardWedgeSource(target as unknown as Window).start(scan);
+    const enter = Object.assign(new Event("keydown", { cancelable: true }), { key: "Enter" });
+    target.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(scan).not.toHaveBeenCalled();
+    stop();
+  });
+
   it("reach one listener, and stop together", async () => {
     const events = comEvents();
     const scans: string[] = [];

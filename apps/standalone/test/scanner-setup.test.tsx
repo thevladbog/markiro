@@ -76,7 +76,7 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     expect(screen.getByLabelText("COM-порт")).toBeTruthy();
     expect(screen.getByLabelText("Скорость, бод")).toBeTruthy();
     // The keyboard scanner is a row of the list: always on, nothing to set.
-    expect(screen.getByText("Клавиатурный сканер")).toBeTruthy();
+    expect(screen.getByText("Сканер в режиме клавиатуры")).toBeTruthy();
     expect(screen.getByText("Работает всегда, без настройки")).toBeTruthy();
     // The focus is taken by a passive effect, which React flushes after the commit the heading
     // appeared in: wait for the focus itself, not for the heading.
@@ -119,10 +119,12 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
 
   it("says a scan reached the app and recognizes the office's pairing code", async () => {
     const { scanner } = await scannerSetup();
-    expect(screen.getByText("Отсканируйте код с экрана офиса или любой другой код.")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте код с экрана Офиса или другой штрихкод.")).toBeTruthy();
     scanner.read(PAYLOAD);
     expect(
-      await screen.findByText("Сканер работает: прочитан код подключения к хосту 192.168.1.10."),
+      await screen.findByText(
+        "Сканер работает. Код подключения считан. Адреса главного ПК: 192.168.1.10.",
+      ),
     ).toBeTruthy();
   });
 
@@ -131,20 +133,20 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     scanner.read("ыыы");
     expect(
       await screen.findByText(
-        "Сканер работает: считано символов — 3. Это не код подключения. Сканер печатает в русской раскладке: код подключения всё равно прочитается.",
+        "Сканер работает. Считано символов: 3. Это не код подключения. Сканер вводит код в русской раскладке. Код подключения всё равно можно считать.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/ыыы/)).toBeNull();
     scanner.read("0104600682000013\u001d21abc");
     expect(
       await screen.findByText(
-        "Сканер работает: считано символов — 22. Это не код подключения. В скане есть разделитель GS.",
+        "Сканер работает. Считано символов: 22. Это не код подключения. В коде есть разделитель GS.",
       ),
     ).toBeTruthy();
     scanner.read("��");
     expect(
       await screen.findByText(
-        "Скан пришёл искажённым. У COM-сканера проверьте скорость: она должна совпадать с настройкой самого сканера.",
+        "Сканер передал искажённый код. Для COM-сканера проверьте скорость: она должна совпадать с настройкой самого сканера.",
       ),
     ).toBeTruthy();
   });
@@ -185,10 +187,10 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
     act(() => listener?.(code.replaceAll("\u001d", ""), "com"));
     expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("problem");
-    expect(screen.getByTestId("self-test-reason").textContent).toContain("Разделители групп");
+    expect(screen.getByTestId("self-test-reason").textContent).toContain("разделители групп");
     act(() => listener?.(code, "keyboard"));
     expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("ok");
-    expect(screen.getByText("сканер как клавиатура")).toBeTruthy();
+    expect(screen.getByText("режим клавиатуры")).toBeTruthy();
     // The pairing screen's own check still reads the scan, without its text.
     expect(screen.getByRole("heading", { name: "Что прочитал сканер" })).toBeTruthy();
   });

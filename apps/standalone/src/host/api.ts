@@ -1,4 +1,10 @@
 import {
+  officeSearchRequestSchema,
+  officeSearchResponseSchema,
+  type OfficeSearchRequest,
+  type OfficeSearchResponse,
+} from "./office-search.js";
+import {
   palletValidationSchema,
   palletCreatedSchema,
   officeWarehousePalletDetailSchema,
@@ -563,6 +569,7 @@ export interface HostApi {
     codeHash: string,
     source?: CodeRegistrySource,
   ) => Promise<CodeRegistryCard>;
+  searchOffice: (token: string, query: OfficeSearchRequest) => Promise<OfficeSearchResponse>;
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
@@ -1506,6 +1513,14 @@ export function createHostApi(client: HostClient): HostApi {
         `/v1/office/code-registry/${codeHash}${source === undefined ? "" : `?source=${source}`}`,
         { officeToken: token, schema: codeRegistryCardSchema },
       );
+    },
+    searchOffice: async (token, query) => {
+      const body = officeSearchRequestSchema.parse(query);
+      return client.request("POST", "/v1/office/search", {
+        officeToken: token,
+        body,
+        schema: officeSearchResponseSchema,
+      });
     },
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {

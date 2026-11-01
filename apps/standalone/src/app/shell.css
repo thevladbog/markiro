@@ -313,13 +313,14 @@
 .office-menu__list {
   display: flex;
   flex-direction: column;
-  margin: 0;
+  gap: 4px;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
 }
 
 .office-menu__section {
-  padding: 10px 14px 2px;
+  padding: 16px 14px 12px;
   color: var(--fg-3);
   font: 600 11px/12px var(--font-ui);
   letter-spacing: 0.08em;
@@ -328,7 +329,7 @@
 
 /* Collapsed: the group's name gives way to a small gap, so the groups still read apart. */
 .office-menu--collapsed .office-menu__section {
-  height: 8px;
+  height: 12px;
   padding: 0;
   overflow: hidden;
 }
@@ -411,14 +412,15 @@
 }
 
 /*
- * The top bar: the menu toggle and the crumbs at the left, the link and sync chips, the theme
+ * The top bar: the menu toggle and the crumbs at the left, the link and sync indicators, the theme
  * selector and the person at the right. It wraps onto a second line in a narrow window.
  */
 .office-header {
   box-sizing: border-box;
   flex: none;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "lead actions";
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
@@ -428,6 +430,7 @@
 }
 
 .office-header__lead {
+  grid-area: lead;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -461,6 +464,7 @@
 }
 
 .office-header__actions {
+  grid-area: actions;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1331,6 +1335,121 @@
 .office-stack {
   display: grid;
   gap: 16px;
+}
+
+.pack-state-chip {
+  justify-self: start;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+}
+
+.office-scanner-dialog > div:first-child {
+  flex-shrink: 0;
+}
+
+.office-scanner-dialog > div:last-child {
+  display: flex;
+  min-height: 0;
+}
+
+.office-scanner-dialog .workstation-setup {
+  flex: 1;
+  height: auto;
+  box-sizing: border-box;
+}
+
+.office-search {
+  width: 100%;
+  min-width: 0;
+}
+
+.office-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.office-search-results {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  max-height: min(55vh, 520px);
+  overflow: auto;
+  padding: 20px 0 0;
+}
+
+.office-search-results:empty {
+  display: none;
+}
+
+.office-search-results p {
+  margin: 0;
+  color: var(--fg-2);
+}
+
+.office-search-group h3 {
+  margin: 0 0 8px;
+  font: var(--text-h3);
+}
+
+.office-search-group h3 span {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.office-search-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.office-search-group li + li {
+  border-top: 1px solid var(--line);
+}
+
+.office-search-result {
+  appearance: none;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--fg-1);
+  font: var(--text-body);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.office-search-result:hover {
+  background: var(--surface-panel);
+}
+
+.office-search-result:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.office-search-result__label {
+  font-weight: 600;
+}
+
+.office-search-result__detail,
+.office-search-result__source {
+  font: var(--text-body-sm);
+  color: var(--fg-2);
+}
+
+@media (max-width: 1100px) {
+  .office-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "lead" "actions";
+    padding: 8px 16px;
+  }
 }
 
 .shift-card__back {
@@ -2290,4 +2409,20 @@
 
 .export-formats [role="radiogroup"] > div:last-child {
   border-bottom: 0;
+}
+
+.office-menu__search {
+  margin-bottom: 12px;
+}
+
+.office-menu__search > .office-menu__link {
+  width: 100%;
+}
+
+.office-sync-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-md);
+  height: var(--control-md);
 }

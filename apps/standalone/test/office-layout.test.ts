@@ -38,8 +38,9 @@ describe("the office layout rules", () => {
     expect(page).toContain("flex: 1 1 auto");
   });
 
-  it("wraps the header, the page header and their buttons in a narrow window", () => {
-    expect(rule(".office-header")).toContain("flex-wrap: wrap");
+  it("wraps the header actions, the page header and its buttons in a narrow window", () => {
+    // The header uses a responsive grid. Its actual bounds and search field
+    // are checked at five widths in office-search-fit.browser.test.ts.
     expect(rule(".office-header__actions")).toContain("flex-wrap: wrap");
     expect(rule(".office-shell__content .mk-page-header")).toContain("flex-wrap: wrap");
     // The actions' box; the title box of a header with a description (`__titles`) is not one of them.

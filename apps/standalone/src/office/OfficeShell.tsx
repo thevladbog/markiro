@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Outlet, useLocation } from "react-router";
+import { Outlet, useLocation, useNavigate } from "react-router";
 
 import { Alert, ConfirmDialog } from "@markiro/ui";
 
@@ -16,6 +16,10 @@ import { OfficeSidebar } from "./OfficeSidebar.js";
 import { OfficeTopBar } from "./OfficeTopBar.js";
 import { useOfficeSession } from "./office-session.js";
 import { useViewportWidth } from "./use-viewport-width.js";
+import { useOfficeScanner } from "./scanner/office-scanner-context.js";
+import { OfficeSearch } from "./search/OfficeSearch.js";
+import { officeSearchHref } from "./search/search-query.js";
+import { listenOfficeScans, officeScanBlocked } from "./search/office-scan.js";
 
 /** Office layout: the menu, the top bar, the banners, the page. */
 export function OfficeShell() {
@@ -24,8 +28,48 @@ export function OfficeShell() {
   const session = useOfficeSession();
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  // What a drawer holds unsaved: leaving the office asks first.
+  const scanner = useOfficeScanner();
+  const navigate = useNavigate();
+  const [search, setSearch] = useState<{ id: number; scan?: { id: number; raw: string } } | null>(
+    null,
+  );
+  const searching = useRef(false);
+  const scanId = useRef(0);
   const dirtyRegistry = useDirtyRegistry();
+  const openSearch = (raw?: string) => {
+    searching.current = true;
+    const id = ++scanId.current;
+    setSearch({ id, ...(raw === undefined ? {} : { scan: { id, raw } }) });
+  };
+  const closeSearch = () => {
+    searching.current = false;
+    setSearch(null);
+  };
+  const openSearchRef = useRef(openSearch);
+  openSearchRef.current = openSearch;
+  useEffect(() => {
+    if (scanner.source === null || scanner.settingsOpen || search !== null) return;
+    return listenOfficeScans(
+      scanner.source,
+      (raw) => openSearchRef.current(raw),
+      () => searching.current || dirtyRegistry.anyDirty(),
+    );
+  }, [scanner.source, scanner.settingsOpen, dirtyRegistry, search]);
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (
+        !(event.ctrlKey || event.metaKey) ||
+        event.altKey ||
+        event.key.toLowerCase() !== "k" ||
+        officeScanBlocked()
+      )
+        return;
+      event.preventDefault();
+      openSearchRef.current();
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   const [leaving, setLeaving] = useState<(() => void) | null>(null);
   const leave = (action: () => void) => {
     if (dirtyRegistry.anyDirty()) setLeaving(() => action);
@@ -59,7 +103,12 @@ export function OfficeShell() {
   return (
     <DirtyGuardProvider registry={dirtyRegistry}>
       <div className="office-shell">
-        <OfficeSidebar groups={groups} collapsed={collapsed} id={menuId} />
+        <OfficeSidebar
+          groups={groups}
+          collapsed={collapsed}
+          id={menuId}
+          onSearch={() => openSearch()}
+        />
         <div className="office-shell__main">
           <OfficeTopBar
             user={session.user}
@@ -86,6 +135,19 @@ export function OfficeShell() {
             <Outlet />
           </main>
         </div>
+        {search !== null && (
+          <OfficeSearch
+            key={search.id}
+            {...(search.scan === undefined ? {} : { scan: search.scan })}
+            navigationKey={location.key}
+            onClose={closeSearch}
+            onSelect={(target) =>
+              leave(() => {
+                void navigate(officeSearchHref(target));
+              })
+            }
+          />
+        )}
         <ConfirmDialog
           open={leaving !== null}
           title={t("office.header.leaveTitle")}

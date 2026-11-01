@@ -365,10 +365,13 @@ describe("the keyboard-wedge scan source", () => {
 
   it("keeps the scan's Enter from also pressing the focused button", () => {
     const source = createKeyboardWedgeSource(window);
-    const stop = source.start(() => undefined);
+    const onScan = vi.fn();
+    const stop = source.start(onScan);
+    for (const key of "badge-code") window.dispatchEvent(new KeyboardEvent("keydown", { key }));
     const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
     window.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
+    expect(onScan).toHaveBeenCalledExactlyOnceWith("badge-code");
     stop();
   });
 });

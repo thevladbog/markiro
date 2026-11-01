@@ -931,6 +931,7 @@ function AppScreens({
       <Office
         key={session.token}
         session={officeSession}
+        scanner={{ source: scanner, local: localDb, hardware: hardwareApi, printing }}
         link={state.link}
         sync={state.sync}
         hostRevision={state.hostRevision}

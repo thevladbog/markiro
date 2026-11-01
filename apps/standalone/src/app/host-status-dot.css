@@ -3,6 +3,13 @@
   display: inline-flex;
 }
 
+.host-dot__button--compact {
+  width: var(--control-md);
+  height: var(--control-md);
+  justify-content: center;
+  border-radius: var(--r-1);
+}
+
 /* Under the button, its right edge on the button's: the header's user controls sit at the right. */
 .host-dot__panel {
   position: absolute;

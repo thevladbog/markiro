@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useSearchParams } from "react-router";
 
 import {
   Alert,
@@ -63,9 +64,48 @@ export function ProductsPage() {
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const groups = useProductGroups();
   const store = useStoreRecord<OfficeProduct>(officeKeys.products);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<ProductFilter>("all");
-  const [dialog, setDialog] = useState<ProductsDialog | null>(null);
+  const [searchEntry, setSearchEntry] = useState<{
+    navigationKey: string | null;
+    value: string;
+  } | null>(null);
+  const [filterEntry, setFilterEntry] = useState<{
+    navigationKey: string | null;
+    value: ProductFilter;
+  } | null>(null);
+  const [params, setParams] = useSearchParams();
+  const [chosenDialog, setChosenDialog] = useState<ProductsDialog | null>(null);
+  const selectedId = params.get("product");
+  const location = useLocation();
+  const navigationKey = selectedId === null ? null : location.key;
+  // List choices belong to the selected link. A new search result must not
+  // inherit a previous query or state filter, even for the same product.
+  const chosenSearch = searchEntry?.navigationKey === navigationKey ? searchEntry.value : null;
+  const filter = filterEntry?.navigationKey === navigationKey ? filterEntry.value : "all";
+  const setSearch = (value: string) => setSearchEntry({ navigationKey, value });
+  const setFilter = (value: ProductFilter) => setFilterEntry({ navigationKey, value });
+  const selectedProduct = products.data?.find((product) => product.id === selectedId);
+  // A demo search result opens its read-only row. Typing or resetting the
+  // list filter returns to ordinary catalog browsing.
+  const selectedDemo =
+    chosenSearch === null && selectedProduct?.demo === true ? selectedProduct : null;
+  const search = chosenSearch ?? selectedDemo?.name ?? "";
+  const dialog: ProductsDialog | null =
+    chosenDialog ??
+    (canEdit && selectedProduct && selectedProduct.demo !== true
+      ? { kind: "edit", product: selectedProduct }
+      : null);
+  const setDialog = (next: ProductsDialog | null) => {
+    setChosenDialog(next);
+    if (params.has("product"))
+      setParams(
+        (previous) => {
+          const updated = new URLSearchParams(previous);
+          updated.delete("product");
+          return updated;
+        },
+        { replace: true },
+      );
+  };
   const [notice, setNotice] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   const open = (next: ProductsDialog) => {
@@ -182,7 +222,11 @@ export function ProductsPage() {
   };
   const filtersOn = search.trim() !== "" || filter !== "all";
   const found = products.isSuccess
-    ? findProducts(activeFirstByName(products.data), search, filter)
+    ? findProducts(
+        activeFirstByName(selectedDemo === null ? products.data : [selectedDemo]),
+        search,
+        filter,
+      )
     : [];
   const view = listViewState({
     pending: products.isPending,
