@@ -120,8 +120,8 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch { val id = meta.installId(); _state.update { it.copy(installId = id) } }
         viewModelScope.launch {
-            combine(printers.observeRouting(), this@SettingsViewModel.config) { routing, device ->
-                val purposes = PrintPurpose.entries.filter { device?.backend != "host" || it != PrintPurpose.DUPLICATE }
+            combine(printers.observeRouting(), this@SettingsViewModel.config) { routing, _ ->
+                val purposes = PrintPurpose.entries.toList()
                 Triple(routing.missing.filter { it in purposes }, routing.attention.filter { it in purposes }, purposes.size)
             }.collect { (missing, attention, count) ->
                 _state.update { it.copy(missingPrinterPurposes = missing, printerAttentionPurposes = attention, printerPurposeCount = count) }

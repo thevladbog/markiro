@@ -582,6 +582,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/warehouse-reprint/lookup (StationWarehouseReprintController.lookup)",
       "POST /station/warehouse-reprint/event-batches (StationWarehouseReprintController.receive)",
       "GET /station/warehouse-reprint/templates (StationWarehouseReprintController.templates)",
+      "GET /station/warehouse-reprint/handheld-pallet-templates-v3 (StationWarehouseReprintController.handheldPalletTemplates)",
+      "POST /station/warehouse-reprint/handheld-lookup-v3 (StationWarehouseReprintController.handheldLookup)",
       "GET /station/warehouse-reprint/source-capabilities (StationWarehouseReprintController.sourceCapabilities)",
       "POST /station/warehouse-reprint/label-facts (StationWarehouseReprintController.receiveFacts)",
       "POST /station/warehouse-reprint/pallet-sources (StationWarehouseReprintController.palletSources)",

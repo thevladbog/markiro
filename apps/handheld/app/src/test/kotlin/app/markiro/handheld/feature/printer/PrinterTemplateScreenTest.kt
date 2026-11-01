@@ -26,13 +26,15 @@ class PrinterTemplateScreenTest {
     private val template = CachedLabelTemplate("box", "box", "Коробка 100×100",
         """{"widthMm":100,"heightMm":100,"dpi":203,"language":"zpl","elements":[]}""")
 
-    @Test fun cloudCatalogueDoesNotOfferARosterRefreshAsATemplateRefresh() {
+    @Test fun cloudCatalogueCanRefreshThroughTheReprintCatalog() {
+        var refreshes = 0
         compose.setContent { MarkiroTheme {
             PrinterTemplateChooserScreen(printer, PrintPurpose.BOX, PrinterTemplatesUi(loading = false),
-                onBack = {}, onSave = { _, _ -> }, onRefresh = {})
+                onBack = {}, onSave = { _, _ -> }, onRefresh = { refreshes++ })
         } }
-        compose.onNodeWithText("Обновить шаблоны").assertDoesNotExist()
-        compose.onNodeWithText("В облачном режиме", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Обновить шаблоны").performScrollTo().performClick()
+        assertEquals(1, refreshes)
+        compose.onNodeWithText("Каталог перепечати", substring = true).assertIsDisplayed()
     }
 
     @Test fun selectingRequiresPreviewAndAnExplicitSaveAndFiltersOtherPurposes() {

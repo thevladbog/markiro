@@ -37,6 +37,25 @@ export class WarehouseUnifiedService {
     private readonly labels: WarehouseLookupService,
     private readonly pallets: WarehousePalletService,
   ) {}
+  async handheldLookup(tenantId: string, deviceId: string, operatorId: string, raw: string) {
+    const result = await this.lookup(tenantId, deviceId, operatorId, raw);
+    if (result.status !== "found" || result.kind !== "pallet")
+      return { result, productId: null, groupCode: null };
+    // Metadata guides eligibility only; the immutable historical data/revision remains unchanged.
+    const [product] = await this.db
+      .select({ productId: schema.products.id, groupCode: schema.products.chzProductGroupCode })
+      .from(schema.shifts)
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, result.data.shiftId)))
+      .limit(1);
+    return { result, productId: product?.productId ?? null, groupCode: product?.groupCode ?? null };
+  }
   async receiveData(
     tenantId: string,
     deviceId: string,

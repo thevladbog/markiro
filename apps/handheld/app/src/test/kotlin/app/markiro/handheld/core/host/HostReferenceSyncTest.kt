@@ -77,8 +77,12 @@ class HostReferenceSyncTest {
         assertEquals("Коробка 100×100", cached?.name)
         assertEquals("box", cached?.purpose)
         assertEquals("[1]", cached?.groupCodes)
+        val reprint = checkNotNull(MetaStore(db).get("host_reprint_template:box-template"))
+        assertTrue(reprint.contains("\"rev\":58"))
+        assertTrue(reprint.contains("\"chzProductGroupCodes\":[1]"))
         reference.sync().getOrThrow()
         assertNull(db.printTemplateDao().template("host:box-template"))
+        assertNull(MetaStore(db).get("host_reprint_template:box-template"))
     }
 
     @Test

@@ -1,3 +1,4 @@
+import { createTestStationDevice } from "./support/auth";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { createDb, schema } from "@markiro/db";
@@ -59,6 +60,90 @@ describe.skipIf(!ready)("warehouse event history", () => {
     };
   });
   afterAll(async () => h?.close());
+  it("accepts a handheld's exact scoped audit once and denies foreign operators and production ingestion", async () => {
+    const handheld = await createTestStationDevice(h.app, h.a.cabinet, "Reprint handheld", {
+      kind: "handheld",
+    });
+    const lookup = await request(h.app.getHttpServer())
+      .post("/station/warehouse-reprint/handheld-lookup-v3")
+      .set("x-api-key", handheld.apiKey)
+      .send({
+        protocol: "warehouse-unified-reprint-v3",
+        raw: WAREHOUSE_TEST_SSCC,
+        operatorId: h.a.operatorId,
+      })
+      .expect(200);
+    expect(lookup.body.result).toMatchObject({
+      status: "found",
+      kind: "box",
+      source: { identity: WAREHOUSE_TEST_SSCC },
+    });
+    await request(h.app.getHttpServer())
+      .post("/station/warehouse-reprint/handheld-lookup-v3")
+      .set("x-api-key", handheld.apiKey)
+      .send({
+        protocol: "warehouse-unified-reprint-v3",
+        raw: WAREHOUSE_TEST_SSCC,
+        operatorId: h.b.operatorId,
+      })
+      .expect(403);
+    const event = {
+      ...prepared,
+      eventId: randomUUID(),
+      jobId: randomUUID(),
+      sessionId: randomUUID(),
+      attemptId: randomUUID(),
+    };
+    const send = () =>
+      request(h.app.getHttpServer())
+        .post("/station/warehouse-reprint/event-batches")
+        .set("x-api-key", handheld.apiKey)
+        .send({ protocol: "warehouse-label-reprint-v1", events: [event] });
+    const first = await send().expect(200);
+    expect(first.body).toEqual({
+      protocol: "warehouse-label-reprint-v1",
+      acceptedEventIds: [event.eventId],
+      quarantined: [],
+    });
+    expect((await send().expect(200)).body).toEqual(first.body);
+    const audits = await h.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.targetId, event.jobId));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      organizationId: h.a.tenantId,
+      actorUserId: null,
+      action: "warehouse_label.prepared",
+      outcome: "accepted",
+      targetType: "warehouse_label_job",
+      targetId: event.jobId,
+    });
+    expect(audits[0]?.after).toEqual({
+      deviceId: handheld.deviceId,
+      operatorId: h.a.operatorId,
+      eventId: event.eventId,
+      sequence: 1,
+      sourceKind: event.sourceKind,
+      sourceId: event.sourceId,
+      identity: event.identity,
+      sourceRevision: event.sourceRevision,
+      templateId: event.templateId,
+      templateDigest: event.templateDigest,
+      payloadDigest: event.payloadDigest,
+      bytesDigest: event.bytesDigest,
+      repair: event.repair,
+      scanDigest: event.scanDigest,
+      reason: event.reason,
+      attemptId: event.attemptId,
+      attemptNo: 1,
+    });
+    await request(h.app.getHttpServer())
+      .post("/station/warehouse-reprint/pallet-data-v3")
+      .set("x-api-key", handheld.apiKey)
+      .send({ protocol: "warehouse-unified-reprint-v3", entries: [] })
+      .expect(403);
+  });
   it("accepts raster prepared events and replays their original receipt", async () => {
     const { language, ...base } = prepared;
     void language;

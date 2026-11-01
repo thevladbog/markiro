@@ -1,5 +1,5 @@
 import { ForbiddenException } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 
 export type WarehouseReader = Pick<Db, "select">;
@@ -15,7 +15,7 @@ export async function assertWarehouseDevice(
       and(
         eq(schema.stationDevices.tenantId, tenantId),
         eq(schema.stationDevices.id, deviceId),
-        eq(schema.stationDevices.kind, "station"),
+        inArray(schema.stationDevices.kind, ["station", "handheld"]),
         isNull(schema.stationDevices.revokedAt),
       ),
     );

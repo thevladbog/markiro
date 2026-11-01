@@ -18,7 +18,7 @@ class ReplacementMigrationTest {
         val context=ApplicationProvider.getApplicationContext<Context>()
         val name="replacement-${UUID.randomUUID()}.db"
         val credential=InMemoryCredentialStore().apply { write("synthetic-key") }
-        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23).build()
+        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25).build()
         try {
             val before=open(); before.initializeRecoveryForTest(credential)
             val owner=before.deviceRecoveryDao().get()

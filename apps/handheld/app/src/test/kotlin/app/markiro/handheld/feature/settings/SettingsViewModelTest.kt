@@ -55,7 +55,7 @@ class SettingsViewModelTest {
         try { main.cancelAndJoinModels() } finally { db.close() }
     }
 
-    @Test fun printerPurposesFollowBackendChangesAndExcludeHostDuplicates() = runTest(timeout = 10.seconds) {
+    @Test fun hostReprintIncludesMarkingCodeAssignmentsWithoutEnablingShiftDuplicateMode() = runTest(timeout = 10.seconds) {
         db.deviceConfigDao().upsert(config)
         db.printerDao().upsert(PrinterEntity("p", "Printer", "wifi", "localhost:9100", "zpl", 203, false, "no_paper", null))
         db.printerDao().assign(PrinterAssignmentEntity("duplicate", "p"))
@@ -84,15 +84,19 @@ class SettingsViewModelTest {
         assertEquals(3, cloud.printerPurposeCount)
 
         db.deviceConfigDao().upsert(config.copy(backend = "host"))
-        val host = model.state.first { it.printerPurposeCount == 2 }
+        model.config.first { it?.backend == "host" }
+        val host = model.state.value
+        assertEquals(3, host.printerPurposeCount)
         assertEquals(listOf(PrintPurpose.BOX, PrintPurpose.PALLET), host.missingPrinterPurposes)
-        assertEquals(emptyList<PrintPurpose>(), host.printerAttentionPurposes)
+        assertEquals(listOf(PrintPurpose.DUPLICATE), host.printerAttentionPurposes)
         for (purpose in listOf(PrintPurpose.BOX, PrintPurpose.PALLET)) {
             db.printerDao().assign(PrinterAssignmentEntity(purpose.wire, "p"))
         }
         val configured = model.state.first { it.missingPrinterPurposes?.isEmpty() == true }
-        assertEquals(listOf(PrintPurpose.BOX, PrintPurpose.PALLET), configured.printerAttentionPurposes)
+        assertEquals(PrintPurpose.entries, configured.printerAttentionPurposes)
         db.printerDao().assign(PrinterAssignmentEntity("duplicate", null))
+        val hostMissingCode = model.state.first { it.missingPrinterPurposes == listOf(PrintPurpose.DUPLICATE) }
+        assertEquals(3, hostMissingCode.printerPurposeCount)
         db.deviceConfigDao().upsert(config)
         val cloudAgain = model.state.first { it.printerPurposeCount == 3 }
         assertEquals(listOf(PrintPurpose.DUPLICATE), cloudAgain.missingPrinterPurposes)

@@ -85,15 +85,15 @@ Android tests must also verify its interpretation.
   device configuration, printers/assignments and hardware preferences; do not use
   revocation/sealing to reset business data. A failed reset stays blocked and
   retryable. Never expose a new epoch to old callbacks or resume old outboxes.
-- Off in host mode: grants, replacement, inventory, write-offs, update checks, duplicate
-  DataMatrix print (`STATION_UPDATE_REQUIRED`). Box and pallet exceptions (step 1б) reach the host only for
+- Off in host mode: grants, replacement, inventory, write-offs, update checks, automatic duplicate
+  DataMatrix print on shift acceptance (`STATION_UPDATE_REQUIRED`). Box and pallet exceptions (step 1б) reach the host only for
   one case: a closed warehouse pallet taken apart is frozen by `HostPalletEvents` as
   `warehouse_pallet_disassembled` once its close is acknowledged and the last `hello` (`MetaStore.HOST_PROTOCOL`,
   written by every heartbeat) said protocol 8 or more; an older host would refuse the kind for good, so the
   record waits. The handheld still sends protocol header 6. Box exceptions, pallet reprints and the disassembly
   of a shift's pallet are still never sent to the host. Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
-- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 23 for printer-template snapshots):
+- Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 25 for site-wide reprint jobs/audit):
   every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
   `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
   (`EnterResult.LineFull`); `HostCalls` carries the two numbers to the loaders. The host's `maxStations`,
@@ -179,3 +179,22 @@ Android tests must also verify its interpretation.
 - A retry of a definite pre-render template refusal may recover a missing/incompatible layout after configuration is corrected. `unknown`/sent states never enable that path. Legacy missing-source rows can acquire their original source, never a later local override.
 - Host alternatives come from the reference feed, with purpose/group constraints and tombstones. Bundle-only catalogue entries are cloud-only and product-bound; never create host bundle aliases that survive feed deletion. Cloud alternatives are obtained by entering shifts; do not offer an operator-roster refresh as a template refresh.
 - Login reveals readiness/errors, never roster counts or fetch timestamps. Compact menu/settings must retain actionable printer, queue, recovery and grant warnings. Short screens and enlarged text scroll instead of shrinking touch targets below 48 dp.
+
+## Site-wide reprint (2026-11-01)
+
+- `core/reprint` and `feature/reprint` support unit, box and pallet reprint across
+  the whole site in both backend modes. Host warehouse access is separately
+  allowed for handheld; this does not enable automatic shift duplicate printing.
+- Reason once, then each scan prints immediately. Use existing printer/purpose
+  assignments and template choices; never add per-object confirmation to the
+  ordinary scan flow. Busy scans are refused visibly.
+- Room 25 freezes source, layout, printer, bytes, operator and owner/generation
+  before hardware I/O. Unknown delivery is never automatically repeated;
+  verification scans compare the saved identity/full KM and never print.
+- Audit envelopes are independent of physical printing, ordered per job by causal
+  sequence, and replayed unchanged until an exact receipt. Rejected jobs retain
+  their remaining evidence. Dataset replacement archives unresolved evidence as
+  opaque `site_reprint_evidence:` metadata without rebinding it.
+- Cloud pallet reprint uses historical V3 branding; unit/box use current cached
+  organization branding. Preserve source availability metadata and refuse any
+  selected template that needs unavailable historical fields.

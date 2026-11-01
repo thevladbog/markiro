@@ -563,3 +563,11 @@ val MIGRATION_22_23 = object : Migration(22, 23) {
         db.execSQL("UPDATE device_config SET hostRev=0 WHERE backend='host'")
     }
 }
+
+val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(db: SupportSQLiteDatabase) = app.markiro.handheld.core.reprint.SiteReprintSchema.create(db)
+}
+
+val MIGRATION_24_25 = object : Migration(24, 25) {
+    override fun migrate(db: SupportSQLiteDatabase) = app.markiro.handheld.core.reprint.SiteReprintSchema.createIndexes(db)
+}

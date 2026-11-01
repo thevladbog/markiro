@@ -131,7 +131,7 @@ pub async fn lookup(
     device: AuthDevice,
     ApiJson(what): ApiJson<WarehouseLookup>,
 ) -> Result<Json<WarehouseLookupResult>, ApiError> {
-    if device.kind != DeviceKind::Station {
+    if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
         return Err(ApiError::forbidden(STATION_ONLY));
     }
     let asked = match (what.code_hash.as_deref(), what.sscc.as_deref()) {
@@ -340,7 +340,13 @@ pub async fn receive_records(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     // A device revoked while the batch waited for the lock records nothing,
     // and a device of another kind never does.
-    device.require_station_in(&mut tx, STATION_ONLY).await?;
+    device
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            STATION_ONLY,
+        )
+        .await?;
     let received_at = state.timestamp();
     let mut receipts = Vec::with_capacity(batch.records.len());
     for (position, record) in batch.records.iter().enumerate() {

@@ -29,6 +29,26 @@ export class WarehousePalletRenderingsService {
     @Inject(DB) private readonly db: Db,
     private readonly pallets: WarehousePalletService,
   ) {}
+  async handheldTemplates(tenantId: string, deviceId: string) {
+    const catalog = await this.templates(tenantId, deviceId);
+    const scopes = await this.db
+      .select({ id: schema.labelTemplates.id, groups: schema.labelTemplates.chzProductGroupCodes })
+      .from(schema.labelTemplates)
+      .where(
+        and(
+          eq(schema.labelTemplates.tenantId, tenantId),
+          eq(schema.labelTemplates.purpose, "pallet"),
+          eq(schema.labelTemplates.enabled, true),
+        ),
+      );
+    return {
+      protocol: "warehouse-unified-reprint-v3" as const,
+      templates: catalog.templates.flatMap((template) => {
+        const scope = scopes.find((scope) => scope.id === template.id);
+        return scope ? [{ template, groupCodes: scope.groups }] : [];
+      }),
+    };
+  }
   async templates(tenantId: string, deviceId: string) {
     await assertWarehouseDevice(this.db, tenantId, deviceId);
     const rows = await this.db

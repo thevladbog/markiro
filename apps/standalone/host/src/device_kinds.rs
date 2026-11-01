@@ -40,8 +40,12 @@ pub const ROUTE_KINDS: &[(&str, &str, &[DeviceKind])] = &[
     ("GET", "/v1/device/displacements", &[Station, Handheld]),
     ("GET", "/v1/device/products/{id}/photo", &[Station]),
     ("GET", "/v1/device/pallet-sheets", &[Station]),
-    ("POST", "/v1/device/warehouse/lookup", &[Station]),
-    ("POST", "/v1/device/warehouse/reprints", &[Station]),
+    ("POST", "/v1/device/warehouse/lookup", &[Station, Handheld]),
+    (
+        "POST",
+        "/v1/device/warehouse/reprints",
+        &[Station, Handheld],
+    ),
     // The update offer is open to every paired device kind, as it was before the matrix (plan
     // ОБН-3, spec §10.11.3): a device the host refuses as `app_too_old` must still learn of it.
     ("GET", "/v1/device/update", &[Station, Handheld, Office]),

@@ -109,7 +109,7 @@ class PrinterCompactScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Дубль кода · Zebra line two").assertIsDisplayed()
+        compose.onNodeWithText("Коды маркировки · Zebra line two").assertIsDisplayed()
         compose.onNodeWithText("Повторить печать").assertDoesNotExist()
         capture("ru-dark-duplicate-sending")
     }

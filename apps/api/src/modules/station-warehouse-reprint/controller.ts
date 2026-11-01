@@ -16,6 +16,7 @@ import {
   PALLET_REPRINT_V2_PROTOCOL,
   PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
   palletTemplateCatalogV2Schema,
+  palletTemplateChoiceSchema,
   palletLookupV2RequestSchema,
   palletLookupV2ResultSchema,
   palletRenderingsV2BatchSchema,
@@ -94,8 +95,30 @@ export const warehouseTemplateIdsQuerySchema = z.strictObject({
     .optional(),
 });
 
-function scope(req: RequestWithTenant): { tenantId: string; deviceId: string } {
-  if (!req.tenantId || !req.deviceId || req.deviceKind !== "station")
+// Separate handheld envelopes preserve strict Station V3/V2 response compatibility.
+export const handheldSiteLookupResultSchema = z.strictObject({
+  result: unifiedLookupResultSchema,
+  productId: z.uuid().nullable(),
+  groupCode: z.number().int().nonnegative().nullable(),
+});
+export const handheldPalletTemplateCatalogSchema = z.strictObject({
+  protocol: z.literal(UNIFIED_REPRINT_PROTOCOL),
+  templates: z
+    .array(
+      z.strictObject({
+        template: palletTemplateChoiceSchema,
+        groupCodes: z.array(z.number().int().nonnegative()).nullable(),
+      }),
+    )
+    .max(1000),
+});
+
+function scope(req: RequestWithTenant, handheld = false): { tenantId: string; deviceId: string } {
+  if (
+    !req.tenantId ||
+    !req.deviceId ||
+    (req.deviceKind !== "station" && !(handheld && req.deviceKind === "handheld"))
+  )
     throw new ForbiddenException({ code: "WAREHOUSE_DEVICE_DENIED" });
   return { tenantId: req.tenantId, deviceId: req.deviceId };
 }
@@ -130,6 +153,27 @@ export class StationWarehouseReprintController {
         PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
       ],
     };
+  }
+  @Post("handheld-lookup-v3")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(unifiedLookupRequestSchema)
+  @ApiZodResponse({ status: 200, schema: handheldSiteLookupResultSchema })
+  @ApiHttpErrors(400, 401, 403)
+  handheldLookup(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(unifiedLookupRequestSchema))
+    input: z.infer<typeof unifiedLookupRequestSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req, true);
+    return this.unified.handheldLookup(tenantId, deviceId, input.operatorId, input.raw);
+  }
+  @Get("handheld-pallet-templates-v3")
+  @ApiZodResponse({ status: 200, schema: handheldPalletTemplateCatalogSchema })
+  @ApiHttpErrors(401, 403, 413)
+  handheldPalletTemplates(@Req() req: RequestWithTenant) {
+    const { tenantId, deviceId } = scope(req, true);
+    return this.renderings.handheldTemplates(tenantId, deviceId);
   }
   @Post("lookup-v3")
   @AllowSubscriptionRecovery("station")
@@ -170,7 +214,7 @@ export class StationWarehouseReprintController {
     @Body(new ZodValidationPipe(palletRenderingsV3BatchSchema))
     input: z.infer<typeof palletRenderingsV3BatchSchema>,
   ) {
-    const { tenantId, deviceId } = scope(req);
+    const { tenantId, deviceId } = scope(req, true);
     return this.unified.receiveRenderings(tenantId, deviceId, input);
   }
   @Post("pallet-events-v3")
@@ -184,7 +228,7 @@ export class StationWarehouseReprintController {
     @Body(new ZodValidationPipe(palletEventsV3BatchSchema))
     input: z.infer<typeof palletEventsV3BatchSchema>,
   ) {
-    const { tenantId, deviceId } = scope(req);
+    const { tenantId, deviceId } = scope(req, true);
     return this.pallets.events(tenantId, deviceId, input.entries, UNIFIED_REPRINT_PROTOCOL);
   }
   @Get("pallet-templates-v2")
@@ -333,7 +377,7 @@ export class StationWarehouseReprintController {
     @Body(new ZodValidationPipe(warehouseEventBatchSchema))
     input: { protocol: "warehouse-label-reprint-v1"; events: WarehouseReprintEvent[] },
   ): Promise<WarehouseReprintReceipt> {
-    const { tenantId, deviceId } = scope(req);
+    const { tenantId, deviceId } = scope(req, true);
     return this.events.receive(tenantId, deviceId, input.events);
   }
   @Get("templates")
@@ -346,7 +390,7 @@ export class StationWarehouseReprintController {
     @Query(new ZodValidationPipe(warehouseTemplateIdsQuerySchema))
     query: z.infer<typeof warehouseTemplateIdsQuerySchema>,
   ): Promise<WarehouseTemplateCatalog> {
-    const { tenantId, deviceId } = scope(req);
+    const { tenantId, deviceId } = scope(req, true);
     return this.templatesService.templates(
       tenantId,
       deviceId,

@@ -43,6 +43,28 @@ class HubScreenTest {
     }
 
     @Test
+    fun aMissingMarkingCodePrinterRemainsActionableInHostMode() {
+        var selected: HubTile? = null
+        compose.setContent { MarkiroTheme {
+            HubScreen(HubUi(hostMode = true, missingPrinterPurposes = listOf(app.markiro.handheld.core.print.PrintPurpose.DUPLICATE)),
+                onTile = { selected = it }, onSignOut = {})
+        } }
+        compose.onNodeWithText("Не назначено: Коды маркировки").assertIsDisplayed().performClick()
+        assertEquals(HubTile.SETTINGS, selected)
+    }
+
+    @Test
+    fun aMarkingCodePrinterProblemRemainsActionableInHostMode() {
+        var selected: HubTile? = null
+        compose.setContent { MarkiroTheme {
+            HubScreen(HubUi(hostMode = true, printerAttentionPurposes = listOf(app.markiro.handheld.core.print.PrintPurpose.DUPLICATE)),
+                onTile = { selected = it }, onSignOut = {})
+        } }
+        compose.onNodeWithText("Проверьте принтер: Коды маркировки").assertIsDisplayed().performClick()
+        assertEquals(HubTile.SETTINGS, selected)
+    }
+
+    @Test
     fun hostMenuAndSettingsFitWithoutScrollingOn320dp() {
         var selected: HubTile? = null
         compose.setContent {
