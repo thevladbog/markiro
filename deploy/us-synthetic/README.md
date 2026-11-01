@@ -107,6 +107,40 @@ material, actual database privilege or execution authority. Do not mount short-l
 administrative credentials into long-lived API/worker services or treat this entry
 as an executable migration/provisioning runbook.
 
+## Administrative material preflight
+
+Separate administrative reader, material and live database owners now implement
+fixed operation-specific files and a checked TLS connection to the synthetic
+administrative database. The database handle exposes identity, assertion and
+awaited close only. It grants no migration, seed or provisioning capability; the
+administrative executable remains locked as described above.
+
+With Node24 and the declared Corepack/pnpm toolchain, run:
+
+```sh
+COREPACK_ENABLE_NETWORK=0 node tools/us-development/verify-hosted-admin-preflight.mjs
+```
+
+The command accepts no arguments. It consumes the fixed, private TEST-package
+locator `installed-fixtures/admin-preflight-package.json` beneath the viewer SDD
+workspace. That locator must bind a clean single-snapshot commit to the current
+11 scoped source files, complete artifact/dependency/SBOM/deployment byte evidence
+and the administrative supplement. TEST artifacts cannot be promoted. The runner
+uses only the pinned cached Linux ARM images, private internal networks and newly
+owned volumes; it never publishes a port or pulls an image.
+
+Acceptance requires all19 preflight tests without skips, two precise numeric TLS
+assertion failures with the intended mutations, restored19 green, and normal
+owned resource/key closure. It then prepares separate credentials and fixtures
+for the unchanged33 original installed tests. Raw reports and ownership progress
+are retained privately beside the TEST snapshot. A timed-out copy retains its
+owned state: local client exit does not prove daemon or remote-child settlement,
+and there is no forced cleanup or retry mode.
+
+This capability check does not run migrations, seed a viewer, verify hosted
+storage, unlock readiness, or accept a deployment. All existing viewer and release
+gates below still apply.
+
 ## Remaining release gates
 
 Separate reviewed contracts are required for migration, seed/provisioning,
