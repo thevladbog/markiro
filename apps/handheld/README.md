@@ -12,9 +12,11 @@ slices: `docs/superpowers/specs/2026-09-10-handheld-foundation-design.md` (pairi
 
 One APK serves two modes, chosen at pairing: the cloud (as before) or the host of
 "Markiro Avtonom" on the site LAN (`device_config.backend` is `cloud` or `host`; a device is
-never both). Host mode pairs by IP and one-time code or by the office's DataMatrix, talks
-HTTPS only with the host's pinned self-signed certificate fingerprint, and has no
-inventory, write-offs, replacement or in-app updates. Hardware acceptance steps:
+never both). Host mode pairs by IP and one-time code or by the office's DataMatrix, sends
+business requests only over HTTPS with the host's pinned self-signed certificate fingerprint, and has no
+inventory, write-offs or replacement. Manual app update checks and downloads remain
+available in Settings → About device: they use the public release channel without
+host or cloud device credentials. Hardware acceptance steps:
 `docs/runbooks/standalone-handheld-checklist.md`. Scoped notes: "Host mode" in `AGENTS.md`.
 
 ## Build and test

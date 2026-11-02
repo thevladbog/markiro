@@ -169,10 +169,11 @@ fun SettingsScreen(
                     }
                     // A row, not a banner: the terminal is offline most of a shift, so
                     // this answers only when an operator asks.
-                    if (config?.backend != "host") SettingRow(stringResource(R.string.settings_update), updateLabel(state), onCheckUpdate)
+                    // Both backend modes use the public release channel without device credentials.
+                    SettingRow(stringResource(R.string.settings_update), updateLabel(state), onCheckUpdate)
                     // Offered only here, never from the work screen: an install restarts
                     // the app, and a line in the middle of a box should not meet it.
-                    if (config?.backend != "host" && state.update is UpdateState.Available) {
+                    if (state.update is UpdateState.Available) {
                         SettingRow(
                             stringResource(R.string.settings_update_install),
                             installLabel(state),

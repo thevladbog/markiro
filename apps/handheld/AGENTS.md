@@ -85,7 +85,7 @@ Android tests must also verify its interpretation.
   device configuration, printers/assignments and hardware preferences; do not use
   revocation/sealing to reset business data. A failed reset stays blocked and
   retryable. Never expose a new epoch to old callbacks or resume old outboxes.
-- Off in host mode: grants, replacement, inventory, write-offs, update checks, automatic duplicate
+- Off in host mode: grants, replacement, inventory, write-offs, automatic duplicate
   DataMatrix print on shift acceptance (`STATION_UPDATE_REQUIRED`). Box and pallet exceptions (step 1б) reach the host only for
   one case: a closed warehouse pallet taken apart is frozen by `HostPalletEvents` as
   `warehouse_pallet_disassembled` once its close is acknowledged and the last `hello` (`MetaStore.HOST_PROTOCOL`,
@@ -93,6 +93,10 @@ Android tests must also verify its interpretation.
   record waits. The handheld still sends protocol header 6. Box exceptions, pallet reprints and the disassembly
   of a shift's pallet are still never sent to the host. Protocol fixtures are read from
   `apps/standalone/proto/fixtures` (test resources); never hand-edit expected values.
+- Manual app updates remain available in Settings → About device in both backend modes.
+  `UpdateModule` uses the bare client for the public stable release channel, without device
+  credentials or paired-origin rewriting. Preserve the pending-queue installation guard,
+  installer size/SHA-256 validation and Android's explicit installation confirmation.
 - Several devices in one shift (plan 2b, host protocol 7; the handheld stays at protocol 6; Room is now 25 for site-wide reprint jobs/audit):
   every entry names `multi-station-v1` (`HostApi.ENTER_SUPPORTS`; an older host ignores the name and still answers
   `shift_busy`, shown as «Смена занята»). A full line is `409 shift_line_full {maxStations, active}`
