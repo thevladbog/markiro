@@ -75,7 +75,8 @@
 }
 
 /* Disabled: a `panel` face and the `dis` label; a loading button keeps its fill. */
-:where(.floor-frame, .station-screen) .mk-btn--floor:disabled:not(:has(.mk-spin)) {
+:where(.floor-frame, .station-screen)
+  .mk-btn--floor:is(:disabled, [aria-disabled="true"]):not(:has(.mk-spin)) {
   border-color: var(--line) !important;
   background: var(--panel) !important;
   color: var(--dis) !important;
@@ -83,7 +84,8 @@
 }
 
 /* Press: scale 0.97 in 150 ms. */
-:where(.floor-frame, .station-screen) .mk-btn--floor:active:not(:disabled) {
+:where(.floor-frame, .station-screen)
+  .mk-btn--floor:active:not(:disabled):not([aria-disabled="true"]) {
   transform: scale(var(--press-scale));
 }
 

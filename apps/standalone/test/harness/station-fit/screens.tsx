@@ -17,6 +17,7 @@ import { FloorFooter } from "../../../src/floor/shifts/FloorScreen.js";
 import { UnitLabelHistory } from "../../../src/floor/unit-labels/UnitLabelHistory.js";
 import { FooterAction } from "../../../src/floor/work/WorkInstruments.js";
 import { ScanHistoryScreen } from "../../../src/floor/work/ScanHistory.js";
+import { SCAN_HISTORY_SQL } from "../../../src/floor/work/scan-history.js";
 import type { LocalExecutor } from "../../../src/local/executor.js";
 import { ENTITY_SET } from "../../../src/local/reference-sync.js";
 import type { HostStatus } from "../../../src/host/protocol.js";
@@ -61,7 +62,7 @@ const local: LocalExecutor = {
         { key: "entity_set", value: ENTITY_SET },
       ]);
     }
-    if (sql.includes("FROM floor_scans AS s")) {
+    if (sql === SCAN_HISTORY_SQL) {
       const limit = Number(params[3] ?? 7);
       const offset = Number(params[4] ?? 0);
       return Promise.resolve(scanRows.slice(offset, offset + limit));
