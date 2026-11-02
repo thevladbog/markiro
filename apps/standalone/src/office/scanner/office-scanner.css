@@ -155,8 +155,8 @@
   color: var(--muted);
   border: 0;
   border-radius: 12px;
-  min-height: 36px;
-  height: 36px;
+  min-height: 44px;
+  height: 44px;
   border-color: transparent;
   background: transparent;
 }
@@ -222,7 +222,8 @@
 }
 .office-scanner-dialog .office-self-test__advanced > summary {
   cursor: pointer;
-  padding-block: 8px;
+  min-height: 44px;
+  padding-block: 14px;
   color: var(--muted);
   font: var(--text-caption);
 }

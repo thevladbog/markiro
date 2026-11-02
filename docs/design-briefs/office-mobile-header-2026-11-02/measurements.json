@@ -1,0 +1,643 @@
+{
+  "browser": "151.0.7922.34",
+  "baseline": {
+    "width": 390,
+    "height": 720,
+    "header": 229,
+    "main": 491
+  },
+  "widths": [
+    {
+      "theme": "dark",
+      "width": 320,
+      "h": 56,
+      "client": 244,
+      "scroll": 244,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 375,
+      "h": 56,
+      "client": 299,
+      "scroll": 299,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "h": 56,
+      "client": 314,
+      "scroll": 314,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 430,
+      "h": 56,
+      "client": 354,
+      "scroll": 354,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 640,
+      "h": 56,
+      "client": 564,
+      "scroll": 564,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 641,
+      "h": 117,
+      "client": 565,
+      "scroll": 565,
+      "main": 603,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 768,
+      "h": 117,
+      "client": 692,
+      "scroll": 692,
+      "main": 603,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 960,
+      "h": 117,
+      "client": 884,
+      "scroll": 884,
+      "main": 603,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "width": 1280,
+      "h": 65,
+      "client": 1204,
+      "scroll": 1204,
+      "main": 655,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 320,
+      "h": 56,
+      "client": 244,
+      "scroll": 244,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 375,
+      "h": 56,
+      "client": 299,
+      "scroll": 299,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "h": 56,
+      "client": 314,
+      "scroll": 314,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 430,
+      "h": 56,
+      "client": 354,
+      "scroll": 354,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 640,
+      "h": 56,
+      "client": 564,
+      "scroll": 564,
+      "main": 664,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки и состояние. Хост на связи",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 44,
+          "width": 44
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 641,
+      "h": 117,
+      "client": 565,
+      "scroll": 565,
+      "main": 603,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 768,
+      "h": 117,
+      "client": 692,
+      "scroll": 692,
+      "main": 603,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 960,
+      "h": 117,
+      "client": 884,
+      "scroll": 884,
+      "main": 603,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "width": 1280,
+      "h": 65,
+      "client": 1204,
+      "scroll": 1204,
+      "main": 655,
+      "buttons": [
+        {
+          "name": "Меню разделов",
+          "height": 44,
+          "width": 44
+        },
+        {
+          "name": "Настройки сканера",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Связь с хостом: На связи с хостом",
+          "height": 48,
+          "width": 48
+        },
+        {
+          "name": "Системная (по умолчанию)",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Светлая",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Тёмная",
+          "height": 40,
+          "width": 40
+        },
+        {
+          "name": "Ирина Смирнова, Администратор",
+          "height": 48,
+          "width": 204.59375
+        }
+      ]
+    }
+  ],
+  "interactions": [
+    {
+      "theme": "dark",
+      "themeSwitch": true,
+      "escapeFocus": true,
+      "scanner": true,
+      "connection": true,
+      "profile": true
+    },
+    {
+      "theme": "light",
+      "themeSwitch": true,
+      "escapeFocus": true,
+      "scanner": true,
+      "connection": true,
+      "profile": true
+    },
+    {
+      "offlineBadge": true
+    }
+  ],
+  "errors": []
+}

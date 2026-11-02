@@ -316,6 +316,7 @@ function RestoreHoldCard({ hold, canManage, format, onResumed }: RestoreHoldCard
     <Card title={t("office.backups.hold.title")} titleAs="h2">
       <div className="standalone-form">
         <DefinitionGrid
+          layout="rows"
           items={[
             {
               id: "since",
@@ -407,6 +408,7 @@ function Destination({ destination, time }: { destination: BackupDestination; ti
   }
   return (
     <DefinitionGrid
+      layout="rows"
       items={[
         { id: "dir", term: t("office.backups.dir"), description: destination.dir, mono: true },
         {

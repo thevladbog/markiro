@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { IconButton, VisuallyHidden } from "@markiro/ui";
 import { StatusDot } from "../lib/StatusDot.js";
 
-import { HostStatusDot } from "../app/HostStatusDot.js";
+import { hostChipView, hostDotTone, HostStatusDot } from "../app/HostStatusDot.js";
 import type { OfficeUser } from "../host/protocol.js";
 import { crumbsFor, crumbTrail } from "./nav-groups.js";
 import { OfficeIcon } from "./OfficeIcon.js";
@@ -15,6 +15,7 @@ import { UserMenu } from "./UserMenu.js";
 import { WindowModeButton } from "./WindowModeButton.js";
 import { useOfficeLink } from "./office-link.js";
 import { useOfficeScanner } from "./scanner/office-scanner-context.js";
+import { OfficeHeaderTools } from "./OfficeHeaderTools.js";
 
 export interface OfficeTopBarProps {
   user: OfficeUser;
@@ -54,6 +55,8 @@ export function OfficeTopBar({
   const link = useOfficeLink();
   const doneAt = useLastSyncTime(link.sync);
   const sync = syncChipModel(link.sync, doneAt);
+  const hostTone = hostDotTone(link.status, link.sync);
+  const syncWarning = hostTone === "ok" && sync?.tone === "warn";
   const crumbs = crumbsFor(pathname);
   const trail = crumbTrail(pathname, search);
   return (
@@ -93,33 +96,39 @@ export function OfficeTopBar({
         )}
       </div>
       <div className="office-header__actions">
-        {scanner.canConfigure && (
-          <IconButton
-            variant="ghost"
-            icon={<OfficeIcon name="qrCode" />}
-            aria-label={t("office.search.scannerSettings")}
-            onClick={scanner.openSettings}
-          />
-        )}
-        <HostStatusDot status={link.status} sync={link.sync} compactWhenHealthy />
-        {sync !== null &&
-          (sync.tone === "ok" ? (
-            <span
-              className="office-sync-dot"
-              role="status"
-              title={t(sync.labelKey, { time: sync.time })}
-            >
-              <StatusDot tone="ok" label={t(sync.labelKey, { time: sync.time })} decorative />
-              <VisuallyHidden>{t(sync.labelKey, { time: sync.time })}</VisuallyHidden>
-            </span>
-          ) : (
-            <span className={`office-chip office-chip--${sync.tone} office-chip--static`}>
-              <OfficeIcon name="sync" size={16} />
-              <span>{t(sync.labelKey, { time: sync.time })}</span>
-            </span>
-          ))}
-        <ThemeSwitcher />
-        <WindowModeButton onLeft={onWindowLeft} />
+        <OfficeHeaderTools
+          label={t("office.header.tools")}
+          tone={syncWarning ? "warn" : hostTone}
+          state={t(syncWarning ? sync.labelKey : hostChipView(link.status, link.sync).textKey)}
+        >
+          {scanner.canConfigure && (
+            <IconButton
+              variant="ghost"
+              icon={<OfficeIcon name="qrCode" />}
+              aria-label={t("office.search.scannerSettings")}
+              onClick={scanner.openSettings}
+            />
+          )}
+          <HostStatusDot status={link.status} sync={link.sync} compactWhenHealthy />
+          {sync !== null &&
+            (sync.tone === "ok" ? (
+              <span
+                className="office-sync-dot"
+                role="status"
+                title={t(sync.labelKey, { time: sync.time })}
+              >
+                <StatusDot tone="ok" label={t(sync.labelKey, { time: sync.time })} decorative />
+                <VisuallyHidden>{t(sync.labelKey, { time: sync.time })}</VisuallyHidden>
+              </span>
+            ) : (
+              <span className={`office-chip office-chip--${sync.tone} office-chip--static`}>
+                <OfficeIcon name="sync" size={16} />
+                <span>{t(sync.labelKey, { time: sync.time })}</span>
+              </span>
+            ))}
+          <ThemeSwitcher />
+          <WindowModeButton onLeft={onWindowLeft} />
+        </OfficeHeaderTools>
         <UserMenu
           userId={user.id}
           avatarVersion={user.avatarVersion}

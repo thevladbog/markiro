@@ -23,6 +23,11 @@ import {
 } from "../../../src/floor/scan-source.js";
 import { api, createReviewApi, user } from "./data.js";
 import { shiftDesignResponses } from "./shift-design-data.js";
+import { AboutProvider } from "../../../src/office/info/about-context.js";
+import type { AboutApi } from "../../../src/office/info/about-api.js";
+import { UpdateShellProvider } from "../../../src/office/info/update-context.js";
+import { UpdateShellError, type UpdateShell } from "../../../src/office/info/update-shell.js";
+import { DEVICE_STATUS, observation } from "../../support/fixtures.js";
 const params = new URLSearchParams(location.search);
 
 // Browser-only demonstration adapters. No real host, local database, printer or COM port is used.
@@ -93,7 +98,7 @@ window.officeReviewEmitScan = (raw) => {
   for (const listener of scanListeners) listener(raw);
 };
 const session: OfficeSessionValue = {
-  user,
+  user: params.get("role") === "technologist" ? { ...user, role: "technologist" } : user,
   api: params.get("scenario") === "shift" ? createReviewApi(shiftDesignResponses) : api,
   call: (operation) => operation("office-preview-session"),
   logout: () => undefined,
@@ -101,16 +106,48 @@ const session: OfficeSessionValue = {
   refreshUser: async () => undefined,
 };
 const theme = params.get("theme") === "light" ? "light" : "dark";
+const about: AboutApi = {
+  appVersion: async () => "1.3.0",
+  installRole: async () => "office",
+  pairing: async () => DEVICE_STATUS,
+  hello: async () => ({
+    ...observation(true),
+    hello: { ...observation(true).hello, version: "1.3.0" },
+  }),
+  system: async () => ({ os: "Windows 11", arch: "x64", webview: "WebView2 130.0.2849.80" }),
+  openLink: async () => undefined,
+};
+const updateShell: UpdateShell = {
+  scan: async () => [],
+  verify: async () => {
+    throw new UpdateShellError("unsupported", "Browser preview");
+  },
+  install: async () => {
+    throw new UpdateShellError("unsupported", "Browser preview");
+  },
+  outcome: async () => null,
+  dismissOutcome: async () => undefined,
+  openFolder: async () => undefined,
+};
 const root = document.getElementById("root");
 if (root === null) throw new Error("No preview root");
 createRoot(root).render(
   <ThemeProvider defaultTheme={theme}>
-    <Office
-      session={session}
-      initialPath={params.get("path") ?? "/"}
-      link={{ state: "online", lastContactAt: Date.now(), lastError: null, seq: 1 }}
-      sync={{ kind: "done", synced: 10, failure: null, quarantined: 0 }}
-      scanner={{ source, local, hardware, printing: createPrintRuntime(hardware.printBytes) }}
-    />
+    <AboutProvider value={about}>
+      <UpdateShellProvider value={updateShell}>
+        <Office
+          session={session}
+          initialPath={params.get("path") ?? "/"}
+          link={{
+            state: params.get("link") === "offline" ? "offline" : "online",
+            lastContactAt: Date.now(),
+            lastError: params.get("link") === "offline" ? "unreachable" : null,
+            seq: 1,
+          }}
+          sync={{ kind: "done", synced: 10, failure: null, quarantined: 0 }}
+          scanner={{ source, local, hardware, printing: createPrintRuntime(hardware.printBytes) }}
+        />
+      </UpdateShellProvider>
+    </AboutProvider>
   </ThemeProvider>,
 );

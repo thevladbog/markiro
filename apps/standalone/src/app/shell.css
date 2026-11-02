@@ -1088,16 +1088,14 @@
   text-align: center;
 }
 
-/* A page's table of contents: plain links to its sections' anchors in a row. */
-/* The anchors of «Информация» as the kit's segments (a link each, not a tab list: the page reads as a whole). */
+/* Information stays one document; its outline uses the kit's flat navigation. */
 .office-toc {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 0 var(--sp-4);
   margin: 0;
-  padding: 4px;
-  border-radius: var(--r-ctl);
-  background: var(--surface-panel);
+  padding: 0;
+  border-bottom: 1px solid var(--line);
   list-style: none;
 }
 
@@ -1105,22 +1103,22 @@
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  min-height: 40px;
-  padding: 0 16px;
-  border-radius: var(--r-sm);
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--sp-2);
+  border-bottom: 3px solid transparent;
   color: var(--fg-2);
   font: 500 14px/20px var(--font-ui);
   text-decoration: none;
 }
 
 .office-toc a:hover {
-  background: color-mix(in srgb, var(--fg-1) 8%, transparent);
   color: var(--fg-1);
 }
 
 .office-toc a[aria-current="location"] {
-  background: var(--surface-inverse);
-  color: var(--fg-on-inverse);
+  border-bottom-color: var(--accentui);
+  color: var(--fg-1);
   font-weight: 600;
 }
 
@@ -1129,39 +1127,50 @@
   outline-offset: -2px;
 }
 
+.office-about-section {
+  scroll-margin-block: var(--sp-4);
+}
+
 /* The license section (plan ЛЦ-3): its parts one under another, each feature as its name and a word. */
 .license-part {
   display: grid;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: var(--sp-3);
 }
 
 .license-part h3,
 .license-part h4 {
   margin: 0;
-  font-weight: 600;
+  font: var(--text-h3);
 }
 
 .license-features {
   display: grid;
-  gap: 6px;
-  max-width: 480px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 0 var(--sp-6);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .license-features li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-1) var(--sp-3);
+  min-height: 44px;
+  padding-block: var(--sp-2);
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--line);
   align-items: center;
-  justify-content: space-between;
 }
 
 .license-features__name {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .license-features__state {
@@ -1175,10 +1184,15 @@
 
 /* Why a feature is off, on the page under its row (the tooltip repeats it). */
 .license-features__why {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   margin: 0;
   color: var(--fg-3);
   font: var(--text-body-sm);
+}
+
+.office-about-section .standalone-form__actions > .mk-btn {
+  max-width: 100%;
+  white-space: normal;
 }
 
 /*
@@ -1450,6 +1464,121 @@
     grid-template-areas: "lead" "actions";
     padding: 8px 16px;
   }
+}
+
+@media (max-width: 640px) {
+  .office-shell__content {
+    --mk-card-pad: 16px;
+    --mk-card-head-pad: 16px 16px 0;
+    padding: var(--sp-4) var(--sp-3);
+  }
+
+  .office-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "lead actions";
+    min-height: 56px;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+  }
+
+  .office-header__lead {
+    gap: var(--sp-1);
+  }
+
+  .office-header .office-crumbs {
+    min-width: 0;
+  }
+
+  .office-header .office-crumbs ol {
+    flex-wrap: nowrap;
+    gap: 0;
+  }
+
+  .office-header .office-crumbs li:not([aria-current="page"]) {
+    display: none;
+  }
+
+  .office-header .office-crumbs__page {
+    display: block;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .office-header__actions {
+    --control-md: 44px;
+    flex-wrap: nowrap;
+  }
+
+  .office-header .user-menu__trigger {
+    width: 44px;
+    padding: 5px;
+  }
+
+  .office-header .user-menu__who,
+  .office-header .user-menu__trigger > svg {
+    display: none;
+  }
+}
+
+.office-header__tools {
+  position: relative;
+  flex: none;
+}
+
+.office-header__tools-inline {
+  display: contents;
+}
+
+.office-header__tools-icon {
+  position: relative;
+  display: inline-flex;
+}
+
+.office-header__tools-icon .status-dot {
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  outline: 2px solid var(--bg);
+}
+
+.office-header__tools-panel {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: calc(-1 * (var(--control-md) + var(--sp-2)));
+  z-index: var(--z-overlay-popover, 30);
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  width: min(304px, calc(100vw - 24px));
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.office-header__tools-panel .theme-switcher__option {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+}
+
+.office-header__tools-panel .host-dot__panel {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: var(--sp-2);
+}
+
+.office-header__tools-panel .host-dot:has(.host-dot__panel) {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
 .shift-card__back {

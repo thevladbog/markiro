@@ -299,9 +299,9 @@ function LicenseBinding({ license }: { license: OfficeLicense }) {
   return (
     <section className="license-part" aria-labelledby={titleId}>
       <h3 id={titleId}>{t("office.about.license.binding.title")}</h3>
-      <DefinitionGrid items={items} />
+      <DefinitionGrid layout="rows" items={items} />
       <div className="standalone-form__actions">
-        <Button variant="secondary" size="compact" onClick={() => void copy()}>
+        <Button variant="secondary" size="md" onClick={() => void copy()}>
           {t("office.about.license.copyHostId")}
         </Button>
       </div>

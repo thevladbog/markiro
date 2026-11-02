@@ -1,0 +1,83 @@
+{
+  "base": "d17e448d2416b8ffc733cff7eff71b3974e6ba00",
+  "state": "local uncommitted follow-up including prior review fixes",
+  "createdAt": "2026-11-02T02:59:25.419121+00:00",
+  "files": [
+    {
+      "path": "apps/standalone/src/app/shell.css",
+      "sha256": "8a44cd288e1e4e593244fa2b4fd4013ec05e2ec674baeb8a6a07c97ff8cacc7e"
+    },
+    {
+      "path": "apps/standalone/src/floor/setup/ScannerSelfTest.tsx",
+      "sha256": "2e412bf52d697f1e2e8aa8af2480c2ec2855d09f8debee1331431493e1847f6c"
+    },
+    {
+      "path": "apps/standalone/src/office/backups/BackupsPage.tsx",
+      "sha256": "2984aa358106743ab05ff354d0f88fb97528e2d1c58ca98a400cc22d08426cb2"
+    },
+    {
+      "path": "apps/standalone/src/office/info/AboutPage.tsx",
+      "sha256": "eea55cb482e888ed2a912836b54cbd9e770e978c2683b4ae7aa728372bb7b00a"
+    },
+    {
+      "path": "apps/standalone/src/office/info/ContactsSection.tsx",
+      "sha256": "42980c7129f501ebc8510101faa08332cc0494e56d8245db81039860f8be3ab8"
+    },
+    {
+      "path": "apps/standalone/src/office/info/LicenseSection.tsx",
+      "sha256": "7f6ed962826e583b83f1bc04b55d26bd695d37564a8804f63e67bb79571d32dd"
+    },
+    {
+      "path": "apps/standalone/src/office/info/ProgramSection.tsx",
+      "sha256": "ab9cc2d4eb16633bc9f6b0f4753d6034d2c2a2157bc5ab35f398b2d98d31a55a"
+    },
+    {
+      "path": "apps/standalone/src/office/info/UpdateSection.tsx",
+      "sha256": "72e278583137b40fab75b2b4e442a2093922a8e350d30ca096480fd97c510552"
+    },
+    {
+      "path": "apps/standalone/src/office/org/OrgProfilePage.tsx",
+      "sha256": "f88687a7dca44c50926060c787ac156d85b428cd15b17bca9d92d8a27fb4857e"
+    },
+    {
+      "path": "apps/standalone/src/office/scanner/office-scanner.css",
+      "sha256": "0e77e08cc5dbf1846e9c342708cc2fd0e1e5cb2abfa9e9d6da1604605808fb21"
+    },
+    {
+      "path": "apps/standalone/src/office/sscc/SsccPage.tsx",
+      "sha256": "78bfd326eab38493f35c4f5769c116cefd37d8ad721b706342d778292a2b0dd5"
+    },
+    {
+      "path": "apps/standalone/test/about-page.test.tsx",
+      "sha256": "fd3eb26494c54df91a6bf31b6f12afe5b9faf2576c3dd049715d84b595de8e7e"
+    },
+    {
+      "path": "apps/standalone/test/harness/office-review/data.ts",
+      "sha256": "756ea4af10e37fc7bf1e113865053a4a887a2416207102788c61c7837705cc70"
+    },
+    {
+      "path": "apps/standalone/test/harness/office-review/main.tsx",
+      "sha256": "da1bb6f260e7571d44fb8399d810b8f09374ab4aa4e2e17e75d96b7535134739"
+    },
+    {
+      "path": "apps/standalone/test/office-list-layout.test.ts",
+      "sha256": "1d4d2f8aece24b33d3297be0f30901e9e97dd8f4e375e72b613b20a2b9d313a0"
+    },
+    {
+      "path": "apps/standalone/test/scanner-selftest-office.test.tsx",
+      "sha256": "0ec92575336179833b7b197b616159a24bd251e0b4a70c974cba1efc864e324e"
+    },
+    {
+      "path": "packages/ui/src/components.css",
+      "sha256": "9da5202e98f5d80483bedf1d70f45add5b54b0056e173091123a036ec692ce22"
+    },
+    {
+      "path": "packages/ui/src/components/DefinitionGrid.tsx",
+      "sha256": "3b069691d6d8ca38953667525413c796d9ee609fa186218c31cf275c14f1c9ee"
+    },
+    {
+      "path": "packages/ui/test/components.test.tsx",
+      "sha256": "b49b4f942ff491c341e5b785efb2392a913cdbbfed9a3d80e2913da9f4f5ba3d"
+    }
+  ]
+}

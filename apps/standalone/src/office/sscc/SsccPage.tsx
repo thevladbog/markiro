@@ -163,6 +163,7 @@ function SsccContent() {
         ) : (
           <>
             <DefinitionGrid
+              layout="rows"
               items={[
                 {
                   id: "box",

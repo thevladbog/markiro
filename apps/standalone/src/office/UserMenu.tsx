@@ -98,6 +98,7 @@ export function UserMenu({
       <Button
         variant="plain"
         className="user-menu__trigger"
+        aria-label={`${name}, ${roleLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

@@ -437,6 +437,7 @@ export function ScannerSelfTest({
           </div>
         </div>
         <Alert
+          role={verdict?.status === "problem" ? "alert" : "status"}
           tone={
             verdict === undefined
               ? "info"

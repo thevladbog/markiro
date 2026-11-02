@@ -34,12 +34,23 @@ describe("office scanner presentation", () => {
     expect(screen.getByRole("button", { name: "Увеличить" }).classList.contains("mk-btn--md")).toBe(
       true,
     );
+    const result = screen.getByText("Ожидание сканирования").closest(".mk-alert");
+    expect(result?.getAttribute("role")).toBe("status");
     const code = state.code;
     act(() => state.onScan(code, "com"));
-    expect(screen.getByRole("alert").textContent).toContain("Проверка пройдена");
+    expect(result?.textContent).toContain("Проверка пройдена");
+    expect(result?.getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(screen.getByText("Дополнительно"));
     fireEvent.click(screen.getByRole("button", { name: "Печать на: Принтер" }));
     expect(print).toHaveBeenCalledWith("test", "dm", code);
+  });
+  it("announces a recoverable scan warning politely", () => {
+    render(<Harness />);
+    act(() => state.onScan(`]d2${state.code}`, "com"));
+    const result = screen.getByText("Проверьте настройки сканера").closest(".mk-alert");
+    expect(result?.getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
   it("reports lost GS without accepting a different code", () => {
     render(<Harness />);

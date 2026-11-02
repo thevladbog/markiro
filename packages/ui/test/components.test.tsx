@@ -1913,8 +1913,25 @@ describe("the 2026 office sizing is opt-in", () => {
     expect(block).toContain("--control-md: 44px");
     expect(block).toContain("--control-sm: 36px");
     expect(block).toContain("--r-2: 16px");
-    expect(block).toContain("--r-3: 20px");
+    expect(block).toContain("--r-3: 24px");
+    expect(block).toContain("--r-compact: 12px");
+    expect(block).toContain("--err-solid: var(--err-fg)");
+    expect(block).toContain("--mk-btn-destructive-fg: var(--onerr)");
     expect(block).toContain("--shadow-1: none");
+  });
+
+  it.each(["html", "subtree"])("keeps the kit radius when applied to %s", (target) => {
+    const element = target === "html" ? document.documentElement : document.createElement("div");
+    if (target === "subtree") document.body.append(element);
+    element.classList.add("mk-kit-2026");
+    try {
+      const style = getComputedStyle(element);
+      expect(style.getPropertyValue("--r-3").trim()).toBe("24px");
+      expect(style.getPropertyValue("--r-compact").trim()).toBe("12px");
+    } finally {
+      element.classList.remove("mk-kit-2026");
+      if (target === "subtree") element.remove();
+    }
   });
 
   it("leaves the shared defaults the cloud apps use", () => {

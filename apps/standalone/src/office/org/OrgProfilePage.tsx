@@ -193,6 +193,7 @@ function OrgProfileView({ profile }: { profile: OrgProfile }) {
   return (
     <>
       <DefinitionGrid
+        layout="rows"
         items={[
           { id: "name", term: t("org.name"), description: profile.name },
           { id: "inn", term: t("org.inn"), description: profile.inn ?? none, mono: true },

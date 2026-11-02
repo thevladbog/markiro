@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import { PageHeader } from "@markiro/ui";
 
@@ -37,18 +37,20 @@ export function AboutPage() {
         <ul className="office-toc">
           {sections.map((section) => (
             <li key={section.id}>
-              <a
-                href={`#${section.id}`}
-                {...(location.hash === `#${section.id}` ? { "aria-current": "location" } : {})}
+              <Link
+                to={`#${section.id}`}
+                {...((location.hash || "#program") === `#${section.id}`
+                  ? { "aria-current": "location" }
+                  : {})}
               >
                 {t(section.titleKey)}
-              </a>
+              </Link>
             </li>
           ))}
         </ul>
       </nav>
       {sections.map(({ id, Component }) => (
-        <div key={id} id={id} tabIndex={-1} className="office-stack">
+        <div key={id} id={id} tabIndex={-1} className="office-stack office-about-section">
           <Component />
         </div>
       ))}
