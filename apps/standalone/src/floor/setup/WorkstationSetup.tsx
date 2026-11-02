@@ -1068,14 +1068,19 @@ export function WorkstationSetup({
                       custom
                       size={controlSize}
                       label={t("floor.setup.printers.editor.outputMode")}
-                      options={(["normal", "peel", "cutter"] as const).map((value) => ({
-                        value,
-                        label: t(`floor.setup.printers.editor.outputModes.${value}`),
-                      }))}
-                      {...(form.outputMode === undefined ? {} : { value: form.outputMode })}
+                      options={[
+                        { value: "", label: t("floor.setup.printers.editor.outputModeLegacy") },
+                        ...(["normal", "peel", "cutter"] as const).map((value) => ({
+                          value,
+                          label: t(`floor.setup.printers.editor.outputModes.${value}`),
+                        })),
+                      ]}
+                      value={form.outputMode ?? ""}
                       placeholder={t("floor.setup.printers.editor.outputModeLegacy")}
                       hint={t("floor.setup.printers.editor.outputModeHint")}
-                      onValueChange={(outputMode) => set({ outputMode })}
+                      onValueChange={(outputMode) =>
+                        set({ outputMode: outputMode === "" ? undefined : outputMode })
+                      }
                     />
                   )}
                   {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (

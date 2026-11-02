@@ -424,11 +424,38 @@ describe("the station tab", () => {
 it("saves the selected label output mode from the printer editor", async () => {
   const { local } = await setup({ printers: true });
   click("Изменить принтер «Zebra у линии»");
-  expect(choicesOf("Выдача этикетки")).toEqual(["Обычная печать", "С отделителем", "С отрезчиком"]);
+  expect(choicesOf("Выдача этикетки")).toEqual([
+    "Как настроено на принтере",
+    "Обычная печать",
+    "С отделителем",
+    "С отрезчиком",
+  ]);
   setField("Выдача этикетки", "С отрезчиком");
   click("Готово");
   await act(async () => {
     click("Сохранить");
   });
   expect((await readWorkstationSettings(local)).printers[0]?.outputMode).toBe("cutter");
+});
+
+it("returns an explicit output mode to the printer configuration and persists its absence", async () => {
+  const { local } = await setup({ printers: true });
+  click("Изменить принтер «Zebra у линии»");
+  setField("Выдача этикетки", "С отрезчиком");
+  click("Готово");
+  await act(async () => {
+    click("Сохранить");
+  });
+  expect((await readWorkstationSettings(local)).printers[0]?.outputMode).toBe("cutter");
+  click("Изменить принтер «Zebra у линии»");
+  setField("Выдача этикетки", "Как настроено на принтере");
+  click("Готово");
+  await act(async () => {
+    click("Сохранить");
+  });
+  expect((await readWorkstationSettings(local)).printers[0]).not.toHaveProperty("outputMode");
+  click("Изменить принтер «Zebra у линии»");
+  expect(screen.getByRole("combobox", { name: "Выдача этикетки" }).textContent).toBe(
+    "Как настроено на принтере",
+  );
 });
