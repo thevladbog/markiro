@@ -1,0 +1,673 @@
+{
+  "baseCommit": "19ffadb1e21ad3e44073d8593038e3b0ce6e4d27",
+  "scope": "Native Android handheld shared UI, synthetic Compose states; no physical device validation",
+  "renderer": "Robolectric native graphics, Android API 34",
+  "compileSdk": 35,
+  "jdk": "Homebrew OpenJDK 17.0.19 on macOS arm64",
+  "tests": {
+    "tests": 1760,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": 228
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 103
+  },
+  "assembleDebug": "passed",
+  "testJvmArgs": ["-XX:TieredStopAtLevel=1", "-XX:ReservedCodeCacheSize=256m"],
+  "runtimeLimitations": [
+    {
+      "standardRun": "Interrupted after test JVM SIGSEGV in C2 CompilerThread0",
+      "frame": "Node::uncast(bool)",
+      "compileTask": "androidx.room.driver.SupportSQLiteStatement$SupportAndroidSQLiteStatement::ensureCursor"
+    },
+    {
+      "firstC1Run": "Interrupted after default 48 MiB CodeCache was full; final run used 256 MiB"
+    }
+  ],
+  "repositoryTestSettingsChanged": false,
+  "sourceFiles": {
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/design/Components.kt": "7bd99a3dcab693bbad8d4cb55eb1d1519c8bd88b1b5bf452fc945750773072b2",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/design/HeaderStatus.kt": "cc2b70854d8904bd7b8458ab57e7da4f9e8be541eb303d7aa6a095631248e0ce",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/design/MarkiroLogo.kt": "f8836f82af8d70846909c9c7beb1e7fe5e8166e8014c96d539916581f3feafe3",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/design/Theme.kt": "48e949fada5b708088e21ecf06bb80aca27217d83db74f9f8be532b9b0f01d78",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/design/Tokens.kt": "32dfff4451c179082e4b3de95388ac3c065e33e521ffb35a0843364b888282e9",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/design/Type.kt": "26e9edada96c81be6ac7ace5ca7dcf10c9cffbbe5d9dbe56ad5dab05e0e9d0e9",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/hub/ActiveShiftCard.kt": "d7d9b3b5287370f926a6c2c124c34fa069547de24285f7c6baedd02e9fba9471",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/hub/HubScreen.kt": "1cfe55155c700b29ba44bd8925eec147fb4df6092cd930e4475a9cc37a7ad702",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/inventory/InventoryListScreen.kt": "5b1181a896d994fc36363aaeb52870659a9aaabc9bd8f2f97016c27d2fa65e04",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/inventory/InventoryWorkScreen.kt": "0502a8dc9dc99bc46288f17d8040e0372de7502026fd4c4dc61d918136e1eea2",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/pairing/HostPairingScreen.kt": "a065eb36f42c791cd542102da990ec417d312ac5f1a74ec64f9c1239ec70087c",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/pairing/PairingScreen.kt": "ec143f36c9b65d8f47a329fb6d64c22a3b28f378629472b898fa13dc9dcc8d5a",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/printer/PrinterScreens.kt": "0b12dbab56408e76aa732c7b5d7f44babec2d8ac1baaad7e3fcaaaf365923f12",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/reprint/SiteReprintScreens.kt": "9405cd8ffcccedb37fcd5da19360b9a76261acc3116fd17a02b5d235300b8231",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/settings/SettingsScreens.kt": "7a6684c4142f34373ea1b53c6c9dc0429da800d94c2fb27f4ae28109a57e9692",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/shift/CloseScreens.kt": "aa129467ba09f8160d8b62ab8a02f3f24fa05a2f79aa88d65a49c1ba5698e938",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/shift/ShiftListScreen.kt": "4e2ea72f5958d4e3f7e59ab6a0fa99a029d1ab6951d0af0fe07924d2e9b1e4de",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/signin/SignInScreen.kt": "428ee1ad5dd56582edbec698be1744a595f2f56982d994891c7e540f0bc7fb95",
+    "apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/work/WorkScreen.kt": "15367f8784b471bcbd57df9dec6772b5ef3de8e54d407b13941ec73b252d6d81",
+    "apps/handheld/app/src/main/res/values-en/strings.xml": "e269b5abbbaf68980064f4bb5bdf8eb705d4f3c30432b5e341143a3f3e5be66e",
+    "apps/handheld/app/src/main/res/values/strings.xml": "b5890a17d47d3da43074c053b4ff319ad9c0796aad2fb8445d3dd1dac1d2ffa2",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/HandheldKitVisualTest.kt": "08411a4f5321636b46f8ac9dd3fb616a783d965eab2a50523fe8bb46d0dc6a32",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/core/design/KitConformanceTest.kt": "0bdaf33089578b7ccb5b43ad3576f56690413b2164396208228b8760b8a684a8",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/core/design/ProductHeaderTest.kt": "b293aef4be8350493140b443920cffa669c019773917fb7a51f19956db1b194a",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/hub/ActiveShiftCardTest.kt": "4245d1b84603d32b88d1d21b4bd2e8a0991e1241d8ef31e957a58d43bb86dd1c",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/hub/HostLinkHubTest.kt": "16ff2cf7c25d829183787471d45cc567144cd4d1d27cbc7e3fadce870cc15a4b",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/hub/HubScreenTest.kt": "1edeaf65c1512298a5b4a03e75b331f35136453a37a5e14dd2b6dc39aa2613aa",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/inventory/InventoryWorkScreenTest.kt": "9043b4422dea4823f69ea4626a78c6b7ccf18d94e59b54307cd9b587ab7caa79",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/printer/PrinterScreensTest.kt": "c11e55c37dc074d0882971a81a924c9ffbbb057dd6a72f6ec5958202ca66bef7",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/work/ValidationWorkScreenTest.kt": "1d6368388e7fb982e1d73eb7793d1ca2ff729d4ce26741683ef7ece989e6693a",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/work/WorkScreenPhoneWidthTest.kt": "9495bb67aec7fdc876e9ba27587314186d3da96913974219120cbd3f066274b7",
+    "apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/work/WorkScreenTest.kt": "30e6a218070294e8de9c1c79a2e5c5d3816f685c61af6c3de36fd6d37f192d2c"
+  },
+  "openPencil": {
+    "file": "../handheld-kit-conformance-2026-11-02.fig",
+    "sha256": "0cf09a409e512bf86b95bf818b3ba6c41f771242b64fd8b504cff8b953048155",
+    "pages": [
+      {
+        "name": "ТСД / Новый кит / 320–360 dp",
+        "frames": 12
+      },
+      {
+        "name": "02 / Компактный хэдер, бренд и агрегация",
+        "frames": 18
+      },
+      {
+        "name": "03 / Длинное название и уместный бренд",
+        "frames": 10
+      },
+      {
+        "name": "04 / Активная смена / иерархия и отступы",
+        "frames": 6
+      }
+    ],
+    "frames": 46,
+    "fontsFaithful": true,
+    "checkedNodeTypes": ["FRAME", "TEXT"],
+    "followupAnalysis": {
+      "totalNodes": 430,
+      "analyzedNodes": 382,
+      "overlaps": 0,
+      "overflows": 0
+    },
+    "longProductAnalysis": {
+      "totalNodes": 312,
+      "analyzedNodes": 272,
+      "overlaps": 0,
+      "overflows": 0
+    },
+    "activeCardAnalysis": {
+      "totalNodes": 78,
+      "analyzedNodes": 78,
+      "overlaps": 0,
+      "overflows": 0
+    }
+  },
+  "screenshots": [
+    {
+      "path": "after/active-card-long-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 640,
+      "sha256": "6a7fe715bb5c60fb676d709a344401dc2a16b121c0b2ec383d3a020787fff9cf"
+    },
+    {
+      "path": "after/active-card-long-320-large-action-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "bbe398c4a9f7d31314955c66acba18872a88214f527b8ba37ff63229b8069d61"
+    },
+    {
+      "path": "after/active-card-long-320-large-action-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "23482e3dc363f7f311e5bd2c4c4ebfd8bce7af7d83ca3f77fb6e2a60f50f7d49"
+    },
+    {
+      "path": "after/active-card-long-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "5cd6f501bd53b9aad433926be3b61ec1caf6cdbe9e506f5e0309762393d19813"
+    },
+    {
+      "path": "after/active-card-long-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "ad0ecea0607a59b0c9068cde306973f3a337665df8cd9113d972c146a49919e7"
+    },
+    {
+      "path": "after/active-card-long-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 640,
+      "sha256": "41e6ea9fe9c2ec5f5bb5ebe59e97fa0730c049be5ce40e4013f099844200dff6"
+    },
+    {
+      "path": "after/aggregation-12-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "d21d1f0c9bf3745c6e6e4505bb05d99c803c2f31c958d97af3feb43ea0f58515"
+    },
+    {
+      "path": "after/aggregation-12-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "c9fa3c3631c53e02424547b0076cb1caeda3cb4bea3f9019863a2a7f8b7e4373"
+    },
+    {
+      "path": "after/aggregation-120-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "5d8ca1db1f67b05af197d2dae4ae61928d9089f6be47c008bff182ff89133b03"
+    },
+    {
+      "path": "after/aggregation-120-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "aa3780388ca8c1a184b0330852c05b41cd694060e59d1d9b506ec52eabe2078d"
+    },
+    {
+      "path": "after/connection-details-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 329,
+      "sha256": "2a5fefde8f6ce197d3f6891a5ca833a7b9382a17cd8390f8b9c81ad905261405"
+    },
+    {
+      "path": "after/connection-details-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 329,
+      "sha256": "3a759d607408ca9e9c64b33718659fd07ce2d5b3d0320968b3b09f432302bd18"
+    },
+    {
+      "path": "after/hub-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "195e82e3ce69b96a838ab36dfbf0f42c33f03222cc10f769779ae8ef798b9391"
+    },
+    {
+      "path": "after/hub-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "fe3771aa95bbb2fb0459ee4dbd2dbddb40915303b002ad57b43e751f48e738ca"
+    },
+    {
+      "path": "after/hub-active-offline-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "e1b7f161e9b57da5f2af989e9903362ca14caae5bd7605d1107f46e025b7a13d"
+    },
+    {
+      "path": "after/hub-active-offline-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "ffc4c4d12ab3c191d8eb5540d58b5fb45d403a0b08b66f43e882c76e8416abec"
+    },
+    {
+      "path": "after/inventory-offline-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "2a8c70a48d3205b246d76dab9c56d65e4c1dc67554d33dde76833f2827597afc"
+    },
+    {
+      "path": "after/inventory-offline-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "d38ba5e821c7fe318f9343a5651152021f0f4fd2f35c1a2c30a2f6aaa17046af"
+    },
+    {
+      "path": "after/legacy/hub-dark-320.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 568,
+      "sha256": "1a2cdb7f2858ed5274e8cc3b3dc35395a81cb8c844eef9d8b113cb8a653a1b0c"
+    },
+    {
+      "path": "after/legacy/login-dark-360.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "12aa8b405fa493c99b5b64d650ccd48eec035d6dc5d32cda05bf21f452636ab7"
+    },
+    {
+      "path": "after/legacy/login-light-320.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 568,
+      "sha256": "bb18c0b008d0adccf3dc6ecb95fb95c78316fc40bf4ebe4054887883996dadfd"
+    },
+    {
+      "path": "after/legacy/settings-light-360.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "9c0dfb9a81662951b8bda75f8d45db548230397eccbe672a5513c2528361e0b0"
+    },
+    {
+      "path": "after/legacy/template-preview-dark-360.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "8d61517ae466c3c767bb10036a543b185699b6ce8d2965b02cedd0fb0de19320"
+    },
+    {
+      "path": "after/login-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "ceb04dede06dd055f54d5e15a8df8bc6e681eea83a0711e27aca35fa7673ae15"
+    },
+    {
+      "path": "after/login-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "2251a99f3e6a1a39ba16978286f1dace67dc9501ee92271ca2a62b23c5f6c5e1"
+    },
+    {
+      "path": "after/login-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "30d890e23f61c59d3f75148299064720d4e10bcf7e304ba05b807b3e7fd448ad"
+    },
+    {
+      "path": "after/login-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "60b4dbb9df65ad397606b71905049f4482c0f49210cc30838af4a703f7e48169"
+    },
+    {
+      "path": "after/long-product-aggregation-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "f372b4b52e111a389451925ba6200b0d2e6317122f444cdc3808ab16c41818dc"
+    },
+    {
+      "path": "after/long-product-aggregation-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "5263aabb7122c4f8355eac9d0193b3e0b3691b12c01862cfbc6075bddfab0f47"
+    },
+    {
+      "path": "after/long-product-aggregation-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "dcb67ad25ab489949c3dc5482ab2594e913f60ae0bccffe102d0e4cb06b90f16"
+    },
+    {
+      "path": "after/long-product-aggregation-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "2e1454c724a8afc0ccf9f90b1576f020682eb44bc3228d167225adf481b410c3"
+    },
+    {
+      "path": "after/long-product-inventory-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "84aad7b0c9732b0c302d3e5f6b644cec7b07681da1c305ac6530130c2905400d"
+    },
+    {
+      "path": "after/long-product-inventory-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "420283f9d2103796c3807db1b22bed1cc1808d51ac9196fe6838ac72f5ac59a6"
+    },
+    {
+      "path": "after/long-product-inventory-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "46738790deb5f2fcebcf9cdd9342095044ca313558ecbc8c1815693dfc11288d"
+    },
+    {
+      "path": "after/long-product-inventory-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "ae9bb6e74f890d062499881a57ed9f8ec9b5b57212fd9e6827b2ea48d5cc3a0b"
+    },
+    {
+      "path": "after/long-product-work-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "8eff60bafff76fa883775c3dffc515828f3d5591cef63b0cefbcc4ef2ae7ae5c"
+    },
+    {
+      "path": "after/long-product-work-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "f20b1221dd8623a52d2f445cea0e1ee4f38276103faca0ae407c943afed1a111"
+    },
+    {
+      "path": "after/long-product-work-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "74432cddbaf66953c3684ccc088a307b84f260b557c0a806e21f6f2d9d1558f9"
+    },
+    {
+      "path": "after/long-product-work-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "c50cff2730d8f3899a0aaa6b6d313080ca82e8e2ef4e842b78bb2a4860189aeb"
+    },
+    {
+      "path": "after/pairing-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "e7f14e8bd841611f435b5f38a2efc2f33f64436a7914ffb81d7859f230059cf1"
+    },
+    {
+      "path": "after/pairing-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "e2390e17767f5ebd0f33bb395c7945659f69fea3c9eaa86ecb63ac09f4f0e505"
+    },
+    {
+      "path": "after/printer-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "505fe1ba9da044fe89331019d5654d1ebf902449be4c774d78f90680d8b80e18"
+    },
+    {
+      "path": "after/printer-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "042208f2766abcaff5472fcddbe9dbf81f8170c54dcf941a0a700e16f8963db9"
+    },
+    {
+      "path": "after/printer-output-choices-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "d3df6b47b794f0f0b70b58166ff7d092be937bdd37aaff0110dba3f88bd41371"
+    },
+    {
+      "path": "after/printer-output-choices-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "d0ecc31bc66fefcc8292cab1646da5e8f934d5cca937f6b27f7adaa003615c94"
+    },
+    {
+      "path": "after/reprint-reason-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "9d0abd1a42f8ae7ef0bced1bf53a8c07078e1d9d72f4ca3404e12330a932cccb"
+    },
+    {
+      "path": "after/reprint-reason-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "0a6687f3f6f51813308ed34f0dad08d7635871e1548015217f092eca7797b345"
+    },
+    {
+      "path": "after/scanner-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "9e950922c76dd3c08d216e28acdd02c1e3a8bbead5b9b89b44e205826e102beb"
+    },
+    {
+      "path": "after/scanner-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "48b7dfa391f4c1e55ecbc054234af6d424f025db0e30af404feba847084df7b8"
+    },
+    {
+      "path": "after/settings-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "bd2c9ebe10f758500dffb5d21f560bf290e95a9399de58092524507f519e8ddd"
+    },
+    {
+      "path": "after/settings-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "9c0dfb9a81662951b8bda75f8d45db548230397eccbe672a5513c2528361e0b0"
+    },
+    {
+      "path": "after/validation-work-en.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 640,
+      "sha256": "de083466540e4523725ca03ee9e9e42fc2cf642218d719db44c8a2aad936ef6d"
+    },
+    {
+      "path": "after/validation-work-ru.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 640,
+      "sha256": "9775f2ac26fcc2b5136c6a4636cfc460961213ed1005ddbf2e818f0b4ad64a3e"
+    },
+    {
+      "path": "after/work-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "f2281bc433e75170b6f1b28fdb1c150366cf8b00bff05fb5269e52160a0a34a2"
+    },
+    {
+      "path": "after/work-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "75227077d3e2335a6cf87f75d44c2390e8a365844b541d8b4f943e3e2c30129b"
+    },
+    {
+      "path": "after/work-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "0e99d605ecbc97e0046bfec282cf83d985ad25b42186c7b54e1f645831a217a5"
+    },
+    {
+      "path": "after/work-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "6a3e0d1b56eccb7af303b6351ded35cb0bcbafe2b6825828a19be57602808a3b"
+    },
+    {
+      "path": "before/active-card-hub-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "821f15068110a17d89222319fbe2522b91152d26864625f8126b42b680a1b290"
+    },
+    {
+      "path": "before/active-card-hub-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "e996e4cf8f8644bccef9fac869026a77ea5594c6791bd752058237eba929c588"
+    },
+    {
+      "path": "before/header-hub-active-offline-320-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "043299502ea78096477d71a1f36f0a579f9dee91116d80b08c9df6c3b8805f3d"
+    },
+    {
+      "path": "before/header-hub-active-offline-320-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "f9f8448423af98df555f50c8443b78f751a787125b3e42fd84fb51939bbcf132"
+    },
+    {
+      "path": "before/header-pairing-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "f786eec8d526802ef24226b2c88f3c70a1077b353096133c3be1383fa4a0e65f"
+    },
+    {
+      "path": "before/header-pairing-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "015faeec46632ce5cbd5e7bca0ead9769de7e52029aed0dabf2067e180ad6f3d"
+    },
+    {
+      "path": "before/header-printer-360-dark.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "3f4ce5df030d902079e565e6ce8356cc22e2e329e6f226f34c9e8f004905f8a1"
+    },
+    {
+      "path": "before/header-printer-360-light.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "19f05393501464d907f7896b6b15dca567bbbbc9f633ae73e9c5d7bcb938fc6b"
+    },
+    {
+      "path": "before/hub-dark-320.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 568,
+      "sha256": "d5627bc08ba4961c9007da33a461af814a1bb18a6dd6bb8fbb5977eae89e1fc1"
+    },
+    {
+      "path": "before/login-dark-360.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "d8bf0a6eab1ab19393de13c71500a45a69e758e89edc0f7d20652088d5c1c700"
+    },
+    {
+      "path": "before/login-light-320.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 568,
+      "sha256": "c099d5f5917e99a5b2693bdcb1193b7e419aa083da790fcce9d471ba4361f3c2"
+    },
+    {
+      "path": "before/settings-light-360.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "e61b151aa7a6d0677205222e33983f923d6e1fda6ea71d71dc0ed20776e656b9"
+    },
+    {
+      "path": "before/template-preview-dark-360.png",
+      "kind": "Compose native render",
+      "width": 360,
+      "height": 640,
+      "sha256": "72cfdd9aaff99dbe172c44a3c770be12446377446c7aafde7e8ced0501452073"
+    },
+    {
+      "path": "before/work-320-large-dark.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "cb1aa8f8f7b6b46b71642b3f233a7f044d89f85478c4c5f3214344c8cb3183aa"
+    },
+    {
+      "path": "before/work-320-large-light.png",
+      "kind": "Compose native render",
+      "width": 320,
+      "height": 520,
+      "sha256": "3c2dd4504b138053411b5131791c56e402abcf6542645fbe613fac323f39d255"
+    },
+    {
+      "path": "openpencil-active-card.png",
+      "kind": "OpenPencil design export",
+      "width": 960,
+      "height": 864,
+      "sha256": "77c739b0c5e93d9527ea85fd7d0476e96d11e109ddb64bab56b420df5cb85b0d"
+    },
+    {
+      "path": "openpencil-header-revision.png",
+      "kind": "OpenPencil design export",
+      "width": 2800,
+      "height": 1408,
+      "sha256": "fc5f413f60a345fde49c42f09777368494f9d3e396f07a24400d0dcbbd107bb5"
+    },
+    {
+      "path": "openpencil-long-title.png",
+      "kind": "OpenPencil design export",
+      "width": 1760,
+      "height": 1100,
+      "sha256": "0b919a56869dcedc95ce92b1af705936edc32b64b33a6916fe5d422cd83557b9"
+    },
+    {
+      "path": "openpencil-proposal.png",
+      "kind": "OpenPencil design export",
+      "width": 1464,
+      "height": 2600,
+      "sha256": "8b8115c7b3434a1de724f55c68f7af952c49ac3c39851852b5cf3590a48e99f5"
+    },
+    {
+      "path": "openpencil-short-screen.png",
+      "kind": "OpenPencil design export",
+      "width": 720,
+      "height": 520,
+      "sha256": "ebb26abc12c07a579c06e211501102156c5eb766dc863bead95a938fca0e86b4"
+    }
+  ],
+  "nativeWindowLimitations": "Status dialog captured as a separate native window; Robolectric does not model on-device placement. Printer popup composited at its native anchor.",
+  "previousFullRunBackgroundDiagnostics": [
+    {
+      "run": "Previous long-product Android gate",
+      "exception": "SQLiteCantOpenDatabaseException",
+      "context": "Background Room observers referenced a removed Robolectric temporary database for AndroidTextRasterizerFittingTest.minimumFontDoesNotShrinkOrRejectMultilineWrapping. UI-focused run has no such logged exception. No lifecycle or storage code changed."
+    }
+  ],
+  "backgroundDiagnostics": [],
+  "activeCardReview": {
+    "layout": "Separate identity, quantity/progress and explicit Continue action; 16 dp inset and group spacing; 64 dp minimum action",
+    "checkedWidthsDp": [320],
+    "checkedFontScales": [1, 1.5],
+    "continueAfterScroll": "passed",
+    "countAndPercentageSemantics": "preserved",
+    "scrollCaptureReanchoredPerTheme": true
+  },
+  "reviewRegressions": {
+    "onlineQuarantine": "Refused count in collapsed status; warning item icon",
+    "offlineQueue": "Pending count retained",
+    "nonSharedLabel": "Local scope independent of freshness timestamp",
+    "scrolling": "320x320 dp, 200 percent font; title, warning and date scroll; actions stay accessible at 48 dp or larger",
+    "preFixScrollRun": "Stopped after the fixed very long title left zero height for the work area; no timeout changes"
+  }
+}

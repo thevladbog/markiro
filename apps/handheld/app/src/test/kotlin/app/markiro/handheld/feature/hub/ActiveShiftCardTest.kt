@@ -11,6 +11,12 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
@@ -47,12 +53,13 @@ class ActiveShiftCardTest {
     fun aKnownTotalShowsTheProductPlanAndPercentage() {
         show(HubActiveShift(shift, 1240, 0L))
         val format = NumberFormat.getIntegerInstance(Locale.forLanguageTag("ru"))
-        compose.onNodeWithText("Смена 14 · Вода 0,5 л").assertIsDisplayed()
+        compose.onNodeWithText("Смена 14").assertIsDisplayed()
+        compose.onNodeWithText("Вода 0,5 л").assertIsDisplayed()
         compose.onNodeWithText("Линия 2 · валидация").assertIsDisplayed()
         compose.onNodeWithText("${format.format(1240)} / ${format.format(3000)}").assertIsDisplayed()
         compose.onNodeWithText("41 %").assertIsDisplayed()
         compose.onNodeWithText("данные на", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("На этом ТСД").assertDoesNotExist()
+        compose.onNodeWithText("На этом ТСД").assertIsDisplayed()
         compose.onNode(progress, useUnmergedTree = true).assert(SemanticsMatcher.expectValue(
             SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(1240f / 3000, 0f..1f),
         ))
@@ -102,7 +109,8 @@ class ActiveShiftCardTest {
     @Config(qualifiers = "en-w320dp-h640dp-mdpi")
     fun theLightEnglishCardUsesEnglishLabelsAndNumberGrouping() {
         show(HubActiveShift(shift.copy(productPrintName = "Water 0.5 L", lineName = "Line 2"), 1240), dark = false)
-        compose.onNodeWithText("Shift 14 · Water 0.5 L").assertIsDisplayed()
+        compose.onNodeWithText("Shift 14").assertIsDisplayed()
+        compose.onNodeWithText("Water 0.5 L").assertIsDisplayed()
         compose.onNodeWithText("1,240 / 3,000").assertIsDisplayed()
         compose.onNodeWithText("On this handheld").assertIsDisplayed()
         compose.onNodeWithText("Continue").assertIsDisplayed()
@@ -113,7 +121,7 @@ class ActiveShiftCardTest {
         val name = "Вода питьевая негазированная в стеклянной бутылке 0,5 л"
         show(HubActiveShift(shift.copy(productPrintName = name), 0))
         val layouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithText("Смена 14 · $name", useUnmergedTree = true)
+        compose.onNodeWithText(name, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val result = layouts.single()
         assertTrue(result.lineCount > 1)
@@ -144,4 +152,53 @@ class ActiveShiftCardTest {
         show(HubActiveShift(shift, 547, shared = true, lineFull = app.markiro.handheld.feature.shift.LineFullNotice(2, 2)))
         compose.onNodeWithText("Линия занята: 2 из 2 — продолжите работу, место вернётся, когда освободится").assertIsDisplayed()
     }
+    @Test
+    fun cardSeparatesIdentityProgressAndActionWithAConsistentReadingEdge() {
+        show(HubActiveShift(shift.copy(plannedQty = 100), 128, shared = true, staleAtMillis = 0L))
+        val number = compose.onNodeWithText("Смена 14", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val product = compose.onNodeWithText("Вода 0,5 л", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val label = compose.onNodeWithText("Всего в смене", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val count = compose.onNodeWithText("128 / 100", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val percentage = compose.onNodeWithText("128 %", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val action = compose.onNodeWithText("Продолжить").assertHeightIsAtLeast(64.dp).fetchSemanticsNode().boundsInRoot
+        assertEquals("Card content has 16 dp breathing room", 16f, product.left, 0.5f)
+        for (left in listOf(number.left, label.left, count.left, action.left)) assertEquals(product.left, left, 0.5f)
+        assertTrue("Product identity is separate from shift metadata", product.top >= number.bottom)
+        assertTrue("Scope is above the value", label.bottom <= count.top)
+        assertTrue("Percentage does not overlap the value", percentage.left >= count.right)
+        assertTrue("Space before the primary action", action.top - compose.onNodeWithText("данные на", substring = true, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.bottom >= 16f)
+    }
+
+    @Test
+    fun continueIsOneExplicitAction() {
+        var calls = 0
+        compose.setContent { MarkiroTheme { ActiveShiftCard(HubActiveShift(shift, 128), onContinue = { calls++ }) } }
+        compose.onNodeWithText("Продолжить").performClick()
+        assertEquals(1, calls)
+    }
+
+    @Test
+    @Config(qualifiers = "ru-w320dp-h520dp-mdpi")
+    fun largeTextKeepsTheFullProductAndContinueReachableOnAShortScreen() {
+        val name = "Сидр полусухой газированный «ДИКИЙ КРЕСТ» яблочный, пастеризованный, 0,45 л"
+        var resumed: String? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1.5f)) {
+                MarkiroTheme {
+                    HubScreen(HubUi(activeShiftId = shift.id,
+                        activeShift = HubActiveShift(shift.copy(productPrintName = name, plannedQty = 100), 128, shared = true, staleAtMillis = 0L)),
+                        onTile = {}, onSignOut = {}, onContinueShift = { resumed = it })
+                }
+            }
+        }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(name, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val title = layouts.single()
+        assertTrue(title.lineCount >= 3)
+        assertEquals(title.layoutInput.text.length, title.getLineEnd(title.lineCount - 1, visibleEnd = true))
+        assertEquals(false, title.hasVisualOverflow)
+        compose.onNodeWithText("Продолжить").performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(64.dp).performClick()
+        assertEquals(shift.id, resumed)
+    }
+
 }

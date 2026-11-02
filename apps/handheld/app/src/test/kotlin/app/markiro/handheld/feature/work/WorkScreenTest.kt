@@ -74,7 +74,9 @@ class WorkScreenTest {
         compose.onNodeWithText("4").assertIsDisplayed()
         compose.onNodeWithText("Дубли").assertIsDisplayed()
         compose.onNodeWithText("2").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Связь и очередь").performClick()
         compose.onNodeWithText("Работаем офлайн · 37 сканов в очереди").assertIsDisplayed()
+        compose.onNodeWithText("Готово").performClick()
         compose.onNodeWithContentDescription("Ещё").performClick()
         compose.onNodeWithText("Закрыть смену").performClick()
         assertEquals(true, closed)
@@ -198,6 +200,7 @@ class WorkScreenTest {
     @Test
     fun theScannerChipNamesTheProfileAsTheHubDoes() {
         compose.setContent { MarkiroTheme { WorkScreen(ui.copy(scannerLabel = "Urovo"), WorkCallbacks()) } }
+        compose.onNodeWithContentDescription("Связь и очередь").performClick()
         compose.onNodeWithText("Urovo").assertIsDisplayed()
         compose.onNodeWithText("Сканер").assertDoesNotExist()
     }

@@ -183,7 +183,7 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
 fun ShiftCardView(card: ShiftCard, onClick: () -> Unit) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    val shape = RoundedCornerShape(MarkiroSizes.radius)
+    val shape = RoundedCornerShape(MarkiroSizes.radiusCard)
     Column(
         Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(c.surfaceCard)
             .border(1.dp, if (card.active) c.accent else c.line, shape)

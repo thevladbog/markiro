@@ -16,6 +16,7 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.OutlinedTextField
+import app.markiro.handheld.core.design.markiroFieldColors
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -28,6 +29,7 @@ import app.markiro.handheld.R
 import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
+import app.markiro.handheld.core.design.MarkiroBrand
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PrimaryButton
 import app.markiro.handheld.core.design.ScreenColumn
@@ -54,7 +56,7 @@ fun PairingSourceScreen(onCloud: () -> Unit, onHost: () -> Unit) {
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-            Text(stringResource(R.string.pairing_brand), style = t.label, color = c.fg3)
+            MarkiroBrand()
             Text(stringResource(R.string.host_pairing_source_title), style = t.title, color = c.fg1)
             Spacer(Modifier.height(MarkiroSizes.sp3))
             PrimaryButton(stringResource(R.string.host_pairing_source_cloud), onCloud)
@@ -102,10 +104,11 @@ private fun EnterAddressAndCode(state: HostPairingUi.Enter, callbacks: HostPairi
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-        Text(stringResource(R.string.pairing_brand), style = t.label, color = c.fg3)
+        MarkiroBrand()
         Text(stringResource(if (state.repairing) R.string.host_pairing_repair_title else R.string.host_pairing_title), style = t.title, color = c.fg1)
         Text(stringResource(R.string.host_pairing_hint), style = t.body.copy(fontSize = 15.sp), color = c.fg2)
         OutlinedTextField(
+            colors = markiroFieldColors(),
             value = state.address,
             onValueChange = callbacks.onAddress,
             label = { Text(stringResource(R.string.host_pairing_address)) },
@@ -116,6 +119,7 @@ private fun EnterAddressAndCode(state: HostPairingUi.Enter, callbacks: HostPairi
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
+            colors = markiroFieldColors(),
             value = state.code,
             onValueChange = callbacks.onCode,
             label = { Text(stringResource(R.string.host_pairing_code)) },

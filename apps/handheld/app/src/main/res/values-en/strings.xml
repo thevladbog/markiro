@@ -983,4 +983,8 @@
     <string name="printer_output_peel">Peeler with label-taken sensor</string>
     <string name="printer_output_cutter">Cutter — every label</string>
     <string name="printer_output_hint">Peeling or cutting requires the corresponding printer hardware. This setting applies to new jobs.</string>
+    <string name="brand_markiro">Markiro</string>
+    <string name="header_status_title">Connection and queue</string>
+    <string name="header_status_done">Done</string>
+    <string name="header_status_open_queue">Open host queue</string>
 </resources>

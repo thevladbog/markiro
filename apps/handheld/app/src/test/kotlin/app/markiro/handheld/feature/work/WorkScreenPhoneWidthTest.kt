@@ -2,12 +2,20 @@ package app.markiro.handheld.feature.work
 
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
+import app.markiro.handheld.core.design.PlexMono
 import app.markiro.handheld.core.km.feedTail
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.sync.SyncState
@@ -60,6 +68,7 @@ class WorkScreenPhoneWidthTest {
         val numbers = NumberFormat.getIntegerInstance()
         val total = compose.onNodeWithText("${numbers.format(1427)} / ${numbers.format(6000)}", useUnmergedTree = true).layout()
         assertEquals(1, total.lineCount)
+        assertEquals("Numeric counters use the Kit's mono face", PlexMono, total.layoutInput.style.fontFamily)
         // The other three still fit beside it rather than being squeezed out.
         labels.forEach { label ->
             assertEquals(label, 1, compose.onNodeWithText(label, useUnmergedTree = true).layout().lineCount)
@@ -68,6 +77,29 @@ class WorkScreenPhoneWidthTest {
 
     @Test
     fun theTotalAgainstThePlanStaysOnOneLine() = countersStayOnOneLine(listOf("Всего", "Этот ТСД", "Ошибки", "Дубли"))
+
+    @Test
+    @Config(qualifiers = "ru-w320dp-h520dp-mdpi")
+    fun statusAndCounterLabelsStayReadableWithLargeText() {
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, fontScale = 1.5f)) {
+                MarkiroTheme { WorkScreen(ui, WorkCallbacks()) }
+            }
+        }
+        compose.onNodeWithContentDescription("Связь и очередь").performClick()
+        for (label in listOf("Принтер", "Сканер")) {
+            val node = compose.onNodeWithText(label).assertIsDisplayed()
+            assertEquals("$label must not be squeezed into narrow fragments", 1, node.layout().lineCount)
+        }
+        compose.onNodeWithText("Готово").performClick()
+        for (label in listOf("Всего", "Этот ТСД", "Ошибки", "Дубли")) {
+            val node = compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+            assertEquals("$label must not be squeezed into narrow fragments", 1, node.layout().lineCount)
+        }
+        val waiting = compose.onNodeWithText("Ожидание скана…").performScrollTo().assertIsDisplayed().layout()
+        assertEquals("Scan result: size=${waiting.size}, widthOverflow=${waiting.didOverflowWidth}, heightOverflow=${waiting.didOverflowHeight}, lines=${waiting.lineCount}, bottom=${waiting.getLineBottom(waiting.lineCount - 1)}, constraints=${waiting.layoutInput.constraints}", false,
+            waiting.hasVisualOverflow)
+    }
 
     @Test
     @Config(qualifiers = "en-w411dp-h914dp-mdpi")

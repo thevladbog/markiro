@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Construction
 import androidx.compose.material3.OutlinedTextField
+import app.markiro.handheld.core.design.markiroFieldColors
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -287,6 +288,7 @@ fun ScannerSettingsScreen(
             if (state.debugScanEnabled) {
                 var text by remember { mutableStateOf("") }
                 OutlinedTextField(
+                    colors = markiroFieldColors(),
                     value = text,
                     onValueChange = { text = it },
                     label = { Text(stringResource(R.string.scanner_debug_field)) },
@@ -341,6 +343,7 @@ private fun CustomProfile(state: SettingsUi, onSave: (String, String, String) ->
     var symbology by remember(state.customSymbologyExtra) { mutableStateOf(state.customSymbologyExtra) }
     Text(stringResource(R.string.scanner_custom_hint), style = t.caption, color = c.fg3)
     OutlinedTextField(
+        colors = markiroFieldColors(),
         value = action,
         onValueChange = { action = it },
         label = { Text(stringResource(R.string.scanner_custom_action)) },
@@ -348,6 +351,7 @@ private fun CustomProfile(state: SettingsUi, onSave: (String, String, String) ->
         modifier = Modifier.fillMaxWidth(),
     )
     OutlinedTextField(
+        colors = markiroFieldColors(),
         value = data,
         onValueChange = { data = it },
         label = { Text(stringResource(R.string.scanner_custom_data)) },
@@ -355,6 +359,7 @@ private fun CustomProfile(state: SettingsUi, onSave: (String, String, String) ->
         modifier = Modifier.fillMaxWidth(),
     )
     OutlinedTextField(
+        colors = markiroFieldColors(),
         value = symbology,
         onValueChange = { symbology = it },
         label = { Text(stringResource(R.string.scanner_custom_symbology)) },
@@ -416,7 +421,7 @@ private fun TestButton(label: String, modifier: Modifier, onClick: () -> Unit) {
     val c = MarkiroTheme.colors
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Box(
-        modifier.height(MarkiroSizes.controlIcon).clip(shape).background(c.surfaceCard).border(1.dp, c.lineStrong, shape).clickable(onClick = onClick),
+        modifier.height(MarkiroSizes.controlIcon).clip(shape).background(c.surfaceCard).border(1.dp, c.lineControl, shape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Text(label, style = MarkiroTheme.type.body, color = c.fg1) }
 }
@@ -440,16 +445,16 @@ private fun OptionRow(label: String, sub: String, selected: Boolean, onClick: ()
     val t = MarkiroTheme.type
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard).border(1.dp, if (selected) c.accent else c.line, shape)
+        Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard).border(1.dp, if (selected) c.fg1 else c.line, shape)
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
     ) {
         Box(
-            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.accent else c.lineStrong, CircleShape),
+            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.fg1 else c.lineControl, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.accent))
+            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.fg1))
         }
         Column {
             Text(label, style = t.strong.copy(fontSize = 16.sp), color = c.fg1)

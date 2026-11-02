@@ -37,6 +37,8 @@ class PrinterScreensTest {
             AddPrinterScreen(AddPrinterForm(outputMode = null), AddPrinterCallbacks(onOutputMode = { selected = it }))
         } }
         compose.onNodeWithText("Как настроено в принтере").performScrollTo().performClick()
+        compose.onNodeWithText("Обычная печать").assertIsDisplayed()
+        compose.onNodeWithText("Обрезчик — каждая этикетка").assertIsDisplayed()
         compose.onNodeWithText("Отделитель с датчиком снятия").performClick()
         assertEquals("peel", selected)
     }

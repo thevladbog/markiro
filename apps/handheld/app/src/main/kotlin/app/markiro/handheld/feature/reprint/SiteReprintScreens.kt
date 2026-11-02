@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import app.markiro.handheld.core.design.markiroFieldColors
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
@@ -64,10 +65,10 @@ fun SiteReprintScreen(state: SiteReprintUi, callbacks: SiteReprintCallbacks) {
                     val chosen = state.reason == reason
                     val shape = RoundedCornerShape(MarkiroSizes.radius)
                     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.surfaceCard, shape)
-                        .border(1.dp, if (chosen) c.accent else c.surfaceCard, shape)
+                        .border(1.dp, if (chosen) c.fg1 else c.surfaceCard, shape)
                         .selectable(selected = chosen, enabled = !state.sealed, role = Role.RadioButton) { callbacks.onReason(reason) }.padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = chosen, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = c.accent, unselectedColor = c.fg2))
+                        RadioButton(selected = chosen, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = c.fg1, unselectedColor = c.fg2))
                         Spacer(Modifier.width(12.dp))
                         Text(stringResource(reasonText(reason)), style = MarkiroTheme.type.body, color = c.fg1,
                             modifier = Modifier.weight(1f).padding(vertical = 12.dp))
@@ -94,7 +95,7 @@ fun SiteReprintScreen(state: SiteReprintUi, callbacks: SiteReprintCallbacks) {
             if (state.step == SiteReprintStep.MANUAL && !state.busy) {
                 Text(stringResource(R.string.site_reprint_manual_title), style = MarkiroTheme.type.title, color = c.fg1)
                 Text(stringResource(R.string.site_reprint_manual_hint), style = MarkiroTheme.type.body, color = c.fg2)
-                OutlinedTextField(value = manual, onValueChange = { manual = it },
+                OutlinedTextField(colors = markiroFieldColors(), value = manual, onValueChange = { manual = it },
                     label = { Text(stringResource(R.string.site_reprint_manual_label)) }, modifier = Modifier.fillMaxWidth(), minLines = 3)
                 Spacer(Modifier.weight(1f))
                 PrimaryButton(stringResource(R.string.site_reprint_find_print), { val raw = manual; manual = ""; callbacks.onSubmit(raw) }, enabled = manual.isNotBlank())

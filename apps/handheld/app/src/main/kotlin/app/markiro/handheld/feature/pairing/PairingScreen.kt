@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.OutlinedTextField
+import app.markiro.handheld.core.design.markiroFieldColors
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,6 +31,7 @@ import app.markiro.handheld.R
 import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.Keypad
 import app.markiro.handheld.core.design.MarkiroSizes
+import app.markiro.handheld.core.design.MarkiroBrand
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.ScreenColumn
 import app.markiro.handheld.core.design.StateAction
@@ -90,7 +92,7 @@ private fun EnterCode(state: PairingUi.Enter, callbacks: PairingCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-        Text(stringResource(R.string.pairing_brand), style = t.label, color = c.fg3)
+        MarkiroBrand()
         Text(stringResource(if (state.restoring) R.string.recovery_connect else R.string.pairing_title), style = t.title, color = c.fg1)
         Text(stringResource(if (state.restoring) R.string.recovery_code_hint else R.string.pairing_hint), style = t.body.copy(fontSize = 15.sp), color = c.fg2)
         Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -102,6 +104,7 @@ private fun EnterCode(state: PairingUi.Enter, callbacks: PairingCallbacks) {
         Keypad(callbacks.onDigit, callbacks.onBackspace, callbacks.onConfirm, confirmEnabled = state.code.length == 8)
         if (state.serverEditable) {
             OutlinedTextField(
+                colors = markiroFieldColors(),
                 value = state.serverUrl,
                 onValueChange = callbacks.onServerUrl,
                 label = { Text(stringResource(R.string.pairing_server_url)) },
