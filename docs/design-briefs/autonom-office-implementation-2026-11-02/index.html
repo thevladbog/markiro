@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Автоном · Офис — реализация</title
+  ><style>
+    body {
+      margin: 32px;
+      background: #f7f7f5;
+      color: #17161a;
+      font: 16px/1.5 system-ui;
+    }
+    main {
+      max-width: 1280px;
+      margin: auto;
+    }
+    h1 {
+      font-size: 28px;
+    }
+    p {
+      max-width: 900px;
+      color: #555;
+    }
+    figure {
+      margin: 32px 0;
+      border: 1px solid #ddd;
+      border-radius: 16px;
+      overflow: hidden;
+      background: white;
+    }
+    figcaption {
+      padding: 12px 20px;
+      font-weight: 600;
+    }
+    img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: auto;
+    }
+    a {
+      color: inherit;
+    }
+  </style>
+  <main>
+    <h1>Автоном · Офис</h1>
+    <p>
+      Реализация утверждённого дизайна v0.3. Настоящие скриншоты Chromium с компонентами приложения.
+      Данные хоста, COM-порты и сохранение имитируются браузерным стендом; заводские устройства не
+      подключались.
+    </p>
+    <figure>
+      <figcaption>Итоги смены · тёмная тема</figcaption>
+      <a href="dark-summary.png"><img src="dark-summary.png" loading="lazy" alt="Итоги смены" /></a>
+    </figure>
+    <figure>
+      <figcaption>Палеты · тёмная тема</figcaption>
+      <a href="dark-pallets.png"><img src="dark-pallets.png" loading="lazy" alt="Палеты" /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканирования · тёмная тема</figcaption>
+      <a href="dark-scans.png"><img src="dark-scans.png" loading="lazy" alt="Сканирования" /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ожидание · тёмная тема</figcaption>
+      <a href="dark-scanner-idle.png"
+        ><img src="dark-scanner-idle.png" loading="lazy" alt="Сканер: ожидание"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: чтение верно · тёмная тема</figcaption>
+      <a href="dark-scanner-success.png"
+        ><img src="dark-scanner-success.png" loading="lazy" alt="Сканер: чтение верно"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: нет GS · тёмная тема</figcaption>
+      <a href="dark-scanner-error.png"
+        ><img src="dark-scanner-error.png" loading="lazy" alt="Сканер: нет GS"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: высота 720 px · тёмная тема</figcaption>
+      <a href="dark-scanner-1280x720.png"
+        ><img src="dark-scanner-1280x720.png" loading="lazy" alt="Сканер: высота 720 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ширина 640 px · тёмная тема</figcaption>
+      <a href="dark-scanner-640x720.png"
+        ><img src="dark-scanner-640x720.png" loading="lazy" alt="Сканер: ширина 640 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ширина 390 px · тёмная тема</figcaption>
+      <a href="dark-scanner-390x720.png"
+        ><img src="dark-scanner-390x720.png" loading="lazy" alt="Сканер: ширина 390 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Итоги смены · светлая тема</figcaption>
+      <a href="light-summary.png"
+        ><img src="light-summary.png" loading="lazy" alt="Итоги смены"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Палеты · светлая тема</figcaption>
+      <a href="light-pallets.png"><img src="light-pallets.png" loading="lazy" alt="Палеты" /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканирования · светлая тема</figcaption>
+      <a href="light-scans.png"><img src="light-scans.png" loading="lazy" alt="Сканирования" /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ожидание · светлая тема</figcaption>
+      <a href="light-scanner-idle.png"
+        ><img src="light-scanner-idle.png" loading="lazy" alt="Сканер: ожидание"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: чтение верно · светлая тема</figcaption>
+      <a href="light-scanner-success.png"
+        ><img src="light-scanner-success.png" loading="lazy" alt="Сканер: чтение верно"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: нет GS · светлая тема</figcaption>
+      <a href="light-scanner-error.png"
+        ><img src="light-scanner-error.png" loading="lazy" alt="Сканер: нет GS"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: высота 720 px · светлая тема</figcaption>
+      <a href="light-scanner-1280x720.png"
+        ><img src="light-scanner-1280x720.png" loading="lazy" alt="Сканер: высота 720 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ширина 640 px · светлая тема</figcaption>
+      <a href="light-scanner-640x720.png"
+        ><img src="light-scanner-640x720.png" loading="lazy" alt="Сканер: ширина 640 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ширина 390 px · светлая тема</figcaption>
+      <a href="light-scanner-390x720.png"
+        ><img src="light-scanner-390x720.png" loading="lazy" alt="Сканер: ширина 390 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сводка: ширина 390 px · светлая тема</figcaption>
+      <a href="light-summary-390x720.png"
+        ><img src="light-summary-390x720.png" loading="lazy" alt="Сводка: ширина 390 px"
+      /></a>
+    </figure>
+    <figure>
+      <figcaption>Сканер: ошибка сохранения на узком окне · светлая тема</figcaption>
+      <a href="light-scanner-save-error-390x720.png"
+        ><img
+          src="light-scanner-save-error-390x720.png"
+          loading="lazy"
+          alt="Сканер: ошибка сохранения на узком окне"
+      /></a>
+    </figure>
+  </main>
+</html>

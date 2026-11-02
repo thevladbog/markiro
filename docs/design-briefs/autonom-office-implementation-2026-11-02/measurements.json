@@ -1,0 +1,49 @@
+{
+  "viewport": [1280, 800],
+  "themes": ["light", "dark"],
+  "headerButtons": {
+    "height": 44,
+    "top": 16
+  },
+  "palletActions": {
+    "width": 88,
+    "height": 36,
+    "sameRow": true
+  },
+  "scanSecondRow": {
+    "inputHeight": 44,
+    "buttonHeight": 44,
+    "top": 361
+  },
+  "scanner": {
+    "width": 976,
+    "height": 704,
+    "alertIconTextCenterDelta": 0,
+    "deleteButtonWidth": 96
+  },
+  "responsive": [
+    {
+      "width": 1280,
+      "height": 720,
+      "statusVisible": true,
+      "footerButtonsWithinModal": true,
+      "pageHorizontalOverflow": false
+    },
+    {
+      "width": 640,
+      "height": 720,
+      "statusVisible": true,
+      "footerButtonsWithinModal": true,
+      "pageHorizontalOverflow": false
+    },
+    {
+      "width": 390,
+      "height": 720,
+      "statusVisible": true,
+      "footerButtonsWithinModal": true,
+      "pageHorizontalOverflow": false
+    }
+  ],
+  "narrowSaveFailureVisible": true,
+  "data": "synthetic fixtures, production components"
+}

@@ -8,6 +8,9 @@ import {
   type ReactNode,
 } from "react";
 
+import { IconButton } from "./IconButton.js";
+import { UiSymbol } from "./UiSymbol.js";
+
 import { cn } from "../cn.js";
 
 /**
@@ -167,11 +170,12 @@ export function Modal({
       >
         {title || onClose ? (
           <div
+            className="mk-modal__header"
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "16px 20px",
+              padding: "var(--mk-modal-header-padding, 16px 20px)",
               borderBottom: "1px solid var(--line)",
             }}
           >
@@ -179,26 +183,23 @@ export function Modal({
               {title}
             </span>
             {onClose && (
-              <button
-                type="button"
-                onClick={onClose}
+              <IconButton
+                variant="secondary"
                 aria-label={closeLabel}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  color: "var(--fg-3)",
-                  padding: 6,
-                  display: "flex",
-                  font: "600 16px/1 var(--font-ui)",
-                }}
-              >
-                ✕
-              </button>
+                onClick={onClose}
+                icon={<UiSymbol name="close" size={24} />}
+                className="mk-overlay-close"
+                style={{ color: "var(--err-fg)", width: 44, minWidth: 44, minHeight: 44 }}
+              />
             )}
           </div>
         ) : null}
-        <div style={{ padding: 20, flex: 1 }}>{children}</div>
+        <div
+          className="mk-modal__body"
+          style={{ padding: "var(--mk-modal-body-padding, 20px)", flex: 1 }}
+        >
+          {children}
+        </div>
         {footer && (
           <div
             style={{

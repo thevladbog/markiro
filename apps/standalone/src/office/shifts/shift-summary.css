@@ -1,0 +1,292 @@
+.mk-side-panel.shift-drawer {
+  --mk-panel-width: min(1040px, 96vw);
+}
+.shift-drawer .mk-side-panel__header {
+  align-items: center;
+}
+.shift-summary__product {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.shift-summary__product h2 {
+  margin: 0;
+  font: 600 20px/1.4 var(--font-ui);
+}
+.shift-summary__product > div {
+  display: grid;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+.shift-summary__product strong {
+  color: var(--fg-1);
+  font: 500 16px/1.4 var(--font-mono);
+}
+.shift-metrics {
+  display: grid;
+  gap: 20px;
+}
+.shift-metrics__numbers {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 24px;
+}
+.shift-metrics__numbers > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.shift-metrics__label {
+  color: var(--fg-2);
+  font: 500 14px/1.4 var(--font-ui);
+}
+.shift-metrics__value {
+  font: 600 40px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.shift-metrics__secondary {
+  font: 500 28px/1.3 var(--font-mono);
+}
+.shift-metrics__hint {
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+.shift-metrics__progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+.shift-metrics__progress > span {
+  height: 100%;
+  display: block;
+  background: var(--done-fg);
+  border-radius: inherit;
+}
+.shift-metrics__completion {
+  display: grid;
+  gap: 16px;
+  padding: 4px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+.shift-metrics h3,
+.shift-contributions h3 {
+  margin: 0;
+  font: 600 18px/1.4 var(--font-ui);
+}
+.shift-metrics__checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.shift-metrics__check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.shift-metrics__check-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+}
+.shift-metrics__check[data-complete="true"] .shift-metrics__check-icon {
+  color: var(--done-fg);
+  background: var(--done-bg);
+}
+.shift-metrics__check > div {
+  display: grid;
+  gap: 4px;
+  font: var(--text-body);
+  min-width: 0;
+}
+.shift-metrics__check strong {
+  font-weight: 500;
+}
+.shift-metrics__check > div > span {
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+.shift-contributions {
+  display: grid;
+  gap: 12px;
+}
+.shift-contributions__scroll {
+  overflow: auto;
+}
+.shift-contributions table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.shift-contributions th {
+  padding: 0 12px 12px;
+  color: var(--fg-2);
+  font: var(--text-caption);
+  text-align: right;
+  white-space: nowrap;
+}
+.shift-contributions td {
+  height: 56px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  font: 500 16px/1.4 var(--font-mono);
+}
+.shift-contributions :is(th, td):first-child {
+  text-align: left;
+  padding-left: 0;
+}
+.shift-contributions td:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font: var(--text-body);
+}
+.shift-contributions td:first-child strong {
+  font-weight: 500;
+}
+.shift-contributions__share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+.shift-contributions__track {
+  width: 96px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.shift-contributions__track > span {
+  display: block;
+  height: 100%;
+  background: var(--fg-3);
+  border-radius: inherit;
+}
+.shift-summary__details {
+  border-radius: 16px;
+  background: var(--surface-panel);
+}
+.shift-summary__details > summary {
+  padding: 14px 16px;
+  cursor: pointer;
+  font: 500 14px/1.4 var(--font-ui);
+}
+.shift-summary__details > :not(summary) {
+  margin: 0 16px 16px;
+}
+.shift-pack-actions.mk-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+.shift-pack-actions .mk-btn {
+  min-width: 88px;
+  white-space: nowrap;
+}
+.shift-drawer .mk-table__td {
+  vertical-align: middle;
+}
+@media (max-width: 1100px) {
+  .mk-side-panel.shift-drawer {
+    --mk-panel-width: 100vw;
+  }
+}
+@media (max-width: 680px) {
+  .shift-metrics__numbers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .shift-metrics__primary {
+    grid-column: 1/-1;
+  }
+  .shift-metrics__checks {
+    grid-template-columns: 1fr;
+  }
+  .shift-summary__product {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .shift-contributions__track {
+    width: 56px;
+  }
+}
+
+.shift-drawer__actions {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.shift-drawer {
+  --table-th-case: none;
+  --table-th-tracking: normal;
+  --table-th-fg: var(--fg-2);
+}
+.shift-scans .mk-filter-bar__controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+.shift-scans .mk-filter-bar__controls > * {
+  min-width: 0;
+}
+.shift-scans__date-pair,
+.shift-scans__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+.shift-scans__actions {
+  padding-top: 22px;
+}
+.shift-scan__cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-height: 40px;
+  align-content: center;
+  justify-items: start;
+}
+.shift-scans .mk-table table {
+  table-layout: fixed;
+  min-width: 920px;
+}
+.shift-scans .mk-table__td {
+  height: 56px;
+}
+.shift-drawer a:not(.mk-btn) {
+  color: var(--info-fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 800px) {
+  .shift-scans .mk-filter-bar__controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .shift-scans__actions {
+    padding-top: 22px;
+  }
+}
+@media (max-width: 480px) {
+  .shift-scans .mk-filter-bar__controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shift-scans__actions {
+    padding-top: 0;
+  }
+}

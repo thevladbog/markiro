@@ -170,7 +170,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     await openCard(session, "OCT26-004");
     expect(session.api.getShift).toHaveBeenCalledWith("office-session-token", ACTIVE.id);
     const drawer = screen.getByRole("dialog", { name: "Смена OCT26-004" });
-    expect(within(drawer).getByText("Молоко 3,2%")).toBeTruthy();
+    expect(within(drawer).getByRole("heading", { name: "Молоко 3,2%" })).toBeTruthy();
     expect(within(drawer).getByText("По 40 кор.")).toBeTruthy();
     // The sections read when they are opened, not before.
     expect(session.api.listShiftBoxes).not.toHaveBeenCalled();
@@ -643,7 +643,9 @@ describe("the card of a shift (plan О-Ф)", () => {
     await openCard(session, CLOSED.number);
     expect(screen.queryByRole("button", { name: "Закрыть" })).toBeNull();
     // «Итоги» is the first section: the figures stand on the card, not in a window of their own.
-    expect(await within(section("Итоги")).findByText("Принято кодов")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Выпуск и завершение" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Итоги", { selector: "summary" }));
+    expect(await screen.findByText("Кодов в закрытых коробах")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Выгрузка" }));
     await screen.findByRole("dialog", { name: "Выгрузка смены OCT26-001/S" });
     // A committed dialog can precede the query observer's passive subscription.

@@ -386,11 +386,11 @@ describe("a new label template", () => {
     ).toBeTruthy();
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Хост не принял макет: он больше 256 КБ. Сократите тексты или импортируйте код поменьше.",
+      "Хост не принял макет: он больше 256 КБ. Сократите тексты или импортируйте код поменьше.",
     );
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
+      "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
     );
     expect(saveButton()).toHaveProperty("disabled", false);
     expect(fake.api.createTemplate).toHaveBeenCalledTimes(4);
@@ -1323,7 +1323,7 @@ describe("changing a label template", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
+      "Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
   });
 
@@ -1334,7 +1334,7 @@ describe("changing a label template", () => {
     type("Название", "Молоко 60×40");
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
+      "Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
     );
     fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
     // The edits are still unsaved, so leaving asks first.
@@ -1375,7 +1375,7 @@ describe("changing a label template", () => {
     };
     const gone = editSession();
     gone.api.getTemplate.mockRejectedValue(hostError("not_found"));
-    let view = await opening(gone, "⧉Шаблона нет на хосте: его удалили на другом рабочем месте.");
+    let view = await opening(gone, "Шаблона нет на хосте: его удалили на другом рабочем месте.");
     fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
     await screen.findByRole("heading", { name: "Шаблоны этикеток" });
     view.unmount();
@@ -1384,7 +1384,7 @@ describe("changing a label template", () => {
     stock.api.getTemplate.mockResolvedValue(milk({ stock: true }));
     view = await opening(
       stock,
-      "⧉У типового шаблона нельзя изменить название и макет. На странице «Шаблоны» его можно включить, выключить или ограничить список категорий. Чтобы изменить название или макет, создайте копию.",
+      "У типового шаблона нельзя изменить название и макет. На странице «Шаблоны» его можно включить, выключить или ограничить список категорий. Чтобы изменить название или макет, создайте копию.",
     );
     fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
     await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
@@ -1394,7 +1394,7 @@ describe("changing a label template", () => {
     unreadable.api.getTemplate.mockResolvedValue(milk({ spec: { widthMm: 58 } }));
     view = await opening(
       unreadable,
-      "⧉Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
+      "Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
     );
     view.unmount();
 
@@ -1406,7 +1406,7 @@ describe("changing a label template", () => {
       .mockResolvedValueOnce(milk());
     await opening(
       down,
-      "✕Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.Повторить",
+      "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.Повторить",
     );
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко 58×40");
@@ -1832,11 +1832,11 @@ describe("copying and deleting a label template", () => {
       return within(deleteDialog()).getByRole("alert").textContent;
     };
     expect(await confirm()).toBe(
-      "✕Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
+      "Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
-    expect(await confirm()).toBe("✕Типовой шаблон не удаляется: его можно выключить.");
+    expect(await confirm()).toBe("Типовой шаблон не удаляется: его можно выключить.");
     expect(await confirm()).toBe(
-      "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
+      "Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
     );
     fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Отмена" }));
     fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
@@ -1975,12 +1975,12 @@ describe("copying and deleting a label template", () => {
     {
       case: "deleted",
       arrange: (api) => api.getTemplate.mockRejectedValue(hostError("not_found")),
-      text: "⧉Шаблона нет на хосте: его удалили на другом рабочем месте.",
+      text: "Шаблона нет на хосте: его удалили на другом рабочем месте.",
     },
     {
       case: "unreadable",
       arrange: (api) => api.getTemplate.mockResolvedValue({ ...stockBox(), spec: { widthMm: 58 } }),
-      text: "⧉Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
+      text: "Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
     },
   ])(
     "explains a copy page whose source is $case, with no copy of a copy on offer",
@@ -2032,7 +2032,7 @@ describe("copying and deleting a label template", () => {
       fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
     });
     expect(within(deleteDialog()).getByRole("alert").textContent).toBe(
-      "✕Шаблон выбран по умолчанию для категорий: Упакованная вода, Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
+      "Шаблон выбран по умолчанию для категорий: Упакованная вода, Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
     await act(async () => {
       fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));

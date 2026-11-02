@@ -1,5 +1,7 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
+import { UiSymbol, type UiSymbolName } from "./UiSymbol.js";
+
 import { cn } from "../cn.js";
 
 /**
@@ -61,6 +63,20 @@ export const PHASE_TONE: Record<TagPhase, PhaseTone> = Object.fromEntries(
   Object.entries(PHASE).map(([phase, config]) => [phase, config.tone]),
 ) as Record<TagPhase, PhaseTone>;
 
+const SYMBOL: Record<TagPhase, UiSymbolName> = {
+  draft: "pencil",
+  planned: "clock",
+  active: "play",
+  running: "sync",
+  done: "check",
+  attention: "warning",
+  duplicate: "copy",
+  failed: "close",
+  retired: "close",
+  dismantled: "prohibit",
+  none: "dot",
+};
+
 export interface StatusChipProps extends Omit<HTMLAttributes<HTMLSpanElement>, "children"> {
   phase: TagPhase;
   /**
@@ -105,7 +121,8 @@ export function StatusChip({
       {...rest}
     >
       <span className="mk-tag__glyph" aria-hidden="true">
-        {config.glyph}
+        <UiSymbol name={SYMBOL[phase]} className="mk-tag__symbol" size={16} />
+        <span className="mk-tag__legacy">{config.glyph}</span>
       </span>
       <span>{label}</span>
     </span>

@@ -1,19 +1,9 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 
+import { UiSymbol } from "./UiSymbol.js";
+
 import { cn } from "../cn.js";
 
-/**
- * Port of `design-system/components/feedback/Alert.jsx`'s `Alert` export
- * (office mode only — the handoff's `mode="floor"` variant is out of scope).
- * Remapped from the handoff's `kind` union (ok/error/duplicate/syncing/neutral)
- * to the plan's `tone` contract (ok/error/warn/info) — the same remap
- * StatusChip already applies (`duplicate` -> `warn`, `syncing` -> `info`,
- * `neutral` dropped since the plan does not ask for it; `info` is the
- * default here since it is the closest fit to the handoff's neutral).
- * Icon glyphs are the literal characters used elsewhere in this package
- * (StatusChip, Toast) instead of the handoff's `<Icon>` SVG set, which this
- * package does not port.
- */
 export type AlertTone = "ok" | "error" | "warn" | "info";
 
 export interface AlertProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
@@ -49,6 +39,7 @@ export function Alert({
   const config = ALERT_TONE[tone];
   const containerStyle: CSSProperties = {
     display: "flex",
+    alignItems: "center",
     gap: 12,
     // `--mk-alert-pad` is the app's way to seat an alert differently (a banner) without `!important`.
     padding: "var(--mk-alert-pad, 12px 16px)",
@@ -68,21 +59,32 @@ export function Alert({
       <span
         aria-hidden="true"
         className="mk-alert__icon"
-        // Same 20px line box as the title and the body text, so the glyph
-        // sits on the first text line instead of floating above it.
         style={{
           flexShrink: 0,
-          width: 16,
-          textAlign: "center",
+          width: 24,
+          height: 24,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
           color: config.fg,
-          font: "600 14px/20px var(--font-ui)",
         }}
       >
-        {config.glyph}
+        <UiSymbol
+          name={
+            tone === "ok"
+              ? "check"
+              : tone === "error"
+                ? "close"
+                : tone === "warn"
+                  ? "warning"
+                  : "info"
+          }
+          size={24}
+        />
       </span>
       <div
         className="mk-alert__body"
-        style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}
+        style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 }}
       >
         {title && (
           <span

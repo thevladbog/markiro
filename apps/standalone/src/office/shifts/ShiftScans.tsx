@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 
 import {
   Button,
-  Card,
   DatePicker,
   EmptyState,
   FilterBar,
@@ -185,29 +184,37 @@ export function ShiftScans({
     {
       key: "scannedAt",
       title: t("office.shiftCard.scans.when"),
-      mono: true,
-      render: (scan) => time(scan.scannedAt),
+      width: 110,
+      render: (scan) => {
+        const full = time(scan.scannedAt);
+        const [date, clock] = full.split(",").map((s) => s.trim());
+        return (
+          <time className="shift-scan__cell font-mono" dateTime={scan.scannedAt} title={full}>
+            <span>{clock ?? full}</span>
+            {clock && <span className="shift-cell__quiet">{date}</span>}
+          </time>
+        );
+      },
     },
     {
       key: "deviceName",
-      title: t("office.shiftCard.scans.station"),
+      title: t("office.shiftCard.dashboard.stationOperator"),
+      width: 210,
       wrap: true,
-      minWidth: 110,
-    },
-    {
-      key: "operatorName",
-      title: t("office.shiftCard.scans.operator"),
-      wrap: true,
-      minWidth: 110,
-      render: (scan) => scan.operatorName ?? t("office.common.none"),
+      render: (scan) => (
+        <span className="shift-scan__cell">
+          <span>{scan.deviceName}</span>
+          <span className="shift-cell__quiet">{scan.operatorName ?? t("office.common.none")}</span>
+        </span>
+      ),
     },
     {
       key: "verdict",
       title: t("office.shiftCard.scans.result"),
+      width: 200,
       wrap: true,
-      minWidth: 220,
       render: (scan) => (
-        <span className="shift-cell">
+        <span className="shift-scan__cell">
           <StatusChip
             phase={VERDICT_PHASE[scan.verdict]}
             label={t(`office.shiftCard.scans.verdicts.${scan.verdict}`)}
@@ -225,36 +232,44 @@ export function ShiftScans({
     {
       key: "code",
       title: t("office.shiftCard.scans.code"),
+      width: 190,
       mono: true,
       render: (scan) =>
-        scan.gtin14 === null
-          ? t("office.common.none")
-          : t("office.shiftCard.scans.maskedCode", {
-              gtin: scan.gtin14,
-              tail: scan.serialTail ?? "",
-            }),
-    },
-    {
-      key: "box",
-      title: t("office.shiftCard.scans.box"),
-      mono: true,
-      render: (scan) =>
-        scan.boxId === null ? (
+        scan.gtin14 === null ? (
           t("office.common.none")
         ) : (
-          <BoxLink id={scan.boxId} sscc={scan.boxSscc} />
+          <span className="shift-scan__cell">
+            <span>{scan.gtin14}</span>
+            <span className="shift-cell__quiet">…{scan.serialTail ?? ""}</span>
+          </span>
         ),
     },
     {
-      key: "pallet",
-      title: t("office.shiftCard.scans.pallet"),
-      mono: true,
-      render: (scan) =>
-        scan.palletId === null ? (
-          t("office.common.none")
-        ) : (
-          <PalletLink id={scan.palletId} sscc={scan.palletSscc} />
-        ),
+      key: "packs",
+      title: t("office.shiftCard.dashboard.packs"),
+      wrap: true,
+      render: (scan) => (
+        <span className="shift-scan__cell">
+          {scan.boxId === null && scan.palletId === null ? (
+            t("office.common.none")
+          ) : (
+            <>
+              {scan.boxId !== null && (
+                <span>
+                  {t("office.shiftCard.dashboard.box")}{" "}
+                  <BoxLink id={scan.boxId} sscc={scan.boxSscc} />
+                </span>
+              )}
+              {scan.palletId !== null && (
+                <span>
+                  {t("office.shiftCard.dashboard.pallet")}{" "}
+                  <PalletLink id={scan.palletId} sscc={scan.palletSscc} />
+                </span>
+              )}
+            </>
+          )}
+        </span>
+      ),
     },
   ];
 
@@ -292,7 +307,10 @@ export function ShiftScans({
   };
 
   return (
-    <section className="shift-card__section" aria-label={t("office.shiftCard.scans.title")}>
+    <section
+      className="shift-card__section shift-scans"
+      aria-label={t("office.shiftCard.scans.title")}
+    >
       <h2>{t("office.shiftCard.scans.title")}</h2>
       <p className="office-note">{t("office.shiftCard.scans.hint")}</p>
       <form
@@ -320,19 +338,21 @@ export function ShiftScans({
             value={filters.device}
             onValueChange={(device) => apply({ device })}
           />
-          <DatePicker
-            label={t("office.shiftCard.scans.from")}
-            {...datePickerTexts(t)}
-            {...(filters.from === "" ? {} : { value: filters.from })}
-            onValueChange={(value) => apply({ from: value ?? "" })}
-          />
-          <DatePicker
-            label={t("office.shiftCard.scans.to")}
-            {...datePickerTexts(t)}
-            {...(filters.to === "" ? {} : { value: filters.to })}
-            {...(periodBackwards ? { error: t("office.shiftCard.scans.periodBackwards") } : {})}
-            onValueChange={(value) => apply({ to: value ?? "" })}
-          />
+          <div className="shift-scans__date-pair">
+            <DatePicker
+              label={t("office.shiftCard.scans.from")}
+              {...datePickerTexts(t)}
+              {...(filters.from === "" ? {} : { value: filters.from })}
+              onValueChange={(value) => apply({ from: value ?? "" })}
+            />
+            <DatePicker
+              label={t("office.shiftCard.scans.to")}
+              {...datePickerTexts(t)}
+              {...(filters.to === "" ? {} : { value: filters.to })}
+              {...(periodBackwards ? { error: t("office.shiftCard.scans.periodBackwards") } : {})}
+              onValueChange={(value) => apply({ to: value ?? "" })}
+            />
+          </div>
           <Input
             mono
             label={t("office.shiftCard.scans.boxFilter")}
@@ -355,17 +375,19 @@ export function ShiftScans({
             {...(tailInvalid ? { error: t("office.shiftCard.scans.tailInvalid") } : {})}
             onChange={(event) => setTailText(event.target.value)}
           />
-          <Button type="submit" disabled={tailInvalid}>
-            {t("office.shiftCard.scans.submit")}
-          </Button>
-          {filtersOn && (
-            <Button type="button" variant="secondary" onClick={reset}>
-              {t("office.shiftCard.scans.reset")}
+          <div className="shift-scans__actions">
+            <Button type="submit" disabled={tailInvalid}>
+              {t("office.shiftCard.scans.submit")}
             </Button>
-          )}
+            {filtersOn && (
+              <Button type="button" variant="secondary" onClick={reset}>
+                {t("office.shiftCard.scans.reset")}
+              </Button>
+            )}
+          </div>
         </FilterBar>
       </form>
-      <Card>{content()}</Card>
+      {content()}
     </section>
   );
 }

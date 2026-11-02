@@ -9,6 +9,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import "./office-scanner.css";
+
 import { Modal } from "@markiro/ui";
 
 import { createGatedScanSource } from "../../floor/gated-scan-source.js";
@@ -94,15 +96,16 @@ export function OfficeScannerProvider({
         <Modal
           open
           title={t("floor.signIn.scannerSettings")}
-          closeLabel={t("office.common.close")}
+          closeLabel={t("office.scannerDesign.close")}
           onClose={closeSettings}
-          width={1100}
+          width={976}
           className="office-scanner-dialog"
-          style={{ height: "min(920px, 90dvh)", overflow: "hidden" }}
+          style={{ height: "min(704px, calc(100dvh - 48px))", overflow: "hidden" }}
         >
           <WorkstationSetup
             {...scanner}
             scope="scanners"
+            presentation="office"
             onSaved={() => undefined}
             onBack={closeSettings}
           />

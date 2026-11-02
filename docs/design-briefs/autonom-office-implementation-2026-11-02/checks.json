@@ -1,0 +1,46 @@
+{
+  "base": "5e6794ba7",
+  "branch": "codex/autonom-office-design",
+  "ui": {
+    "passed": 345,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed"
+  },
+  "standalone": {
+    "passed": 8892,
+    "skipped": 4,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed"
+  },
+  "rustWorkspace": {
+    "passed": 2830,
+    "ignored": 12,
+    "failed": 0,
+    "offline": true,
+    "platform": "macOS"
+  },
+  "consumerTypecheck": {
+    "surfaces": ["admin", "kiosk", "station", "saas-admin"],
+    "tasks": 8,
+    "passed": 8
+  },
+  "formatCheck": "passed",
+  "diffCheck": "passed",
+  "browser": {
+    "engine": "Chromium",
+    "data": "synthetic host and COM adapters, real production components",
+    "themes": ["light", "dark"],
+    "sizes": [
+      [1280, 800],
+      [1280, 720],
+      [640, 720],
+      [390, 720]
+    ],
+    "alertCenterDeltaPx": 0,
+    "narrowSaveErrorVisible": true
+  },
+  "notExercised": ["Windows/WebView2", "physical scanner", "physical printer", "real Host API"],
+  "verificationStage": "pre-publication"
+}

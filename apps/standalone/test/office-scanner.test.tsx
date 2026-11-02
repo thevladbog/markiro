@@ -98,9 +98,11 @@ describe("Office scanner ownership", () => {
     const office = mount();
     for (const key of "PENDING") fireEvent.keyDown(window, { key });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    await screen.findByRole("heading", { name: "Сканеры" });
+    await screen.findByRole("heading", { name: "Подключение" });
     expect(screen.getByRole("dialog", { name: "Настройки сканера" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Закрыть настройки сканера" })).toBeTruthy();
     expect(screen.getByText("Сканер в режиме клавиатуры")).toBeTruthy();
+    fireEvent.click(screen.getByText("Дополнительно"));
     office.com("CHECK");
     expect(await screen.findByText(/Считано символов: 5/)).toBeTruthy();
     expect(office.onScan).not.toHaveBeenCalled();
@@ -115,7 +117,7 @@ describe("Office scanner ownership", () => {
     expect((await readWorkstationSettings(office.local)).scanners).toEqual([
       { port: "COM3", baud: 9600 },
     ]);
-    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     wedge("NEXT");
     office.com("COM-NEXT");
