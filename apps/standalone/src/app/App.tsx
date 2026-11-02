@@ -1169,8 +1169,6 @@ function AppScreens({
       {view.kind === "office_login" && (
         <OfficeLogin
           key={linked === null ? "unpaired" : `${linked.hostId}:${linked.deviceId}`}
-          readBranding={hostApi.getLoginBranding}
-          brandingRevision={state.hostRevision}
           notice={view.notice}
           onLogin={login}
           onBack={officePc ? null : openFloor}

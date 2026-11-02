@@ -59,7 +59,7 @@ describe("the office sign-in (beta 3.2)", () => {
     expect(
       document.querySelector(".office-login__recent")?.closest(".office-login__card"),
     ).not.toBeNull();
-    expect(screen.getByRole("region", { name: "Ваше производство" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Ваше производство" })).toBeNull();
   });
 
   it("switches the theme from the selector: system, light, dark; the choice persists and applies", () => {
@@ -94,7 +94,7 @@ describe("the office sign-in (beta 3.2)", () => {
     renderLogin(undefined, "2.1.0");
     const product = await screen.findByText("Markiro Автоном 2.1.0");
     expect(product.className).toContain("office-login__product");
-    expect(product.closest(".office-login__brand-footer")).not.toBeNull();
+    expect(product.closest(".office-login__meta")).not.toBeNull();
   });
 
   it("shows a green chip «Связь есть» when the host answers", () => {
@@ -157,8 +157,8 @@ describe("the office sign-in (beta 3.2)", () => {
 
   it("offers no recent users on a PC nobody signed in on, and says where they will appear", () => {
     renderLogin();
-    const aside = screen.getByRole("complementary", { name: "Недавние на этом ПК" });
-    expect(within(aside).getByText(/Здесь появятся пользователи/)).toBeTruthy();
+    const aside = screen.getByRole("complementary", { name: "Недавние логины" });
+    expect(within(aside).getByText(/После первого входа здесь появится логин/)).toBeTruthy();
     expect(within(aside).queryAllByRole("listitem")).toHaveLength(0);
   });
 
@@ -166,7 +166,7 @@ describe("the office sign-in (beta 3.2)", () => {
     rememberLogin("irina");
     rememberLogin("petr");
     renderLogin();
-    const aside = screen.getByRole("complementary", { name: "Недавние на этом ПК" });
+    const aside = screen.getByRole("complementary", { name: "Недавние логины" });
     expect(within(aside).getAllByRole("listitem")).toHaveLength(2);
     fireEvent.click(within(aside).getByRole("button", { name: "Войти как irina" }));
     expect((screen.getByLabelText("Логин") as HTMLInputElement).value).toBe("irina");
@@ -183,8 +183,8 @@ describe("the office sign-in (beta 3.2)", () => {
     expect(pick.getAttribute("aria-pressed")).toBe("true");
     expect(pick.querySelector(".office-login__check")).not.toBeNull();
     expect(pick.querySelector(".office-login__go")).toBeNull();
-    // A one-word login gives one initial (the same rule as the top bar's avatar).
-    expect(pick.querySelector(".office-login__avatar")?.textContent).toBe("I");
+    // Local name shortcuts use text, without a second identity/avatar.
+    expect(pick.querySelector(".office-login__avatar")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Очистить список" }));
     expect(screen.queryByRole("button", { name: "Войти как irina" })).toBeNull();
     expect(readRecentLogins()).toEqual([]);

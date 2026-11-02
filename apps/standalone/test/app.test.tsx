@@ -437,6 +437,20 @@ describe("App", () => {
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
   });
 
+  it("keeps office sign-in product-branded without fetching the organization's logo", async () => {
+    const host = fakeHost();
+    vi.mocked(host.getLoginBranding).mockResolvedValue({
+      logo: { width: 8, height: 1, pixelsBase64: "gA==", updatedAt: "2026-10-30T00:00:00Z" },
+    });
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await screen.findByRole("heading", { name: "Вход в офис" });
+    await act(async () => undefined);
+    expect(screen.queryByRole("img", { name: "Логотип организации" })).toBeNull();
+    expect(screen.getByText("маркиро")).toBeTruthy();
+    expect(host.getLoginBranding).not.toHaveBeenCalled();
+  });
+
   it("shows sign-in when the idle session expires, without a navigation click", async () => {
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
