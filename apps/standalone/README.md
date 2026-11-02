@@ -41,6 +41,15 @@ boxes, contents sheet, A4/A5 placard, GIS MT aggregation XML and disaggregation.
 The card keeps the generated files. If the host response is lost, use
 **Повторить создание** with the same composition to recover the original result.
 
+## Printer label output
+
+In **Рабочее место → Принтеры**, edit a RAW printer and choose **Выдача этикетки**:
+**Обычная печать**, **С отделителем** or **С отрезчиком**. The selected mode is
+saved on this computer and applied to newly rendered ZPL/TSPL labels. Existing
+profiles without a choice retain the printer's configuration. Saved print jobs
+replay their original bytes. For Windows driver printing, configure label output
+in the printer driver.
+
 ## Tests
 
 - Rust: `cargo test --manifest-path apps/standalone/Cargo.toml --workspace`

@@ -62,9 +62,10 @@ export function scannedTestCode(raw: string): string {
 }
 
 /**
- * The scanner self-test's DataMatrix on a label (owner feedback, beta 3): the symbol is the label
- * model's own GS1 DataMatrix (`km.code`, framed in GS1 with FNC1 as the product labels are), «TEST»
- * beside it, all ASCII. The code goes in the label data's `km.code`, not in the spec.
+ * The scanner self-test's DataMatrix occupies a 26 mm square. Render with
+ * `kmDataMatrix: "raster"`: the native emitters interpret sizeMm as a module size,
+ * whereas the shared GS1 raster fits the whole symbol and its quiet zones in this square.
+ * The code goes in the label data's `km.code`, with ASCII TEST markings beside it.
  */
 export function selfTestDataMatrixSpec(language: PrinterLanguage): LabelTemplateSpec {
   return {

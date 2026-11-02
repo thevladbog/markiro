@@ -325,7 +325,7 @@ describe("a label whose outcome is not known", () => {
   it("waits for the operator: no send by itself, a check by a scan or a new attempt with a reason", async () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
-    expect(await screen.findByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    expect(await screen.findByText(/Неизвестно, напечаталась ли этикетка/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     // Time, the link and a rerender send nothing.
     at.rerender({ online: false });
@@ -356,11 +356,11 @@ describe("a label whose outcome is not known", () => {
   it("is printed again only with a reason chosen, and the confirmation waits for it", async () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
-    await screen.findByText(/Неизвестно, вышла ли этикетка/);
+    await screen.findByText(/Неизвестно, напечаталась ли этикетка/);
     await at.press("Напечатать ещё раз");
     expect(
       screen.getByText(
-        "Этикетка могла уже выйти. На принтер уйдут те же данные: код и SSCC не меняются.",
+        "Этикетка могла уже напечататься. Код и SSCC при повторной печати не меняются.",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Напечатать" }).hasAttribute("disabled")).toBe(true);
@@ -380,7 +380,7 @@ describe("a label whose outcome is not known", () => {
   it("takes «Отмена» of the confirmation as no print", async () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
-    await screen.findByText(/Неизвестно, вышла ли этикетка/);
+    await screen.findByText(/Неизвестно, напечаталась ли этикетка/);
     await at.press("Напечатать ещё раз");
     await at.press("Утеряна");
     await at.press("Отмена");
@@ -401,7 +401,7 @@ describe("a restart of the screen", () => {
     first.view.unmount();
     const again = await renderWarehouse({ seeded: { db: first.db, executor: first.local } });
     expect(await screen.findByText(/Продолжен незавершённый сеанс перепечатки\./)).toBeTruthy();
-    expect(screen.getByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    expect(screen.getByText(/Неизвестно, напечаталась ли этикетка/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
     expect(again.shell.sends).toHaveLength(0);
@@ -481,7 +481,7 @@ describe("the session", () => {
   it("keeps the finish disabled with its reason while a label waits: never the session's end", async () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
-    await screen.findByText(/Неизвестно, вышла ли этикетка/);
+    await screen.findByText(/Неизвестно, напечаталась ли этикетка/);
     // The finish stays reachable from the detail, disabled, with the reason beside it.
     expect(
       screen.getByRole("button", { name: "Завершить сеанс" }).getAttribute("aria-disabled"),
@@ -590,7 +590,7 @@ describe("without the link", () => {
 });
 
 describe("the check of the print by a second scan: the session's switch", () => {
-  const SWITCH = "Проверка распечатки повторным сканированием";
+  const SWITCH = "Проверка этикетки после печати";
 
   /** A session started with the check switched as asked (the switch stands on the start screen). */
   async function startedWith(
@@ -669,7 +669,7 @@ describe("the check of the print by a second scan: the session's switch", () => 
     await on.press("Начать перепечатку");
     await on.scanner.listening();
     await on.scan(BOX_SSCC);
-    expect(await screen.findByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    expect(await screen.findByText(/Неизвестно, напечаталась ли этикетка/)).toBeTruthy();
     await on.press("Проверить сканом");
     await on.scan(BOX_SSCC);
     expect(await screen.findByText("Новая этикетка проверена")).toBeTruthy();

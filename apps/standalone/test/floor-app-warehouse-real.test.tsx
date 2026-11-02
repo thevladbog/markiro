@@ -102,7 +102,7 @@ describe("a label of the warehouse reprint whose outcome is unknown, and the ope
     await act(async () => {
       scanner.emit(BOX_SSCC);
     });
-    expect(await screen.findByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    expect(await screen.findByText(/Неизвестно, напечаталась ли этикетка/)).toBeTruthy();
     expect(shell.sends).toHaveLength(1);
     // Leave through the floor: the list of shifts, with the session paused.
     await pause();
@@ -115,7 +115,7 @@ describe("a label of the warehouse reprint whose outcome is unknown, and the ope
     fireEvent.click(again);
     expect(await screen.findByText(/Продолжен незавершённый сеанс перепечатки\./)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Проверить сканом" })).toBeTruthy();
-    expect(screen.getByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    expect(screen.getByText(/Неизвестно, напечаталась ли этикетка/)).toBeTruthy();
     await waitFor(() => expect(shell.sends).toHaveLength(1));
     // The shell heard of the records (the delivery goes after the facts) and of no shift.
     expect(rows(db, "SELECT count(*) AS n FROM wh_outbox")).toEqual([{ n: 1 }]);

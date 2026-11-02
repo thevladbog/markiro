@@ -1,7 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { sampleLabelData } from "@markiro/domain";
+import {
+  buildBitmapCommand,
+  buildGfaCommand,
+  mmToDots,
+  rasterizeGs1DataMatrix,
+  sampleLabelData,
+} from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import { renderLabel } from "../src/floor/print/label-render.js";
@@ -110,8 +116,8 @@ function tab(name: "Сканеры" | "Принтеры" | "Звук" | "Ста�
 }
 
 /** The real render over a rasterizer that needs no canvas: the test label is ASCII and never asks it. */
-const realRender: RenderLabel = (spec, fields, printer) =>
-  renderLabel(spec, fields, printer, fakeRaster);
+const realRender: typeof renderLabel = (spec, fields, printer, _raster, logo, options) =>
+  renderLabel(spec, fields, printer, fakeRaster, logo, options);
 
 function type(label: string, value: string): void {
   setField(label, value);
@@ -137,6 +143,7 @@ describe("the printer form", () => {
       profile: {
         id: "new-1",
         name: "Zebra",
+        outputMode: "normal",
         target: { kind: "tcp", host: "192.168.1.50", port: 9100 },
         language: "zpl",
         dpi: 203,
@@ -151,6 +158,7 @@ describe("the printer form", () => {
       profile: {
         id: "tsc",
         name: "TSC",
+        outputMode: "normal",
         target: { kind: "serial", port: "COM4", baud: 9600 },
         language: "zpl",
         dpi: 300,
@@ -1753,18 +1761,34 @@ describe("«Проверка сканера» inside «Сканеры»", () => 
     expect(screen.getByTestId("self-test-history").children).toHaveLength(1);
   });
 
-  it("prints the test DataMatrix on a label printer through the label model (GS1 framed), marked TEST", async () => {
+  it.each([
+    ["zpl", 203],
+    ["zpl", 300],
+    ["tspl", 203],
+    ["tspl", 300],
+  ] as const)("prints a bounded GS1 test raster on %s at %s dpi", async (language, dpi) => {
     const local = openLocalDb().executor;
-    await setUpPrinting(local);
+    const settings = { ...printingSettings(), printers: [{ ...ZEBRA, language, dpi }] };
+    await saveWorkstationSettings(local, {
+      ...settings,
+      assignments: { box: ZEBRA.id, pallet: null, duplicate: null },
+    });
     const { shell } = await setup({ local, render: realRender, tab: "Сканеры" });
+    const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
     await act(async () => {
-      click("Печать");
+      fireEvent.click(screen.getByRole("button", { name: /^Печать/ }));
     });
     await screen.findByText("Тестовый код отправлен на печать.");
     const text = shell.sends[0]?.text ?? "";
-    // The printer's own DataMatrix with FNC1 first and real separators (`_1D`) between the AIs.
-    expect(text).toMatch(/\^BXN[^\n]*\^FD_1010299999999999\d21TEST[0-9A-Z]+_1D91TEST_1D92TEST/);
-    expect(text).toContain("^FDTEST^FS");
+    // Compare the actual printer payload with the entire GS1 symbol, including quiet zones.
+    const raster = rasterizeGs1DataMatrix(code, mmToDots(26, dpi));
+    expect(text).toContain(
+      language === "zpl"
+        ? buildGfaCommand(raster)
+        : buildBitmapCommand(mmToDots(4, dpi), mmToDots(9, dpi), raster),
+    );
+    expect(text).not.toContain(language === "zpl" ? "^BX" : "DMATRIX");
+    expect(text).toContain("TEST");
     expect(text).not.toContain(sampleLabelData()["km.code"]);
   });
 });

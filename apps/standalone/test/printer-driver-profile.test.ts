@@ -113,6 +113,7 @@ describe("the printer form's way of printing", () => {
         target: { kind: "usb", printer: "Godex G500" },
         language: "zpl",
         dpi: 203,
+        outputMode: "normal",
       },
     });
     // A printer moved to the network keeps no driver mode.
@@ -125,6 +126,7 @@ describe("the printer form's way of printing", () => {
         target: { kind: "tcp", host: "10.0.0.7", port: 9100 },
         language: "zpl",
         dpi: 203,
+        outputMode: "normal",
       },
     });
   });

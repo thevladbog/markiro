@@ -1,5 +1,7 @@
 import {
+  applyPrinterOutputMode,
   boxLabelFields,
+  type PrinterOutputMode,
   palletLabelFields,
   withPrinterDpi,
   type LabelField,
@@ -18,6 +20,7 @@ export interface LabelPrinter {
   dpi: PrinterDpi;
   /** `windows_driver` — a `mono-raster-v1` page for the Windows driver (plan ДРВ); absent — the language. */
   mode?: PrinterMode;
+  outputMode?: PrinterOutputMode;
   /** «Лист А4» (plan А4): the shift's A4 sheet instead of the label; only with the driver at 300 dpi. */
   paper?: "a4";
 }
@@ -144,5 +147,5 @@ export async function renderLabel(
     printer.language === "tspl"
       ? await emitters.generateTspl(printSpec, fields, deps)
       : await emitters.generateZpl(printSpec, fields, deps);
-  return latin1ToBytes(text);
+  return applyPrinterOutputMode(latin1ToBytes(text), printer.language, printer.outputMode);
 }

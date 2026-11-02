@@ -210,7 +210,7 @@ export function resultView(
       tone: "info",
       glyph: "scan-frame",
       title: "verify",
-      body: { kind: "hint", key: "verify" },
+      body: null,
     };
   }
   switch (job.state) {

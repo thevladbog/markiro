@@ -13,8 +13,10 @@ import { ThemeProvider } from "@markiro/ui";
 
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
 import { WorkstationSetup } from "../src/floor/setup/WorkstationSetup.js";
+import { readWorkstationSettings } from "../src/floor/setup/workstation-settings.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
+import { choicesOf, setField } from "./support/floor-fields.js";
 import { fakeRender, manualRuntime, setUpPrinting } from "./support/printing.js";
 
 /**
@@ -417,4 +419,43 @@ describe("the station tab", () => {
     fireEvent.click(within(group).getByRole("radio", { name: "Системная" }));
     expect(window.localStorage.getItem("markiro.theme")).toBe("system");
   });
+});
+
+it("saves the selected label output mode from the printer editor", async () => {
+  const { local } = await setup({ printers: true });
+  click("Изменить принтер «Zebra у линии»");
+  expect(choicesOf("Выдача этикетки")).toEqual([
+    "Как настроено на принтере",
+    "Обычная печать",
+    "С отделителем",
+    "С отрезчиком",
+  ]);
+  setField("Выдача этикетки", "С отрезчиком");
+  click("Готово");
+  await act(async () => {
+    click("Сохранить");
+  });
+  expect((await readWorkstationSettings(local)).printers[0]?.outputMode).toBe("cutter");
+});
+
+it("returns an explicit output mode to the printer configuration and persists its absence", async () => {
+  const { local } = await setup({ printers: true });
+  click("Изменить принтер «Zebra у линии»");
+  setField("Выдача этикетки", "С отрезчиком");
+  click("Готово");
+  await act(async () => {
+    click("Сохранить");
+  });
+  expect((await readWorkstationSettings(local)).printers[0]?.outputMode).toBe("cutter");
+  click("Изменить принтер «Zebra у линии»");
+  setField("Выдача этикетки", "Как настроено на принтере");
+  click("Готово");
+  await act(async () => {
+    click("Сохранить");
+  });
+  expect((await readWorkstationSettings(local)).printers[0]).not.toHaveProperty("outputMode");
+  click("Изменить принтер «Zebra у линии»");
+  expect(screen.getByRole("combobox", { name: "Выдача этикетки" }).textContent).toBe(
+    "Как настроено на принтере",
+  );
 });
