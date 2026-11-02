@@ -28,6 +28,11 @@ class SettingsUpdateTest {
         serverUrl = "https://admin.markiro.app", pairedAt = 1L,
     )
 
+    private val hostConfig = config.copy(
+        backend = "host", serverUrl = "https://192.168.1.10:45710",
+        hostId = "host-1", pinSha256 = "a".repeat(64),
+    )
+
     private val available = UpdateState.Available(
         UpdateManifest(
             versionName = "0.5.0", versionCode = 5, sha256 = "a".repeat(64), bytes = 1,
@@ -41,15 +46,38 @@ class SettingsUpdateTest {
         language = "ru", version = "0.1.0", installId = "0123456789abcdef",
     )
 
-    private fun screen(state: SettingsUi, onInstall: () -> Unit = {}) {
+    private fun screen(
+        state: SettingsUi,
+        device: DeviceConfigEntity = config,
+        onCheck: () -> Unit = {},
+        onInstall: () -> Unit = {},
+    ) {
         compose.setContent {
             MarkiroTheme {
                 SettingsScreen(
-                    state, config, onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {},
-                    onInstallUpdate = onInstall,
+                    state, device, onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {},
+                    onCheckUpdate = onCheck, onInstallUpdate = onInstall,
                 )
             }
         }
+    }
+
+    @Test
+    fun aHostPairedDeviceCanCheckThePublicUpdateChannel() {
+        var asked = false
+        screen(ui, hostConfig, onCheck = { asked = true })
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
+        compose.onNodeWithText("Обновление").performScrollTo().performClick()
+        assertEquals(true, asked)
+    }
+
+    @Test
+    fun aHostPairedDeviceCanInstallAnAvailableUpdate() {
+        var asked = false
+        screen(ui.copy(update = available), hostConfig, onInstall = { asked = true })
+        compose.onNodeWithText("Об устройстве").performScrollTo().performClick()
+        compose.onNodeWithText("скачать и установить").performScrollTo().performClick()
+        assertEquals(true, asked)
     }
 
     /** Nothing to install, nothing offered: the row would be a dead control. */
