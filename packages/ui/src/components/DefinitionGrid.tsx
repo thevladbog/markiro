@@ -11,13 +11,22 @@ export interface DefinitionGridItem {
 
 export interface DefinitionGridProps {
   items: readonly DefinitionGridItem[];
+  /** Label/value rows for requisites; the default keeps the compact facts grid. */
+  layout?: "grid" | "rows";
   className?: string;
   style?: CSSProperties;
 }
 
-export function DefinitionGrid({ items, className, style }: DefinitionGridProps) {
+export function DefinitionGrid({ items, layout = "grid", className, style }: DefinitionGridProps) {
   return (
-    <dl className={cn("mk-definition-grid", className)} style={style}>
+    <dl
+      className={cn(
+        "mk-definition-grid",
+        layout === "rows" && "mk-definition-grid--rows",
+        className,
+      )}
+      style={style}
+    >
       {items.map((item) => (
         <div className="mk-definition-grid__item" key={item.id}>
           <dt className="mk-definition-grid__term">{item.term}</dt>

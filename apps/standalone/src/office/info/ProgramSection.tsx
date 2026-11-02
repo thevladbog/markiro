@@ -25,7 +25,11 @@ export function ProgramSection() {
   const data = useAboutData();
   return (
     <Card title={t("office.about.program.title")} titleAs="h2">
-      {data.isPending ? <PageLoading /> : <DefinitionGrid items={programItems(data.data, t)} />}
+      {data.isPending ? (
+        <PageLoading />
+      ) : (
+        <DefinitionGrid layout="rows" items={programItems(data.data, t)} />
+      )}
     </Card>
   );
 }

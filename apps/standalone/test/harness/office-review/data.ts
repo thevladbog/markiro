@@ -6,6 +6,13 @@ import lineFixture from "../../../proto/fixtures/office-line.json";
 import productFixture from "../../../proto/fixtures/office-product.json";
 import shiftFixture from "../../../proto/fixtures/office-shift.json";
 import userFixture from "../../../proto/fixtures/office-user.json";
+import userRecordFixture from "../../../proto/fixtures/office-user-record.json";
+import operatorFixture from "../../../proto/fixtures/office-operator.json";
+import ssccFixture from "../../../proto/fixtures/sscc-state.json";
+import updateStatusFixture from "../../../proto/fixtures/office-update-status.json";
+import yandexFixture from "../../../proto/fixtures/yandex-backup-disconnected.json";
+import disaggregationFixture from "../../../proto/fixtures/disaggregation-document.json";
+import reasonFixture from "../../../proto/fixtures/disaggregation-reason.json";
 import palletFixture from "../../../proto/fixtures/office-warehouse-pallet-detail.json";
 import orgFixture from "../../../proto/fixtures/org-profile.json";
 import templateFixture from "../../../proto/fixtures/template-summary.json";
@@ -119,6 +126,17 @@ export const pallet = {
 
 const responses: Record<string, unknown> = {
   "/v1/office/me": user,
+  "/v1/office/users": [
+    { ...userRecordFixture, id: "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21" },
+    { ...userRecordFixture, ...user, createdAt: "2026-09-26T09:15:00Z", rev: 1 },
+  ],
+  "/v1/office/operators": [operatorFixture],
+  "/v1/office/sscc": ssccFixture,
+  "/v1/office/update-status": updateStatusFixture,
+  "/v1/office/backups/yandex": yandexFixture,
+  "/v1/office/disaggregation": [disaggregationFixture],
+  "/v1/office/disaggregation-reasons": [reasonFixture],
+  "/v1/office/import/history": null,
   "/v1/office/org": { ...orgFixture, inn: "7707083893" },
   "/v1/office/org/logo": { logo: null },
   "/v1/device/login-branding": { logo: null },

@@ -1,0 +1,499 @@
+{
+  "source": "d17e448d2 + local Office conformance and prior review fixes",
+  "data": "Synthetic protocol fixtures; localhost only",
+  "pages": [
+    {
+      "theme": "dark",
+      "route": "/",
+      "title": "Обзор",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/lines",
+      "title": "Линии",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/shifts",
+      "title": "Смены",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/conflicts",
+      "title": "Конфликты",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/disaggregation",
+      "title": "Дезагрегация",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/operators",
+      "title": "Операторы",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/devices",
+      "title": "Устройства",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/codes",
+      "title": "Поиск кодов",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/products",
+      "title": "Товары",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/templates",
+      "title": "Шаблоны этикеток",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/org",
+      "title": "Профиль организации",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 0
+    },
+    {
+      "theme": "dark",
+      "route": "/sscc",
+      "title": "SSCC",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/counterparties",
+      "title": "Контрагенты",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/users",
+      "title": "Пользователи офиса",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/backups",
+      "title": "Резервные копии",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "dark",
+      "route": "/import",
+      "title": "Перенос из облака",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 0
+    },
+    {
+      "theme": "dark",
+      "route": "/about",
+      "title": "Информация",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 2
+    },
+    {
+      "theme": "light",
+      "route": "/",
+      "title": "Обзор",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/lines",
+      "title": "Линии",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/shifts",
+      "title": "Смены",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/conflicts",
+      "title": "Конфликты",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/disaggregation",
+      "title": "Дезагрегация",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/operators",
+      "title": "Операторы",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/devices",
+      "title": "Устройства",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/codes",
+      "title": "Поиск кодов",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/products",
+      "title": "Товары",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/templates",
+      "title": "Шаблоны этикеток",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/org",
+      "title": "Профиль организации",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 0
+    },
+    {
+      "theme": "light",
+      "route": "/sscc",
+      "title": "SSCC",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/counterparties",
+      "title": "Контрагенты",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/users",
+      "title": "Пользователи офиса",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/backups",
+      "title": "Резервные копии",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 1
+    },
+    {
+      "theme": "light",
+      "route": "/import",
+      "title": "Перенос из облака",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 0
+    },
+    {
+      "theme": "light",
+      "route": "/about",
+      "title": "Информация",
+      "overflow": false,
+      "errorAlerts": [],
+      "tables": 2
+    }
+  ],
+  "geometry": [
+    {
+      "theme": "dark",
+      "width": 1280,
+      "nav": [44, 44, 44, 44, 44],
+      "rows": [
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        }
+      ],
+      "mono": "\"IBM Plex Mono\", ui-monospace, monospace",
+      "copy": 44,
+      "uploads": [44]
+    },
+    {
+      "theme": "dark",
+      "width": 960,
+      "clientWidth": 884,
+      "scrollWidth": 884,
+      "contactButtons": [44, 44]
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "clientWidth": 314,
+      "scrollWidth": 314,
+      "contactButtons": [44, 44]
+    },
+    {
+      "theme": "light",
+      "width": 1280,
+      "nav": [44, 44, 44, 44, 44],
+      "rows": [
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        },
+        {
+          "termX": 133,
+          "descriptionX": 389,
+          "centerDelta": 0
+        }
+      ],
+      "mono": "\"IBM Plex Mono\", ui-monospace, monospace",
+      "copy": 44,
+      "uploads": [44]
+    },
+    {
+      "theme": "light",
+      "width": 960,
+      "clientWidth": 884,
+      "scrollWidth": 884,
+      "contactButtons": [44, 44]
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "clientWidth": 314,
+      "scrollWidth": 314,
+      "contactButtons": [44, 44]
+    }
+  ],
+  "captures": [
+    "about-program-dark.png",
+    "about-license-dark.png",
+    "about-update-dark.png",
+    "about-contacts-dark.png",
+    "about-support-dark.png",
+    "about-features-dark.png",
+    "about-device-versions-dark.png",
+    "backups-dark.png",
+    "sscc-dark.png",
+    "org-dark.png",
+    "operators-dark.png",
+    "users-dark.png",
+    "products-dark.png",
+    "disaggregation-dark.png",
+    "import-dark.png",
+    "org-readonly-dark.png",
+    "sscc-readonly-dark.png",
+    "about-license-960-dark.png",
+    "about-contacts-960-dark.png",
+    "about-support-960-dark.png",
+    "about-license-390-dark.png",
+    "about-contacts-390-dark.png",
+    "about-support-390-dark.png",
+    "about-program-light.png",
+    "about-license-light.png",
+    "about-update-light.png",
+    "about-contacts-light.png",
+    "about-support-light.png",
+    "about-features-light.png",
+    "about-device-versions-light.png",
+    "backups-light.png",
+    "sscc-light.png",
+    "org-light.png",
+    "operators-light.png",
+    "users-light.png",
+    "products-light.png",
+    "disaggregation-light.png",
+    "import-light.png",
+    "org-readonly-light.png",
+    "sscc-readonly-light.png",
+    "about-license-960-light.png",
+    "about-contacts-960-light.png",
+    "about-support-960-light.png",
+    "about-license-390-light.png",
+    "about-contacts-390-light.png",
+    "about-support-390-light.png"
+  ],
+  "failures": [],
+  "pageErrors": [],
+  "finalContacts": [
+    {
+      "theme": "dark",
+      "width": 1280,
+      "client": 1204,
+      "scroll": 1204,
+      "heights": [44, 44],
+      "addresses": ["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]
+    },
+    {
+      "theme": "dark",
+      "width": 960,
+      "client": 884,
+      "scroll": 884,
+      "heights": [44, 44],
+      "addresses": ["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "client": 314,
+      "scroll": 314,
+      "heights": [44, 44],
+      "addresses": ["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]
+    },
+    {
+      "theme": "light",
+      "width": 1280,
+      "client": 1204,
+      "scroll": 1204,
+      "heights": [44, 44],
+      "addresses": ["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]
+    },
+    {
+      "theme": "light",
+      "width": 960,
+      "client": 884,
+      "scroll": 884,
+      "heights": [44, 44],
+      "addresses": ["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "client": 314,
+      "scroll": 314,
+      "heights": [44, 44],
+      "addresses": ["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]
+    }
+  ],
+  "browser": "151.0.7922.34"
+}

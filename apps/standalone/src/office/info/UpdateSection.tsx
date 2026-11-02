@@ -95,7 +95,7 @@ export function UpdateSection() {
   return (
     <>
       <Card title={t("office.about.update.title")} titleAs="h2">
-        <DefinitionGrid items={items} />
+        <DefinitionGrid layout="rows" items={items} />
         {outcome.data ? (
           <OutcomeAlert outcome={outcome.data} onHidden={() => void outcome.refetch()} />
         ) : null}
@@ -473,7 +473,7 @@ function ReportCard({
       {report.manifest.channel === "beta" ? (
         <Badge tone="warn">{t("office.about.update.beta")}</Badge>
       ) : null}
-      <DefinitionGrid items={facts} />
+      <DefinitionGrid layout="rows" items={facts} />
       {report.manifest.notes.length > 0 ? (
         <section className="office-section-intro">
           <h4>{t("office.about.update.notes")}</h4>
@@ -503,6 +503,7 @@ function ReportCard({
         <div className="office-stack">
           <p className="office-note">{t("office.about.update.manualHint")}</p>
           <DefinitionGrid
+            layout="rows"
             items={[
               {
                 id: "installerPath",

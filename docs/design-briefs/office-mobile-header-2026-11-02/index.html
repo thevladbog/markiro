@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Офис · компактная шапка</title
+  ><style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #fafaf8;
+      color: #17161a;
+      font:
+        16px/1.5 system-ui,
+        sans-serif;
+    }
+    main {
+      max-width: 1100px;
+      margin: auto;
+      padding: 28px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+    h2 {
+      font-size: 20px;
+      margin-top: 36px;
+    }
+    p {
+      max-width: 850px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+    }
+    figure {
+      margin: 0;
+    }
+    img {
+      max-width: 100%;
+      display: block;
+      border: 1px solid #deddd7;
+      border-radius: 16px;
+    }
+    figcaption {
+      padding: 10px 0;
+    }
+    a {
+      color: inherit;
+      text-underline-offset: 3px;
+    }
+    @media (max-width: 650px) {
+      main {
+        padding: 16px;
+      }
+      .grid {
+        gap: 12px;
+      }
+    }
+  </style>
+  <main>
+    <h1>Компактная шапка офиса</h1>
+    <p>
+      На ширине 390 px: 229 → 56 px. Содержимому вернулось 173 px по высоте. Настройки и статус — в
+      раскрывающейся панели, профиль — под аватаром.
+    </p>
+    <p><a href="README.md">Изменения и проверка</a> · <a href="measurements.json">Замеры</a></p>
+    <h2>Тёмная тема</h2>
+    <div class="grid">
+      <figure>
+        <a href="before-390-dark.png"
+          ><img src="before-390-dark.png" alt="Было · 229 px" loading="lazy"
+        /></a>
+        <figcaption>Было · 229 px</figcaption>
+      </figure>
+      <figure>
+        <a href="after-390-dark.png"
+          ><img src="after-390-dark.png" alt="Стало · 56 px" loading="lazy"
+        /></a>
+        <figcaption>Стало · 56 px</figcaption>
+      </figure>
+    </div>
+    <h2>Настройки и профиль</h2>
+    <div class="grid">
+      <figure>
+        <a href="tools-390-dark.png"
+          ><img src="tools-390-dark.png" alt="Настройки и состояние" loading="lazy"
+        /></a>
+        <figcaption>Настройки и состояние</figcaption>
+      </figure>
+      <figure>
+        <a href="profile-390-dark.png"
+          ><img src="profile-390-dark.png" alt="Меню пользователя" loading="lazy"
+        /></a>
+        <figcaption>Меню пользователя</figcaption>
+      </figure>
+    </div>
+    <h2>Светлая тема</h2>
+    <div class="grid">
+      <figure>
+        <a href="before-390-light.png"
+          ><img src="before-390-light.png" alt="Было · 229 px" loading="lazy"
+        /></a>
+        <figcaption>Было · 229 px</figcaption>
+      </figure>
+      <figure>
+        <a href="after-390-light.png"
+          ><img src="after-390-light.png" alt="Стало · 56 px" loading="lazy"
+        /></a>
+        <figcaption>Стало · 56 px</figcaption>
+      </figure>
+    </div>
+    <h2>Настройки и профиль</h2>
+    <div class="grid">
+      <figure>
+        <a href="tools-390-light.png"
+          ><img src="tools-390-light.png" alt="Настройки и состояние" loading="lazy"
+        /></a>
+        <figcaption>Настройки и состояние</figcaption>
+      </figure>
+      <figure>
+        <a href="profile-390-light.png"
+          ><img src="profile-390-light.png" alt="Меню пользователя" loading="lazy"
+        /></a>
+        <figcaption>Меню пользователя</figcaption>
+      </figure>
+    </div>
+  </main>
+</html>

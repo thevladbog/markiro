@@ -291,11 +291,11 @@ describe("Информация", () => {
       "Сведения для поддержки",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "#program",
-      "#license",
-      "#update",
-      "#contacts",
-      "#support",
+      "/#program",
+      "/#license",
+      "/#update",
+      "/#contacts",
+      "/#support",
     ]);
     for (const id of ["program", "license", "update", "contacts", "support"]) {
       expect(document.getElementById(id)).not.toBeNull();
@@ -311,6 +311,25 @@ describe("Информация", () => {
     const update = ABOUT_SECTIONS.find((section) => section.id === "update");
     expect(update?.titleKey).toBe("office.about.update.title");
     expect(update?.roles).toEqual(["admin", "technologist"]);
+  });
+
+  it("updates the current section and moves keyboard focus when an outline link is followed", async () => {
+    renderAbout(fakeAbout(), fakeOfficeFiles(), ONLINE, "/about");
+    const toc = await screen.findByRole("navigation", { name: "Разделы страницы" });
+    expect(
+      within(toc).getByRole("link", { name: "О программе" }).getAttribute("aria-current"),
+    ).toBe("location");
+    const license = within(toc).getByRole("link", { name: "Лицензия" });
+    fireEvent.click(license);
+    await waitFor(() => expect(license.getAttribute("aria-current")).toBe("location"));
+    expect(document.activeElement).toBe(document.getElementById("license"));
+
+    const program = within(toc).getByRole("link", { name: "О программе" });
+    fireEvent.click(program);
+    await waitFor(() => expect(program.getAttribute("aria-current")).toBe("location"));
+    expect(license.hasAttribute("aria-current")).toBe(false);
+    expect(document.activeElement).toBe(document.getElementById("program"));
+    expect(screen.getByRole("heading", { name: "Обновление", level: 2 })).toBeTruthy();
   });
 
   it("is a page of the office's «Сервис» for both roles, and works without the shell", async () => {

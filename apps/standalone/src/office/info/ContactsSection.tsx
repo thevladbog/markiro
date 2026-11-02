@@ -18,17 +18,20 @@ export function ContactsSection() {
   const mailButton = (email: string) => (
     <Button
       variant="secondary"
-      size="compact"
+      size="md"
       onClick={() => open(email)}
       aria-label={t("office.about.contacts.writeTo", { email })}
     >
-      {email}
+      {email.slice(0, email.indexOf("@"))}
+      <wbr />
+      {email.slice(email.indexOf("@"))}
     </Button>
   );
   return (
     <Card title={t("office.about.contacts.title")} titleAs="h2">
       <div className="standalone-form">
         <DefinitionGrid
+          layout="rows"
           items={[
             {
               id: "email",

@@ -275,6 +275,50 @@
   overflow-wrap: anywhere;
 }
 
+.mk-definition-grid__description.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-definition-grid--rows {
+  grid-template-columns: minmax(0, 1fr);
+  border: 0;
+  container-type: inline-size;
+}
+
+.mk-definition-grid--rows > .mk-definition-grid__item {
+  display: grid;
+  grid-template-columns: minmax(0, min(36%, 240px)) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-definition-grid--rows > .mk-definition-grid__item:last-child {
+  border-bottom: 0;
+}
+
+.mk-definition-grid--rows .mk-definition-grid__term {
+  color: var(--fg-2);
+  font: var(--text-body);
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+.mk-definition-grid--rows .mk-definition-grid__description {
+  min-width: 0;
+  margin: 0;
+}
+
+@container (max-width: 480px) {
+  .mk-definition-grid--rows > .mk-definition-grid__item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+}
+
 .mk-section-header {
   min-width: 0;
   display: flex;
@@ -1170,9 +1214,9 @@
 }
 
 /*
- * The 2026-10 office sizing, opt-in (kit §Changes: office controls 44, radii 16/20): inside an element with
+ * The 2026-10 office sizing, opt-in (kit §Changes: office controls 44, radii 16/24): inside an element with
  * this class the controls are 44 px (36 compact) and the field, button and alert radius is 16, the dialog
- * and card radius 20, and a card carries no shadow (one hairline layer). The components draw all of that
+ * and card radius 24, and a card carries no shadow (one hairline layer). The components draw all of that
  * from tokens, so redefining the tokens here changes only this subtree; the cloud apps (admin, saas-admin,
  * kiosk, station) never carry the class and keep 40/32 and 8/12. Overlays (dialogs, panels, select lists)
  * are portalled to the document body, outside any subtree, so the standalone office puts the class on
@@ -1183,11 +1227,17 @@
   --control-md: 44px;
   --control-sm: 36px;
   --r-2: 16px;
-  --r-3: 20px;
+  --r-3: 24px;
+  --r-compact: 12px;
   --shadow-1: none;
   --shadow-2: none;
+  --err-solid: var(--err-fg);
   /* The label of a solid error button is the kit's `onerr`, not a literal white (2.6:1 on the dark coral). */
-  --mk-btn-destructive-fg: var(--fg-on-err-solid);
+  --mk-btn-destructive-fg: var(--onerr);
+}
+
+.mk-kit-2026 .mk-file-drop--compact {
+  min-height: var(--control-md);
 }
 
 /* A field with a wrong value: a 2 px rule in the error colour (the message carries the word «Ошибка ·»). */
@@ -1226,14 +1276,6 @@
 .mk-kit-2026 .mk-tag--office .mk-tag__glyph {
   width: 16px;
   height: 16px;
-}
-.mk-kit-2026 {
-  --r-3: 24px;
-  --err-solid: var(--err-fg);
-  --mk-btn-destructive-fg: var(--onerr);
-}
-.mk-kit-2026 {
-  --r-compact: 12px;
 }
 .mk-kit-2026 .mk-btn--primary:active:not(:disabled):not([aria-disabled="true"]) {
   --mk-btn-bg: var(--primarypressed);

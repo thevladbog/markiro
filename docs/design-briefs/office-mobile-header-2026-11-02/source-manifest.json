@@ -1,0 +1,103 @@
+{
+  "base": "d17e448d2416b8ffc733cff7eff71b3974e6ba00",
+  "state": "Local mobile header fix plus existing Office follow-up changes",
+  "createdAt": "2026-11-02T03:16:57.948723+00:00",
+  "files": [
+    {
+      "path": "apps/standalone/src/app/shell.css",
+      "sha256": "6f5ed3bd9305b6ba882849c423979d9ceb3743bf95098c32a6390e2634f6bc94"
+    },
+    {
+      "path": "apps/standalone/src/floor/setup/ScannerSelfTest.tsx",
+      "sha256": "2e412bf52d697f1e2e8aa8af2480c2ec2855d09f8debee1331431493e1847f6c"
+    },
+    {
+      "path": "apps/standalone/src/i18n/ru.json",
+      "sha256": "f6afeb24141fada2298ff4fb7be441fbbc58febd9fbfffa9619e905efb1f0ea3"
+    },
+    {
+      "path": "apps/standalone/src/office/OfficeHeaderTools.tsx",
+      "sha256": "6171950e4af7ee7c082013cb9b849b7b0f3474811cd33b147dc6912b2ac0e75a"
+    },
+    {
+      "path": "apps/standalone/src/office/OfficeTopBar.tsx",
+      "sha256": "fc6fba3d6fe0e2e63a7530a56a8ac5df0027d6543dfb385a0fd5a1e89307f372"
+    },
+    {
+      "path": "apps/standalone/src/office/UserMenu.tsx",
+      "sha256": "3b08b7741ef693e129b27872d91a5e21d30b1463abdb4a24e19afd953129ec89"
+    },
+    {
+      "path": "apps/standalone/src/office/backups/BackupsPage.tsx",
+      "sha256": "2984aa358106743ab05ff354d0f88fb97528e2d1c58ca98a400cc22d08426cb2"
+    },
+    {
+      "path": "apps/standalone/src/office/info/AboutPage.tsx",
+      "sha256": "eea55cb482e888ed2a912836b54cbd9e770e978c2683b4ae7aa728372bb7b00a"
+    },
+    {
+      "path": "apps/standalone/src/office/info/ContactsSection.tsx",
+      "sha256": "42980c7129f501ebc8510101faa08332cc0494e56d8245db81039860f8be3ab8"
+    },
+    {
+      "path": "apps/standalone/src/office/info/LicenseSection.tsx",
+      "sha256": "7f6ed962826e583b83f1bc04b55d26bd695d37564a8804f63e67bb79571d32dd"
+    },
+    {
+      "path": "apps/standalone/src/office/info/ProgramSection.tsx",
+      "sha256": "ab9cc2d4eb16633bc9f6b0f4753d6034d2c2a2157bc5ab35f398b2d98d31a55a"
+    },
+    {
+      "path": "apps/standalone/src/office/info/UpdateSection.tsx",
+      "sha256": "72e278583137b40fab75b2b4e442a2093922a8e350d30ca096480fd97c510552"
+    },
+    {
+      "path": "apps/standalone/src/office/org/OrgProfilePage.tsx",
+      "sha256": "f88687a7dca44c50926060c787ac156d85b428cd15b17bca9d92d8a27fb4857e"
+    },
+    {
+      "path": "apps/standalone/src/office/scanner/office-scanner.css",
+      "sha256": "0e77e08cc5dbf1846e9c342708cc2fd0e1e5cb2abfa9e9d6da1604605808fb21"
+    },
+    {
+      "path": "apps/standalone/src/office/sscc/SsccPage.tsx",
+      "sha256": "78bfd326eab38493f35c4f5769c116cefd37d8ad721b706342d778292a2b0dd5"
+    },
+    {
+      "path": "apps/standalone/test/about-page.test.tsx",
+      "sha256": "fd3eb26494c54df91a6bf31b6f12afe5b9faf2576c3dd049715d84b595de8e7e"
+    },
+    {
+      "path": "apps/standalone/test/harness/office-review/data.ts",
+      "sha256": "756ea4af10e37fc7bf1e113865053a4a887a2416207102788c61c7837705cc70"
+    },
+    {
+      "path": "apps/standalone/test/harness/office-review/main.tsx",
+      "sha256": "c6355b3358f42fb072c38822fdc8e14f3ac8af08f9807f388a18e064b28c2ad1"
+    },
+    {
+      "path": "apps/standalone/test/office-list-layout.test.ts",
+      "sha256": "1d4d2f8aece24b33d3297be0f30901e9e97dd8f4e375e72b613b20a2b9d313a0"
+    },
+    {
+      "path": "apps/standalone/test/office-mobile-header.test.tsx",
+      "sha256": "de07a504e828b9ea7e9de4ec395ea930fbcf82b3fc5987de2cf57d4f0107462a"
+    },
+    {
+      "path": "apps/standalone/test/scanner-selftest-office.test.tsx",
+      "sha256": "0ec92575336179833b7b197b616159a24bd251e0b4a70c974cba1efc864e324e"
+    },
+    {
+      "path": "packages/ui/src/components.css",
+      "sha256": "9da5202e98f5d80483bedf1d70f45add5b54b0056e173091123a036ec692ce22"
+    },
+    {
+      "path": "packages/ui/src/components/DefinitionGrid.tsx",
+      "sha256": "3b069691d6d8ca38953667525413c796d9ee609fa186218c31cf275c14f1c9ee"
+    },
+    {
+      "path": "packages/ui/test/components.test.tsx",
+      "sha256": "b49b4f942ff491c341e5b785efb2392a913cdbbfed9a3d80e2913da9f4f5ba3d"
+    }
+  ]
+}

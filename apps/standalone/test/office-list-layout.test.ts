@@ -205,9 +205,7 @@ describe("the segmented control", () => {
 
 describe("the destructive button and the field error", () => {
   it("takes the label colour that pairs with the solid error fill, not a literal white", () => {
-    expect(kitDeclarations(".mk-kit-2026")).toContain(
-      "--mk-btn-destructive-fg: var(--fg-on-err-solid)",
-    );
+    expect(kitDeclarations(".mk-kit-2026")).toContain("--mk-btn-destructive-fg: var(--onerr)");
   });
 
   it("draws a wrong field with a 2 px border and opens its message with the word from i18n", () => {
