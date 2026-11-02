@@ -1,0 +1,154 @@
+[
+  {
+    "name": "newshift",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "setup",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "scanner",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "signin",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "hub",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "work",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "exceptions",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "close",
+    "theme": "dark",
+    "alerts": [
+      {
+        "text": "Смену пока не закрытьВ открытом коробе 5 шт. Сначала закройте его или очистите в",
+        "align": "center",
+        "icon": "24px",
+        "title": "20px",
+        "body": "18px"
+      }
+    ],
+    "small": []
+  },
+  {
+    "name": "closed",
+    "theme": "dark",
+    "alerts": [
+      {
+        "text": "Ваша часть смены № 12 закрытаХост не принял закрытие вашей части. Откройте «Очер",
+        "align": "center",
+        "icon": "24px",
+        "title": "20px",
+        "body": "18px"
+      }
+    ],
+    "small": []
+  },
+  {
+    "name": "history",
+    "theme": "dark",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "newshift",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "setup",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "scanner",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "signin",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "hub",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "work",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "exceptions",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  },
+  {
+    "name": "close",
+    "theme": "light",
+    "alerts": [
+      {
+        "text": "Смену пока не закрытьВ открытом коробе 5 шт. Сначала закройте его или очистите в",
+        "align": "center",
+        "icon": "24px",
+        "title": "20px",
+        "body": "18px"
+      }
+    ],
+    "small": []
+  },
+  {
+    "name": "closed",
+    "theme": "light",
+    "alerts": [
+      {
+        "text": "Ваша часть смены № 12 закрытаХост не принял закрытие вашей части. Откройте «Очер",
+        "align": "center",
+        "icon": "24px",
+        "title": "20px",
+        "body": "18px"
+      }
+    ],
+    "small": []
+  },
+  {
+    "name": "history",
+    "theme": "light",
+    "alerts": [],
+    "small": []
+  }
+]
