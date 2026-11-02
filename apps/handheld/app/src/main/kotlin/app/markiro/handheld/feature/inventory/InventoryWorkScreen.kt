@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
@@ -40,7 +41,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
@@ -89,7 +89,6 @@ fun InventoryWorkScreen(state: InventoryWorkUi, cb: InventoryWorkCallbacks) {
     var menu by remember { mutableStateOf(false) }
     var dateSheet by remember { mutableStateOf(false) }
     val numbers = NumberFormat.getIntegerInstance()
-    val scrollContent = LocalDensity.current.fontScale > 1f
     if (state.closed) {
         Column(Modifier.fillMaxSize().background(c.surfacePage)) {
             FullScreenState(
@@ -137,54 +136,57 @@ fun InventoryWorkScreen(state: InventoryWorkUi, cb: InventoryWorkCallbacks) {
                 }
             }
         }
-        Text(
-            state.task?.let { it.productPrintName ?: it.productName } ?: "",
-            style = t.strong.copy(fontSize = 16.sp, lineHeight = 22.sp),
-            color = c.fg1,
-            modifier = Modifier.fillMaxWidth().padding(start = MarkiroSizes.sp4, end = MarkiroSizes.sp4, bottom = MarkiroSizes.sp2),
-        )
-        state.activeDate?.let { date ->
-            Box(Modifier.padding(horizontal = MarkiroSizes.sp4).heightIn(min = 48.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).clickable { dateSheet = true }.padding(MarkiroSizes.sp2), contentAlignment = Alignment.CenterStart) {
-                MarkiroChip(stringResource(R.string.inventory_active_date, civilDate(date)), Tone.Info)
-            }
-        }
-        Column(if (scrollContent) Modifier.weight(1f).verticalScroll(rememberScrollState()) else Modifier.weight(1f)) {
-            LastZone(state.last, if (scrollContent) Modifier.heightIn(min = 104.dp) else Modifier.weight(0.4f))
-            FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
-                horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4),
-                verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
-            ) {
-                Counter(
-                    stringResource(R.string.inventory_verified),
-                    stringResource(R.string.inventory_of, numbers.format(state.progress.verified), numbers.format(state.expectedCount)),
-                )
-                Counter(stringResource(R.string.inventory_this_terminal), numbers.format(state.progress.thisTerminal))
-                Counter(
-                    stringResource(R.string.inventory_discrepancies),
-                    numbers.format(state.progress.discrepancies),
-                    if (state.progress.discrepancies > 0) Tone.Warn else Tone.Neutral,
-                )
-            }
-            if (state.progress.protected > 0 || state.progress.rejected > 0) {
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val viewportHeight = maxHeight
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = viewportHeight)) {
                 Text(
-                    listOfNotNull(
-                        state.progress.protected.takeIf { it > 0 }?.let { stringResource(R.string.inventory_protected_count, it) },
-                        state.progress.rejected.takeIf { it > 0 }?.let { stringResource(R.string.inventory_rejected_count, it) },
-                    ).joinToString(" · "),
-                    style = t.caption,
-                    color = c.fg3,
-                    modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
+                    state.task?.let { it.productPrintName ?: it.productName } ?: "",
+                    style = t.strong.copy(fontSize = 16.sp, lineHeight = 22.sp),
+                    color = c.fg1,
+                    modifier = Modifier.fillMaxWidth().padding(start = MarkiroSizes.sp4, end = MarkiroSizes.sp4, bottom = MarkiroSizes.sp2),
                 )
-            }
-            Column((if (scrollContent) Modifier else Modifier.weight(0.6f)).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
-                if (state.feed.isEmpty()) Text(stringResource(R.string.inventory_feed_empty), style = t.caption, color = c.fg3)
-                state.feed.forEach { event ->
-                    val verdict = InventoryVerdict.fromWire(event.localVerdict)
-                    Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
-                        Text(InventoryTail.ofEvent(event.kind, event.canonicalRaw) ?: "…", style = t.code.copy(fontSize = 14.sp), color = c.fg1)
-                        Text(stringResource(verdict.label()), style = t.caption, color = c.tone(verdict.tone()).fg)
+                state.activeDate?.let { date ->
+                    Box(Modifier.padding(horizontal = MarkiroSizes.sp4).heightIn(min = 48.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).clickable { dateSheet = true }.padding(MarkiroSizes.sp2), contentAlignment = Alignment.CenterStart) {
+                        MarkiroChip(stringResource(R.string.inventory_active_date, civilDate(date)), Tone.Info)
+                    }
+                }
+                LastZone(state.last, Modifier.heightIn(min = maxOf(104.dp, viewportHeight * 0.4f)))
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
+                    horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4),
+                    verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
+                ) {
+                    Counter(
+                        stringResource(R.string.inventory_verified),
+                        stringResource(R.string.inventory_of, numbers.format(state.progress.verified), numbers.format(state.expectedCount)),
+                    )
+                    Counter(stringResource(R.string.inventory_this_terminal), numbers.format(state.progress.thisTerminal))
+                    Counter(
+                        stringResource(R.string.inventory_discrepancies),
+                        numbers.format(state.progress.discrepancies),
+                        if (state.progress.discrepancies > 0) Tone.Warn else Tone.Neutral,
+                    )
+                }
+                if (state.progress.protected > 0 || state.progress.rejected > 0) {
+                    Text(
+                        listOfNotNull(
+                            state.progress.protected.takeIf { it > 0 }?.let { stringResource(R.string.inventory_protected_count, it) },
+                            state.progress.rejected.takeIf { it > 0 }?.let { stringResource(R.string.inventory_rejected_count, it) },
+                        ).joinToString(" · "),
+                        style = t.caption,
+                        color = c.fg3,
+                        modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
+                    )
+                }
+                Column(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
+                    if (state.feed.isEmpty()) Text(stringResource(R.string.inventory_feed_empty), style = t.caption, color = c.fg3)
+                    state.feed.forEach { event ->
+                        val verdict = InventoryVerdict.fromWire(event.localVerdict)
+                        Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
+                            Text(InventoryTail.ofEvent(event.kind, event.canonicalRaw) ?: "…", style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+                            Text(stringResource(verdict.label()), style = t.caption, color = c.tone(verdict.tone()).fg)
+                        }
                     }
                 }
             }

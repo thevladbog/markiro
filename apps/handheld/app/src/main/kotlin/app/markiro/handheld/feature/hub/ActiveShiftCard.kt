@@ -61,7 +61,7 @@ internal fun ActiveShiftCard(active: HubActiveShift, onContinue: () -> Unit) {
         }
         Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
             Text(
-                stringResource(if (active.shared) R.string.work_shift_total else if (active.summaryAt == null) R.string.hub_active_shift_local else R.string.close_summary_accepted),
+                stringResource(if (active.shared) R.string.work_shift_total else R.string.hub_active_shift_local),
                 style = t.caption, color = c.fg3,
             )
             FlowRow(

@@ -105,4 +105,17 @@ class HostLinkHubTest {
         compose.onNodeWithText("Привязать заново").performClick()
         assertEquals(1, repaired)
     }
+    @Test fun onlineQuarantineShowsRefusedCountBeforeOpeningDetails() {
+        show(HubUi(hostMode = true, reachable = true, hostLink = HostLinkStatus.Online, queue = 0, hostQuarantined = 7))
+        compose.onNodeWithText("7").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Связь и очередь").performClick()
+        compose.onNodeWithText("Очередь хоста: ждут 0, отклонено 7").assertIsDisplayed()
+    }
+
+    @Test fun offlineWarningStillShowsPendingRatherThanRefusedCount() {
+        show(HubUi(hostMode = true, hostLink = HostLinkStatus.Offline, queue = 3, hostQuarantined = 7))
+        compose.onNodeWithText("3").assertIsDisplayed()
+        compose.onNodeWithText("7").assertDoesNotExist()
+    }
+
 }

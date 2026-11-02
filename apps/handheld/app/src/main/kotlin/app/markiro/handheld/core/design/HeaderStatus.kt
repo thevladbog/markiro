@@ -42,10 +42,12 @@ import app.markiro.handheld.R
 
 /** Routine connectivity occupies one header target; details and recovery remain one tap away. */
 @Composable
-fun HeaderStatus(items: List<StatusItem>, tone: Tone, pending: Int = 0, actions: List<StateAction> = emptyList()) {
+fun HeaderStatus(items: List<StatusItem>, tone: Tone, pending: Int = 0, actions: List<StateAction> = emptyList(), refused: Int = 0) {
     val c = MarkiroTheme.colors
     val title = stringResource(R.string.header_status_title)
     val summary = items.joinToString(". ") { it.label }
+    val warning = items.firstOrNull { it.tone == Tone.Warn }
+    val count = if (tone == Tone.Warn && items.firstOrNull()?.tone == Tone.Ok && refused > 0) refused else pending
     var open by remember { mutableStateOf(false) }
     Row(
         Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp).clip(RoundedCornerShape(MarkiroSizes.radius))
@@ -65,11 +67,11 @@ fun HeaderStatus(items: List<StatusItem>, tone: Tone, pending: Int = 0, actions:
         } else {
             val icon = when (tone) {
                 Tone.Err -> Icons.Outlined.ErrorOutline
-                Tone.Warn -> items.firstOrNull()?.icon ?: Icons.Outlined.Sync
+                Tone.Warn -> warning?.icon ?: items.firstOrNull()?.icon ?: Icons.Outlined.Sync
                 else -> Icons.Outlined.Sync
             }
             Icon(icon, null, tint = c.tone(tone).fg, modifier = Modifier.size(20.dp))
-            if (pending > 0) Text(pending.toString(), style = MarkiroTheme.type.code.copy(fontSize = 13.sp, lineHeight = 18.sp), color = c.tone(tone).fg)
+            if (count > 0) Text(count.toString(), style = MarkiroTheme.type.code.copy(fontSize = 13.sp, lineHeight = 18.sp), color = c.tone(tone).fg)
         }
     }
     if (open) AlertDialog(

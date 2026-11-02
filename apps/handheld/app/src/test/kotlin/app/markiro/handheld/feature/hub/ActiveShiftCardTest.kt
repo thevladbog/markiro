@@ -59,7 +59,7 @@ class ActiveShiftCardTest {
         compose.onNodeWithText("${format.format(1240)} / ${format.format(3000)}").assertIsDisplayed()
         compose.onNodeWithText("41 %").assertIsDisplayed()
         compose.onNodeWithText("данные на", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("На этом ТСД").assertDoesNotExist()
+        compose.onNodeWithText("На этом ТСД").assertIsDisplayed()
         compose.onNode(progress, useUnmergedTree = true).assert(SemanticsMatcher.expectValue(
             SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(1240f / 3000, 0f..1f),
         ))

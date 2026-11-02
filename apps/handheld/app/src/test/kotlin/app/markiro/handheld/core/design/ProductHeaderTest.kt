@@ -57,7 +57,7 @@ class ProductHeaderTest {
         }
         verifyHeader(scale)
         compose.onNodeWithText(if (aggregation) "Короб 1 · 7 / 12" else "Ожидание скана…").assertIsDisplayed()
-        if (aggregation) compose.onNodeWithText("Всего").assertIsDisplayed()
+        if (aggregation) compose.onNodeWithText("Всего").performScrollTo().assertIsDisplayed()
     }
 
     private fun verifyHeader(scale: Float) {
@@ -109,4 +109,40 @@ class ProductHeaderTest {
         compose.onNodeWithContentDescription("Маркиро").assertDoesNotExist()
         compose.onNodeWithText("Добавить принтер").assertIsDisplayed()
     }
+    @Test @Config(qualifiers = "ru-w320dp-h320dp-mdpi")
+    fun longWorkIdentityAndWarningsScrollWhileActionsStayAvailable() {
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                MarkiroTheme {
+                    WorkScreen(WorkUi(shift = ShiftEntityFixtures.bundled("scroll").copy(productPrintName = product.repeat(3), mode = "aggregation", ssccIssuerPrefix = null, ssccIssuerProblem = "org_gln_missing"),
+                        last = null, total = 128, plan = 1200, thisTerminal = 128, errors = 0, duplicates = 0,
+                        feed = emptyList(), sync = SyncState(pending = 0), reachable = true, team = null), WorkCallbacks())
+                }
+            }
+        }
+        compose.onNodeWithText("Всего").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("В организации не задан GLN", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(product.repeat(3)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Связь и очередь").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithContentDescription("Ещё").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test @Config(qualifiers = "ru-w320dp-h320dp-mdpi")
+    fun longInventoryIdentityAndDateScrollWhileActionsStayAvailable() {
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                MarkiroTheme {
+                    InventoryWorkScreen(InventoryWorkUi(task = InventoryFixtures.task("scroll").copy(productPrintName = product.repeat(3)),
+                        expectedCount = 1200, activeDate = "2026-08-20", last = null,
+                        progress = InventoryProgress(128, 0, 0, 128, 0), feed = emptyList(), sync = InventorySyncState(pending = 0), reachable = true, held = null, closed = false), InventoryWorkCallbacks())
+                }
+            }
+        }
+        compose.onNodeWithText("Проверено").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Дата 20.08.2026").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(product.repeat(3)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Связь и очередь").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithContentDescription("Ещё").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+    }
+
 }

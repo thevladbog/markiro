@@ -147,7 +147,7 @@ fun HubScreen(
     )
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         AppBar(stringResource(R.string.hub_work_title), showBrand = true, actions = {
-            HeaderStatus(statusItems, statusTone, state.queue, statusActions)
+            HeaderStatus(statusItems, statusTone, state.queue, statusActions, refused = if (state.hostMode) state.hostQuarantined else 0)
             IconAction(Icons.Outlined.Settings, stringResource(R.string.hub_tile_settings), onClick = { onTile(HubTile.SETTINGS) })
         })
         ScreenColumn(modifier = Modifier.weight(1f), padding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
