@@ -171,7 +171,7 @@ describe("the template import dialog", () => {
     chooseValue("Формат кода", "json");
     paste("JSON шаблона", "{");
     fireEvent.click(button("Проверить код"));
-    expect(screen.getByRole("alert").textContent).toMatch(/^.Код не разобран: invalid JSON: /);
+    expect(screen.getByRole("alert").textContent).toMatch(/^Код не разобран: invalid JSON: /);
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
 
     paste("JSON шаблона", JSON.stringify({ ...JSON_SPEC, elements: [{ kind: "text", id: "a" }] }));
@@ -189,7 +189,7 @@ describe("the template import dialog", () => {
     );
     fireEvent.click(button("Проверить код"));
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Один из элементов больше этикетки. Исправьте код или разрешение.",
+      "Один из элементов больше этикетки. Исправьте код или разрешение.",
     );
   });
 

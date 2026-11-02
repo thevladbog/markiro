@@ -8,6 +8,7 @@ const MANUAL = "__manual__";
 
 export interface ComPortFieldProps {
   /** The field's name (the select's label, or the text field's when no list is there). */
+  size?: "md" | "floor";
   label: string;
   value: string;
   onChange: (port: string) => void;
@@ -22,7 +23,14 @@ export interface ComPortFieldProps {
  * typed when the list is empty, did not come, or the port is not on it (a port the system does not
  * list yet, a virtual one). The list is asked for by the screen; this only shows it.
  */
-export function ComPortField({ label, value, onChange, ports, manualEntry }: ComPortFieldProps) {
+export function ComPortField({
+  label,
+  value,
+  onChange,
+  ports,
+  manualEntry,
+  size = "floor",
+}: ComPortFieldProps) {
   const { t } = useTranslation();
   const [manual, setManual] = useState(false);
   const listed = ports ?? [];
@@ -31,7 +39,7 @@ export function ComPortField({ label, value, onChange, ports, manualEntry }: Com
   const field = (text: string) => (
     <Input
       {...manualEntry}
-      size="floor"
+      size={size}
       label={text}
       value={value}
       onChange={(event) => onChange(event.target.value)}
@@ -43,7 +51,7 @@ export function ComPortField({ label, value, onChange, ports, manualEntry }: Com
       <Select
         custom
         searchable
-        size="floor"
+        size={size}
         label={label}
         value={chosen}
         searchLabel={t("floor.setup.comPort.searchLabel")}

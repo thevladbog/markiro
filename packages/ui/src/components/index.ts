@@ -124,3 +124,6 @@ export type { RadioCardProps } from "./RadioCard.js";
 
 export { RowActionMenu } from "./RowActionMenu.js";
 export type { RowActionItem, RowActionMenuProps } from "./RowActionMenu.js";
+
+export { UiSymbol } from "./UiSymbol.js";
+export type { UiSymbolName } from "./UiSymbol.js";

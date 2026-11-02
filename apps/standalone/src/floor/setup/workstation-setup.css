@@ -1107,7 +1107,7 @@ section.workstation-setup {
     gap: 4px;
   }
 
-  .workstation-setup__footer,
+  .workstation-setup:not(.workstation-setup--office) > .workstation-setup__footer,
   .workstation-setup__footer .setup-footer__back,
   .workstation-setup__footer .floor-primary {
     height: 72px !important;

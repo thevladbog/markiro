@@ -59,6 +59,8 @@ import { ShiftEditBody, type ShiftEditStatus } from "./ShiftEditor.js";
 import { ShiftExports } from "./ShiftExports.js";
 import { ShiftScans } from "./ShiftScans.js";
 import { PalletCountTag } from "./PalletCountTag.js";
+import { ShiftSummaryMetrics, ShiftDeviceContributions } from "./ShiftSummaryMetrics.js";
+import "./shift-summary.css";
 import { ShiftMarks } from "./ShiftMarks.js";
 import { OVERVIEW_POLL_MS } from "../overview/use-overview-data.js";
 import { isSharedShift } from "./participation.js";
@@ -229,7 +231,13 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     if (editStatus.dirty) setAsking("cancel");
     else setEditing(false);
   };
-  const panel = (title: string, body: ReactNode, footer?: ReactNode) => (
+  const panel = (
+    title: ReactNode,
+    body: ReactNode,
+    footer?: ReactNode,
+    headerActions?: ReactNode,
+    titleExtra?: ReactNode,
+  ) => (
     <>
       <SidePanel
         open
@@ -240,6 +248,8 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         onClose={requestClose}
         busy={editing && editStatus.sending}
         footer={footer}
+        headerActions={headerActions}
+        titleExtra={titleExtra}
       >
         {body}
       </SidePanel>
@@ -354,50 +364,54 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     );
   }
 
+  const headerActions = (
+    <RowActions className="shift-drawer__actions">
+      {editable && (
+        <Button
+          variant="secondary"
+          aria-label={t("office.shiftCard.editNamed", { number: current.number })}
+          onClick={() => {
+            setNotice(null);
+            setEditStatus({ dirty: false, submitDisabled: true, sending: false });
+            setEditing(true);
+          }}
+        >
+          {t("office.shiftCard.edit")}
+        </Button>
+      )}
+      {current.status !== "planned" && (
+        <Button variant="secondary" onClick={() => setDialog("export")}>
+          {t("office.shifts.export")}
+        </Button>
+      )}
+      {canPlan && current.status === "active" && (
+        <Button variant="secondary" onClick={() => setDialog("close")}>
+          {t(isSharedShift(current) ? "office.shifts.closeAll" : "office.shifts.close")}
+        </Button>
+      )}
+      {canPlan && current.status === "closed" && current.closeReasonMissing === true && (
+        <Button variant="secondary" onClick={() => setDialog("reason")}>
+          {t("office.shifts.supplyReason")}
+        </Button>
+      )}
+      {current.status !== "closed" && (
+        <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
+          {t("office.shiftCard.taskForm")}
+        </Button>
+      )}
+      {current.status !== "planned" && placards && (
+        <Button variant="secondary" onClick={() => setForm({ kind: "placards" })}>
+          {t("office.shiftCard.placards")}
+        </Button>
+      )}
+    </RowActions>
+  );
+
   return panel(
     t("office.shiftCard.title", { number: current.number }),
     <div className="office-stack">
-      <ShiftStatusLine shift={current} demo={demo} />
-      <RowActions>
-        {editable && (
-          <Button
-            variant="secondary"
-            aria-label={t("office.shiftCard.editNamed", { number: current.number })}
-            onClick={() => {
-              setNotice(null);
-              setEditStatus({ dirty: false, submitDisabled: true, sending: false });
-              setEditing(true);
-            }}
-          >
-            {t("office.shiftCard.edit")}
-          </Button>
-        )}
-        {current.status !== "planned" && (
-          <Button variant="secondary" onClick={() => setDialog("export")}>
-            {t("office.shifts.export")}
-          </Button>
-        )}
-        {canPlan && current.status === "active" && (
-          <Button variant="secondary" onClick={() => setDialog("close")}>
-            {t(isSharedShift(current) ? "office.shifts.closeAll" : "office.shifts.close")}
-          </Button>
-        )}
-        {canPlan && current.status === "closed" && current.closeReasonMissing === true && (
-          <Button variant="secondary" onClick={() => setDialog("reason")}>
-            {t("office.shifts.supplyReason")}
-          </Button>
-        )}
-        {current.status !== "closed" && (
-          <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
-            {t("office.shiftCard.taskForm")}
-          </Button>
-        )}
-        {current.status !== "planned" && placards && (
-          <Button variant="secondary" onClick={() => setForm({ kind: "placards" })}>
-            {t("office.shiftCard.placards")}
-          </Button>
-        )}
-      </RowActions>
+      <ShiftStatusLine shift={current} demo={demo} showPhase={false} />
+
       {notice && (
         <Alert tone="ok" id={noticeId} tabIndex={-1}>
           {notice}
@@ -511,6 +525,12 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         />
       )}
     </div>,
+    undefined,
+    headerActions,
+    <StatusChip
+      phase={STATUS_PHASE[current.status]}
+      label={t(`office.shifts.statuses.${current.status}`)}
+    />,
   );
 }
 
@@ -539,160 +559,176 @@ function ShiftSummary({
     current.validationPrint?.mode === "duplicate_dm" ? current.validationPrint : null;
   return (
     <>
-      <DefinitionGrid
-        items={[
-          {
-            id: "product",
-            term: t("office.shifts.table.product"),
-            description: recordLabel("product", products, current.productId, t),
-          },
-          {
-            id: "plannedDate",
-            term: t("office.shifts.table.plannedDate"),
-            description: civilDateLabel(current.plannedDate),
-            mono: true,
-          },
-          {
-            id: "productionDate",
-            term: t("office.shifts.table.productionDate"),
-            description: civilDateLabel(current.productionDate),
-            mono: true,
-          },
-          {
-            id: "line",
-            term: t("office.shifts.table.line"),
-            description: recordLabel("line", lines, current.lineId, t),
-          },
-          {
-            id: "counterparty",
-            term: t("office.shiftCard.counterparty"),
-            description:
-              current.counterpartyId === null
-                ? t("office.common.none")
-                : recordLabel("counterparty", counterparties, current.counterpartyId, t),
-          },
-          {
-            id: "mode",
-            term: t("office.shifts.table.mode"),
-            description: t(`office.shifts.modes.${current.mode}`),
-          },
-          // The duplicate print is a validation shift's alone (plan РЕЖ part B).
-          ...(validation
-            ? [
-                {
-                  id: "duplicate",
-                  term: t("office.shiftCard.duplicate"),
-                  description:
-                    duplicate === null
-                      ? t("office.shiftCard.duplicateOff")
-                      : t(
-                          duplicate.verification === "required"
-                            ? "office.shiftCard.duplicateRequired"
-                            : "office.shiftCard.duplicateOptional",
-                        ),
-                },
-              ]
-            : []),
-          {
-            id: "plannedQty",
-            term: t("office.shifts.table.plannedQty"),
-            description:
-              current.plannedQty === null
-                ? t("office.common.none")
-                : UNITS.format(current.plannedQty),
-            mono: true,
-          },
-          // A validation shift has no boxes and no pallets (plan РЕЖ, Р11): the capacity it
-          // keeps (Р4) means nothing to it.
-          ...(validation
-            ? []
-            : [
-                {
-                  id: "boxCapacity",
-                  term: t("office.shiftCard.boxCapacity"),
-                  description: UNITS.format(current.boxCapacity),
-                  mono: true,
-                },
-                {
-                  id: "pallets",
-                  term: t("office.shiftCard.palletsFact"),
-                  description:
-                    current.palletBoxCapacity === null
-                      ? t("office.shiftCard.noPallets")
-                      : t("office.shiftCard.palletCapacity", {
-                          boxes: UNITS.format(current.palletBoxCapacity),
-                        }),
-                },
-              ]),
-          // The templates the shift prints with, frozen at its opening (a validation shift
-          // prints no box label; its duplicate template is shown above with the flag).
-          ...(validation
-            ? duplicate === null
+      {current.status !== "planned" && (
+        <>
+          <header className="shift-summary__product">
+            <h2>{recordLabel("product", products, current.productId, t)}</h2>
+            <div>
+              <span>{t("office.shifts.table.productionDate")}</span>
+              <strong>{civilDateLabel(current.productionDate)}</strong>
+            </div>
+          </header>
+          <ShiftSummaryMetrics shift={current} />
+          <ShiftDeviceContributions shift={current} />
+        </>
+      )}
+      <details className="shift-summary__details" open={current.status === "planned"}>
+        <summary>{t("office.shiftCard.dashboard.parameters")}</summary>
+        <DefinitionGrid
+          items={[
+            {
+              id: "product",
+              term: t("office.shifts.table.product"),
+              description: recordLabel("product", products, current.productId, t),
+            },
+            {
+              id: "plannedDate",
+              term: t("office.shifts.table.plannedDate"),
+              description: civilDateLabel(current.plannedDate),
+              mono: true,
+            },
+            {
+              id: "productionDate",
+              term: t("office.shifts.table.productionDate"),
+              description: civilDateLabel(current.productionDate),
+              mono: true,
+            },
+            {
+              id: "line",
+              term: t("office.shifts.table.line"),
+              description: recordLabel("line", lines, current.lineId, t),
+            },
+            {
+              id: "counterparty",
+              term: t("office.shiftCard.counterparty"),
+              description:
+                current.counterpartyId === null
+                  ? t("office.common.none")
+                  : recordLabel("counterparty", counterparties, current.counterpartyId, t),
+            },
+            {
+              id: "mode",
+              term: t("office.shifts.table.mode"),
+              description: t(`office.shifts.modes.${current.mode}`),
+            },
+            // The duplicate print is a validation shift's alone (plan РЕЖ part B).
+            ...(validation
+              ? [
+                  {
+                    id: "duplicate",
+                    term: t("office.shiftCard.duplicate"),
+                    description:
+                      duplicate === null
+                        ? t("office.shiftCard.duplicateOff")
+                        : t(
+                            duplicate.verification === "required"
+                              ? "office.shiftCard.duplicateRequired"
+                              : "office.shiftCard.duplicateOptional",
+                          ),
+                  },
+                ]
+              : []),
+            {
+              id: "plannedQty",
+              term: t("office.shifts.table.plannedQty"),
+              description:
+                current.plannedQty === null
+                  ? t("office.common.none")
+                  : UNITS.format(current.plannedQty),
+              mono: true,
+            },
+            // A validation shift has no boxes and no pallets (plan РЕЖ, Р11): the capacity it
+            // keeps (Р4) means nothing to it.
+            ...(validation
               ? []
               : [
                   {
-                    id: "duplicateTemplate",
-                    term: t("office.shiftCard.duplicateTemplate"),
-                    description: templateName(templates, duplicate.templateId, t),
+                    id: "boxCapacity",
+                    term: t("office.shiftCard.boxCapacity"),
+                    description: UNITS.format(current.boxCapacity),
+                    mono: true,
                   },
-                ]
-            : [
-                {
-                  id: "boxTemplate",
-                  term: t("office.shiftCard.boxTemplate"),
-                  description: templateName(templates, current.boxTemplateId, t),
-                },
-                ...(current.palletTemplateId === null
-                  ? []
-                  : [
-                      {
-                        id: "palletTemplate",
-                        term: t("office.shiftCard.palletTemplate"),
-                        description: templateName(templates, current.palletTemplateId, t),
-                      },
-                      {
-                        id: "palletSheet",
-                        term: t("office.shiftCard.palletSheet"),
-                        description:
-                          current.palletSheetTemplateId === null
-                            ? t("office.shiftCard.defaultSheet")
-                            : (sheets?.sheets.find(
-                                (sheet) => sheet.id === current.palletSheetTemplateId,
-                              )?.name ??
-                              t("office.shiftCard.templateNamed", {
-                                id: current.palletSheetTemplateId.slice(0, 8),
-                              })),
-                      },
-                    ]),
-              ]),
-          {
-            id: "output",
-            term: t("office.shifts.table.output"),
-            description: shiftOutput(current, t),
-            mono: true,
-          },
-          {
-            id: "openedAt",
-            term: t("office.shiftCard.openedAt"),
-            description: at(current.openedAt),
-          },
-          {
-            id: "closedAt",
-            term: t("office.shiftCard.closedAt"),
-            description: at(current.closedAt),
-          },
-        ]}
-      />
+                  {
+                    id: "pallets",
+                    term: t("office.shiftCard.palletsFact"),
+                    description:
+                      current.palletBoxCapacity === null
+                        ? t("office.shiftCard.noPallets")
+                        : t("office.shiftCard.palletCapacity", {
+                            boxes: UNITS.format(current.palletBoxCapacity),
+                          }),
+                  },
+                ]),
+            // The templates the shift prints with, frozen at its opening (a validation shift
+            // prints no box label; its duplicate template is shown above with the flag).
+            ...(validation
+              ? duplicate === null
+                ? []
+                : [
+                    {
+                      id: "duplicateTemplate",
+                      term: t("office.shiftCard.duplicateTemplate"),
+                      description: templateName(templates, duplicate.templateId, t),
+                    },
+                  ]
+              : [
+                  {
+                    id: "boxTemplate",
+                    term: t("office.shiftCard.boxTemplate"),
+                    description: templateName(templates, current.boxTemplateId, t),
+                  },
+                  ...(current.palletTemplateId === null
+                    ? []
+                    : [
+                        {
+                          id: "palletTemplate",
+                          term: t("office.shiftCard.palletTemplate"),
+                          description: templateName(templates, current.palletTemplateId, t),
+                        },
+                        {
+                          id: "palletSheet",
+                          term: t("office.shiftCard.palletSheet"),
+                          description:
+                            current.palletSheetTemplateId === null
+                              ? t("office.shiftCard.defaultSheet")
+                              : (sheets?.sheets.find(
+                                  (sheet) => sheet.id === current.palletSheetTemplateId,
+                                )?.name ??
+                                t("office.shiftCard.templateNamed", {
+                                  id: current.palletSheetTemplateId.slice(0, 8),
+                                })),
+                        },
+                      ]),
+                ]),
+            {
+              id: "output",
+              term: t("office.shifts.table.output"),
+              description: shiftOutput(current, t),
+              mono: true,
+            },
+            {
+              id: "openedAt",
+              term: t("office.shiftCard.openedAt"),
+              description: at(current.openedAt),
+            },
+            {
+              id: "closedAt",
+              term: t("office.shiftCard.closedAt"),
+              description: at(current.closedAt),
+            },
+          ]}
+        />
+      </details>
       {current.status !== "planned" && current.totals.unitLabels !== undefined && (
         <UnitLabelControl figures={current.totals.unitLabels} />
       )}
       {current.status !== "planned" && (
-        <section className="shift-card__section" aria-labelledby={figuresId}>
-          <h2 id={figuresId}>{t("office.shiftCard.figures")}</h2>
+        <details className="shift-card__section shift-summary__details">
+          <summary id={figuresId}>{t("office.shiftCard.figures")}</summary>
           <Card>
             <ShiftTotalsBody shift={current} />
           </Card>
-        </section>
+        </details>
       )}
     </>
   );
@@ -711,14 +747,24 @@ function templateName(
 }
 
 /** The shift's status and its marks, as the list's status cell shows them. */
-function ShiftStatusLine({ shift, demo }: { shift: OfficeShift; demo: boolean }) {
+function ShiftStatusLine({
+  shift,
+  demo,
+  showPhase = true,
+}: {
+  shift: OfficeShift;
+  demo: boolean;
+  showPhase?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="shift-cell">
-      <StatusChip
-        phase={STATUS_PHASE[shift.status]}
-        label={t(`office.shifts.statuses.${shift.status}`)}
-      />
+      {showPhase && (
+        <StatusChip
+          phase={STATUS_PHASE[shift.status]}
+          label={t(`office.shifts.statuses.${shift.status}`)}
+        />
+      )}
       {demo && <DemoBadge />}
       {/* The working day, in the header of every tab (beta 3); the production date is in the summary. */}
       <span className="shift-cell__quiet">
@@ -902,6 +948,8 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
     },
     {
       key: "forms",
+      stickyEnd: true,
+      minWidth: 200,
       title: t("office.shiftCard.forms"),
       render: (box) => {
         const label = box.sscc === null ? t("office.shiftCard.noSscc") : ssccText(box.sscc);
@@ -1002,23 +1050,25 @@ function ShiftPallets({ shift, at, onForm }: SectionProps) {
       key: "closedAt",
       title: t("office.shiftCard.pallets.closedAt"),
       wrap: true,
-      minWidth: 150,
+      minWidth: 132,
       render: (pallet) => at(pallet.closedAt),
     },
     {
       key: "state",
       title: t("office.shiftCard.pallets.state"),
       wrap: true,
-      minWidth: 180,
+      minWidth: 138,
       render: (pallet) => <PackStateCell pack={pallet} kind="pallet" at={at} />,
     },
     {
       key: "forms",
+      stickyEnd: true,
+      minWidth: 200,
       title: t("office.shiftCard.forms"),
       render: (pallet) => {
         const label = pallet.sscc === null ? t("office.shiftCard.noSscc") : ssccText(pallet.sscc);
         return (
-          <RowActions>
+          <RowActions className="shift-pack-actions">
             <Button
               variant="secondary"
               size="compact"

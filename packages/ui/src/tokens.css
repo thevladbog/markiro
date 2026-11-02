@@ -1,6 +1,9 @@
 /* Маркиро — цвет. Бренд = монохром; цвет зарезервирован за статусами. */
 :root,
 [data-theme="light"] {
+  --primarypressed: #3b3a3e;
+  --secondarypressed: #f0efea;
+  --dangerpressed: #8a1e16;
   /* base */
   --ink: #17161a;
   --paper: #fafaf8;
@@ -137,6 +140,9 @@
 }
 
 [data-theme="dark"] {
+  --primarypressed: #d5d5d4;
+  --secondarypressed: #232228;
+  --dangerpressed: #ff8075;
   --surface-page: #131216;
   --surface-card: #1c1b21;
   --surface-panel: #232228;

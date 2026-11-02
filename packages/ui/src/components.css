@@ -1194,3 +1194,81 @@
 .mk-kit-2026 .mk-input--error {
   --mk-input-border: 2px solid var(--err-solid);
 }
+
+/* Kit 2026: shared office geometry, independent of the floor's touch controls. */
+.mk-side-panel__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mk-overlay-close {
+  flex-shrink: 0;
+}
+.mk-btn > svg {
+  flex-shrink: 0;
+}
+.mk-btn__label {
+  min-width: 0;
+}
+.mk-tag__symbol {
+  display: none;
+}
+.mk-kit-2026 .mk-tag__symbol {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.mk-kit-2026 .mk-tag__legacy {
+  display: none;
+}
+.mk-kit-2026 .mk-tag--office .mk-tag__glyph {
+  width: 16px;
+  height: 16px;
+}
+.mk-kit-2026 {
+  --r-3: 24px;
+  --err-solid: var(--err-fg);
+  --mk-btn-destructive-fg: var(--onerr);
+}
+.mk-kit-2026 {
+  --r-compact: 12px;
+}
+.mk-kit-2026 .mk-btn--primary:active:not(:disabled):not([aria-disabled="true"]) {
+  --mk-btn-bg: var(--primarypressed);
+}
+.mk-kit-2026 .mk-btn--secondary:active:not(:disabled):not([aria-disabled="true"]) {
+  --mk-btn-bg: var(--secondarypressed);
+  --mk-btn-border: var(--fg-1);
+}
+.mk-kit-2026 .mk-btn--destructive:active:not(:disabled):not([aria-disabled="true"]) {
+  --mk-btn-bg: var(--dangerpressed);
+}
+@supports (text-box-trim: trim-both) {
+  .mk-kit-2026 .mk-btn__label,
+  .mk-kit-2026 .mk-tag > :last-child {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+  }
+}
+@media (max-width: 640px) {
+  .mk-side-panel__header {
+    flex-wrap: wrap;
+  }
+  .mk-side-panel__header-actions {
+    margin-left: auto;
+  }
+}
+
+.mk-side-panel__title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.mk-kit-2026 .mk-tag {
+  border-radius: 999px;
+  border-color: transparent;
+}

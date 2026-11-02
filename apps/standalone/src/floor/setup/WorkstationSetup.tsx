@@ -85,6 +85,7 @@ const VOLUME_STEP = 10;
 const A4_PREVIEW_FACTOR = 6;
 
 export interface WorkstationSetupProps {
+  presentation?: "floor" | "office";
   local: LocalExecutor;
   hardware: Pick<
     HardwareApi,
@@ -202,9 +203,12 @@ export function WorkstationSetup({
   onBack,
   initialTab = "printer",
   scope = "all",
+  presentation = "floor",
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
   const scannersOnly = scope === "scanners";
+  const office = presentation === "office";
+  const controlSize = office ? "md" : "floor";
   // What the last scan read, for the scanner check (scanners only).
   const [scanCheck, setScanCheck] = useState<ScanCheck | null>(null);
   // The scanner self-test («Проверить сканер»): its code and results outlive a change of tab.
@@ -447,12 +451,19 @@ export function WorkstationSetup({
 
   if (readFailed || draft === null || stored === null) {
     return (
-      <section className="workstation-setup" aria-labelledby="workstation-setup-title">
-        <header className="workstation-setup__header">
-          <h2 id="workstation-setup-title">
-            {t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
-          </h2>
-        </header>
+      <section
+        className={`workstation-setup${office ? " workstation-setup--office" : ""}`}
+        {...(office
+          ? { "aria-label": t("floor.setup.scannerScope.title") }
+          : { "aria-labelledby": "workstation-setup-title" })}
+      >
+        {!office && (
+          <header className="workstation-setup__header">
+            <h2 id="workstation-setup-title">
+              {t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
+            </h2>
+          </header>
+        )}
         <div className="workstation-setup__loading" aria-live="polite">
           {readFailed ? (
             <Alert tone="error" role="presentation">
@@ -463,7 +474,7 @@ export function WorkstationSetup({
           )}
         </div>
         <footer className="workstation-setup__footer">
-          <Button size="floor" variant="secondary" onClick={onBack}>
+          <Button size={controlSize} variant="secondary" onClick={onBack}>
             {t("floor.setup.back")}
           </Button>
         </footer>
@@ -809,7 +820,7 @@ export function WorkstationSetup({
       >
         <Input
           {...manualEntry}
-          size="floor"
+          size={controlSize}
           mono
           inputMode="none"
           label={field.label}
@@ -869,7 +880,7 @@ export function WorkstationSetup({
               <div className="setup-editor__top">
                 <Input
                   {...manualEntry}
-                  size="floor"
+                  size={controlSize}
                   label={t("floor.setup.printers.editor.name")}
                   value={form.name}
                   {...(nameError === undefined ? {} : { error: nameError })}
@@ -913,6 +924,7 @@ export function WorkstationSetup({
                 {serial && (
                   <>
                     <ComPortField
+                      size={controlSize}
                       label={t("floor.setup.printers.editor.serialPort")}
                       value={form.serialPort}
                       ports={serialPorts}
@@ -920,7 +932,7 @@ export function WorkstationSetup({
                       onChange={(serialPort) => set({ serialPort })}
                     />
                     <Button
-                      size="floor"
+                      size={controlSize}
                       variant="secondary"
                       className="setup-printer-connection__wide setup-nowrap"
                       onClick={refreshSerial}
@@ -939,7 +951,7 @@ export function WorkstationSetup({
                   <>
                     <Select
                       custom
-                      size="floor"
+                      size={controlSize}
                       label={t("floor.setup.printers.editor.usbPrinter")}
                       searchable
                       searchLabel={t("floor.setup.printers.editor.usbSearch")}
@@ -957,7 +969,7 @@ export function WorkstationSetup({
                       onValueChange={(usbPrinter) => set({ usbPrinter })}
                     />
                     <Button
-                      size="floor"
+                      size={controlSize}
                       variant="secondary"
                       className="setup-printer-connection__wide setup-nowrap"
                       onClick={refreshUsb}
@@ -973,7 +985,7 @@ export function WorkstationSetup({
                   <div className="setup-editor__summary-row">
                     <span className="setup-editor__chips">
                       <StatusChip
-                        size="floor"
+                        size={office ? "office" : "floor"}
                         phase="none"
                         label={t(
                           form.paper === "a4"
@@ -982,7 +994,7 @@ export function WorkstationSetup({
                         )}
                       />
                       <StatusChip
-                        size="floor"
+                        size={office ? "office" : "floor"}
                         phase="none"
                         label={
                           driver
@@ -990,9 +1002,13 @@ export function WorkstationSetup({
                             : form.language.toUpperCase()
                         }
                       />
-                      <StatusChip size="floor" phase="none" label={`${form.dpi} dpi`} />
+                      <StatusChip
+                        size={office ? "office" : "floor"}
+                        phase="none"
+                        label={`${form.dpi} dpi`}
+                      />
                     </span>
-                    <Button size="floor" variant="secondary" onClick={() => setKeypad(null)}>
+                    <Button size={controlSize} variant="secondary" onClick={() => setKeypad(null)}>
                       {t("floor.setup.printers.editor.change")}
                     </Button>
                   </div>
@@ -1190,7 +1206,7 @@ export function WorkstationSetup({
               </span>
             </div>
             <Button
-              size="floor"
+              size={controlSize}
               variant="secondary"
               onClick={() => {
                 setSubmitted(false);
@@ -1219,13 +1235,13 @@ export function WorkstationSetup({
                           <h3 title={printer.name}>{printer.name}</h3>
                           {tested ? (
                             <StatusChip
-                              size="floor"
+                              size={office ? "office" : "floor"}
                               phase={TEST_CHIP[test.kind].phase}
                               label={t(`floor.setup.printers.testChip.${test.kind}`)}
                             />
                           ) : (
                             <StatusChip
-                              size="floor"
+                              size={office ? "office" : "floor"}
                               phase="none"
                               label={t("floor.setup.printers.notTested")}
                             />
@@ -1237,7 +1253,7 @@ export function WorkstationSetup({
                       </div>
                       <div className="setup-printer-row__actions">
                         <Button
-                          size="floor"
+                          size={controlSize}
                           variant="secondary"
                           icon={<PrintIcon />}
                           aria-label={t("floor.setup.printers.testFor", { name: printer.name })}
@@ -1252,7 +1268,7 @@ export function WorkstationSetup({
                           </span>
                         </Button>
                         <Button
-                          size="floor"
+                          size={controlSize}
                           variant="secondary"
                           icon={<PencilIcon />}
                           aria-label={t("floor.setup.printers.editFor", { name: printer.name })}
@@ -1267,7 +1283,7 @@ export function WorkstationSetup({
                           </span>
                         </Button>
                         <Button
-                          size="floor"
+                          size={controlSize}
                           variant="secondary"
                           className="setup-printer-row__remove"
                           aria-label={t("floor.setup.printers.removeFor", { name: printer.name })}
@@ -1317,7 +1333,7 @@ export function WorkstationSetup({
             <Select
               key={purpose}
               custom
-              size="floor"
+              size={controlSize}
               label={t(`floor.setup.printers.purposes.${purpose}`)}
               value={draft.assignments[purpose] ?? ""}
               options={purposeOptions(purpose)}
@@ -1379,8 +1395,30 @@ export function WorkstationSetup({
     return settled.state === "sent" ? "sent" : "failed";
   };
 
+  const rawScanPanel = (
+    <section
+      className="setup-card setup-card--check"
+      aria-labelledby="setup-scan-check"
+      data-testid="scanner-check"
+    >
+      <h2 id="setup-scan-check" className="setup-card__title">
+        {t("floor.setup.scannerScope.checkTitle")}
+      </h2>
+      <p className="setup-card__hint">{t("floor.setup.scannerScope.checkBody")}</p>
+      <div className="workstation-setup__live" aria-live="polite">
+        {scanCheck !== null && (
+          <Alert tone={scanCheckTone(scanCheck)} role="presentation">
+            {scanCheckText(scanCheck)}
+          </Alert>
+        )}
+      </div>
+    </section>
+  );
+
   const selfTestPanel = (
     <ScannerSelfTest
+      presentation={presentation}
+      additional={office && scannersOnly ? rawScanPanel : undefined}
       state={selfTest}
       printers={draft.printers
         .filter((printer) => printer.paper !== "a4")
@@ -1408,7 +1446,7 @@ export function WorkstationSetup({
               ref={scannersHeading}
               tabIndex={-1}
             >
-              {t("floor.setup.scanners.title")}
+              {t(office ? "office.scannerDesign.connection" : "floor.setup.scanners.title")}
             </h2>
             <span className="setup-printer-list__count" aria-hidden="true">
               {draft.scanners.length}
@@ -1432,12 +1470,17 @@ export function WorkstationSetup({
                   </span>
                 </div>
                 <span aria-live="polite" className="setup-scanner-row__state">
-                  <StatusChip size="floor" wrap phase={state.phase} label={state.text} />
+                  <StatusChip
+                    size={office ? "office" : "floor"}
+                    wrap
+                    phase={state.phase}
+                    label={state.text}
+                  />
                 </span>
                 <Button
-                  size="floor"
+                  size={controlSize}
                   variant="secondary"
-                  icon={<TrashIcon />}
+                  icon={office ? undefined : <TrashIcon />}
                   aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
                   title={t("floor.setup.scanners.remove")}
                   className="setup-scanner-row__remove"
@@ -1462,7 +1505,11 @@ export function WorkstationSetup({
                 {t("floor.setup.scanners.keyboardBody")}
               </span>
             </div>
-            <StatusChip size="floor" phase="none" label={t("floor.setup.scanners.keyboardChip")} />
+            <StatusChip
+              size={office ? "office" : "floor"}
+              phase="none"
+              label={t("floor.setup.scanners.keyboardChip")}
+            />
           </li>
         </ul>
         {draft.scanners.length === 0 && (
@@ -1470,10 +1517,11 @@ export function WorkstationSetup({
         )}
         <div className="setup-scanner-add" role="group" aria-labelledby="setup-scanner-add">
           <h3 id="setup-scanner-add" className="setup-scanner-add__title">
-            {t("floor.setup.scanners.connection")}
+            {t(office ? "office.scannerDesign.comScanners" : "floor.setup.scanners.connection")}
           </h3>
           <div className="setup-scanner-add__fields">
             <ComPortField
+              size={controlSize}
               label={t("floor.setup.scanners.port")}
               value={scanner.port}
               ports={serialPorts}
@@ -1491,9 +1539,9 @@ export function WorkstationSetup({
             >
               <Input
                 {...manualEntry}
-                size="floor"
+                size={controlSize}
                 mono
-                inputMode="none"
+                inputMode={office ? "numeric" : "none"}
                 label={t("floor.setup.scanners.baud")}
                 value={scanner.baud}
                 {...(keypad === "baud" ? { suffix: <KeyboardIcon /> } : {})}
@@ -1502,7 +1550,9 @@ export function WorkstationSetup({
                   setScanner({ ...scanner, baud: event.target.value });
                   setScannerError(null);
                 }}
-                onPointerDown={() => setKeypad("baud")}
+                onPointerDown={() => {
+                  if (!office) setKeypad("baud");
+                }}
                 onPaste={(event: ClipboardEvent<HTMLInputElement>) => {
                   event.preventDefault();
                   const input = event.currentTarget;
@@ -1519,9 +1569,11 @@ export function WorkstationSetup({
                 }}
               />
             </div>
-            <Button size="floor" onClick={addScanner}>
-              {t("floor.setup.scanners.add")}
-            </Button>
+            {!office && (
+              <Button size={controlSize} onClick={addScanner}>
+                {t("floor.setup.scanners.add")}
+              </Button>
+            )}
           </div>
           <div className="workstation-setup__live" aria-live="polite">
             {scannerError !== null && (
@@ -1530,10 +1582,22 @@ export function WorkstationSetup({
               </Alert>
             )}
           </div>
+          {office && (
+            <div className="office-scanner-actions">
+              <Button size="md" variant="secondary" onClick={addScanner}>
+                {t("floor.setup.scanners.add")}
+              </Button>
+              <Button size="md" variant="secondary" onClick={refreshSerial}>
+                {t("floor.setup.scanners.listPorts")}
+              </Button>
+            </div>
+          )}
           <div className="setup-scanner-add__ports">
-            <Button size="floor" variant="secondary" onClick={refreshSerial}>
-              {t("floor.setup.scanners.listPorts")}
-            </Button>
+            {!office && (
+              <Button size={controlSize} variant="secondary" onClick={refreshSerial}>
+                {t("floor.setup.scanners.listPorts")}
+              </Button>
+            )}
             <div className="workstation-setup__live" aria-live="polite">
               {serialAsking ? (
                 <p className="setup-card__hint">{t("floor.setup.scanners.portsAsking")}</p>
@@ -1553,25 +1617,7 @@ export function WorkstationSetup({
         </div>
       </section>
       <div className="setup-scanners__side">
-        {scannersOnly && (
-          <section
-            className="setup-card setup-card--check"
-            aria-labelledby="setup-scan-check"
-            data-testid="scanner-check"
-          >
-            <h2 id="setup-scan-check" className="setup-card__title">
-              {t("floor.setup.scannerScope.checkTitle")}
-            </h2>
-            <p className="setup-card__hint">{t("floor.setup.scannerScope.checkBody")}</p>
-            <div className="workstation-setup__live" aria-live="polite">
-              {scanCheck !== null && (
-                <Alert tone={scanCheckTone(scanCheck)} role="presentation">
-                  {scanCheckText(scanCheck)}
-                </Alert>
-              )}
-            </div>
-          </section>
-        )}
+        {scannersOnly && !office && rawScanPanel}
         {keypad === "baud" ? (
           <IpKeypad
             target="baud"
@@ -1620,7 +1666,7 @@ export function WorkstationSetup({
         <div className="setup-volume__row">
           {/* At a limit a button stays on the keyboard and does nothing: one that vanished would take the focus. */}
           <Button
-            size="floor"
+            size={controlSize}
             variant="secondary"
             className="setup-volume__step"
             {...(draft.sound.muted || draft.sound.volume <= 0
@@ -1636,7 +1682,7 @@ export function WorkstationSetup({
           </Button>
           <VolumeScale filled={volumeDivisions(draft.sound)} silent={silent} />
           <Button
-            size="floor"
+            size={controlSize}
             variant="secondary"
             className="setup-volume__step"
             {...(draft.sound.muted || draft.sound.volume >= 100
@@ -1658,7 +1704,7 @@ export function WorkstationSetup({
         </p>
         <div>
           <Button
-            size="floor"
+            size={controlSize}
             variant="secondary"
             onClick={() => playTone(soundLevel(draft.sound))}
           >
@@ -1700,24 +1746,31 @@ export function WorkstationSetup({
   const formBlocked = editor !== null && liveFooterError(editor) !== null;
 
   return (
-    <section className="workstation-setup" aria-labelledby="workstation-setup-title">
-      <header className="workstation-setup__header">
-        <div className="workstation-setup__heading">
-          <h2 id="workstation-setup-title">
-            {t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
-          </h2>
-          <p className="workstation-setup__subtitle">{subtitle}</p>
-        </div>
-        {!scannersOnly && (
-          <SetupTabList
-            tabs={tabs}
-            label={t("floor.setup.tabs.label")}
-            activeTab={activeTab}
-            locked={editor !== null}
-            onTabChange={setActiveTab}
-          />
-        )}
-      </header>
+    <section
+      className={`workstation-setup${office ? " workstation-setup--office" : ""}`}
+      {...(office
+        ? { "aria-label": t("floor.setup.scannerScope.title") }
+        : { "aria-labelledby": "workstation-setup-title" })}
+    >
+      {!office && (
+        <header className="workstation-setup__header">
+          <div className="workstation-setup__heading">
+            <h2 id="workstation-setup-title">
+              {t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
+            </h2>
+            <p className="workstation-setup__subtitle">{subtitle}</p>
+          </div>
+          {!scannersOnly && (
+            <SetupTabList
+              tabs={tabs}
+              label={t("floor.setup.tabs.label")}
+              activeTab={activeTab}
+              locked={editor !== null}
+              onTabChange={setActiveTab}
+            />
+          )}
+        </header>
+      )}
 
       {shown !== undefined && (
         <SetupTabPanel tab={shown}>
@@ -1746,9 +1799,9 @@ export function WorkstationSetup({
       {editor !== null ? (
         <footer className="workstation-setup__footer">
           <Button
-            size="floor"
+            size={controlSize}
             variant="secondary"
-            className="setup-footer__back"
+            className={office ? "office-setup-footer-back" : "setup-footer__back"}
             onClick={() => {
               setEditor(null);
               setEditorError(null);
@@ -1774,8 +1827,8 @@ export function WorkstationSetup({
             )}
           </div>
           <Button
-            size="floor"
-            className="floor-primary setup-footer__primary"
+            size={controlSize}
+            className={`${office ? "" : "floor-primary "}setup-footer__primary`}
             {...(formBlocked ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
             onClick={() => {
               if (!formBlocked) applyEditor();
@@ -1787,8 +1840,19 @@ export function WorkstationSetup({
       ) : (
         <footer className="workstation-setup__footer">
           {/* Never held by a save or a test print: leaving is always open. */}
-          <Button size="floor" variant="secondary" className="setup-footer__back" onClick={onBack}>
-            {t(dirty ? "floor.setup.backUnsaved" : "floor.setup.back")}
+          <Button
+            size={controlSize}
+            variant="secondary"
+            className={office ? "office-setup-footer-back" : "setup-footer__back"}
+            onClick={onBack}
+          >
+            {t(
+              office
+                ? "office.common.cancel"
+                : dirty
+                  ? "floor.setup.backUnsaved"
+                  : "floor.setup.back",
+            )}
           </Button>
           <div className="setup-footer__status" aria-live="polite">
             {status !== null && status.kind !== "saved" ? (
@@ -1796,22 +1860,30 @@ export function WorkstationSetup({
                 {t(`floor.setup.status.${status.kind}`)}
               </Alert>
             ) : status !== null ? (
-              <StatusChip size="floor" phase="done" label={t("floor.setup.footer.saved")} />
+              <StatusChip
+                size={office ? "office" : "floor"}
+                phase="done"
+                label={t("floor.setup.footer.saved")}
+              />
             ) : unsaved ? (
               <StatusChip
-                size="floor"
+                size={office ? "office" : "floor"}
                 wrap
                 phase="attention"
                 label={t("floor.setup.footer.unsaved", { parts: partNames.join(", ") })}
               />
             ) : (
-              <StatusChip size="floor" phase="done" label={t("floor.setup.footer.clean")} />
+              <StatusChip
+                size={office ? "office" : "floor"}
+                phase="done"
+                label={t("floor.setup.footer.clean")}
+              />
             )}
           </div>
           {/* Kept on the keyboard while it saves or has nothing to save: a button that vanishes from the tab order takes the focus with it. */}
           <Button
-            size="floor"
-            className="floor-primary setup-footer__primary"
+            size={controlSize}
+            className={`${office ? "" : "floor-primary "}setup-footer__primary`}
             {...(!canSave || saving ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
             onClick={() => void save()}
           >

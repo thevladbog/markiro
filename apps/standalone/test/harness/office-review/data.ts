@@ -211,46 +211,54 @@ const responses: Record<string, unknown> = {
   },
 };
 
-const client: HostClient = {
-  async request(method, path, options) {
-    const pathname = new URL(path, "https://office-review.invalid").pathname;
-    if (method === "POST" && pathname === "/v1/office/search") {
-      const query = officeSearchRequestSchema.parse(options.body);
-      const warehouse = {
-        id: `warehouse:${palletId}`,
-        label: `Палет (00)${pallet.sscc}`,
-        detail: "Молоко 3,2% · 12 шт.",
-        target: { kind: "warehouse_pallet", id: palletId },
-      };
-      return options.schema.parse({
-        items:
-          query.kind === "sscc"
-            ? [warehouse]
-            : [
-                warehouse,
-                {
-                  id: `product:${product.id}`,
-                  label: product.name,
-                  detail: `GTIN ${product.gtin14}`,
-                  target: { kind: "product", id: product.id },
-                },
-                {
-                  id: `shift:${shiftFixture.id}`,
-                  label: "Смена NOV01-001",
-                  detail: "Линия розлива № 1 · Активна",
-                  target: { kind: "shift", id: shiftFixture.id, source: "local" },
-                },
-              ],
-        truncated: false,
-      });
-    }
-    if (method === "GET" && /^\/v1\/office\/users\/[^/]+\/avatar$/.test(pathname))
-      return options.schema.parse({ avatar: null });
-    if (method === "GET" && /^\/v1\/office\/products\/[^/]+\/photo$/.test(pathname))
-      return options.schema.parse({ photo: null });
-    if (method !== "GET" || !Object.hasOwn(responses, pathname))
-      throw new Error(`Unconfigured Office review request: ${method} ${path}`);
-    return options.schema.parse(responses[pathname]);
-  },
-};
-export const api = createHostApi(client);
+export function createReviewApi(overrides: Record<string, unknown> = {}) {
+  const client: HostClient = {
+    async request(method, path, options) {
+      const pathname = new URL(path, "https://office-review.invalid").pathname;
+      if (method === "POST" && pathname === "/v1/office/search") {
+        const query = officeSearchRequestSchema.parse(options.body);
+        const warehouse = {
+          id: `warehouse:${palletId}`,
+          label: `Палет (00)${pallet.sscc}`,
+          detail: "Молоко 3,2% · 12 шт.",
+          target: { kind: "warehouse_pallet", id: palletId },
+        };
+        return options.schema.parse({
+          items:
+            query.kind === "sscc"
+              ? [warehouse]
+              : [
+                  warehouse,
+                  {
+                    id: `product:${product.id}`,
+                    label: product.name,
+                    detail: `GTIN ${product.gtin14}`,
+                    target: { kind: "product", id: product.id },
+                  },
+                  {
+                    id: `shift:${shiftFixture.id}`,
+                    label: "Смена NOV01-001",
+                    detail: "Линия розлива № 1 · Активна",
+                    target: { kind: "shift", id: shiftFixture.id, source: "local" },
+                  },
+                ],
+          truncated: false,
+        });
+      }
+      if (method === "GET" && /^\/v1\/office\/users\/[^/]+\/avatar$/.test(pathname))
+        return options.schema.parse({ avatar: null });
+      if (method === "GET" && /^\/v1\/office\/products\/[^/]+\/photo$/.test(pathname))
+        return options.schema.parse({ photo: null });
+      if (
+        method !== "GET" ||
+        (!Object.hasOwn(overrides, pathname) && !Object.hasOwn(responses, pathname))
+      )
+        throw new Error(`Unconfigured Office review request: ${method} ${path}`);
+      return options.schema.parse(
+        Object.hasOwn(overrides, pathname) ? overrides[pathname] : responses[pathname],
+      );
+    },
+  };
+  return createHostApi(client);
+}
+export const api = createReviewApi();

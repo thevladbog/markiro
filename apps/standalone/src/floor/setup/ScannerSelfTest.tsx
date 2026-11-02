@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import { Button, FullScreenDialog, Select, StatusChip } from "@markiro/ui";
+import { Alert, Button, FullScreenDialog, Select, StatusChip, UiSymbol } from "@markiro/ui";
 
 import { downloadFile } from "../../office/templates/download.js";
 import type { ScanChannel } from "../scan-source.js";
@@ -84,6 +84,8 @@ export interface SelfTestPrinter {
 export type SelfTestPrintResult = "sent" | "failed" | "render_failed";
 
 export interface ScannerSelfTestProps {
+  presentation?: "floor" | "office";
+  additional?: ReactNode;
   state: ScannerSelfTestState;
   /** The printers a test code can go to; none hides nothing, it explains. */
   printers: readonly SelfTestPrinter[];
@@ -237,6 +239,8 @@ function VerdictView({ verdict }: { verdict: Verdict }) {
  */
 export function ScannerSelfTest({
   state,
+  presentation = "floor",
+  additional,
   printers,
   print,
   save = downloadFile,
@@ -246,6 +250,8 @@ export function ScannerSelfTest({
   const [open, setOpen] = useState(false);
   const [printerId, setPrinterId] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const office = presentation === "office";
+  const controlSize = office ? "md" : "floor";
   const chosen = printers.find((printer) => printer.id === printerId) ?? printers[0] ?? null;
 
   const saveAs = async (format: "png" | "pdf") => {
@@ -273,6 +279,199 @@ export function ScannerSelfTest({
       ),
     );
   };
+
+  const actions = (
+    <div className="self-test__actions">
+      <Button size={controlSize} variant="secondary" onClick={() => setOpen(true)}>
+        {t("floor.setup.selfTest.show")}
+      </Button>
+      <Button size={controlSize} variant="secondary" onClick={() => void saveAs("png")}>
+        {t("floor.setup.selfTest.savePng")}
+      </Button>
+      <Button size={controlSize} variant="secondary" onClick={() => void saveAs("pdf")}>
+        {t("floor.setup.selfTest.savePdf")}
+      </Button>
+      {printers.length > 1 && (
+        <Select
+          custom
+          size={controlSize}
+          label={t("floor.setup.selfTest.printer")}
+          value={chosen?.id ?? ""}
+          options={printers.map((printer) => ({ value: printer.id, label: printer.name }))}
+          onValueChange={setPrinterId}
+        />
+      )}
+      <Button
+        size={controlSize}
+        variant="secondary"
+        disabled={chosen === null}
+        onClick={() => void printNow()}
+      >
+        {printers.length === 1 && chosen !== null
+          ? t("floor.setup.selfTest.printOn", { name: chosen.name })
+          : t("floor.setup.selfTest.print")}
+      </Button>
+      <Button size={controlSize} variant="secondary" onClick={state.renew}>
+        {t("floor.setup.selfTest.newCode")}
+      </Button>
+    </div>
+  );
+  const largeView = (
+    <FullScreenDialog
+      open={open}
+      title={t("floor.setup.selfTest.shownTitle")}
+      backLabel={t("floor.setup.selfTest.closeShown")}
+      backPlacement="footer"
+      initialFocus="dialog"
+      className="self-test__window"
+      onClose={() => setOpen(false)}
+    >
+      <div className="self-test__shown">
+        <span className="self-test__badge">{t("floor.setup.selfTest.badge")}</span>
+        <SymbolView kind={kind} code={code} big />
+        {current !== null && (
+          <p className="self-test__shown-status" data-tone={current.verdict.status} role="status">
+            {t(`floor.setup.selfTest.status.${current.verdict.status}`)}:{" "}
+            {reasonText(t, current.verdict)}
+          </p>
+        )}
+      </div>
+    </FullScreenDialog>
+  );
+  if (office) {
+    const verdict = current?.verdict;
+    const missingGs = verdict?.reason === "gsLost";
+    const success = verdict?.status === "ok";
+    return (
+      <section
+        className="setup-card self-test office-self-test"
+        aria-labelledby="self-test-title"
+        data-testid="scanner-self-test"
+      >
+        <div>
+          <h2 id="self-test-title" className="setup-card__title">
+            {t("office.scannerDesign.reading")}
+          </h2>
+          <p className="setup-card__hint">{t("office.scannerDesign.hint")}</p>
+        </div>
+        <div
+          className="self-test__kinds"
+          role="group"
+          aria-label={t("floor.setup.selfTest.kindLabel")}
+        >
+          {(["plain", "dm"] as const).map((value) => (
+            <Button
+              key={value}
+              size="md"
+              variant="plain"
+              aria-pressed={kind === value}
+              className="self-test__kind"
+              data-checked={kind === value ? "true" : undefined}
+              onClick={() => {
+                if (kind !== value) state.setKind(value);
+              }}
+            >
+              {kind === value && <UiSymbol name="check" size={16} />}
+              {t(value === "dm" ? "floor.setup.selfTest.kindDm" : "floor.setup.selfTest.kindPlain")}
+            </Button>
+          ))}
+        </div>
+        <div className="office-self-test__preview">
+          <div className="self-test__figure">
+            <span className="self-test__badge">{t("floor.setup.selfTest.badge")}</span>
+            <SymbolView kind={kind} code={code} />
+          </div>
+          <div className="office-self-test__meta">
+            <strong>{t("office.scannerDesign.testCode")}</strong>
+            <p>{t("office.scannerDesign.notProduct")}</p>
+            <div>
+              <p>{t("floor.setup.selfTest.facts.structure")}</p>
+              <code>
+                {kind === "dm"
+                  ? expectedStructure(code)
+                      .map((item) => item.ai)
+                      .join(" · ")
+                  : t("floor.setup.selfTest.kindPlain")}
+              </code>
+              <p>
+                {t("office.scannerDesign.groups", {
+                  count: Array.from(code).filter((c) => c === "\u001d").length,
+                })}
+              </p>
+            </div>
+            <Button size="md" variant="secondary" onClick={() => setOpen(true)}>
+              {t("office.scannerDesign.enlarge")}
+            </Button>
+            <details className="office-self-test__advanced">
+              <summary>{t("office.scannerDesign.advanced")}</summary>
+              {actions}
+              {chosen === null && (
+                <p className="setup-card__hint">{t("floor.setup.selfTest.noPrinter")}</p>
+              )}
+              <p className="setup-card__hint" aria-live="polite" data-testid="self-test-note">
+                {note}
+              </p>
+              <Spelled code={code} />
+              {verdict !== undefined && <VerdictView verdict={verdict} />}
+              <h3 className="self-test__history-title">
+                {t("floor.setup.selfTest.history.title")}
+              </h3>
+              {history.length === 0 ? (
+                <p>{t("floor.setup.selfTest.history.empty")}</p>
+              ) : (
+                <ol className="self-test__history" data-testid="self-test-history">
+                  {history.map((entry, index) => (
+                    <li key={`${entry.at}-${index}`} data-tone={entry.verdict.status}>
+                      {t("floor.setup.selfTest.history.row", {
+                        at: entry.at,
+                        status: t(`floor.setup.selfTest.status.${entry.verdict.status}`),
+                        channel: channelLabel(t, entry.verdict.channel),
+                        masked: entry.verdict.masked,
+                      })}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {additional}
+            </details>
+          </div>
+        </div>
+        <Alert
+          tone={
+            verdict === undefined
+              ? "info"
+              : success
+                ? "ok"
+                : verdict.status === "warning"
+                  ? "warn"
+                  : "error"
+          }
+          title={t(
+            verdict === undefined
+              ? "office.scannerDesign.waitingTitle"
+              : success
+                ? "office.scannerDesign.successTitle"
+                : missingGs
+                  ? "office.scannerDesign.gsTitle"
+                  : "office.scannerDesign.problemTitle",
+          )}
+        >
+          {verdict === undefined
+            ? t("office.scannerDesign.waitingBody")
+            : success
+              ? t("office.scannerDesign.successBody", {
+                  channel: channelLabel(t, verdict.channel),
+                  length: verdict.length,
+                  groups: verdict.groupSeparators,
+                })
+              : missingGs
+                ? t("office.scannerDesign.gsBody")
+                : reasonText(t, verdict)}
+        </Alert>
+        {largeView}
+      </section>
+    );
+  }
 
   return (
     <section
@@ -325,40 +524,7 @@ export function ScannerSelfTest({
             </p>
           )}
           <p className="setup-card__hint">{t("floor.setup.selfTest.notProduct")}</p>
-          <div className="self-test__actions">
-            <Button size="floor" variant="secondary" onClick={() => setOpen(true)}>
-              {t("floor.setup.selfTest.show")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={() => void saveAs("png")}>
-              {t("floor.setup.selfTest.savePng")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={() => void saveAs("pdf")}>
-              {t("floor.setup.selfTest.savePdf")}
-            </Button>
-            {printers.length > 1 && (
-              <Select
-                custom
-                size="floor"
-                label={t("floor.setup.selfTest.printer")}
-                value={chosen?.id ?? ""}
-                options={printers.map((printer) => ({ value: printer.id, label: printer.name }))}
-                onValueChange={setPrinterId}
-              />
-            )}
-            <Button
-              size="floor"
-              variant="secondary"
-              disabled={chosen === null}
-              onClick={() => void printNow()}
-            >
-              {printers.length === 1 && chosen !== null
-                ? t("floor.setup.selfTest.printOn", { name: chosen.name })
-                : t("floor.setup.selfTest.print")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={state.renew}>
-              {t("floor.setup.selfTest.newCode")}
-            </Button>
-          </div>
+          {actions}
           {chosen === null && (
             <p className="setup-card__hint">{t("floor.setup.selfTest.noPrinter")}</p>
           )}
@@ -400,26 +566,7 @@ export function ScannerSelfTest({
           )}
         </div>
       </div>
-      <FullScreenDialog
-        open={open}
-        title={t("floor.setup.selfTest.shownTitle")}
-        backLabel={t("floor.setup.selfTest.closeShown")}
-        backPlacement="footer"
-        initialFocus="dialog"
-        className="self-test__window"
-        onClose={() => setOpen(false)}
-      >
-        <div className="self-test__shown">
-          <span className="self-test__badge">{t("floor.setup.selfTest.badge")}</span>
-          <SymbolView kind={kind} code={code} big />
-          {current !== null && (
-            <p className="self-test__shown-status" data-tone={current.verdict.status} role="status">
-              {t(`floor.setup.selfTest.status.${current.verdict.status}`)}:{" "}
-              {reasonText(t, current.verdict)}
-            </p>
-          )}
-        </div>
-      </FullScreenDialog>
+      {largeView}
     </section>
   );
 }

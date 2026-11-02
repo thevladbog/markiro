@@ -1,4 +1,3 @@
-import type { TFunction } from "i18next";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -8,6 +7,7 @@ import type { DeviceRecord, DeviceTotals, OfficeShift } from "../../host/protoco
 import { isKnownTimeZone } from "../../lib/civil-date.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
+import { deviceLabel } from "./shift-device-label.js";
 import { LoadError, PageLoading } from "../page-state.js";
 
 /** Counts with the thousands apart by a no-break space, as Russian writes them: «1 200». */
@@ -87,18 +87,6 @@ export function ShiftTotalsBody({ shift }: { shift: OfficeShift }) {
       devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
     />
   );
-}
-
-/**
- * How the dialog names a device: its name, marked when revoked; the start of
- * its id when the list lacks it or was not read.
- */
-function deviceLabel(id: string, devices: readonly DeviceRecord[] | undefined, t: TFunction) {
-  const device = devices?.find((each) => each.id === id);
-  if (device === undefined) return t("office.shifts.totals.unknownDevice", { id: id.slice(0, 8) });
-  return device.revokedAt === null
-    ? device.name
-    : t("office.shifts.totals.revokedDevice", { name: device.name });
 }
 
 /**

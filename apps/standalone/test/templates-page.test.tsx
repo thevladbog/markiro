@@ -1226,7 +1226,7 @@ describe("office label templates: a template deleted on another workstation", ()
         fireEvent.click(submit);
       });
       expect(within(dialog()).getByRole("alert").textContent).toBe(
-        "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
+        "Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
       );
       expect(screen.getByRole("dialog", { name: title })).toBeTruthy();
       await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
@@ -1238,7 +1238,7 @@ describe("office label templates: a template deleted on another workstation", ()
   });
 
   it("reads the list once, leaves the dialog open with its message and no notice behind it, and writes again on a second click", async () => {
-    const missing = "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.";
+    const missing = "Шаблона больше нет на хосте: его удалили на другом рабочем месте.";
     for (const [action, title, submitName] of [
       ["Выключить шаблон «Молоко 58×40»", "Выключить шаблон?", "Выключить"],
       ["Категории шаблона «Молоко 58×40»", "Категории шаблона «Молоко 58×40»", "Сохранить"],

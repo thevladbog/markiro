@@ -39,18 +39,18 @@ const HEIGHT: Record<ButtonSize, string> = {
 
 const VARIANT_STYLE: Record<Exclude<ButtonVariant, "plain">, CSSProperties> = {
   primary: {
-    background: "var(--surface-inverse)",
+    background: "var(--mk-btn-bg, var(--surface-inverse))",
     color: "var(--fg-on-inverse)",
     border: "1px solid var(--surface-inverse)",
   },
   secondary: {
-    background: "var(--surface-card)",
+    background: "var(--mk-btn-bg, var(--surface-card))",
     color: "var(--fg-1)",
-    border: "1px solid var(--line-strong)",
+    border: "1px solid var(--mk-btn-border, var(--line-strong))",
   },
   destructive: {
     // handoff hardcodes white text on the solid error color — no on-solid token exists
-    background: "var(--err-solid)",
+    background: "var(--mk-btn-bg, var(--err-solid))",
     // `--mk-btn-destructive-fg` lets an app pair the label with the fill by token (the kit's `onerr`).
     color: "var(--mk-btn-destructive-fg, #FFFFFF)",
     border: "1px solid var(--err-solid)",
@@ -129,7 +129,7 @@ export function Button({
               height: size === "floor" ? HEIGHT[size] : undefined,
               minWidth: size === "floor" ? "var(--control-floor)" : undefined,
               padding: size === "floor" ? "0 24px" : "0 16px",
-              borderRadius: "var(--r-2)",
+              borderRadius: size === "compact" ? "var(--r-compact, var(--r-2))" : "var(--r-2)",
               font: size === "floor" ? "var(--floor-body-strong)" : "600 14px/1 var(--font-ui)",
               fontSize: size === "floor" ? 18 : size === "compact" ? 13 : 14,
               width: fullWidth ? "100%" : undefined,
@@ -157,7 +157,11 @@ export function Button({
         />
       )}
       {!loading && icon}
-      {children}
+      {variant === "plain" || size === "floor" ? (
+        children
+      ) : (
+        <span className="mk-btn__label">{children}</span>
+      )}
       {loading && <style>{"@keyframes mk-spin{to{transform:rotate(360deg)}}"}</style>}
     </button>
   );

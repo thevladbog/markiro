@@ -4501,7 +4501,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     await signIn();
     await screen.findByRole("heading", { name: "Обзор", level: 1 });
     fireEvent.click(await screen.findByRole("button", { name: "Настройки сканера" }));
-    await screen.findByRole("heading", { name: "Сканеры" });
+    await screen.findByRole("heading", { name: "Подключение", level: 2 });
     expect(screen.getByText("Сканер в режиме клавиатуры")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Принтеры" })).toBeNull();
     fireEvent.change(screen.getByLabelText("COM-порт"), { target: { value: "COM5" } });
@@ -4512,7 +4512,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     );
     expect((await readWorkstationSettings(local)).scanners).toEqual([{ port: "COM5", baud: 9600 }]);
     expect(shell.hardware.printBytes).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("heading", { name: "Обзор", level: 1 })).toBeTruthy();
   });

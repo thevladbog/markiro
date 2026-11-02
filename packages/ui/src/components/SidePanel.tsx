@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from "react";
 
 import { cn } from "../cn.js";
+import { UiSymbol } from "./UiSymbol.js";
 import { IconButton } from "./IconButton.js";
 import { OverlayLayer } from "./OverlayLayer.js";
 
@@ -13,6 +14,8 @@ export interface SidePanelProps {
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
+  headerActions?: ReactNode;
+  titleExtra?: ReactNode;
   status?: ReactNode;
   size?: SidePanelSize;
   busy?: boolean;
@@ -27,6 +30,8 @@ export function SidePanel({
   description,
   children,
   footer,
+  headerActions,
+  titleExtra,
   status,
   size = "standard",
   busy = false,
@@ -66,24 +71,32 @@ export function SidePanel({
           >
             <header className="mk-side-panel__header">
               <div>
-                <h2 id={titleId} className="mk-side-panel__title">
-                  {title}
-                </h2>
+                <div className="mk-side-panel__title-line">
+                  <h2 id={titleId} className="mk-side-panel__title">
+                    {title}
+                  </h2>
+                  {titleExtra}
+                </div>
                 {description ? (
                   <p id={descriptionId} className="mk-side-panel__description">
                     {description}
                   </p>
                 ) : null}
               </div>
-              <IconButton
-                type="button"
-                size="compact"
-                variant="secondary"
-                aria-label={closeLabel}
-                icon={<span aria-hidden="true">×</span>}
-                disabled={busy}
-                onClick={() => onClose("close-button")}
-              />
+              <div className="mk-side-panel__header-actions">
+                {headerActions}
+                <IconButton
+                  type="button"
+                  size="md"
+                  variant="secondary"
+                  aria-label={closeLabel}
+                  icon={<UiSymbol name="close" size={24} />}
+                  className="mk-overlay-close"
+                  style={{ color: "var(--err-fg)", width: 44, minWidth: 44, minHeight: 44 }}
+                  disabled={busy}
+                  onClick={() => onClose("close-button")}
+                />
+              </div>
             </header>
             <div className="mk-side-panel__body">{children}</div>
             {footer || status ? (

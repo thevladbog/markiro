@@ -134,25 +134,22 @@ describe("«Сканирования» of a shift's drawer", () => {
     await waitFor(() => expect(rows()).toHaveLength(5));
     expect(session.api.listShiftScans).toHaveBeenCalledWith(TOKEN, ACTIVE.id, {}, null, 10);
     const table = rows();
-    // Time, station, operator, result with its reason, code, box, pallet.
+    // Five columns retain time/date, station/operator, verdict, masked code and both packs.
     expect(table[0]?.slice(1)).toEqual([
-      "Станция А",
-      "Иванов И.",
+      "Станция АИванов И.",
       "✕Не распознанСчитанное не похоже на код маркировки",
       "—",
       "—",
-      "—",
     ]);
-    expect(table[1]?.[3]).toBe("⧉ДубликатЭтот код уже есть в базе хоста");
-    expect(table[2]?.[3]).toBe("✕Другой товарGTIN кода не совпадает с товаром смены");
-    expect(table[2]?.[4]).toBe("04600682000099 …k3Z3");
+    expect(table[1]?.[2]).toBe("⧉ДубликатЭтот код уже есть в базе хоста");
+    expect(table[2]?.[2]).toBe("✕Другой товарGTIN кода не совпадает с товаром смены");
+    expect(table[2]?.[3]).toBe("04600682000099…k3Z3");
     // Accepted: operator unknown is a dash, the pallet is a link to its card.
-    expect(table[3]?.slice(2)).toEqual([
-      "—",
+    expect(table[3]?.slice(1)).toEqual([
+      "Станция А—",
       "✓ПринятКод принят в смену",
-      "04600682000013 …k3Z4",
-      "(00)046006820000015000",
-      "(00)146006820000000409",
+      "04600682000013…k3Z4",
+      "Короб (00)046006820000015000Палет (00)146006820000000409",
     ]);
     const link = within(screen.getByRole("region", { name: "История сканирований" })).getAllByRole(
       "link",
@@ -162,7 +159,7 @@ describe("«Сканирования» of a shift's drawer", () => {
     // The code is never shown whole: no full serial, only the tail.
     expect(screen.queryByText(/S000001/)).toBeNull();
     // The times are the organization's, written as the other tables write them.
-    expect(table[0]?.[0]).toMatch(/^08\.10\.2026/);
+    expect(table[0]?.[0]).toMatch(/08\.10\.2026$/);
   });
 
   it("says the station's local duplicate in its own words", async () => {
@@ -172,7 +169,7 @@ describe("«Сканирования» of a shift's drawer", () => {
       ]),
     );
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(rows()[0]?.[3]).toBe("⧉ДубликатСтанция уже сканировала этот код");
+    expect(rows()[0]?.[2]).toBe("⧉ДубликатСтанция уже сканировала этот код");
   });
 
   it("says so when the shift has no scans, and when the filters keep none", async () => {

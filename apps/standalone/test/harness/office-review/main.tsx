@@ -21,7 +21,9 @@ import {
   createKeyboardWedgeSource,
   mergeScanSources,
 } from "../../../src/floor/scan-source.js";
-import { api, user } from "./data.js";
+import { api, createReviewApi, user } from "./data.js";
+import { shiftDesignResponses } from "./shift-design-data.js";
+const params = new URLSearchParams(location.search);
 
 // Browser-only demonstration adapters. No real host, local database, printer or COM port is used.
 const stored = new Map<string, string>([
@@ -34,6 +36,7 @@ const local: LocalExecutor = {
     return [...stored].map(([key, value]) => row.parse({ key, value }));
   },
   async transaction(statements) {
+    if (params.get("scannerSave") === "fail") throw new Error("Synthetic local save failure");
     return statements.map((statement) => {
       if (!statement.sql.startsWith("INSERT INTO workstation_settings"))
         throw new Error("Unexpected preview write");
@@ -91,13 +94,12 @@ window.officeReviewEmitScan = (raw) => {
 };
 const session: OfficeSessionValue = {
   user,
-  api,
+  api: params.get("scenario") === "shift" ? createReviewApi(shiftDesignResponses) : api,
   call: (operation) => operation("office-preview-session"),
   logout: () => undefined,
   signOut: () => undefined,
   refreshUser: async () => undefined,
 };
-const params = new URLSearchParams(location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
 const root = document.getElementById("root");
 if (root === null) throw new Error("No preview root");

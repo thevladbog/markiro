@@ -1,0 +1,334 @@
+.office-scanner-dialog {
+  --mk-modal-header-padding: 24px 32px;
+  --mk-modal-body-padding: 24px 32px 32px;
+}
+.office-scanner-dialog .mk-modal__header {
+  flex: none;
+  gap: 24px;
+}
+.office-scanner-dialog .mk-modal__body {
+  min-height: 0;
+  overflow: hidden;
+}
+.office-scanner-dialog section.workstation-setup--office {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+  contain: none;
+}
+.office-scanner-dialog .setup-tabs__panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.office-scanner-dialog .workstation-setup__single {
+  overflow: visible;
+}
+.office-scanner-dialog .setup-scanners {
+  height: auto;
+  grid-template-columns: minmax(0, 400fr) minmax(0, 480fr);
+  gap: 32px;
+}
+.office-scanner-dialog .setup-scanners__list,
+.office-scanner-dialog .setup-card {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+}
+.office-scanner-dialog .setup-scanners__list {
+  align-content: start;
+}
+.office-scanner-dialog .setup-card__title {
+  font: var(--text-h3);
+}
+.office-scanner-dialog .setup-card__hint,
+.office-scanner-dialog .setup-scanner-row__kind,
+.office-scanner-dialog .setup-card__waiting {
+  font: var(--text-body);
+  margin: 4px 0 0;
+}
+.office-scanner-dialog .setup-card__waiting {
+  padding: 12px 0;
+}
+.office-scanner-dialog .setup-printer-list__header {
+  padding: 0 0 16px;
+  min-height: 0;
+}
+.office-scanner-dialog .setup-printer-list__count {
+  font: var(--text-body);
+}
+.office-scanner-dialog .setup-scanner-list {
+  display: flex;
+  flex-direction: column;
+}
+.office-scanner-dialog .setup-scanner-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 96px;
+  min-height: 76px;
+  padding: 12px 0;
+  gap: 8px 12px;
+}
+.office-scanner-dialog .setup-scanner-row--always {
+  grid-template-columns: minmax(0, 1fr) auto;
+  order: -1;
+}
+.office-scanner-dialog .setup-scanner-row__detail {
+  font: 600 14px/20px var(--font-ui);
+}
+.office-scanner-dialog .setup-scanner-row__state {
+  max-width: none;
+}
+.office-scanner-dialog .setup-scanner-row__remove {
+  justify-self: end;
+  width: 96px;
+  min-width: 96px;
+  grid-column: auto;
+}
+.office-scanner-dialog .setup-row__action-text {
+  display: inline;
+}
+.office-scanner-dialog .setup-scanner-add {
+  padding: 20px 0 0;
+  gap: 12px;
+}
+.office-scanner-dialog .setup-scanner-add__title {
+  font: 600 14px/20px var(--font-ui);
+}
+.office-scanner-dialog .setup-scanner-add__fields {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 12px 16px;
+}
+.office-scanner-dialog .setup-scanner-add__fields > .mk-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-width: 144px;
+}
+.office-scanner-dialog .setup-keyfield {
+  padding: 0;
+  border: 0;
+}
+.office-scanner-dialog .setup-scanner-add__ports {
+  gap: 8px;
+}
+.office-scanner-dialog .workstation-setup__result:empty {
+  display: none;
+}
+.office-scanner-dialog .workstation-setup__footer {
+  flex: none;
+  height: auto;
+  min-height: 64px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  gap: 20px;
+}
+.office-scanner-dialog .office-setup-footer-back {
+  min-width: 124px;
+  flex: none;
+}
+.office-scanner-dialog .setup-footer__primary {
+  width: 180px;
+}
+.office-scanner-dialog .setup-footer__status {
+  font: var(--text-caption);
+}
+.office-scanner-dialog .office-self-test {
+  display: grid;
+  gap: 16px;
+}
+.office-scanner-dialog .self-test__kinds {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--panel);
+}
+.office-scanner-dialog .self-test__kind {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font: 600 14px/20px var(--font-ui);
+  color: var(--muted);
+  border: 0;
+  border-radius: 12px;
+  min-height: 36px;
+  height: 36px;
+  border-color: transparent;
+  background: transparent;
+}
+.office-scanner-dialog .self-test__kind[data-checked="true"] {
+  --mk-btn-bg: var(--fg);
+  --mk-btn-border: transparent;
+  background: var(--fg);
+  color: var(--bg);
+}
+.office-scanner-dialog .self-test__kind .mk-btn__label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+.office-scanner-dialog .office-self-test__preview {
+  display: grid;
+  grid-template-columns: minmax(0, 232fr) minmax(0, 224fr);
+  gap: 24px;
+  align-items: start;
+}
+.office-scanner-dialog .self-test__figure {
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 0;
+  border-radius: 20px;
+  background: #fff;
+  align-content: center;
+  gap: 8px;
+}
+.office-scanner-dialog .self-test__badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 2px 6px;
+  color: #fff;
+  background: #17161a;
+  font: var(--text-caption);
+}
+.office-scanner-dialog .self-test__symbol {
+  max-width: 176px;
+  color: #000;
+}
+.office-scanner-dialog .office-self-test__meta {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  font: var(--text-body);
+}
+.office-scanner-dialog .office-self-test__meta p {
+  margin: 0;
+  color: var(--muted);
+  font: var(--text-caption);
+}
+.office-scanner-dialog .office-self-test__meta code {
+  display: block;
+  margin: 8px 0;
+  font: var(--text-code);
+}
+.office-scanner-dialog .office-self-test__advanced {
+  min-width: 0;
+}
+.office-scanner-dialog .office-self-test__advanced > summary {
+  cursor: pointer;
+  padding-block: 8px;
+  color: var(--muted);
+  font: var(--text-caption);
+}
+.office-scanner-dialog .office-self-test__advanced > :not(summary) {
+  margin-top: 12px;
+}
+.office-scanner-dialog .self-test__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.office-scanner-dialog .self-test__facts {
+  display: block;
+  font: var(--text-caption);
+}
+.office-scanner-dialog .self-test__facts dd {
+  margin: 0 0 8px;
+}
+.office-scanner-dialog .self-test__history {
+  padding-left: 20px;
+  font: var(--text-caption);
+}
+.office-scanner-dialog .office-self-test > .mk-alert {
+  min-height: 64px;
+  box-sizing: border-box;
+}
+@media (max-width: 900px) {
+  .office-scanner-dialog {
+    --mk-modal-header-padding: 20px 24px;
+    --mk-modal-body-padding: 20px 24px 24px;
+  }
+  .office-scanner-dialog .setup-scanners {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .office-scanner-dialog .setup-scanners__side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .office-scanner-dialog .office-self-test__preview {
+    grid-template-columns: minmax(0, 232px) minmax(0, 1fr);
+  }
+}
+@media (max-width: 540px) {
+  .office-scanner-dialog .office-self-test__preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .office-scanner-dialog .self-test__figure {
+    width: 232px;
+    max-width: 100%;
+  }
+  .office-scanner-dialog .workstation-setup__footer {
+    display: grid;
+    height: auto;
+    min-height: 98px;
+    grid-template-columns: 124px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .office-scanner-dialog .setup-footer__status {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 22px;
+  }
+  .office-scanner-dialog .office-setup-footer-back,
+  .office-scanner-dialog .setup-footer__primary {
+    grid-row: 2;
+  }
+  .office-scanner-dialog .setup-footer__primary {
+    flex: 1;
+    width: auto;
+  }
+}
+
+.office-scanner-actions {
+  display: grid;
+  grid-template-columns: 144px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.office-scanner-dialog .office-self-test .self-test__symbol {
+  max-width: 176px;
+}
+.office-scanner-dialog .office-self-test .self-test__figure {
+  padding: 16px;
+}
+.office-scanner-dialog .self-test__kind {
+  gap: 8px;
+}
+
+@media (max-width: 540px) {
+  .office-scanner-dialog .setup-scanner-row:not(.setup-scanner-row--always) {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+  .office-scanner-dialog
+    .setup-scanner-row:not(.setup-scanner-row--always)
+    .setup-scanner-row__detail {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .office-scanner-dialog .setup-scanner-row__state {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .office-scanner-dialog .setup-scanner-row__remove {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
