@@ -2,6 +2,7 @@
  * The printer form of the workstation setup: what the operator types, and
  * the profile it describes once checked.
  */
+import type { PrinterOutputMode } from "@markiro/domain";
 import type { PrintTarget } from "../../hardware/hardware.js";
 import { addressInvalid } from "../kit/ip-entry.js";
 import {
@@ -36,6 +37,7 @@ export interface PrinterDraft {
   dpi: `${PrinterDpi}`;
   /** Read only for a Windows queue (plan ДРВ): another kind always prints RAW. */
   mode: PrinterMode;
+  outputMode: PrinterOutputMode | undefined;
   /** «Лист А4» (plan А4): only a Windows queue in driver mode, at 300 dpi. */
   paper: "label" | "a4";
 }
@@ -53,6 +55,7 @@ export const NEW_PRINTER: PrinterDraft = {
   language: "zpl",
   dpi: "203",
   mode: "raw",
+  outputMode: "normal",
   paper: "label",
 };
 
@@ -72,6 +75,7 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
     language: profile.language,
     dpi: profile.dpi === 300 ? "300" : "203",
     mode: printerMode(profile),
+    outputMode: profile.outputMode,
     paper: profile.paper ?? "label",
   };
 }
@@ -151,6 +155,7 @@ export function profileOf(
     language: draft.language,
     dpi: Number(draft.dpi),
     ...(driver ? { mode: "windows_driver" } : {}),
+    ...(!driver && draft.outputMode !== undefined ? { outputMode: draft.outputMode } : {}),
     ...(draft.paper === "a4" ? { paper: "a4" } : {}),
   });
   return profile === null ? { error: "name" } : { profile };

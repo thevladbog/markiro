@@ -453,3 +453,21 @@ describe("the organization logo on a label (#703)", () => {
     expect(decodeMonoRaster(blank).pixels.every((byte) => byte === 0)).toBe(true);
   });
 });
+
+describe("printer output mode on new label bytes", () => {
+  it.each([
+    ["zpl", "peel", "^MMP"],
+    ["zpl", "cutter", "^MMC"],
+    ["zpl", "normal", "^MMT"],
+    ["tspl", "peel", "SET CUTTER OFF\nSET PEEL ON"],
+    ["tspl", "cutter", "SET PEEL OFF\nSET CUTTER 1"],
+    ["tspl", "normal", "SET CUTTER OFF\nSET PEEL OFF"],
+  ] as const)("renders %s %s before the label", async (language, outputMode, command) => {
+    const spec: LabelTemplateSpec = { widthMm: 58, heightMm: 40, dpi: 203, language, elements: [] };
+    const bytes = await renderLabel(spec, sampleLabelData(), { language, dpi: 203, outputMode });
+    expect(decode(bytes)).toContain(command);
+    expect(decode(bytes).indexOf(command)).toBeLessThan(
+      decode(bytes).indexOf(language === "zpl" ? "^PW" : "SIZE"),
+    );
+  });
+});

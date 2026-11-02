@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PRINTER_OUTPUT_MODES, type PrinterOutputMode } from "@markiro/domain";
 
 import type { PrintTarget, ScannerConfig } from "../../hardware/hardware.js";
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
@@ -47,6 +48,8 @@ export interface PrinterProfile {
    * in driver mode: the last RAW language, for switching back.
    */
   mode?: PrinterMode;
+  /** Absent keeps the printer configuration used by legacy profiles. RAW labels only. */
+  outputMode?: PrinterOutputMode;
   /**
    * «Лист А4» (plan А4): the printer takes A4 sheets through its Windows
    * driver at 300 dpi; only the purpose «Паллета» may print on it, and it
@@ -198,6 +201,9 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   const language = PRINTER_LANGUAGES.find((candidate) => candidate === row["language"]);
   const dpi = PRINTER_DPIS.find((candidate) => candidate === row["dpi"]);
   const mode = PRINTER_MODES.find((candidate) => candidate === row["mode"]);
+  const outputMode = PRINTER_OUTPUT_MODES.find((candidate) => candidate === row["outputMode"]);
+  if (row["outputMode"] !== undefined && outputMode === undefined) return null;
+  if (mode === "windows_driver" && outputMode !== undefined) return null;
   if (id === null || name === null || target === null || !language || !dpi) return null;
   // A way of printing this build does not know is no profile; the driver prints to a Windows queue only.
   if (row["mode"] !== undefined && mode === undefined) return null;
@@ -214,6 +220,7 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
     language,
     dpi,
     ...(mode === undefined ? {} : { mode }),
+    ...(outputMode === undefined ? {} : { outputMode }),
     ...(paper === "a4" ? { paper: "a4" as const } : {}),
   };
 }

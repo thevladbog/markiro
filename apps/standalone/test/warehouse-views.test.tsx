@@ -209,7 +209,7 @@ describe("the job's detail", () => {
     const h = jobView(job({ state: "unknown", errorCode: "outcome_unknown" }), {
       resultText: "Проверьте принтер.",
     });
-    expect(screen.getByText("Неизвестно, вышла ли этикетка")).toBeTruthy();
+    expect(screen.getByText("Неизвестно, напечаталась ли этикетка")).toBeTruthy();
     expect(buttonNames()).toEqual([
       "К сменам",
       "Завершить сеанс",
@@ -225,7 +225,7 @@ describe("the job's detail", () => {
   it("waits for a scan of the new label while it is checked, and can be cancelled", () => {
     jobView(job({ state: "unknown", errorCode: "outcome_unknown" }), {
       verifying: true,
-      resultText: "Скан старой этикетки с «!1» новую печать не подтверждает.",
+      resultText: null,
     });
     expect(screen.getByText("Отсканируйте новую этикетку")).toBeTruthy();
     const cancel = screen.getByRole("button", { name: "Отменить проверку" });
@@ -292,10 +292,10 @@ describe("the job's detail", () => {
 
   it("says the old label that was made anew, and a banner above the zones", () => {
     jobView(job(), {
-      note: "Распознана старая этикетка с «!1»: новая — с тем же SSCC без ошибки.",
+      note: "Новая этикетка с тем же SSCC.",
       said: { tone: "warn", text: "Этот код уже печатали в этом сеансе.", kind: "duplicate" },
     });
-    expect(screen.getByText(/Распознана старая этикетка/)).toBeTruthy();
+    expect(screen.getByText(/Новая этикетка с тем же SSCC/)).toBeTruthy();
     expect(screen.getByText("Код уже в журнале сеанса")).toBeTruthy();
   });
 });
@@ -554,7 +554,7 @@ describe("the questions over the screen", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "Причина новой попытки" });
     expect(dialog.getAttribute("aria-modal")).toBe("true");
-    expect(within(dialog).getByText(/код и SSCC не меняются/)).toBeTruthy();
+    expect(within(dialog).getByText(/Код и SSCC при повторной печати не меняются/)).toBeTruthy();
     expect(
       within(dialog).getByRole("button", { name: "Напечатать" }).hasAttribute("disabled"),
     ).toBe(true);
@@ -765,7 +765,7 @@ describe("the check of the print by a second scan (the session's switch)", () =>
       />,
     );
     const toggle = screen.getByRole("switch", {
-      name: "Проверка распечатки повторным сканированием",
+      name: "Проверка этикетки после печати",
     });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
@@ -786,7 +786,7 @@ describe("the check of the print by a second scan (the session's switch)", () =>
         onCheck={onCheck}
       />,
     );
-    const on = screen.getByRole("switch", { name: "Проверка распечатки повторным сканированием" });
+    const on = screen.getByRole("switch", { name: "Проверка этикетки после печати" });
     expect(on.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(on);
     expect(onCheck).toHaveBeenLastCalledWith("none");

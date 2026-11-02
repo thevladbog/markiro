@@ -270,7 +270,7 @@
   height: 56px;
 }
 .shift-drawer a:not(.mk-btn) {
-  color: var(--info-fg);
+  color: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
 }

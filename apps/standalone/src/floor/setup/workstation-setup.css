@@ -89,7 +89,8 @@ section.workstation-setup {
 }
 
 /* Selected = `fg` fill, the check and weight 600: three signs, never the colour alone. */
-.setup-tabs__list .mk-data-tabs__tab--active {
+.setup-tabs__list .mk-data-tabs__tab--active,
+.setup-tabs__list .mk-data-tabs__tab--active:hover:not(:disabled) {
   background: var(--fg);
   color: var(--bg);
   font-weight: 600;

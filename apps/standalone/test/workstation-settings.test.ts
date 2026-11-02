@@ -424,3 +424,27 @@ describe("paper «Лист А4» (plan А4)", () => {
     ).toEqual(ZEBRA);
   });
 });
+
+describe("printer label output", () => {
+  it.each(["normal", "peel", "cutter"])(
+    "persists %s through save and reload",
+    async (outputMode) => {
+      const local = openLocalDb().executor;
+      const profile = parsePrinterProfile({ ...ZEBRA, outputMode });
+      expect(profile).toEqual({ ...ZEBRA, outputMode });
+      await saveWorkstationSettings(local, { ...SETTINGS, printers: [profile ?? ZEBRA, TSC] });
+      expect((await readWorkstationSettings(local)).printers[0]).toEqual({ ...ZEBRA, outputMode });
+    },
+  );
+  it("rejects unknown modes and driver-controlled finishing", () => {
+    expect(parsePrinterProfile({ ...ZEBRA, outputMode: "unknown" })).toBeNull();
+    expect(
+      parsePrinterProfile({
+        ...ZEBRA,
+        target: { kind: "usb", printer: "HP" },
+        mode: "windows_driver",
+        outputMode: "cutter",
+      }),
+    ).toBeNull();
+  });
+});

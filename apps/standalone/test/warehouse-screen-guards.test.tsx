@@ -147,7 +147,7 @@ describe("the guard against a second tap", () => {
       answer: async () => ({ sent: false, code: "outcome_unknown" }),
     });
     await at.scan(BOX_SSCC);
-    await screen.findByText(/Неизвестно, вышла ли этикетка/);
+    await screen.findByText(/Неизвестно, напечаталась ли этикетка/);
     await at.press("Проверить сканом");
     await at.pressAtOnce("Отменить проверку");
     expect(screen.getByText("Отсканируйте новую этикетку")).toBeTruthy();
@@ -389,7 +389,7 @@ describe("work in hand", () => {
     expect(await screen.findByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     // The failed settle wrote no record, the recovery wrote one: the delivery is told once.
     expect(at.props.onRecorded).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
+    expect(screen.getByText(/Неизвестно, напечаталась ли этикетка/)).toBeTruthy();
     expect(screen.queryByText(/Ничего не напечатано/)).toBeNull();
     expect(at.shell.sends).toHaveLength(1);
     expect(rows(db.db, "SELECT state, error_code FROM wh_jobs")).toEqual([

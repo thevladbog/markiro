@@ -217,7 +217,7 @@ describe("what a job tells of its printing", () => {
     expect(resultView(job({ state: "unknown" }), true)).toMatchObject({
       tone: "info",
       title: "verify",
-      body: { kind: "hint", key: "verify" },
+      body: null,
     });
     expect(resultView(job({ state: "verified" }), false)).toMatchObject({
       tone: "ok",

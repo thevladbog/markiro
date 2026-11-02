@@ -28,7 +28,7 @@ import { checkAddress, checkBaud, checkPort, pasteInto, type IpTarget } from "..
 import { ModeSegment } from "../kit/ModeSegment.js";
 import { SwitchCard } from "../kit/SwitchCard.js";
 import { renderLabel } from "../print/label-render.js";
-import { settleOutcome, type PrintJobCode, type RenderLabel } from "../print/print-jobs.js";
+import { settleOutcome, type PrintJobCode } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
 import { printerFormatText } from "../print/printer-format.js";
 import type { ScanChannel, ScanSource } from "../scan-source.js";
@@ -95,7 +95,7 @@ export interface WorkstationSetupProps {
   /** The floor's scanner: the code of a test label is scanned back here. */
   source: ScanSource;
   /** How the test label is rendered; the app's by default. */
-  render?: RenderLabel;
+  render?: typeof renderLabel;
   /** How the A4 test sheet is made (plan А4); the app's by default. */
   a4Sheet?: typeof a4TestSheet;
   /** «Проверить звук»: the floor's own tone at this level (0–1); the generated tone by default. */
@@ -1063,6 +1063,21 @@ export function WorkstationSetup({
                     hint={t("floor.setup.printers.editor.dpiHint")}
                     onChange={(dpi) => set({ dpi })}
                   />
+                  {!driver && (
+                    <Select
+                      custom
+                      size={controlSize}
+                      label={t("floor.setup.printers.editor.outputMode")}
+                      options={(["normal", "peel", "cutter"] as const).map((value) => ({
+                        value,
+                        label: t(`floor.setup.printers.editor.outputModes.${value}`),
+                      }))}
+                      {...(form.outputMode === undefined ? {} : { value: form.outputMode })}
+                      placeholder={t("floor.setup.printers.editor.outputModeLegacy")}
+                      hint={t("floor.setup.printers.editor.outputModeHint")}
+                      onValueChange={(outputMode) => set({ outputMode })}
+                    />
+                  )}
                   {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (
                     <ModeSegment
                       label={t("floor.setup.printers.editor.mode")}
@@ -1382,6 +1397,9 @@ export function WorkstationSetup({
               selfTestDataMatrixSpec(printer.language),
               { ...sampleLabelData(), "km.code": code },
               printer,
+              undefined,
+              null,
+              { kmDataMatrix: "raster" },
             )
           : await render(testLabelSpec(code, printer.language), sampleLabelData(), printer);
     } catch {
