@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="ru">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>ТСД · компактный хэдер, логотип и агрегация</title
+  ><style>
+    body {
+      margin: 0;
+      background: #f0efea;
+      color: #17161a;
+      font:
+        16px/1.5 system-ui,
+        sans-serif;
+      padding: 24px;
+    }
+    main {
+      max-width: 1000px;
+      margin: auto;
+    }
+    h1 {
+      font-size: 30px;
+      margin: 0;
+    }
+    h2 {
+      font-size: 22px;
+      margin: 32px 0 12px;
+    }
+    .pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    figure {
+      margin: 0;
+    }
+    figcaption {
+      margin-bottom: 8px;
+      color: #45433e;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #c9c6bd;
+      border-radius: 12px;
+      display: block;
+    }
+    a {
+      color: inherit;
+    }
+    a:focus-visible {
+      outline: 3px solid #1a4f9c;
+    }
+    summary {
+      cursor: pointer;
+      padding: 12px 0;
+    }
+    section {
+      border-top: 1px solid #c9c6bd;
+      margin-top: 24px;
+    }
+    @media (max-width: 650px) {
+      body {
+        padding: 16px;
+      }
+      .pair {
+        gap: 12px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+    }
+  </style>
+  <main>
+    <h1>ТСД · дизайн-кит и рабочие экраны</h1>
+    <p>
+      Связь и очередь перенесены в хэдер. Логотип оставлен на входе, привязке и главном меню.
+      Названия продукции переносятся целиком. Режимы выдачи и сетка агрегации сохранены.
+    </p>
+    <p>
+      <a href="README.md">Выводы, проверки и ограничения</a> ·
+      <a href="../handheld-kit-conformance-2026-11-02.fig">OpenPencil</a> ·
+      <a href="evidence.json">Сведения о проверке</a>
+    </p>
+    <p>
+      Настоящие Compose-компоненты, нативный рендерер Robolectric API 34, синтетические данные.
+      Диалог снят отдельным окном; его положение на физическом ТСД здесь не моделируется. На
+      устройстве не проверялось.
+    </p>
+    <section>
+      <h2>Активная смена · до и после</h2>
+      <p>
+        Отдельные блоки контекста, товара, выпуска и действия. Внутренние отступы 16 dp, кнопка от
+        64 dp.
+      </p>
+      <div class="pair">
+        <figure>
+          <figcaption>До · 320×520</figcaption>
+          <img src="before/active-card-hub-320-light.png" alt="Карточка до изменения" />
+        </figure>
+        <figure>
+          <figcaption>После · 320×520</figcaption>
+          <img
+            src="after/hub-active-offline-320-light.png"
+            alt="Карточка с раздельными блоками и отступами"
+          />
+        </figure>
+      </div>
+    </section>
+    <details>
+      <summary>OpenPencil · карточка активной смены</summary>
+      <a href="openpencil-active-card.png"
+        ><img
+          loading="lazy"
+          src="openpencil-active-card.png"
+          alt="Карточка с коротким и длинным названием, без плана, в двух темах"
+      /></a>
+    </details>
+    <section>
+      <h2>Активная смена · длинный товар</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/active-card-long-320-dark.png"
+            ><img
+              loading="lazy"
+              src="after/active-card-long-320-dark.png"
+              alt="Активная смена · длинный товар · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/active-card-long-320-light.png"
+            ><img
+              loading="lazy"
+              src="after/active-card-long-320-light.png"
+              alt="Активная смена · длинный товар · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Активная смена · шрифт 150%</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/active-card-long-320-large-dark.png"
+            ><img
+              loading="lazy"
+              src="after/active-card-long-320-large-dark.png"
+              alt="Активная смена · шрифт 150% · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/active-card-long-320-large-light.png"
+            ><img
+              loading="lazy"
+              src="after/active-card-long-320-large-light.png"
+              alt="Активная смена · шрифт 150% · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Активная смена · шрифт 150% · кнопка после прокрутки</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/active-card-long-320-large-action-dark.png"
+            ><img
+              loading="lazy"
+              src="after/active-card-long-320-large-action-dark.png"
+              alt="Активная смена · шрифт 150% · кнопка после прокрутки · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/active-card-long-320-large-action-light.png"
+            ><img
+              loading="lazy"
+              src="after/active-card-long-320-large-action-light.png"
+              alt="Активная смена · шрифт 150% · кнопка после прокрутки · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <details open>
+      <summary>OpenPencil · длинное название и уместный логотип</summary>
+      <a href="openpencil-long-title.png"
+        ><img
+          loading="lazy"
+          src="openpencil-long-title.png"
+          alt="Длинное название продукции, отдельная строка действий и читаемая агрегация"
+      /></a>
+    </details>
+    <section>
+      <h2>Работа · название в три строки</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark · 320×520</figcaption>
+          <a href="after/long-product-work-320-dark.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-work-320-dark.png"
+              alt="Работа · название в три строки · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light · 320×520</figcaption>
+          <a href="after/long-product-work-320-light.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-work-320-light.png"
+              alt="Работа · название в три строки · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Агрегация · название в три строки</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark · 320×520</figcaption>
+          <a href="after/long-product-aggregation-320-dark.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-aggregation-320-dark.png"
+              alt="Агрегация · название в три строки · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light · 320×520</figcaption>
+          <a href="after/long-product-aggregation-320-light.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-aggregation-320-light.png"
+              alt="Агрегация · название в три строки · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Инвентаризация · название в три строки</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark · 320×520</figcaption>
+          <a href="after/long-product-inventory-320-dark.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-inventory-320-dark.png"
+              alt="Инвентаризация · название в три строки · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light · 320×520</figcaption>
+          <a href="after/long-product-inventory-320-light.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-inventory-320-light.png"
+              alt="Инвентаризация · название в три строки · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Работа · длинное название · шрифт 150%</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark · 320×520</figcaption>
+          <a href="after/long-product-work-320-large-dark.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-work-320-large-dark.png"
+              alt="Работа · длинное название · шрифт 150% · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light · 320×520</figcaption>
+          <a href="after/long-product-work-320-large-light.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-work-320-large-light.png"
+              alt="Работа · длинное название · шрифт 150% · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Агрегация · длинное название · шрифт 150%</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark · 320×520</figcaption>
+          <a href="after/long-product-aggregation-320-large-dark.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-aggregation-320-large-dark.png"
+              alt="Агрегация · длинное название · шрифт 150% · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light · 320×520</figcaption>
+          <a href="after/long-product-aggregation-320-large-light.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-aggregation-320-large-light.png"
+              alt="Агрегация · длинное название · шрифт 150% · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Инвентаризация · длинное название · шрифт 150%</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark · 320×520</figcaption>
+          <a href="after/long-product-inventory-320-large-dark.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-inventory-320-large-dark.png"
+              alt="Инвентаризация · длинное название · шрифт 150% · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light · 320×520</figcaption>
+          <a href="after/long-product-inventory-320-large-light.png"
+            ><img
+              loading="lazy"
+              src="after/long-product-inventory-320-large-light.png"
+              alt="Инвентаризация · длинное название · шрифт 150% · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <details>
+      <summary>Новые макеты OpenPencil</summary>
+      <a href="openpencil-header-revision.png"
+        ><img
+          loading="lazy"
+          src="openpencil-header-revision.png"
+          alt="Компактный хэдер, бренд, режимы выдачи и агрегация"
+      /></a>
+    </details>
+    <section>
+      <h2>До и после · больше места для работы</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>До · 320×520</figcaption>
+          <img src="before/header-hub-active-offline-320-light.png" alt="До" />
+        </figure>
+        <figure>
+          <figcaption>После · 320×520</figcaption>
+          <img src="after/hub-active-offline-320-light.png" alt="После" />
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Меню и активная смена офлайн · 320×520</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/hub-active-offline-320-dark.png"
+            ><img
+              loading="lazy"
+              src="after/hub-active-offline-320-dark.png"
+              alt="Меню и активная смена офлайн · 320×520 · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/hub-active-offline-320-light.png"
+            ><img
+              loading="lazy"
+              src="after/hub-active-offline-320-light.png"
+              alt="Меню и активная смена офлайн · 320×520 · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Меню · связь в порядке</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/hub-360-dark.png"
+            ><img loading="lazy" src="after/hub-360-dark.png" alt="Меню · связь в порядке · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/hub-360-light.png"
+            ><img loading="lazy" src="after/hub-360-light.png" alt="Меню · связь в порядке · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Связь и очередь · отдельное окно</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/connection-details-360-dark.png"
+            ><img
+              loading="lazy"
+              src="after/connection-details-360-dark.png"
+              alt="Связь и очередь · отдельное окно · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/connection-details-360-light.png"
+            ><img
+              loading="lazy"
+              src="after/connection-details-360-light.png"
+              alt="Связь и очередь · отдельное окно · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Привязка · логотип</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/pairing-360-dark.png"
+            ><img loading="lazy" src="after/pairing-360-dark.png" alt="Привязка · логотип · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/pairing-360-light.png"
+            ><img loading="lazy" src="after/pairing-360-light.png" alt="Привязка · логотип · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Добавить принтер</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/printer-360-dark.png"
+            ><img loading="lazy" src="after/printer-360-dark.png" alt="Добавить принтер · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/printer-360-light.png"
+            ><img loading="lazy" src="after/printer-360-light.png" alt="Добавить принтер · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Три режима выдачи этикетки</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/printer-output-choices-360-dark.png"
+            ><img
+              loading="lazy"
+              src="after/printer-output-choices-360-dark.png"
+              alt="Три режима выдачи этикетки · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/printer-output-choices-360-light.png"
+            ><img
+              loading="lazy"
+              src="after/printer-output-choices-360-light.png"
+              alt="Три режима выдачи этикетки · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Агрегация · 12 ячеек</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/aggregation-12-360-dark.png"
+            ><img
+              loading="lazy"
+              src="after/aggregation-12-360-dark.png"
+              alt="Агрегация · 12 ячеек · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/aggregation-12-360-light.png"
+            ><img
+              loading="lazy"
+              src="after/aggregation-12-360-light.png"
+              alt="Агрегация · 12 ячеек · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Агрегация · 120 единиц, счётчик</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/aggregation-120-360-dark.png"
+            ><img
+              loading="lazy"
+              src="after/aggregation-120-360-dark.png"
+              alt="Агрегация · 120 единиц, счётчик · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/aggregation-120-360-light.png"
+            ><img
+              loading="lazy"
+              src="after/aggregation-120-360-light.png"
+              alt="Агрегация · 120 единиц, счётчик · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Вход</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/login-360-dark.png"
+            ><img loading="lazy" src="after/login-360-dark.png" alt="Вход · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/login-360-light.png"
+            ><img loading="lazy" src="after/login-360-light.png" alt="Вход · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Вход · 320×520 · шрифт 150%</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/login-320-large-dark.png"
+            ><img
+              loading="lazy"
+              src="after/login-320-large-dark.png"
+              alt="Вход · 320×520 · шрифт 150% · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/login-320-large-light.png"
+            ><img
+              loading="lazy"
+              src="after/login-320-large-light.png"
+              alt="Вход · 320×520 · шрифт 150% · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Настройки</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/settings-360-dark.png"
+            ><img loading="lazy" src="after/settings-360-dark.png" alt="Настройки · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/settings-360-light.png"
+            ><img loading="lazy" src="after/settings-360-light.png" alt="Настройки · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Сканер</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/scanner-360-dark.png"
+            ><img loading="lazy" src="after/scanner-360-dark.png" alt="Сканер · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/scanner-360-light.png"
+            ><img loading="lazy" src="after/scanner-360-light.png" alt="Сканер · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Причина перепечати</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/reprint-reason-360-dark.png"
+            ><img
+              loading="lazy"
+              src="after/reprint-reason-360-dark.png"
+              alt="Причина перепечати · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/reprint-reason-360-light.png"
+            ><img
+              loading="lazy"
+              src="after/reprint-reason-360-light.png"
+              alt="Причина перепечати · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Работа</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/work-360-dark.png"
+            ><img loading="lazy" src="after/work-360-dark.png" alt="Работа · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/work-360-light.png"
+            ><img loading="lazy" src="after/work-360-light.png" alt="Работа · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Работа · 320×520 · шрифт 150%</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/work-320-large-dark.png"
+            ><img
+              loading="lazy"
+              src="after/work-320-large-dark.png"
+              alt="Работа · 320×520 · шрифт 150% · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/work-320-large-light.png"
+            ><img
+              loading="lazy"
+              src="after/work-320-large-light.png"
+              alt="Работа · 320×520 · шрифт 150% · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+    <section>
+      <h2>Инвентаризация офлайн</h2>
+      <div class="pair">
+        <figure>
+          <figcaption>dark</figcaption>
+          <a href="after/inventory-offline-360-dark.png"
+            ><img
+              loading="lazy"
+              src="after/inventory-offline-360-dark.png"
+              alt="Инвентаризация офлайн · dark"
+          /></a>
+        </figure>
+        <figure>
+          <figcaption>light</figcaption>
+          <a href="after/inventory-offline-360-light.png"
+            ><img
+              loading="lazy"
+              src="after/inventory-offline-360-light.png"
+              alt="Инвентаризация офлайн · light"
+          /></a>
+        </figure>
+      </div>
+    </section>
+  </main>
+</html>

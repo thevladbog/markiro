@@ -59,7 +59,8 @@ import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.ScreenColumn
 import app.markiro.handheld.core.design.StatusItem
-import app.markiro.handheld.core.design.StatusStrip
+import app.markiro.handheld.core.design.HeaderStatus
+import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.design.MenuRow
 import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.util.TimeText
@@ -114,8 +115,39 @@ fun HubScreen(
         }
         return
     }
+    val link = state.hostLink.takeIf { state.hostMode }
+    val network = when (link) {
+        HostLinkStatus.Online -> StatusItem(Icons.Outlined.Wifi, stringResource(R.string.host_link_online), Tone.Ok)
+        HostLinkStatus.Offline -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_offline_banner), Tone.Warn)
+        HostLinkStatus.Restoring -> StatusItem(Icons.Outlined.Sync, stringResource(R.string.host_link_restoring_banner), Tone.Warn)
+        HostLinkStatus.ClockSkew -> StatusItem(Icons.Outlined.Schedule, stringResource(R.string.host_link_clock_skew_banner), Tone.Warn)
+        HostLinkStatus.CertificateChanged -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_certificate), Tone.Err)
+        null -> if (state.reachable) StatusItem(Icons.Outlined.Wifi, stringResource(R.string.hub_network), Tone.Ok)
+            else StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.hub_offline_banner), Tone.Warn)
+    }
+    val statusItems = listOfNotNull(
+        network,
+        StatusItem(Icons.Outlined.Sync,
+            if (state.hostMode) stringResource(R.string.host_queue_banner, state.queue, state.hostQuarantined)
+            else stringResource(R.string.hub_queue, state.queue),
+            if (state.stuck) Tone.Err else if (state.hostMode && state.hostQuarantined > 0) Tone.Warn else Tone.Neutral),
+        StatusItem(Icons.Outlined.Sync, stringResource(R.string.hub_sync_stuck), Tone.Err).takeIf { state.stuck },
+    )
+    val statusTone = when {
+        state.stuck || link == HostLinkStatus.CertificateChanged -> Tone.Err
+        network.tone != Tone.Ok || (state.hostMode && state.hostQuarantined > 0) -> Tone.Warn
+        state.queue > 0 -> Tone.Info
+        else -> Tone.Ok
+    }
+    val statusActions = listOfNotNull(
+        StateAction(stringResource(R.string.header_status_open_queue), onHostQueue)
+            .takeIf { state.hostMode && (state.queue > 0 || state.hostQuarantined > 0) },
+        StateAction(stringResource(R.string.host_link_repair)) { confirmRepair = true }
+            .takeIf { link == HostLinkStatus.CertificateChanged },
+    )
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
-        AppBar(stringResource(R.string.hub_work_title), actions = {
+        AppBar(stringResource(R.string.hub_work_title), showBrand = true, actions = {
+            HeaderStatus(statusItems, statusTone, state.queue, statusActions)
             IconAction(Icons.Outlined.Settings, stringResource(R.string.hub_tile_settings), onClick = { onTile(HubTile.SETTINGS) })
         })
         ScreenColumn(modifier = Modifier.weight(1f), padding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -129,57 +161,6 @@ fun HubScreen(
                     Text(listOfNotNull(state.organization.ifEmpty { null }, state.lineName).joinToString(" · "), style = t.caption, color = c.fg2)
                 }
                 Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c.fg2)
-            }
-            StatusStrip(
-                listOfNotNull(
-                    if (state.hostMode && state.hostLink != null) {
-                        // Text and icon both say it: a state is never told by colour alone.
-                        when (state.hostLink) {
-                            HostLinkStatus.Online -> StatusItem(Icons.Outlined.Wifi, stringResource(R.string.host_link_online), Tone.Ok)
-                            HostLinkStatus.Offline -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_offline), Tone.Warn)
-                            HostLinkStatus.Restoring -> StatusItem(Icons.Outlined.Sync, stringResource(R.string.host_link_restoring), Tone.Warn)
-                            HostLinkStatus.ClockSkew -> StatusItem(Icons.Outlined.Schedule, stringResource(R.string.host_link_clock_skew), Tone.Warn)
-                            HostLinkStatus.CertificateChanged -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_certificate), Tone.Err)
-                        }
-                    } else if (state.reachable) {
-                        StatusItem(Icons.Outlined.Wifi, stringResource(R.string.hub_network), Tone.Ok)
-                    } else {
-                        StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.hub_offline), Tone.Warn)
-                    },
-                    StatusItem(Icons.Outlined.Sync, stringResource(R.string.hub_queue, state.queue), if (state.stuck) Tone.Err else Tone.Neutral).takeIf { state.queue > 0 },
-                ),
-            )
-            if (state.stuck) {
-                Banner(stringResource(R.string.hub_sync_stuck), Tone.Err, Icons.Outlined.Sync)
-            } else if (state.hostMode && state.hostLink != null) {
-                // The work goes on in every state of the link; the banner says why the queue is not going out.
-                when (state.hostLink) {
-                    HostLinkStatus.Online -> Unit
-                    HostLinkStatus.Offline -> Banner(stringResource(R.string.host_link_offline_banner), Tone.Warn, Icons.Outlined.WifiOff)
-                    HostLinkStatus.Restoring -> Banner(stringResource(R.string.host_link_restoring_banner), Tone.Warn, Icons.Outlined.Sync)
-                    HostLinkStatus.ClockSkew -> Banner(stringResource(R.string.host_link_clock_skew_banner), Tone.Warn, Icons.Outlined.Schedule)
-                    // The one state with no way out by waiting: the banner is the way into pairing again.
-                    HostLinkStatus.CertificateChanged -> Box(Modifier.fillMaxWidth().clickable(onClick = { confirmRepair = true })) {
-                        Banner(stringResource(R.string.host_link_certificate_banner), Tone.Err, Icons.Outlined.WifiOff)
-                    }
-                }
-            } else if (!state.reachable) {
-                val text = if (state.queue > 0) {
-                    stringResource(R.string.hub_offline_banner_queue, pluralStringResource(R.plurals.scans_queued, state.queue, state.queue))
-                } else {
-                    stringResource(R.string.hub_offline_banner)
-                }
-                Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
-            }
-            // What the host refused stays for support and is one tap from here; a refused record never stops the line.
-            if (state.hostMode && (state.queue > 0 || state.hostQuarantined > 0)) {
-                Box(Modifier.fillMaxWidth().clickable(onClick = onHostQueue)) {
-                    Banner(
-                        stringResource(R.string.host_queue_banner, state.queue, state.hostQuarantined),
-                        if (state.hostQuarantined > 0) Tone.Warn else Tone.Neutral,
-                        Icons.Outlined.Sync,
-                    )
-                }
             }
             // Labels owed on boxes already closed and reported. Shown on the hub
             // because the queue belongs to the device, not to any one shift.

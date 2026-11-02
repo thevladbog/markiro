@@ -15,6 +15,7 @@ data class MarkiroPalette(
     val fgDisabled: Color,
     val line: Color,
     val lineStrong: Color,
+    val lineControl: Color,
     val accent: Color,
     val fgOnAccent: Color,
     val okFg: Color,
@@ -52,6 +53,7 @@ object MarkiroColors {
         fgDisabled = Color(0xFF5B5952),
         line = Color(0xFF2E2D33),
         lineStrong = Color(0xFF45444B),
+        lineControl = Color(0xFF6F6D76),
         accent = Color(0xFF3DDC7A),
         fgOnAccent = Color(0xFF0B2A17),
         okFg = Color(0xFF3DDC7A),
@@ -88,6 +90,7 @@ object MarkiroColors {
         fgDisabled = Color(0xFFA5A29A),
         line = Color(0xFFE0DED7),
         lineStrong = Color(0xFFC9C6BD),
+        lineControl = Color(0xFF8A877F),
         accent = Color(0xFF0FAF56),
         fgOnAccent = Color(0xFF0B2A17),
         okFg = Color(0xFF116335),
@@ -98,7 +101,7 @@ object MarkiroColors {
         errFg = Color(0xFFA1231A),
         errBg = Color(0xFFFDEAE7),
         errBorder = Color(0xFFF2D4D0),
-        errSolid = Color(0xFFC0392B),
+        errSolid = Color(0xFFA1231A),
         fgOnErr = Color(0xFFFFFFFF),
         warnFg = Color(0xFF8A4C07),
         warnBg = Color(0xFFFDF0DC),
@@ -121,7 +124,9 @@ object MarkiroSizes {
     val key = 72.dp
     val statusStrip = 32.dp
     val appBar = 56.dp
-    val radius = 8.dp
+    val radius = 16.dp
+    val radiusCard = 24.dp
+    val radiusPrimary = 22.dp
     val sp1 = 4.dp
     val sp2 = 8.dp
     val sp3 = 12.dp

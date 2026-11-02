@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Backspace
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,6 +49,13 @@ import app.markiro.handheld.R
 
 data class StatusItem(val icon: ImageVector, val label: String, val tone: Tone = Tone.Neutral)
 data class StateAction(val label: String, val onClick: () -> Unit)
+
+@Composable
+fun markiroFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = MarkiroTheme.colors.focusRing,
+    unfocusedBorderColor = MarkiroTheme.colors.lineControl,
+    cursorColor = MarkiroTheme.colors.fg1,
+)
 
 /**
  * A screen-height column that scrolls only when its content does not fit.
@@ -80,11 +90,11 @@ fun ScreenColumn(
 @Composable
 fun StatusStrip(items: List<StatusItem>, modifier: Modifier = Modifier) {
     val c = MarkiroTheme.colors
-    Row(
-        modifier = modifier.fillMaxWidth().height(MarkiroSizes.statusStrip).background(c.surfacePanel)
-            .padding(horizontal = MarkiroSizes.sp4),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    FlowRow(
+        modifier = modifier.fillMaxWidth().heightIn(min = MarkiroSizes.statusStrip).background(c.surfacePanel)
+            .padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp1),
+        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
+        verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
     ) {
         items.forEach { item ->
             val color = if (item.tone == Tone.Neutral) c.fg2 else c.tone(item.tone).fg
@@ -97,16 +107,19 @@ fun StatusStrip(items: List<StatusItem>, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun AppBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
+fun AppBar(title: String, onBack: (() -> Unit)? = null, showBrand: Boolean = false, actions: @Composable RowScope.() -> Unit = {}) {
     val c = MarkiroTheme.colors
     Row(
-        modifier = Modifier.fillMaxWidth().height(MarkiroSizes.appBar).background(c.surfacePage)
+        modifier = Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.appBar).background(c.surfacePage)
             .padding(start = if (onBack == null) MarkiroSizes.sp4 else MarkiroSizes.sp1, end = MarkiroSizes.sp1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) IconAction(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
+        if (showBrand) MarkiroLogo(Modifier.padding(end = MarkiroSizes.sp2))
         Text(
             title,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
             style = MarkiroTheme.type.title.copy(fontSize = 20.sp, lineHeight = 26.sp),
             color = c.fg1,
             modifier = Modifier.weight(1f),
@@ -119,26 +132,29 @@ fun AppBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable Row
 fun IconAction(icon: ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
     val c = MarkiroTheme.colors
     Box(
-        modifier = Modifier.size(MarkiroSizes.controlIcon).clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
+        modifier = Modifier.size(MarkiroSizes.controlIcon).clip(RoundedCornerShape(MarkiroSizes.radius))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = description, tint = if (enabled) c.fg1 else c.fg3, modifier = Modifier.size(24.dp)) }
+    ) { Icon(icon, contentDescription = description, tint = if (enabled) c.fg1 else c.fgDisabled, modifier = Modifier.size(24.dp)) }
 }
 
 @Composable
 private fun ButtonShell(
     height: Dp,
+    radius: Dp,
     background: Color,
     border: Color?,
     enabled: Boolean,
     onClick: () -> Unit,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(MarkiroSizes.radius)
+    val shape = RoundedCornerShape(radius)
     Row(
-        modifier = Modifier.fillMaxWidth().height(height).clip(shape)
+        modifier = Modifier.fillMaxWidth().heightIn(min = height).clip(shape)
             .background(if (enabled) background else MarkiroTheme.colors.surfacePanel)
             .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp3),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
         content = content,
@@ -148,39 +164,40 @@ private fun ButtonShell(
 @Composable
 fun PrimaryButton(label: String, onClick: () -> Unit, enabled: Boolean = true, icon: ImageVector? = null) {
     val c = MarkiroTheme.colors
-    ButtonShell(MarkiroSizes.controlPrimary, c.accent, null, enabled, onClick) {
+    ButtonShell(MarkiroSizes.controlPrimary, MarkiroSizes.radiusPrimary, c.fg1, null, enabled, onClick) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = c.fgOnAccent, modifier = Modifier.size(26.dp))
+            Icon(icon, contentDescription = null, tint = if (enabled) c.surfacePage else c.fgDisabled, modifier = Modifier.size(26.dp))
             Spacer(Modifier.size(MarkiroSizes.sp2))
         }
-        Text(label, style = MarkiroTheme.type.strong, color = if (enabled) c.fgOnAccent else c.fgDisabled)
+        Text(label, style = MarkiroTheme.type.strong, color = if (enabled) c.surfacePage else c.fgDisabled, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
 fun SecondaryButton(label: String, onClick: () -> Unit, enabled: Boolean = true) {
     val c = MarkiroTheme.colors
-    ButtonShell(MarkiroSizes.controlRow, c.surfaceCard, c.lineStrong, enabled, onClick) {
-        Text(label, style = MarkiroTheme.type.strong, color = if (enabled) c.fg1 else c.fgDisabled)
+    ButtonShell(MarkiroSizes.controlRow, MarkiroSizes.radius, c.surfaceCard, c.lineControl, enabled, onClick) {
+        Text(label, style = MarkiroTheme.type.strong, color = if (enabled) c.fg1 else c.fgDisabled, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
 fun DestructiveButton(label: String, onClick: () -> Unit) {
     val c = MarkiroTheme.colors
-    ButtonShell(MarkiroSizes.controlPrimary, c.errSolid, null, true, onClick) {
-        Text(label, style = MarkiroTheme.type.strong, color = c.fgOnErr)
+    ButtonShell(MarkiroSizes.controlPrimary, MarkiroSizes.radiusPrimary, c.errSolid, null, true, onClick) {
+        Text(label, style = MarkiroTheme.type.strong, color = c.fgOnErr, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
-fun MarkiroTextButton(label: String, onClick: () -> Unit, tone: Tone = Tone.Accent) {
-    val color = MarkiroTheme.colors.tone(tone).fg
+fun MarkiroTextButton(label: String, onClick: () -> Unit, tone: Tone = Tone.Neutral) {
+    val color = if (tone == Tone.Neutral) MarkiroTheme.colors.fg1 else MarkiroTheme.colors.tone(tone).fg
     Row(
-        modifier = Modifier.fillMaxWidth().height(MarkiroSizes.controlIcon).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.controlIcon)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
-    ) { Text(label, style = MarkiroTheme.type.body.copy(fontWeight = FontWeight.SemiBold), color = color) }
+    ) { Text(label, style = MarkiroTheme.type.body.copy(fontWeight = FontWeight.SemiBold), color = color, textAlign = TextAlign.Center) }
 }
 
 @Composable
@@ -198,7 +215,7 @@ fun Keypad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, onConfirm: () -> Un
             }
             Key(Modifier.weight(1f), onClick = { onDigit('0') }, height = keyHeight) { KeyLabel("0") }
             Key(Modifier.weight(1f), onClick = onConfirm, accent = true, enabled = confirmEnabled, height = keyHeight) {
-                Text("OK", style = MarkiroTheme.type.strong.copy(fontSize = 20.sp), color = if (confirmEnabled) MarkiroTheme.colors.fgOnAccent else MarkiroTheme.colors.fgDisabled)
+                Text("OK", style = MarkiroTheme.type.strong.copy(fontSize = 20.sp), color = if (confirmEnabled) MarkiroTheme.colors.surfacePage else MarkiroTheme.colors.fgDisabled)
             }
         }
     }
@@ -213,7 +230,7 @@ private fun Key(modifier: Modifier, onClick: () -> Unit, accent: Boolean = false
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Box(
         modifier = modifier.height(height).clip(shape)
-            .background(if (accent) (if (enabled) c.accent else c.surfacePanel) else c.surfaceCard)
+            .background(if (accent) (if (enabled) c.fg1 else c.surfacePanel) else c.surfaceCard)
             .then(if (accent) Modifier else Modifier.border(1.dp, c.line, shape))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -233,7 +250,7 @@ fun PinDots(total: Int, filled: Int) {
 @Composable
 fun Tile(icon: ImageVector, label: String, status: String, onClick: () -> Unit, modifier: Modifier = Modifier, statusTone: Tone = Tone.Neutral, enabled: Boolean = true) {
     val c = MarkiroTheme.colors
-    val shape = RoundedCornerShape(MarkiroSizes.radius)
+    val shape = RoundedCornerShape(MarkiroSizes.radiusCard)
     Column(
         // Minimum height from the brief; a two-line status (offline timestamp) grows the tile instead of clipping.
         modifier = modifier.heightIn(min = 116.dp).clip(shape).background(c.surfaceCard).border(1.dp, c.line, shape)
@@ -265,9 +282,10 @@ fun MarkiroChip(text: String, tone: Tone = Tone.Neutral) {
 fun Banner(text: String, tone: Tone, icon: ImageVector) {
     val t = MarkiroTheme.colors.tone(tone)
     Row(
-        modifier = Modifier.fillMaxWidth().background(t.bg).padding(horizontal = MarkiroSizes.sp4, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(MarkiroSizes.radiusCard))
+            .background(t.bg).padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp3),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
     ) {
         Icon(icon, contentDescription = null, tint = t.fg, modifier = Modifier.size(20.dp))
         Text(text, style = MarkiroTheme.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = t.fg)

@@ -22,6 +22,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -32,6 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
@@ -404,15 +411,15 @@ private fun ChoiceRow(label: String, sub: String, selected: Boolean, onClick: ()
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Row(
         Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard)
-            .border(1.dp, if (selected) c.accent else c.line, shape)
+            .border(1.dp, if (selected) c.fg1 else c.line, shape)
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
     ) {
         Box(
-            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.accent else c.lineStrong, CircleShape),
+            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.fg1 else c.lineControl, CircleShape),
             contentAlignment = Alignment.Center,
-        ) { if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.accent)) }
+        ) { if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.fg1)) }
         Column(Modifier.weight(1f)) {
             Text(label, style = t.body, color = c.fg1)
             Text(sub, style = t.caption, color = c.fg2)
@@ -428,13 +435,17 @@ private fun <T> Segmented(options: List<Pair<String, T>>, current: T, onPick: (T
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
         options.forEach { (label, value) ->
             val active = value == current
-            Box(
-                Modifier.weight(1f).height(MarkiroSizes.controlRow).clip(shape)
-                    .background(if (active) c.surfacePanel else c.surfaceCard)
-                    .border(1.dp, if (active) c.accent else c.line, shape)
-                    .clickable { onPick(value) },
-                contentAlignment = Alignment.Center,
-            ) { Text(label, style = t.body, color = if (active) c.fg1 else c.fg2) }
+            Row(
+                Modifier.weight(1f).heightIn(min = MarkiroSizes.controlRow).clip(shape)
+                    .background(if (active) c.fg1 else c.surfaceCard)
+                    .border(1.dp, if (active) c.fg1 else c.lineControl, shape)
+                    .clickable { onPick(value) }.padding(8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (active) Icon(Icons.Outlined.Check, null, tint = c.surfacePage, modifier = Modifier.size(18.dp))
+                Text(label, style = t.body, color = if (active) c.surfacePage else c.fg1)
+            }
         }
     }
 }
@@ -454,7 +465,7 @@ private fun Field(
         Text(label, style = t.label, color = c.fg3)
         Box(
             Modifier.fillMaxWidth().height(MarkiroSizes.controlRow).clip(shape).background(c.surfaceCard)
-                .border(1.dp, c.line, shape).padding(horizontal = 14.dp),
+                .border(1.dp, c.lineControl, shape).padding(horizontal = 14.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
             BasicTextField(
@@ -462,7 +473,7 @@ private fun Field(
                 onValueChange = onChange,
                 singleLine = true,
                 textStyle = t.body.copy(color = c.fg1),
-                cursorBrush = SolidColor(c.accent),
+                cursorBrush = SolidColor(c.fg1),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = if (digitsOnly) KeyboardType.Number else KeyboardType.Text,
                     imeAction = ImeAction.Done,
@@ -499,7 +510,15 @@ private fun PrinterOutputModePicker(mode: String?, onMode: (String?) -> Unit) {
     val label = choices.firstOrNull { it.first == mode }?.second ?: R.string.printer_output_device
     Text(stringResource(R.string.printer_output_mode), style = MarkiroTheme.type.label, color = MarkiroTheme.colors.fg3)
     Box(Modifier.fillMaxWidth()) {
-        SecondaryButton(stringResource(label), { expanded = true })
+        val c = MarkiroTheme.colors
+        val shape = RoundedCornerShape(MarkiroSizes.radius)
+        Row(Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.controlRow).clip(shape)
+            .background(c.surfaceCard).border(1.dp, c.lineControl, shape)
+            .clickable(role = Role.Button) { expanded = true }.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(label), style = MarkiroTheme.type.body, color = c.fg1, modifier = Modifier.weight(1f))
+            Icon(Icons.Outlined.ExpandMore, null, tint = c.fg2, modifier = Modifier.size(24.dp))
+        }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             if (mode == null) DropdownMenuItem(
                 text = { Text(stringResource(R.string.printer_output_device)) },
@@ -508,6 +527,8 @@ private fun PrinterOutputModePicker(mode: String?, onMode: (String?) -> Unit) {
             choices.forEach { (value, title) ->
                 DropdownMenuItem(
                     text = { Text(stringResource(title)) },
+                    modifier = Modifier.semantics { selected = mode == value },
+                    trailingIcon = { if (mode == value) Icon(Icons.Outlined.Check, null) },
                     onClick = { expanded = false; onMode(value) },
                 )
             }

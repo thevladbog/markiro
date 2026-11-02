@@ -185,7 +185,9 @@ class HubScreenTest {
         compose.onNodeWithText("Иванова Анна").assertIsDisplayed()
         compose.onNodeWithText("3 доступны").assertIsDisplayed()
         compose.onNodeWithText("1 задание").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Связь и очередь").performClick()
         compose.onNodeWithText("Очередь 37").assertIsDisplayed()
+        compose.onNodeWithText("Готово").performClick()
         compose.onNodeWithText("Инвентаризация").performClick()
         assertEquals(HubTile.INVENTORY, opened)
     }
@@ -222,7 +224,10 @@ class HubScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Работаем офлайн · 37 сканов в очереди").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Связь и очередь").performClick()
+        compose.onNodeWithText("Работаем офлайн").assertIsDisplayed()
+        compose.onNodeWithText("Очередь 37").assertIsDisplayed()
+        compose.onNodeWithText("Готово").performClick()
         compose.onNodeWithText("Продолжить").assertIsDisplayed()
         compose.onNodeWithText("На этом ТСД").assertIsDisplayed()
         compose.onNodeWithText("заданий нет · данные на", substring = true).performScrollTo().assertIsDisplayed()

@@ -1013,4 +1013,8 @@
     <string name="printer_output_peel">Отделитель с датчиком снятия</string>
     <string name="printer_output_cutter">Обрезчик — каждая этикетка</string>
     <string name="printer_output_hint">Для отделения или резки требуется соответствующий модуль принтера. Режим применяется к новым заданиям.</string>
+    <string name="brand_markiro">Маркиро</string>
+    <string name="header_status_title">Связь и очередь</string>
+    <string name="header_status_done">Готово</string>
+    <string name="header_status_open_queue">Открыть очередь хоста</string>
 </resources>

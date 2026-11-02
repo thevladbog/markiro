@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Sync
 import app.markiro.handheld.core.design.IconAction
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import app.markiro.handheld.core.design.markiroFieldColors
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -78,14 +79,14 @@ private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks, roster: Roster
     BoxWithConstraints {
         val keyHeight = if (maxHeight < 560.dp) 48.dp else 56.dp
         Column(Modifier.fillMaxSize()) {
-            AppBar(stringResource(R.string.signin_title), actions = {
+            AppBar(stringResource(R.string.signin_title), showBrand = true, actions = {
                 IconAction(Icons.Outlined.Sync, stringResource(R.string.signin_refresh), enabled = !roster.refreshing, onClick = cb.onRefreshRoster)
             })
             ScreenColumn(modifier = Modifier.weight(1f), padding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 RosterLine(roster)
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(MarkiroSizes.radius))
-                        .background(c.surfaceCard).border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)).padding(12.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(MarkiroSizes.radiusCard))
+                        .background(c.surfaceCard).border(1.dp, c.line, RoundedCornerShape(MarkiroSizes.radiusCard)).padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg1, modifier = Modifier.size(28.dp))
@@ -151,6 +152,7 @@ private fun SearchStep(state: SignInUi.Search, cb: SignInCallbacks) {
         // The roster of a real line runs to dozens of names; the bar stays put and the matches scroll.
         ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
             OutlinedTextField(
+                colors = markiroFieldColors(),
                 value = state.query,
                 onValueChange = cb.onSearchQuery,
                 singleLine = true,
@@ -181,7 +183,7 @@ private fun Field(label: String, value: String) {
         Text(label, style = t.caption, color = c.fg2)
         Row(
             Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
-                .border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)).padding(horizontal = 12.dp),
+                .border(1.dp, c.lineControl, RoundedCornerShape(MarkiroSizes.radius)).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) { Text(value, style = t.code.copy(fontSize = 22.sp), color = c.fg1) }
     }

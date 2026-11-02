@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -134,16 +135,17 @@ private fun ReasonRow(label: String, selected: Boolean, onClick: () -> Unit) {
     val c = MarkiroTheme.colors
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Row(
-        Modifier.fillMaxWidth().height(MarkiroSizes.controlRow).clip(shape).background(c.surfaceCard)
-            .border(1.dp, if (selected) c.accent else c.line, shape).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.controlRow).clip(shape).background(c.surfaceCard)
+            .border(1.dp, if (selected) c.fg1 else c.line, shape).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = MarkiroSizes.sp3),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
     ) {
         Box(
-            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.accent else c.lineStrong, CircleShape),
+            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.fg1 else c.lineControl, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.accent))
+            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.fg1))
         }
         Text(label, style = MarkiroTheme.type.body, color = c.fg1)
     }

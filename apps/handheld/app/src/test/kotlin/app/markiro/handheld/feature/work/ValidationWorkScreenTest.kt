@@ -44,7 +44,8 @@ class ValidationWorkScreenTest {
         val total=compose.onNodeWithText(compose.activity.getString(app.markiro.handheld.R.string.work_plan_of,"1","100")).fetchSemanticsNode().boundsInRoot
         // Both the terminal and duplicate counters legitimately show one. Resolve
         // the terminal value by the total row while retaining the geometry assertion.
-        val ones=compose.onAllNodesWithText("1").assertCountEquals(2).fetchSemanticsNodes()
+        val ones=compose.onAllNodesWithText("1").fetchSemanticsNodes().filter { it.boundsInRoot.top >= total.top }
+        assertEquals("Two counters below the header",2,ones.size)
         val mine=ones.single { it.boundsInRoot.top == total.top }.boundsInRoot
         assertTrue("Counters need a visible gap",mine.left-total.right>=16)
         compose.onNodeWithText(if(english) "Errors" else "Ошибки").assertIsDisplayed()
