@@ -8,6 +8,7 @@ import { ThemeProvider } from "@markiro/ui";
 import { OfficeTopBar } from "../src/office/OfficeTopBar.js";
 import { OfficeLinkProvider } from "../src/office/office-link.js";
 import type { HostStatus } from "../src/host/protocol.js";
+import type { SyncState } from "../src/app/shell.js";
 import { SESSION } from "./support/fixtures.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { fakeOfficeSession } from "./support/office.js";
@@ -20,13 +21,17 @@ function resize(width: number) {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
   window.dispatchEvent(new Event("resize"));
 }
-function mount(status = ONLINE, windowMode: WindowMode | null = null) {
+function mount(
+  status = ONLINE,
+  windowMode: WindowMode | null = null,
+  sync: SyncState | null = null,
+) {
   render(
     <ThemeProvider defaultTheme="dark">
       <MemoryRouter>
         <QueryClientProvider client={createOfficeQueryClient()}>
           <OfficeSessionProvider value={fakeOfficeSession()}>
-            <OfficeLinkProvider value={{ status, sync: null }}>
+            <OfficeLinkProvider value={{ status, sync }}>
               <WindowModeProvider value={windowMode}>
                 <OfficeTopBar
                   user={SESSION.user}
@@ -101,6 +106,45 @@ describe("the compact office header", () => {
     expect(screen.queryByRole("button", { name: /Настройки и состояние/ })).toBeNull();
     expect(screen.getByRole("radiogroup", { name: "Тема оформления" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Связь с хостом/ })).toBeTruthy();
+  });
+
+  it("does not open a closed tools panel when another modal is present during resize", () => {
+    mount();
+    render(<div role="dialog" aria-modal="true" aria-label="Другая форма" />);
+    act(() => resize(430));
+    const tools = screen.getByRole("button", { name: /Настройки и состояние/ });
+    expect(tools.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Настройки и состояние" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Другая форма" })).toBeTruthy();
+    act(() => resize(1280));
+    act(() => resize(390));
+    expect(
+      screen.getByRole("button", { name: /Настройки и состояние/ }).getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it.each(["failed", "done"] as const)(
+    "announces a sync failure while the host is online (sync state: %s)",
+    (kind) => {
+      mount(ONLINE, null, { kind, synced: 0, failure: "host", quarantined: 0 });
+      const tools = screen.getByRole("button", {
+        name: /Настройки и состояние.*Сбой синхронизации/,
+      });
+      expect(tools.querySelector(".status-dot--warn")).not.toBeNull();
+      expect(screen.getByRole("status").textContent).toBe("Сбой синхронизации");
+    },
+  );
+
+  it("keeps the offline host warning ahead of a separate sync failure", () => {
+    mount({ ...ONLINE, state: "offline", lastError: "unreachable" }, null, {
+      kind: "failed",
+      synced: 0,
+      failure: "host",
+      quarantined: 0,
+    });
+    const tools = screen.getByRole("button", { name: /Настройки и состояние.*Нет связи/ });
+    expect(tools.querySelector(".status-dot--error")).not.toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Нет связи");
   });
 
   it("keeps the kiosk confirmation alive through portalled focus and a window resize", async () => {

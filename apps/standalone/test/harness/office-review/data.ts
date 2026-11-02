@@ -126,7 +126,10 @@ export const pallet = {
 
 const responses: Record<string, unknown> = {
   "/v1/office/me": user,
-  "/v1/office/users": [userRecordFixture],
+  "/v1/office/users": [
+    { ...userRecordFixture, id: "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21" },
+    { ...userRecordFixture, ...user, createdAt: "2026-09-26T09:15:00Z", rev: 1 },
+  ],
   "/v1/office/operators": [operatorFixture],
   "/v1/office/sscc": ssccFixture,
   "/v1/office/update-status": updateStatusFixture,

@@ -56,7 +56,7 @@ export function OfficeTopBar({
   const doneAt = useLastSyncTime(link.sync);
   const sync = syncChipModel(link.sync, doneAt);
   const hostTone = hostDotTone(link.status, link.sync);
-  const syncWarning = hostTone === "ok" && sync?.tone === "warn";
+  const syncWarning = hostDotTone(link.status, null) === "ok" && sync?.tone === "warn";
   const crumbs = crumbsFor(pathname);
   const trail = crumbTrail(pathname, search);
   return (

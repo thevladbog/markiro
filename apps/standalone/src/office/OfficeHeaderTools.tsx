@@ -27,7 +27,10 @@ export function OfficeHeaderTools({
 
   useEffect(() => {
     const resized = () =>
-      setOpen(document.querySelector('[role="dialog"][aria-modal="true"]') !== null);
+      setOpen(
+        (wasOpen) =>
+          wasOpen && document.querySelector('[role="dialog"][aria-modal="true"]') !== null,
+      );
     window.addEventListener("resize", resized);
     return () => window.removeEventListener("resize", resized);
   }, []);
