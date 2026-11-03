@@ -23,11 +23,12 @@ separate installation.
 
 ## Three identities
 
-The office login reads only `GET /v1/device/login-branding` before its session:
-paired station/office devices only, `OrgLogoState`, with the host's `customLogo`
-gate applied. No profile, license or user list is exposed. Branding failures,
-older hosts and invalid images fall back to Markiro without blocking login;
-pairing changes unmount the login and discard pending branding responses.
+The office login uses the bundled Markiro mark, without organization logos or
+branding requests before sign-in. `GET /v1/device/login-branding` remains a
+paired-device endpoint for compatibility; the host's `customLogo` gate and
+`OrgLogoState` contract are unchanged. No profile, license or office-user list
+is read before the office session. Recent logins are local names from successful
+sign-ins only: choosing one fills the login and focuses the password field.
 
 Office users (login and password, a session bound to a device), operators
 (PIN and badge, verified on the device) and devices (a per-device key) never
