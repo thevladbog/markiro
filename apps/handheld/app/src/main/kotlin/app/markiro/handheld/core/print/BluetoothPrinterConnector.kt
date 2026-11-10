@@ -46,28 +46,31 @@ class BluetoothPrinterConnector @Inject constructor(
         }
 
     @SuppressLint("MissingPermission")
-    override suspend fun open(printer: PrinterEntity): PrinterConnection {
+    override suspend fun open(printer: PrinterEntity): PrinterConnection = try {
         val adapter = adapter ?: throw IOException("bluetooth unavailable")
-        val socket = try {
-            val socket = adapter.getRemoteDevice(printer.address).createRfcommSocketToServiceRecord(SPP)
-            // Discovery keeps the radio busy and makes a connection attempt fail slowly.
-            adapter.cancelDiscovery()
-            socket.connect()
-            socket
-        } catch (e: SecurityException) {
-            // The connect permission can be withdrawn between adding this printer and using it. The
-            // connector contract is `IOException`; anything else escapes the transport's catch and
-            // reaches the operator as a crash rather than as a printer that refused.
-            throw IOException("bluetooth permission missing", e)
-        } catch (e: IllegalArgumentException) {
-            // A stored row can outlive the device it names, and a malformed address throws here.
-            throw IOException("not a bluetooth address: ${printer.address}", e)
+        // Discovery keeps the radio busy and makes a connection attempt fail slowly.
+        adapter.cancelDiscovery()
+        val socket = adapter.getRemoteDevice(printer.address).createRfcommSocketToServiceRecord(SPP)
+        try {
+            socket.withBluetoothTimeout { socket.connect() }
+            object : PrinterConnection {
+                override val input: InputStream = socket.inputStream
+                override val output: OutputStream = socket.outputStream
+                override fun close() = socket.close()
+            }
+        } catch (error: Exception) {
+            try {
+                socket.close()
+            } catch (closeError: IOException) {
+                error.addSuppressed(closeError)
+            }
+            throw error
         }
-        return object : PrinterConnection {
-            override val input: InputStream = socket.inputStream
-            override val output: OutputStream = socket.outputStream
-            override fun close() = socket.close()
-        }
+    } catch (e: SecurityException) {
+        // The permission can be withdrawn between adding the printer and opening the socket.
+        throw IOException("bluetooth permission missing", e)
+    } catch (e: IllegalArgumentException) {
+        throw IOException("not a bluetooth address: ${printer.address}", e)
     }
 
     private companion object {

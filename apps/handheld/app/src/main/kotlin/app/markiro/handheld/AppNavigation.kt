@@ -867,9 +867,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     LaunchedEffect(vm) {
                         vm.saved.collect { nav.popBackStack(Routes.PRINTER, inclusive = false) }
                     }
-                    // An unreachable printer gets its own screen; every other refusal stays on the form
-                    // with the printer's own words.
-                    if (form.error == NotReadyReason.UNREACHABLE) {
+                    // The separate error screen explains how to troubleshoot a network address.
+                    if (form.transport == TransportKind.WIFI && form.error == NotReadyReason.UNREACHABLE) {
                         PrinterErrorScreen(
                             form.host,
                             PrinterErrorCallbacks(

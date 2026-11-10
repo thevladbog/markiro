@@ -365,7 +365,8 @@ fun TestPrintScreen(step: TestPrintStep, language: PrinterLanguage, dpi: Int, cb
                 }
 
                 is TestPrintStep.Unknown -> {
-                    Banner(stringResource(R.string.printer_test_unknown_title), step.cause, Tone.Warn)
+                    val detail = printerStatusLabel(step.cause)?.let { stringResource(it) } ?: step.cause
+                    Banner(stringResource(R.string.printer_test_unknown_title), detail, Tone.Warn)
                     Text(stringResource(R.string.printer_test_unknown_body), style = t.body, color = c.fg2)
                     // Confirming is the primary action on purpose: it is the cheap, safe one, and a
                     // second send is the deliberate one.
