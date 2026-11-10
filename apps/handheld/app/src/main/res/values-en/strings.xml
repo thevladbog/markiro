@@ -394,6 +394,7 @@
     <string name="printer_bluetooth_pick">Pick</string>
     <string name="printer_bluetooth_permission">Bluetooth access is needed to see the printers.</string>
     <string name="printer_bluetooth_grant">Allow</string>
+    <string name="printer_bluetooth_settings">Open app settings</string>
     <string name="printer_bluetooth_empty">No paired printers. Pair the printer in the Android settings and come back.</string>
     <string name="printer_test_title">Test print</string>
     <string name="printer_test_sending">Sending the label…</string>

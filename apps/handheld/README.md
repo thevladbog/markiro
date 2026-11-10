@@ -171,7 +171,11 @@ its leading GS1 flag and every separator intact. What no test here can show is w
 symbol scans: module size against a real print head and real scanner optics is hardware validation.
 
 Printers live only on this device. Settings → «Принтеры» keeps named Wi-Fi and Bluetooth
-profiles with their language and DPI. The hub and settings name the purposes affected by a known
+profiles with their language and DPI. Pair Bluetooth printers in Android's Bluetooth settings first.
+On Android 12 and newer, tap «Разрешить» on the Bluetooth printer screen to grant «Устройства
+поблизости». If Android no longer shows the prompt, use «Открыть настройки приложения» to grant
+access and return to the printer list.
+The hub and settings name the purposes affected by a known
 printer refusal; test and production status from an old snapshot cannot overwrite an edited endpoint.
 «Назначения» selects a printer independently for **Короб**,
 **Дубль кода**, and **Паллета**. One printer may serve all three. Adding a profile never changes

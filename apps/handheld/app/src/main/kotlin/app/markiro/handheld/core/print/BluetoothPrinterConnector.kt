@@ -16,15 +16,13 @@ import javax.inject.Inject
 /** A printer offered by the platform, either already paired or newly found. */
 data class DiscoveredPrinter(val address: String, val name: String, val bonded: Boolean)
 
-/**
- * The permissions Bluetooth needs on this platform version. Asking for the wrong set does not fail
- * loudly: the device list simply comes back empty.
- */
+// CONNECT reads bonded devices and opens the socket. SCAN lets the connector cancel discovery.
+// On Android 11 and older both operations use install-time Bluetooth permissions.
 fun bluetoothPermissions(): Array<String> =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
     } else {
-        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        emptyArray()
     }
 
 /**

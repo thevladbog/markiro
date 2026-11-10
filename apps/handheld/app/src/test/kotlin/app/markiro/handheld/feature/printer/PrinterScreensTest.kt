@@ -1,7 +1,15 @@
 package app.markiro.handheld.feature.printer
 
+import android.Manifest.permission.BLUETOOTH_CONNECT
+import android.Manifest.permission.BLUETOOTH_SCAN
+import android.app.Activity.RESULT_CANCELED
+import android.content.Intent
+import android.content.pm.PackageManager.PERMISSION_GRANTED
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
@@ -12,15 +20,18 @@ import app.markiro.handheld.core.label.PrinterLanguage
 import app.markiro.handheld.core.print.DiscoveredPrinter
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterEntity
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
 class PrinterScreensTest {
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val zebra = PrinterEntity(
         "p1", "Zebra ZD421", "wifi", "192.168.1.40:9100", "zpl", 203,
@@ -140,16 +151,79 @@ class PrinterScreensTest {
     }
 
     @Test
-    fun theBluetoothScreenAsksForPermissionBeforeListingAnything() {
+    @Config(sdk = [33])
+    fun aPartialGrantHidesPairedDevicesUntilTheRemainingPermissionIsGranted() {
+        val activity = compose.activity
+        val app = shadowOf(activity.application)
+        app.grantPermissions(BLUETOOTH_CONNECT)
+        app.denyPermissions(BLUETOOTH_SCAN)
+        var reads = 0
         compose.setContent {
-            MarkiroTheme { BluetoothPairScreen(PrinterUi(permissionNeeded = true), BluetoothPairCallbacks()) }
+            MarkiroTheme {
+                BluetoothPairScreen(
+                    PrinterUi(paired = listOf(DiscoveredPrinter("AA:BB", "Zebra ZQ320", bonded = true))),
+                    BluetoothPairCallbacks(onSearchAgain = { reads++ }),
+                )
+            }
         }
-        compose.onNodeWithText("Нужен доступ к Bluetooth, чтобы увидеть принтеры.").assertIsDisplayed()
-        compose.onNodeWithText("Разрешить").assertIsDisplayed()
+
+        compose.onNodeWithText("Zebra ZQ320").assertDoesNotExist()
+        compose.onNodeWithText("Разрешить").performClick()
+        val request = checkNotNull(shadowOf(activity).lastRequestedPermission)
+        assertArrayEquals(arrayOf(BLUETOOTH_SCAN), request.requestedPermissions)
+        compose.runOnIdle {
+            activity.activityResultRegistry.dispatchResult(request.requestCode, mapOf(BLUETOOTH_SCAN to false))
+            assertEquals(0, reads)
+        }
+
+        compose.onNodeWithText("Открыть настройки приложения").performClick()
+        val settings = checkNotNull(shadowOf(activity).nextStartedActivityForResult)
+        assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, settings.intent.action)
+        assertEquals("package:${activity.packageName}", settings.intent.dataString)
+        compose.runOnIdle {
+            app.grantPermissions(BLUETOOTH_SCAN)
+            activity.activityResultRegistry.dispatchResult(settings.requestCode, RESULT_CANCELED, Intent())
+        }
+        compose.onNodeWithText("Zebra ZQ320").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, reads) }
     }
 
     @Test
-    fun theBluetoothScreenListsPairedDevices() {
+    @Config(sdk = [33])
+    @Suppress("DEPRECATION") // Simulate Android delivering the permission result.
+    fun tappingAllowRequestsAndroidPermissionsAndReloadsAfterGrant() {
+        val activity = compose.activity
+        val app = shadowOf(activity.application)
+        val permissions = arrayOf(BLUETOOTH_SCAN, BLUETOOTH_CONNECT)
+        app.denyPermissions(*permissions)
+        val state = mutableStateOf(PrinterUi(permissionNeeded = true))
+        var reads = 0
+        compose.setContent {
+            MarkiroTheme {
+                BluetoothPairScreen(state.value, BluetoothPairCallbacks(onSearchAgain = {
+                    reads++
+                    state.value = PrinterUi(paired = listOf(DiscoveredPrinter("AA:BB", "Zebra ZQ320", bonded = true)))
+                }))
+            }
+        }
+
+        compose.onNodeWithText("Разрешить").performClick()
+        val request = checkNotNull(shadowOf(activity).lastRequestedPermission) {
+            "The Allow button did not ask Android for Bluetooth permissions"
+        }
+        assertArrayEquals(permissions, request.requestedPermissions)
+        compose.runOnIdle {
+            assertEquals(0, reads)
+            app.grantPermissions(*permissions)
+            activity.onRequestPermissionsResult(request.requestCode, permissions, intArrayOf(PERMISSION_GRANTED, PERMISSION_GRANTED))
+        }
+        compose.onNodeWithText("Zebra ZQ320").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, reads) }
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun theBluetoothScreenListsPairedDevicesWithoutRuntimePermissionOnOlderAndroid() {
         compose.setContent {
             MarkiroTheme {
                 BluetoothPairScreen(

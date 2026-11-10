@@ -1,6 +1,11 @@
 package app.markiro.handheld.feature.printer
 
-import androidx.compose.foundation.clickable
+import android.content.Intent
+import android.content.pm.PackageManager.PERMISSION_GRANTED
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -35,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -60,6 +67,7 @@ import app.markiro.handheld.core.print.PRINTER_TIMEOUT_MS
 import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.core.print.PrinterRouting
+import app.markiro.handheld.core.print.bluetoothPermissions
 
 data class PrinterListCallbacks(
     val onBack: () -> Unit = {},
@@ -86,7 +94,6 @@ data class AddPrinterCallbacks(
 
 data class BluetoothPairCallbacks(
     val onBack: () -> Unit = {},
-    val onGrant: () -> Unit = {},
     val onSearchAgain: () -> Unit = {},
     val onPick: (DiscoveredPrinter) -> Unit = {},
 )
@@ -274,6 +281,20 @@ fun AddPrinterScreen(form: AddPrinterForm, cb: AddPrinterCallbacks) {
 
 @Composable
 fun BluetoothPairScreen(state: PrinterUi, cb: BluetoothPairCallbacks) {
+    val context = LocalContext.current
+    val requiredPermissions = remember { bluetoothPermissions() }
+    fun missingPermissions() = requiredPermissions.filter { context.checkSelfPermission(it) != PERMISSION_GRANTED }
+
+    var needsPermission by remember { mutableStateOf(missingPermissions().isNotEmpty()) }
+    fun refresh() {
+        needsPermission = missingPermissions().isNotEmpty()
+        if (!needsPermission) cb.onSearchAgain()
+    }
+
+    val requestPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh() }
+    val openSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh() }
+    LaunchedEffect(Unit) { refresh() }
+
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
@@ -283,9 +304,16 @@ fun BluetoothPairScreen(state: PrinterUi, cb: BluetoothPairCallbacks) {
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
         ) {
             if (state.addressConflict) Text(stringResource(R.string.printer_address_exists), style = t.body, color = c.tone(Tone.Err).fg)
-            if (state.permissionNeeded) {
+            if (needsPermission || state.permissionNeeded) {
                 Text(stringResource(R.string.printer_bluetooth_permission), style = t.body, color = c.fg2)
-                PrimaryButton(stringResource(R.string.printer_bluetooth_grant), cb.onGrant)
+                PrimaryButton(stringResource(R.string.printer_bluetooth_grant), {
+                    val missing = missingPermissions()
+                    if (missing.isEmpty()) refresh() else requestPermissions.launch(missing.toTypedArray())
+                })
+                SecondaryButton(stringResource(R.string.printer_bluetooth_settings), {
+                    val appUri = Uri.fromParts("package", context.packageName, null)
+                    openSettings.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, appUri))
+                })
                 return@Column
             }
             Text(stringResource(R.string.printer_bluetooth_hint), style = t.caption, color = c.fg2)
@@ -308,7 +336,7 @@ fun BluetoothPairScreen(state: PrinterUi, cb: BluetoothPairCallbacks) {
                     }
                 }
             }
-            SecondaryButton(stringResource(R.string.printer_bluetooth_search_again), cb.onSearchAgain)
+            SecondaryButton(stringResource(R.string.printer_bluetooth_search_again), { refresh() })
         }
     }
 }

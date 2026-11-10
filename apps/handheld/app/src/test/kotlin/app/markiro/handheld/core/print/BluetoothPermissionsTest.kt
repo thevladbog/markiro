@@ -11,8 +11,8 @@ import org.robolectric.annotation.Config
 class BluetoothPermissionsTest {
     @Test
     @Config(sdk = [28])
-    fun olderPlatformsAskForLocationBecauseDiscoveryNeedsIt() {
-        assertArrayEquals(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), bluetoothPermissions())
+    fun olderPlatformsNeedNoRuntimePermissionsForPairedPrinters() {
+        assertArrayEquals(emptyArray<String>(), bluetoothPermissions())
     }
 
     @Test
