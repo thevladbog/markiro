@@ -137,7 +137,7 @@ class PrinterScreensTest {
         compose.setContent {
             MarkiroTheme {
                 TestPrintScreen(
-                    TestPrintStep.Unknown("link lost"),
+                    TestPrintStep.Unknown("unreachable"),
                     PrinterLanguage.ZPL,
                     203,
                     TestPrintCallbacks(onConfirm = { confirmed = true }, onRetry = { retried = true }),
@@ -145,6 +145,7 @@ class PrinterScreensTest {
             }
         }
         compose.onNodeWithText("Результат печати неизвестен").assertIsDisplayed()
+        compose.onNodeWithText("Принтер не отвечает").assertIsDisplayed()
         compose.onNodeWithText("Этикетка напечаталась").performClick()
         assertEquals(true, confirmed)
         assertEquals(false, retried)

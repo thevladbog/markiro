@@ -1,12 +1,15 @@
 package app.markiro.handheld.core.print
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.SocketTimeoutException
 
 /** The drawn timeout: a printer that has not answered in five seconds is not answering. */
 const val PRINTER_TIMEOUT_MS = 5_000
@@ -70,9 +73,12 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
         val tspl = printer.language == "tspl"
         val reply = try {
             connectors(printer).open(printer).use { connection ->
-                connection.output.write(if (tspl) TSPL_STATUS_QUERY else ZPL_STATUS_QUERY)
-                connection.output.flush()
-                readStatusReply(connection.input) { if (tspl) it.isNotEmpty() else zplReplyIsComplete(it) }
+                val exchange = {
+                    connection.output.write(if (tspl) TSPL_STATUS_QUERY else ZPL_STATUS_QUERY)
+                    connection.output.flush()
+                    readStatusReply(connection.input) { if (tspl) it.isNotEmpty() else zplReplyIsComplete(it) }
+                }
+                if (printer.transport == "bluetooth") connection.withBluetoothTimeout(exchange) else exchange()
             }
         } catch (_: IOException) {
             return@withContext PrinterStatus.NotReady(NotReadyReason.UNREACHABLE)
@@ -82,13 +88,14 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
     } }
 
     override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome = PrinterOutput.serialized(printer) { withContext(Dispatchers.IO) {
+        val bluetooth = printer.transport == "bluetooth"
         val connection = try {
             connectors(printer).open(printer)
         } catch (_: IOException) {
             return@withContext SendOutcome.Refused(NotReadyReason.UNREACHABLE)
         }
         try {
-            connection.use {
+            connection.use { socket ->
                 // Written in chunks rather than in one call. A single large write is copied into the
                 // kernel's send buffer and returns successfully even when the printer has already
                 // gone away, so the failure would never be seen. Flushing each chunk gives the reset
@@ -97,15 +104,21 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
                 var offset = 0
                 while (offset < document.size) {
                     val length = minOf(CHUNK_BYTES, document.size - offset)
-                    it.output.write(document, offset, length)
-                    it.output.flush()
+                    val writeChunk = {
+                        socket.output.write(document, offset, length)
+                        socket.output.flush()
+                    }
+                    if (bluetooth) socket.withBluetoothTimeout(writeChunk) else writeChunk()
                     offset += length
                 }
             }
             SendOutcome.Delivered
         } catch (e: IOException) {
             // The connection was open, so some or all of the document may already be on the printer.
-            SendOutcome.Unknown(e.message ?: "link lost")
+            val reason = if (bluetooth && e is SocketTimeoutException) {
+                NotReadyReason.UNREACHABLE.name.lowercase()
+            } else e.message ?: "link lost"
+            SendOutcome.Unknown(reason)
         }
     } }
 
@@ -117,6 +130,21 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
         const val CHUNK_BYTES = 512
     }
 }
+
+/** BluetoothSocket.close() aborts blocking socket I/O from the timeout or cancellation thread. */
+internal suspend fun <T : Any> Closeable.withBluetoothTimeout(operation: () -> T): T =
+    withTimeoutOrNull(PRINTER_TIMEOUT_MS.toLong()) {
+        suspendCancellableCoroutine<T> { continuation ->
+            continuation.invokeOnCancellation {
+                try {
+                    close()
+                } catch (_: IOException) {
+                    // The socket may already have been closed.
+                }
+            }
+            if (continuation.isActive) continuation.resumeWith(runCatching(operation))
+        }
+    } ?: throw SocketTimeoutException("Bluetooth printer timed out")
 
 /**
  * Reads a status reply.

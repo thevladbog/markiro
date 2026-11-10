@@ -175,6 +175,11 @@ profiles with their language and DPI. Pair Bluetooth printers in Android's Bluet
 On Android 12 and newer, tap «Разрешить» on the Bluetooth printer screen to grant «Устройства
 поблизости». If Android no longer shows the prompt, use «Открыть настройки приложения» to grant
 access and return to the printer list.
+For a Bluetooth printer, the app allows up to five seconds to open the connection
+and up to five more for the status exchange. If it gets no response, the profile
+form shows the error and allows another check. During Bluetooth printing, each
+chunk has its own five-second deadline. A stalled transfer leaves the print
+outcome unknown for the operator to resolve.
 The hub and settings name the purposes affected by a known
 printer refusal; test and production status from an old snapshot cannot overwrite an edited endpoint.
 «Назначения» selects a printer independently for **Короб**,

@@ -14,6 +14,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class PrinterTransportTest {
     private fun printer(address: String, language: String = "zpl") = PrinterEntity(
@@ -36,6 +38,18 @@ class PrinterTransportTest {
     }
 
     private fun transport(connector: PrinterConnector) = StreamPrinterTransport { connector }
+
+    private class BlockedSocket {
+        private val closed = CountDownLatch(1)
+
+        fun awaitClose(): Nothing {
+            assertTrue("Bluetooth I/O stayed blocked after the printer deadline",
+                closed.await(PRINTER_TIMEOUT_MS + 3_000L, TimeUnit.MILLISECONDS))
+            throw IOException("socket closed")
+        }
+
+        fun close() = closed.countDown()
+    }
 
     @Test
     fun aReadyPrinterAcceptsTheDocument() = runTest {
@@ -198,6 +212,45 @@ class PrinterTransportTest {
     fun aPrinterThatSaysNothingAtAllIsUnreachable() = runTest {
         val outcome = transport { HoldingConnection() }.status(printer("host:9100"))
         assertEquals(PrinterStatus.NotReady(NotReadyReason.UNREACHABLE), outcome)
+    }
+
+    @Test
+    fun aSilentBluetoothSocketClosesAtTheDeadlineAndCanBeRetried() = runTest {
+        val blocked = BlockedSocket()
+        val silent = object : PrinterConnection {
+            override val output = ByteArrayOutputStream()
+            override val input = object : InputStream() {
+                override fun read(): Int = blocked.awaitClose()
+                override fun read(b: ByteArray, off: Int, len: Int): Int = blocked.awaitClose()
+            }
+            override fun close() = blocked.close()
+        }
+        val connections = ArrayDeque(listOf(silent, FakeConnection(byteArrayOf(0), null)))
+        val transport = transport { connections.removeFirst() }
+        val printer = printer("AA:BB:CC:DD:EE:FF", language = "tspl").copy(transport = "bluetooth")
+
+        assertEquals(PrinterStatus.NotReady(NotReadyReason.UNREACHABLE), transport.status(printer))
+        assertEquals(PrinterStatus.Ready, transport.status(printer))
+    }
+
+    @Test
+    fun aBlockedBluetoothWriteLeavesAnUnknownPrintWithoutResending() = runTest {
+        val blocked = BlockedSocket()
+        val connection = object : PrinterConnection {
+            override val input = ByteArrayInputStream(byteArrayOf())
+            override val output = object : ByteArrayOutputStream() {
+                override fun flush(): Unit = blocked.awaitClose()
+            }
+            override fun close() = blocked.close()
+        }
+        val document = ByteArray(1024) { 'x'.code.toByte() }
+        var opened = 0
+        val transport = transport { opened++; connection }
+        val printer = printer("AA:BB:CC:DD:EE:FF").copy(transport = "bluetooth")
+
+        assertEquals(SendOutcome.Unknown("unreachable"), transport.send(printer, document))
+        assertEquals(1, opened)
+        assertTrue(connection.output.size() in 1 until document.size)
     }
 
     @Test
