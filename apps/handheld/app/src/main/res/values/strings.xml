@@ -408,6 +408,7 @@
     <string name="printer_bluetooth_pick">Выбрать</string>
     <string name="printer_bluetooth_permission">Нужен доступ к Bluetooth, чтобы увидеть принтеры.</string>
     <string name="printer_bluetooth_grant">Разрешить</string>
+    <string name="printer_bluetooth_settings">Открыть настройки приложения</string>
     <string name="printer_bluetooth_empty">Сопряжённых принтеров нет. Сопрягите принтер в настройках Android и вернитесь сюда.</string>
     <string name="printer_test_title">Тестовая печать</string>
     <string name="printer_test_sending">Отправляем этикетку…</string>

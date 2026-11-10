@@ -5,10 +5,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Before Android 12 a Bluetooth scan counted as a location capability, so discovery needed it. -->
+    <!-- On Android 11 and older, reading paired devices and cancelling discovery use these permissions. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
     <!-- From Android 12 the two are their own permissions; this app never infers location from them. -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"

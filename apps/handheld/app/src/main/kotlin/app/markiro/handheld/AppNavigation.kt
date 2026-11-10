@@ -905,14 +905,12 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 composable(Routes.PRINTER_BLUETOOTH) { entry ->
                     val vm = printerViewModel(nav, entry)
                     val state by vm.state.collectAsStateWithLifecycle()
-                    LaunchedEffect(Unit) { vm.loadPairedDevices() }
                     LaunchedEffect(vm) { vm.saved.collect { nav.popBackStack(Routes.PRINTER, inclusive = false) } }
                     BluetoothPairScreen(
                         state,
                         BluetoothPairCallbacks(
                             onBack = { nav.popBackStack() },
-                            onGrant = { vm.loadPairedDevices() },
-                            onSearchAgain = { vm.loadPairedDevices() },
+                            onSearchAgain = vm::loadPairedDevices,
                             onPick = vm::pickPairedDevice,
                         ),
                     )
