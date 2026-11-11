@@ -88,6 +88,12 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
 
     suspend fun shifts(): Result<DeviceShiftsDto> = parse(transport.get("/v1/device/shifts"), DeviceShiftsDto.serializer())
 
+    suspend fun shiftCreateOptions(): Result<ShiftCreateOptionsDto> =
+        parse(transport.get("/v1/device/shift-create-options"), ShiftCreateOptionsDto.serializer())
+
+    suspend fun createShift(request: HostShiftCreateRequest): Result<DeviceShiftDto> =
+        parse(transport.post("/v1/device/shifts", json.encodeToString(HostShiftCreateRequest.serializer(), request)), DeviceShiftDto.serializer())
+
     suspend fun enter(shiftId: String): Result<DeviceShiftDto> {
         val body = buildJsonObject { put("supports", JsonArray(ENTER_SUPPORTS.map(::JsonPrimitive))) }.toString()
         return parse(transport.post("/v1/device/shifts/$shiftId/enter", body), DeviceShiftDto.serializer())

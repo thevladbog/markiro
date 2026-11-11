@@ -37,7 +37,8 @@ use crate::validate;
 /// of `0010` and `0012`. A validation shift (plan РЕЖ, Р11) accepts its
 /// units without boxes: they are the codes it owns, each without a box
 /// (`code_owners_shift_unboxed` of `0020`); it has no boxes and no pallets.
-const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
+const SELECT: &str =
+    "SELECT id, number_month_key, number_seq, number_origin AS created_from, status, mode, \
      pallets_enabled, product_id, line_id, counterparty_id, production_date, lot_number, \
      COALESCE(planned_date, production_date) AS planned_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, \
@@ -165,7 +166,7 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         status: row.status.parse().map_err(ApiError::internal)?,
         mode: row.mode.parse().map_err(ApiError::internal)?,
         pallets_enabled: row.pallets_enabled,
-        created_from,
+        created_from: created_from.device_category(),
         product_id: row.product_id,
         line_id: row.line_id,
         counterparty_id: row.counterparty_id,

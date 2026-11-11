@@ -34,7 +34,8 @@ use crate::validate;
 
 /// The columns of a station's shift. The product and the counterparty are
 /// the snapshot's once the shift is open, the records' before.
-const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_from, s.status, \
+const SELECT: &str =
+    "SELECT s.id, s.number_month_key, s.number_seq, s.number_origin AS created_from, s.status, \
      s.mode, s.pallets_enabled, s.line_id, s.product_id, \
      COALESCE(json_extract(s.snapshot, '$.product.name'), p.name) AS product_name, \
      COALESCE(json_extract(s.snapshot, '$.product.gtin14'), p.gtin14) AS product_gtin14, \
@@ -90,7 +91,7 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         status,
         mode: row.mode.parse().map_err(ApiError::internal)?,
         pallets_enabled: row.pallets_enabled,
-        created_from,
+        created_from: created_from.device_category(),
         line_id: row.line_id,
         product_id: row.product_id,
         product_name: row.product_name,
@@ -174,19 +175,7 @@ async fn read_for(
     with_participation(conn, shift, device_id, as_of, true).await
 }
 
-const STATION_ONLY: &str = "only a station works on shifts";
 const WORKS_SHIFTS: &str = "only a station or a handheld works on shifts";
-
-/// Shifts are a station's: another kind of device works on none. The write
-/// routes read the device again inside their transaction
-/// ([`AuthDevice::require_station_in`]).
-fn require_station(device: &AuthDevice) -> Result<(), ApiError> {
-    if device.kind == DeviceKind::Station {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden(STATION_ONLY))
-    }
-}
 
 /// How long a station keeps seeing a closed shift it entered.
 const CLOSED_DAYS: i64 = 30;
@@ -237,9 +226,8 @@ pub fn line_conflict() -> ApiError {
     ApiError::conflict("shift_line", "the shift is not on this station's line")
 }
 
-/// `POST /v1/device/shifts`: a station creates a planned shift on its own
-/// line, under the rules of the office's plan, pallets included; its number
-/// ends in `/S`. The same `requestId` again answers the shift it created,
+/// `POST /v1/device/shifts`: a station or handheld creates a planned shift
+/// on its assigned line. The number ends in `/S` for a station and `/M` for a handheld. The same `requestId` again answers the shift it created,
 /// whatever the body says now, so a create retried after a lost answer makes
 /// no second shift.
 pub async fn create_device_shift(
@@ -247,7 +235,6 @@ pub async fn create_device_shift(
     device: AuthDevice,
     ApiJson(create): ApiJson<DeviceShiftCreate>,
 ) -> Result<Json<DeviceShift>, ApiError> {
-    require_station(&device)?;
     validate::client_uuid("requestId", &create.request_id)?;
     // The mode and print policy follow the office's rules (plan РЕЖ); a
     // station before beta 3.2 names neither: an aggregation shift that prints
@@ -280,7 +267,19 @@ pub async fn create_device_shift(
     )?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    device.require_station_in(&mut tx, STATION_ONLY).await?;
+    let kind = device
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            WORKS_SHIFTS,
+        )
+        .await?;
+    if kind == DeviceKind::Handheld && !matches!(validation_print, ValidationPrint::None {}) {
+        return Err(ApiError::validation(
+            "validationPrint",
+            "a handheld cannot print duplicate codes",
+        ));
+    }
     let repeated: Option<String> =
         sqlx::query_scalar("SELECT id FROM shifts WHERE created_by = ? AND create_request_id = ?")
             .bind(&device.id)
@@ -296,9 +295,23 @@ pub async fn create_device_shift(
             .ok_or_else(|| ApiError::internal("shift vanished"));
     }
     let lot_number = shifts::lot_number(create.lot_number.as_deref())?;
+    if kind == DeviceKind::Handheld && lot_number.is_some() {
+        return Err(ApiError::validation(
+            "lotNumber",
+            "handhelds do not yet support lot numbers",
+        ));
+    }
     // A new shift the station could not open (plan ЛЦ-2, spec §3.3): a
     // retried create above still answers the shift it made.
     crate::license::gate::require_new_shifts(&state, &mut tx).await?;
+    if kind == DeviceKind::Handheld {
+        crate::license::seats::require_feature(
+            &state,
+            &mut tx,
+            crate::license::seats::Feature::Handheld,
+        )
+        .await?;
+    }
     // Pallets are a feature of the license (plan ЛЦ-2 Д8): a new shift with
     // them asks; a planned one with them opens (`enter_shift`) unasked.
     if create.pallets_enabled {
@@ -315,6 +328,9 @@ pub async fn create_device_shift(
         .await
         .map_err(ApiError::internal)?;
     let line_id = line_id.ok_or_else(line_conflict)?;
+    if kind == DeviceKind::Handheld && create.expected_line_id.as_deref() != Some(&line_id) {
+        return Err(line_conflict());
+    }
     require_active_line(&mut tx, &line_id).await?;
     let product = shifts::shift_product(&mut tx, &create.product_id).await?;
     if let Some(counterparty_id) = &create.counterparty_id {
@@ -324,7 +340,7 @@ pub async fn create_device_shift(
     if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
         shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
     }
-    let pallets = shifts::pallets(
+    let mut pallets = shifts::pallets(
         &mut tx,
         pallet_request,
         &create.product_id,
@@ -333,6 +349,40 @@ pub async fn create_device_shift(
         lot_number.is_some(),
     )
     .await?;
+    if kind == DeviceKind::Handheld {
+        // Do not create a planned shift this client will be refused on entry.
+        for (field, id) in [
+            ("boxTemplateId", Some(create.box_template_id.as_str())),
+            (
+                "palletTemplateId",
+                pallets.as_ref().map(|pallet| pallet.template_id.as_str()),
+            ),
+        ] {
+            if let Some(id) = id {
+                if shifts::layout_has_lot_binding(&mut tx, id, false).await? {
+                    return Err(ApiError::validation(
+                        field,
+                        "this layout needs lot number support",
+                    ));
+                }
+            }
+        }
+        if let Some(pallet) = &mut pallets {
+            if let Some(id) = &pallet.sheet_id {
+                if shifts::layout_has_lot_binding(&mut tx, id, true).await? {
+                    if create.pallet_sheet_template_id.is_some() {
+                        return Err(ApiError::validation(
+                            "palletSheetTemplateId",
+                            "this layout needs lot number support",
+                        ));
+                    }
+                    // An automatic default may have changed in the office.
+                    // The optional A4 sheet must never prevent handheld work.
+                    pallet.sheet_id = None;
+                }
+            }
+        }
+    }
     if lot_number.is_some() {
         shifts::require_lot_templates(
             &mut tx,
@@ -351,7 +401,11 @@ pub async fn create_device_shift(
         &mut tx,
         &NewShift {
             lot_number: lot_number.as_deref(),
-            origin: ShiftOrigin::Station,
+            origin: if kind == DeviceKind::Handheld {
+                ShiftOrigin::Handheld
+            } else {
+                ShiftOrigin::Station
+            },
             mode,
             created_by: &device.id,
             request_id: Some(&create.request_id),
@@ -549,7 +603,7 @@ pub async fn enter_shift(
         "SELECT s.status, s.mode, s.line_id, s.product_id, s.box_template_id, \
          s.pallet_template_id, s.pallet_sheet_template_id, s.validation_print_mode, \
          s.validation_print_verification, s.validation_print_template_id, s.counterparty_id, \
-         s.snapshot, s.lot_number, s.number_month_key, s.number_seq, s.created_from, l.max_stations \
+         s.snapshot, s.lot_number, s.number_month_key, s.number_seq, s.number_origin AS created_from, l.max_stations \
          FROM shifts s JOIN lines l ON l.id = s.line_id WHERE s.id = ?",
     )
     .bind(&id)
@@ -798,7 +852,7 @@ pub async fn leave_shift(
         )
         .await?;
     let number: Option<(String, i64, String)> = sqlx::query_as(
-        "SELECT number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+        "SELECT number_month_key, number_seq, number_origin FROM shifts WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -845,4 +899,105 @@ pub async fn leave_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(left))
+}
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+struct CreateProduct {
+    id: String,
+    name: String,
+    gtin14: String,
+    group: u32,
+    box_capacity: u32,
+    pallet_box_capacity: u32,
+    box_preference: Option<String>,
+    box_category_default: Option<String>,
+    pallet_preference: Option<String>,
+    pallet_category_default: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTemplate {
+    id: String,
+    name: String,
+    purpose: String,
+    groups: Option<Vec<u32>>,
+}
+
+/// A fresh read of just the references needed by the handheld's creation form.
+/// No layouts or operator records go through this route. POST checks the references again.
+pub async fn shift_create_options(
+    State(state): State<AppState>,
+    device: AuthDevice,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    device
+        .require_kinds_in(&mut tx, &[DeviceKind::Handheld], WORKS_SHIFTS)
+        .await?;
+    let (line_id, line_name): (String, String) = sqlx::query_as(
+        "SELECT l.id, l.name FROM devices d JOIN lines l ON l.id = d.line_id WHERE d.id = ? AND l.archived = 0",
+    )
+    .bind(&device.id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?
+    .ok_or_else(line_conflict)?;
+    let org = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+        "SELECT time_zone, default_box_template_id, default_pallet_template_id FROM org_profile WHERE id = 1",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let license = state
+        .license
+        .snapshot(&state, &mut tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let products: Vec<CreateProduct> = sqlx::query_as(
+        "SELECT p.id, p.name, p.gtin14, p.chz_group_code AS 'group', p.box_capacity, p.pallet_box_capacity, \
+         p.default_box_template_id AS box_preference, box.template_id AS box_category_default, \
+         p.default_pallet_template_id AS pallet_preference, pal.template_id AS pallet_category_default \
+         FROM products p \
+         LEFT JOIN category_template_defaults box ON box.chz_group_code=p.chz_group_code AND box.purpose='box' \
+         LEFT JOIN category_template_defaults pal ON pal.chz_group_code=p.chz_group_code AND pal.purpose='pallet' \
+         WHERE p.status='active' AND p.archived=0 AND p.chz_group_code IS NOT NULL \
+           AND p.box_capacity IS NOT NULL AND p.pallet_box_capacity IS NOT NULL \
+         ORDER BY p.name COLLATE NOCASE, p.id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let rows: Vec<(String, String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT id, name, purpose, category_codes, spec FROM label_templates \
+         WHERE enabled=1 AND purpose IN ('box', 'pallet') \
+         UNION ALL SELECT id, name, 'sheet', NULL, spec FROM pallet_sheet_templates WHERE enabled=1 \
+         ORDER BY name COLLATE NOCASE, id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let mut templates = Vec::with_capacity(rows.len());
+    for (id, name, purpose, groups, spec) in rows {
+        if shifts::template_supports_lot(&serde_json::from_str(&spec).map_err(ApiError::internal)?)
+        {
+            continue;
+        }
+        templates.push(CreateTemplate {
+            id,
+            name,
+            purpose,
+            groups: groups
+                .map(|groups| serde_json::from_str(&groups))
+                .transpose()
+                .map_err(ApiError::internal)?,
+        });
+    }
+    Ok(Json(json!({
+        "lineId": line_id, "lineName": line_name, "timeZone": org.0,
+        "boxDefault": org.1, "palletDefault": org.2,
+        "palletsAllowed": license.evaluation.features.pallets,
+        "creationAllowed": license.evaluation.opens_new_shifts && license.evaluation.features.handheld,
+        "products": products, "templates": templates,
+    })))
 }

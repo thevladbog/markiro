@@ -44,19 +44,19 @@ pub const FROM: &str = "FROM code_conflicts c \
 const COLUMNS: &str = "SELECT c.id, c.kind, c.code_hash, l.gtin14, l.serial, c.detected_at, \
      c.reviewed_at, ru.name AS reviewed_by_name, \
      l.shift_id AS l_shift_id, ls.number_month_key AS l_month_key, ls.number_seq AS l_seq, \
-     ls.created_from AS l_origin, l.device_id AS l_device_id, ld.name AS l_device_name, \
+     ls.number_origin AS l_origin, l.device_id AS l_device_id, ld.name AS l_device_name, \
      lo.name AS l_operator_name, l.scanned_at AS l_scanned_at, l.box_id AS l_box_id, \
      lb.sscc AS l_box_sscc, ls.status = 'closed' AS l_shift_closed, \
      lb.disassembled_at IS NOT NULL AS l_box_disassembled, \
      w.shift_id AS w_shift_id, ws.number_month_key AS w_month_key, ws.number_seq AS w_seq, \
-     ws.created_from AS w_origin, w.device_id AS w_device_id, wd.name AS w_device_name, \
+     ws.number_origin AS w_origin, w.device_id AS w_device_id, wd.name AS w_device_name, \
      wo.name AS w_operator_name, w.scanned_at AS w_scanned_at, w.box_id AS w_box_id, \
      wb.sscc AS w_box_sscc, ws.status = 'closed' AS w_shift_closed, \
      wb.disassembled_at IS NOT NULL AS w_box_disassembled, NULL AS w_number ";
 
 const CLOUD: &str = "SELECT c.id, 'late' AS kind, c.code_hash, l.gtin14, l.serial, c.detected_at,
  c.reviewed_at, ru.name AS reviewed_by_name,
- l.shift_id AS l_shift_id,ls.number_month_key AS l_month_key,ls.number_seq AS l_seq,ls.created_from AS l_origin,
+ l.shift_id AS l_shift_id,ls.number_month_key AS l_month_key,ls.number_seq AS l_seq,ls.number_origin AS l_origin,
  l.device_id AS l_device_id,ld.name AS l_device_name,lo.name AS l_operator_name,l.scanned_at AS l_scanned_at,
  l.box_id AS l_box_id,lb.sscc AS l_box_sscc,ls.status='closed' AS l_shift_closed,lb.disassembled_at IS NOT NULL AS l_box_disassembled,
  c.winner_shift_id AS w_shift_id,'' AS w_month_key,0 AS w_seq,'' AS w_origin,

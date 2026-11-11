@@ -303,6 +303,10 @@ fn protected_routes() -> Router<AppState> {
                 .post(crate::routes::device_shifts::create_device_shift),
         )
         .route(
+            "/v1/device/shift-create-options",
+            get(crate::routes::device_shifts::shift_create_options),
+        )
+        .route(
             "/v1/device/shifts/{id}/enter",
             post(crate::routes::device_shifts::enter_shift),
         )

@@ -78,7 +78,7 @@ pub const PALLET_SQL: &str = "SELECT p.id, p.closed_at, p.box_count_reported, \
 
 /// The shift a record belongs to: its frozen snapshot, date and number.
 pub const SHIFT_SQL: &str = "SELECT snapshot, production_date, number_month_key, number_seq, \
-     created_from FROM shifts WHERE id = ?";
+     number_origin FROM shifts WHERE id = ?";
 
 /// What a shift gives every label of it.
 struct ShiftPart {

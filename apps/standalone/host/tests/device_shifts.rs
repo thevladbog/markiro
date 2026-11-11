@@ -225,7 +225,7 @@ async fn a_station_sees_the_open_shifts_of_its_line_and_those_it_entered() {
 }
 
 #[tokio::test]
-async fn only_a_station_reads_and_creates_shifts() {
+async fn office_devices_cannot_read_or_create_shifts() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
     let (_, unassigned) = pair_device(&admin.app, "station").await;
@@ -264,8 +264,8 @@ async fn only_a_station_reads_and_creates_shifts() {
         } else {
             assert_eq!(
                 (status, answer["error"]["code"].clone()),
-                (StatusCode::FORBIDDEN, json!("forbidden")),
-                "handheld creates no shift"
+                (StatusCode::CONFLICT, json!("conflict")),
+                "a handheld without a line cannot create a shift"
             );
         }
         let builder = request(method, "/v1/device/shifts");
@@ -279,6 +279,147 @@ async fn only_a_station_reads_and_creates_shifts() {
             "{method}"
         );
     }
+}
+
+#[tokio::test]
+async fn handheld_creates_each_mode_on_its_assigned_line_and_retries_safely() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let handheld = pair_handheld(&admin).await;
+    let device = device_id(&admin, &handheld).await;
+    let (status, reply) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/devices/{device}"),
+            Some(json!({ "lineId": setup.line })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+
+    let lot_box = office_template(&admin, "box", true, Value::Null).await;
+    sqlx::query(
+        "UPDATE label_templates SET spec = json_set(spec, '$.elements', json(?)) WHERE id = ?",
+    )
+    .bind(json!([{ "kind": "field", "field": "shift.lotNumber" }]).to_string())
+    .bind(&lot_box)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (status, options) = device_call(
+        &admin,
+        &handheld,
+        "GET",
+        "/v1/device/shift-create-options",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{options}");
+    assert_eq!(options["lineId"], setup.line);
+    assert!(options["products"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["id"] == setup.product));
+    assert!(options["templates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["id"] == setup.template));
+
+    assert!(!options["templates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["id"] == lot_box));
+    let mut incompatible = device_create(&setup, REQUEST);
+    incompatible["expectedLineId"] = json!(setup.line);
+    incompatible["boxTemplateId"] = json!(lot_box);
+    let (status, refused) = device_call(
+        &admin,
+        &handheld,
+        "POST",
+        "/v1/device/shifts",
+        Some(incompatible),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+
+    let pallet = pallet_template(&admin).await;
+    let mut wrong_line = device_create(&setup, REQUEST);
+    wrong_line["expectedLineId"] = json!(setup.other_line);
+    let (status, _) = device_call(
+        &admin,
+        &handheld,
+        "POST",
+        "/v1/device/shifts",
+        Some(wrong_line),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    for (idx, mode, pallets) in [
+        (1, "validation", false),
+        (2, "aggregation", false),
+        (3, "aggregation", true),
+    ] {
+        let mut body = device_create(&setup, &format!("1b2c3d4e-5f60-4a71-8b82-93a4b5c6d7e{idx}"));
+        body["expectedLineId"] = json!(setup.line);
+        body["mode"] = json!(mode);
+        body["plannedDate"] = json!("2026-11-02");
+        body["palletsEnabled"] = json!(pallets);
+        if pallets {
+            body["palletTemplateId"] = json!(pallet);
+            body["plannedQty"] = json!(640);
+        }
+        let (status, created) = device_call(
+            &admin,
+            &handheld,
+            "POST",
+            "/v1/device/shifts",
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        assert_eq!(created["number"], format!("OCT26-{idx:03}/M"));
+        assert_eq!(created["lineId"], setup.line);
+        assert_eq!(created["mode"], mode);
+        assert_eq!(created["palletsEnabled"], pallets);
+        assert_eq!(created["plannedDate"], "2026-11-02");
+        assert_eq!(created["plannedQty"], body["plannedQty"]);
+        let id = created["id"].as_str().unwrap();
+        let (status, office) = admin
+            .call("GET", &format!("/v1/office/shifts/{id}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{office}");
+        assert_eq!(office["number"], created["number"]);
+        let (status, repeated) =
+            device_call(&admin, &handheld, "POST", "/v1/device/shifts", Some(body)).await;
+        assert_eq!((status, repeated), (StatusCode::OK, created.clone()));
+        let (status, search) = admin
+            .call(
+                "POST",
+                "/v1/office/search",
+                Some(json!({"kind":"text","text": created["number"]})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{search}");
+        assert_eq!(search["items"][0]["label"], created["number"]);
+        let (status, opened) = enter_with(
+            &admin,
+            &handheld,
+            &created,
+            json!({"supports":["handheld-host-v1","validation-v1"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{opened}");
+        assert_eq!(opened["number"], created["number"]);
+        assert_eq!(opened["status"], "active");
+        assert_eq!(opened["myState"], "active");
+    }
+    let audit = audit_trail(&admin.app, "shift.create").await;
+    assert_eq!(audit.len(), 3);
+    assert!(audit
+        .iter()
+        .all(|row| row.1.as_deref() == Some(device.as_str())));
 }
 
 /// A station's create of `setup`'s product with `request_id`.

@@ -64,7 +64,7 @@ const DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.reason_id, r.nam
 
 const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.warehouse_pallet_id, l.status, \
      COALESCE(l.product_id,l.cloud_product_id) AS product_id, COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count, l.validated_at, COALESCE(s.id,cs.id) AS shift_id, \
-     s.number_month_key, s.number_seq, s.created_from, cs.number AS cloud_number, \
+     s.number_month_key, s.number_seq, s.number_origin AS created_from, cs.number AS cloud_number, \
      (l.cloud_box_id IS NOT NULL OR l.cloud_pallet_id IS NOT NULL) AS cloud_history \
      FROM disaggregation_document_lines l \
      LEFT JOIN products p ON p.id = l.product_id \

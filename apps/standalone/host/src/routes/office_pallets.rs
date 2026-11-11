@@ -31,7 +31,7 @@ macro_rules! pallet_list {
         concat!(
             "SELECT p.id, p.sscc, p.opened_at, p.closed_at, p.disassembled_at, \
              p.box_count_reported, p.device_id, d.name AS device_name, \
-             sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
+             sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.number_origin AS created_from, \
              sh.production_date, sh.product_id, pr.name AS product_name, sh.line_id, \
              l.name AS line_name, \
              (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \

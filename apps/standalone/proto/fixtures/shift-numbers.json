@@ -28,6 +28,7 @@
     { "monthKey": "JAN27", "seq": 42, "createdFrom": "office", "number": "JAN27-042" },
     { "monthKey": "OCT26", "seq": 4, "createdFrom": "station", "number": "OCT26-004/S" },
     { "monthKey": "AUG26", "seq": 1234, "createdFrom": "office", "number": "AUG26-1234" },
-    { "monthKey": "DEC29", "seq": 1, "createdFrom": "station", "number": "DEC29-001/S" }
+    { "monthKey": "DEC29", "seq": 1, "createdFrom": "station", "number": "DEC29-001/S" },
+    { "monthKey": "NOV26", "seq": 14, "createdFrom": "handheld", "number": "NOV26-014/M" }
   ]
 }

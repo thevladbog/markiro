@@ -219,11 +219,10 @@ pub async fn search_codes(
         page: q.page,
     })?;
     let shift = c.shift.as_ref().map(|n| {
-        format!(
-            "{}-{:03}{}",
-            n.month_key,
+        crate::shifts::format_number(
+            &n.month_key,
             n.seq,
-            if n.station { "/S" } else { "" }
+            n.origin.unwrap_or(markiro_proto::ShiftOrigin::Office),
         )
     });
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;

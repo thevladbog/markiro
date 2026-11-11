@@ -38,6 +38,7 @@ async fn read_info(
         paired_at,
         // `GET /v1/device` adds the license (plan ЛЦ-2); the line's answer has none.
         license: None,
+        handheld_shift_create: device.kind == DeviceKind::Handheld,
     })
 }
 

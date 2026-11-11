@@ -32,10 +32,10 @@ pub const STATUS_SQL: &str = "SELECT l.record_id, c.reviewed_at FROM scans l \
 /// starting at the device's scans, whose journal only grows. One batch
 /// detects many at one instant, so the id breaks the tie.
 pub const DISPLACEMENTS_SQL: &str = "SELECT c.id, l.record_id, l.shift_id, \
-     ls.number_month_key AS l_month_key, ls.number_seq AS l_seq, ls.created_from AS l_origin, \
+     ls.number_month_key AS l_month_key, ls.number_seq AS l_seq, ls.number_origin AS l_origin, \
      c.code_hash, l.box_id, lb.sscc AS box_sscc, \
      c.detected_at, c.reviewed_at, w.shift_id AS w_shift_id, ws.number_month_key, \
-     ws.number_seq, ws.created_from, w.device_id AS w_device_id, w.scanned_at AS w_scanned_at \
+     ws.number_seq, ws.number_origin AS created_from, w.device_id AS w_device_id, w.scanned_at AS w_scanned_at \
      FROM code_conflicts c CROSS JOIN scans l ON l.id = c.loser_scan_id \
      JOIN shifts ls ON ls.id = l.shift_id LEFT JOIN boxes lb ON lb.id = l.box_id \
      JOIN scans w ON w.id = c.winner_scan_id JOIN shifts ws ON ws.id = w.shift_id \

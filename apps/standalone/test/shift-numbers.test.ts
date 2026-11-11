@@ -18,7 +18,7 @@ const NUMBERS = z
       z.strictObject({
         monthKey: z.string(),
         seq: z.number().int().positive(),
-        createdFrom: z.enum(["office", "station"]),
+        createdFrom: z.enum(["office", "station", "handheld"]),
         number: z.string(),
       }),
     ),
@@ -30,9 +30,9 @@ const NUMBERS = z
   );
 
 describe("shift numbers: the fixture the host's shift number answers too", () => {
-  it("holds 22 dates and 5 numbers", () => {
+  it("holds 22 dates and 6 numbers", () => {
     expect(NUMBERS.monthKeys).toHaveLength(22);
-    expect(NUMBERS.numbers).toHaveLength(5);
+    expect(NUMBERS.numbers).toHaveLength(6);
   });
 
   it.each(NUMBERS.monthKeys.map((each) => [each.date, each.monthKey] as const))(
@@ -50,7 +50,7 @@ describe("shift numbers: the fixture the host's shift number answers too", () =>
     "writes %s as the host does",
     (number, each) => {
       // The host's `office` is the cloud's `admin`.
-      const createdFrom = each.createdFrom === "office" ? "admin" : "station";
+      const createdFrom = each.createdFrom === "office" ? "admin" : each.createdFrom;
       expect(formatShiftNumber({ monthKey: each.monthKey, seq: each.seq, createdFrom })).toBe(
         number,
       );

@@ -60,7 +60,7 @@ pub async fn get(
             .await
             .map_err(ApiError::internal)?;
     // Limit every read even if a corrupt/legacy source exceeds the office's 1000-box input cap.
-    let rows: Vec<MemberRow> = sqlx::query_as("SELECT CAST(wb.id AS TEXT) AS membership_id, b.id, b.sscc, b.shift_id, s.number_month_key, s.number_seq, s.created_from, s.production_date, b.disassembled_at, wb.removed_at, (SELECT COUNT(*) FROM box_items i WHERE i.box_id=b.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc=wb.box_sscc JOIN shifts s ON s.id=b.shift_id WHERE wb.pallet_id=? ORDER BY wb.added_at, wb.id LIMIT 10001")
+    let rows: Vec<MemberRow> = sqlx::query_as("SELECT CAST(wb.id AS TEXT) AS membership_id, b.id, b.sscc, b.shift_id, s.number_month_key, s.number_seq, s.number_origin AS created_from, s.production_date, b.disassembled_at, wb.removed_at, (SELECT COUNT(*) FROM box_items i WHERE i.box_id=b.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc=wb.box_sscc JOIN shifts s ON s.id=b.shift_id WHERE wb.pallet_id=? ORDER BY wb.added_at, wb.id LIMIT 10001")
         .bind(&id).fetch_all(&mut *tx).await.map_err(ApiError::internal)?;
     if rows.len() > 10_000 {
         return Err(ApiError::conflict(

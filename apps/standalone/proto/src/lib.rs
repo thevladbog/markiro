@@ -624,6 +624,8 @@ pub struct DeviceInfo {
         deserialize_with = "license::device_license_or_none"
     )]
     pub license: Option<license::DeviceLicense>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub handheld_shift_create: bool,
 }
 
 /// `PUT /v1/device/line`: a station chooses the line it works on.
@@ -1897,6 +1899,7 @@ pub struct TemplateDefaultsUpdate {
 pub enum ShiftOrigin {
     Office,
     Station,
+    Handheld,
 }
 
 impl ShiftOrigin {
@@ -1904,6 +1907,18 @@ impl ShiftOrigin {
         match self {
             ShiftOrigin::Office => "office",
             ShiftOrigin::Station => "station",
+            ShiftOrigin::Handheld => "handheld",
+        }
+    }
+}
+
+impl ShiftOrigin {
+    /// Keep the office and station response category readable by older clients.
+    /// The shift number carries the more specific origin.
+    pub fn device_category(self) -> Self {
+        match self {
+            Self::Handheld => Self::Station,
+            other => other,
         }
     }
 }
@@ -1911,8 +1926,7 @@ impl ShiftOrigin {
 impl std::str::FromStr for ShiftOrigin {
     type Err = UnknownVariant;
 
-    /// The name [`ShiftOrigin::as_str`] gives, as `shifts.created_from`
-    /// stores it.
+    /// The name [`ShiftOrigin::as_str`] gives in the host's number origin.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         parse_variant("shift origin", text)
     }
@@ -2594,6 +2608,10 @@ pub struct DeviceShifts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceShiftCreate {
+    /// The line displayed by the handheld while the operator filled the form.
+    /// The host still resolves the actual assignment inside the transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_line_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lot_number: Option<String>,
     pub request_id: String,
@@ -3748,10 +3766,14 @@ mod tests {
 
     /// Every `ShiftOrigin`, listed the same way.
     fn shift_origins() -> Vec<ShiftOrigin> {
-        let origins = vec![ShiftOrigin::Office, ShiftOrigin::Station];
+        let origins = vec![
+            ShiftOrigin::Office,
+            ShiftOrigin::Station,
+            ShiftOrigin::Handheld,
+        ];
         for origin in &origins {
             match origin {
-                ShiftOrigin::Office | ShiftOrigin::Station => {}
+                ShiftOrigin::Office | ShiftOrigin::Station | ShiftOrigin::Handheld => {}
             }
         }
         origins

@@ -45,7 +45,7 @@ pub async fn summary(conn: &mut SqliteConnection) -> Result<DemoDataSummary, Api
         counts.push(u32::try_from(value).map_err(ApiError::internal)?);
     }
     let active: Vec<(String, i64, String)> = sqlx::query_as(&format!(
-        "SELECT number_month_key, number_seq, created_from FROM shifts \
+        "SELECT number_month_key, number_seq, number_origin FROM shifts \
          WHERE status = 'active' AND id IN ({DEMO_SHIFTS}) ORDER BY number_seq"
     ))
     .fetch_all(&mut *conn)

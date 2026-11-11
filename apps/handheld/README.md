@@ -74,6 +74,17 @@ the cabinet after entry reaches the device; offline it falls back to the cached
 bundle, and a refused entry shows the list's own states. The **Shift** tile opens
 all available shifts. Leaving or locally closing the shift removes the card.
 
+On a compatible «Автоном» host, **Смена → Новая смена** lets the signed-in
+operator create and open a shift on the handheld's assigned line. Pick a
+product by name/GTIN or scan it, choose validation or aggregation (with or
+without pallets), and set the shift date separately from the production date.
+The plan is optional. The host assigns the number ending in `/M`.
+Creation requires the host connection. The device keeps the draft and retries
+an unconfirmed request with the same ID. If creation succeeded but entry
+failed, **Открыть смену** retries entry without creating another shift.
+Lot numbers and layouts that use a lot-number field require separate handheld
+support and are not offered by this form.
+
 An aggregation shift whose bundle carried no SSCC block warns on this card and on
 the work screen from entry — «В организации не задан GLN» or «У контрагента-эмитента
 нет GLN», with where in the cabinet to fix it — rather than on the twentieth scan.
