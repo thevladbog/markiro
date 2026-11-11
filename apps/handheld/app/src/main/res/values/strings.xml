@@ -400,6 +400,7 @@
     <string name="printer_unreachable_body">%1$s · нет ответа %2$d с. Проверьте, что принтер включён, в той же сети Wi-Fi, и адрес указан верно.</string>
     <string name="printer_no_paper">Нет бумаги</string>
     <string name="printer_head_open">Открыта крышка</string>
+    <string name="printer_paper_jam">Замятие бумаги</string>
     <string name="printer_not_ready">Принтер не готов</string>
     <string name="printer_bluetooth_title">Bluetooth-принтер</string>
     <string name="printer_bluetooth_hint">Включите принтер и Bluetooth на нём. Сопряжённые принтеры появятся в списке.</string>

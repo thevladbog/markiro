@@ -18,41 +18,47 @@ private const val DEFAULT_NARROW_DOTS = 2
  *
  * The media gap and print direction are fixed here rather than carried on the template: they are a
  * property of the printer and its media, not of the label design.
+ * Handheld print jobs use CRLF framing. The default framing matches the shared template fixtures.
  */
 suspend fun generateTspl(
     spec: LabelSpec,
     data: Map<LabelField, String>,
     rasterize: RasterizeText?,
     logo: RasterResult? = null,
+    commandTerminator: String = "\n",
+    configureMedia: Boolean = true,
 ): ByteArray {
     val out = ByteArrayOutputStream()
+    val terminator = commandTerminator.toByteArray(Charsets.US_ASCII)
     fun line(text: String) {
         out.write(text.toByteArray(Charsets.ISO_8859_1))
-        out.write('\n'.code)
+        out.write(terminator)
     }
-    line("SIZE ${number(spec.widthMm)} mm, ${number(spec.heightMm)} mm")
-    line("GAP 2 mm, 0 mm")
+    if (configureMedia) {
+        line("SIZE ${number(spec.widthMm)} mm, ${number(spec.heightMm)} mm")
+        line("GAP 2 mm, 0 mm")
+    }
     line("DIRECTION 1")
     line("CLS")
     for (element in spec.elements) {
         when (element) {
             is LabelElement.Text -> textLike(
                 spec, element.xMm, element.yMm, element.text, element.fontSizePt, element.bold,
-                element.align, element.maxWidthMm, element.maxLines, rasterize, out, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
+                element.align, element.maxWidthMm, element.maxLines, rasterize, out, terminator, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
             is LabelElement.Field -> textLike(
                 spec, element.xMm, element.yMm,
                 labelFieldDisplayValue(element.field, data, element.textFormat),
                 element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines,
-                rasterize, out, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
+                rasterize, out, terminator, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
             is LabelElement.OrganizationLogo -> {
                 if (logo == null) continue
                 val fitted = fitLabelLogo(element, spec.dpi, logo)
                 buildBitmapCommand(fitted.x, fitted.y, fitted.raster, out)
-                out.write('\n'.code)
+                out.write(terminator)
             }
-            is LabelElement.Barcode -> barcode(spec, element, data, out, ::line)
+            is LabelElement.Barcode -> barcode(spec, element, data, out, terminator, ::line)
             is LabelElement.Line -> line(bar(spec, element))
             is LabelElement.Box -> line(box(spec, element))
         }
@@ -84,6 +90,7 @@ private suspend fun textLike(
     maxLines: Int?,
     rasterize: RasterizeText?,
     out: ByteArrayOutputStream,
+    terminator: ByteArray,
     line: (String) -> Unit,
     fontFamily: String?, lineHeight: Double?, minFontSizePt: Double?,
 ) {
@@ -111,7 +118,7 @@ private suspend fun textLike(
         )
         val offset = rasterAlignOffsetDots(align, maxWidthDots, raster.width)
         buildBitmapCommand(x + offset, y, raster, out)
-        out.write('\n'.code)
+        out.write(terminator)
         return
     }
     // Wrapping returns null when the element carries no box or the text already fits, which keeps
@@ -138,6 +145,7 @@ private fun barcode(
     element: LabelElement.Barcode,
     data: Map<LabelField, String>,
     out: ByteArrayOutputStream,
+    terminator: ByteArray,
     line: (String) -> Unit,
 ) {
     val x = mmToDots(element.xMm, spec.dpi)
@@ -151,7 +159,7 @@ private fun barcode(
         if (raw.isEmpty()) throw LabelRenderException("no marking code to print")
         // Unlike every other barcode element, `sizeMm` here is the whole symbol square.
         buildBitmapCommand(x, y, rasterizeGs1DataMatrix(raw, mmToDots(element.sizeMm, spec.dpi)), out)
-        out.write('\n'.code)
+        out.write(terminator)
         return
     }
     if (element.format != BarcodeFormat.CODE128) {

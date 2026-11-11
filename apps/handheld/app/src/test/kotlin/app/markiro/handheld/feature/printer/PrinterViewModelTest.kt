@@ -44,16 +44,18 @@ class PrinterViewModelTest {
         var outcome: SendOutcome = SendOutcome.Delivered,
     ) : PrinterTransport {
         var sent = 0
+        var lastDocument: ByteArray? = null
         val targets = mutableListOf<PrinterEntity>()
         override suspend fun status(printer: PrinterEntity) = nextStatus
         override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
             sent++
+            lastDocument = document
             targets += printer
             return outcome
         }
     }
 
-    private val rasterize = RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }
+    private val rasterize = RasterizeText { _, _ -> RasterResult("F5F2", 2, 2, 16, 1) }
 
     @Before
     fun setUp() {
@@ -144,6 +146,24 @@ class PrinterViewModelTest {
         model.retryTest()
         model.testStep.first { it is TestPrintStep.Unknown && transport.sent == 2 }
         assertEquals(listOf(first, first), transport.targets)
+    }
+
+    @Test
+    fun tsplTestPrintUsesCrLfAndKeepsTheCalibratedMedia() = runTest {
+        val transport = FakeTransport()
+        val model = vm(transport)
+        model.startAdd(TransportKind.BLUETOOTH)
+        model.setLanguage(PrinterLanguage.TSPL)
+        model.pickPairedDevice(DiscoveredPrinter("AA:BB:CC:DD:EE:FF", "TSPL printer", true))
+        val printer = checkNotNull(model.state.first { it.selected != null }.selected)
+
+        model.printTest(printer.id)
+        model.testStep.first { it is TestPrintStep.Sent }
+
+        val document = checkNotNull(transport.lastDocument).toString(Charsets.ISO_8859_1)
+        assertTrue(document.startsWith("SET CUTTER OFF\r\nSET PEEL OFF\r\nDIRECTION 1\r\nCLS\r\n"))
+        assertTrue(document.contains(Regex("BITMAP [0-9]+,[0-9]+,2,1,0,\n\r\r\n")))
+        assertTrue(document.endsWith("\r\nPRINT 1\r\n"))
     }
 
     @Test

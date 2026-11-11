@@ -538,7 +538,7 @@ class DuplicateJobs(
         NotReadyReason.NO_PAPER -> DuplicateReason.NO_PAPER
         NotReadyReason.HEAD_OPEN -> DuplicateReason.HEAD_OPEN
         NotReadyReason.UNREACHABLE -> DuplicateReason.UNREACHABLE
-        NotReadyReason.OTHER -> DuplicateReason.TRANSPORT_FAILED
+        NotReadyReason.PAPER_JAM, NotReadyReason.OTHER -> DuplicateReason.TRANSPORT_FAILED
     }
 }
 

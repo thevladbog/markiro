@@ -113,6 +113,7 @@ data class PrinterErrorCallbacks(
 private fun printerStatusLabel(status: String?): Int? = when (status) {
     "no_paper" -> R.string.printer_no_paper
     "head_open" -> R.string.printer_head_open
+    "paper_jam" -> R.string.printer_paper_jam
     "unreachable" -> R.string.print_reason_unreachable
     "other" -> R.string.printer_not_ready
     "unknown" -> R.string.printer_test_unknown_title
@@ -413,6 +414,7 @@ fun PrinterErrorScreen(address: String, cb: PrinterErrorCallbacks) {
 private fun reasonLabel(reason: NotReadyReason): Int = when (reason) {
     NotReadyReason.NO_PAPER -> R.string.printer_no_paper
     NotReadyReason.HEAD_OPEN -> R.string.printer_head_open
+    NotReadyReason.PAPER_JAM -> R.string.printer_paper_jam
     NotReadyReason.UNREACHABLE -> R.string.printer_unreachable_title
     NotReadyReason.OTHER -> R.string.printer_not_ready
 }

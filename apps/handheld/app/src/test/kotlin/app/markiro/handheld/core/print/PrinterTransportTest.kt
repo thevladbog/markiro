@@ -122,6 +122,13 @@ class PrinterTransportTest {
     }
 
     @Test
+    fun aTsplPaperJamIsReportedByName() = runTest {
+        val printer = printer("AA:BB:CC:DD:EE:FF", language = "tspl").copy(transport = "bluetooth")
+        val status = transport { FakeConnection(byteArrayOf(0x02), null) }.status(printer)
+        assertEquals(PrinterStatus.NotReady(NotReadyReason.PAPER_JAM), status)
+    }
+
+    @Test
     fun aSilentPrinterIsNotReady() = runTest {
         val outcome = transport { FakeConnection(byteArrayOf(), null) }.status(printer("host:9100"))
         assertEquals(PrinterStatus.NotReady(NotReadyReason.UNREACHABLE), outcome)

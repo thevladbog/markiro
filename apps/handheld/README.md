@@ -185,7 +185,8 @@ printer refusal; test and production status from an old snapshot cannot overwrit
 «Назначения» selects a printer independently for **Короб**,
 **Дубль кода**, and **Паллета**. One printer may serve all three. Adding a profile never changes
 assignments; «Не назначен» never falls back to another profile. Test printing belongs to the
-explicitly opened profile and leaves all three assignments intact.
+explicitly opened profile and leaves all three assignments intact. The TSPL
+test uses the media size and gap already calibrated on the printer.
 
 Room v13 adds `printer_assignments` and `print_destinations`. On upgrade, only the previously
 selected profile receives all three purposes once; other saved profiles and queued work survive.

@@ -185,6 +185,6 @@ class BoxPrinter(
         NotReadyReason.NO_PAPER -> PrintReason.NO_PAPER
         NotReadyReason.HEAD_OPEN -> PrintReason.HEAD_OPEN
         NotReadyReason.UNREACHABLE -> PrintReason.UNREACHABLE
-        NotReadyReason.OTHER -> PrintReason.TRANSPORT_FAILED
+        NotReadyReason.PAPER_JAM, NotReadyReason.OTHER -> PrintReason.TRANSPORT_FAILED
     }
 }

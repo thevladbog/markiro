@@ -14,7 +14,7 @@ import java.net.SocketTimeoutException
 /** The drawn timeout: a printer that has not answered in five seconds is not answering. */
 const val PRINTER_TIMEOUT_MS = 5_000
 
-enum class NotReadyReason { NO_PAPER, HEAD_OPEN, UNREACHABLE, OTHER }
+enum class NotReadyReason { NO_PAPER, HEAD_OPEN, PAPER_JAM, UNREACHABLE, OTHER }
 
 sealed interface PrinterStatus {
     data object Ready : PrinterStatus
@@ -211,13 +211,14 @@ internal fun decodeZplStatus(reply: ByteArray): PrinterStatus {
     }
 }
 
-/** The single status byte: zero is normal, and the low bits flag the two conditions we name. */
+/** Zero is normal. The low bits describe paper and print-head problems. */
 internal fun decodeTsplStatus(reply: ByteArray): PrinterStatus {
     val value = reply.first().toInt() and 0xFF
     return when {
         value == 0 -> PrinterStatus.Ready
         value and 0x04 != 0 -> PrinterStatus.NotReady(NotReadyReason.NO_PAPER)
         value and 0x01 != 0 -> PrinterStatus.NotReady(NotReadyReason.HEAD_OPEN)
+        value and 0x02 != 0 -> PrinterStatus.NotReady(NotReadyReason.PAPER_JAM)
         else -> PrinterStatus.NotReady(NotReadyReason.OTHER)
     }
 }
