@@ -1,4 +1,10 @@
-import { palletLabelFields, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  DomainError,
+  labelTemplateUsesField,
+  LOT_NUMBER_LABEL_FIELD,
+  palletLabelFields,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
 import { z } from "zod";
 
 import { issuerPrefix, THIRTEEN_DIGITS } from "../../lib/rules.js";
@@ -26,6 +32,7 @@ export async function assemblyIssuerPrefix(local: LocalExecutor): Promise<string
 export async function assemblyTemplate(
   local: LocalExecutor,
   product: PalletAssemblyPallet["product"],
+  hasLotNumber = false,
 ): Promise<LabelTemplateSpec | null> {
   const [templates, defaults, [preference]] = await Promise.all([
     readWarehouseTemplates(local),
@@ -36,15 +43,26 @@ export async function assemblyTemplate(
       preferenceRow,
     ),
   ]);
-  const fits = (id: string | null) => checkTemplate(templates, id, "pallet", product.chzGroupCode);
+  const fits = (id: string | null) => {
+    const sibling = hasLotNumber
+      ? templates.find((candidate) => candidate.enabled && candidate.lotNumberSourceId === id)
+      : undefined;
+    return checkTemplate(templates, sibling?.id ?? id, "pallet", product.chzGroupCode);
+  };
   const preferred = fits(preference?.default_pallet_template_id ?? null);
   if (preferred.kind === "ok") return preferred.spec;
   const fallback = fits(defaults.pallet);
   if (fallback.kind === "ok") return fallback.spec;
   const matching = templates
-    .map((template) => fits(template.id))
+    .map((template) => checkTemplate(templates, template.id, "pallet", product.chzGroupCode))
     .filter((result) => result.kind === "ok");
-  return matching.length === 1 ? (matching[0]?.spec ?? null) : null;
+  const candidates = matching.filter(
+    ({ template }) => !matching.some((base) => base.template.id === template.lotNumberSourceId),
+  );
+  const [only] = candidates;
+  if (candidates.length !== 1 || only === undefined) return null;
+  const selected = fits(only.template.id);
+  return selected.kind === "ok" ? selected.spec : only.spec;
 }
 
 export function assemblyLabelFields(pallet: PalletAssemblyPallet): LabelFields {
@@ -66,6 +84,7 @@ export function assemblyLabelFields(pallet: PalletAssemblyPallet): LabelFields {
     counterpartyName: null,
     productionDate: label.productionDate,
     shiftNumber: null,
+    lotNumber: label.lotNumber ?? null,
   });
   return label.productionDate === null ? { ...fields, date: "", expiry: "" } : fields;
 }
@@ -99,10 +118,20 @@ export async function sendAssemblyLabel({
     return false;
   if (!(await store.startPrint(pallet.id, pallet.labelVersion, allowUnknown))) return false;
   let bytes: Uint8Array;
+  if (
+    pallet.label.lotNumber != null &&
+    !labelTemplateUsesField(pallet.label.template, LOT_NUMBER_LABEL_FIELD)
+  ) {
+    return store.finishPrint(pallet.id, "failed", "lot_template_missing");
+  }
   try {
     bytes = await render(pallet.label.template, assemblyLabelFields(pallet), printer);
-  } catch {
-    return store.finishPrint(pallet.id, "failed", "render_failed");
+  } catch (error) {
+    const code =
+      error instanceof DomainError && error.code === "LABEL_LOT_NUMBER_OVERFLOW"
+        ? "lot_template_overflow"
+        : "render_failed";
+    return store.finishPrint(pallet.id, "failed", code);
   }
   if (!canSend()) return store.finishPrint(pallet.id, "failed", "not_sent");
   const answer = settleOutcome(

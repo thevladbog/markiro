@@ -4,7 +4,7 @@ import { DomainError } from "../errors.js";
 import {
   labelTemplateSpecStrictSchema,
   mmToDots,
-  type LabelField,
+  type LabelFieldData,
   type LabelTemplateSpec,
 } from "./model.js";
 import { createLabelRenderPlan, type LabelRenderElement } from "./render-plan.js";
@@ -20,7 +20,7 @@ function invalid(): never {
 /** Raster output deliberately has no dependency on the profile's last RAW language. */
 export async function renderMonoLabel(
   spec: LabelTemplateSpec,
-  fields: Record<LabelField, string>,
+  fields: LabelFieldData,
   rasterizeText: RasterizeTextFn,
   options: { logo?: MonoBitmap | null } = {},
 ): Promise<MonoRaster> {

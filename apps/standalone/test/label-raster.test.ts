@@ -68,7 +68,7 @@ interface FakeSurface {
   rects: { rect: number[]; fillStyle: string }[];
   texts: { text: string; x: number; y: number; fillStyle: string; textBaseline: string }[];
   reads: number[][];
-  measureText(line: string): { width: number };
+  measureText(line: string): Partial<TextMetrics> & { width: number };
   fillRect(...rect: number[]): void;
   fillText(text: string, x: number, y: number): void;
   getImageData(x: number, y: number, width: number, height: number): { data: Uint8ClampedArray };
@@ -92,9 +92,17 @@ beforeEach(() => {
  */
 function fakeCanvases({
   charWidth = 10,
+  inkBounds,
   measureFails,
 }: {
   charWidth?: number | ((fontPx: number) => number);
+  inkBounds?: Pick<
+    TextMetrics,
+    | "actualBoundingBoxLeft"
+    | "actualBoundingBoxRight"
+    | "actualBoundingBoxAscent"
+    | "actualBoundingBoxDescent"
+  >;
   measureFails?: () => never;
 } = {}): FakeSurface[] {
   const surfaces: FakeSurface[] = [];
@@ -117,7 +125,7 @@ function fakeCanvases({
           // The width follows the font set on this very context, as a real one's does.
           const fontPx = Number(/(\d+)px/.exec(surface.font)?.[1] ?? 0);
           const perChar = typeof charWidth === "function" ? charWidth(fontPx) : charWidth;
-          return { width: line.length * perChar };
+          return { width: line.length * perChar, ...inkBounds };
         },
         fillRect: (...rect) => {
           surface.rects.push({ rect, fillStyle: surface.fillStyle });
@@ -192,6 +200,30 @@ describe("the text rasterizer", () => {
 
 describe("the text rasterizer's drawing", () => {
   const font = "400 21px IBM Plex Sans, sans-serif";
+
+  it("keeps measured accents, descenders and side bearings inside a complete lot raster", async () => {
+    const surfaces = fakeCanvases({
+      inkBounds: {
+        actualBoundingBoxLeft: 1,
+        actualBoundingBoxRight: 19,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 4,
+      },
+    });
+    const raster = await rasterizeText("Ёу", {
+      fontFamily: "monospace",
+      fontSizePx: 16,
+      bold: false,
+      maxWidthPx: 40,
+      lineHeight: 1,
+      overflow: "error",
+      containInk: true,
+    });
+    expect(raster).toMatchObject({ width: 21, height: 18 });
+    expect(surfaces[1]?.texts).toEqual([
+      { text: "Ёу", x: 1, y: 13, fillStyle: "#000000", textBaseline: "alphabetic" },
+    ]);
+  });
 
   it("draws a canvas of up to 4096 dots on a side, and refuses a larger one before making it", async () => {
     const fits = fakeCanvases({ charWidth: 1 });

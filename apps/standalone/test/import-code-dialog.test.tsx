@@ -205,9 +205,11 @@ describe("the template import dialog", () => {
     const fields = screen.getByRole("region", { name: "Поля шаблона" });
     expect(within(fields).getByText("Название товара")).toBeTruthy();
     expect(within(fields).getByText("{{product.name}}")).toBeTruthy();
-    expect(within(fields).getAllByRole("button", { name: /^Копировать / })).toHaveLength(13);
+    expect(within(fields).getByText("{{shift.lotNumber}}")).toBeTruthy();
+    expect(within(fields).getAllByRole("button", { name: /^Копировать / })).toHaveLength(14);
     chooseValue("Формат кода", "json");
     expect(within(fields).getByText("qty.boxes")).toBeTruthy();
+    expect(within(fields).getByText("shift.lotNumber")).toBeTruthy();
     expect(within(fields).queryByText("{{qty.boxes}}")).toBeNull();
   });
 

@@ -138,7 +138,7 @@ where
 
 /// The shift with its product now.
 pub const PALLET_SHIFT_SQL: &str = "SELECT s.id, s.number_month_key, s.number_seq, \
-     s.created_from, s.production_date, p.name AS product_name, p.gtin14, p.shelf_life_days \
+     s.created_from, s.production_date, s.lot_number, p.name AS product_name, p.gtin14, p.shelf_life_days \
      FROM shifts s JOIN products p ON p.id = s.product_id WHERE s.id = ?";
 
 /// Every pallet of the shift, opened first first.
@@ -162,6 +162,7 @@ struct ShiftRow {
     number_seq: i64,
     created_from: String,
     production_date: String,
+    lot_number: Option<String>,
     product_name: String,
     gtin14: String,
     shelf_life_days: Option<u32>,
@@ -275,6 +276,7 @@ where
             number: shifts::format_number(&shift.number_month_key, shift.number_seq, created_from),
             id: shift.id,
             production_date: shift.production_date,
+            lot_number: shift.lot_number,
             product_name: shift.product_name,
             gtin14: shift.gtin14,
             shelf_life_days: shift.shelf_life_days,

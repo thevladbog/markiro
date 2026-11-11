@@ -50,6 +50,21 @@ async fn registry(admin: &Admin, key: &str) -> (StatusCode, Value) {
 
 #[tokio::test]
 async fn station_builds_one_pallet_from_two_shifts_while_a_source_shift_is_open() {
+    warehouse_lot_scenario(["0042Бк", "0042Бк"], None, None).await;
+}
+
+#[tokio::test]
+async fn station_close_freezes_the_common_lot_or_its_explicit_absence() {
+    warehouse_lot_scenario(["0042Бк", "0042Бк"], Some(Some("0042Бк")), Some("0042Бк")).await;
+    warehouse_lot_scenario(["0042Бк", "0042Бк"], Some(None), None).await;
+    warehouse_lot_scenario(["0042Бк", "0042бк"], Some(None), None).await;
+}
+
+async fn warehouse_lot_scenario(
+    source_lots: [&str; 2],
+    reported_lot: Option<Option<&str>>,
+    frozen_lot: Option<&str>,
+) {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
     let first = closed_boxes(&admin, &setup, 1).await;
@@ -85,14 +100,31 @@ async fn station_builds_one_pallet_from_two_shifts_while_a_source_shift_is_open(
         assert_eq!(receipt["outcome"], "accepted", "{receipt}");
     }
 
+    for (shift, lot) in [
+        (&first.shift, source_lots[0]),
+        (&second.shift, source_lots[1]),
+    ] {
+        // Fixture the already frozen source lots without coupling the warehouse test to planning.
+        sqlx::query("UPDATE shifts SET lot_number = ?1, snapshot = json_set(snapshot, '$.lotNumber', ?1) WHERE id = ?2")
+            .bind(lot)
+            .bind(shift)
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+    }
     let (assembly_id, assembly_key) = pair_device(&admin.app, "station").await;
     let (status, data) = registry(&admin, &assembly_key).await;
     assert_eq!(status, StatusCode::OK, "{data}");
     assert_eq!(data["canOpenPallets"], true);
+    assert_eq!(data["lotNumbersSupported"], true);
     let items = data["items"].as_array().unwrap();
-    for (sscc, source) in [(box_sscc(1500), &first), (second_sscc.clone(), &second)] {
+    for ((sscc, source), lot) in [(box_sscc(1500), &first), (second_sscc.clone(), &second)]
+        .into_iter()
+        .zip(source_lots)
+    {
         let item = items.iter().find(|item| item["sscc"] == sscc).unwrap();
         assert_eq!(item["shiftNumber"], source.number);
+        assert_eq!(item["lotNumber"], lot);
         assert_eq!(item["productId"], setup.product);
         assert_eq!(item["palletActive"], false);
         assert!(item["closedAt"].is_string());
@@ -101,17 +133,18 @@ async fn station_builds_one_pallet_from_two_shifts_while_a_source_shift_is_open(
     let (status, data) = registry(&admin, &handheld).await;
     assert_eq!(status, StatusCode::OK, "{data}");
     assert!(data.get("canOpenPallets").is_none());
+    assert!(data.get("lotNumbersSupported").is_none());
     assert!(data["items"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|item| item.get("shiftNumber").is_none()));
+        .all(|item| item.get("shiftNumber").is_none() && item.get("lotNumber").is_none()));
 
     let operator = operator(&admin).await;
     let block = pallet_block(&admin, &assembly_key, REQUEST_ID).await;
     let serial = block["fromSerial"].as_u64().unwrap() as u32;
     let sscc = pallet_sscc(serial);
-    let records = [
+    let mut records = [
         opened(1, PALLET_A, &setup.product, &instant(100, 0)),
         added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
         added(3, PALLET_A, &second_sscc, &instant(102, 0)),
@@ -125,7 +158,11 @@ async fn station_builds_one_pallet_from_two_shifts_while_a_source_shift_is_open(
         ),
     ]
     .map(|event| by(event, &operator));
-    let expected = vec![accepted(1), accepted(2), accepted(3), accepted(4)];
+    let mut expected = vec![accepted(1), accepted(2), accepted(3), accepted(4)];
+    if let Some(reported_lot) = reported_lot {
+        records[3]["data"]["lotNumber"] = json!(reported_lot);
+        expected[3]["details"] = json!({ "lotNumber": frozen_lot });
+    }
     assert_eq!(receipts_of(&admin, &assembly_key, &records).await, expected);
     assert_eq!(receipts_of(&admin, &assembly_key, &records).await, expected);
     let disassemble = by(
@@ -160,6 +197,7 @@ async fn station_builds_one_pallet_from_two_shifts_while_a_source_shift_is_open(
         .await;
     assert_eq!(status, StatusCode::OK, "{detail}");
     assert_eq!(detail["sscc"], sscc);
+    assert_eq!(detail["lotNumber"], json!(frozen_lot));
     assert_eq!(detail["boxes"], 2);
     let members = detail["members"].as_array().unwrap();
     assert_eq!(members[0]["shiftId"], first.shift);
@@ -261,7 +299,12 @@ fn close_event(n: u32, pallet: &str, operator: &str, block: &Value, count: u32) 
 async fn an_office_review_approves_the_exact_authoritative_box_set_for_a_new_close() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
-    closed_boxes(&admin, &setup, 1).await;
+    let source = closed_boxes(&admin, &setup, 1).await;
+    sqlx::query("UPDATE shifts SET lot_number = '0042Бк' WHERE id = ?")
+        .bind(source.shift)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
     let (station_id, station) = pair_device(&admin.app, "station").await;
     let (_, other) = pair_device(&admin.app, "station").await;
     let operator = operator(&admin).await;
@@ -359,6 +402,7 @@ async fn an_office_review_approves_the_exact_authoritative_box_set_for_a_new_clo
         .await;
     assert_eq!(status, StatusCode::OK, "{approved}");
     assert_eq!(approved["approvedBoxSsccs"], json!([box_sscc(1500)]));
+    assert_eq!(approved["approvedLotNumber"], "0042Бк");
     assert_eq!(approved["status"], "approved");
     assert_eq!(host_revision(&admin.app).await, revision + 2);
     assert_eq!(
@@ -673,4 +717,56 @@ async fn a_station_can_read_the_registry_when_pallets_are_disabled() {
         .await,
         vec![rejected(1, "feature_disabled", None)]
     );
+}
+
+#[tokio::test]
+async fn a_reported_lot_that_disagrees_with_the_contents_requires_review() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let source = closed_boxes(&admin, &setup, 1).await;
+    sqlx::query("UPDATE shifts SET lot_number = '0042Бк' WHERE id = ?")
+        .bind(source.shift)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (_, station) = pair_device(&admin.app, "station").await;
+    let operator = operator(&admin).await;
+    let block = pallet_block(&admin, &station, REQUEST_ID).await;
+    let mut close = close_event(3, PALLET_A, &operator, &block, 1);
+    close["data"]["lotNumber"] = json!("0042бк");
+    let receipts = receipts_of(
+        &admin,
+        &station,
+        &[
+            by(
+                opened(1, PALLET_A, &setup.product, &instant(100, 0)),
+                &operator,
+            ),
+            by(
+                added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
+                &operator,
+            ),
+            close,
+        ],
+    )
+    .await;
+    let rejected = &receipts[2];
+    assert_eq!(rejected["code"], "pallet_state");
+    assert_eq!(rejected["details"]["reason"], "pallet_lot_mismatch");
+    assert_eq!(rejected["details"]["lotNumber"], "0042Бк");
+    let issue = rejected["details"]["closeIssueId"].as_str().unwrap();
+    let (status, approved) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/warehouse-pallets/close-issues/{issue}/resolve"),
+            Some(json!({ "action": "approve_reclose", "expectedBoxSsccs": [box_sscc(1500)] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{approved}");
+    assert_eq!(approved["approvedLotNumber"], "0042Бк");
+    let mut correction = close_event(4, PALLET_A, &operator, &block, 1);
+    correction["data"]["lotNumber"] = approved["approvedLotNumber"].clone();
+    let receipt = receipts_of(&admin, &station, &[correction]).await.remove(0);
+    assert_eq!(receipt["outcome"], "accepted", "{receipt}");
+    assert_eq!(receipt["details"]["lotNumber"], "0042Бк");
 }

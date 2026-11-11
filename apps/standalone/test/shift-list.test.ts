@@ -33,6 +33,18 @@ import {
 } from "./support/shifts.js";
 
 describe("the shifts list's rules", () => {
+  it("matches a case-insensitive lot fragment within the line and status filters", () => {
+    const lot = { ...PLANNED, lotNumber: "0042Бк07A" };
+    const second = { ...lot, id: ACTIVE.id, lotNumber: "0042бк08A" };
+    const rows = [lot, second, { ...CLOSED, lotNumber: lot.lotNumber }];
+    expect(findShifts(rows, { lineId: "", status: "planned", search: "0042бк" }, () => "")).toEqual(
+      [lot, second],
+    );
+    expect(
+      findShifts(rows, { lineId: lot.lineId, status: "planned", search: "0042бк07a" }, () => ""),
+    ).toEqual([lot]);
+  });
+
   it("writes a civil date as day, month and year", () => {
     expect(civilDateLabel("2026-10-08")).toBe("08.10.2026");
     expect(civilDateLabel("0024-02-29")).toBe("29.02.0024");

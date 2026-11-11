@@ -4,7 +4,7 @@ import { formatSsccHri } from "../gs1/sscc.js";
 import { formatLabelDate } from "./date.js";
 import { canonicalizeKm } from "../gs1/km.js";
 
-/** Data sources a text/field element on a label can be bound to. */
+/** Legacy sources shared by text, barcodes and exhaustive saved field records. */
 export const LABEL_FIELDS = [
   "product.name",
   // The catalog's optional short print name; the station substitutes the full
@@ -34,6 +34,28 @@ export type LabelField = (typeof LABEL_FIELDS)[number];
 
 const labelFieldSchema = z.enum(LABEL_FIELDS);
 
+export const LOT_NUMBER_LABEL_FIELD = "shift.lotNumber";
+/** Text also supports the optional lot number supplied by Avtonom. */
+export const LABEL_TEXT_FIELDS = [...LABEL_FIELDS, LOT_NUMBER_LABEL_FIELD] as const;
+export type LabelTextField = (typeof LABEL_TEXT_FIELDS)[number];
+
+/** Present fields are always strings, including for legacy print consumers. */
+export type LabelFieldData = Record<LabelField, string> &
+  Partial<Record<typeof LOT_NUMBER_LABEL_FIELD, string>>;
+
+/** Saved label jobs can predate the optional lot number. */
+export const labelFieldDataSchema = z
+  .strictObject({
+    ...(Object.fromEntries(LABEL_FIELDS.map((field) => [field, z.string()])) as Record<
+      LabelField,
+      z.ZodString
+    >),
+    [LOT_NUMBER_LABEL_FIELD]: z.string().optional(),
+  })
+  .transform(({ [LOT_NUMBER_LABEL_FIELD]: lotNumber, ...fields }): LabelFieldData =>
+    lotNumber === undefined ? fields : { ...fields, [LOT_NUMBER_LABEL_FIELD]: lotNumber },
+  );
+
 const alignSchema = z.enum(["left", "center", "right"]);
 
 /** Shared placement fields every element carries. */
@@ -61,6 +83,12 @@ const wrappableTextShape = {
   align: alignSchema.optional(),
   maxWidthMm: z.number().positive().optional(),
   maxLines: z.number().int().min(1).max(16).optional(),
+  when: z
+    .strictObject({
+      field: z.enum([LOT_NUMBER_LABEL_FIELD, "product.egais"]),
+      op: z.literal("present"),
+    })
+    .optional(),
 };
 
 /*
@@ -82,7 +110,7 @@ export type LabelTextElement = z.infer<typeof textElementSchema>;
 const fieldElementShape = {
   kind: z.literal("field"),
   ...elementBaseShape,
-  field: labelFieldSchema,
+  field: z.enum(LABEL_TEXT_FIELDS),
   /** Human-readable identity only; the barcode continues to use the original field bytes. */
   textFormat: z
     .enum(["km_without_crypto", "quantity_number", "sscc_with_title", "sscc_spaced"])
@@ -269,33 +297,68 @@ export const labelTemplateSpecSchema = z
   });
 export type LabelTemplateSpec = z.infer<typeof labelTemplateSpecSchema>;
 
-/**
- * Strict twin of `labelTemplateSpecSchema`: the SAME shapes, but an unknown
- * property is reported as an `unrecognized_keys` issue instead of being
- * silently stripped. It exists for ONE consumer -- the JSON importer, which
- * runs it first to WARN the author about properties the lenient schema is
- * about to drop (a typo such as `maxlines` would otherwise vanish without a
- * trace). It is never the validator: `parseLabelTemplate` (lenient, with the
- * unique-id refinement) stays the single source of truth, and the API keeps
- * accepting and stripping unknown keys exactly as before.
- */
+const strictTextElementSchema = z.strictObject(textElementShape);
+const strictFieldElementSchema = z.strictObject(fieldElementShape);
+const otherStrictElementSchemas = [
+  z.strictObject(barcodeElementShape(z.strictObject({ literal: z.string() }))),
+  z.strictObject(lineElementShape),
+  z.strictObject(boxElementShape),
+  z.strictObject(organizationLogoShape),
+] as const;
+
+/** Closed element shapes for import diagnostics and rendering. */
 export const labelTemplateSpecStrictSchema = z.strictObject({
   ...specShape,
   elements: z.array(
     z.discriminatedUnion("kind", [
-      z.strictObject(textElementShape),
-      z.strictObject(fieldElementShape),
-      z.strictObject(barcodeElementShape(z.strictObject({ literal: z.string() }))),
-      z.strictObject(lineElementShape),
-      z.strictObject(boxElementShape),
-      z.strictObject(organizationLogoShape),
+      strictTextElementSchema,
+      strictFieldElementSchema,
+      ...otherStrictElementSchemas,
+    ]),
+  ),
+});
+
+const cloudTextElementSchema = strictTextElementSchema.omit({ when: true });
+const cloudFieldElementSchema = strictFieldElementSchema
+  .omit({ when: true })
+  .extend({ field: labelFieldSchema });
+
+/** Frozen inventory snapshots are read by cloud stations and handhelds. */
+export const cloudLabelTemplateSpecStrictSchema = labelTemplateSpecStrictSchema.extend({
+  elements: z.array(
+    z.discriminatedUnion("kind", [
+      cloudTextElementSchema,
+      cloudFieldElementSchema,
+      ...otherStrictElementSchemas,
+    ]),
+  ),
+});
+
+/** Cloud template writes preserve the existing fields and unknown-key behavior. */
+export const cloudLabelTemplateSpecSchema = labelTemplateSpecSchema.safeExtend({
+  elements: z.array(
+    z.discriminatedUnion("kind", [
+      cloudTextElementSchema.strip(),
+      cloudFieldElementSchema.strip(),
+      barcodeElementSchema,
+      lineElementSchema,
+      boxElementSchema,
+      organizationLogoSchema,
     ]),
   ),
 });
 
 /** Parses and validates an unknown value as a `LabelTemplateSpec`. */
-export function parseLabelTemplate(json: unknown): LabelTemplateSpec {
-  const result = labelTemplateSpecSchema.safeParse(json);
+export function parseLabelTemplate(json: unknown): LabelTemplateSpec;
+export function parseLabelTemplate<Spec extends LabelTemplateSpec>(
+  json: unknown,
+  schema: z.ZodType<Spec>,
+): Spec;
+export function parseLabelTemplate(
+  json: unknown,
+  schema: z.ZodType<LabelTemplateSpec> = labelTemplateSpecSchema,
+): LabelTemplateSpec {
+  const result = schema.safeParse(json);
   if (!result.success) {
     const firstIssue = result.error.issues[0];
     const pathStr = firstIssue?.path.join(".") ?? "";
@@ -418,8 +481,8 @@ export const BOX_QTY_UNIT_SUFFIX = "кор.";
  * there.
  */
 export function labelFieldDisplayValue(
-  field: LabelField,
-  data: Record<LabelField, string>,
+  field: LabelTextField,
+  data: LabelFieldData,
   textFormat?: LabelFieldElement["textFormat"],
 ): string {
   const value = data[field] ?? "";
@@ -452,4 +515,15 @@ export function labelFieldDisplayValue(
     if (/^\d+$/.test(digits)) return `${digits} ${BOX_QTY_UNIT_SUFFIX}`;
   }
   return value;
+}
+
+/** Skip conditional captions and values without their source data. */
+export function labelElementVisible(element: LabelElement, data: LabelFieldData): boolean {
+  if (element.kind !== "text" && element.kind !== "field") return true;
+  if (element.when && !data[element.when.field]) return false;
+  return (
+    element.kind !== "field" ||
+    element.field !== LOT_NUMBER_LABEL_FIELD ||
+    Boolean(data[LOT_NUMBER_LABEL_FIELD])
+  );
 }

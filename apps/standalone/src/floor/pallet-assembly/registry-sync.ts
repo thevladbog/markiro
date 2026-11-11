@@ -1,7 +1,7 @@
 import type { BoxRegistryPage, BoxRegistryQuery } from "../../host/pallet-assembly.js";
 
 interface RegistrySync {
-  state: { until: string; restoreEpoch: string | null } | null;
+  state: { until: string; restoreEpoch: string | null; lotNumbersSupported?: boolean } | null;
   getPage: (query: BoxRegistryQuery) => Promise<BoxRegistryPage>;
   applyPage: (page: BoxRegistryPage, mode: { full: boolean; first: boolean }) => Promise<void>;
   active?: () => boolean;
@@ -18,16 +18,24 @@ export async function syncPalletBoxRegistry({
   let base = state === null ? {} : { since: state.until };
   let page = await getPage(base);
   if (!active()) return;
-  if (state !== null && state.restoreEpoch !== (page.restoreEpoch ?? null)) {
+  if (
+    state !== null &&
+    (state.restoreEpoch !== (page.restoreEpoch ?? null) ||
+      (state.lotNumbersSupported ?? false) !== (page.lotNumbersSupported ?? false))
+  ) {
     base = {};
     page = await getPage(base);
   }
   const full = !("since" in base);
-  const { until, restoreEpoch } = page;
+  const { until, restoreEpoch, lotNumbersSupported } = page;
   const seen = new Set<string>();
   let first = true;
   while (active()) {
-    if (page.until !== until || page.restoreEpoch !== restoreEpoch) {
+    if (
+      page.until !== until ||
+      page.restoreEpoch !== restoreEpoch ||
+      page.lotNumbersSupported !== lotNumbersSupported
+    ) {
       throw new Error("Box registry window changed before completion");
     }
     const cursor = page.nextCursor;

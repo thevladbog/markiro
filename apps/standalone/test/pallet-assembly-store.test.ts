@@ -26,7 +26,7 @@ const OWNER = { hostId: HOST_ID, deviceId: DEVICE_ID };
 const [template] = buildPalletLabelTemplates();
 if (template === undefined) throw new Error("pallet template missing");
 
-function fixture() {
+function fixture(lots: readonly (string | null)[] = []) {
   const { db, executor: local } = openLocalDb();
   seedWarehouseCopies(db);
   const product = db.prepare(
@@ -50,16 +50,18 @@ function fixture() {
       {
         until: AT,
         canOpenPallets: true,
+        lotNumbersSupported: lots.length !== 0,
         items: [
           { sscc: FIRST, shiftNumber: "1", productId: "product", productionDate: "2026-11-10" },
           { sscc: SECOND, shiftNumber: "2", productId: "product", productionDate: "2026-11-11" },
           { sscc: THIRD, shiftNumber: "2", productId: "other", productionDate: "2026-11-11" },
-        ].map((item) => ({
+        ].map((item, index) => ({
           kind: "upsert",
           updatedAt: AT,
           closedAt: AT,
           bottleCount: 12,
           ...item,
+          ...(lots[index] == null ? {} : { lotNumber: lots[index] }),
         })),
       },
       { full: true, first: true, now: new Date(AT) },
@@ -93,6 +95,33 @@ describe("warehouse pallet assembly", () => {
       ],
     });
   });
+
+  it.each([
+    [["0042Бк07A", "0042Бк07A"], "0042Бк07A", false],
+    [["0042Бк07A", "0042Бк07A"], "0042Бк07A", true],
+    [["0042Бк07A", "0042БК07A"], undefined, false],
+    [["0042Бк07A", null], undefined, false],
+  ] as const)(
+    "freezes the lot across source shifts only when every box has the same value",
+    async (lots, expected, refreshing) => {
+      const { db, store, load } = fixture(lots);
+      await load();
+      const added = await store().add(FIRST);
+      if (added.kind !== "added") throw new Error(added.kind);
+      await store().add(SECOND);
+      if (refreshing) db.exec("DELETE FROM pallet_registry_state");
+      const result = await store().close(added.pallet.id, PREFIX, template.spec);
+      expect(result.kind).toBe("closed");
+      expect((await store().get(added.pallet.id))?.label?.lotNumber).toBe(expected);
+      expect(
+        db
+          .prepare(
+            "SELECT payload -> '$.data.lotNumber' AS lot FROM pallet_assembly_outbox WHERE kind = 'warehouse_pallet_closed'",
+          )
+          .get()?.["lot"],
+      ).toBe(JSON.stringify(expected ?? null));
+    },
+  );
 
   it("recovers a started print as uncertain and requires an explicit retry", async () => {
     const { store, load } = fixture();

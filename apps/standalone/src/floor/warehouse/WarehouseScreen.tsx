@@ -415,6 +415,7 @@ export function WarehouseScreen({
       case "invalid_scan":
       case "offline":
       case "host_outdated":
+      case "station_update":
       case "restore_pending":
       case "lookup_failed":
       case "not_found":

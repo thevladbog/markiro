@@ -1306,7 +1306,7 @@ describe("HostApi floor work", () => {
     expect([...lookup.sent, ...sent.sent]).toEqual([
       {
         method: "POST",
-        path: "/v1/device/warehouse/lookup",
+        path: "/v1/device/warehouse/lookup?lotNumbers=1",
         body: { sscc: "046006820000015000" },
         officeToken: undefined,
       },

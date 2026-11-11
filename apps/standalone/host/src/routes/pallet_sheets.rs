@@ -38,11 +38,11 @@ use crate::server::AppState;
 use crate::validate;
 
 const SELECT: &str =
-    "SELECT id, name, enabled, preset_key, revision, spec FROM pallet_sheet_templates";
+    "SELECT id, name, enabled, preset_key, revision, spec, lot_number_source_id FROM pallet_sheet_templates";
 
 /// A stock sheet by its preset key: the unique index finds it.
 pub const BY_PRESET_SQL: &str =
-    "SELECT id, name, enabled, preset_key, revision, spec FROM pallet_sheet_templates \
+    "SELECT id, name, enabled, preset_key, revision, spec, lot_number_source_id FROM pallet_sheet_templates \
      WHERE preset_key = ?";
 
 /// The planned shifts that name a sheet: the partial index finds them.
@@ -70,16 +70,25 @@ pub const PRODUCT_SHEET_SQL: &str = "SELECT COALESCE(\
 pub const PRODUCTS_PREFERRING_SQL: &str =
     "SELECT COUNT(*) FROM products WHERE default_pallet_sheet_id = ?";
 
-type SheetRow = (String, String, bool, Option<String>, i64, String);
+type SheetRow = (
+    String,
+    String,
+    bool,
+    Option<String>,
+    i64,
+    String,
+    Option<String>,
+);
 
 fn sheet(
-    (id, name, enabled, preset_key, revision, spec): SheetRow,
+    (id, name, enabled, preset_key, revision, spec, lot_number_source_id): SheetRow,
 ) -> Result<PalletSheet, ApiError> {
     Ok(PalletSheet {
         id,
         name,
         enabled,
         preset_key,
+        lot_number_source_id,
         revision,
         spec: serde_json::from_str(&spec).map_err(ApiError::internal)?,
     })
@@ -317,6 +326,11 @@ pub async fn create_sheet(
     )
     .await
     .map_err(ApiError::internal)?;
+    if create.preset_key.is_some() {
+        crate::lot_templates::add_sheet_variants(&mut tx, &at)
+            .await
+            .map_err(ApiError::internal)?;
+    }
     let created = read(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("sheet vanished"))?;

@@ -10,6 +10,7 @@ import {
   parseDuplicateKm,
   renderMonoLabel,
   withPrinterDpi,
+  type LabelFieldData,
   type LabelTemplateSpec,
   type MonoBitmap,
 } from "@markiro/domain";
@@ -290,7 +291,7 @@ function cloudDuplicateFields(
   context: CloudLabelContext,
   canonicalRaw: string,
   acceptedAt: string,
-): Record<string, string> {
+): LabelFieldData {
   const code = parseDuplicateKm(canonicalRaw);
   if (code.gtin14 !== context.gtin14) throw new Error("another product's code");
   const base = boxLabelFields({ ...context, sscc: "", itemCount: 1, closedAt: acceptedAt });
@@ -300,7 +301,7 @@ function cloudDuplicateFields(
 /** The cloud's `renderLabelBytes(spec, fields, language, rasterize, { kmDataMatrix: "raster", dpi })`. */
 async function cloudDuplicateBytes(
   spec: LabelTemplateSpec,
-  fields: Record<string, string>,
+  fields: LabelFieldData,
   printer: PrinterProfile,
 ): Promise<Uint8Array> {
   const printSpec = withPrinterDpi(spec, printer.dpi);

@@ -40,7 +40,7 @@ const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_f
      COALESCE(json_extract(s.snapshot, '$.product.gtin14'), p.gtin14) AS product_gtin14, \
      CASE WHEN s.snapshot IS NULL THEN c.name \
          ELSE json_extract(s.snapshot, '$.counterpartyName') END AS counterparty_name, \
-     s.production_date, COALESCE(s.planned_date, s.production_date) AS planned_date, \
+     s.production_date, s.lot_number, COALESCE(s.planned_date, s.production_date) AS planned_date, \
      s.planned_qty, s.box_capacity, s.box_template_id, \
      s.pallet_box_capacity, s.pallet_template_id, s.validation_print_mode, \
      s.validation_print_verification, s.validation_print_template_id, s.owner_device_id, \
@@ -64,6 +64,7 @@ struct ShiftRow {
     product_gtin14: String,
     counterparty_name: Option<String>,
     production_date: String,
+    lot_number: Option<String>,
     planned_date: String,
     planned_qty: Option<u32>,
     box_capacity: u32,
@@ -96,6 +97,7 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         product_gtin14: row.product_gtin14,
         counterparty_name: row.counterparty_name,
         production_date: row.production_date,
+        lot_number: row.lot_number,
         planned_date: Some(row.planned_date),
         planned_qty: row.planned_qty,
         box_capacity: row.box_capacity,
@@ -293,6 +295,7 @@ pub async fn create_device_shift(
             .map(Json)
             .ok_or_else(|| ApiError::internal("shift vanished"));
     }
+    let lot_number = shifts::lot_number(create.lot_number.as_deref())?;
     // A new shift the station could not open (plan ЛЦ-2, spec §3.3): a
     // retried create above still answers the shift it made.
     crate::license::gate::require_new_shifts(&state, &mut tx).await?;
@@ -327,12 +330,27 @@ pub async fn create_device_shift(
         &create.product_id,
         &product,
         create.pallet_sheet_template_id.as_deref(),
+        lot_number.is_some(),
     )
     .await?;
+    if lot_number.is_some() {
+        shifts::require_lot_templates(
+            &mut tx,
+            mode,
+            &create.box_template_id,
+            pallets.as_ref().map(|pallets| pallets.template_id.as_str()),
+            pallets
+                .as_ref()
+                .and_then(|pallets| pallets.sheet_id.as_deref()),
+            &validation_print,
+        )
+        .await?;
+    }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let id = shifts::insert(
         &mut tx,
         &NewShift {
+            lot_number: lot_number.as_deref(),
             origin: ShiftOrigin::Station,
             mode,
             created_by: &device.id,
@@ -361,6 +379,9 @@ pub async fn create_device_shift(
         "lineId": created.line_id,
         "productionDate": created.production_date,
     });
+    if let Some(lot_number) = &created.lot_number {
+        details["lotNumber"] = json!(lot_number);
+    }
     // Named only by a validation shift, as the office's row does.
     if created.mode != ShiftMode::Aggregation {
         details["mode"] = json!(created.mode);
@@ -406,6 +427,7 @@ fn require_supports(
     kind: DeviceKind,
     mode: ShiftMode,
     prints: bool,
+    has_lot_number: bool,
     enter: &ShiftEnter,
 ) -> Result<(), ApiError> {
     let mut needed: Vec<&str> = match (mode, prints) {
@@ -421,6 +443,9 @@ fn require_supports(
     if kind == DeviceKind::Handheld {
         needed.push(shift_supports::HANDHELD_HOST);
     }
+    if has_lot_number {
+        needed.push(shift_supports::LOT_NUMBER);
+    }
     if needed
         .iter()
         .all(|needed| enter.supports.iter().any(|name| name == needed))
@@ -429,6 +454,34 @@ fn require_supports(
     } else {
         Err(station_update())
     }
+}
+
+/// Older stations cannot render the new binding even when the lot is blank.
+fn require_template_support(snapshot: &ShiftSnapshot, enter: &ShiftEnter) -> Result<(), ApiError> {
+    if enter
+        .supports
+        .iter()
+        .any(|name| name == shift_supports::LOT_NUMBER)
+    {
+        return Ok(());
+    }
+    let templates = [
+        Some(&snapshot.box_template.spec),
+        snapshot.pallet_template.as_ref().map(|label| &label.spec),
+        snapshot.pallet_sheet.as_ref().map(|sheet| &sheet.spec),
+        snapshot
+            .validation_print
+            .as_ref()
+            .map(|print| &print.template.spec),
+    ];
+    if templates
+        .into_iter()
+        .flatten()
+        .any(shifts::template_supports_lot)
+    {
+        return Err(station_update());
+    }
+    Ok(())
 }
 
 /// A shift as an entry reads it, with its line's limit (plan 2b).
@@ -446,6 +499,7 @@ struct EntryRow {
     validation_print_template_id: Option<String>,
     counterparty_id: Option<String>,
     snapshot: Option<String>,
+    lot_number: Option<String>,
     number_month_key: String,
     number_seq: i64,
     created_from: String,
@@ -495,7 +549,7 @@ pub async fn enter_shift(
         "SELECT s.status, s.mode, s.line_id, s.product_id, s.box_template_id, \
          s.pallet_template_id, s.pallet_sheet_template_id, s.validation_print_mode, \
          s.validation_print_verification, s.validation_print_template_id, s.counterparty_id, \
-         s.snapshot, s.number_month_key, s.number_seq, s.created_from, l.max_stations \
+         s.snapshot, s.lot_number, s.number_month_key, s.number_seq, s.created_from, l.max_stations \
          FROM shifts s JOIN lines l ON l.id = s.line_id WHERE s.id = ?",
     )
     .bind(&id)
@@ -555,10 +609,12 @@ pub async fn enter_shift(
         }) => Some((*verification, template_id.as_str())),
         Some(ValidationPrint::None {}) | None => None,
     };
+    let mode = shift.mode.parse().map_err(ApiError::internal)?;
     require_supports(
         kind,
-        shift.mode.parse().map_err(ApiError::internal)?,
+        mode,
         duplicate.is_some(),
+        shift.lot_number.is_some(),
         &enter,
     )?;
     let origin = shift.created_from.parse().map_err(ApiError::internal)?;
@@ -567,6 +623,7 @@ pub async fn enter_shift(
         Some(text) => {
             let snapshot: ShiftSnapshot =
                 serde_json::from_str(&text).map_err(ApiError::internal)?;
+            require_template_support(&snapshot, &enter)?;
             let mut entered = match decision {
                 Some(EntryDecision::Reenter) => {
                     shift_participants::touch(&mut tx, &id, &device.id, &at).await?;
@@ -617,7 +674,20 @@ pub async fn enter_shift(
             // Opening is the one move a license that ran out closes (plan ЛЦ-2, spec §3.3).
             crate::license::gate::require_new_shifts(&state, &mut tx).await?;
             let own_logo = crate::license::gate::custom_branding(&state, &mut tx).await?;
-            let snapshot = shifts::snapshot(
+            if shift.lot_number.is_some() {
+                shifts::require_lot_templates(
+                    &mut tx,
+                    mode,
+                    &shift.box_template_id,
+                    shift.pallet_template_id.as_deref(),
+                    shift.pallet_sheet_template_id.as_deref(),
+                    validation_print
+                        .as_ref()
+                        .unwrap_or(&ValidationPrint::None {}),
+                )
+                .await?;
+            }
+            let mut snapshot = shifts::snapshot(
                 &mut tx,
                 &shift.product_id,
                 &shift.box_template_id,
@@ -627,6 +697,8 @@ pub async fn enter_shift(
                 duplicate,
             )
             .await?;
+            snapshot.lot_number = shift.lot_number;
+            require_template_support(&snapshot, &enter)?;
             // Custom branding is a license feature: without it the shift freezes no logo, and
             // every print of it falls back to the bundled Markiro one.
             if own_logo {

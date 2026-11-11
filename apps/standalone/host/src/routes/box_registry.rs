@@ -47,6 +47,7 @@ struct Row {
     closed_at: Option<String>,
     disassembled_at: Option<String>,
     production_date: String,
+    lot_number: Option<String>,
     number_month_key: String,
     number_seq: i64,
     created_from: String,
@@ -121,7 +122,7 @@ pub async fn box_registry(
         "SELECT b.sscc AS sscc, b.changed_at AS changed_at, b.id AS id, sh.product_id AS product_id, \
          b.item_count_reported AS item_count_reported, b.closed_at AS closed_at, \
          b.disassembled_at AS disassembled_at, sh.production_date AS production_date, \
-         sh.number_month_key, sh.number_seq, sh.created_from, \
+         sh.number_month_key, sh.number_seq, sh.created_from, sh.lot_number, \
          p.id AS prod_pallet, p.sscc AS prod_sscc, p.disassembled_at AS prod_off, \
          wp.id AS wh_pallet, wp.sscc AS wh_sscc \
          FROM boxes b JOIN shifts sh ON sh.id = b.shift_id \
@@ -176,6 +177,7 @@ pub async fn box_registry(
         next_cursor,
         restore_epoch,
         can_open_pallets,
+        lot_numbers_supported: station.then_some(true),
     }))
 }
 
@@ -218,5 +220,10 @@ fn item(row: &Row, station: bool) -> Result<BoxRegistryItem, ApiError> {
         closed_at: row.closed_at.clone(),
         production_date: Some(row.production_date.clone()),
         shift_number,
+        lot_number: if station {
+            row.lot_number.clone()
+        } else {
+            None
+        },
     })
 }

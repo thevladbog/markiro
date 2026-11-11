@@ -24,7 +24,7 @@ import {
   labelFieldDisplayValue,
   type LabelBarcodeElement,
   type LabelElement,
-  type LabelField,
+  type LabelFieldData,
   type LabelFieldElement,
   type LabelTextElement,
 } from "./model.js";
@@ -65,17 +65,14 @@ export const TOTAL_MODULES = INTERIOR_MODULES + QUIET_ZONE_MODULES * 2;
 
 function resolveTextForBounds(
   element: LabelTextElement | LabelFieldElement,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
 ): string {
   return element.kind === "text"
     ? element.text
     : labelFieldDisplayValue(element.field, data, element.textFormat);
 }
 
-function resolveBarcodeTextForBounds(
-  element: LabelBarcodeElement,
-  data: Record<LabelField, string>,
-): string {
+function resolveBarcodeTextForBounds(element: LabelBarcodeElement, data: LabelFieldData): string {
   return typeof element.data === "string" ? (data[element.data] ?? "") : element.data.literal;
 }
 
@@ -97,10 +94,7 @@ function resolveBarcodeTextForBounds(
  * every template authored before that field existed keeps its previous
  * bounds unchanged.
  */
-function linearBarcodeWidthMm(
-  element: LabelBarcodeElement,
-  data: Record<LabelField, string>,
-): number {
+function linearBarcodeWidthMm(element: LabelBarcodeElement, data: LabelFieldData): number {
   const text = resolveBarcodeTextForBounds(element, data);
   if (element.moduleWidthMm === undefined) {
     return Math.max(text.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * element.sizeMm;
@@ -128,7 +122,7 @@ function linearBarcodeWidthMm(
  */
 export function elementBoundsMm(
   element: LabelElement,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
   options: { kmDataMatrix?: "native" | "raster" } = {},
 ): BoundsMm {
   switch (element.kind) {

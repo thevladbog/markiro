@@ -129,6 +129,7 @@ export async function renderWarehouseSheet(
       boxCount: count(fields["qty.boxes"]),
       itemCount: count(fields.qty),
       shiftNumber: fields["shift.no"] === "" ? null : fields["shift.no"],
+      ...(fields["shift.lotNumber"] === undefined ? {} : { lotNumber: fields["shift.lotNumber"] }),
       organizationName: organization.name,
       organizationInn: organization.inn,
       logo: sheetLogoOf(bitmap, ownLogo === null ? "markiro" : "organization"),

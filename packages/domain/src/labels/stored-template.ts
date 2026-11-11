@@ -1,6 +1,7 @@
 import { DomainError } from "../errors.js";
+import type { z } from "zod";
 import type { LabelTemplatePurpose } from "../product-labels/contracts.js";
-import { parseLabelTemplate, type LabelTemplateSpec } from "./model.js";
+import { labelTemplateSpecSchema, parseLabelTemplate, type LabelTemplateSpec } from "./model.js";
 import { parsePalletSheetSpec, type PalletSheetSpecV2 } from "./pallet-sheet-model.js";
 import { MAX_LABEL_CODE_BYTES } from "./import.js";
 
@@ -22,7 +23,10 @@ export function isPalletSheetSpec(spec: StoredLabelTemplateSpec): spec is Pallet
 }
 
 /** Never feed a versioned document through the legacy unknown-key stripper. */
-export function parseStoredLabelTemplate(value: unknown): StoredLabelTemplateSpec {
+export function parseStoredLabelTemplate(
+  value: unknown,
+  thermalSchema: z.ZodType<LabelTemplateSpec> = labelTemplateSpecSchema,
+): StoredLabelTemplateSpec {
   if (isRecord(value) && ("schemaVersion" in value || "kind" in value)) {
     if (value.schemaVersion !== 2 || value.kind !== "pallet_sheet")
       throw new DomainError(
@@ -31,7 +35,7 @@ export function parseStoredLabelTemplate(value: unknown): StoredLabelTemplateSpe
       );
     return parsePalletSheetSpec(value);
   }
-  return parseLabelTemplate(value);
+  return parseLabelTemplate(value, thermalSchema);
 }
 function validatePayload(name: unknown, purpose: unknown, value: unknown): StoredTemplateJson {
   if (typeof name !== "string" || !name.trim() || name.length > 200)

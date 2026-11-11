@@ -37,6 +37,7 @@ const labelSchema = z.object({
   boxCount: z.number().int().positive(),
   itemCount: z.number().int().nonnegative(),
   productionDate: z.string().nullable(),
+  lotNumber: z.string().nullish(),
 });
 const palletRow = z.object({
   id: z.string(),
@@ -58,6 +59,7 @@ const memberRow = z.object({
   sscc: z.string(),
   shiftNumber: z.string().nullable(),
   productionDate: z.string().nullable(),
+  lotNumber: z.string().nullish(),
   itemCount: z.number().int().nonnegative(),
   syncState: z.enum(["pending", "accepted"]),
 });
@@ -125,7 +127,7 @@ export function createPalletAssemblyStore(context: PalletAssemblyContext): Palle
 
   async function toPallet(row: z.infer<typeof palletRow>): Promise<PalletAssemblyPallet> {
     const boxes = await local.query(
-      "SELECT m.sscc, m.shift_number AS shiftNumber, m.production_date AS productionDate, " +
+      "SELECT m.sscc, m.shift_number AS shiftNumber, m.production_date AS productionDate, m.lot_number AS lotNumber, " +
         "m.item_count AS itemCount, coalesce(o.outcome, 'pending') AS syncState FROM pallet_assembly_members m " +
         "JOIN pallet_assembly_outbox o ON o.id = m.add_id WHERE m.pallet_id = ? AND m.host_id = ? " +
         `AND m.device_id = ? AND ${ACTIVE_MEMBER} AND (? IS NULL OR m.sscc IN (SELECT value FROM json_each(?))) ORDER BY o.seq`,
@@ -135,7 +137,9 @@ export function createPalletAssemblyStore(context: PalletAssemblyContext): Palle
     return {
       id: row.id,
       product: productSchema.parse(JSON.parse(row.product)),
-      boxes,
+      boxes: boxes.map(({ lotNumber, ...box }) =>
+        lotNumber == null ? box : { ...box, lotNumber },
+      ),
       openedAt: row.opened_at,
       closedAt: row.closed_at,
       sscc: row.sscc,
@@ -316,8 +320,8 @@ export function createPalletAssemblyStore(context: PalletAssemblyContext): Palle
       const addId = newId();
       statements.push({
         sql:
-          "INSERT INTO pallet_assembly_members (add_id, host_id, device_id, pallet_id, sscc, shift_number, production_date, item_count) " +
-          "SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM pallet_registry_boxes " +
+          "INSERT INTO pallet_assembly_members (add_id, host_id, device_id, pallet_id, sscc, shift_number, production_date, lot_number, item_count) " +
+          "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM pallet_registry_boxes " +
           "WHERE host_id = ? AND device_id = ? AND sscc = ? AND payload = ?) " +
           "AND EXISTS (SELECT 1 FROM pallet_registry_state WHERE host_id = ? AND device_id = ? AND synced_at IS NOT NULL) " +
           `AND NOT EXISTS (SELECT 1 ${LOCALLY_OCCUPIED})`,
@@ -328,6 +332,7 @@ export function createPalletAssemblyStore(context: PalletAssemblyContext): Palle
           sscc,
           box.shiftNumber ?? null,
           box.productionDate ?? null,
+          box.lotNumber ?? null,
           box.bottleCount ?? 0,
           ...owner,
           sscc,
@@ -429,8 +434,14 @@ export function createPalletAssemblyStore(context: PalletAssemblyContext): Palle
         return { kind: changed ? "invalid_serial" : "stale" };
       }
       const firstDate = pallet.boxes[0]?.productionDate ?? null;
+      const firstLot = pallet.boxes[0]?.lotNumber ?? null;
+      const lotNumber = pallet.boxes.every((box) => (box.lotNumber ?? null) === firstLot)
+        ? firstLot
+        : null;
+      const registry = await readPalletRegistryState(local, pairing);
       const label = {
         template,
+        ...(lotNumber === null ? {} : { lotNumber }),
         boxCount: pallet.boxes.length,
         itemCount: pallet.boxes.reduce((total, box) => total + box.itemCount, 0),
         productionDate: pallet.boxes.every((box) => box.productionDate === firstDate)
@@ -456,6 +467,9 @@ export function createPalletAssemblyStore(context: PalletAssemblyContext): Palle
           openedAt: pallet.openedAt,
           closedAt: time,
           boxCount: label.boxCount,
+          // A nonempty lot came from a capable host even while a full refresh
+          // temporarily clears the registry watermark.
+          ...(registry?.lotNumbersSupported || lotNumber !== null ? { lotNumber } : {}),
         }),
       ]);
       if (!changed) return { kind: "stale" };

@@ -11,7 +11,8 @@
       "palletActive": false,
       "closedAt": "2026-10-08T06:58:00Z",
       "productionDate": "2026-10-08",
-      "shiftNumber": "OCT26-001"
+      "shiftNumber": "OCT26-001",
+      "lotNumber": "0042Бк07A"
     },
     {
       "kind": "remove",
@@ -20,5 +21,6 @@
     }
   ],
   "restoreEpoch": "b3000000-0000-4000-8000-000000000001",
-  "canOpenPallets": true
+  "canOpenPallets": true,
+  "lotNumbersSupported": true
 }

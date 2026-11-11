@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { PalletSheetSpecV2 } from "@markiro/domain";
-import { Alert, Spinner } from "@markiro/ui";
+import { palletSheetUsesLotNumber, type PalletSheetSpecV2 } from "@markiro/domain";
+import { Alert, Checkbox, Spinner } from "@markiro/ui";
 
 import { loadBundledMarkiroLogo, logoFromWire, sheetLogoOf } from "../../labels/logo.js";
 import {
@@ -38,6 +38,8 @@ export function SheetPreview({ spec, label }: SheetPreviewProps) {
   const logo = useOfficeQuery(officeKeys.orgLogo, (api, token) => api.getOrgLogo(token));
   const branding = useCustomBranding();
   const [failed, setFailed] = useState(false);
+  const [showLotNumber, setShowLotNumber] = useState(true);
+  const usesLotNumber = palletSheetUsesLotNumber(spec);
   const orgData = org.data;
   const logoData = logo.data;
   const brandAllowed = branding.allowed;
@@ -49,13 +51,13 @@ export function SheetPreview({ spec, label }: SheetPreviewProps) {
     const own = logoData.logo === null || !brandAllowed ? null : logoFromWire(logoData.logo);
     const draw = async () => {
       const bitmap = own ?? (await loadBundledMarkiroLogo());
-      const raster = await renderSheetRaster(
-        spec,
-        sampleSheetContext(
+      const raster = await renderSheetRaster(spec, {
+        ...sampleSheetContext(
           organization,
           sheetLogoOf(bitmap, own === null ? "markiro" : "organization"),
         ),
-      );
+        lotNumber: usesLotNumber && showLotNumber ? "0042Бк07A" : null,
+      });
       if (!cancelled && canvasRef.current !== null) {
         paintMonoRaster(canvasRef.current, raster, FACTOR);
       }
@@ -67,11 +69,18 @@ export function SheetPreview({ spec, label }: SheetPreviewProps) {
     return () => {
       cancelled = true;
     };
-  }, [spec, orgData, logoData, brandAllowed, branding.settled]);
+  }, [spec, orgData, logoData, brandAllowed, branding.settled, usesLotNumber, showLotNumber]);
 
   const unavailable = org.isError || logo.isError;
   return (
     <>
+      {usesLotNumber && (
+        <Checkbox
+          label={t("office.labelFields.previewLotNumber")}
+          checked={showLotNumber}
+          onCheckedChange={setShowLotNumber}
+        />
+      )}
       {(failed || unavailable) && (
         <Alert tone="error">
           {t(

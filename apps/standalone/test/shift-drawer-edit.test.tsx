@@ -30,6 +30,30 @@ afterEach(() => {
 });
 
 describe("office shifts: the list's «Открыть» and the card's «Изменить»", () => {
+  it("shows and clears the saved lot number of a planned shift even after the setting is off", async () => {
+    const shift = { ...PLANNED, lotNumber: "0042Бк07A" };
+    const fake = shiftsSession([shift, ACTIVE, CLOSED]);
+    fake.api.updateShift.mockResolvedValue({ ...shift, lotNumber: null, rev: shift.rev + 1 });
+    await openShifts(fake);
+    expect(within(shiftRow(shift.number)).getByText("Партия 0042Бк07A")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `Открыть смену ${shift.number}` }));
+    const heading = await screen.findByRole("heading", {
+      name: /Смена OCT26-005.*Партия 0042Бк07A/,
+    });
+    expect(within(heading).getByText("Партия 0042Бк07A")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
+    const field = await screen.findByLabelText("Номер партии (необязательно)");
+    expect(field).toHaveProperty("value", "0042Бк07A");
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fake.api.updateShift).toHaveBeenCalledWith("office-session-token", shift.id, {
+        expectedRev: shift.rev,
+        lotNumber: null,
+      }),
+    );
+  });
+
   it("offers a planned shift «Открыть» and «Удалить» to both roles, and no «Изменить» in the list", async () => {
     for (const user of [undefined, TECHNOLOGIST]) {
       const view = await openShifts(shiftsSession(undefined, user));

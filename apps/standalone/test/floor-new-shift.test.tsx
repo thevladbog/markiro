@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
+import { buildStockLotNumberLabelVariants } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
@@ -22,6 +31,7 @@ import {
   type DeviceShiftCreate,
   type EnteredShift,
 } from "../src/host/protocol.js";
+import * as lotFit from "../src/labels/lot-number-fit.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
@@ -47,7 +57,9 @@ const [, PLANNED] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shif
   DeviceShift,
 ];
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
-const ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1"] };
+const ENTRY = {
+  supports: ["validation-v1", "validation-dm-duplicate-v1", "multi-station-v1", "lot-number"],
+};
 const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
 /**
  * The shift the host makes of `CREATED_BODY` (the form as it starts on `NOW`):
@@ -182,6 +194,125 @@ async function chooseMilk(): Promise<void> {
 function next(): void {
   fireEvent.click(screen.getByRole("button", { name: "Далее" }));
 }
+
+const LOT_CATALOG = CATALOG.map((each) =>
+  each.entity === "org_profile"
+    ? { ...each, data: { ...(each.data as object), useLotNumbers: true } }
+    : each,
+);
+const MILK_LOT_TEMPLATE = "b741e65f-7de7-43dc-9143-abcc1229e365";
+
+function milkLotTemplate(): ChangeItem {
+  const source = CATALOG.find((each) => each.id === MILK_TEMPLATE);
+  const stock = buildStockLotNumberLabelVariants().find((each) => each.purpose === "box");
+  if (source === undefined || stock === undefined) throw new Error("stock lot label missing");
+  return item("label_templates", MILK_LOT_TEMPLATE, 101, {
+    ...(source.data as object),
+    name: "Шаблон молока с партией",
+    lotNumberSourceId: MILK_TEMPLATE,
+    spec: stock.spec,
+  });
+}
+
+describe("the lot-number step", () => {
+  it("edits at the caret across layouts, accepts typed and pasted text, and retains it when going back", async () => {
+    const lotNumber = "0042Бк07A";
+    const check = vi.spyOn(lotFit, "checkThermalLotNumber").mockResolvedValue(null);
+    const { handlers, scanner } = renderNew(await copiesOf([...LOT_CATALOG, milkLotTemplate()]), {
+      create: async () => ({ ...MADE, lotNumber, boxTemplateId: MILK_LOT_TEMPLATE }),
+      enter: async () => ({
+        ...OPENED,
+        snapshot: { ...OPENED.snapshot, lotNumber },
+      }),
+    });
+    await chooseMilk();
+    next();
+    expect(screen.getByRole("heading", { name: "Номер партии" })).toBeTruthy();
+    const getField = () => screen.getByRole<HTMLInputElement>("textbox", { name: /номер партии/i });
+    const getKey = (name: string) => screen.getByRole("button", { name });
+    const field = getField();
+    expect(document.activeElement).toBe(field);
+    expect(scanner.manual).toHaveBeenLastCalledWith(true);
+    expect(scanner.listening()).toBe(false);
+    fireEvent.change(field, { target: { value: "004207" } });
+    field.setSelectionRange(4, 4);
+    fireEvent.click(getKey("Б"));
+    expect(field.value).toBe("0042Б07");
+    expect(field.selectionStart).toBe(5);
+    fireEvent.click(getKey("Регистр"));
+    expect(field.selectionStart).toBe(5);
+    fireEvent.click(getKey("к"));
+    expect(field.value).toBe("0042Бк07");
+    fireEvent.click(getKey("Eng"));
+    expect(field.selectionStart).toBe(6);
+    fireEvent.click(getKey("Удалить знак слева"));
+    expect(field.value).toBe("0042Б07");
+    fireEvent.click(getKey("Очистить"));
+    expect(field.value).toBe("");
+    fireEvent.paste(field, { clipboardData: { getData: () => " 0042Бк07A " } });
+    expect(field.value).toBe(lotNumber);
+    fireEvent.click(getKey("Назад"));
+    expect(scanner.manual).toHaveBeenLastCalledWith(false);
+    next();
+    expect(getField().value).toBe(lotNumber);
+    next();
+    expect(scanner.manual).toHaveBeenLastCalledWith(false);
+    fireEvent.click(getKey("Предыдущий шаг"));
+    expect(getField().value).toBe(lotNumber);
+    next();
+    createShift();
+    await waitFor(() =>
+      expect(handlers.create).toHaveBeenCalledWith(
+        expect.objectContaining({ lotNumber, boxTemplateId: MILK_LOT_TEMPLATE }),
+      ),
+    );
+    await waitFor(() => expect(handlers.enter).toHaveBeenCalled());
+    check.mockRestore();
+  });
+
+  it("checks invalid characters and allows the operator to leave the lot blank", async () => {
+    const { handlers } = renderNew(await copiesOf([...LOT_CATALOG, milkLotTemplate()]));
+    await chooseMilk();
+    next();
+    const field = screen.getByRole("textbox", { name: /номер партии/i });
+    fireEvent.change(field, { target: { value: "0042-Бк" } });
+    next();
+    expect(screen.getByText(/Только русские и латинские буквы/)).toBeTruthy();
+    expect(handlers.create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Очистить" }));
+    next();
+    createShift();
+    await waitFor(() => expect(handlers.create).toHaveBeenCalled());
+    expect(handlers.create.mock.calls[0]?.[0]).not.toHaveProperty("lotNumber");
+    expect(handlers.create.mock.calls[0]?.[0]?.boxTemplateId).toBe(MILK_TEMPLATE);
+  });
+
+  it("rolls back a wedge scanner burst without losing the manual lot number or caret", async () => {
+    renderNew(await copiesOf(LOT_CATALOG));
+    await chooseMilk();
+    next();
+    const field = screen.getByRole<HTMLInputElement>("textbox", { name: /номер партии/i });
+    fireEvent.change(field, { target: { value: "Б7" } });
+    field.setSelectionRange(1, 1);
+    const key = (character: string, timeStamp: number) => {
+      const event = createEvent.keyDown(field, { key: character });
+      Object.defineProperty(event, "timeStamp", { value: timeStamp });
+      fireEvent(field, event);
+      return event.defaultPrevented;
+    };
+    expect(key("0", 100)).toBe(false);
+    fireEvent.change(field, { target: { value: "Б07" } });
+    field.setSelectionRange(2, 2);
+    expect(key("1", 107)).toBe(true);
+    expect(key("2", 114)).toBe(true);
+    expect(key("Enter", 121)).toBe(true);
+    expect(field.value).toBe("Б7");
+    expect(field.selectionStart).toBe(1);
+    expect(key("A", 270)).toBe(false);
+    fireEvent.change(field, { target: { value: "БA7" } });
+    expect(field.value).toBe("БA7");
+  });
+});
 
 /** Back to the details from a template step, through «Предыдущий шаг». */
 function backToDetails(): void {

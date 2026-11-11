@@ -22,6 +22,7 @@ struct PalletRow {
     product_id: String,
     product_name: String,
     gtin14: String,
+    lot_number: Option<String>,
     shelf_life_days: Option<u32>,
     opened_at: String,
     closed_at: Option<String>,
@@ -48,7 +49,7 @@ pub async fn get(
     ApiPath(id): ApiPath<String>,
 ) -> Result<Json<OfficeWarehousePalletDetail>, ApiError> {
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    let row: Option<PalletRow> = sqlx::query_as("SELECT wp.id, wp.sscc, wp.source, p.demo, u.name AS created_by_name, d.name AS device_name, wp.product_id, p.name AS product_name, wp.gtin14, p.shelf_life_days, wp.opened_at, wp.closed_at, wp.disassembled_at FROM warehouse_pallets wp JOIN devices d ON d.id=wp.device_id JOIN products p ON p.id=wp.product_id LEFT JOIN office_users u ON u.id=wp.created_by_user_id WHERE wp.id=?")
+    let row: Option<PalletRow> = sqlx::query_as("SELECT wp.id, wp.sscc, wp.source, p.demo, u.name AS created_by_name, d.name AS device_name, wp.product_id, p.name AS product_name, wp.gtin14, wp.lot_number, p.shelf_life_days, wp.opened_at, wp.closed_at, wp.disassembled_at FROM warehouse_pallets wp JOIN devices d ON d.id=wp.device_id JOIN products p ON p.id=wp.product_id LEFT JOIN office_users u ON u.id=wp.created_by_user_id WHERE wp.id=?")
         .bind(&id).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?;
     let Some(row) = row else {
         return Err(ApiError::not_found("no such warehouse pallet"));
@@ -104,6 +105,7 @@ pub async fn get(
         product_id: row.product_id,
         product_name: row.product_name,
         gtin14: row.gtin14,
+        lot_number: row.lot_number,
         shelf_life_days: row.shelf_life_days,
         opened_at: row.opened_at,
         closed_at: row.closed_at,

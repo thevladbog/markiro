@@ -187,13 +187,32 @@ export function wrapTextToWidthStrict(
     maxLines < 1
   )
     throw new DomainError("LABEL_TEXT_OVERFLOW", "Invalid text layout bounds");
-  const lines = text
-    .split(/\r?\n/)
-    .flatMap((line) => wrapTextToWidth(line, measure, maxWidth, Number.MAX_SAFE_INTEGER));
-  if (lines.length > maxLines || lines.some((line) => measure(line) > maxWidth))
+  const fail = () => {
     throw new DomainError(
       "LABEL_TEXT_OVERFLOW",
       "Complete text does not fit its declared lines and width",
     );
+  };
+  // Identifiers can contain an arbitrarily long single token. Stop measuring
+  // as soon as the allotted lines are full instead of laying out the rest.
+  if (text !== "" && !/\s/.test(text)) {
+    const lines: string[] = [];
+    let current = "";
+    for (const char of text) {
+      const candidate = current + char;
+      if (measure(candidate) <= maxWidth) {
+        current = candidate;
+      } else {
+        if (current === "" || lines.length + 1 >= maxLines || measure(char) > maxWidth) fail();
+        lines.push(current);
+        current = char;
+      }
+    }
+    return [...lines, current];
+  }
+  const lines = text
+    .split(/\r?\n/)
+    .flatMap((line) => wrapTextToWidth(line, measure, maxWidth, Number.MAX_SAFE_INTEGER));
+  if (lines.length > maxLines || lines.some((line) => measure(line) > maxWidth)) fail();
   return lines;
 }

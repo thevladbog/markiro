@@ -1,3 +1,4 @@
+import { lotNumberLabelWidthDots, rasterizeLabelLotNumber } from "./lot-number-raster.js";
 import { renderLabelLogo } from "./label-logo.js";
 import type { MonoBitmap } from "./mono-compose.js";
 import { DomainError } from "../errors.js";
@@ -8,6 +9,9 @@ import {
   ptToDots,
   type LabelBarcodeElement,
   type LabelBoxElement,
+  LOT_NUMBER_LABEL_FIELD,
+  labelElementVisible,
+  type LabelFieldData,
   type LabelField,
   type LabelFieldElement,
   type LabelLineElement,
@@ -152,6 +156,18 @@ async function renderTextLikeElement(
 ): Promise<string> {
   const x = mmToDots(element.xMm, spec.dpi);
   const y = mmToDots(element.yMm, spec.dpi);
+
+  if (element.kind === "field" && element.field === LOT_NUMBER_LABEL_FIELD) {
+    if (!deps.rasterizeText)
+      throw new DomainError("RASTER_REQUIRED", "Lot number printing needs a text rasterizer");
+    const raster = await rasterizeLabelLotNumber(element, spec, text, deps.rasterizeText);
+    const offset = rasterAlignOffsetDots(
+      element.align,
+      lotNumberLabelWidthDots(element, spec),
+      raster.width,
+    );
+    return `^FO${x + offset},${y}${buildGfaCommand(raster)}^FS`;
+  }
 
   if (
     needsImageRendering(text) ||
@@ -360,7 +376,7 @@ function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"
  */
 export async function generateZpl(
   spec: LabelTemplateSpec,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
   deps: GenerateZplDeps = {},
 ): Promise<string> {
   const widthDots = mmToDots(spec.widthMm, spec.dpi);
@@ -372,6 +388,7 @@ export async function generateZpl(
   // emitted document regardless of how fast/slow individual rasterizeText
   // calls resolve, and keeps a test double's call order predictable.
   for (const element of spec.elements) {
+    if (!labelElementVisible(element, data)) continue;
     switch (element.kind) {
       case "organization_logo": {
         if (!deps.logo) break; // Decorative: preserve the empty reserved space offline.

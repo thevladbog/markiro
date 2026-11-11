@@ -50,6 +50,7 @@ import {
   isBoxLabelTemplateEligible,
   isPalletLabelTemplateEligible,
   productLabelTemplateListSchema,
+  cloudLabelTemplateSpecSchema,
   parseLabelTemplate,
   shiftMonthKey,
   type ProductLabelTemplateList,
@@ -553,7 +554,7 @@ export class ShiftsService {
       id: template.id,
       name: template.name,
       purpose: query.purpose,
-      spec: parseLabelTemplate(template.spec),
+      spec: parseLabelTemplate(template.spec, cloudLabelTemplateSpecSchema),
     };
   }
 

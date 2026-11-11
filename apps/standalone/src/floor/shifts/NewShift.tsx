@@ -16,8 +16,19 @@ import type {
   ShiftMode,
 } from "../../host/protocol.js";
 import type { DeviceShiftInput } from "../../host/requests.js";
+import {
+  checkSheetLotNumber,
+  checkThermalLotNumber,
+  type LotTemplateIssue,
+} from "../../labels/lot-number-fit.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
+import {
+  isLotNumber,
+  lotTemplateChoices,
+  lotTemplateId,
+  optionalLotNumber,
+} from "../../lib/lot-number.js";
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import {
   MAX_BOX_CAPACITY,
@@ -36,7 +47,7 @@ import { ProductPhotoSquare } from "../kit/PhotoSquare.js";
 import { SwitchCard } from "../kit/SwitchCard.js";
 import { opensBlocked } from "../license.js";
 import type { ScanSource } from "../scan-source.js";
-import { readWorkstationSettings } from "../setup/workstation-settings.js";
+import { readWorkstationSettings, resolvePrinter } from "../setup/workstation-settings.js";
 import { sheetSpecOf } from "../warehouse/warehouse-sheet.js";
 import {
   palletPaperOf,
@@ -44,6 +55,7 @@ import {
   type PalletPaper,
 } from "../warehouse/warehouse-templates.js";
 import { FloorFooter, FloorScreen } from "./FloorScreen.js";
+import { LotNumberStep } from "./LotNumberStep.js";
 import {
   createdCopy,
   createStationShift,
@@ -114,6 +126,7 @@ interface Form {
   productionDate: string;
   /** «Дата смены»: the working day, today in the organization's zone until the operator moves it. */
   plannedDate: string;
+  lotNumber: string;
   plannedQty: string;
   boxCapacity: string;
   /** «С паллетами» (plan ПЛ-Ц): on by default when the product offers pallets (`palletCapacityOffered`). */
@@ -141,7 +154,8 @@ interface Form {
 type Problem =
   | { kind: "scan"; key: string; gtin: string | null }
   | { kind: "create"; reason: CreateRefusal }
-  | { kind: "existing"; shift: DeviceShift; pallets: boolean }
+  | { kind: "lot_template"; issue: LotTemplateIssue; name: string }
+  | { kind: "existing"; shift: DeviceShift; pallets: boolean; lotNumber: string | null }
   | { kind: "enter"; number: string; reason: EntryRefusal };
 
 /**
@@ -149,7 +163,8 @@ type Problem =
  * steps: the shift's details, then the box template with its preview, then
  * — for a shift with pallets — the pallet template with its preview.
  */
-type FormView = "details" | "box_template" | "pallet_template" | "duplicate_template";
+type FormView =
+  "details" | "lot_number" | "box_template" | "pallet_template" | "duplicate_template";
 
 /**
  * The form's views in order for the form's mode: an aggregation shift chooses
@@ -158,19 +173,22 @@ type FormView = "details" | "box_template" | "pallet_template" | "duplicate_temp
  * prints a duplicate, chooses the duplicate template.
  */
 function viewsOf(form: Form, from: NewShiftChoices): FormView[] {
+  const details: FormView[] = from.useLotNumbers ? ["details", "lot_number"] : ["details"];
   if (form.mode === "validation") {
-    return form.printDuplicate ? ["details", "duplicate_template"] : ["details"];
+    return form.printDuplicate ? [...details, "duplicate_template"] : details;
   }
   const withPallets =
     form.pallets && palletCapacityOffered(form.product, from.palletTemplates) !== null;
-  return withPallets ? ["details", "box_template", "pallet_template"] : ["details", "box_template"];
+  return withPallets
+    ? [...details, "box_template", "pallet_template"]
+    : [...details, "box_template"];
 }
 
 /** The box template the request names: the form's, or for a validation shift the first that fits. */
 function boxTemplateOf(form: Form, from: NewShiftChoices): string | null {
   if (form.templateId !== null) return form.templateId;
   if (form.mode !== "validation") return null;
-  return fittingTemplates(form.product, from.templates)[0]?.id ?? null;
+  return lotTemplateChoices(fittingTemplates(form.product, from.templates), false)[0]?.id ?? null;
 }
 
 type Step = { kind: "product" } | { kind: "form"; form: Form; view: FormView };
@@ -192,7 +210,11 @@ function palletsOf(
   | { kind: "pallets"; pallets: NonNullable<DeviceShiftInput["pallets"]> } {
   if (!form.pallets || form.mode === "validation") return { kind: "none" };
   const boxCapacity = palletCapacityOffered(form.product, from.palletTemplates);
-  const fitting = fittingPalletTemplates(form.product, from.palletTemplates);
+  const fitting = lotTemplateChoices(
+    fittingPalletTemplates(form.product, from.palletTemplates),
+    optionalLotNumber(form.lotNumber) !== null,
+    form.palletTemplateId,
+  );
   // On a printer of A4 sheets the pallet prints its sheet, not a label template: the host
   // still takes a template for the shift, so the preselected one (else the first) stands.
   const wanted = paper === "a4" ? (form.palletTemplateId ?? fitting[0]?.id) : form.palletTemplateId;
@@ -251,6 +273,7 @@ export function NewShift({
   const [query, setQuery] = useState("");
   const [problem, setProblem] = useState<Problem | null>(null);
   const [errors, setErrors] = useState<{ plannedQty?: string; boxCapacity?: string }>({});
+  const [lotInvalid, setLotInvalid] = useState(false);
   const [busy, setBusy] = useState<"creating" | "entering" | null>(null);
   const running = useRef(false);
   const alive = useRef(true);
@@ -287,20 +310,27 @@ export function NewShift({
   const choose = useCallback(
     (product: ShiftProduct) => {
       if (ready === null) return;
-      const fitting = fittingTemplates(product, ready.templates);
+      const fitting = lotTemplateChoices(fittingTemplates(product, ready.templates), false);
       const suggested = suggestBoxTemplate(product, ready.templates, ready.defaults);
       const [only] = fitting;
       // The rule's choice is only the preselection: the operator sees every template that fits.
       const fixed = suggested ?? (fitting.length === 1 && only !== undefined ? only.id : null);
-      const palletFitting = fittingPalletTemplates(product, ready.palletTemplates);
+      const palletFitting = lotTemplateChoices(
+        fittingPalletTemplates(product, ready.palletTemplates),
+        false,
+      );
       const [onlyPallet] = palletFitting;
       const palletFixed =
         suggestPalletTemplate(product, ready.palletTemplates, ready.defaults) ??
         (palletFitting.length === 1 && onlyPallet !== undefined ? onlyPallet.id : null);
-      const duplicateFitting = fittingDuplicateTemplates(product, ready.duplicateTemplates);
+      const duplicateFitting = lotTemplateChoices(
+        fittingDuplicateTemplates(product, ready.duplicateTemplates),
+        false,
+      );
       const [onlyDuplicate] = duplicateFitting.length === 1 ? duplicateFitting : [];
       setProblem(null);
       setErrors({});
+      setLotInvalid(false);
       setActiveField("plannedQty");
       setStep({
         kind: "form",
@@ -311,6 +341,7 @@ export function NewShift({
           templateId: fixed,
           productionDate: civilToday(ready.timeZone, current.current.now()),
           plannedDate: civilToday(ready.timeZone, current.current.now()),
+          lotNumber: "",
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
           pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
@@ -525,7 +556,12 @@ export function NewShift({
     if (!matches) {
       // A repeated request id brought back an earlier shift of other fields:
       // not the one on the screen, so not entered in silence.
-      setProblem({ kind: "existing", shift: created.shift, pallets: input.pallets !== undefined });
+      setProblem({
+        kind: "existing",
+        shift: created.shift,
+        pallets: input.pallets !== undefined,
+        lotNumber: input.lotNumber ?? null,
+      });
       return;
     }
     await open(created.shift);
@@ -566,6 +602,13 @@ export function NewShift({
     go(to);
   };
 
+  const checkLot = (form: Form): boolean => {
+    const lot = optionalLotNumber(form.lotNumber);
+    const invalid = lot !== null && !isLotNumber(lot);
+    setLotInvalid(invalid);
+    return !invalid;
+  };
+
   const submit = async (form: Form) => {
     if (ready === null || running.current) return;
     const templateId = boxTemplateOf(form, ready);
@@ -585,6 +628,7 @@ export function NewShift({
       go("details");
       return;
     }
+    const lotNumber = optionalLotNumber(form.lotNumber);
     const input: DeviceShiftInput = {
       requestId: form.requestId,
       productId: form.product.id,
@@ -592,6 +636,7 @@ export function NewShift({
       productionDate: form.productionDate,
       // The working day: today in the organization's zone unless the operator moved it.
       plannedDate: form.plannedDate,
+      ...(lotNumber === null ? {} : { lotNumber }),
       // A validation shift hides the capacity: the host takes the product's unless a valid one stands.
       ...(form.mode === "validation" && checked.boxCapacity === 0
         ? {}
@@ -615,7 +660,85 @@ export function NewShift({
           }
         : {}),
     };
-    await run("creating", () => make(input));
+    await run("creating", async () => {
+      if (lotNumber !== null) {
+        const settings = await readWorkstationSettings(local).catch(() => null);
+        const required = [
+          ...(form.mode === "aggregation"
+            ? [
+                {
+                  id: templateId,
+                  slot: "box",
+                  view: "box_template",
+                  choices: ready.templates,
+                } as const,
+              ]
+            : []),
+          ...(prints && form.duplicateTemplateId !== null
+            ? [
+                {
+                  id: form.duplicateTemplateId,
+                  slot: "duplicate",
+                  view: "duplicate_template",
+                  choices: ready.duplicateTemplates,
+                } as const,
+              ]
+            : []),
+          ...(pallets.kind === "pallets"
+            ? [
+                {
+                  id: pallets.pallets.templateId,
+                  slot: "pallet",
+                  view: "pallet_template",
+                  choices: ready.palletTemplates,
+                } as const,
+              ]
+            : []),
+        ];
+        for (const { id, slot, view, choices: templates } of required) {
+          const spec = specs?.get(id);
+          const printer = settings === null ? null : resolvePrinter(settings, slot);
+          const issue =
+            spec === undefined
+              ? "unavailable"
+              : await checkThermalLotNumber(
+                  spec,
+                  lotNumber,
+                  printer?.paper === "a4" ? undefined : (printer ?? undefined),
+                );
+          if (!alive.current) return;
+          if (issue !== null) {
+            go(view);
+            setProblem({
+              kind: "lot_template",
+              issue,
+              name:
+                templates.find((template) => template.id === id)?.name ??
+                t("floor.newShift.template"),
+            });
+            return;
+          }
+        }
+        if (pallets.kind === "pallets" && paper === "a4") {
+          const listed = sheets.kind === "ready" ? sheets.sheets : null;
+          const id = pallets.pallets.sheetTemplateId ?? listed?.defaultId;
+          const sheet = listed?.sheets.find((candidate) => candidate.id === id);
+          const spec = sheet === undefined ? null : sheetSpecOf(sheet);
+          const issue = spec === null ? "unavailable" : await checkSheetLotNumber(spec, lotNumber);
+          if (!alive.current) return;
+          if (issue !== null) {
+            go("pallet_template");
+            setProblem({
+              kind: "lot_template",
+              issue,
+              name: sheet?.name ?? t("floor.newShift.palletSheet"),
+            });
+            return;
+          }
+        }
+      }
+      await make(input);
+    });
   };
 
   /** What the shift an earlier request made says of pallets, when it differs from nothing asked. */
@@ -633,6 +756,8 @@ export function NewShift({
         return t(`floor.newShift.scan.${shown.key}`, { gtin: shown.gtin ?? "" });
       case "create":
         return t(`floor.newShift.refused.${shown.reason}`);
+      case "lot_template":
+        return t(`rules.lotTemplate.${shown.issue}`, { name: shown.name });
       case "existing":
         return t("floor.newShift.existing", {
           number: shown.shift.number,
@@ -643,6 +768,11 @@ export function NewShift({
               ? t("floor.newShift.existingNoPlan")
               : t("floor.newShift.existingPlan", { qty: formatQuantity(shown.shift.plannedQty) }),
           pallets: existingPallets(shown),
+          lot: shown.shift.lotNumber
+            ? t("floor.newShift.existingLot", { number: shown.shift.lotNumber })
+            : shown.lotNumber === null
+              ? ""
+              : t("floor.newShift.existingNoLot"),
         });
       case "enter":
         return `${t("floor.newShift.notEntered", { number: shown.number })} ${t(
@@ -966,8 +1096,12 @@ export function NewShift({
   const sheetView = (form: Form) => {
     const frozen = busy !== null || form.created !== null;
     const listed: PalletSheets | null = sheets.kind === "ready" ? sheets.sheets : null;
-    const enabled: PalletSheet[] = (listed?.sheets ?? []).filter((sheet) => sheet.enabled);
     const effectiveId = form.palletSheetId ?? listed?.defaultId ?? null;
+    const enabled: PalletSheet[] = lotTemplateChoices(
+      (listed?.sheets ?? []).filter((sheet) => sheet.enabled),
+      optionalLotNumber(form.lotNumber) !== null,
+      effectiveId,
+    );
     const chosen = enabled.find((sheet) => sheet.id === effectiveId) ?? null;
     const spec: PalletSheetSpecV2 | null = chosen === null ? null : sheetSpecOf(chosen);
     const pick = (palletSheetId: string | null) => () => update({ palletSheetId });
@@ -1045,6 +1179,7 @@ export function NewShift({
                   pairing={{ hostId, deviceId }}
                   spec={spec}
                   label={t("floor.newShift.sheetPreview", { name: chosen.name })}
+                  lotNumber={optionalLotNumber(form.lotNumber)}
                 />
               ) : (
                 <p className="new-shift__hint">
@@ -1069,7 +1204,7 @@ export function NewShift({
     }
     const box = purpose === "box";
     const duplicate = purpose === "duplicate";
-    const fitting = box
+    const candidates = box
       ? fittingTemplates(form.product, from.templates)
       : duplicate
         ? fittingDuplicateTemplates(form.product, from.duplicateTemplates)
@@ -1079,6 +1214,11 @@ export function NewShift({
       : duplicate
         ? form.duplicateTemplateId
         : form.palletTemplateId;
+    const fitting = lotTemplateChoices(
+      candidates,
+      optionalLotNumber(form.lotNumber) !== null,
+      chosenId,
+    );
     // Only one template fits: a plain line. Two or more: the choice, with the rule's preselected.
     const fixed = fitting.length === 1;
     const chosen = fitting.find((template) => template.id === chosenId) ?? null;
@@ -1189,7 +1329,12 @@ export function NewShift({
             ) : (
               <div className="new-shift__preview">
                 {spec !== null ? (
-                  <TemplatePreview spec={spec} purpose={purpose} product={form.product} />
+                  <TemplatePreview
+                    spec={spec}
+                    purpose={purpose}
+                    product={form.product}
+                    lotNumber={optionalLotNumber(form.lotNumber)}
+                  />
                 ) : (
                   <p className="new-shift__hint">
                     {t(
@@ -1205,7 +1350,36 @@ export function NewShift({
     );
   };
 
-  const formShown = step.kind === "form" && ready !== null ? step : null;
+  const formWithLotTemplates = (form: Form, from: NewShiftChoices): Form => {
+    if (optionalLotNumber(form.lotNumber) === null || form.created !== null) return form;
+    const availableSheets = sheets.kind === "ready" ? sheets.sheets : null;
+    const sheetId = form.palletSheetId ?? availableSheets?.defaultId ?? null;
+    const compatibleSheetId = lotTemplateId(
+      sheetId,
+      (availableSheets?.sheets ?? []).filter((sheet) => sheet.enabled),
+    );
+    return {
+      ...form,
+      templateId:
+        form.mode === "validation"
+          ? form.templateId
+          : lotTemplateId(form.templateId, fittingTemplates(form.product, from.templates)),
+      duplicateTemplateId: lotTemplateId(
+        form.duplicateTemplateId,
+        fittingDuplicateTemplates(form.product, from.duplicateTemplates),
+      ),
+      palletTemplateId: lotTemplateId(
+        form.palletTemplateId,
+        fittingPalletTemplates(form.product, from.palletTemplates),
+      ),
+      palletSheetId: sheetId === compatibleSheetId ? form.palletSheetId : compatibleSheetId,
+    };
+  };
+
+  const formShown =
+    step.kind === "form" && ready !== null
+      ? { ...step, form: formWithLotTemplates(step.form, ready) }
+      : null;
   // The problem and the request in progress, said together in one polite
   // region that is there before either. Not an alert as well
   // (`role="presentation"` drops the component's own role): inside this
@@ -1267,7 +1441,10 @@ export function NewShift({
               (view === "box_template" && form.templateId === null) ||
               (view === "pallet_template" && paper !== "a4" && form.palletTemplateId === null)
             }
-            onClick={() => (view === "details" ? next(form, following) : go(following))}
+            onClick={() => {
+              if (view === "details") next(form, following);
+              else if (view !== "lot_number" || checkLot(form)) go(following);
+            }}
           >
             {t("floor.newShift.next")}
           </Button>
@@ -1285,6 +1462,7 @@ export function NewShift({
             }
             onClick={() => {
               if (view === "details" && form.created === null && counts(form) === null) return;
+              if (view === "lot_number" && form.created === null && !checkLot(form)) return;
               void submit(form);
             }}
           >
@@ -1301,16 +1479,29 @@ export function NewShift({
             disabled={busy !== null}
             onClick={() => go(previous)}
           >
-            {t("floor.newShift.previousStep")}
+            {t(view === "lot_number" ? "floor.newShift.back" : "floor.newShift.previousStep")}
           </Button>
         )}
-        {otherProduct}
-        {back}
+        {view !== "lot_number" && otherProduct}
+        {view !== "lot_number" && back}
       </>
     );
   };
 
   const formBody = (shown: { form: Form; view: FormView }, from: NewShiftChoices) => {
+    if (shown.view === "lot_number")
+      return (
+        <LotNumberStep
+          source={source}
+          value={shown.form.lotNumber}
+          invalid={lotInvalid}
+          disabled={busy !== null || shown.form.created !== null}
+          onChange={(lotNumber) => {
+            setLotInvalid(false);
+            update({ lotNumber });
+          }}
+        />
+      );
     if (shown.view === "box_template") return templateView(shown.form, from, "box");
     if (shown.view === "pallet_template") return templateView(shown.form, from, "pallet");
     if (shown.view === "duplicate_template") return templateView(shown.form, from, "duplicate");
@@ -1320,7 +1511,11 @@ export function NewShift({
   return (
     <FloorScreen
       className="new-shift"
-      title={t("floor.newShift.title")}
+      title={t(
+        formShown?.view === "lot_number"
+          ? "floor.newShift.lotNumber.title"
+          : "floor.newShift.title",
+      )}
       actions={
         <FloorFooter ariaLabel={t("floor.newShift.actions")}>
           {formShown !== null && ready !== null ? (
@@ -1338,7 +1533,7 @@ export function NewShift({
     >
       {formShown !== null && ready !== null ? (
         <section
-          className={`new-shift__panel new-shift__panel--${formShown.view === "details" ? "found" : "template"}`}
+          className={`new-shift__panel new-shift__panel--${formShown.view === "details" ? "found" : formShown.view === "lot_number" ? "lot" : "template"}`}
         >
           {/* Keyed per view: a scroller reused across the steps kept the last one's scroll. */}
           <div key={formShown.view} className="new-shift__fields">

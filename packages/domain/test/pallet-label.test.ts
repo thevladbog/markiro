@@ -19,7 +19,7 @@ const base: PalletLabelInput = {
 
 describe("palletLabelFields", () => {
   it("prints units in qty and boxes in qty.boxes", () => {
-    const fields = palletLabelFields(base);
+    const fields: Record<string, string> = palletLabelFields(base);
     expect(fields.qty).toBe("240");
     expect(fields["qty.boxes"]).toBe("12");
   });

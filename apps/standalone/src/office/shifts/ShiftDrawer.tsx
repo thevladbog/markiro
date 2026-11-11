@@ -325,14 +325,25 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
 
   const editable = canPlan && current.status === "planned";
   const demo = isDemoShift(current, products.data);
+  const title = (
+    <>
+      {t("office.shiftCard.title", { number: current.number })}
+      {current.lotNumber && (
+        <span className="shift-drawer__lot">
+          {t("office.shifts.lot", { number: current.lotNumber })}
+        </span>
+      )}
+    </>
+  );
   if (editing && editable) {
     return panel(
-      t("office.shiftCard.title", { number: current.number }),
+      title,
       <div className="office-stack">
         <ShiftStatusLine shift={current} demo={demo} />
         <ShiftEditBody
           key={current.id}
           shift={current}
+          useLotNumbers={org.data?.useLotNumbers ?? false}
           formId={formId}
           onStatus={setEditStatus}
           onClose={() => setEditing(false)}
@@ -408,7 +419,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
   );
 
   return panel(
-    t("office.shiftCard.title", { number: current.number }),
+    title,
     <div className="office-stack">
       <ShiftStatusLine shift={current} demo={demo} showPhase={false} />
 

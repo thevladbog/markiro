@@ -3,6 +3,7 @@ import { utf16BoundedString } from "@markiro/domain";
 import { z } from "zod";
 
 import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
+import { isLotNumber, optionalLotNumber } from "../lib/lot-number.js";
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
 /**
@@ -32,6 +33,15 @@ export const LOCAL_HOST_ADDRESS = `https://127.0.0.1:${DEFAULT_HOST_PORT}`;
 //   fields) is carried to plan 5, and the coupling of the block sizes to a
 //   fail-closed record to plan 2a and the owner;
 // - request bodies are strict, like the host's `deny_unknown_fields`.
+
+/** Absent on legacy records, null for a shift with no lot. */
+const lotNumberValueSchema = z.string().refine(isLotNumber).nullable();
+export const lotNumberSchema = lotNumberValueSchema.optional();
+const lotNumberInputSchema = z
+  .string()
+  .transform(optionalLotNumber)
+  .pipe(lotNumberValueSchema)
+  .nullish();
 
 /** Mirrors `markiro_proto::Hello`; rebuilt by the shell, so strict. */
 export const helloSchema = z
@@ -413,6 +423,7 @@ export const orgRecordSchema = z.object({
   gln: z.string(),
   gs1Prefixes: z.array(z.string()),
   timeZone: z.string(),
+  useLotNumbers: z.boolean().optional(),
   defaultBoxTemplateId: z.uuid().nullish(),
   defaultPalletTemplateId: z.uuid().nullish(),
   defaultDuplicateTemplateId: z.uuid().nullish(),
@@ -505,6 +516,7 @@ export const labelTemplateRecordSchema = z.object({
   enabled: z.boolean(),
   chzProductGroupCodes: groupCodesSchema,
   stock: z.boolean(),
+  lotNumberSourceId: z.uuid().nullish(),
   spec: templateSpecSchema,
 });
 export type LabelTemplateRecord = z.infer<typeof labelTemplateRecordSchema>;
@@ -556,6 +568,7 @@ export const orgProfileSchema = z.object({
   gln: z.string(),
   gs1Prefixes: z.array(z.string()),
   timeZone: z.string(),
+  useLotNumbers: z.boolean().optional(),
   rev: z.number().int(),
 });
 export type OrgProfile = z.infer<typeof orgProfileSchema>;
@@ -593,6 +606,7 @@ export const palletSheetSchema = z.object({
   name: z.string().min(1),
   enabled: z.boolean(),
   presetKey: z.string().nullable(),
+  lotNumberSourceId: z.uuid().nullish(),
   revision: z.number().int().positive(),
   spec: z.unknown(),
 });
@@ -910,6 +924,7 @@ export const labelTemplateSummarySchema = z.object({
   enabled: z.boolean(),
   chzProductGroupCodes: groupCodesSchema,
   stock: z.boolean(),
+  lotNumberSourceId: z.uuid().nullish(),
   widthMm: z.number().nullable(),
   heightMm: z.number().nullable(),
   dpi: z.number().int().nonnegative().nullable(),
@@ -926,6 +941,7 @@ export const labelTemplateSchema = z.object({
   enabled: z.boolean(),
   chzProductGroupCodes: groupCodesSchema,
   stock: z.boolean(),
+  lotNumberSourceId: z.uuid().nullish(),
   spec: templateSpecSchema,
   rev: z.number().int(),
 });
@@ -1161,6 +1177,7 @@ const officeShiftObject = z.object({
   productionDate: civilDateTextSchema,
   /** The shift's own date (the cloud's `plannedDate`, «Дата смены»), apart from the production date. */
   plannedDate: civilDateTextSchema,
+  lotNumber: lotNumberSchema,
   plannedQty: z.number().int().positive().nullable(),
   boxCapacity: z.number().int().positive(),
   boxTemplateId: z.uuid(),
@@ -1367,6 +1384,7 @@ export const palletReportRowsSchema = z.object({
     id: z.uuid(),
     number: z.string().min(1),
     productionDate: civilDateTextSchema,
+    lotNumber: lotNumberSchema,
     productName: z.string(),
     gtin14: z.string(),
     shelfLifeDays: z.number().int().positive().nullable(),
@@ -1463,6 +1481,7 @@ export const shiftSnapshotSchema = z.object({
   product: shiftSnapshotProductSchema,
   boxTemplate: shiftSnapshotTemplateSchema,
   issuerPrefix: z.string(),
+  lotNumber: lotNumberSchema,
   counterpartyName: z.string().nullable(),
   palletTemplate: shiftSnapshotTemplateSchema.optional(),
   palletSheet: shiftSnapshotSheetSchema.optional(),
@@ -1499,6 +1518,7 @@ const deviceShiftObject = z.object({
   productionDate: civilDateTextSchema,
   /** The shift's own date; left out by a host before beta 3, which is the production date. */
   plannedDate: civilDateTextSchema.optional(),
+  lotNumber: lotNumberSchema,
   plannedQty: z.number().int().positive().nullable(),
   boxCapacity: z.number().int().positive(),
   boxTemplateId: z.uuid(),
@@ -1565,6 +1585,7 @@ export const SHIFT_SUPPORTS = {
   validationDmDuplicate: "validation-dm-duplicate-v1",
   handheldHost: "handheld-host-v1",
   multiStation: "multi-station-v1",
+  lotNumber: "lot-number",
 } as const;
 
 /**
@@ -1708,6 +1729,7 @@ export const warehouseSourceSchema = z.object({
   counterpartyName: z.string().nullable(),
   shiftId: z.uuid(),
   shiftNumber: z.string(),
+  lotNumber: lotNumberSchema,
   productionDate: z.string(),
   at: z.string(),
   itemCount: z.number().int().nonnegative(),
@@ -1875,6 +1897,7 @@ export const orgProfileUpdateSchema = z
     gln: z.string(),
     gs1Prefixes: z.array(z.string()),
     timeZone: z.string(),
+    useLotNumbers: z.boolean().optional(),
     expectedRev: z.number().int(),
   })
   .strict();
@@ -2139,6 +2162,7 @@ export const shiftCreateSchema = z
     productionDate: z.string(),
     /** The shift's own date; left out, the host takes the production date. */
     plannedDate: z.string().optional(),
+    lotNumber: lotNumberInputSchema,
     boxTemplateId: z.uuid(),
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
@@ -2168,6 +2192,7 @@ export const shiftUpdateSchema = z
     lineId: z.uuid().optional(),
     productionDate: z.string().optional(),
     plannedDate: z.string().optional(),
+    lotNumber: lotNumberInputSchema,
     boxTemplateId: z.uuid().optional(),
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
@@ -2256,6 +2281,7 @@ export const deviceShiftCreateSchema = z
     productionDate: z.string(),
     /** The shift's own date, today in the organization's zone; left out, the host takes the production date. */
     plannedDate: z.string().optional(),
+    lotNumber: lotNumberInputSchema,
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
     counterpartyId: z.uuid().nullable().optional(),

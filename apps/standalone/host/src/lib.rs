@@ -24,6 +24,7 @@ pub mod install;
 pub mod install_windows;
 pub mod license;
 pub mod logging;
+mod lot_templates;
 pub mod network;
 pub mod network_profile;
 pub mod pairing_code;
@@ -177,6 +178,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     // fails stops the start before any migration runs.
     let pre_upgrade = upgrade::PreUpgrade::for_paths(paths, config.host_id.clone(), clock.now());
     let pool = db::open_upgrading(&paths.database_file(), &pre_upgrade).await?;
+    lot_templates::register(&pool, &clock::format_timestamp(clock.now())).await?;
     // Build the unknown-login verifier now, off the async threads, so the
     // first unknown login does not pay for building it.
     tokio::task::spawn_blocking(|| {

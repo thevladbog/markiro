@@ -576,6 +576,7 @@ const COLUMNS: Record<string, string[]> = {
     "pallet_template_id TEXT",
     // Migration 0018 (beta 3): the shift's own date, NULL for a copy without one.
     "planned_date TEXT",
+    "lot_number TEXT",
   ],
   floor_sscc_blocks: [
     "block_id TEXT NOT NULL PK1",

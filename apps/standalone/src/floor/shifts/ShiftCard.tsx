@@ -151,6 +151,8 @@ export function ShiftCard({
   participation = null,
 }: ShiftCardProps) {
   const { t } = useTranslation();
+  const lot =
+    copy.lotNumber === undefined ? null : t("floor.shifts.lot", { number: copy.lotNumber });
   const phase =
     copy.localState === "closing"
       ? "closing"
@@ -235,6 +237,11 @@ export function ShiftCard({
               </Badge>
             )}
           </div>
+          {lot !== null && (
+            <p className="shift-card__lot" title={lot}>
+              {lot}
+            </p>
+          )}
           <div className="shift-card__product shift-card__product--only" title={title}>
             {title}
           </div>

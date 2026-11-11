@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   changesResponseSchema,
   labelTemplateRecordSchema,
+  orgRecordSchema,
   type ChangeItem,
   type ChangesResponse,
 } from "../src/host/protocol.js";
@@ -371,13 +372,41 @@ function heldOps(executor: LocalExecutor) {
   };
 }
 
+it("updates the station copy of the lot-number setting and defaults legacy profiles to off", async () => {
+  const { db, executor } = openLocalDb();
+  const state = () => db.prepare("SELECT use_lot_numbers FROM ref_org").get()?.["use_lot_numbers"];
+  await syncReferences({
+    changes: feed({ 0: page(41, [ORG]) }),
+    local: executor,
+    hostId: HOST_ID,
+    deviceId: DEVICE_ID,
+  });
+  expect(state()).toBe(0);
+  for (const [rev, useLotNumbers] of [
+    [42, true],
+    [43, false],
+  ] as const) {
+    await syncReferences({
+      changes: feed({
+        [rev - 1]: page(rev, [
+          { ...ORG, rev, data: { ...orgRecordSchema.parse(ORG.data), useLotNumbers } },
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    expect(state()).toBe(Number(useLotNumbers));
+  }
+});
+
 describe("ENTITY_SET", () => {
   it("names the kept entities and the version of their records", () => {
     // Derived from the entity table and `SYNC_SCHEMA_VERSION`; pinned so a
     // build cannot change one and forget the other.
     expect(ENTITY_SET).toBe(
       "org_profile,site,lines,operators,operator_badges,products,label_templates," +
-        "category_template_defaults,code_releases;v5",
+        "category_template_defaults,code_releases;v6",
     );
   });
 });

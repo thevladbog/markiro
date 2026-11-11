@@ -59,6 +59,22 @@ impl Issue {
     ) -> Result<WarehousePalletCloseIssue, ApiError> {
         let current_box_ssccs = self.current_box_ssccs(conn).await?;
         let approved_box_ssccs = self.approved_box_ssccs()?;
+        let approved_lot_number = match &self.approved_boxes {
+            Some(approved) => {
+                let lot = sqlx::query_scalar(
+                    "SELECT CASE WHEN COUNT(*) = COUNT(s.lot_number) \
+                     AND COUNT(DISTINCT s.lot_number) = 1 THEN MIN(s.lot_number) END \
+                     FROM json_each(?) approved LEFT JOIN boxes b ON b.sscc = approved.value \
+                     LEFT JOIN shifts s ON s.id = b.shift_id",
+                )
+                .bind(approved)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?;
+                Some(lot)
+            }
+            None => None,
+        };
         Ok(WarehousePalletCloseIssue {
             id: self.id.clone(),
             pallet_id: self.pallet_id.clone(),
@@ -70,6 +86,7 @@ impl Issue {
             approved_boxes: approved_box_ssccs.as_ref().map(|boxes| boxes.len() as u32),
             current_box_ssccs,
             approved_box_ssccs,
+            approved_lot_number,
             created_at: self.created_at.clone(),
             device_name: self.device_name.clone(),
         })

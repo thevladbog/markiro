@@ -38,7 +38,7 @@ use crate::validate;
 /// units without boxes: they are the codes it owns, each without a box
 /// (`code_owners_shift_unboxed` of `0020`); it has no boxes and no pallets.
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
-     pallets_enabled, product_id, line_id, counterparty_id, production_date, \
+     pallets_enabled, product_id, line_id, counterparty_id, production_date, lot_number, \
      COALESCE(planned_date, production_date) AS planned_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, \
      pallet_sheet_template_id, validation_print_mode, validation_print_verification, \
@@ -108,6 +108,7 @@ struct ShiftRow {
     line_id: String,
     counterparty_id: Option<String>,
     production_date: String,
+    lot_number: Option<String>,
     planned_date: String,
     planned_qty: Option<u32>,
     box_capacity: u32,
@@ -169,6 +170,7 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         line_id: row.line_id,
         counterparty_id: row.counterparty_id,
         production_date: row.production_date,
+        lot_number: row.lot_number,
         planned_date: row.planned_date,
         planned_qty: row.planned_qty,
         box_capacity: row.box_capacity,
@@ -396,6 +398,7 @@ pub async fn create_shift(
         create.pallet_template_id.as_deref(),
     )?;
     let production_date = validate::civil_date("productionDate", &create.production_date)?;
+    let lot_number = shifts::lot_number(create.lot_number.as_deref())?;
     // Left out, the shift's date is the production date.
     let planned_date = create
         .planned_date
@@ -438,12 +441,27 @@ pub async fn create_shift(
         &create.product_id,
         &product,
         create.pallet_sheet_template_id.as_deref(),
+        lot_number.is_some(),
     )
     .await?;
+    if lot_number.is_some() {
+        shifts::require_lot_templates(
+            &mut tx,
+            create.mode,
+            &create.box_template_id,
+            pallets.as_ref().map(|pallets| pallets.template_id.as_str()),
+            pallets
+                .as_ref()
+                .and_then(|pallets| pallets.sheet_id.as_deref()),
+            &validation_print,
+        )
+        .await?;
+    }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let id = shifts::insert(
         &mut tx,
         &NewShift {
+            lot_number: lot_number.as_deref(),
             origin: markiro_proto::ShiftOrigin::Office,
             mode: create.mode,
             created_by: &context.user.id,
@@ -472,6 +490,9 @@ pub async fn create_shift(
         "lineId": created.line_id,
         "productionDate": created.production_date,
     });
+    if let Some(lot_number) = &created.lot_number {
+        details["lotNumber"] = json!(lot_number);
+    }
     // Named only when it is not the production date, so the rows of shifts
     // that have one date keep their shape (beta 3).
     if created.planned_date != created.production_date {
@@ -580,6 +601,10 @@ pub async fn update_shift(
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
+    let lot_number = match &update.lot_number {
+        Some(lot_number) => shifts::lot_number(lot_number.as_deref())?,
+        None => current.lot_number.clone(),
+    };
     let line_id = update
         .line_id
         .clone()
@@ -650,11 +675,16 @@ pub async fn update_shift(
             Some(Some(id)) => Some(id.clone()),
             None if current.pallets_enabled => current.pallet_sheet_template_id.clone(),
             Some(None) | None => {
-                crate::routes::pallet_sheets::default_sheet_for_product(
+                let default = crate::routes::pallet_sheets::default_sheet_for_product(
                     &mut tx,
                     &current.product_id,
                 )
-                .await?
+                .await?;
+                if lot_number.is_some() {
+                    shifts::default_lot_sheet(&mut tx, default).await?
+                } else {
+                    default
+                }
             }
         }
     } else {
@@ -677,7 +707,8 @@ pub async fn update_shift(
         || pallet_box_capacity != current.pallet_box_capacity
         || pallet_template_id != current.pallet_template_id
         || pallet_sheet_template_id != current.pallet_sheet_template_id
-        || validation_print != current_print;
+        || validation_print != current_print
+        || lot_number != current.lot_number;
     match current.status {
         ShiftStatus::Planned => {
             // Pallets turned on in a plan ask the license (plan ЛЦ-2 Д8); a
@@ -736,6 +767,17 @@ pub async fn update_shift(
                     shifts::check_counterparty(&mut tx, counterparty_id).await?;
                 }
             }
+            if lot_number.is_some() {
+                shifts::require_lot_templates(
+                    &mut tx,
+                    mode,
+                    &box_template_id,
+                    pallet_template_id.as_deref(),
+                    pallet_sheet_template_id.as_deref(),
+                    &validation_print,
+                )
+                .await?;
+            }
         }
         ShiftStatus::Active if !fixed_changed => {}
         status => return Err(shifts::status_conflict(status)),
@@ -769,6 +811,7 @@ pub async fn update_shift(
             json!(counterparty_id),
         ),
         ("mode", json!(current.mode), json!(mode)),
+        ("lotNumber", json!(current.lot_number), json!(lot_number)),
         (
             "palletsEnabled",
             json!(current.pallets_enabled),
@@ -807,7 +850,7 @@ pub async fn update_shift(
          box_capacity = ?, planned_qty = ?, counterparty_id = ?, mode = ?, pallets_enabled = ?, \
          pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, \
          validation_print_mode = ?, validation_print_verification = ?, \
-         validation_print_template_id = ?, rev = ? WHERE id = ?",
+         validation_print_template_id = ?, lot_number = ?, rev = ? WHERE id = ?",
     )
     .bind(&line_id)
     .bind(&production_date)
@@ -824,6 +867,7 @@ pub async fn update_shift(
     .bind(print_mode)
     .bind(print_verification)
     .bind(print_template_id)
+    .bind(&lot_number)
     .bind(rev)
     .bind(&id)
     .execute(&mut *tx)

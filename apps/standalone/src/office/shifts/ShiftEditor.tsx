@@ -19,15 +19,22 @@ import {
   type OfficeShift,
   type ShiftCreate,
   type ShiftUpdate,
+  type TemplatePurpose,
 } from "../../host/protocol.js";
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
+import {
+  isLotNumber,
+  lotTemplateChoices,
+  lotTemplateId,
+  optionalLotNumber,
+} from "../../lib/lot-number.js";
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import { templateFitsSlot } from "../../lib/template-eligibility.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
-import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
+import { alertFailure, useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { EntityDrawer } from "../EntityDrawer.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { PageLoading, StaleAlert, WriteFailureAlert } from "../page-state.js";
@@ -50,6 +57,7 @@ import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
 import { defaultSheetFor } from "../sheet-choice.js";
 import { sheetOptions } from "./sheet-options.js";
 import { datePickerTexts } from "./shift-text.js";
+import { checkShiftLotTemplates } from "./lot-templates.js";
 
 export interface ShiftEditorProps {
   /** `null` plans a new shift; a planned shift is changed. */
@@ -94,6 +102,7 @@ export function ShiftCreateDrawer(props: Omit<ShiftEditorProps, "shift">) {
       {...props}
       today={civilToday(zone)}
       dateNote={zone !== null ? null : org.isSuccess ? "localDateZone" : "localDate"}
+      useLotNumbers={org.data?.useLotNumbers ?? false}
     />
   );
 }
@@ -101,10 +110,15 @@ export function ShiftCreateDrawer(props: Omit<ShiftEditorProps, "shift">) {
 function ShiftCreateForm({
   today,
   dateNote,
+  useLotNumbers,
   ...props
-}: Omit<ShiftEditorProps, "shift"> & { today: string; dateNote: DateNote }) {
+}: Omit<ShiftEditorProps, "shift"> & {
+  today: string;
+  dateNote: DateNote;
+  useLotNumbers: boolean;
+}) {
   const { t } = useTranslation();
-  const editor = useShiftEditor({ ...props, shift: null, today, dateNote });
+  const editor = useShiftEditor({ ...props, shift: null, today, dateNote, useLotNumbers });
   return (
     <EntityDrawer
       title={t("office.shifts.createTitle")}
@@ -138,17 +152,20 @@ export function ShiftEditBody({
   shift,
   formId,
   onStatus,
+  useLotNumbers = false,
   ...callbacks
 }: Omit<ShiftEditorProps, "shift"> & {
   shift: OfficeShift;
   formId: string;
   onStatus: (status: ShiftEditStatus) => void;
+  useLotNumbers?: boolean;
 }) {
   const editor = useShiftEditor({
     ...callbacks,
     shift,
     today: shift.productionDate,
     dateNote: null,
+    useLotNumbers,
   });
   const { dirty, submitDisabled, sending } = editor;
   useEffect(() => {
@@ -176,6 +193,7 @@ function keepCalendarEscape(event: KeyboardEvent<HTMLElement>): void {
 
 interface ShiftEditorInput extends ShiftEditorProps {
   today: string;
+  useLotNumbers: boolean;
   /** Why `today` is this PC's date, not the organization's; `null` when it is the organization's. */
   dateNote: DateNote;
 }
@@ -201,12 +219,15 @@ function useShiftEditor({
   onOutdated,
   today: todayAtOpen,
   dateNote: dateNoteAtOpen,
+  useLotNumbers,
 }: ShiftEditorInput) {
   const { t } = useTranslation();
   // The date the form started on and the note about where it came from are fixed when the
   // dialog opens: the profile read again later (failing, or arriving after a failure)
   // must not put a note under, or take one from, a date that did not change.
   const [{ today, dateNote }] = useState(() => ({ today: todayAtOpen, dateNote: dateNoteAtOpen }));
+  const [lotsEnabledAtOpen] = useState(useLotNumbers);
+  const showLotNumber = lotsEnabledAtOpen || useLotNumbers || (shift?.lotNumber ?? null) !== null;
   const ids = useId();
   const rereadIfLost = useRereadShiftsOnLostAnswer();
   const fieldId = (name: (typeof SHIFT_FIELD_ORDER)[number]) => `${ids}-${name}`;
@@ -234,6 +255,7 @@ function useShiftEditor({
         ? api.createShift(token, request.create)
         : api.updateShift(token, request.id, request.update),
   );
+  const checkTemplates = useOfficeMutation(checkShiftLotTemplates);
   const {
     register,
     control,
@@ -276,6 +298,35 @@ function useShiftEditor({
     { enabled: palletsEnabled && !validation },
   );
   const product = products.data?.find((each) => each.id === productId);
+  const lot = optionalLotNumber(watch("lotNumber"));
+  const hasLot = lot !== null && isLotNumber(lot);
+  const appliesToTemplate = (purpose: TemplatePurpose) =>
+    !modeFixed && (!validation || purpose !== "box");
+  const fittingFor = (purpose: TemplatePurpose) =>
+    fittingTemplates(templates.data, purpose, product?.chzProductGroupCode ?? null);
+  const templateWithLot = (id: string, purpose: TemplatePurpose, active: boolean) =>
+    active && appliesToTemplate(purpose) && product !== undefined
+      ? lotTemplateId(id, fittingFor(purpose))
+      : id;
+  const templatesFor = (purpose: TemplatePurpose, selected: string) => {
+    if (templates.data === undefined) return undefined;
+    const fitting = fittingFor(purpose);
+    const eligible = new Set(fitting.map((template) => template.id));
+    return [
+      ...templates.data.filter((template) => !eligible.has(template.id)),
+      ...lotTemplateChoices(fitting, hasLot && appliesToTemplate(purpose), selected),
+    ];
+  };
+  const defaultSheetId = defaultSheetFor(product, defaults.data, palletSheets.data);
+  const sheetWithLot = (id: string, active: boolean) => {
+    if (!active || modeFixed) return id;
+    const baseId = id === "" ? defaultSheetId : id;
+    const selected = lotTemplateId(
+      baseId,
+      (palletSheets.data?.sheets ?? []).filter((sheet) => sheet.enabled),
+    );
+    return selected === baseId ? id : (selected ?? "");
+  };
   // Pallets need the product's pallet capacity, as the cloud's switch does.
   const palletsPossible = product !== undefined && product.palletBoxCapacity !== null;
   // A changed shift of an archived or draft product will not open, whatever is changed.
@@ -345,7 +396,11 @@ function useShiftEditor({
   const duplicateFitting =
     product === undefined
       ? []
-      : fittingTemplates(templates.data, "product_duplicate", product.chzProductGroupCode);
+      : fittingTemplates(
+          templatesFor("product_duplicate", watch("duplicateTemplateId")),
+          "product_duplicate",
+          product.chzProductGroupCode,
+        );
   /** A duplicate template as the office offers one: its name and size (a template has no resolution). */
   const duplicateLabel = (template: LabelTemplateSummary): string =>
     template.widthMm === null || template.heightMm === null
@@ -491,15 +546,49 @@ function useShiftEditor({
   };
 
   const submit = handleSubmit(
-    async (values) => {
+    async (entered) => {
       setFailure(null);
+      const lotNumber = optionalLotNumber(entered.lotNumber);
+      const values: ShiftFields =
+        lotNumber === null
+          ? entered
+          : {
+              ...entered,
+              boxTemplateId: templateWithLot(entered.boxTemplateId, "box", true),
+              duplicateTemplateId: templateWithLot(
+                entered.duplicateTemplateId,
+                "product_duplicate",
+                true,
+              ),
+              palletTemplateId: templateWithLot(entered.palletTemplateId, "pallet", true),
+              palletSheetTemplateId: sheetWithLot(entered.palletSheetTemplateId, true),
+            };
       const update =
-        shift === null ? null : shiftUpdate(shift, toShiftChange(values, shift.status));
+        shift === null
+          ? null
+          : shiftUpdate(shift, toShiftChange(values, shift.status, showLotNumber));
       // The form is changed but the shift is not (blanks typed, a value written as it was):
       // there is nothing to send, and nothing was saved.
       if (update !== null && Object.keys(update).length === 1) {
         onClose();
         return;
+      }
+      if (lotNumber !== null) {
+        try {
+          const failure = await checkTemplates.mutateAsync({
+            values,
+            lotNumber,
+            sheetId: values.palletSheetTemplateId || defaultSheetId,
+            sheets: palletSheets.data?.sheets,
+          });
+          if (failure !== null) {
+            setFailure(failure);
+            return;
+          }
+        } catch (error) {
+          setFailure(alertFailure(error));
+          return;
+        }
       }
       let saved: OfficeShift;
       try {
@@ -686,6 +775,33 @@ function useShiftEditor({
           </div>
         )}
       />
+      {showLotNumber && (
+        <Input
+          label={t("office.shifts.fields.lotNumber")}
+          hint={t("office.shifts.fields.lotNumberHint")}
+          autoComplete="off"
+          spellCheck={false}
+          id={fieldId("lotNumber")}
+          disabled={locked}
+          onPaste={(event) => {
+            const raw = event.clipboardData.getData("text/plain");
+            const pasted = optionalLotNumber(raw);
+            if (raw === pasted) return;
+            event.preventDefault();
+            if (pasted === null) return;
+            const input = event.currentTarget;
+            const from = input.selectionStart ?? input.value.length;
+            const to = input.selectionEnd ?? from;
+            setValue("lotNumber", input.value.slice(0, from) + pasted + input.value.slice(to), {
+              shouldDirty: true,
+              shouldValidate: true,
+            });
+            input.setSelectionRange(from + pasted.length, from + pasted.length);
+          }}
+          {...fieldError(errors.lotNumber?.message)}
+          {...register("lotNumber")}
+        />
+      )}
       <Input
         label={t("office.shifts.fields.plannedQty")}
         hint={t("office.shifts.fields.optional")}
@@ -754,8 +870,10 @@ function useShiftEditor({
                 {...searchableSelect(t)}
                 label={t("office.shifts.duplicate.template")}
                 placeholder={t("office.shifts.duplicate.templatePlaceholder")}
-                options={duplicateOptions(field.value)}
-                value={field.value}
+                options={duplicateOptions(
+                  templateWithLot(field.value, "product_duplicate", hasLot),
+                )}
+                value={templateWithLot(field.value, "product_duplicate", hasLot)}
                 onValueChange={(id) => {
                   field.onChange(id);
                   clearErrors("duplicateTemplateId");
@@ -817,14 +935,17 @@ function useShiftEditor({
               product === undefined
                 ? ownTemplate
                 : templateOptions(
-                    templates.data,
+                    templatesFor("box", templateWithLot(field.value, "box", hasLot)),
                     "box",
                     product.chzProductGroupCode,
-                    [shift?.boxTemplateId ?? "", field.value],
+                    [
+                      templateWithLot(shift?.boxTemplateId ?? "", "box", hasLot),
+                      templateWithLot(field.value, "box", hasLot),
+                    ],
                     t,
                   ).filter((option) => option.value !== "")
             }
-            value={field.value}
+            value={templateWithLot(field.value, "box", hasLot)}
             onValueChange={field.onChange}
             id={fieldId("boxTemplateId")}
             disabled={locked || !templates.isSuccess || product === undefined}
@@ -895,13 +1016,16 @@ function useShiftEditor({
                 label={t("office.shifts.fields.palletTemplate")}
                 placeholder={t("office.shifts.fields.templatePlaceholder")}
                 options={templateOptions(
-                  templates.data,
+                  templatesFor("pallet", templateWithLot(field.value, "pallet", hasLot)),
                   "pallet",
                   product?.chzProductGroupCode ?? null,
-                  [shift?.palletTemplateId ?? "", field.value],
+                  [
+                    templateWithLot(shift?.palletTemplateId ?? "", "pallet", hasLot),
+                    templateWithLot(field.value, "pallet", hasLot),
+                  ],
                   t,
                 ).filter((option) => option.value !== "")}
-                value={field.value}
+                value={templateWithLot(field.value, "pallet", hasLot)}
                 onValueChange={field.onChange}
                 id={fieldId("palletTemplateId")}
                 disabled={locked || !templates.isSuccess}
@@ -922,11 +1046,11 @@ function useShiftEditor({
                 options={sheetOptions(
                   palletSheets.data,
                   shift?.palletSheetTemplateId ?? null,
-                  field.value,
+                  sheetWithLot(field.value, hasLot),
                   t,
-                  defaultSheetFor(product, defaults.data, palletSheets.data),
+                  defaultSheetId,
                 )}
-                value={field.value}
+                value={sheetWithLot(field.value, hasLot)}
                 onValueChange={field.onChange}
                 id={fieldId("palletSheetTemplateId")}
                 disabled={locked}

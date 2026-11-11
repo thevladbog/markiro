@@ -296,6 +296,15 @@ pub async fn create(
         sqlx::query("INSERT INTO warehouse_pallet_boxes(pallet_id,box_sscc,added_at,record_id,device_id) VALUES(?,?,?,?,?)")
             .bind(&id).bind(&code).bind(&at).bind(&body.request_id).bind(&context.device_id).execute(&mut *tx).await.map_err(ApiError::internal)?;
     }
+    let (_, lot_number) = crate::pallet_events::pallet_contents(&mut tx, &id).await?;
+    if let Some(lot_number) = lot_number {
+        sqlx::query("UPDATE warehouse_pallets SET lot_number = ? WHERE id = ?")
+            .bind(lot_number)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    }
     registry_touch::warehouse_pallet_boxes(&mut tx, &id, &at).await?;
     audit::record(
         &mut tx,

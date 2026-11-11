@@ -2124,6 +2124,9 @@ fn the_box_registry_page_is_a_delta_with_removals_and_the_restore_epoch() {
 fn the_station_registry_adds_the_source_shift_and_assembly_permission() {
     let page: BoxRegistryPage = round_trip("station-box-registry-page.json");
     assert_eq!(page.can_open_pallets, Some(true));
+    assert_eq!(page.lot_numbers_supported, Some(true));
+    assert_eq!(page.items[0].lot_number.as_deref(), Some("0042Бк07A"));
+    assert_eq!(page.items[1].lot_number, None);
     assert_eq!(page.items[0].shift_number.as_deref(), Some("OCT26-001"));
     assert_eq!(page.items[1].shift_number, None);
 }
@@ -2134,6 +2137,24 @@ fn the_pallet_close_issue_returns_the_current_and_approved_sets() {
     assert_eq!(issue.status, WarehousePalletCloseIssueStatus::Approved);
     assert_eq!(issue.current_boxes, 1);
     assert_eq!(issue.approved_box_ssccs, Some(issue.current_box_ssccs));
+    assert_eq!(
+        issue.approved_lot_number,
+        Some(Some("0042Бк07A".to_owned()))
+    );
+}
+
+#[test]
+fn station_close_round_trips_a_frozen_lot_and_explicit_absence() {
+    let record: markiro_proto::PalletEventRecord = round_trip("station-pallet-close-lot.json");
+    let closed: WarehousePalletClosedData = serde_json::from_value(record.data.clone()).unwrap();
+    assert_eq!(closed.lot_number, Some(Some("0042Бк07A".to_owned())));
+    assert_eq!(serde_json::to_value(closed).unwrap(), record.data);
+
+    let mut blank = record.data;
+    blank["lotNumber"] = Value::Null;
+    let closed: WarehousePalletClosedData = serde_json::from_value(blank.clone()).unwrap();
+    assert_eq!(closed.lot_number, Some(None));
+    assert_eq!(serde_json::to_value(closed).unwrap(), blank);
 }
 
 #[test]
@@ -2376,6 +2397,31 @@ fn a_shared_shifts_participants_and_totals_round_trip_and_add_up() {
     let legacy: OfficeShift = serde_json::from_value(fixture("office-shift.json")).unwrap();
     assert!(legacy.participants.is_empty() && legacy.by_device.is_empty());
     assert!(!legacy.close_reason_missing);
+}
+
+#[test]
+fn the_lot_capability_and_nullable_shift_update_round_trip() {
+    let enter: ShiftEnter = round_trip("shift-enter-lot.json");
+    assert!(enter
+        .supports
+        .iter()
+        .any(|name| name == shift_supports::LOT_NUMBER));
+    let values = [
+        (serde_json::json!({ "expectedRev": 4 }), None),
+        (
+            serde_json::json!({ "expectedRev": 4, "lotNumber": null }),
+            Some(None),
+        ),
+        (
+            serde_json::json!({ "expectedRev": 4, "lotNumber": "0042Бк07AЁ" }),
+            Some(Some("0042Бк07AЁ".to_owned())),
+        ),
+    ];
+    for (value, lot_number) in values {
+        let update: ShiftUpdate = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(update.lot_number, lot_number);
+        assert_eq!(serde_json::to_value(update).unwrap(), value);
+    }
 }
 
 #[test]

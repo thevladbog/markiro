@@ -449,6 +449,7 @@ const REQUESTS = [
   ["shift-enter.json", shiftEnterSchema],
   ["shift-enter-empty.json", shiftEnterSchema],
   ["shift-enter-multi.json", shiftEnterSchema],
+  ["shift-enter-lot.json", shiftEnterSchema],
   ["shift-enter-handheld-multi.json", shiftEnterSchema],
   ["shift-leave.json", shiftLeaveSchema],
   ["shift-close-reason-set.json", shiftCloseReasonSetSchema],
@@ -603,10 +604,11 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
       validationDmDuplicate: "validation-dm-duplicate-v1",
       handheldHost: "handheld-host-v1",
       multiStation: "multi-station-v1",
+      lotNumber: "lot-number",
     });
     // The station works validation, prints its duplicate and, since plan 2b, joins a shift
     // another device works (`multi-station-v1`), and says so on every entry.
-    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter-multi.json"));
+    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter-lot.json"));
     expect(shiftEnterSchema.parse(STATION_SHIFT_ENTER)).toStrictEqual(STATION_SHIFT_ENTER);
   });
 
@@ -4058,5 +4060,41 @@ describe("several devices in one shift (plan 2b)", () => {
     expect(
       deviceShiftsSchema.safeParse({ shifts: [{ ...first, myState: "paused" }] }).success,
     ).toBe(false);
+  });
+});
+
+describe("optional production lot numbers", () => {
+  const lot = "0042Бк07A";
+
+  it("keeps older requests compatible and preserves explicit clearing", () => {
+    expect(shiftUpdateSchema.parse({ expectedRev: 71 })).not.toHaveProperty("lotNumber");
+    expect(shiftUpdateSchema.parse({ expectedRev: 71, lotNumber: null })).toStrictEqual({
+      expectedRev: 71,
+      lotNumber: null,
+    });
+    expect(shiftUpdateSchema.parse({ expectedRev: 71, lotNumber: "  " }).lotNumber).toBeNull();
+    expect(shiftUpdateSchema.parse({ expectedRev: 71, lotNumber: ` ${lot} ` }).lotNumber).toBe(lot);
+    for (const invalid of ["0042-Бк", "0042 Бк", "１２３", "1\n2"]) {
+      expect(shiftUpdateSchema.safeParse({ expectedRev: 71, lotNumber: invalid }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it("reads the profile, planned shift and frozen snapshot", () => {
+    const profile = orgProfileSchema.parse(fixture("org-profile.json"));
+    expect(profile).not.toHaveProperty("useLotNumbers");
+    expect(orgProfileSchema.parse({ ...profile, useLotNumbers: true }).useLotNumbers).toBe(true);
+
+    const shift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
+    expect(shift).not.toHaveProperty("lotNumber");
+    expect(shift.snapshot).not.toHaveProperty("lotNumber");
+    expect(
+      enteredShiftSchema.parse({
+        ...shift,
+        lotNumber: lot,
+        snapshot: { ...shift.snapshot, lotNumber: lot },
+      }).snapshot.lotNumber,
+    ).toBe(lot);
   });
 });

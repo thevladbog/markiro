@@ -114,6 +114,7 @@ export async function renderShiftSheet(
       boxCount: count(fields["qty.boxes"]),
       itemCount: count(fields.qty),
       shiftNumber: fields["shift.no"] === "" ? null : fields["shift.no"],
+      ...(shift.snapshot.lotNumber === undefined ? {} : { lotNumber: shift.snapshot.lotNumber }),
       organizationName: organization.name,
       organizationInn: organization.inn,
       logo: sheetLogoOf(bitmap, own === null ? "markiro" : "organization"),

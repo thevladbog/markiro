@@ -169,6 +169,9 @@ describe("a label printed again from the warehouse (plan СКЛ)", () => {
     expect(fields.expiry).toBe("17.10.2026");
     expect(fields.qty).toBe("12");
     expect(fields["shift.no"]).toBe("OCT26-003");
+    expect(sourceFields({ ...BOX_SOURCE, lotNumber: "0042Бк07A" })["shift.lotNumber"]).toBe(
+      "0042Бк07A",
+    );
     expect(fields["counterparty.name"]).toBe("ООО «Север»");
   });
 

@@ -1,4 +1,4 @@
-import { LABEL_FIELDS } from "@markiro/domain";
+import { labelFieldDataSchema } from "@markiro/domain";
 import { z } from "zod";
 
 import {
@@ -211,7 +211,6 @@ const jobRow = z.object({
   updated_at: z.string(),
 });
 
-const fieldsSchema = z.record(z.enum(LABEL_FIELDS), z.string());
 const countRow = z.object({ n: z.number().int().nonnegative() });
 const idRow = z.object({ id: z.string() });
 
@@ -237,7 +236,7 @@ function toJob(row: z.infer<typeof jobRow>): WarehouseJob {
       printer = parsePrinterProfile(JSON.parse(row.printer));
       if (printer === null) throw new UnreadableWarehouseJobError(row.id);
     }
-    fields = fieldsSchema.parse(JSON.parse(row.fields));
+    fields = labelFieldDataSchema.parse(JSON.parse(row.fields));
   } catch {
     throw new UnreadableWarehouseJobError(row.id);
   }

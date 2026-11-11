@@ -23,6 +23,24 @@ const MONTH_KEYS: [&str; 12] = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ];
 
+/// The human-entered number retains case and any leading zeros.
+pub fn lot_number(value: Option<&str>) -> Result<Option<String>, ApiError> {
+    // Match the webview's String.trim whitespace set.
+    let value = value.unwrap_or_default().trim_matches(|letter: char| {
+        (letter.is_whitespace() && letter != '\u{0085}') || letter == '\u{feff}'
+    });
+    if !value
+        .chars()
+        .all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, 'А'..='я' | 'Ё' | 'ё'))
+    {
+        return Err(ApiError::validation(
+            "lotNumber",
+            "use Russian or Latin letters and digits for the lot number",
+        ));
+    }
+    Ok((!value.is_empty()).then(|| value.to_owned()))
+}
+
 /// A civil date as `YYYY-MM-DD`: four, two and two ASCII digits naming a
 /// real calendar day of the years 1–9999, as the cloud's `civilDateSchema`.
 /// The domain's `shiftMonthKey` also takes the year 0000 (its `Date.UTC`
@@ -265,6 +283,92 @@ pub fn stored_print(
     }
 }
 
+/// A lot-capable layout references the lot binding in a printable node.
+pub(crate) fn template_supports_lot(spec: &serde_json::Value) -> bool {
+    fn contains_binding(node: &serde_json::Value) -> bool {
+        if let Some(items) = node.as_array() {
+            return items.iter().any(contains_binding);
+        }
+        node.get("field").and_then(serde_json::Value::as_str) == Some("shift.lotNumber")
+            || node.get("children").is_some_and(contains_binding)
+    }
+    ["elements", "body"]
+        .iter()
+        .any(|key| spec.get(key).is_some_and(contains_binding))
+}
+
+pub(crate) fn lot_template_missing(field: &str) -> ApiError {
+    ApiError::conflict(
+        "lot_template_missing",
+        "the selected layout has no lot-number field",
+    )
+    .with_details(serde_json::json!({ "constraint": "lot_template_missing", "field": field }))
+}
+
+/// Reject a shift with a lot if any layout it prints cannot display the value.
+pub(crate) async fn require_lot_templates(
+    conn: &mut SqliteConnection,
+    mode: ShiftMode,
+    box_id: &str,
+    pallet_id: Option<&str>,
+    sheet_id: Option<&str>,
+    print: &ValidationPrint,
+) -> Result<(), ApiError> {
+    let duplicate_id = match print {
+        ValidationPrint::DuplicateDm { template_id, .. } => Some(template_id.as_str()),
+        ValidationPrint::None {} => None,
+    };
+    for (field, id) in [
+        (
+            "boxTemplateId",
+            (mode == ShiftMode::Aggregation).then_some(box_id),
+        ),
+        ("palletTemplateId", pallet_id),
+        ("validationPrint.templateId", duplicate_id),
+        ("palletSheetTemplateId", sheet_id),
+    ] {
+        let Some(id) = id else {
+            continue;
+        };
+        let sql = if field == "palletSheetTemplateId" {
+            "SELECT spec FROM pallet_sheet_templates WHERE id = ?"
+        } else {
+            "SELECT spec FROM label_templates WHERE id = ?"
+        };
+        let spec: Option<String> = sqlx::query_scalar(sql)
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+        let supports = spec
+            .as_deref()
+            .and_then(|spec| serde_json::from_str(spec).ok())
+            .as_ref()
+            .is_some_and(template_supports_lot);
+        if !supports {
+            return Err(lot_template_missing(field));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn default_lot_sheet(
+    conn: &mut SqliteConnection,
+    sheet_id: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    let Some(sheet_id) = sheet_id else {
+        return Ok(None);
+    };
+    let variant = sqlx::query_scalar(
+        "SELECT id FROM pallet_sheet_templates WHERE lot_number_source_id = ? AND enabled = 1",
+    )
+    .bind(&sheet_id)
+    .fetch_optional(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(variant.or(Some(sheet_id)))
+}
+
 /// A shift's pallets: how many boxes a pallet holds and the pallet label
 /// template. A shift without pallets has none of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -335,6 +439,7 @@ pub async fn pallets(
     product_id: &str,
     product: &ShiftProduct,
     sheet_id: Option<&str>,
+    has_lot_number: bool,
 ) -> Result<Option<Pallets>, ApiError> {
     match request {
         PalletRequest::Off => match sheet_id {
@@ -356,8 +461,14 @@ pub async fn pallets(
                     Some(id.to_owned())
                 }
                 None => {
-                    crate::routes::pallet_sheets::default_sheet_for_product(conn, product_id)
-                        .await?
+                    let default =
+                        crate::routes::pallet_sheets::default_sheet_for_product(conn, product_id)
+                            .await?;
+                    if has_lot_number {
+                        default_lot_sheet(conn, default).await?
+                    } else {
+                        default
+                    }
                 }
             };
             Ok(Some(Pallets {
@@ -371,6 +482,7 @@ pub async fn pallets(
 
 /// A new shift after the request's own checks and the references' checks.
 pub struct NewShift<'a> {
+    pub lot_number: Option<&'a str>,
     pub origin: ShiftOrigin,
     /// The creator's choice (plan РЕЖ): the office's, or a station's own
     /// (`DeviceShiftCreate::mode`, beta 3.2; left out, aggregation).
@@ -429,8 +541,8 @@ pub async fn insert(
          counterparty_id, production_date, planned_date, planned_qty, box_capacity, \
          box_template_id, pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, \
          validation_print_mode, validation_print_verification, validation_print_template_id, \
-         created_at, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         lot_number, created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&key)
@@ -466,6 +578,7 @@ pub async fn insert(
     .bind(print_mode)
     .bind(print_verification)
     .bind(print_template_id)
+    .bind(shift.lot_number)
     .bind(at)
     .bind(rev)
     .execute(&mut *conn)
@@ -745,6 +858,7 @@ pub async fn snapshot(
             pixels_base64: logo.pixels_base64,
         });
     Ok(ShiftSnapshot {
+        lot_number: None,
         product: ShiftSnapshotProduct {
             id: product_id.to_owned(),
             gtin14,
@@ -787,6 +901,7 @@ mod tests {
 
     fn snapshot(filler: usize) -> ShiftSnapshot {
         ShiftSnapshot {
+            lot_number: None,
             product: ShiftSnapshotProduct {
                 id: "p".to_owned(),
                 gtin14: "04600682000013".to_owned(),

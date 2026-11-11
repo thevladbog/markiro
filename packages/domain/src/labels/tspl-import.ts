@@ -111,7 +111,7 @@ function parseText(
         : "right"
     : undefined;
   const payload = required(args, hasAlignment ? 7 : 6, line, source);
-  const parsed = parseTemplatePayload(payload, line);
+  const parsed = parseTemplatePayload(payload, line, "text");
   const common = {
     id: importedElementId("tspl", ordinal),
     xMm,

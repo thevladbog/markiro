@@ -106,12 +106,20 @@ function rasterizeTextSync(
     lineHeight: lineHeightEm,
     minFontSizePx,
     overflow,
+    containInk,
   }: RasterizeTextOptions,
 ) {
   let font = fontShorthand(fontFamily, fontSizePx, bold);
   const measureContext = canvas2d(1, 1);
   measureContext.font = font;
-  const measure = (line: string) => measureContext.measureText(line).width;
+  const inkLeft = (metrics: TextMetrics) =>
+    Math.max(0, Math.ceil(metrics.actualBoundingBoxLeft || 0));
+  const measure = (line: string) => {
+    const metrics = measureContext.measureText(line);
+    return containInk
+      ? inkLeft(metrics) + Math.max(metrics.width, metrics.actualBoundingBoxRight || 0)
+      : metrics.width;
+  };
 
   const bounded = maxWidthPx !== undefined && maxWidthPx > 0;
   if (bounded && minFontSizePx !== undefined) {
@@ -124,11 +132,27 @@ function rasterizeTextSync(
       throw new Error("Label quantity exceeds its box at minimum font size");
     }
   }
-  // A sheet (V2) refuses a text it cannot place in full (`overflow: "error"`,
-  // the domain's strict wrap throws); a label keeps the «…» it always had.
+  // Complete values use strict wrapping. Ordinary thermal text keeps its ellipsis.
   const wrap = overflow === "error" ? wrapTextToWidthStrict : wrapTextToWidth;
   const lines = bounded ? wrap(text, measure, maxWidthPx, maxLines ?? 1) : [text];
-  const lineHeight = Math.ceil(fontSizePx * (lineHeightEm ?? 1.5));
+  const ink = containInk ? lines.map((line) => measureContext.measureText(line)) : [];
+  const exactBaseline =
+    ink.length > 0 &&
+    ink.every(
+      (metrics) =>
+        Number.isFinite(metrics.actualBoundingBoxAscent) &&
+        Number.isFinite(metrics.actualBoundingBoxDescent),
+    );
+  const ascent = exactBaseline
+    ? Math.ceil(Math.max(0, ...ink.map((m) => m.actualBoundingBoxAscent)))
+    : 0;
+  const descent = exactBaseline
+    ? Math.ceil(Math.max(0, ...ink.map((m) => m.actualBoundingBoxDescent)))
+    : 0;
+  const lineHeight = Math.max(
+    Math.ceil(fontSizePx * (lineHeightEm ?? 1.5)),
+    exactBaseline ? ascent + descent + 2 : 0,
+  );
   const naturalWidth = Math.ceil(Math.max(...lines.map(measure)));
   const width = Math.max(1, bounded ? Math.min(maxWidthPx, naturalWidth) : naturalWidth);
   const height = lineHeight * lines.length;
@@ -138,9 +162,13 @@ function rasterizeTextSync(
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
   context.fillStyle = "#000000";
-  context.textBaseline = "middle";
+  context.textBaseline = exactBaseline ? "alphabetic" : "middle";
+  const baseline = exactBaseline
+    ? Math.floor((lineHeight - ascent - descent) / 2) + ascent
+    : lineHeight / 2;
   lines.forEach((line, index) => {
-    context.fillText(line, 0, index * lineHeight + lineHeight / 2);
+    const metrics = ink[index];
+    context.fillText(line, metrics ? inkLeft(metrics) : 0, index * lineHeight + baseline);
   });
 
   const { data } = context.getImageData(0, 0, width, height);

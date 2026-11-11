@@ -29,6 +29,7 @@ export interface WarehouseTemplate {
   enabled: boolean;
   chzProductGroupCodes: number[] | null;
   rev: number;
+  lotNumberSourceId?: string;
   spec: LabelTemplateSpec | null;
 }
 
@@ -40,6 +41,7 @@ const templateRow = z.object({
   category_codes: z.string().nullable(),
   spec: z.string(),
   rev: z.number().int(),
+  lot_number_source_id: z.string().nullish(),
 });
 const codesSchema = z.array(z.number().int());
 const orgRow = z.object({
@@ -60,7 +62,7 @@ function readJson<T>(text: string, schema: z.ZodType<T>): T | null {
 /** The templates of the three purposes in this pairing's copies, by name (the reference table is small). */
 export async function readWarehouseTemplates(local: LocalExecutor): Promise<WarehouseTemplate[]> {
   const found = await local.query(
-    "SELECT id, name, purpose, enabled, category_codes, spec, rev FROM ref_templates " +
+    "SELECT id, name, purpose, enabled, category_codes, spec, rev, lot_number_source_id FROM ref_templates " +
       "WHERE purpose IN ('product_duplicate', 'box', 'pallet') ORDER BY name, id",
     [],
     templateRow,
@@ -74,6 +76,7 @@ export async function readWarehouseTemplates(local: LocalExecutor): Promise<Ware
       enabled: row.enabled === 1,
       chzProductGroupCodes: codes,
       rev: row.rev,
+      ...(row.lot_number_source_id == null ? {} : { lotNumberSourceId: row.lot_number_source_id }),
       // A category list that does not read must not widen the template to every
       // category: the template is then unreadable and prints nothing.
       spec:
@@ -134,7 +137,9 @@ export function initialTemplates(
     const choosable = templates.filter((template) => isChoosable(template, kind));
     const preferred = choosable.find((template) => template.id === defaults[kind]);
     if (preferred !== undefined) return preferred.id;
-    const [only, ...others] = choosable;
+    const [only, ...others] = choosable.filter(
+      (template) => !choosable.some((base) => base.id === template.lotNumberSourceId),
+    );
     return only !== undefined && others.length === 0 ? only.id : null;
   };
   return {

@@ -33,7 +33,7 @@ describe("boxLabelFields", () => {
   });
 
   it("prints dates as DD.MM.YYYY and the SSCC bare", () => {
-    const fields = boxLabelFields(base);
+    const fields: Record<string, string> = boxLabelFields(base);
     expect(fields.date).toBe("10.09.2026");
     expect(fields.expiry).toBe("09.09.2027");
     // The (00) application identifier belongs to the emitter and nowhere else.

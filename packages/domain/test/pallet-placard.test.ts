@@ -104,6 +104,23 @@ describe("summarizeByProductionDate", () => {
 });
 
 describe("pallet placard", () => {
+  it.each(["a4", "a5"] as const)("prints the complete lot on its own lines on %s", (format) => {
+    const lot = "0042Бк07A".repeat(8);
+    const html = renderPalletPlacardHtml(fixture({ lotNumber: lot }), format);
+    const block = html.match(/<div class="pl-lot-number">(.+?)<\/div>/)?.[1] ?? "";
+    expect(block).toContain("Номер партии");
+    const lines = Array.from(block.matchAll(/<span style="display: block">(.+?)<\/span>/g));
+    expect(lines).toHaveLength(2);
+    expect(lines.map((match) => match[1]).join("")).toBe(lot);
+    expect(renderPalletPlacardHtml(fixture(), format)).not.toContain("Номер партии");
+  });
+
+  it("refuses a lot that cannot fit without cutting the placard", () => {
+    expect(() => renderPalletPlacardHtml(fixture({ lotNumber: "Ж".repeat(1000) }), "a5")).toThrow(
+      expect.objectContaining({ code: "LABEL_LOT_NUMBER_OVERFLOW" }),
+    );
+  });
+
   it("prints the header with only the word ПАЛЕТА, the organisation and the product", () => {
     const html = renderPalletPlacardHtml(fixture(), "a4");
     expect(html).toContain("ПАЛЕТА");

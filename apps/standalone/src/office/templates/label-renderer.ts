@@ -1,7 +1,11 @@
 import {
   elementBoundsMm,
   INTERIOR_MODULES,
+  labelElementVisible,
   labelFieldDisplayValue,
+  LOT_NUMBER_LABEL_FIELD,
+  lotNumberLabelWidthDots,
+  rasterizeLabelLotNumber,
   LINE_HEIGHT_EM,
   mmToDots,
   needsImageRendering,
@@ -14,7 +18,7 @@ import {
   wrapTextToWidth,
   type LabelBarcodeElement,
   type LabelBoxElement,
-  type LabelField,
+  type LabelFieldData,
   type LabelFieldElement,
   type LabelLineElement,
   type LabelTemplateSpec,
@@ -64,10 +68,16 @@ type LabelOrganizationLogoElement = Extract<
   { kind: "organization_logo" }
 >;
 
-function textOf(element: TextLikeElement, data: Record<LabelField, string>): string {
+function textOf(element: TextLikeElement, data: LabelFieldData): string {
   return element.kind === "text"
     ? element.text
     : labelFieldDisplayValue(element.field, data, element.textFormat);
+}
+
+function isLotField(
+  element: TextLikeElement,
+): element is LabelFieldElement & { field: typeof LOT_NUMBER_LABEL_FIELD } {
+  return element.kind === "field" && element.field === LOT_NUMBER_LABEL_FIELD;
 }
 
 /**
@@ -86,12 +96,13 @@ function asksForBitmap(element: TextLikeElement): boolean {
  */
 export function rasterTextElements(
   spec: LabelTemplateSpec,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
 ): TextLikeElement[] {
   return spec.elements.filter(
     (element): element is TextLikeElement =>
       (element.kind === "text" || element.kind === "field") &&
-      (asksForBitmap(element) || needsImageRendering(textOf(element, data))),
+      labelElementVisible(element, data) &&
+      (isLotField(element) || asksForBitmap(element) || needsImageRendering(textOf(element, data))),
   );
 }
 
@@ -252,7 +263,7 @@ function drawBarcode(
   canvas: LabelCanvas,
   element: LabelBarcodeElement,
   scale: number,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
   options: LabelRenderOptions,
 ): void {
   // Left white here: `paintCodeRasters` paints the station's raster once its encoder loads.
@@ -320,7 +331,7 @@ export function drawLabel(
   spec: LabelTemplateSpec,
   canvas: LabelCanvas,
   scale: number,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
   options: LabelRenderOptions,
 ): void {
   const widthPx = spec.widthMm * scale;
@@ -329,12 +340,13 @@ export function drawLabel(
   canvas.fillStyle = LABEL_BACKGROUND;
   canvas.fillRect(0, 0, widthPx, heightPx);
   for (const element of spec.elements) {
+    if (!labelElementVisible(element, data)) continue;
     switch (element.kind) {
       case "text":
         drawText(canvas, element, element.text, scale);
         break;
       case "field":
-        drawText(canvas, element, textOf(element, data), scale);
+        if (!isLotField(element)) drawText(canvas, element, textOf(element, data), scale);
         break;
       case "barcode":
         drawBarcode(canvas, element, scale, data, options);
@@ -365,7 +377,7 @@ export async function paintCodeRasters(
   spec: LabelTemplateSpec,
   canvas: LabelCanvas,
   scale: number,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
   options: LabelRenderOptions,
   cancelled: () => boolean,
 ): Promise<void> {
@@ -411,7 +423,7 @@ export async function compositeTextRasters(
   spec: LabelTemplateSpec,
   canvas: LabelCanvas,
   scale: number,
-  data: Record<LabelField, string>,
+  data: LabelFieldData,
   options: LabelRenderOptions,
   rasterizeText: RasterizeTextFn,
   cancelled: () => boolean,
@@ -419,21 +431,27 @@ export async function compositeTextRasters(
   const dotPx = (25.4 / spec.dpi) * scale;
   for (const element of rasterTextElements(spec, data)) {
     const text = textOf(element, data);
-    const maxWidthDots =
-      element.maxWidthMm === undefined ? undefined : mmToDots(element.maxWidthMm, spec.dpi);
+    const lot = isLotField(element);
+    const maxWidthDots = lot
+      ? lotNumberLabelWidthDots(element, spec)
+      : element.maxWidthMm === undefined
+        ? undefined
+        : mmToDots(element.maxWidthMm, spec.dpi);
     let raster: RasterResult | null;
     try {
-      raster = await rasterizeText(text, {
-        fontFamily: element.fontFamily ?? PRINT_FONT_FAMILY,
-        ...(element.minFontSizePt === undefined
-          ? {}
-          : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
-        ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
-        fontSizePx: ptToDots(element.fontSizePt, spec.dpi),
-        bold: element.bold ?? false,
-        maxWidthPx: maxWidthDots,
-        maxLines: element.maxLines ?? 1,
-      });
+      raster = lot
+        ? await rasterizeLabelLotNumber(element, spec, text, rasterizeText)
+        : await rasterizeText(text, {
+            fontFamily: element.fontFamily ?? PRINT_FONT_FAMILY,
+            ...(element.minFontSizePt === undefined
+              ? {}
+              : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
+            ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
+            fontSizePx: ptToDots(element.fontSizePt, spec.dpi),
+            bold: element.bold ?? false,
+            maxWidthPx: maxWidthDots,
+            maxLines: element.maxLines ?? 1,
+          });
     } catch {
       raster = null;
     }

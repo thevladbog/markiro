@@ -738,6 +738,8 @@ impl std::fmt::Debug for ChangeItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrgRecord {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub use_lot_numbers: bool,
     pub name: String,
     pub inn: Option<String>,
     pub gln: String,
@@ -895,6 +897,9 @@ pub struct ProductRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabelTemplateRecord {
+    /// The original stock template whose print geometry this variant matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number_source_id: Option<String>,
     pub name: String,
     pub purpose: TemplatePurpose,
     pub enabled: bool,
@@ -1063,6 +1068,8 @@ pub struct BootstrapResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrgProfile {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub use_lot_numbers: bool,
     pub name: String,
     pub inn: Option<String>,
     pub gln: String,
@@ -1075,6 +1082,8 @@ pub struct OrgProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrgProfileUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_lot_numbers: Option<bool>,
     pub name: String,
     #[serde(default)]
     pub inn: Option<String>,
@@ -1212,6 +1221,9 @@ pub struct UserAvatarPut {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PalletSheet {
+    /// The original stock template whose print geometry this variant matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number_source_id: Option<String>,
     pub id: String,
     pub name: String,
     pub enabled: bool,
@@ -1739,6 +1751,9 @@ pub struct ProductUpdate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabelTemplateSummary {
+    /// The original stock template whose print geometry this variant matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number_source_id: Option<String>,
     pub id: String,
     pub name: String,
     pub purpose: TemplatePurpose,
@@ -1758,6 +1773,9 @@ pub struct LabelTemplateSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabelTemplate {
+    /// The original stock template whose print geometry this variant matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number_source_id: Option<String>,
     pub id: String,
     pub name: String,
     pub purpose: TemplatePurpose,
@@ -1975,6 +1993,8 @@ pub mod shift_supports {
     /// shift another device works while its line has a free slot; one that does not still finds
     /// such a shift `shift_busy`, as every build before plan 2b expects.
     pub const MULTI_STATION: &str = "multi-station-v1";
+    /// Reads the frozen lot number and prints it with the shift.
+    pub const LOT_NUMBER: &str = "lot-number";
 }
 
 /// Whether the operator must scan a printed duplicate before the next unit
@@ -2158,6 +2178,8 @@ pub struct DeviceShiftTotals {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeShift {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub id: String,
     pub number: String,
     pub status: ShiftStatus,
@@ -2275,6 +2297,8 @@ pub struct UnitLabelTotals {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftCreate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub product_id: String,
     pub line_id: String,
     pub production_date: String,
@@ -2317,6 +2341,9 @@ pub struct ShiftCreate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftUpdate {
+    /// An explicit null clears the lot number; an absent field keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub lot_number: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2381,6 +2408,8 @@ pub struct ShiftCloseReasonSet {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceShift {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub id: String,
     pub number: String,
     pub status: ShiftStatus,
@@ -2449,6 +2478,8 @@ pub struct DeviceShift {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub product: ShiftSnapshotProduct,
     pub box_template: ShiftSnapshotTemplate,
     /// The SSCC issuer prefix of the organization's GLN when the shift
@@ -2563,6 +2594,8 @@ pub struct DeviceShifts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceShiftCreate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub request_id: String,
     pub product_id: String,
     pub box_template_id: String,
@@ -3260,6 +3293,8 @@ pub enum WarehouseUnavailable {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WarehouseSource {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub kind: WarehouseSubjectKind,
     pub subject_id: String,
     pub identity: String,
@@ -3584,6 +3619,8 @@ pub struct PalletReportRows {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportShift {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot_number: Option<String>,
     pub id: String,
     pub number: String,
     pub production_date: String,

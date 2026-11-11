@@ -63,6 +63,8 @@ export interface RasterizeTextOptions {
   maxLines?: number;
   /** V2 sheets reject overflow; legacy labels keep ellipsis by default. */
   overflow?: "error" | "ellipsis";
+  /** Reserve space for glyph bearings and accents in an exact identifier. */
+  containInk?: boolean;
   lineHeight?: number;
   minFontSizePx?: number;
 }

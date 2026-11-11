@@ -8,6 +8,7 @@ import {
   type ValidationPrint,
 } from "../../host/protocol.js";
 import type { ShiftChange, ShiftInput } from "../../host/requests.js";
+import { isLotNumber, optionalLotNumber } from "../../lib/lot-number.js";
 import {
   plannedQtyRule,
   plannedDateRule,
@@ -38,6 +39,10 @@ export const shiftFieldsSchema = z
     productionDate: productionDateRule,
     /** The working day of the shift («Дата смены»), apart from the production date. */
     plannedDate: plannedDateRule,
+    lotNumber: z.string().refine((value) => {
+      const lot = optionalLotNumber(value);
+      return lot === null || isLotNumber(lot);
+    }, "rules.lotNumber"),
     plannedQty: plannedQtyRule,
     boxCapacity: z.string(),
     boxTemplateId: z.string().min(1, "office.shifts.errors.templateRequired"),
@@ -100,6 +105,7 @@ export const SHIFT_FIELD_ORDER = [
   "printDuplicate",
   "productionDate",
   "plannedDate",
+  "lotNumber",
   "plannedQty",
   "lineId",
   "counterpartyId",
@@ -121,6 +127,7 @@ export function newShiftFields(today: string): ShiftFields {
     lineId: "",
     productionDate: today,
     plannedDate: today,
+    lotNumber: "",
     plannedQty: "",
     boxCapacity: "",
     boxTemplateId: "",
@@ -150,6 +157,7 @@ export function shiftFields(shift: OfficeShift): ShiftFields {
     lineId: shift.lineId,
     productionDate: shift.productionDate,
     plannedDate: shift.plannedDate,
+    lotNumber: shift.lotNumber ?? "",
     plannedQty: shift.plannedQty === null ? "" : String(shift.plannedQty),
     boxCapacity: String(shift.boxCapacity),
     boxTemplateId: shift.boxTemplateId,
@@ -191,6 +199,7 @@ export function toValidationPrint(values: ShiftFields): ValidationPrint {
  */
 export function toShiftInput(values: ShiftFields): ShiftInput {
   const validation = values.mode === "validation";
+  const lotNumber = optionalLotNumber(values.lotNumber);
   const boxCapacity =
     !validation || shiftBoxCapacityRule.safeParse(values.boxCapacity).success
       ? { boxCapacity: Number(values.boxCapacity.trim()) }
@@ -200,6 +209,7 @@ export function toShiftInput(values: ShiftFields): ShiftInput {
     lineId: values.lineId,
     productionDate: values.productionDate,
     plannedDate: values.plannedDate,
+    ...(lotNumber === null ? {} : { lotNumber }),
     boxTemplateId: values.boxTemplateId,
     ...boxCapacity,
     plannedQty: toCount(values.plannedQty),
@@ -243,6 +253,7 @@ export const SHIFT_FIELDS = {
   },
   productionDate: "productionDate",
   plannedDate: "plannedDate",
+  lotNumber: { field: "lotNumber", message: "rules.lotNumber" },
   plannedQty: "plannedQty",
   boxCapacity: "boxCapacity",
   palletBoxCapacity: "palletBoxCapacity",
@@ -260,12 +271,17 @@ export const SHIFT_CONFLICTS = {
  * policy is a planned shift's only (`status`): an open one froze it, and the
  * host refuses a change of it (`conflict` on `shift_status`).
  */
-export function toShiftChange(values: ShiftFields, status: ShiftStatus = "planned"): ShiftChange {
+export function toShiftChange(
+  values: ShiftFields,
+  status: ShiftStatus = "planned",
+  showLotNumber = false,
+): ShiftChange {
   const input = toShiftInput(values);
   return {
     lineId: input.lineId,
     productionDate: input.productionDate,
     ...(input.plannedDate === undefined ? {} : { plannedDate: input.plannedDate }),
+    ...(status === "planned" && showLotNumber ? { lotNumber: input.lotNumber ?? null } : {}),
     boxTemplateId: input.boxTemplateId,
     ...(input.boxCapacity === undefined ? {} : { boxCapacity: input.boxCapacity }),
     plannedQty: input.plannedQty,

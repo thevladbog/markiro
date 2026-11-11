@@ -58,6 +58,7 @@ export function unitLabelFields(
     closedAt: acceptedAt,
     productionDate: shift.copy.productionDate,
     shiftNumber: shift.copy.number,
+    lotNumber: shift.snapshot.lotNumber ?? null,
   });
   return { ...base, "km.code": km.raw, qty: "1", sscc: "" };
 }

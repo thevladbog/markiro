@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DomainError } from "../errors.js";
+import { LOT_NUMBER_LABEL_FIELD } from "./model.js";
 
 export const PALLET_SHEET_FOOTER_CAPABILITY = "pallet-sheet-footer-v1";
 export const PALLET_SHEET_MAX_NODES = 200;
@@ -9,6 +10,7 @@ export const SSCC_SYMBOL_MODULES = 156;
 export const GS1_128_QUIET_MODULES = 10;
 export const GS1_128_MAX_WIDTH_MM = 165.1;
 
+/** Field palette for the existing cloud sheet editor. */
 export const PALLET_SHEET_FIELDS = [
   "organization.name",
   "product.printName",
@@ -20,8 +22,8 @@ export const PALLET_SHEET_FIELDS = [
   "itemCount",
   "shiftNumber",
 ] as const;
-export type PalletSheetField = (typeof PALLET_SHEET_FIELDS)[number];
-const field = z.enum(PALLET_SHEET_FIELDS);
+const field = z.enum([...PALLET_SHEET_FIELDS, LOT_NUMBER_LABEL_FIELD]);
+export type PalletSheetField = z.infer<typeof field>;
 const mm = z.number().min(0).max(300);
 const positiveMm = z.number().positive().max(300);
 const condition = z.strictObject({ field, op: z.literal("present") });
@@ -60,6 +62,7 @@ const fieldNode = z.strictObject({
   kind: z.literal("field"),
   field,
   ...textStyle,
+  minFontSizePt: z.number().min(4).max(72).optional(),
   underline: underlineSchema.optional(),
 });
 const rowFieldNode = z.strictObject({
@@ -68,6 +71,7 @@ const rowFieldNode = z.strictObject({
   label: z.string().min(1).max(200),
   field,
   ...textStyle,
+  minFontSizePt: z.number().min(4).max(72).optional(),
   labelFontSizePt: z.number().min(4).max(72).optional(),
   gapMm: mm.optional(),
 });
@@ -320,4 +324,15 @@ export function palletSheetRequiresFooterCapability(spec: PalletSheetSpecV2): bo
         ("children" in node && hasUnderline(node.children)),
     );
   return spec.footer.caption !== undefined || hasUnderline(spec.body);
+}
+
+export function palletSheetUsesLotNumber(spec: PalletSheetSpecV2): boolean {
+  const usesLot = (nodes: SheetNode[]): boolean =>
+    nodes.some(
+      (node) =>
+        ((node.kind === "field" || node.kind === "field_row") &&
+          node.field === LOT_NUMBER_LABEL_FIELD) ||
+        ("children" in node && usesLot(node.children)),
+    );
+  return usesLot(spec.body);
 }

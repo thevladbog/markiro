@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ApiProperty, type SchemaObject } from "@nestjs/swagger";
 import {
   DomainError,
-  labelTemplateSpecSchema,
+  cloudLabelTemplateSpecSchema,
   parseStoredLabelTemplate,
   isPalletSheetSpec,
   palletSheetSpecSchema,
@@ -28,7 +28,7 @@ function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): StoredLabelT
   try {
     if (Buffer.byteLength(JSON.stringify(spec) ?? "", "utf8") > 256 * 1024)
       throw new DomainError("LABEL_CODE_TOO_LARGE", "Template JSON exceeds 256 KiB");
-    return parseStoredLabelTemplate(spec);
+    return parseStoredLabelTemplate(spec, cloudLabelTemplateSpecSchema);
   } catch (error) {
     if (!(error instanceof DomainError)) {
       throw error;
@@ -210,14 +210,14 @@ const productGroupCodesOpenApiSchema = {
 } as const;
 
 /**
- * Generated from the domain's own `labelTemplateSpecSchema`, so the full
+ * Generated from the domain's own `cloudLabelTemplateSpecSchema`, so the full
  * element model (text | field | barcode | line | box discriminated union)
  * stays in lockstep with what `parseLabelTemplate` actually accepts. The
  * schema's one cross-element `superRefine` invariant (unique element ids)
  * is not representable in JSON Schema, hence the description.
  */
 const labelTemplateSpecOpenApiSchema: SchemaObject = {
-  ...zodApiSchema(labelTemplateSpecSchema),
+  ...zodApiSchema(cloudLabelTemplateSpecSchema),
   description:
     "Printer-agnostic label layout. Every element's `id` must be unique within the template " +
     "(enforced server-side; not expressible in JSON Schema).",

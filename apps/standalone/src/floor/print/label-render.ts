@@ -4,7 +4,7 @@ import {
   type PrinterOutputMode,
   palletLabelFields,
   withPrinterDpi,
-  type LabelField,
+  type LabelFieldData,
   type LabelTemplateSpec,
   type MonoBitmap,
   type RasterizeTextFn,
@@ -26,7 +26,7 @@ export interface LabelPrinter {
 }
 
 /** A label's fields, as the domain gives them for its template. */
-export type LabelFields = Record<LabelField, string>;
+export type LabelFields = LabelFieldData;
 
 /**
  * Turns an emitter's output into its exact bytes, one code unit per byte (the
@@ -67,6 +67,7 @@ export function boxLabelData(
     closedAt: box.closedAt,
     productionDate: shift.copy.productionDate,
     shiftNumber: shift.copy.number,
+    lotNumber: shift.snapshot.lotNumber ?? null,
   });
 }
 
@@ -97,6 +98,7 @@ export function palletLabelData(
     closedAt: pallet.closedAt,
     productionDate: shift.copy.productionDate,
     shiftNumber: shift.copy.number,
+    lotNumber: shift.snapshot.lotNumber ?? null,
   });
 }
 

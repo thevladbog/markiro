@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LabelTemplateSpec, MonoBitmap } from "@markiro/domain";
-import { Alert } from "@markiro/ui";
+import {
+  LOT_NUMBER_LABEL_FIELD,
+  labelTemplateUsesField,
+  type LabelTemplateSpec,
+  type MonoBitmap,
+} from "@markiro/domain";
+import { Alert, Checkbox } from "@markiro/ui";
 
 import type { TemplatePurpose } from "../../host/protocol.js";
 import type { LabelFontFamily } from "../../labels/font-coverage.js";
@@ -50,7 +55,15 @@ export function PreviewPane({ spec, purpose, logo = null }: PreviewPaneProps) {
   const { context, rasterizeText, checkFamilyCoverage } = useLabelRendering();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [coverage, setCoverage] = useState<Coverage>("ok");
-  const data = labelSampleData(purpose);
+  const [showLotNumber, setShowLotNumber] = useState(true);
+  const usesLotNumber = labelTemplateUsesField(spec, LOT_NUMBER_LABEL_FIELD);
+  const data = useMemo(
+    () =>
+      showLotNumber && usesLotNumber
+        ? { ...labelSampleData(purpose), [LOT_NUMBER_LABEL_FIELD]: "0042Бк07A" }
+        : labelSampleData(purpose),
+    [purpose, showLotNumber, usesLotNumber],
+  );
   const options = useMemo(() => ({ ...labelRenderOptions(purpose), logo }), [purpose, logo]);
   const needsCheck = rasterTextElements(spec, data).length > 0;
 
@@ -92,6 +105,13 @@ export function PreviewPane({ spec, purpose, logo = null }: PreviewPaneProps) {
   const shown = needsCheck ? coverage : "ok";
   return (
     <figure className="template-preview">
+      {usesLotNumber && (
+        <Checkbox
+          label={t("office.labelFields.previewLotNumber")}
+          checked={showLotNumber}
+          onCheckedChange={setShowLotNumber}
+        />
+      )}
       <canvas
         ref={canvasRef}
         className="template-preview__label"

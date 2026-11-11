@@ -27,6 +27,7 @@ export interface SheetPreviewProps {
   spec: PalletSheetSpecV2;
   /** The canvas's accessible name. */
   label: string;
+  lotNumber?: string | null;
 }
 
 /**
@@ -36,7 +37,7 @@ export interface SheetPreviewProps {
  * INN from the copies and its logo as the newest shift snapshot froze it, else
  * the bundled Markiro logo.
  */
-export function SheetPreview({ local, pairing, spec, label }: SheetPreviewProps) {
+export function SheetPreview({ local, pairing, spec, label, lotNumber = null }: SheetPreviewProps) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
@@ -53,13 +54,13 @@ export function SheetPreview({ local, pairing, spec, label }: SheetPreviewProps)
       if (organization === undefined) throw new Error("the copies hold no organization");
       const own = await readKnownOrganizationLogo(local, { hostId, deviceId }).catch(() => null);
       const bitmap = own ?? (await loadBundledMarkiroLogo());
-      const raster = await renderSheetRaster(
-        spec,
-        sampleSheetContext(
+      const raster = await renderSheetRaster(spec, {
+        ...sampleSheetContext(
           organization,
           sheetLogoOf(bitmap, own === null ? "markiro" : "organization"),
         ),
-      );
+        lotNumber,
+      });
       if (!cancelled && canvasRef.current !== null)
         paintMonoRaster(canvasRef.current, raster, FACTOR);
     };
@@ -70,7 +71,7 @@ export function SheetPreview({ local, pairing, spec, label }: SheetPreviewProps)
     return () => {
       cancelled = true;
     };
-  }, [spec, local, hostId, deviceId]);
+  }, [spec, local, hostId, deviceId, lotNumber]);
 
   return (
     <>

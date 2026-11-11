@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LabelField, LabelTemplateSpec } from "@markiro/domain";
+import type { LabelFieldData, LabelTemplateSpec } from "@markiro/domain";
 
 import type { TemplatePurpose } from "../../host/protocol.js";
 import {
@@ -20,6 +20,7 @@ export interface TemplatePreviewProps {
   purpose: Extract<TemplatePurpose, "box" | "pallet">;
   /** The product of the new shift: its name and GTIN replace the sample's. */
   product: { name: string; gtin14: string };
+  lotNumber?: string | null;
 }
 
 /**
@@ -29,18 +30,19 @@ export interface TemplatePreviewProps {
  * data and the shift's product put in, so the operator sees the layout, not
  * a print. Where the webview gives no canvas the box stays empty.
  */
-export function TemplatePreview({ spec, purpose, product }: TemplatePreviewProps) {
+export function TemplatePreview({ spec, purpose, product, lotNumber }: TemplatePreviewProps) {
   const { t } = useTranslation();
   const { context, rasterizeText } = useLabelRendering();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const data = useMemo<Record<LabelField, string>>(
+  const data = useMemo<LabelFieldData>(
     () => ({
       ...labelSampleData(purpose),
       "product.name": product.name,
       "product.printName": product.name,
       "product.gtin": product.gtin14,
+      ...(lotNumber == null ? {} : { "shift.lotNumber": lotNumber }),
     }),
-    [purpose, product.gtin14, product.name],
+    [purpose, product.gtin14, product.name, lotNumber],
   );
   const options = useMemo(() => labelRenderOptions(purpose), [purpose]);
 

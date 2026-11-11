@@ -3,8 +3,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
 
-import { Alert, Button, Card, Combobox, DefinitionGrid, Input, PageHeader } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Combobox,
+  DefinitionGrid,
+  Input,
+  PageHeader,
+} from "@markiro/ui";
 
 import type { OrgProfile } from "../../host/protocol.js";
 import {
@@ -13,7 +23,6 @@ import {
   orgFieldsSchema,
   THIRTEEN_DIGITS,
   toOrgInput,
-  type OrgFields,
 } from "../../lib/rules.js";
 import { TIME_ZONE_OPTIONS } from "../../lib/time-zones.js";
 import { useCan } from "../access.js";
@@ -21,6 +30,9 @@ import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.j
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 import { OrgLogoCard } from "./OrgLogoCard.js";
+
+const profileFieldsSchema = orgFieldsSchema.extend({ useLotNumbers: z.boolean() });
+type ProfileFields = z.input<typeof profileFieldsSchema>;
 
 /** The organization profile (spec §5.5): administrators edit it, technologists read it. */
 export function OrgProfilePage() {
@@ -82,8 +94,13 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
-  const update = useOfficeMutation((api, token, values: OrgFields) =>
-    api.updateOrg(token, { ...toOrgInput(values), expectedRev: profile.rev }),
+  const useLotNumbers = profile.useLotNumbers ?? false;
+  const update = useOfficeMutation((api, token, values: ProfileFields) =>
+    api.updateOrg(token, {
+      ...toOrgInput(values),
+      expectedRev: profile.rev,
+      ...(values.useLotNumbers === useLotNumbers ? {} : { useLotNumbers: values.useLotNumbers }),
+    }),
   );
   const {
     register,
@@ -91,14 +108,15 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
     handleSubmit,
     setError,
     formState: { errors, isDirty, isSubmitting },
-  } = useForm<OrgFields>({
-    resolver: zodResolver(orgFieldsSchema),
+  } = useForm<ProfileFields>({
+    resolver: zodResolver(profileFieldsSchema),
     defaultValues: {
       orgName: profile.name,
       inn: profile.inn ?? "",
       gln: profile.gln,
       gs1Prefixes: profile.gs1Prefixes.join(", "),
       timeZone: profile.timeZone,
+      useLotNumbers,
     },
   });
   const gln = useWatch({ control, name: "gln" }).trim();
@@ -114,7 +132,7 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
     try {
       saved = await update.mutateAsync(values);
     } catch (error) {
-      const outcome = writeFailure(error, ORG_HOST_FIELDS);
+      const outcome = writeFailure(error, { ...ORG_HOST_FIELDS, useLotNumbers: "useLotNumbers" });
       if (outcome.kind === "field") {
         setError(outcome.field, { type: "server", message: outcome.message });
       } else {
@@ -178,6 +196,20 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
           />
         )}
       />
+      <Controller
+        control={control}
+        name="useLotNumbers"
+        render={({ field }) => (
+          <Checkbox
+            name={field.name}
+            label={t("office.org.useLotNumbers")}
+            hint={t("office.org.useLotNumbersHint")}
+            checked={field.value}
+            onCheckedChange={field.onChange}
+            {...fieldError(errors.useLotNumbers?.message)}
+          />
+        )}
+      />
       <div className="standalone-form__actions">
         <Button type="submit" loading={isSubmitting} disabled={!isDirty}>
           {t("office.common.save")}
@@ -210,6 +242,12 @@ function OrgProfileView({ profile }: { profile: OrgProfile }) {
             description: profile.timeZone.replaceAll("_", " "),
           },
         ]}
+      />
+      <Checkbox
+        label={t("office.org.useLotNumbers")}
+        hint={t("office.org.useLotNumbersHint")}
+        checked={profile.useLotNumbers ?? false}
+        disabled
       />
       <p className="office-note">{t("office.common.readOnly")}</p>
     </>

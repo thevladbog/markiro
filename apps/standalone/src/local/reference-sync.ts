@@ -124,11 +124,11 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
       upsert:
         "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, " +
         "default_box_template_id, default_pallet_template_id, default_duplicate_template_id, " +
-        "rev) " +
+        "use_lot_numbers, rev) " +
         "SELECT r.value ->> 'id', r.value ->> 'name', r.value ->> 'inn', r.value ->> 'gln', " +
         "r.value ->> 'gs1Prefixes', r.value ->> 'timeZone', r.value ->> 'defaultBoxTemplateId', " +
         "r.value ->> 'defaultPalletTemplateId', r.value ->> 'defaultDuplicateTemplateId', " +
-        "r.value ->> 'rev' " +
+        "coalesce(r.value ->> 'useLotNumbers', 0), r.value ->> 'rev' " +
         "FROM json_each(?) AS r " +
         notQuarantinedNewer("org_profile") +
         " " +
@@ -138,7 +138,7 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "default_box_template_id = excluded.default_box_template_id, " +
         "default_pallet_template_id = excluded.default_pallet_template_id, " +
         "default_duplicate_template_id = excluded.default_duplicate_template_id, " +
-        "rev = excluded.rev " +
+        "use_lot_numbers = excluded.use_lot_numbers, rev = excluded.rev " +
         "WHERE excluded.rev > ref_org.rev",
     },
   ],
@@ -246,15 +246,16 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
       // `->>` yields the categories and the layout as JSON text, and `null`
       // categories (every category) as NULL.
       upsert:
-        "INSERT INTO ref_templates (id, name, purpose, enabled, category_codes, stock, spec, rev) " +
+        "INSERT INTO ref_templates (id, name, purpose, enabled, category_codes, stock, spec, lot_number_source_id, rev) " +
         "SELECT r.value ->> 'id', r.value ->> 'name', r.value ->> 'purpose', " +
         "r.value ->> 'enabled', r.value ->> 'chzProductGroupCodes', r.value ->> 'stock', " +
-        "r.value ->> 'spec', r.value ->> 'rev' " +
+        "r.value ->> 'spec', r.value ->> 'lotNumberSourceId', r.value ->> 'rev' " +
         "FROM json_each(?) AS r " +
         notQuarantinedNewer("label_templates") +
         " ON CONFLICT (id) DO UPDATE SET name = excluded.name, purpose = excluded.purpose, " +
         "enabled = excluded.enabled, category_codes = excluded.category_codes, " +
-        "stock = excluded.stock, spec = excluded.spec, rev = excluded.rev " +
+        "stock = excluded.stock, spec = excluded.spec, lot_number_source_id = excluded.lot_number_source_id, " +
+        "rev = excluded.rev " +
         "WHERE excluded.rev > ref_templates.rev",
     },
   ],
@@ -283,7 +284,7 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
  * matches, every device syncs from zero, and records an older build
  * quarantined or kept differently come again.
  */
-const SYNC_SCHEMA_VERSION = 5;
+const SYNC_SCHEMA_VERSION = 6;
 
 /**
  * The feed entities this build acts on but keeps no copy of (plan ДЗГ):
@@ -301,7 +302,7 @@ const releaseBoxId = z.uuid();
  * This build's copies and actions, in `sync_state.entity_set`: the feed
  * entities it keeps (derived from `ENTITIES`, so a new entity cannot update
  * that map and forget this value, or the reverse), the ones it only acts on
- * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`; nine entities and `v5`
+ * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`; nine entities and `v6`
  * today (`test/reference-sync.test.ts` pins the text). A build that keeps
  * other entities, or reads them differently, finds another value there and
  * syncs from zero: records the old build skipped or quarantined would never

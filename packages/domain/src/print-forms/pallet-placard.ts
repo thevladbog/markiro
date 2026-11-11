@@ -1,4 +1,6 @@
+import { DomainError } from "../errors.js";
 import { shelfLifeExpiryDate } from "../labels/shelf-life.js";
+import { ptToMm, wrapTextToWidthStrict } from "../labels/wrap.js";
 import { brandLogo, escapeHtml, ssccBarcode, ssccHri, type ReportOrg } from "./contents-report.js";
 
 /**
@@ -28,6 +30,7 @@ export interface PalletPlacardData {
   status: "open" | "closed" | "disassembled";
   productName: string | null;
   gtin14: string | null;
+  lotNumber?: string | null;
   shelfLifeDays: number | null;
   org: ReportOrg | null;
   /** Every box that ever joined, disassembled ones included. */
@@ -244,6 +247,28 @@ function dateTable(rows: PlacardDateRow[], format: PlacardFormat): string {
   return `<table class="pl-dates">${head}${body}${total}</table>`;
 }
 
+function renderLotNumber(lot: string, size: PageSize): string {
+  const availableMm = size.widthMm - 2 * size.marginMm;
+  for (let fontPt = Math.min(12, size.tablePt); fontPt >= 8; fontPt--) {
+    // The HTML form has no font metrics. Reserve 0.75 em per monospace
+    // glyph to leave room for the browser's bundled or fallback font.
+    const width = (text: string) => text.length * ptToMm(fontPt) * 0.75;
+    try {
+      const lines = wrapTextToWidthStrict(lot, width, availableMm, 2);
+      const value = lines
+        .map((line) => `<span style="display: block">${escapeHtml(line)}</span>`)
+        .join("");
+      return `<div class="pl-lot-number"><span class="pl-figure-label">Номер партии</span><span class="mono" style="display: block; font-size: ${fontPt}pt; line-height: 1.1; overflow-wrap: anywhere">${value}</span></div>\n  `;
+    } catch (error) {
+      if (!(error instanceof DomainError && error.code === "LABEL_TEXT_OVERFLOW")) throw error;
+    }
+  }
+  throw new DomainError(
+    "LABEL_LOT_NUMBER_OVERFLOW",
+    "The complete lot number does not fit in the pallet placard",
+  );
+}
+
 /**
  * One placard page. The product-name size is set inline because it depends
  * on THIS pallet's name length, and a shift document stacks pages for
@@ -283,7 +308,7 @@ function renderPlacardPage(data: PalletPlacardData, format: PlacardFormat): stri
     <div class="pl-figure"><span class="pl-figure-label">Коробов</span><span class="pl-figure-value">${boxCount}</span></div>
     <div class="pl-figure"><span class="pl-figure-label">Единиц</span><span class="pl-figure-value">${unitCount}</span></div>
   </div>
-  ${dateTable(rows, format)}
+  ${data.lotNumber ? renderLotNumber(data.lotNumber, size) : ""}${dateTable(rows, format)}
   <div class="pl-code">${barcode}</div>
   <footer class="pl-footer">${footer}</footer>
 </section>`;

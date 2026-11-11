@@ -2,7 +2,8 @@ import { DomainError } from "../errors.js";
 import { isValidSscc, formatSsccHri } from "../gs1/sscc.js";
 import { addCalendarDays, shelfLifeExpiryDate } from "./shelf-life.js";
 import { formatLabelDate } from "./date.js";
-import { sampleLabelData, mmToDots } from "./model.js";
+import { LOT_NUMBER_LABEL_FIELD, sampleLabelData, mmToDots } from "./model.js";
+import { rasterizeCompleteLotNumber } from "./lot-number-raster.js";
 import { renderMonoLabel } from "./mono-render.js";
 import { encodeMonoRaster, type MonoRaster } from "./mono-raster.js";
 import {
@@ -41,6 +42,7 @@ export interface PalletSheetContext {
   boxCount: number;
   itemCount: number;
   shiftNumber: string | null;
+  lotNumber?: string | null;
   organizationName: string;
   organizationInn?: string | null;
   logo: SheetLogo;
@@ -169,6 +171,7 @@ function contextFields(context: PalletSheetContext): Record<PalletSheetField, st
     boxCount: String(context.boxCount),
     itemCount: String(context.itemCount),
     shiftNumber: context.shiftNumber ?? "",
+    [LOT_NUMBER_LABEL_FIELD]: context.lotNumber ?? "",
   };
 }
 export interface SheetElementRegion {
@@ -257,15 +260,33 @@ export async function renderPalletSheet(
     if (node.kind === "text" || node.kind === "field" || node.kind === "field_row") {
       const value = node.kind === "text" ? node.text : fields[node.field];
       if (value === "" && node.kind !== "text") return { width, height: 0, paints: [] };
-      const bitmap = await paintText(
-        node.id,
-        value,
-        width,
-        node.fontSizePt,
-        node.maxLines ?? 1,
-        node.fontFamily,
-        node.bold,
-      );
+      const lot = node.kind !== "text" && node.field === LOT_NUMBER_LABEL_FIELD;
+      const bitmap = lot
+        ? bitmapFromText(
+            await rasterizeCompleteLotNumber(
+              node.id,
+              value,
+              rasterizeText,
+              {
+                fontFamily: node.fontFamily ?? "IBM Plex Mono",
+                fontSizePx: (node.fontSizePt * 300) / 72,
+                bold: node.bold ?? false,
+                maxWidthPx: width,
+                maxLines: node.maxLines ?? 2,
+              },
+              ((node.minFontSizePt ?? node.fontSizePt) * 300) / 72,
+              Math.ceil(((node.fontSizePt * 300) / 72) * 1.5) * (node.maxLines ?? 2),
+            ),
+          )
+        : await paintText(
+            node.id,
+            value,
+            width,
+            node.fontSizePt,
+            node.maxLines ?? 1,
+            node.fontFamily,
+            node.bold,
+          );
       const align = (w: number) =>
         node.align === "right"
           ? width - w

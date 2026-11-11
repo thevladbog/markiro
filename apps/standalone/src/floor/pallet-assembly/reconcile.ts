@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { lotNumberSchema } from "../../host/protocol.js";
 import type { PalletAssemblyCloseIssue } from "../../host/pallet-assembly.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
@@ -39,12 +40,14 @@ const closePayload = z.object({
     openedAt: z.string(),
     closedAt: z.string(),
     boxCount: z.number().int().positive(),
+    lotNumber: lotNumberSchema,
   }),
 });
 const boxTotals = z.object({
   boxes: z.number().int().nonnegative(),
   items: z.number().int().nonnegative(),
   date: z.string().nullable(),
+  lot: z.string().nullable(),
 });
 
 /** Office evidence chooses the physical members. The original event and label never change. */
@@ -108,7 +111,9 @@ export async function reconcilePalletAssemblyCloseIssue(
   const [totals] = await local.query(
     "SELECT count(*) AS boxes, coalesce(sum(m.item_count), 0) AS items, " +
       "CASE WHEN count(m.production_date) = count(*) AND min(m.production_date) = max(m.production_date) " +
-      "THEN min(m.production_date) ELSE NULL END AS date " +
+      "THEN min(m.production_date) ELSE NULL END AS date, " +
+      "CASE WHEN count(m.lot_number) = count(*) AND min(m.lot_number) = max(m.lot_number) " +
+      "THEN min(m.lot_number) ELSE NULL END AS lot " +
       "FROM pallet_assembly_members m JOIN pallet_assembly_outbox o ON o.id = m.add_id " +
       "WHERE m.pallet_id = ? AND m.host_id = ? AND m.device_id = ? AND m.removed_at IS NULL " +
       "AND o.outcome = 'accepted' AND m.sscc IN (SELECT value FROM json_each(?))",
@@ -119,13 +124,20 @@ export async function reconcilePalletAssemblyCloseIssue(
   // issue intact until all of the selected members are known.
   if (totals === undefined || totals.boxes !== boxes.length) return false;
 
+  const approvedLot = issue.approvedLotNumber === undefined ? totals.lot : issue.approvedLotNumber;
+  const lotSupported =
+    issue.approvedLotNumber !== undefined || original.data.lotNumber !== undefined;
   const id = crypto.randomUUID();
   const kind = "warehouse_pallet_closed";
   const payload = JSON.stringify({
     id,
     kind,
     operatorId: original.operatorId,
-    data: { ...original.data, boxCount: totals.boxes },
+    data: {
+      ...original.data,
+      boxCount: totals.boxes,
+      ...(lotSupported ? { lotNumber: approvedLot } : {}),
+    },
   });
   return applyAssemblyChange(local, [
     {
@@ -137,7 +149,7 @@ export async function reconcilePalletAssemblyCloseIssue(
       sql:
         "INSERT INTO pallet_assembly_outbox (id, host_id, device_id, pallet_id, kind, payload, created_at, " +
         "priority_seq, replaces_id, correction_label, correction_boxes) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, " +
-        "json_set(label, '$.boxCount', ?, '$.itemCount', ?, '$.productionDate', ?), ? " +
+        "json_set(label, '$.boxCount', ?, '$.itemCount', ?, '$.productionDate', ?, '$.lotNumber', ?), ? " +
         "FROM pallet_assembly_pallets WHERE id = ? AND host_id = ? AND device_id = ?",
       values: [
         id,
@@ -151,6 +163,7 @@ export async function reconcilePalletAssemblyCloseIssue(
         totals.boxes,
         totals.items,
         totals.date,
+        approvedLot,
         boxList,
         issue.palletId,
         ...owner,
