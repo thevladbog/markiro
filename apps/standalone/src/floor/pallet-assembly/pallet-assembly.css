@@ -267,8 +267,19 @@
   white-space: nowrap;
 }
 
-.pallet-assembly__manual .mk-field {
-  width: min(100%, 36rem);
+.pallet-assembly__manual {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 34%, 372px);
+  align-items: start;
+  align-content: start;
+  gap: var(--sp-5);
+}
+
+.pallet-assembly__manual-entry {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+  max-width: 36rem;
 }
 
 .pallet-assembly__inline-actions {
@@ -313,12 +324,22 @@
 }
 
 @media (max-height: 720px) {
+  .pallet-assembly__manual {
+    padding: var(--sp-4);
+  }
+
   .pallet-assembly__count strong {
     font: var(--floor-counter-sm);
   }
 
   .pallet-assembly__recent .pallet-assembly__boxes li:not(:first-child) {
     display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .pallet-assembly__manual {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

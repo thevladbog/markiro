@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { FloorSession } from "../../app/shell.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
+import { NumericKeypad } from "../kit/NumericKeypad.js";
 import { Glyph } from "../kit/StatusIcons.js";
 import type { RenderLabel } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
@@ -70,6 +71,7 @@ type Panel =
 
 type LoadedAssembly = { view: PalletAssemblyView; settings: WorkstationSettings };
 type AssemblyLoad = { kind: "loading" | "error" } | { kind: "ready"; data: LoadedAssembly };
+const SSCC_LENGTH = 18;
 
 function thermalPrinter(settings: WorkstationSettings): PrinterProfile | null {
   const assigned = resolvePrinter(settings, "pallet");
@@ -494,6 +496,11 @@ export function PalletAssemblyScreen({
       );
   } else if (panel.kind === "manual") {
     title = t("manualTitle");
+    const editManual = (value: string) => {
+      touch();
+      setManual(value);
+      setManualInvalid(false);
+    };
     body = (
       <form
         ref={manualForm}
@@ -503,7 +510,7 @@ export function PalletAssemblyScreen({
           event.preventDefault();
           action(() => {
             const entered = manual.trim();
-            if (!/^\d{18}$/.test(entered) || !isValidSscc(entered)) {
+            if (!isValidSscc(entered)) {
               setManualInvalid(true);
               return;
             }
@@ -518,20 +525,29 @@ export function PalletAssemblyScreen({
           }
         }}
       >
-        <Glyph name="keyboard" size={32} />
-        <Input
-          size="floor"
-          label={t("boxSscc")}
-          hint={t("manualHelp")}
-          {...(manualInvalid ? { error: t("manualInvalid") } : {})}
-          mono
-          inputMode="numeric"
-          maxLength={18}
+        <div className="pallet-assembly__manual-entry">
+          <Glyph name="keyboard" size={32} />
+          <Input
+            size="floor"
+            label={t("boxSscc")}
+            hint={t("manualHelp")}
+            {...(manualInvalid ? { error: t("manualInvalid") } : {})}
+            mono
+            inputMode="none"
+            maxLength={SSCC_LENGTH}
+            value={manual}
+            onChange={(event) => editManual(event.target.value)}
+          />
+        </div>
+        <NumericKeypad
           value={manual}
-          onChange={(event) => {
-            setManual(event.target.value);
-            setManualInvalid(false);
-          }}
+          onChange={editManual}
+          maxLength={SSCC_LENGTH}
+          leadingZero
+          disabled={busy}
+          ariaLabel={all("floor.warehouse.manualKeypad")}
+          clearLabel={all("floor.warehouse.manualClear")}
+          backspaceLabel={all("floor.warehouse.manualBackspace")}
         />
       </form>
     );
