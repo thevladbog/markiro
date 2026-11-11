@@ -60,6 +60,30 @@ class PrinterTransportTest {
     }
 
     @Test
+    fun aTsplBluetoothConnectionStaysOpenAfterTheFinalFlush() = runTest {
+        var lastFlushAt = 0L
+        var closedAt = 0L
+        val connection = object : PrinterConnection {
+            override val input = ByteArrayInputStream(byteArrayOf())
+            override val output = object : ByteArrayOutputStream() {
+                override fun flush() {
+                    lastFlushAt = System.nanoTime()
+                }
+            }
+            override fun close() {
+                closedAt = System.nanoTime()
+            }
+        }
+        val printer = printer("AA:BB:CC:DD:EE:FF", language = "tspl").copy(transport = "bluetooth")
+        val document = ByteArray(1024) { 'x'.code.toByte() } + "PRINT 1\r\n".toByteArray()
+
+        assertEquals(SendOutcome.Delivered, transport { connection }.send(printer, document))
+        assertTrue(document.contentEquals(connection.output.toByteArray()))
+        val openAfterFlushMs = TimeUnit.NANOSECONDS.toMillis(closedAt - lastFlushAt)
+        assertTrue("Connection closed $openAfterFlushMs ms after the final flush", openAfterFlushMs >= 1_150)
+    }
+
+    @Test
     fun aLinkThatBreaksPartwayThroughIsUnknownNotRefused() = runTest {
         val connection = FakeConnection(byteArrayOf(), failAfter = 3)
         val outcome = transport { connection }.send(printer("host:9100"), "^XA^XZ".toByteArray())
