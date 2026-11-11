@@ -8,6 +8,7 @@ import type { OfficeWarehousePallet } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { instantFormat } from "./CodeCard.js";
+import { WarehousePalletIssues } from "./WarehousePalletIssues.js";
 
 const COUNT = new Intl.NumberFormat("ru");
 
@@ -94,6 +95,7 @@ export function WarehousePalletsSection({ zone }: { zone: string }) {
     <section aria-label={t("office.warehousePallets.title")} className="office-stack">
       <h2>{t("office.warehousePallets.title")}</h2>
       <p>{t("office.warehousePallets.hint")}</p>
+      <WarehousePalletIssues />
       {content()}
     </section>
   );

@@ -17,6 +17,8 @@ import {
   type ShellAction,
   type SyncState,
 } from "../app/shell.js";
+import type { HostApi } from "../host/api.js";
+import { HostError } from "../host/client.js";
 import type {
   DeviceLicense,
   WarehouseLookup,
@@ -58,6 +60,14 @@ import { createWorkGate } from "./work-gate.js";
 import { playSignalTone } from "./work/signal-sound.js";
 import { useScannerIndicator } from "./scanner-indicator.js";
 import { WarehouseScreen } from "./warehouse/WarehouseScreen.js";
+import { WarehouseOperations } from "./warehouse/WarehouseOperations.js";
+import { PalletAssemblyScreen } from "./pallet-assembly/PalletAssemblyScreen.js";
+import { assemblyIssuerPrefix } from "./pallet-assembly/assembly-print.js";
+import { createPalletAssemblyStore } from "./pallet-assembly/store.js";
+import { applyPalletRegistryPage, readPalletRegistryState } from "./pallet-assembly/registry.js";
+import { syncPalletBoxRegistry } from "./pallet-assembly/registry-sync.js";
+import { PALLET_EXTENSION } from "./pallets/pallets.js";
+import { createBlockSupply } from "./work/block-supply.js";
 import { WorkScreen, type WorkScreenProps } from "./work/WorkScreen.js";
 
 /**
@@ -72,7 +82,9 @@ type Leave =
   | { kind: "line_changed" }
   | { kind: "setup"; shift: WorkShift }
   // From the warehouse reprint to the workstation setup, and back to its session (plan СКЛ).
-  | { kind: "warehouse_setup" };
+  | { kind: "warehouse_setup" }
+  | { kind: "pallet_assembly_setup" }
+  | { kind: "warehouse_menu" };
 
 /**
  * The floor's screens; in the work of a shift, `officeClosed` says the
@@ -84,7 +96,9 @@ type FloorView =
   | { kind: "work"; shift: WorkShift; leaving: boolean; officeClosed: boolean }
   // The warehouse reprint (plan СКЛ): no shift, its work gated like a shift's.
   | { kind: "warehouse"; leaving: boolean }
-  | { kind: "setup"; back: WorkShift | "warehouse" | null }
+  | { kind: "warehouse_menu" }
+  | { kind: "pallet_assembly"; leaving: boolean }
+  | { kind: "setup"; back: WorkShift | "warehouse" | "pallet_assembly" | null }
   // The queue of what was not sent (plan ОЧ).
   | { kind: "queue" };
 
@@ -119,6 +133,7 @@ export interface FloorAppProps {
   requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
   /** `HostApi.warehouseLookup` (plan СКЛ); none — the list offers no warehouse reprint. */
   warehouseLookup?: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
+  getBoxRegistry?: HostApi["getBoxRegistry"];
   /** `HostApi.getDevicePalletSheets`: the A4 sheets of a pallet's warehouse reprint (beta 3.2); none — no sheet is offered. */
   palletSheets?: (productId?: string) => Promise<PalletSheets>;
   /** The link's delivery of the outbox, asked after every local write (`useHostLink`). */
@@ -184,6 +199,7 @@ export function FloorApp({
   checkCode,
   requestBlock,
   warehouseLookup,
+  getBoxRegistry,
   palletSheets,
   requestFacts,
   requestLeaves,
@@ -205,6 +221,7 @@ export function FloorApp({
   // The scanner as the header says it: the warehouse reprint makes the typed code its main way in when it is away.
   const scannerState = useScannerIndicator(hardware.watchScanners);
   const [view, setView] = useState<FloorView>({ kind: "list" });
+  const [palletHostUnsupported, setPalletHostUnsupported] = useState(false);
   // How many times an entry was turned back on the list: it reads its copies
   // again, for those it showed are the ones the entry found out of date.
   const [turnedBack, setTurnedBack] = useState(0);
@@ -219,9 +236,9 @@ export function FloorApp({
   }, []);
   // The view and the callbacks as the last commit has them, for timers and
   // answers that land later.
-  const current = useRef({ view, onSignOut, dispatch, requestLeaves, requestShifts });
+  const current = useRef({ view, onSignOut, dispatch, requestLeaves, requestShifts, online });
   useLayoutEffect(() => {
-    current.current = { view, onSignOut, dispatch, requestLeaves, requestShifts };
+    current.current = { view, onSignOut, dispatch, requestLeaves, requestShifts, online };
   });
   // What the leave that waits for the work ends in; `null` when none waits.
   const standing = useRef<Leave | null>(null);
@@ -249,6 +266,14 @@ export function FloorApp({
       setView({ kind: "setup", back: "warehouse" });
       return;
     }
+    if (leave.kind === "pallet_assembly_setup") {
+      setView({ kind: "setup", back: "pallet_assembly" });
+      return;
+    }
+    if (leave.kind === "warehouse_menu") {
+      setView({ kind: "warehouse_menu" });
+      return;
+    }
     setView({ kind: "list" });
   }, []);
 
@@ -261,7 +286,7 @@ export function FloorApp({
       const pausedShift = leaving.kind === "work" ? leaving.shift.copy.id : null;
       // The warehouse reprint's work is tracked by the same gate as a shift's (N9),
       // but it is no shift: the shell is told of no work entered or left.
-      if (from !== "work" && from !== "warehouse") {
+      if (from !== "work" && from !== "warehouse" && from !== "pallet_assembly") {
         finish(reason);
         return;
       }
@@ -277,7 +302,9 @@ export function FloorApp({
       }
       standing.current = reason;
       setView((now) =>
-        now.kind === "work" || now.kind === "warehouse" ? { ...now, leaving: true } : now,
+        now.kind === "work" || now.kind === "warehouse" || now.kind === "pallet_assembly"
+          ? { ...now, leaving: true }
+          : now,
       );
       void gate.drain().then(() => {
         const ending = standing.current ?? reason;
@@ -433,14 +460,14 @@ export function FloorApp({
   // eyes on the host's list. A shift that cannot be read again is left for the list.
   const returning = useRef(false);
   const backFromSetup = useCallback(
-    (back: WorkShift | "warehouse" | null) => {
+    (back: WorkShift | "warehouse" | "pallet_assembly" | null) => {
       if (back === null) {
         setView({ kind: "list" });
         return;
       }
-      if (back === "warehouse") {
+      if (back === "warehouse" || back === "pallet_assembly") {
         ending.current = false;
-        setView({ kind: "warehouse", leaving: false });
+        setView({ kind: back, leaving: false });
         return;
       }
       if (returning.current) return;
@@ -501,6 +528,93 @@ export function FloorApp({
     requestFacts();
   }, [requestFacts]);
 
+  const palletAssemblyActive = view.kind === "pallet_assembly";
+  useEffect(() => (palletAssemblyActive ? awake.hold() : undefined), [palletAssemblyActive, awake]);
+
+  const palletPairing = useMemo(() => ({ hostId, deviceId }), [hostId, deviceId]);
+  const palletStore = useMemo(
+    () => createPalletAssemblyStore({ local, pairing: palletPairing, operatorId: operator.id }),
+    [local, palletPairing, operator.id],
+  );
+  const palletLink = useMemo(() => {
+    const active = () =>
+      alive.current &&
+      current.current.view.kind === "pallet_assembly" &&
+      current.current.online &&
+      !ending.current;
+    let refreshing: Promise<void> | null = null;
+    let toppingUp: Promise<void> | null = null;
+
+    async function refresh() {
+      if (getBoxRegistry === undefined || !active()) return;
+      const startedAt = new Date();
+      try {
+        await syncPalletBoxRegistry({
+          state: await readPalletRegistryState(local, palletPairing),
+          getPage: getBoxRegistry,
+          applyPage: (page, mode) =>
+            applyPalletRegistryPage(local, palletPairing, page, { ...mode, startedAt }),
+          active,
+        });
+        if (active()) setPalletHostUnsupported(false);
+      } catch (error) {
+        if (active()) {
+          if (error instanceof HostError && (error.status === 403 || error.status === 404)) {
+            setPalletHostUnsupported(true);
+          } else {
+            hostError(error);
+          }
+        }
+        throw error;
+      }
+    }
+
+    async function topUp() {
+      if (!active()) return;
+      const prefix = await assemblyIssuerPrefix(local);
+      if (prefix === null || !active()) return;
+      const registry = await readPalletRegistryState(local, palletPairing);
+      if (registry?.canOpenPallets !== true || !active()) return;
+      await createBlockSupply({
+        local,
+        pairing: palletPairing,
+        issuerPrefix: prefix,
+        mode: "aggregation",
+        extension: PALLET_EXTENSION,
+        online: active,
+        requestBlock,
+        onHostError: hostError,
+        now: () => new Date(),
+        newId: () => crypto.randomUUID(),
+      }).topUp();
+    }
+
+    return {
+      refresh: () =>
+        (refreshing ??= refresh().finally(() => {
+          refreshing = null;
+        })),
+      topUp: () =>
+        (toppingUp ??= topUp().finally(() => {
+          toppingUp = null;
+        })),
+    };
+  }, [local, palletPairing, getBoxRegistry, requestBlock, hostError]);
+
+  useEffect(() => {
+    if (palletAssemblyActive && online) {
+      void palletLink
+        .refresh()
+        .then(palletLink.topUp)
+        .then(() => {
+          if (alive.current && current.current.view.kind === "pallet_assembly" && !ending.current) {
+            current.current.dispatch({ type: "outbox_changed" });
+          }
+        })
+        .catch(() => undefined);
+    }
+  }, [palletAssemblyActive, online, shiftReads.done, palletLink]);
+
   if (view.kind === "setup") {
     const { back } = view;
     const setupScreen = (
@@ -523,7 +637,7 @@ export function FloorApp({
       />
     );
     // Opened from a shift's work screen: an update restarts the app, so the install is held back.
-    return back !== null && back !== "warehouse" ? (
+    return back !== null && back !== "warehouse" && back !== "pallet_assembly" ? (
       <InShiftUpdateEntry>{setupScreen}</InShiftUpdateEntry>
     ) : (
       setupScreen
@@ -560,6 +674,49 @@ export function FloorApp({
       />
     );
   }
+  if (view.kind === "warehouse_menu") {
+    return (
+      <WarehouseOperations
+        onAssembly={() => {
+          ending.current = false;
+          setView({ kind: "pallet_assembly", leaving: false });
+        }}
+        {...(warehouseLookup === undefined
+          ? {}
+          : {
+              onReprint: () => {
+                ending.current = false;
+                setView({ kind: "warehouse", leaving: false });
+              },
+            })}
+        onBack={() => setView({ kind: "list" })}
+      />
+    );
+  }
+  if (view.kind === "pallet_assembly" && getBoxRegistry !== undefined) {
+    return (
+      <PalletAssemblyScreen
+        local={local}
+        pairing={palletPairing}
+        store={palletStore}
+        operator={operator}
+        source={source}
+        printing={printing}
+        online={online}
+        refresh={palletLink.refresh}
+        onTopUp={palletLink.topUp}
+        onRecorded={recorded}
+        onLeave={() => leave({ kind: "warehouse_menu" })}
+        onSetup={() => leave({ kind: "pallet_assembly_setup" })}
+        track={gate.track}
+        touch={lock.touch}
+        isLeaving={isLeaving}
+        version={outboxVersion}
+        signal={signal}
+        blockReason={palletHostUnsupported ? "host_update" : null}
+      />
+    );
+  }
   if (view.kind === "warehouse" && warehouseLookup !== undefined) {
     return (
       <WarehouseScreen
@@ -577,7 +734,7 @@ export function FloorApp({
         onHostError={hostError}
         onRecorded={recorded}
         printing={printing}
-        onLeave={() => leave({ kind: "list" })}
+        onLeave={() => leave({ kind: getBoxRegistry === undefined ? "list" : "warehouse_menu" })}
         onSetup={() => leave({ kind: "warehouse_setup" })}
       />
     );
@@ -632,12 +789,17 @@ export function FloorApp({
       license={license}
       onSetup={() => setView({ kind: "setup", back: null })}
       onQueue={() => setView({ kind: "queue" })}
-      {...(warehouseLookup === undefined
+      warehouseMenu={getBoxRegistry !== undefined}
+      {...(warehouseLookup === undefined && getBoxRegistry === undefined
         ? {}
         : {
             onWarehouse: () => {
               ending.current = false;
-              setView({ kind: "warehouse", leaving: false });
+              setView(
+                getBoxRegistry === undefined
+                  ? { kind: "warehouse", leaving: false }
+                  : { kind: "warehouse_menu" },
+              );
             },
           })}
     />

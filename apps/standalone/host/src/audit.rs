@@ -144,6 +144,7 @@ pub mod actions {
     /// its kind, the losing shift and device and the winning shift, never the
     /// code or its hash. A conflict reviewed already writes no row.
     pub const CONFLICT_REVIEW: &str = "conflict.review";
+    pub const WAREHOUSE_PALLET_CLOSE_ISSUE_RESOLVE: &str = "warehouse_pallet.close_issue.resolve";
     /// The office's disaggregation reasons (plan ДЗГ); a change that changes
     /// nothing writes no row.
     pub const DISAGGREGATION_REASON_CREATE: &str = "disaggregation_reason.create";

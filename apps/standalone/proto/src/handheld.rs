@@ -110,6 +110,60 @@ pub struct WarehousePalletClosedData {
     pub box_count: u32,
 }
 
+/// The authoritative set is shown to the office and frozen when it approves a correction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarehousePalletCloseIssue {
+    pub id: String,
+    pub pallet_id: String,
+    pub sscc: String,
+    pub code: String,
+    pub status: WarehousePalletCloseIssueStatus,
+    pub reported_boxes: u32,
+    pub current_boxes: u32,
+    pub current_box_ssccs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_boxes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_box_ssccs: Option<Vec<String>>,
+    pub created_at: String,
+    pub device_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarehousePalletCloseIssueStatus {
+    Pending,
+    Approved,
+    Cancelled,
+    Reclosed,
+}
+
+impl std::str::FromStr for WarehousePalletCloseIssueStatus {
+    type Err = UnknownVariant;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("warehouse pallet close issue status", text)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WarehousePalletCloseIssues {
+    pub issues: Vec<WarehousePalletCloseIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "action",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WarehousePalletCloseResolution {
+    ApproveReclose { expected_box_ssccs: Vec<String> },
+    Cancel { label_removed: bool },
+}
+
 /// `data` of `warehouse_pallet_label`: the check of a closed pallet's label, as a box's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -167,6 +221,9 @@ pub struct BoxRegistryItem {
     pub closed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub production_date: Option<String>,
+    /// The source shift's display number, sent only to stations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift_number: Option<String>,
 }
 
 impl BoxRegistryItem {
@@ -184,6 +241,7 @@ impl BoxRegistryItem {
             pallet_active: None,
             closed_at: None,
             production_date: None,
+            shift_number: None,
         }
     }
 }
@@ -200,6 +258,9 @@ pub struct BoxRegistryPage {
     pub next_cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_epoch: Option<String>,
+    /// Whether the license allows a new pallet. Only stations receive this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_open_pallets: Option<bool>,
 }
 
 /// `GET /v1/device/org/print`: what a device prints about the organization when no shift is open.

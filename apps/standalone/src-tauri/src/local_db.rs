@@ -116,6 +116,12 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_unit_labels", TableClass::DeviceData),
     ("installation_dataset_epochs", TableClass::Installation),
     ("outbox", TableClass::DeviceData),
+    ("pallet_assembly_members", TableClass::DeviceData),
+    ("pallet_assembly_outbox", TableClass::DeviceData),
+    ("pallet_assembly_pallets", TableClass::DeviceData),
+    ("pallet_assembly_print_attempts", TableClass::DeviceData),
+    ("pallet_registry_boxes", TableClass::Disposable),
+    ("pallet_registry_state", TableClass::Disposable),
     ("ref_lines", TableClass::Disposable),
     ("ref_operator_badges", TableClass::Disposable),
     ("ref_operators", TableClass::Disposable),
@@ -703,7 +709,7 @@ async fn unsent_records(
 /// reprint's `wh_outbox` (migration `0012`, plan СКЛ). A reprint record not yet
 /// sent is a trace the host should still get; the forget refuses for it as for
 /// a fact.
-const UNSENT_TABLES: [&str; 2] = ["outbox", "wh_outbox"];
+const UNSENT_TABLES: [&str; 3] = ["outbox", "wh_outbox", "pallet_assembly_outbox"];
 
 async fn table_exists(
     connection: &mut sqlx::SqliteConnection,

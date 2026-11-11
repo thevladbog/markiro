@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import type { HostApi } from "../host/api.js";
+import type { PalletAssemblyCloseIssue } from "../host/pallet-assembly.js";
 import type { KnownBlocksRequest, KnownBlocksResponse } from "../host/backups.js";
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
 import { replaceShiftCopies } from "../floor/shifts/shift-copies.js";
+import { sendPalletAssemblyBatch } from "../floor/pallet-assembly/sender.js";
+import {
+  readPalletAssemblyCloseIssues,
+  reconcilePalletAssemblyCloseIssue,
+} from "../floor/pallet-assembly/reconcile.js";
 import { DeviceError } from "../host/device.js";
 import type { ChangesResponse, DeviceShift, DeviceStatus, FactReceipt } from "../host/protocol.js";
 import { readConflictNotices } from "../local/conflict-notices.js";
@@ -107,6 +113,9 @@ export interface HostLinkOptions {
    * after the facts, by the same delivery; none — they wait.
    */
   sendWarehouseRecords?: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /** Station warehouse pallet events, delivered after production facts and restore reconciliation. */
+  sendPalletEvents?: HostApi["sendPalletEvents"];
+  getPalletCloseIssue?: HostApi["getPalletCloseIssue"];
   /**
    * `HostApi.conflictStatus` and `HostApi.listDisplacements` (plan КНФ): what
    * the host tells this station of its conflicts; without both, nothing is read.
@@ -192,6 +201,8 @@ export function useHostLink({
   sendFacts,
   registerKnownBlocks,
   sendWarehouseRecords,
+  sendPalletEvents,
+  getPalletCloseIssue,
   conflictStatus,
   listDisplacements,
   deviceProductPhoto,
@@ -269,6 +280,13 @@ export function useHostLink({
       clearTimeout(warehouseRetry);
       warehouseRetry = null;
     };
+    let palletFailures = 0;
+    let palletRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelPalletRetry = () => {
+      if (palletRetry === null) return;
+      clearTimeout(palletRetry);
+      palletRetry = null;
+    };
     // And for what the host tells this station of its conflicts (plan КНФ).
     let noticeFailures = 0;
     let noticeRetry: ReturnType<typeof setTimeout> | null = null;
@@ -336,6 +354,7 @@ export function useHostLink({
       cancelShiftRetry();
       cancelFactRetry();
       cancelWarehouseRetry();
+      cancelPalletRetry();
       cancelReconcileRetry();
       cancelNoticeRetry();
       cancelLeaveRetry();
@@ -640,10 +659,64 @@ export function useHostLink({
           }
           if (!active) return;
         }
+        let palletSent = 0;
+        let palletReconciled = false;
+        if (
+          !more &&
+          !restoreHeld(warehouseFailure) &&
+          sendPalletEvents !== undefined &&
+          palletRetry === null
+        ) {
+          try {
+            if (getPalletCloseIssue !== undefined) {
+              const issues = await readPalletAssemblyCloseIssues(local, pairing);
+              for (const id of issues) {
+                if (!active) return;
+                let issue: PalletAssemblyCloseIssue;
+                try {
+                  issue = await getPalletCloseIssue(id);
+                } catch (error) {
+                  // A restored host may need the pallet's events before the issue exists again.
+                  if (error instanceof HostError && error.status === 404) continue;
+                  throw error;
+                }
+                if (!active) return;
+                palletReconciled =
+                  (await reconcilePalletAssemblyCloseIssue(
+                    local,
+                    pairing,
+                    issue,
+                    () => new Date(),
+                  )) || palletReconciled;
+              }
+            }
+            if (!active) return;
+            const result = await sendPalletAssemblyBatch(
+              local,
+              pairing,
+              sendPalletEvents,
+              () => new Date(),
+            );
+            palletSent = result.sent;
+            palletFailures = 0;
+          } catch (error) {
+            if (shellActionFor(error, null) !== null || restoreHeld(error)) throw error;
+            if (active && online && !(error instanceof HostError && error.code === "not_paired")) {
+              palletFailures += 1;
+              palletRetry = setTimeout(() => {
+                palletRetry = null;
+                if (factRetry === null) factSender.trigger();
+              }, nextSyncRetryMs(palletFailures));
+            }
+          }
+          if (!active) return;
+        }
         factFailures = 0;
         dispatch({ type: "facts_sent" });
-        if (sent > 0 || warehouse.sent > 0) dispatch({ type: "outbox_changed" });
-        if (more || warehouse.more) factSender.trigger();
+        if (sent > 0 || warehouse.sent > 0 || palletSent > 0 || palletReconciled)
+          dispatch({ type: "outbox_changed" });
+        // A replayed receipt can expose an existing case without a host revision.
+        if (more || warehouse.more || palletSent > 0) factSender.trigger();
         if (warehouseFailure !== null) {
           warehouseFailures += 1;
           if (online && restoreHeld(warehouseFailure)) {
@@ -765,6 +838,7 @@ export function useHostLink({
             cancelShiftRetry();
             cancelFactRetry();
             cancelWarehouseRetry();
+            cancelPalletRetry();
             cancelReconcileRetry();
             cancelNoticeRetry();
             cancelLeaveRetry();
@@ -842,6 +916,8 @@ export function useHostLink({
     sendFacts,
     registerKnownBlocks,
     sendWarehouseRecords,
+    sendPalletEvents,
+    getPalletCloseIssue,
     conflictStatus,
     listDisplacements,
     deviceProductPhoto,

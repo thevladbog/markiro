@@ -91,6 +91,11 @@ pub const GATED: &[(&str, &str, &str)] = &[
 pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/office/search"),
     ("GET", "/v1/office/warehouse-pallets/{id}"),
+    ("GET", "/v1/office/warehouse-pallets/close-issues"),
+    (
+        "POST",
+        "/v1/office/warehouse-pallets/close-issues/{id}/resolve",
+    ),
     ("POST", "/v1/office/warehouse-pallets/validate"),
     ("GET", "/v1/hello"),
     ("POST", "/v1/local-pair"),
@@ -106,6 +111,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/device/sscc/blocks/known"),
     ("POST", "/v1/device/facts"),
     ("POST", "/v1/device/pallet-events"),
+    ("GET", "/v1/device/pallet-events/close-issues/{id}"),
     ("GET", "/v1/device/box-registry"),
     ("POST", "/v1/device/disaggregation/lookup"),
     ("POST", "/v1/device/disaggregation/apply"),

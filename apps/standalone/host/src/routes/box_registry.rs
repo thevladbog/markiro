@@ -1,5 +1,5 @@
-//! `GET /v1/device/box-registry`: the closed boxes a handheld builds warehouse pallets of (plan
-//! ТСД-Х, spec 6.5). A delta by the boxes' change time: `since` (the previous walk's `until`),
+//! `GET /v1/device/box-registry`: closed boxes for warehouse pallet assembly.
+//! A delta by the boxes' change time: `since` (the previous walk's `until`),
 //! pages of `(changed_at, sscc)` after `cursor`, every page of one walk under the `until` the first
 //! page named. No code of a unit leaves the host (unlike a station's warehouse lookup).
 //!
@@ -12,13 +12,15 @@
 
 use axum::extract::State;
 use axum::Json;
-use markiro_proto::{BoxRegistryItem, BoxRegistryKind, BoxRegistryPage};
+use markiro_proto::{BoxRegistryItem, BoxRegistryKind, BoxRegistryPage, DeviceKind, ShiftOrigin};
 use serde::Deserialize;
 
 use crate::auth::AskingDevice;
 use crate::clock::parse_timestamp;
 use crate::error::{ApiError, ApiQuery};
+use crate::license::seats::Feature;
 use crate::server::AppState;
+use crate::shifts;
 
 const DEFAULT_LIMIT: u32 = 250;
 const MAX_LIMIT: u32 = 500;
@@ -45,6 +47,9 @@ struct Row {
     closed_at: Option<String>,
     disassembled_at: Option<String>,
     production_date: String,
+    number_month_key: String,
+    number_seq: i64,
+    created_from: String,
     prod_pallet: Option<String>,
     prod_sscc: Option<String>,
     prod_off: Option<String>,
@@ -60,7 +65,7 @@ fn timestamp(field: &str, text: &str) -> Result<(), ApiError> {
 
 pub async fn box_registry(
     State(state): State<AppState>,
-    _device: AskingDevice,
+    AskingDevice(device): AskingDevice,
     ApiQuery(query): ApiQuery<RegistryQuery>,
 ) -> Result<Json<BoxRegistryPage>, ApiError> {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
@@ -116,6 +121,7 @@ pub async fn box_registry(
         "SELECT b.sscc AS sscc, b.changed_at AS changed_at, b.id AS id, sh.product_id AS product_id, \
          b.item_count_reported AS item_count_reported, b.closed_at AS closed_at, \
          b.disassembled_at AS disassembled_at, sh.production_date AS production_date, \
+         sh.number_month_key, sh.number_seq, sh.created_from, \
          p.id AS prod_pallet, p.sscc AS prod_sscc, p.disassembled_at AS prod_off, \
          wp.id AS wh_pallet, wp.sscc AS wh_sscc \
          FROM boxes b JOIN shifts sh ON sh.id = b.shift_id \
@@ -140,6 +146,17 @@ pub async fn box_registry(
             .fetch_one(&mut *tx)
             .await
             .map_err(ApiError::internal)?;
+    let station = device.kind == DeviceKind::Station;
+    let can_open_pallets = if station {
+        let license = state
+            .license
+            .snapshot(&state, &mut tx)
+            .await
+            .map_err(ApiError::internal)?;
+        Some(Feature::Pallets.enabled(&license.evaluation.features))
+    } else {
+        None
+    };
     tx.rollback().await.map_err(ApiError::internal)?;
     let more = rows.len() > limit as usize;
     let rows = &rows[..rows.len().min(limit as usize)];
@@ -149,18 +166,25 @@ pub async fn box_registry(
                 .map(|row| format!("{}|{}", row.changed_at, row.sscc))
         })
         .flatten();
-    let items = rows.iter().map(item).collect();
+    let items = rows
+        .iter()
+        .map(|row| item(row, station))
+        .collect::<Result<_, _>>()?;
     Ok(Json(BoxRegistryPage {
         until,
         items,
         next_cursor,
         restore_epoch,
+        can_open_pallets,
     }))
 }
 
-fn item(row: &Row) -> BoxRegistryItem {
+fn item(row: &Row, station: bool) -> Result<BoxRegistryItem, ApiError> {
     if row.disassembled_at.is_some() {
-        return BoxRegistryItem::remove(row.sscc.clone(), row.changed_at.clone());
+        return Ok(BoxRegistryItem::remove(
+            row.sscc.clone(),
+            row.changed_at.clone(),
+        ));
     }
     // A warehouse pallet outranks a taken-apart production one; a standing production pallet
     // holds its boxes from the box's close.
@@ -169,7 +193,17 @@ fn item(row: &Row) -> BoxRegistryItem {
         (None, Some(pallet), None) => (Some(pallet.clone()), row.prod_sscc.clone(), true),
         _ => (None, None, false),
     };
-    BoxRegistryItem {
+    let shift_number = if station {
+        let origin: ShiftOrigin = row.created_from.parse().map_err(ApiError::internal)?;
+        Some(shifts::format_number(
+            &row.number_month_key,
+            row.number_seq,
+            origin,
+        ))
+    } else {
+        None
+    };
+    Ok(BoxRegistryItem {
         kind: BoxRegistryKind::Upsert,
         sscc: row.sscc.clone(),
         updated_at: row.changed_at.clone(),
@@ -183,5 +217,6 @@ fn item(row: &Row) -> BoxRegistryItem {
         pallet_active: Some(active),
         closed_at: row.closed_at.clone(),
         production_date: Some(row.production_date.clone()),
-    }
+        shift_number,
+    })
 }

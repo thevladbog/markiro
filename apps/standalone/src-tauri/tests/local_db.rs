@@ -132,6 +132,12 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_unit_labels",
             "installation_dataset_epochs",
             "outbox",
+            "pallet_assembly_members",
+            "pallet_assembly_outbox",
+            "pallet_assembly_pallets",
+            "pallet_assembly_print_attempts",
+            "pallet_registry_boxes",
+            "pallet_registry_state",
             "ref_lines",
             "ref_operator_badges",
             "ref_operators",
@@ -1027,6 +1033,13 @@ fn without_0023(rows: Vec<Value>) -> Vec<Value> {
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     without_0023(rows)
         .into_iter()
+        // `0024` adds the warehouse-pallet tables and a distinct trigger on the production table.
+        .filter(|row| {
+            let table = row["tbl_name"].as_str().unwrap_or_default();
+            !table.starts_with("pallet_assembly_")
+                && !table.starts_with("pallet_registry_")
+                && row["name"] != "floor_pallet_sscc_not_in_assembly"
+        })
         .filter(|row| row["tbl_name"] != "floor_displacements")
         .filter(|row| row["tbl_name"] != "ref_product_photos")
         .filter(|row| row["tbl_name"] != "installation_dataset_epochs")
@@ -1986,6 +1999,10 @@ async fn every_table_has_a_forget_class() {
             "floor_sscc_blocks",
             "floor_unit_labels",
             "outbox",
+            "pallet_assembly_members",
+            "pallet_assembly_outbox",
+            "pallet_assembly_pallets",
+            "pallet_assembly_print_attempts",
             "wh_jobs",
             "wh_outbox",
             "wh_sessions"
@@ -2085,6 +2102,38 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     // One record in each table of this device's own (`0006`–`0008`, `0012`) and
     // one setting of the workstation (`0007`).
     db.transaction(device_records()).await.unwrap();
+    db.transaction(vec![
+        statement(
+            "INSERT INTO pallet_registry_state (host_id, device_id, until_at) VALUES (?, ?, 'at')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO pallet_registry_boxes VALUES (?, ?, 'box-1', '{}', 'at')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO pallet_assembly_pallets (id, host_id, device_id, product, opened_at) \
+             VALUES ('pallet-assembly-1', ?, ?, '{}', 'at')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO pallet_assembly_outbox (id, host_id, device_id, pallet_id, kind, payload, created_at) \
+             VALUES ('event-assembly-1', ?, ?, 'pallet-assembly-1', 'pallet_box_added', '{}', 'at')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO pallet_assembly_members (add_id, host_id, device_id, pallet_id, sscc, item_count) \
+             VALUES ('event-assembly-1', ?, ?, 'pallet-assembly-1', 'box-1', 1)",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO pallet_assembly_print_attempts (host_id, device_id, pallet_id, attempt, operator_id, started_at) \
+             VALUES (?, ?, 'pallet-assembly-1', 1, 'operator-1', 'at')",
+            json!([HOST, DEVICE]),
+        ),
+    ])
+    .await
+    .unwrap();
     db.transaction(vec![statement(
         "INSERT INTO workstation_settings (key, value) VALUES ('printers', '{}')",
         json!([]),
@@ -2718,7 +2767,8 @@ const JOIN_PALLET: &str =
 const BOX_ONTO_PALLET: &str =
     "UPDATE floor_boxes SET pallet_id = ? WHERE id = ? AND host_id = ? AND device_id = ? \
      AND closed_at IS NOT NULL AND pallet_id IS NULL";
-const PALLET_SSCC_HELD: &str = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? LIMIT 1";
+const PALLET_SSCC_HELD: &str = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? UNION ALL \
+    SELECT 1 AS n FROM pallet_assembly_pallets WHERE sscc = ? LIMIT 1";
 /// The exceptions of a pallet (plan ПЛ-Ц, `src/floor/exceptions/pallet-exceptions.ts` and
 /// `src/floor/pallets/pallets.ts`; `test/floor-schema.test.ts` checks the texts agree): the
 /// closed pallets of a shift with their boxes, a pallet by its key with its boxes, its
@@ -4785,24 +4835,30 @@ async fn the_forget_counts_read_only_the_unsent_indexes() {
         (
             "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? \
              AND device_id = ?) + (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL \
-             AND host_id = ? AND device_id = ?) AS n",
+             AND host_id = ? AND device_id = ?) + (SELECT count(*) FROM pallet_assembly_outbox \
+             WHERE acked_at IS NULL AND host_id = ? AND device_id = ?) AS n",
             &[
                 "SCAN CONSTANT ROW",
                 "SCALAR SUBQUERY 1",
                 "SEARCH outbox USING INDEX outbox_unsent (host_id=? AND device_id=?)",
                 "SCALAR SUBQUERY 2",
                 "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+                "SCALAR SUBQUERY 3",
+                "SEARCH pallet_assembly_outbox USING INDEX pallet_assembly_outbox_unsent (host_id=? AND device_id=?)",
             ],
         ),
         (
             "SELECT (SELECT count(*) FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL) + \
-             (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL) AS n",
+             (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL) + \
+             (SELECT count(*) FROM pallet_assembly_outbox WHERE acked_at IS NULL) AS n",
             &[
                 "SCAN CONSTANT ROW",
                 "SCALAR SUBQUERY 1",
                 "SCAN outbox USING INDEX outbox_unsent",
                 "SCALAR SUBQUERY 2",
                 "SCAN wh_outbox USING INDEX wh_outbox_unsent",
+                "SCALAR SUBQUERY 3",
+                "SCAN pallet_assembly_outbox USING INDEX pallet_assembly_outbox_unsent",
             ],
         ),
         (

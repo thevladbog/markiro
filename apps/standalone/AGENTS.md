@@ -6085,6 +6085,40 @@ Known limits of the pallets, and who carries each:
 - Pallets of several stations on one shift and the revocation of pallet blocks
   are stage 2b (plan ПЛ-Х, «Перенесено»).
 
+## Warehouse pallet assembly on the station
+
+«Смены линии» → «Складские операции» → «Короба в палеты». The source shift
+can still be active. The host admits only closed, free boxes of one product,
+including boxes from different shifts. Source shifts remain on the boxes.
+The station and handheld share the host registry and warehouse-pallet event
+contracts. The station's registry adds the source shift number and the site's
+current permission to open pallets. Office devices cannot use the floor routes.
+The station checks its current local operator roster before a new action.
+Delivery preserves the historical actor UUID even when a restored host copy
+predates that operator. This UUID grants no office privileges. Warehouse
+pallet disassembly through the device event route remains handheld-only.
+
+The local registry is pairing-scoped and uses a complete initial walk and
+deltas. A host restore changes the window and forces a new full walk. A local
+add, removal or close is recorded with its outbox event in one transaction.
+Closing consumes one extension-1 serial from the device's shared pallet SSCC
+pool. A warehouse pallet can close and print from the last usable mirror and
+local stock while offline. Different or incomplete source dates leave the
+label's production and expiry fields blank. The initial station mode prints
+thermal labels through the configured pallet profile.
+
+A closed pallet's print state is separate from the host receipt. Printing
+claims the local job before sending. An interrupted send is uncertain and
+requires an operator decision before another attempt. A rejected close blocks
+the following pallets' events. The office reconciles the physical composition
+under «Поиск кодов» → «Палеты» → «Сверка складских палет». An authorized
+correction reuses the SSCC only after the host validates the approved box set
+and original ownership. The next label is offered after that close is admitted.
+Cancellation follows confirmed removal of the old label and retires a valid
+unused SSCC issued to that station. An older backup may need the office to
+repeat a decision made after the copy. A later pallet waits and retries in
+that case. See the [design](../../docs/superpowers/specs/2026-11-11-standalone-boxes-to-pallets-design.md).
+
 ## Warehouse reprint
 
 Plan СКЛ (pilot spec §30) ports the cloud station's «Складские операции →

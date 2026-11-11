@@ -39,6 +39,7 @@ pub async fn list(
           WHERE wb.pallet_id = wp.id AND wb.removed_at IS NULL AND b.disassembled_at IS NULL) AS boxes \
          FROM warehouse_pallets wp JOIN devices d ON d.id = wp.device_id \
          JOIN products pr ON pr.id = wp.product_id \
+         WHERE wp.assembly_cancelled_at IS NULL \
          ORDER BY ifnull(wp.closed_at, '~') DESC, wp.id DESC LIMIT ?",
     )
     .bind(LIMIT)

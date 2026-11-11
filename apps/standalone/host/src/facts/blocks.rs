@@ -42,12 +42,15 @@ pub async fn issued_to(
 ) -> Result<bool, ApiError> {
     let found: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM sscc_blocks WHERE id = ? AND device_id = ? AND issuer_prefix = ? \
-         AND extension = ? AND from_serial <= ? AND to_serial >= ? AND revoked_at IS NULL",
+         AND extension = ? AND from_serial <= ? AND to_serial >= ? AND revoked_at IS NULL \
+         AND NOT EXISTS (SELECT 1 FROM warehouse_pallet_close_issues issue WHERE issue.retired = 1 \
+             AND issue.block_id = sscc_blocks.id AND issue.serial = ?)",
     )
     .bind(block_id)
     .bind(device_id)
     .bind(issuer_prefix)
     .bind(i64::from(extension))
+    .bind(serial)
     .bind(serial)
     .bind(serial)
     .fetch_optional(conn)

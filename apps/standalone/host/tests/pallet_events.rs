@@ -7,7 +7,7 @@ mod support;
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use support::app::{admin, host_revision, instant, pair_handheld, shift_setup};
+use support::app::{admin, host_revision, instant, pair_device, pair_handheld, shift_setup};
 use support::handheld::{
     accepted, added, box_sscc, closed_boxes, event, events, opened, pallet_block, pallet_sscc,
     product_of, receipts_of, rejected, PALLET_A, PALLET_B,
@@ -322,14 +322,11 @@ async fn a_license_without_pallets_refuses_a_new_pallet_and_never_an_open_one() 
 }
 
 #[tokio::test]
-async fn only_a_handheld_sends_pallet_events_and_a_database_error_is_no_receipt() {
+async fn an_office_device_cannot_send_pallet_events_and_a_database_error_is_no_receipt() {
     let admin = admin().await;
-    let (status, refused) = events(
-        &admin,
-        &admin.key,
-        &[opened(1, PALLET_A, "x", &instant(1, 0))],
-    )
-    .await;
+    let (_, office) = pair_device(&admin.app, "office").await;
+    let (status, refused) =
+        events(&admin, &office, &[opened(1, PALLET_A, "x", &instant(1, 0))]).await;
     assert_eq!(
         (status, refused["error"]["code"].clone()),
         (StatusCode::FORBIDDEN, json!("forbidden"))

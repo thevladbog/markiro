@@ -30,6 +30,7 @@ pub const BUSINESS_TABLES: &[&str] = &[
     "code_releases",
     "warehouse_reprints",
     "warehouse_pallet_boxes",
+    "warehouse_pallet_close_issues",
     "warehouse_pallets",
     "unit_label_events",
     "pallet_exceptions",
