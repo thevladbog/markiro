@@ -33,7 +33,7 @@ fn every_month_key_of_the_fixture_matches() {
 fn every_number_of_the_fixture_matches() {
     let fixture = fixture();
     let cases = fixture["numbers"].as_array().expect("numbers");
-    assert_eq!(cases.len(), 5);
+    assert_eq!(cases.len(), 6);
     for case in cases {
         let origin: ShiftOrigin = serde_json::from_value(case["createdFrom"].clone()).unwrap();
         assert_eq!(

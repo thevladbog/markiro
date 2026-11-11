@@ -87,6 +87,7 @@ class MetaStore(private val db: HandheldDatabase) {
 
         /** The protocol of the paired host as its last `hello` said: which pallet events it reads (`HostPalletEvents`). */
         const val HOST_PROTOCOL = "host_protocol"
+        const val HOST_SHIFT_CREATE = "host_shift_create"
 
         /** The in-flight document, so a retry re-sends exactly that row and nothing else. */
         fun writeoffPin(documentId: String) = "writeoff_pending:$documentId"

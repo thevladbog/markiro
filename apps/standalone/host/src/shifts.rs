@@ -80,11 +80,12 @@ pub fn month_key_of(text: &str) -> Option<String> {
 /// The shift number as people read it: `OCT26-004`, `OCT26-004/S` for a
 /// station's, and never cut short past 999 (`OCT26-1234`).
 pub fn format_number(month_key: &str, seq: i64, origin: ShiftOrigin) -> String {
-    let station = match origin {
+    let suffix = match origin {
         ShiftOrigin::Office => "",
         ShiftOrigin::Station => "/S",
+        ShiftOrigin::Handheld => "/M",
     };
-    format!("{month_key}-{seq:03}{station}")
+    format!("{month_key}-{seq:03}{suffix}")
 }
 
 /// What a new shift's product gives it: the product group its templates
@@ -330,26 +331,33 @@ pub(crate) async fn require_lot_templates(
         let Some(id) = id else {
             continue;
         };
-        let sql = if field == "palletSheetTemplateId" {
-            "SELECT spec FROM pallet_sheet_templates WHERE id = ?"
-        } else {
-            "SELECT spec FROM label_templates WHERE id = ?"
-        };
-        let spec: Option<String> = sqlx::query_scalar(sql)
-            .bind(id)
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(ApiError::internal)?;
-        let supports = spec
-            .as_deref()
-            .and_then(|spec| serde_json::from_str(spec).ok())
-            .as_ref()
-            .is_some_and(template_supports_lot);
-        if !supports {
+        if !layout_has_lot_binding(conn, id, field == "palletSheetTemplateId").await? {
             return Err(lot_template_missing(field));
         }
     }
     Ok(())
+}
+
+pub(crate) async fn layout_has_lot_binding(
+    conn: &mut SqliteConnection,
+    id: &str,
+    sheet: bool,
+) -> Result<bool, ApiError> {
+    let sql = if sheet {
+        "SELECT spec FROM pallet_sheet_templates WHERE id = ?"
+    } else {
+        "SELECT spec FROM label_templates WHERE id = ?"
+    };
+    let spec: Option<String> = sqlx::query_scalar(sql)
+        .bind(id)
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(spec
+        .as_deref()
+        .and_then(|spec| serde_json::from_str(spec).ok())
+        .as_ref()
+        .is_some_and(template_supports_lot))
 }
 
 pub(crate) async fn default_lot_sheet(
@@ -533,7 +541,7 @@ pub async fn insert(
     let (print_mode, print_verification, print_template_id) = print_columns(shift.validation_print);
     let created_by_kind = match shift.origin {
         ShiftOrigin::Office => "office_user",
-        ShiftOrigin::Station => "device",
+        ShiftOrigin::Station | ShiftOrigin::Handheld => "device",
     };
     sqlx::query(
         "INSERT INTO shifts (id, number_month_key, number_seq, created_from, created_by_kind, \
@@ -541,13 +549,13 @@ pub async fn insert(
          counterparty_id, production_date, planned_date, planned_qty, box_capacity, \
          box_template_id, pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, \
          validation_print_mode, validation_print_verification, validation_print_template_id, \
-         lot_number, created_at, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         lot_number, created_at, rev, created_on_handheld) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&key)
     .bind(seq)
-    .bind(shift.origin.as_str())
+    .bind(shift.origin.device_category().as_str())
     .bind(created_by_kind)
     .bind(shift.created_by)
     .bind(shift.request_id)
@@ -581,6 +589,7 @@ pub async fn insert(
     .bind(shift.lot_number)
     .bind(at)
     .bind(rev)
+    .bind(shift.origin == ShiftOrigin::Handheld)
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;

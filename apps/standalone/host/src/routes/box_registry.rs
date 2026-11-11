@@ -122,7 +122,7 @@ pub async fn box_registry(
         "SELECT b.sscc AS sscc, b.changed_at AS changed_at, b.id AS id, sh.product_id AS product_id, \
          b.item_count_reported AS item_count_reported, b.closed_at AS closed_at, \
          b.disassembled_at AS disassembled_at, sh.production_date AS production_date, \
-         sh.number_month_key, sh.number_seq, sh.created_from, sh.lot_number, \
+         sh.number_month_key, sh.number_seq, sh.number_origin AS created_from, sh.lot_number, \
          p.id AS prod_pallet, p.sscc AS prod_sscc, p.disassembled_at AS prod_off, \
          wp.id AS wh_pallet, wp.sscc AS wh_sscc \
          FROM boxes b JOIN shifts sh ON sh.id = b.shift_id \

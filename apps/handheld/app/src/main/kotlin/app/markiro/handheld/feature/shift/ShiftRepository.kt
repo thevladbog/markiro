@@ -13,6 +13,7 @@ import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.UPDATE_REQUIRED_CODE
 import app.markiro.handheld.core.network.ValidationPrintDto
 import app.markiro.handheld.core.pallets.SsccBlockApplier
+import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.flow.Flow
@@ -162,6 +163,8 @@ class ShiftRepository(
         generation: app.markiro.handheld.core.storage.GenerationToken,
         scope: kotlinx.coroutines.CoroutineScope,
     ) = BoxSerialTopUp(db, pool, shiftId, issuerPrefix, generation, scope, backend::topUpBoxSscc)
+
+    fun observeCreationSupport(): Flow<String?> = db.metaDao().observe(MetaStore.HOST_SHIFT_CREATE)
 
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
 

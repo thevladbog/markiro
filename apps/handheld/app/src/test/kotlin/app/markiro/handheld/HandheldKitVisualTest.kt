@@ -13,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -47,6 +48,14 @@ import app.markiro.handheld.feature.settings.ScannerSettingsScreen
 import app.markiro.handheld.feature.settings.SettingsScreen
 import app.markiro.handheld.feature.settings.SettingsUi
 import app.markiro.handheld.feature.settings.ThemeMode
+import app.markiro.handheld.core.network.host.ShiftCreateOptionsDto
+import app.markiro.handheld.core.network.host.ShiftCreateProductDto
+import app.markiro.handheld.core.network.host.ShiftCreateTemplateDto
+import app.markiro.handheld.feature.shift.CreateShiftCallbacks
+import app.markiro.handheld.feature.shift.CreateShiftDraft
+import app.markiro.handheld.feature.shift.CreateShiftMode
+import app.markiro.handheld.feature.shift.CreateShiftScreen
+import app.markiro.handheld.feature.shift.CreateShiftUi
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
 import app.markiro.handheld.feature.signin.SignInCallbacks
 import app.markiro.handheld.feature.signin.SignInScreen
@@ -171,6 +180,24 @@ class HandheldKitVisualTest {
         WorkScreen(WorkUi(shift = ShiftEntityFixtures.bundled("audit-shift"), last = null,
             total = 128, plan = 1200, thisTerminal = 128, errors = 1, duplicates = 2,
             feed = emptyList(), sync = SyncState(pending = 12), reachable = false, team = null), WorkCallbacks())
+    }
+
+    @Test @Config(qualifiers = "ru-w320dp-h520dp-mdpi")
+    fun createShiftWithPalletsOnShortScreen() = captureThemes("new-shift-320", onThemeReady = {
+        compose.onNodeWithText("Создать и открыть").assertIsDisplayed()
+    }) {
+        val product = ShiftCreateProductDto("kefir", "Кефир 2,5%, 930 г", "04600682000020", 8, 12, 30)
+        val options = ShiftCreateOptionsDto(
+            lineId = "mobile", lineName = "Мобильная линия", timeZone = "Europe/Moscow",
+            palletsAllowed = true, creationAllowed = true, products = listOf(product),
+            templates = listOf(
+                ShiftCreateTemplateDto("box", "Термо 75 × 120 мм", "box", null),
+                ShiftCreateTemplateDto("pallet", "Термо 100 × 150 мм", "pallet", null),
+            ),
+        )
+        val draft = CreateShiftDraft(mode = CreateShiftMode.PALLETS, plannedDate = "2026-11-12",
+            productionDate = "2026-11-11", plan = "360").withProduct(product)
+        CreateShiftScreen(CreateShiftUi(options = options, draft = draft, busy = false), CreateShiftCallbacks())
     }
 
     @Test fun inventoryOffline() = captureThemes("inventory-offline-360") {

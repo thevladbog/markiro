@@ -14,7 +14,7 @@ use crate::{
 };
 
 const COMPLETE: &str = "EXISTS (SELECT 1 FROM cloud_history_batches batch WHERE batch.id=t.batch_id AND batch.status='complete')";
-const SHIFT_LABEL: &str = "t.number_month_key || '-' || printf('%03d',t.number_seq) || CASE WHEN t.created_from='station' THEN '/S' ELSE '' END";
+const SHIFT_LABEL: &str = "t.number_month_key || '-' || printf('%03d',t.number_seq) || CASE t.number_origin WHEN 'station' THEN '/S' WHEN 'handheld' THEN '/M' ELSE '' END";
 
 /// Shared with query-plan regression tests: no full code/scan hydration.
 pub const LOCAL_CODE_SQL: &str = "SELECT code_hash AS id,substr(code_hash,1,12) AS label,NULL AS detail FROM scans WHERE code_hash=?1 GROUP BY code_hash";

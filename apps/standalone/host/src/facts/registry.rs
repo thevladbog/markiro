@@ -58,7 +58,7 @@ pub async fn owner(
     }
     type OwnerRow = (String, String, String, i64, String, String, String);
     let row: Option<OwnerRow> = sqlx::query_as(
-        "SELECT o.scan_id, o.shift_id, s.number_month_key, s.number_seq, s.created_from, \
+        "SELECT o.scan_id, o.shift_id, s.number_month_key, s.number_seq, s.number_origin AS created_from, \
          o.device_id, o.scanned_at FROM code_owners o JOIN shifts s ON s.id = o.shift_id \
          WHERE o.code_hash = ?",
     )

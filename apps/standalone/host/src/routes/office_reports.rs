@@ -138,7 +138,7 @@ where
 
 /// The shift with its product now.
 pub const PALLET_SHIFT_SQL: &str = "SELECT s.id, s.number_month_key, s.number_seq, \
-     s.created_from, s.production_date, s.lot_number, p.name AS product_name, p.gtin14, p.shelf_life_days \
+     s.number_origin AS created_from, s.production_date, s.lot_number, p.name AS product_name, p.gtin14, p.shelf_life_days \
      FROM shifts s JOIN products p ON p.id = s.product_id WHERE s.id = ?";
 
 /// Every pallet of the shift, opened first first.

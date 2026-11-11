@@ -13,13 +13,14 @@ use crate::error::ApiError;
 
 /// `(method, route as the router writes it, the kinds that may call it)`.
 ///
-/// A handheld reads and enters its line's shift and gets SSCC blocks (task Х2); it creates no
-/// shift and chooses no line: the office assigns a handheld its line.
+/// A handheld creates, reads and enters shifts on its assigned line.
+/// Only the office assigns a line to a handheld.
 pub const ROUTE_KINDS: &[(&str, &str, &[DeviceKind])] = &[
     ("GET", "/v1/device", &[Station, Handheld, Office]),
     ("PUT", "/v1/device/line", &[Station]),
     ("GET", "/v1/device/shifts", &[Station, Handheld]),
-    ("POST", "/v1/device/shifts", &[Station]),
+    ("POST", "/v1/device/shifts", &[Station, Handheld]),
+    ("GET", "/v1/device/shift-create-options", &[Handheld]),
     ("POST", "/v1/device/shifts/{id}/enter", &[Station, Handheld]),
     ("POST", "/v1/device/shifts/{id}/leave", &[Station, Handheld]),
     ("POST", "/v1/device/sscc/blocks", &[Station, Handheld]),

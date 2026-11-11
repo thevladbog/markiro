@@ -72,6 +72,9 @@ class HostReferenceSync(
         val device = api.device().getOrThrow()
         db.recovery.commit {
             val own = config.get() ?: return@commit
+            if (own.deviceId != device.id || own.backend != "host") return@commit
+            val canCreate = device.handheldShiftCreate.toString()
+            if (meta.get(MetaStore.HOST_SHIFT_CREATE) != canCreate) meta.put(MetaStore.HOST_SHIFT_CREATE, canCreate)
             if (own.lineId != device.lineId) config.upsert(own.copy(lineId = device.lineId, lineName = null))
             resolveLineName()
         }

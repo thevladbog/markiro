@@ -21,7 +21,7 @@ data class HelloDto(
 data class PairedDto(val deviceId: String, val deviceKey: String, val hostId: String)
 
 @Serializable
-data class DeviceInfoDto(val id: String, val kind: String, val name: String, val lineId: String? = null, val pairedAt: String? = null)
+data class DeviceInfoDto(val id: String, val kind: String, val name: String, val lineId: String? = null, val pairedAt: String? = null, val handheldShiftCreate: Boolean = false)
 
 @Serializable
 data class ChangeItemDto(val entity: String, val id: String, val rev: Long, val deleted: Boolean, val data: JsonObject? = null)

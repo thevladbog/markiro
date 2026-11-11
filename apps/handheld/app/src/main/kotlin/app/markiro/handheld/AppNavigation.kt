@@ -74,6 +74,9 @@ import app.markiro.handheld.feature.settings.ThemeMode
 import app.markiro.handheld.feature.shift.CloseCallbacks
 import app.markiro.handheld.feature.shift.CloseScreen
 import app.markiro.handheld.feature.shift.CloseViewModel
+import app.markiro.handheld.feature.shift.CreateShiftCallbacks
+import app.markiro.handheld.feature.shift.CreateShiftScreen
+import app.markiro.handheld.feature.shift.CreateShiftViewModel
 import app.markiro.handheld.feature.shift.ShiftListCallbacks
 import app.markiro.handheld.feature.shift.ShiftListEvent
 import app.markiro.handheld.feature.shift.ShiftListScreen
@@ -129,6 +132,7 @@ object Routes {
     const val PRINTER_BLUETOOTH = "settings/printer/bluetooth"
     const val PRINTER_TEST = "settings/printer/test"
     const val SHIFTS = "shifts"
+    const val CREATE_SHIFT = "create-shift"
     const val WORK = "work/{shiftId}"
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
@@ -456,6 +460,10 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.SHIFTS) {
                 val vm: ShiftListViewModel = hiltViewModel()
+                DisposableEffect(Unit) {
+                    vm.setScanning(true)
+                    onDispose { vm.setScanning(false) }
+                }
                 vm.grantDenial.Dialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 LaunchedEffect(Unit) {
@@ -476,8 +484,24 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onConfirmOther = vm::confirmOther,
                         onDismiss = vm::dismissDialog,
                         onRefresh = vm::refresh,
+                        onCreate = { nav.navigate(Routes.CREATE_SHIFT) { launchSingleTop = true } },
                     ),
                 )
+            }
+            composable(Routes.CREATE_SHIFT) {
+                val vm: CreateShiftViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                LaunchedEffect(vm) {
+                    vm.entries.collect { id -> nav.navigate(Routes.work(id)) { popUpTo(Routes.HUB) } }
+                }
+                CreateShiftScreen(state, CreateShiftCallbacks(
+                    onBack = { vm.leave { nav.popBackStack() } },
+                    onReload = vm::reload,
+                    onSubmit = vm::submit,
+                    onSelect = vm::select,
+                    onEdit = vm::edit,
+                    onProductScanning = vm::setProductScanning,
+                ))
             }
             composable(Routes.WORK) { entry ->
                 val vm: WorkViewModel = hiltViewModel()

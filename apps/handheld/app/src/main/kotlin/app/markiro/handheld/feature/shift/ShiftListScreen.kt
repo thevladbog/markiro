@@ -54,6 +54,7 @@ data class ShiftListCallbacks(
     val onConfirmOther: () -> Unit = {},
     val onDismiss: () -> Unit = {},
     val onRefresh: () -> Unit = {},
+    val onCreate: () -> Unit = {},
 )
 
 /** Card content shared by cached rows and other-line rows. */
@@ -136,44 +137,59 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
         if (state.refreshFailed) {
             Banner(stringResource(R.string.common_refresh_failed), Tone.Warn, Icons.Outlined.CloudOff)
         }
-        if (!state.loading && state.continueShift == null && state.mine.isEmpty() && !state.othersExpanded) {
-            FullScreenState(Icons.Outlined.Factory, stringResource(R.string.shifts_empty_title), stringResource(R.string.shifts_empty_text))
-            return
+        val empty = !state.loading && state.continueShift == null && state.mine.isEmpty() && !state.othersExpanded
+        if (empty) {
+            Column(Modifier.weight(1f).fillMaxWidth()) {
+                if (state.canCreate) state.ownLineName?.let { line ->
+                    Text(line, style = t.title, color = c.fg1, modifier = Modifier.padding(MarkiroSizes.sp4))
+                }
+                FullScreenState(
+                    Icons.Outlined.Factory,
+                    stringResource(if (state.canCreate) R.string.shift_create_empty_title else R.string.shifts_empty_title),
+                    stringResource(if (state.canCreate) R.string.shift_create_empty_text else R.string.shifts_empty_text),
+                )
+            }
+        } else {
+            PullToRefreshBox(isRefreshing = state.loading, onRefresh = cb.onRefresh, modifier = Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(MarkiroSizes.sp4),
+                    verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
+                ) {
+                    state.continueShift?.let { current ->
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                                ShiftCardView(current.card(true), onClick = cb.onContinue)
+                                PrimaryButton(stringResource(R.string.common_continue), cb.onContinue)
+                            }
+                        }
+                    }
+                    if (state.mine.isNotEmpty()) {
+                        item { Text(stringResource(R.string.shifts_my_line), style = t.label, color = c.fg3) }
+                        items(state.mine, key = { it.id }) { shift -> ShiftCardView(shift.card(state.reachable), onClick = { cb.onSelect(shift) }) }
+                    }
+                    if (state.loading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
+                    if (!state.othersExpanded) {
+                        item { MarkiroTextButton(stringResource(R.string.shifts_show_other), cb.onExpandOthers) }
+                    } else {
+                        item { Text(stringResource(R.string.shifts_other_lines), style = t.label, color = c.fg3) }
+                        if (state.othersLoading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
+                        // A failed lookup used to be indistinguishable from «нет смен».
+                        if (state.othersFailed) {
+                            item { Text(stringResource(R.string.common_other_lines_failed), style = t.caption, color = c.warnFg) }
+                        }
+                        state.others.forEach { line ->
+                            items(line.shifts, key = { "${line.id}:${it.id}" }) { dto ->
+                                ShiftCardView(dto.card(state.reachable, line.name), onClick = { cb.onSelectOther(dto, line.name) })
+                            }
+                        }
+                    }
+                }
+            }
         }
-        PullToRefreshBox(isRefreshing = state.loading, onRefresh = cb.onRefresh, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(MarkiroSizes.sp4),
-                verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
-            ) {
-                state.continueShift?.let { current ->
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                            ShiftCardView(current.card(true), onClick = cb.onContinue)
-                            PrimaryButton(stringResource(R.string.common_continue), cb.onContinue)
-                        }
-                    }
-                }
-                if (state.mine.isNotEmpty()) {
-                    item { Text(stringResource(R.string.shifts_my_line), style = t.label, color = c.fg3) }
-                    items(state.mine, key = { it.id }) { shift -> ShiftCardView(shift.card(state.reachable), onClick = { cb.onSelect(shift) }) }
-                }
-                if (state.loading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
-                if (!state.othersExpanded) {
-                    item { MarkiroTextButton(stringResource(R.string.shifts_show_other), cb.onExpandOthers) }
-                } else {
-                    item { Text(stringResource(R.string.shifts_other_lines), style = t.label, color = c.fg3) }
-                    if (state.othersLoading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
-                    // A failed lookup used to be indistinguishable from «нет смен».
-                    if (state.othersFailed) {
-                        item { Text(stringResource(R.string.common_other_lines_failed), style = t.caption, color = c.warnFg) }
-                    }
-                    state.others.forEach { line ->
-                        items(line.shifts, key = { "${line.id}:${it.id}" }) { dto ->
-                            ShiftCardView(dto.card(state.reachable, line.name), onClick = { cb.onSelectOther(dto, line.name) })
-                        }
-                    }
-                }
+        if (state.canCreate) {
+            Column(Modifier.padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2)) {
+                PrimaryButton(stringResource(R.string.shift_create_title), cb.onCreate)
             }
         }
     }

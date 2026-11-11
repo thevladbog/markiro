@@ -46,8 +46,10 @@ export function shiftMonthKey(isoDate: string): string {
 export function formatShiftNumber(input: {
   monthKey: string;
   seq: number;
-  createdFrom: "admin" | "station";
+  createdFrom: "admin" | "station" | "handheld";
 }): string {
   const seq = String(input.seq).padStart(3, "0");
-  return `${input.monthKey}-${seq}${input.createdFrom === "station" ? "/S" : ""}`;
+  const suffix =
+    input.createdFrom === "station" ? "/S" : input.createdFrom === "handheld" ? "/M" : "";
+  return `${input.monthKey}-${seq}${suffix}`;
 }

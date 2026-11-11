@@ -101,7 +101,7 @@ macro_rules! item_columns {
              CASE WHEN wp.id IS NOT NULL THEN 'warehouse' END AS pallet_kind, \
              CASE WHEN wp.id IS NOT NULL THEN wp.sscc ELSE p.sscc END AS pallet_sscc, \
              CASE WHEN wp.id IS NOT NULL THEN wp.disassembled_at ELSE p.disassembled_at END AS pallet_disassembled_at, \
-             sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
+             sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.number_origin AS created_from, \
              sh.status AS shift_status, sh.production_date, pr.name AS product_name, \
              l.name AS line_name, s.device_id, d.name AS device_name, \
              op.name AS operator_name "
@@ -242,7 +242,7 @@ const REGISTRY_HYDRATE_SQL: &str = concat!(
 pub const CARD_SCANS_SQL: &str = concat!(
     "SELECT s.id, s.scanned_at, s.verdict, s.duplicate_source, \
      s.gtin14, s.serial, s.canonical, s.shift_id, sh.number_month_key, sh.number_seq, \
-     sh.created_from, d.name AS device_name, op.name AS operator_name, s.box_id, \
+     sh.number_origin AS created_from, d.name AS device_name, op.name AS operator_name, s.box_id, \
      (EXISTS (SELECT 1 FROM box_items i WHERE i.scan_id = s.id) \
       OR (s.verdict = 'ok' AND s.box_id IS NULL AND ",
     took_its_code!(),
@@ -295,7 +295,7 @@ pub const PALLET_BY_SSCC_SQL: &str = "SELECT id FROM pallets WHERE sscc = ?1";
 pub const WAREHOUSE_PALLET_BY_SSCC_SQL: &str = "SELECT id FROM warehouse_pallets WHERE sscc = ?1";
 /// The shift of a number.
 pub const SHIFT_BY_NUMBER_SQL: &str =
-    "SELECT id, created_from FROM shifts WHERE number_month_key = ?1 AND number_seq = ?2";
+    "SELECT id, number_origin FROM shifts WHERE number_month_key = ?1 AND number_seq = ?2";
 
 /// Every query of this module by name, for the test that each one searches
 /// by an index.
@@ -357,7 +357,7 @@ pub struct CodeSearchQuery {
 struct ShiftNumber {
     month_key: String,
     seq: i64,
-    station: bool,
+    origin: Option<ShiftOrigin>,
 }
 
 /// The month keys the host draws numbers from (`shifts::month_key`).
@@ -374,9 +374,12 @@ fn is_month_key(text: &str) -> bool {
 /// station's suffix or none. Upper case only, as the host writes it.
 fn shift_number(text: &str) -> Result<ShiftNumber, ApiError> {
     let refused = || ApiError::validation("shift", "a shift number such as OCT26-004");
-    let (number, station) = match text.strip_suffix("/S") {
-        Some(number) => (number, true),
-        None => (text, false),
+    let (number, origin) = if let Some(number) = text.strip_suffix("/S") {
+        (number, Some(ShiftOrigin::Station))
+    } else if let Some(number) = text.strip_suffix("/M") {
+        (number, Some(ShiftOrigin::Handheld))
+    } else {
+        (text, None)
     };
     let (key, seq) = number.split_once('-').ok_or_else(refused)?;
     let year_ok = key.len() == 5 && key.as_bytes()[3..].iter().all(u8::is_ascii_digit);
@@ -393,7 +396,7 @@ fn shift_number(text: &str) -> Result<ShiftNumber, ApiError> {
     Ok(ShiftNumber {
         month_key: key.to_owned(),
         seq,
-        station,
+        origin,
     })
 }
 
@@ -577,7 +580,7 @@ async fn resolve(
         match found {
             // `/S` names a station's shift; without it the number names
             // the shift whoever created it.
-            Some((id, from)) if !number.station || from == ShiftOrigin::Station.as_str() => {
+            Some((id, from)) if number.origin.is_none_or(|origin| from == origin.as_str()) => {
                 resolved.shift_id = Some(id);
             }
             _ => return Ok(None),

@@ -28,7 +28,7 @@ pub const BOX_SQL: &str = "SELECT b.id, b.sscc, b.opened_at, b.closed_at, b.disa
      b.device_id, d.name AS device_name, op.name AS operator_name, \
      (SELECT COUNT(*) FROM box_items i WHERE i.box_id = b.id \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units, \
-     sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
+     sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.number_origin AS created_from, \
      sh.status AS shift_status, sh.production_date, pr.name AS product_name, \
      l.name AS line_name, COALESCE(wp.id,p.id) AS pallet_id, \
      CASE WHEN wp.id IS NOT NULL THEN 'warehouse' END AS pallet_kind, \
@@ -73,7 +73,7 @@ pub const PALLET_SQL: &str = "SELECT p.id, p.sscc, p.opened_at, p.closed_at, \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL \
       WHERE b.pallet_id = p.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) \
       AS units, \
-     sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
+     sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.number_origin AS created_from, \
      sh.status AS shift_status, sh.production_date, pr.name AS product_name, \
      l.name AS line_name \
      FROM pallets p JOIN shifts sh ON sh.id = p.shift_id \

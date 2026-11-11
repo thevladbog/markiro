@@ -454,7 +454,7 @@ async fn entered_shift(
         Option<String>,
     );
     let row: Option<ShiftRow> = sqlx::query_as(
-        "SELECT s.status, s.mode, s.number_month_key, s.number_seq, s.created_from, \
+        "SELECT s.status, s.mode, s.number_month_key, s.number_seq, s.number_origin AS created_from, \
          json_extract(s.snapshot, '$.product.gtin14'), json_extract(s.snapshot, '$.issuerPrefix'), \
          s.pallets_enabled, s.validation_print_mode = 'duplicate_dm', s.planned_qty, \
          (SELECT p.state FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \

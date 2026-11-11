@@ -66,6 +66,7 @@ data class ShiftListUi(
      */
     val refreshFailed: Boolean = false,
     val othersFailed: Boolean = false,
+    val canCreate: Boolean = false,
 )
 
 sealed interface ShiftListEvent {
@@ -87,7 +88,7 @@ private const val REACHABLE_TICK_MS = 30 * 1000L
  */
 private const val SCAN_LOADING_RETRY_TIMEOUT_MS = 5_000L
 
-private data class Lists(val current: ShiftEntity?, val mine: List<ShiftEntity>, val config: DeviceConfigEntity?, val reachable: Boolean)
+private data class Lists(val current: ShiftEntity?, val mine: List<ShiftEntity>, val config: DeviceConfigEntity?, val reachable: Boolean, val canCreate: Boolean)
 
 @HiltViewModel
 class ShiftListViewModel(
@@ -144,13 +145,18 @@ class ShiftListViewModel(
     private val _events = MutableSharedFlow<ShiftListEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<ShiftListEvent> = _events
 
-    private val lists = combine(repository.observeShifts(), config.observe(), reachability.lastSuccessAt, tick, hostReachable) { shifts, cfg, lastOk, _, host ->
+    private var scanning = true
+    fun setScanning(active: Boolean) { scanning = active }
+
+    private val hostState = combine(hostReachable, repository.observeCreationSupport()) { reachable, support -> reachable to (support == "true") }
+
+    private val lists = combine(repository.observeShifts(), config.observe(), reachability.lastSuccessAt, tick, hostState) { shifts, cfg, lastOk, _, (host, create) ->
         val open = shifts.filter { it.status != "closed" }
         val current = cfg?.activeShiftId?.let { id -> open.firstOrNull { it.id == id } }
         val mine = open.filter { it.id != current?.id && (it.lineId == cfg?.lineId || it.lineId == null) }
         // A device of a host reaches the host, never the cloud: the cloud's tracker says nothing for it.
         val reachable = if (cfg?.backend == "host") host else lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS
-        Lists(current, mine, cfg, reachable)
+        Lists(current, mine, cfg, reachable, cfg?.backend == "host" && create)
     }
 
     val state: StateFlow<ShiftListUi> =
@@ -170,6 +176,7 @@ class ShiftListViewModel(
                 dialog = values[5] as ShiftDialog?,
                 refreshFailed = values[6] as Boolean,
                 othersFailed = values[7] as Boolean,
+                canCreate = lists.canCreate,
             )
         }.stateIn(viewModelScope, SharingStarted.Eagerly, ShiftListUi(true, null, emptyList(), emptyList(), false, false, null, false, null, null))
 
@@ -253,7 +260,7 @@ class ShiftListViewModel(
      * look up the same shift once more before giving up.
      */
     private suspend fun onScan(raw: String) {
-        if (dialog.value != null) return
+        if (!scanning || dialog.value != null) return
         val shiftId = ShiftTaskToken.parse(raw.trim()) ?: return
         var match = matchFromVisible(shiftId, state.value) ?: repository.listed(shiftId)?.toDto()
         if (match == null && state.value.loading) {
