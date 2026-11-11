@@ -327,6 +327,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::pallet_events::receive_events),
         )
         .route(
+            "/v1/device/pallet-events/close-issues/{id}",
+            get(crate::routes::pallet_close_issues::device_get),
+        )
+        .route(
             "/v1/device/disaggregation/lookup",
             post(crate::routes::device_disaggregation::lookup),
         )
@@ -430,6 +434,14 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/warehouse-pallets/{id}",
             get(crate::routes::office_warehouse_detail::get),
+        )
+        .route(
+            "/v1/office/warehouse-pallets/close-issues",
+            get(crate::routes::pallet_close_issues::office_list),
+        )
+        .route(
+            "/v1/office/warehouse-pallets/close-issues/{id}/resolve",
+            post(crate::routes::pallet_close_issues::office_resolve),
         )
         .route(
             "/v1/office/warehouse-pallets/validate",

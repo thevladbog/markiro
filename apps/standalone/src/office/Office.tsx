@@ -128,6 +128,7 @@ export function Office({
     // A phase of the license changes with a revision of its own (license spec
     // §8.2): the band, «Обзор» and «Лицензия» read it again.
     void queryClient.invalidateQueries({ queryKey: officeKeys.license });
+    void queryClient.invalidateQueries({ queryKey: officeKeys.warehousePalletIssues });
   }, [hostRevision, session, queryClient]);
   const officeLink = useMemo(() => ({ status: link, sync }), [link, sync]);
   return (

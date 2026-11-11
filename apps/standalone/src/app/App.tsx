@@ -409,6 +409,12 @@ function AppScreens({
     sendFacts: hostApi.sendFacts,
     registerKnownBlocks: hostApi.registerKnownBlocks,
     sendWarehouseRecords: hostApi.sendWarehouseRecords,
+    ...(linked?.kind === "station"
+      ? {
+          sendPalletEvents: hostApi.sendPalletEvents,
+          getPalletCloseIssue: hostApi.getPalletCloseIssue,
+        }
+      : {}),
     conflictStatus: hostApi.conflictStatus,
     listDisplacements: hostApi.listDisplacements,
     deviceProductPhoto: hostApi.getDeviceProductPhoto,
@@ -1149,6 +1155,7 @@ function AppScreens({
                 checkCode={hostApi.checkCode}
                 requestBlock={hostApi.requestSsccBlock}
                 warehouseLookup={hostApi.warehouseLookup}
+                getBoxRegistry={hostApi.getBoxRegistry}
                 palletSheets={hostApi.getDevicePalletSheets}
                 requestFacts={requestFacts}
                 requestShifts={requestShifts}

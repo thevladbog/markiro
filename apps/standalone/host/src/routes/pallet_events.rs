@@ -1,5 +1,4 @@
-//! `POST /v1/device/pallet-events`: a handheld's warehouse pallets outside any shift (plan ТСД-Х,
-//! spec 6.4.1).
+//! `POST /v1/device/pallet-events`: a station or handheld's warehouse pallets outside any shift.
 
 use axum::extract::State;
 use axum::Json;
@@ -35,11 +34,11 @@ pub async fn receive_events(
     }
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     // A device revoked while the batch waited for the lock sends nothing.
-    device
+    let kind = device
         .require_kinds_in(
             &mut tx,
-            &[DeviceKind::Handheld],
-            "only a handheld sends pallet events",
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            "only floor devices send pallet events",
         )
         .await?;
     let received_at = state.timestamp();
@@ -50,6 +49,7 @@ pub async fn receive_events(
             &state,
             &mut tx,
             &device.id,
+            kind,
             record,
             &received_at,
             &mut revision,
@@ -59,7 +59,9 @@ pub async fn receive_events(
             Ok(receipt) => receipts.push(receipt),
             Err(error) => {
                 // The device sends the same batch again; support learns which record failed.
-                tracing::error!(device = %device.id, position, "a pallet event batch failed");
+                if error.status().is_server_error() {
+                    tracing::error!(device = %device.id, position, "a pallet event batch failed");
+                }
                 return Err(error);
             }
         }

@@ -1,5 +1,4 @@
-//! The events of a device outside a shift (plan ТСД-Х, spec 6.4): a handheld's warehouse pallets,
-//! and since protocol 8 the disassembly of a closed one.
+//! The warehouse pallet events of a floor device outside a shift.
 //! One record, one receipt, as `facts::receive` does it: a record whose id has a kept receipt
 //! answers that receipt when its digest is the same and `payload_mismatch` (kept nowhere) when it
 //! is not; a record that cannot be read or breaks a rule is a `rejected` receipt and writes
@@ -8,7 +7,7 @@
 
 use axum::http::StatusCode;
 use markiro_proto::{
-    exception_reasons, receipt_codes, FactOutcome, FactReceipt, PalletBoxAddedData,
+    exception_reasons, receipt_codes, DeviceKind, FactOutcome, FactReceipt, PalletBoxAddedData,
     PalletBoxRemovedData, PalletEventKind, PalletEventRecord, WarehousePalletClosedData,
     WarehousePalletDisassembledData, WarehousePalletLabelData, WarehousePalletOpenedData,
 };
@@ -19,6 +18,7 @@ use crate::db::next_revision;
 use crate::error::ApiError;
 use crate::facts::{blocks, registry_touch, rules, Applied, Failure, Reject};
 use crate::license::seats::{require_feature, Feature};
+use crate::pallet_close_issues;
 use crate::server::AppState;
 use crate::validate;
 
@@ -27,6 +27,7 @@ pub const MAX_RECORD_BYTES: usize = 16 * 1024;
 
 struct Context<'a> {
     device_id: &'a str,
+    device_kind: DeviceKind,
     record_id: &'a str,
     operator_id: Option<&'a str>,
     received_at: &'a str,
@@ -54,6 +55,7 @@ pub async fn receive(
     app: &AppState,
     conn: &mut SqliteConnection,
     device_id: &str,
+    device_kind: DeviceKind,
     value: &Value,
     received_at: &str,
     revision: &mut Option<i64>,
@@ -83,7 +85,16 @@ pub async fn receive(
             ));
         }
     }
-    let (kind, answer) = apply(app, conn, device_id, value, received_at, revision).await?;
+    let (kind, answer) = apply(
+        app,
+        conn,
+        device_id,
+        device_kind,
+        value,
+        received_at,
+        revision,
+    )
+    .await?;
     let receipt = match answer {
         Ok(applied) => FactReceipt {
             id: id.clone(),
@@ -153,6 +164,7 @@ async fn apply(
     app: &AppState,
     conn: &mut SqliteConnection,
     device_id: &str,
+    device_kind: DeviceKind,
     value: &Value,
     received_at: &str,
     revision: &mut Option<i64>,
@@ -169,8 +181,20 @@ async fn apply(
             return Ok((kind, Err(Reject::field("operatorId"))));
         }
     }
+    if device_kind == DeviceKind::Station {
+        // The station checks the local roster when it writes the event. At delivery the
+        // actor is historical evidence, as for production facts. A restored host can
+        // be older than that operator's record.
+        if record.operator_id.is_none() {
+            return Ok((kind, Err(Reject::field("operatorId"))));
+        }
+        if record.kind == PalletEventKind::WarehousePalletDisassembled {
+            return Ok((kind, Err(Reject::field("kind"))));
+        }
+    }
     let context = Context {
         device_id,
+        device_kind,
         record_id: &record.id,
         operator_id: record.operator_id.as_deref(),
         received_at,
@@ -180,7 +204,7 @@ async fn apply(
         PalletEventKind::PalletBoxAdded => box_added(conn, &context, &record.data).await,
         PalletEventKind::PalletBoxRemoved => box_removed(conn, &context, &record.data).await,
         PalletEventKind::WarehousePalletClosed => {
-            closed(conn, &context, &record.data, revision).await
+            close_event(conn, &context, &record.data, revision).await
         }
         PalletEventKind::WarehousePalletLabel => label(conn, &context, &record.data).await,
         PalletEventKind::WarehousePalletDisassembled => {
@@ -212,7 +236,8 @@ async fn own_pallet(
     id: &str,
 ) -> Result<(Option<String>, String), Failure> {
     let row: Option<(Option<String>, String)> = sqlx::query_as(
-        "SELECT closed_at, product_id FROM warehouse_pallets WHERE id = ? AND device_id = ?",
+        "SELECT closed_at, product_id FROM warehouse_pallets \
+         WHERE id = ? AND device_id = ? AND source = 'device' AND assembly_cancelled_at IS NULL",
     )
     .bind(id)
     .bind(context.device_id)
@@ -236,23 +261,47 @@ async fn opened(
     if crate::cloud_history::reserved_identity(&mut *conn, &data.pallet_id).await? {
         return Err(Reject::field("data.palletId").into());
     }
-    let existing: Option<(String, String)> =
-        sqlx::query_as("SELECT device_id, product_id FROM warehouse_pallets WHERE id = ?")
+    if context.device_kind == DeviceKind::Station {
+        if let Some(id) =
+            pallet_close_issues::cancelled(conn, context.device_id, &data.pallet_id).await?
+        {
+            return Err(pallet_close_issues::with_issue(
+                Reject::new(receipt_codes::PALLET_STATE),
+                &id,
+            )
+            .into());
+        }
+    }
+    let existing: Option<(String, String, String, Option<String>)> =
+        sqlx::query_as("SELECT device_id, product_id, source, assembly_cancelled_at FROM warehouse_pallets WHERE id = ?")
             .bind(&data.pallet_id)
             .fetch_optional(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
     match existing {
         // Another device's pallet has this id: an id made up twice is the device's fault.
-        Some((device, _)) if device != context.device_id => {
+        Some((device, _, source, _)) if device != context.device_id || source != "device" => {
             return Err(Reject::field("data.palletId").into())
         }
-        Some((_, product)) if product != data.product_id => {
+        Some((_, product, _, _)) if product != data.product_id => {
             return Err(Reject::field("data.productId").into())
         }
+        Some((_, _, _, Some(_))) => return Err(Reject::new(receipt_codes::PALLET_STATE).into()),
         // Sent again under another record id: nothing to write.
         Some(_) => return Ok(Applied::accepted()),
         None => {}
+    }
+    if context.device_kind == DeviceKind::Station {
+        if let Some(issue) = pallet_close_issues::active(conn, context.device_id).await? {
+            if issue.pallet_id != data.pallet_id {
+                return Err(previous_pallet_needs_review());
+            }
+            return Err(pallet_close_issues::with_issue(
+                Reject::new(receipt_codes::PALLET_STATE),
+                &issue.id,
+            )
+            .into());
+        }
     }
     // Under the batch writer lock, before any insert or abandoned-draft cleanup.
     // An ApiError fails/rolls back the batch without a permanent rejected receipt,
@@ -278,10 +327,10 @@ async fn opened(
         }
         Err(error) => return Err(error.into()),
     }
-    // A handheld works one open pallet. An empty one it left (a draft the operator threw away
+    // A device works one open pallet. An empty one it left (a draft the operator threw away
     // after the host heard `opened`) goes; one with boxes on it is a state the device must fix.
     let open: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM warehouse_pallets WHERE device_id = ? AND closed_at IS NULL",
+        "SELECT id FROM warehouse_pallets WHERE device_id = ? AND closed_at IS NULL AND assembly_cancelled_at IS NULL",
     )
     .bind(context.device_id)
     .fetch_optional(&mut *conn)
@@ -328,6 +377,16 @@ async fn opened(
     Ok(Applied::accepted())
 }
 
+/// A host restored before an office decision can still hold a preceding pallet.
+/// Roll back this batch so later records can be retried after the office resolves it.
+fn previous_pallet_needs_review() -> Failure {
+    ApiError::conflict(
+        "previous_pallet_needs_review",
+        "a preceding station pallet is awaiting office review",
+    )
+    .into()
+}
+
 fn on_pallet(sscc: Option<String>, pallet_id: &str) -> Failure {
     Reject {
         code: receipt_codes::BOX_ON_PALLET,
@@ -353,7 +412,7 @@ async fn box_added(
         return Err(Reject::new(receipt_codes::PALLET_NOT_OPEN).into());
     }
     type BoxRow = (
-        String,
+        Option<String>,
         Option<String>,
         String,
         Option<String>,
@@ -361,7 +420,7 @@ async fn box_added(
         Option<String>,
     );
     let found: Option<BoxRow> = sqlx::query_as(
-        "SELECT b.id, b.disassembled_at, sh.product_id, p.id, p.sscc, p.disassembled_at \
+        "SELECT b.closed_at, b.disassembled_at, sh.product_id, p.id, p.sscc, p.disassembled_at \
          FROM boxes b JOIN shifts sh ON sh.id = b.shift_id LEFT JOIN pallets p ON p.id = b.pallet_id \
          WHERE b.sscc = ?",
     )
@@ -369,12 +428,18 @@ async fn box_added(
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let Some((_, disassembled_at, product, production_pallet, production_sscc, production_off)) =
-        found
+    let Some((
+        box_closed_at,
+        disassembled_at,
+        product,
+        production_pallet,
+        production_sscc,
+        production_off,
+    )) = found
     else {
         return Err(Reject::new(receipt_codes::BOX_NOT_FOUND).into());
     };
-    if disassembled_at.is_some() {
+    if box_closed_at.is_none() || disassembled_at.is_some() {
         return Err(Reject::new(receipt_codes::BOX_NOT_CLOSED).into());
     }
     if product != pallet_product {
@@ -444,7 +509,7 @@ async fn box_removed(
     Ok(Applied::accepted())
 }
 
-async fn closed(
+async fn close_event(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
     data: &Value,
@@ -462,7 +527,70 @@ async fn closed(
     if data.box_count == 0 {
         return Err(Reject::field("data.boxCount").into());
     }
-    let serial = i64::try_from(data.serial).map_err(|_| Reject::field("data.serial"))?;
+    i64::try_from(data.serial).map_err(|_| Reject::field("data.serial"))?;
+    if context.device_kind != DeviceKind::Station {
+        return closed(conn, context, &data, revision).await;
+    }
+    if let Some(id) =
+        pallet_close_issues::cancelled(conn, context.device_id, &data.pallet_id).await?
+    {
+        return Err(
+            pallet_close_issues::with_issue(Reject::new(receipt_codes::PALLET_STATE), &id).into(),
+        );
+    }
+    let issue = pallet_close_issues::active(conn, context.device_id).await?;
+    let result = match issue.as_ref() {
+        Some(issue) if issue.pallet_id != data.pallet_id => {
+            return Err(previous_pallet_needs_review());
+        }
+        Some(issue) => match issue.admit_reclose(conn, &data).await? {
+            Some(reject) if reject.code == receipt_codes::PALLET_STATE => return Err(reject.into()),
+            Some(reject) => Err(reject.into()),
+            None => closed(conn, context, &data, revision).await,
+        },
+        None => closed(conn, context, &data, revision).await,
+    };
+    match result {
+        Ok(applied) => {
+            if let Some(issue) = issue.as_ref() {
+                pallet_close_issues::mark_reclosed(conn, issue).await?;
+                mark_revision(conn, revision).await?;
+            }
+            Ok(applied)
+        }
+        Err(Failure::Reject(reject)) => {
+            let reject = pallet_close_issues::record_rejection(
+                conn,
+                context.device_id,
+                &data,
+                reject,
+                issue.as_ref(),
+                context.received_at,
+            )
+            .await?;
+            mark_revision(conn, revision).await?;
+            Err(reject.into())
+        }
+        Err(Failure::Internal(error)) => Err(error.into()),
+    }
+}
+
+async fn mark_revision(
+    conn: &mut SqliteConnection,
+    revision: &mut Option<i64>,
+) -> Result<(), ApiError> {
+    if revision.is_none() {
+        *revision = Some(next_revision(conn).await.map_err(ApiError::internal)?);
+    }
+    Ok(())
+}
+
+async fn closed(
+    conn: &mut SqliteConnection,
+    context: &Context<'_>,
+    data: &WarehousePalletClosedData,
+    revision: &mut Option<i64>,
+) -> Result<Applied, Failure> {
     let (closed_at, _) = own_pallet(conn, context, &data.pallet_id).await?;
     if closed_at.is_some() {
         let stored: Option<String> =
@@ -478,49 +606,14 @@ async fn closed(
             Err(Reject::new(receipt_codes::PALLET_ALREADY_CLOSED).into())
         };
     }
-    // The prefix is the block's own, frozen when the block was issued: the pallet was printed
-    // offline from that block, and the office may have changed the organization's GLN since. The
-    // block still has to be this device's, live, of extension 1 and to hold the serial.
-    let prefix: Option<String> = sqlx::query_scalar(
-        "SELECT issuer_prefix FROM sscc_blocks WHERE id = ? AND device_id = ? AND extension = 1",
+    let serial = validate_close_serial(
+        conn,
+        context.device_id,
+        &data.block_id,
+        &data.sscc,
+        data.serial,
     )
-    .bind(&data.block_id)
-    .bind(context.device_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(ApiError::internal)?;
-    let Some(prefix) = prefix else {
-        return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
-    };
-    if !rules::names_serial(&data.sscc, 1, &prefix, data.serial)
-        || !blocks::issued_to(
-            &mut *conn,
-            context.device_id,
-            &prefix,
-            &data.block_id,
-            1,
-            serial,
-        )
-        .await?
-    {
-        return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
-    }
-    // One serial of a pallet block is one label, on whichever kind of pallet it is printed.
-    let taken: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM pallets WHERE sscc = ?1 OR (block_id = ?2 AND serial = ?3) \
-         UNION ALL SELECT 1 FROM warehouse_pallets \
-         WHERE id != ?4 AND (sscc = ?1 OR (block_id = ?2 AND serial = ?3))",
-    )
-    .bind(&data.sscc)
-    .bind(&data.block_id)
-    .bind(serial)
-    .bind(&data.pallet_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(ApiError::internal)?;
-    if taken.is_some() || crate::cloud_history::reserved_sscc(&mut *conn, &data.sscc).await? {
-        return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
-    }
+    .await?;
     // A box the production side took apart after the scan stays live in the table but is not on
     // the pallet any more (the registry told the handheld to drop it).
     let counted: i64 = sqlx::query_scalar(
@@ -557,14 +650,51 @@ async fn closed(
         .await?;
     blocks::consume(&mut *conn, &data.block_id, serial).await?;
     // A pallet's close is an event for the office, as a shift's close is.
-    if revision.is_none() {
-        *revision = Some(
-            next_revision(&mut *conn)
-                .await
-                .map_err(ApiError::internal)?,
-        );
-    }
+    mark_revision(conn, revision).await?;
     Ok(Applied::accepted())
+}
+
+/// An unused serial of the original device block, even if the site's GLN later changed.
+pub(crate) async fn validate_close_serial(
+    conn: &mut SqliteConnection,
+    device_id: &str,
+    block_id: &str,
+    sscc: &str,
+    serial: u64,
+) -> Result<i64, Failure> {
+    let db_serial = i64::try_from(serial).map_err(|_| Reject::field("data.serial"))?;
+    let prefix: Option<String> = sqlx::query_scalar(
+        "SELECT issuer_prefix FROM sscc_blocks WHERE id = ? AND device_id = ? AND extension = 1",
+    )
+    .bind(block_id)
+    .bind(device_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    let Some(prefix) = prefix else {
+        return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
+    };
+    if !rules::names_serial(sscc, 1, &prefix, serial)
+        || !blocks::issued_to(conn, device_id, &prefix, block_id, 1, db_serial).await?
+    {
+        return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
+    }
+    // One serial of a pallet block is one label, on whichever kind of pallet it is printed.
+    let taken: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM pallets WHERE sscc = ?1 OR (block_id = ?2 AND serial = ?3) \
+         UNION ALL SELECT 1 FROM warehouse_pallets \
+         WHERE sscc = ?1 OR (block_id = ?2 AND serial = ?3)",
+    )
+    .bind(sscc)
+    .bind(block_id)
+    .bind(db_serial)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    if taken.is_some() || crate::cloud_history::reserved_sscc(conn, sscc).await? {
+        return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
+    }
+    Ok(db_serial)
 }
 
 async fn label(

@@ -52,6 +52,10 @@ export async function noteRestoreEpoch(
       sql: NOTE_SQL,
       values: [pairing.hostId, pairing.deviceId, epoch, now.toISOString()],
     },
+    {
+      sql: "DELETE FROM pallet_registry_state WHERE host_id = ? AND device_id = ? AND restore_epoch IS NOT ?",
+      values: [pairing.hostId, pairing.deviceId, epoch],
+    },
   ]);
   return changed === 1;
 }
@@ -178,6 +182,29 @@ function warehouseReopenStatement(pairing: Pairing, since: string): LocalStateme
   return { sql: WAREHOUSE_REOPEN_SQL, values: [pairing.hostId, pairing.deviceId, since] };
 }
 
+/** Replay accepted predecessors with a pallet's recent or still waiting events. */
+const REPLAY_ASSEMBLY_REJECTED =
+  "o.outcome = 'rejected' AND o.resolved_at IS NULL " +
+  "AND o.kind IN ('warehouse_pallet_opened', 'warehouse_pallet_closed') " +
+  "AND NOT EXISTS (SELECT 1 FROM pallet_assembly_outbox c WHERE c.replaces_id = o.id)";
+
+export const PALLET_ASSEMBLY_REOPEN_SQL =
+  "WITH owed AS MATERIALIZED (SELECT pallet_id FROM pallet_assembly_outbox AS o " +
+  "WHERE host_id = ? AND device_id = ? AND (acked_at IS NULL OR (outcome = 'accepted' AND acked_at >= ?) " +
+  `OR (${REPLAY_ASSEMBLY_REJECTED}))) ` +
+  "UPDATE pallet_assembly_outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = NULL " +
+  "WHERE host_id = ? AND device_id = ? AND outcome = 'accepted' AND pallet_id IN (SELECT pallet_id FROM owed) " +
+  "AND NOT EXISTS (SELECT 1 FROM pallet_assembly_pallets p WHERE p.id = pallet_assembly_outbox.pallet_id AND p.cancelled_at IS NOT NULL)";
+
+/** A restored host can have lost the unresolved refusal and its Office issue. Keep the fence until a fresh receipt. */
+const PALLET_ASSEMBLY_REOPEN_REJECTED_SQL =
+  "UPDATE pallet_assembly_outbox AS o SET previous_receipt = json_object('outcome', outcome, 'code', outcome_code, " +
+  "'details', json(outcome_details), 'ackedAt', acked_at, 'acknowledgedAt', acknowledged_at), " +
+  "replay_blocked = 1, outcome = NULL, acked_at = NULL " +
+  `WHERE host_id = ? AND device_id = ? AND ${REPLAY_ASSEMBLY_REJECTED} ` +
+  "AND NOT EXISTS (SELECT 1 FROM pallet_assembly_pallets p WHERE p.id = o.pallet_id " +
+  "AND (p.cancelled_at IS NOT NULL OR p.abandoned_at IS NOT NULL))";
+
 /**
  * Settles the epoch the run read, once: only while it is still that epoch
  * and still owed. Parameters: the instant, the refused count, the refused
@@ -299,6 +326,14 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
     { sql: FROM_ZERO_SQL, values: [due.epoch] },
     reopenStatement(pairing, since),
     warehouseReopenStatement(pairing, since),
+    {
+      sql: PALLET_ASSEMBLY_REOPEN_SQL,
+      values: [pairing.hostId, pairing.deviceId, since, pairing.hostId, pairing.deviceId],
+    },
+    {
+      sql: PALLET_ASSEMBLY_REOPEN_REJECTED_SQL,
+      values: [pairing.hostId, pairing.deviceId],
+    },
     {
       sql: SETTLE_SQL,
       values: [

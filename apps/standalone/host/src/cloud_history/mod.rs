@@ -35,9 +35,10 @@ pub async fn reserved_identity(conn: &mut SqliteConnection, id: &str) -> Result<
     sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cloud_history_shifts x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.id=?1 UNION ALL SELECT 1 FROM cloud_history_boxes x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.id=?1 UNION ALL SELECT 1 FROM cloud_history_pallets x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.id=?1)")
         .bind(id).fetch_one(conn).await.map_err(ApiError::internal)
 }
-/// Counters protect future allocation; this protects delayed facts from old blocks.
+/// Counters protect future allocation; this protects delayed facts from old blocks and
+/// prevents reuse of a label withdrawn after a station's offline close.
 pub async fn reserved_sscc(conn: &mut SqliteConnection, sscc: &str) -> Result<bool, ApiError> {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cloud_history_boxes x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.sscc=?1 UNION ALL SELECT 1 FROM cloud_history_pallets x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.sscc=?1)")
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cloud_history_boxes x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.sscc=?1 UNION ALL SELECT 1 FROM cloud_history_pallets x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.sscc=?1 UNION ALL SELECT 1 FROM warehouse_pallet_close_issues issue WHERE issue.retired=1 AND issue.sscc=?1)")
         .bind(sscc).fetch_one(conn).await.map_err(ApiError::internal)
 }
 pub async fn manifest(

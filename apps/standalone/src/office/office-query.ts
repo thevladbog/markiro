@@ -34,6 +34,7 @@ export const officeKeys = {
   license: ["office", "license"],
   palletSheets: ["office", "pallet-sheets"],
   warehousePallets: ["office", "warehouse-pallets"],
+  warehousePalletIssues: ["office", "warehouse-pallet-close-issues"],
   warehousePallet: (id: string) => ["office", "warehouse-pallet", id],
   sscc: ["office", "sscc"],
   users: ["office", "users"],

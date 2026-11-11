@@ -27,6 +27,7 @@ pub mod logging;
 pub mod network;
 pub mod network_profile;
 pub mod pairing_code;
+mod pallet_close_issues;
 pub mod pallet_events;
 pub mod rate_limit;
 pub mod restore;

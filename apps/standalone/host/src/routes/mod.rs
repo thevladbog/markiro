@@ -44,6 +44,7 @@ pub mod org;
 pub mod org_logo;
 pub mod org_print;
 pub mod pairing;
+pub mod pallet_close_issues;
 pub mod pallet_events;
 pub mod pallet_sheets;
 pub mod product_photos;

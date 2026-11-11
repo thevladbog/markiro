@@ -27,8 +27,9 @@ use markiro_proto::{
     receipt_codes, shift_close_reasons, shift_supports, BoxRegistryItem, BoxRegistryKind,
     BoxRegistryPage, DemoDataSummary, OfficeWarehousePallets, OrgPrint, PalletBoxAddedData,
     PalletBoxRemovedData, PalletEventBatch, PalletEventKind, UserAvatarPut, UserAvatarState,
-    WarehousePalletClosedData, WarehousePalletDisassembledData, WarehousePalletLabelData,
-    WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
+    WarehousePalletCloseIssue, WarehousePalletCloseIssueStatus, WarehousePalletClosedData,
+    WarehousePalletDisassembledData, WarehousePalletLabelData, WarehousePalletOpenedData,
+    MIN_PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -2112,9 +2113,27 @@ fn the_box_registry_page_is_a_delta_with_removals_and_the_restore_epoch() {
     assert!(page.next_cursor.is_some() && page.restore_epoch.is_some());
     let last: BoxRegistryPage = round_trip("box-registry-last-page.json");
     assert!(last.next_cursor.is_none() && last.restore_epoch.is_none() && last.items.is_empty());
+    assert_eq!(page.can_open_pallets, None);
+    assert!(page.items.iter().all(|item| item.shift_number.is_none()));
     // No code of a unit is in a registry item: the type has no field for one.
     let text = serde_json::to_string(&page).unwrap();
     assert!(!text.contains("contentKeys") && !text.contains("codeHash"));
+}
+
+#[test]
+fn the_station_registry_adds_the_source_shift_and_assembly_permission() {
+    let page: BoxRegistryPage = round_trip("station-box-registry-page.json");
+    assert_eq!(page.can_open_pallets, Some(true));
+    assert_eq!(page.items[0].shift_number.as_deref(), Some("OCT26-001"));
+    assert_eq!(page.items[1].shift_number, None);
+}
+
+#[test]
+fn the_pallet_close_issue_returns_the_current_and_approved_sets() {
+    let issue: WarehousePalletCloseIssue = round_trip("warehouse-pallet-close-issue.json");
+    assert_eq!(issue.status, WarehousePalletCloseIssueStatus::Approved);
+    assert_eq!(issue.current_boxes, 1);
+    assert_eq!(issue.approved_box_ssccs, Some(issue.current_box_ssccs));
 }
 
 #[test]

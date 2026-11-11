@@ -2515,7 +2515,8 @@ describe("the operator on the floor", () => {
       act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 450));
       });
-    fireEvent.click(await screen.findByRole("button", { name: "Повторная печать этикеток" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Складские операции" }));
+    fireEvent.click(await screen.findByRole("button", { name: "К перепечатке" }));
     await screen.findByRole("heading", { name: "Повторная печать этикеток" });
     await pause();
     fireEvent.click(await screen.findByRole("radio", { name: "Повреждена" }));

@@ -1,0 +1,11 @@
+.warehouse-pallet-issue__boxes {
+  max-block-size: 15rem;
+  overflow: auto;
+  margin-block: 0;
+}
+
+.warehouse-pallet-issue__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

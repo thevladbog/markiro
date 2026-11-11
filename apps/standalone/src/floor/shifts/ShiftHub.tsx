@@ -51,6 +51,7 @@ export interface ShiftHubViewProps {
   onNew: () => void;
   onSetup?: () => void;
   onWarehouse?: () => void;
+  warehouseMenu?: boolean;
   onQueue?: () => void;
 }
 
@@ -78,6 +79,7 @@ export function ShiftHubView({
   onNew,
   onSetup,
   onWarehouse,
+  warehouseMenu = false,
   onQueue,
 }: ShiftHubViewProps) {
   const { t } = useTranslation();
@@ -191,9 +193,9 @@ export function ShiftHubView({
                 variant="secondary"
                 disabled={busy}
                 onClick={onWarehouse}
-                icon={<Glyph name="printer" size={24} />}
+                icon={<Glyph name={warehouseMenu ? "layers" : "printer"} size={24} />}
               >
-                {t("floor.warehouse.open")}
+                {t(warehouseMenu ? "floor.warehouseMenu.title" : "floor.warehouse.open")}
               </Button>
             </div>
           )}

@@ -289,6 +289,12 @@ describe("the station's own production tables (migration 0006)", () => {
         "floor_restore_epochs",
         "floor_shift_participation",
         "installation_dataset_epochs",
+        "pallet_assembly_members",
+        "pallet_assembly_outbox",
+        "pallet_assembly_pallets",
+        "pallet_assembly_print_attempts",
+        "pallet_registry_boxes",
+        "pallet_registry_state",
       ]
         .sort()
         .flatMap((tableName) =>
@@ -1052,7 +1058,10 @@ describe("the shape of the production tables (migration 0006)", () => {
       [CLOSE_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)", PALLET_BOXES_INDEX]],
       [JOIN_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
       [BOX_ONTO_PALLET_SQL, ["sqlite_autoindex_floor_boxes_1 (id=?)"]],
-      [PALLET_SSCC_HELD_SQL, ["floor_pallets_sscc (sscc=?)"]],
+      [
+        PALLET_SSCC_HELD_SQL,
+        ["floor_pallets_sscc (sscc=?)", "sqlite_autoindex_pallet_assembly_pallets_2 (sscc=?)"],
+      ],
       // The exceptions of a pallet (task 4): the closed pallets of a shift through the shift's
       // pallets with their boxes counted through the pallet's boxes, a pallet by its key
       // (with its boxes counted), its disassembly and the reprint's comparison by the same
@@ -2135,6 +2144,8 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
       "SEARCH outbox USING INDEX outbox_unsent (host_id=? AND device_id=?)",
       "SCALAR SUBQUERY 2",
       "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+      "SCALAR SUBQUERY 3",
+      "SEARCH pallet_assembly_outbox USING INDEX pallet_assembly_outbox_unsent (host_id=? AND device_id=?)",
     ]);
     expect(plan(FORGET_UNSENT_ANY_SQL)).toEqual([
       "SCAN CONSTANT ROW",
@@ -2142,6 +2153,8 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
       "SCAN outbox USING INDEX outbox_unsent",
       "SCALAR SUBQUERY 2",
       "SCAN wh_outbox USING INDEX wh_outbox_unsent",
+      "SCALAR SUBQUERY 3",
+      "SCAN pallet_assembly_outbox USING INDEX pallet_assembly_outbox_unsent",
     ]);
     expect(plan(SHELL_COUNT_SQL)).toEqual([
       "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
@@ -2172,7 +2185,9 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
     }
     // The outbox's own form is the same text over its table.
     expect(SHELL_COUNT_ANY_OUTBOX_SQL).toBe(SHELL_COUNT_ANY_SQL.replaceAll("wh_outbox", "outbox"));
-    expect(shell).toContain('const UNSENT_TABLES: [&str; 2] = ["outbox", "wh_outbox"];');
+    expect(shell).toContain(
+      'const UNSENT_TABLES: [&str; 3] = ["outbox", "wh_outbox", "pallet_assembly_outbox"];',
+    );
   });
 
   it("are pinned on the shell's SQLite with the same texts", () => {

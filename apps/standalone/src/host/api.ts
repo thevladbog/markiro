@@ -5,6 +5,16 @@ import {
   type OfficeSearchResponse,
 } from "./office-search.js";
 import {
+  boxRegistryPageSchema,
+  boxRegistryPath,
+  palletAssemblyCloseIssueSchema,
+  palletAssemblyCloseIssuesSchema,
+  type BoxRegistryPage,
+  type BoxRegistryQuery,
+  type PalletAssemblyCloseIssue,
+  type ResolvePalletAssemblyCloseIssue,
+} from "./pallet-assembly.js";
+import {
   palletValidationSchema,
   palletCreatedSchema,
   officeWarehousePalletDetailSchema,
@@ -729,6 +739,17 @@ export interface HostApi {
   warehouseLookup: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
   /** The warehouse reprint records (1–100); a receipt per record, in their order. */
   sendWarehouseRecords: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /** One page of the device's mirror of closed boxes. */
+  getBoxRegistry: (query: BoxRegistryQuery) => Promise<BoxRegistryPage>;
+  /** Frozen warehouse pallet events, one receipt per record. */
+  sendPalletEvents: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  getPalletCloseIssue: (id: string) => Promise<PalletAssemblyCloseIssue>;
+  listPalletCloseIssues: (token: string) => Promise<PalletAssemblyCloseIssue[]>;
+  resolvePalletCloseIssue: (
+    token: string,
+    id: string,
+    request: ResolvePalletAssemblyCloseIssue,
+  ) => Promise<PalletAssemblyCloseIssue>;
   /**
    * The outbox's records as kept (1-100, `FactRecord` each); a receipt per
    * record, in their order. A failed call is no receipt: the batch is sent
@@ -1288,6 +1309,36 @@ export function createHostApi(client: HostClient): HostApi {
           schema: factReceiptsSchema,
         })
       ).receipts,
+    getBoxRegistry: (query) =>
+      client.request("GET", boxRegistryPath(query), { schema: boxRegistryPageSchema }),
+    sendPalletEvents: async (records) =>
+      (
+        await client.request("POST", "/v1/device/pallet-events", {
+          body: { records },
+          schema: factReceiptsSchema,
+        })
+      ).receipts,
+    getPalletCloseIssue: (id) =>
+      client.request("GET", `/v1/device/pallet-events/close-issues/${encodeURIComponent(id)}`, {
+        schema: palletAssemblyCloseIssueSchema,
+      }),
+    listPalletCloseIssues: async (token) =>
+      (
+        await client.request("GET", "/v1/office/warehouse-pallets/close-issues", {
+          officeToken: token,
+          schema: palletAssemblyCloseIssuesSchema,
+        })
+      ).issues,
+    resolvePalletCloseIssue: (token, id, body) =>
+      client.request(
+        "POST",
+        `/v1/office/warehouse-pallets/close-issues/${encodeURIComponent(id)}/resolve`,
+        {
+          officeToken: token,
+          body,
+          schema: palletAssemblyCloseIssueSchema,
+        },
+      ),
     sendFacts: async (records) =>
       (
         await client.request("POST", "/v1/device/facts", {

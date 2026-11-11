@@ -8,8 +8,8 @@ use axum::http::StatusCode;
 use markiro_host::db::begin_write;
 use serde_json::{json, Value};
 use support::app::{
-    admin, box_id, code_hash, empty, fact, instant, json as json_request, pair_handheld, record_id,
-    request, shift_setup, with_device, Admin,
+    admin, box_id, code_hash, empty, fact, instant, json as json_request, pair_device,
+    pair_handheld, record_id, request, shift_setup, with_device, Admin,
 };
 use support::handheld::{
     added, box_sscc, closed_boxes, event, opened, pallet_block, pallet_sscc, product_of,
@@ -219,9 +219,10 @@ async fn a_taken_apart_box_is_a_removal_and_the_restore_epoch_rides_every_page()
 }
 
 #[tokio::test]
-async fn only_a_handheld_reads_the_registry_and_a_bad_query_is_a_validation_error() {
+async fn an_office_device_cannot_read_the_registry_and_a_bad_query_is_a_validation_error() {
     let admin = admin().await;
-    let (status, refused) = registry(&admin, &admin.key, "").await;
+    let (_, office) = pair_device(&admin.app, "office").await;
+    let (status, refused) = registry(&admin, &office, "").await;
     assert_eq!(
         (status, refused["error"]["code"].clone()),
         (StatusCode::FORBIDDEN, json!("forbidden"))

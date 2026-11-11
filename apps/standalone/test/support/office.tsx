@@ -210,6 +210,15 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     sendWarehouseRecords: vi.fn<HostApi["sendWarehouseRecords"]>(() =>
       unexpected("sendWarehouseRecords"),
     ),
+    getBoxRegistry: vi.fn<HostApi["getBoxRegistry"]>(() => unexpected("getBoxRegistry")),
+    sendPalletEvents: vi.fn<HostApi["sendPalletEvents"]>(() => unexpected("sendPalletEvents")),
+    getPalletCloseIssue: vi.fn<HostApi["getPalletCloseIssue"]>(() =>
+      unexpected("getPalletCloseIssue"),
+    ),
+    listPalletCloseIssues: vi.fn<HostApi["listPalletCloseIssues"]>(async () => []),
+    resolvePalletCloseIssue: vi.fn<HostApi["resolvePalletCloseIssue"]>(() =>
+      unexpected("resolvePalletCloseIssue"),
+    ),
     registerKnownBlocks: vi.fn<HostApi["registerKnownBlocks"]>(() =>
       unexpected("registerKnownBlocks"),
     ),

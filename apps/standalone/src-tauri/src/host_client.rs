@@ -471,7 +471,7 @@ fn allowed_method(method: &str) -> Result<Method, RequestError> {
 }
 
 /// Only host API paths: `/v1/…` of plain URL characters, no traversal. `%` is
-/// excluded: none of our routes need percent-encoding, and allowing it would
+/// excluded from the route: allowing it would
 /// let an encoded `..` or `/` reach the host after the `url` crate normalizes
 /// it, bypassing the checks above. A `.` path segment is refused for the same
 /// reason: `url` collapses `/v1/device/./line` to `/v1/device/line`, which
@@ -482,21 +482,40 @@ fn allowed_method(method: &str) -> Result<Method, RequestError> {
 /// such a caller-side check — today it is harmless only because the host
 /// does not normalize a trailing slash away, but nothing guarantees that.
 fn validate_path(path: &str) -> Result<(), RequestError> {
-    let route = path.split('?').next().unwrap_or(path);
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
     let safe = path.starts_with("/v1/")
         && path.len() <= MAX_PATH_LENGTH
         && !path.contains("..")
         && !path.contains("//")
         && !route.ends_with('/')
         && !route.split('/').any(|segment| segment == ".")
-        && path
+        && route
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"/_.~?=&-".contains(&byte));
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/_.~=&-".contains(&byte))
+        && valid_query(query);
     if safe {
         Ok(())
     } else {
         Err(RequestError::InvalidRequest)
     }
+}
+
+/// Percent escapes in a query value cannot change the route. The registry's
+/// timestamp and cursor use them; reject incomplete escapes and raw delimiters.
+fn valid_query(query: &str) -> bool {
+    let mut bytes = query.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            if !(bytes.next().is_some_and(|digit| digit.is_ascii_hexdigit())
+                && bytes.next().is_some_and(|digit| digit.is_ascii_hexdigit()))
+            {
+                return false;
+            }
+        } else if !(byte.is_ascii_alphanumeric() || b"/_.~?=&-".contains(&byte)) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether a failed request's error chain contains the pin verifier's
@@ -599,6 +618,7 @@ mod tests {
             "/v1/office/import/history/complete",
             "/v1/office/import/history/cancel",
             "/v1/changes?since=5&limit=100",
+            "/v1/device/box-registry?until=2026-11-11T08%3A00%3A00Z&cursor=2026-11-11T08%3A00%3A00Z%7C046006820000015024",
             // The query part is never split into path segments (`route`
             // stops at `?`), so a `.` there is unaffected by the `.` segment
             // check — whether it stands alone or, as in the second case,
@@ -620,6 +640,8 @@ mod tests {
             "/v1/%2e%2e/x",
             "/v1/.%2E/x",
             "/v1/office%2Fx",
+            "/v1/device/box-registry?cursor=bad%7",
+            "/v1/device/box-registry?cursor=bad%XY",
             too_long.as_str(),
             // A `.` segment: the `url` crate collapses this to
             // `/v1/device/line`, which would reach the host's line route

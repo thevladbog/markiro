@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { factsFailureOf, useHostLink } from "../src/app/host-link.js";
 import type { ShellAction } from "../src/app/shell.js";
+import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
 import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
@@ -62,6 +63,8 @@ async function link(
   waiting = 0,
   database: { db: DatabaseSync; executor: LocalExecutor } = openLocalDb(),
   through: (executor: LocalExecutor) => LocalExecutor = (executor) => executor,
+  sendPalletEvents?: Send,
+  getPalletCloseIssue?: HostApi["getPalletCloseIssue"],
 ) {
   const { db, executor: stored } = database;
   const executor = through(stored);
@@ -87,6 +90,8 @@ async function link(
         refresh,
         deviceShifts: async () => [],
         sendFacts: send,
+        ...(sendPalletEvents === undefined ? {} : { sendPalletEvents }),
+        ...(getPalletCloseIssue === undefined ? {} : { getPalletCloseIssue }),
         registerKnownBlocks: async () => ({ results: [] }),
         dispatch,
       }),
@@ -116,6 +121,95 @@ afterEach(() => {
 });
 
 describe("the outbox on the link", () => {
+  it("checks a newly delivered rejection's case even if the host sent no revision", async () => {
+    const database = openLocalDb();
+    const id = "replayed-close";
+    await database.executor.transaction([
+      {
+        sql: "INSERT INTO pallet_assembly_outbox (id, host_id, device_id, pallet_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        values: [
+          id,
+          HOST_ID,
+          DEVICE_ID,
+          "pallet",
+          "warehouse_pallet_closed",
+          JSON.stringify({ id }),
+          "2026-11-11T08:00:00Z",
+        ],
+      },
+    ]);
+    const get = vi.fn<HostApi["getPalletCloseIssue"]>(async (issueId) => ({
+      id: issueId,
+      palletId: "pallet",
+      sscc: "146006820000000409",
+      code: "pallet_count_mismatch",
+      status: "pending",
+      reportedBoxes: 2,
+      currentBoxes: 1,
+      currentBoxSsccs: ["046006820000015024"],
+      createdAt: "2026-11-11T08:00:00Z",
+    }));
+    const send = vi.fn<Send>(async () => [
+      {
+        id,
+        outcome: "rejected",
+        code: "pallet_count_mismatch",
+        details: { closeIssueId: "existing-case" },
+      },
+    ]);
+    const station = await link(acceptAll, HOST_ID, 0, database, (local) => local, send, get);
+    await waitFor(() => expect(get).toHaveBeenCalledExactlyOnceWith("existing-case"));
+    expect(send).toHaveBeenCalledTimes(1);
+    station.hook.unmount();
+  });
+
+  it("delivers a station's pallet events after all waiting production facts", async () => {
+    const database = openLocalDb();
+    const order: string[] = [];
+    const event = {
+      id: "open-pallet-event",
+      kind: "warehouse_pallet_opened",
+      data: { palletId: "pallet" },
+    };
+    await database.executor.transaction([
+      {
+        sql: "INSERT INTO pallet_assembly_outbox (id, host_id, device_id, pallet_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        values: [
+          event.id,
+          HOST_ID,
+          DEVICE_ID,
+          event.data.palletId,
+          event.kind,
+          JSON.stringify(event),
+          "2026-11-11T08:00:00Z",
+        ],
+      },
+    ]);
+    const sendPalletEvents = vi.fn<Send>(async (records) => {
+      order.push("pallets");
+      return acceptAll(records);
+    });
+    const station = await link(
+      async (records) => {
+        order.push("facts");
+        return acceptAll(records);
+      },
+      HOST_ID,
+      101,
+      database,
+      (local) => local,
+      sendPalletEvents,
+    );
+    await waitFor(() => {
+      expect(rows(database.db, "SELECT outcome FROM pallet_assembly_outbox")).toEqual([
+        { outcome: "accepted" },
+      ]);
+    });
+    expect(order).toEqual(["facts", "facts", "pallets"]);
+    expect(sendPalletEvents).toHaveBeenCalledExactlyOnceWith([event]);
+    station.hook.unmount();
+  });
+
   it("goes once the link is watched, a full batch asking for the next at once", async () => {
     const station = await link(acceptAll, HOST_ID, 150);
     await waitFor(() => expect(station.unsent()).toBe(0));

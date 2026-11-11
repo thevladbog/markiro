@@ -178,7 +178,9 @@ function spendSerial(blockId: string, serial: number): LocalStatement {
  * `floor_pallets_sscc` is unique across pairings, and a forget keeps a former
  * pairing's pallets.
  */
-export const PALLET_SSCC_HELD_SQL = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? LIMIT 1";
+export const PALLET_SSCC_HELD_SQL =
+  "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? UNION ALL " +
+  "SELECT 1 AS n FROM pallet_assembly_pallets WHERE sscc = ? LIMIT 1";
 
 /**
  * The SSCC a pallet can carry for `serial`, by the domain's `buildSscc`;
@@ -200,7 +202,7 @@ async function freePalletSscc(
     if (error instanceof DomainError && error.code === "SSCC_RANGE") return null;
     throw error;
   }
-  const [held] = await local.query(PALLET_SSCC_HELD_SQL, [sscc], heldRow);
+  const [held] = await local.query(PALLET_SSCC_HELD_SQL, [sscc, sscc], heldRow);
   return held === undefined ? sscc : null;
 }
 

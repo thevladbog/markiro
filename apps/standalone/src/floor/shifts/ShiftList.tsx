@@ -51,6 +51,7 @@ export interface ShiftListProps {
   onSetup?: () => void;
   /** The warehouse reprint (plan СКЛ); none — no button. */
   onWarehouse?: () => void;
+  warehouseMenu?: boolean;
   /** The queue of what was not sent (plan ОЧ); none — no button. */
   onQueue?: () => void;
   /** The site's license as the station last heard it (plan ЛЦ-3); `null` — nothing known. */
@@ -88,6 +89,7 @@ export function ShiftList({
   onNew,
   onSetup,
   onWarehouse,
+  warehouseMenu = false,
   onQueue,
   license = null,
 }: ShiftListProps) {
@@ -336,6 +338,7 @@ export function ShiftList({
       onNew={onNew}
       {...(onSetup === undefined ? {} : { onSetup })}
       {...(onWarehouse === undefined ? {} : { onWarehouse })}
+      warehouseMenu={warehouseMenu}
       {...(onQueue === undefined ? {} : { onQueue })}
     />
   );

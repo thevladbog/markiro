@@ -1,0 +1,24 @@
+{
+  "until": "2026-10-08T07:10:00Z",
+  "items": [
+    {
+      "kind": "upsert",
+      "sscc": "046006820000015000",
+      "updatedAt": "2026-10-08T07:00:00Z",
+      "boxId": "b1000000-0000-4000-8000-000000000001",
+      "productId": "b2000000-0000-4000-8000-000000000001",
+      "bottleCount": 12,
+      "palletActive": false,
+      "closedAt": "2026-10-08T06:58:00Z",
+      "productionDate": "2026-10-08",
+      "shiftNumber": "OCT26-001"
+    },
+    {
+      "kind": "remove",
+      "sscc": "046006820000015024",
+      "updatedAt": "2026-10-08T07:10:00Z"
+    }
+  ],
+  "restoreEpoch": "b3000000-0000-4000-8000-000000000001",
+  "canOpenPallets": true
+}

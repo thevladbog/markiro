@@ -9,6 +9,7 @@ import { ThemeProvider } from "@markiro/ui";
 import type { FloorNotice, FloorSession, ShellAction, SyncState } from "../src/app/shell.js";
 import { FloorApp } from "../src/floor/FloorApp.js";
 import { createPrintRuntime } from "../src/floor/print/print-runtime.js";
+import type { PalletAssemblyScreenProps } from "../src/floor/pallet-assembly/PalletAssemblyScreen.js";
 import type { ScanSource } from "../src/floor/scan-source.js";
 import { replaceShiftCopies } from "../src/floor/shifts/shift-copies.js";
 import type { WarehouseScreenProps } from "../src/floor/warehouse/WarehouseScreen.js";
@@ -41,6 +42,16 @@ vi.mock("../src/floor/warehouse/WarehouseScreen.js", () => ({
     screens.seen.push(props);
     return <StubWarehouse {...props} />;
   },
+}));
+vi.mock("../src/floor/pallet-assembly/PalletAssemblyScreen.js", () => ({
+  PalletAssemblyScreen: (props: PalletAssemblyScreenProps) => (
+    <div>
+      <h2>Сборка на станции</h2>
+      <button type="button" onClick={props.onLeave}>
+        К операциям
+      </button>
+    </div>
+  ),
 }));
 
 let releaseWork: () => void = () => undefined;
@@ -154,6 +165,7 @@ interface Options {
   rejectionPending?: boolean;
   lineChangePending?: boolean;
   idleTimeoutMs?: number;
+  pallets?: boolean;
 }
 
 function floorOf(
@@ -177,6 +189,15 @@ function floorOf(
         checkCode={vi.fn()}
         requestBlock={vi.fn()}
         warehouseLookup={handlers.lookup}
+        {...(options.pallets
+          ? {
+              getBoxRegistry: async () => ({
+                until: "2026-11-11T08:00:00Z",
+                items: [],
+                canOpenPallets: true,
+              }),
+            }
+          : {})}
         requestFacts={handlers.requestFacts}
         source={SILENT_SOURCE}
         printing={handlers.printing}
@@ -233,6 +254,20 @@ afterEach(() => {
   screens.unmounts = 0;
   releaseWork = () => undefined;
   failWork = () => undefined;
+});
+
+it("opens warehouse operations from the shift list and enters assembly without a shift", async () => {
+  const local = await copies();
+  const handlers = handlersOf();
+  render(floorOf(local, handlers, { pallets: true }));
+  fireEvent.click(await screen.findByRole("button", { name: "Складские операции" }));
+  expect(await screen.findByRole("heading", { name: "Короба в палеты" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "К перепечатке" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Открыть режим" }));
+  expect(await screen.findByRole("heading", { name: "Сборка на станции" })).toBeTruthy();
+  expect(types(handlers)).not.toContain("work_entered");
+  fireEvent.click(screen.getByRole("button", { name: "К операциям" }));
+  expect(await screen.findByRole("heading", { name: "Складские операции" })).toBeTruthy();
 });
 
 describe("what the floor gives the warehouse reprint (plan СКЛ)", () => {
