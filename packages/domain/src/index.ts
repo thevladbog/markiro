@@ -70,6 +70,8 @@ export { validateShiftScan } from "./scan/validate.js";
 export { boxMembershipDigestV1 } from "./sync/box-reconciliation.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
+  cloudLabelTemplateSpecSchema,
+  cloudLabelTemplateSpecStrictSchema,
   LABEL_FIELDS,
   LABEL_TEXT_FIELDS,
   LOT_NUMBER_LABEL_FIELD,

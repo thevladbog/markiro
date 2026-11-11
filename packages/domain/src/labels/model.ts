@@ -297,33 +297,68 @@ export const labelTemplateSpecSchema = z
   });
 export type LabelTemplateSpec = z.infer<typeof labelTemplateSpecSchema>;
 
-/**
- * Strict twin of `labelTemplateSpecSchema`: the SAME shapes, but an unknown
- * property is reported as an `unrecognized_keys` issue instead of being
- * silently stripped. It exists for ONE consumer -- the JSON importer, which
- * runs it first to WARN the author about properties the lenient schema is
- * about to drop (a typo such as `maxlines` would otherwise vanish without a
- * trace). It is never the validator: `parseLabelTemplate` (lenient, with the
- * unique-id refinement) stays the single source of truth, and the API keeps
- * accepting and stripping unknown keys exactly as before.
- */
+const strictTextElementSchema = z.strictObject(textElementShape);
+const strictFieldElementSchema = z.strictObject(fieldElementShape);
+const otherStrictElementSchemas = [
+  z.strictObject(barcodeElementShape(z.strictObject({ literal: z.string() }))),
+  z.strictObject(lineElementShape),
+  z.strictObject(boxElementShape),
+  z.strictObject(organizationLogoShape),
+] as const;
+
+/** Closed element shapes for import diagnostics and rendering. */
 export const labelTemplateSpecStrictSchema = z.strictObject({
   ...specShape,
   elements: z.array(
     z.discriminatedUnion("kind", [
-      z.strictObject(textElementShape),
-      z.strictObject(fieldElementShape),
-      z.strictObject(barcodeElementShape(z.strictObject({ literal: z.string() }))),
-      z.strictObject(lineElementShape),
-      z.strictObject(boxElementShape),
-      z.strictObject(organizationLogoShape),
+      strictTextElementSchema,
+      strictFieldElementSchema,
+      ...otherStrictElementSchemas,
+    ]),
+  ),
+});
+
+const cloudTextElementSchema = strictTextElementSchema.omit({ when: true });
+const cloudFieldElementSchema = strictFieldElementSchema
+  .omit({ when: true })
+  .extend({ field: labelFieldSchema });
+
+/** Frozen inventory snapshots are read by cloud stations and handhelds. */
+export const cloudLabelTemplateSpecStrictSchema = labelTemplateSpecStrictSchema.extend({
+  elements: z.array(
+    z.discriminatedUnion("kind", [
+      cloudTextElementSchema,
+      cloudFieldElementSchema,
+      ...otherStrictElementSchemas,
+    ]),
+  ),
+});
+
+/** Cloud template writes preserve the existing fields and unknown-key behavior. */
+export const cloudLabelTemplateSpecSchema = labelTemplateSpecSchema.safeExtend({
+  elements: z.array(
+    z.discriminatedUnion("kind", [
+      cloudTextElementSchema.strip(),
+      cloudFieldElementSchema.strip(),
+      barcodeElementSchema,
+      lineElementSchema,
+      boxElementSchema,
+      organizationLogoSchema,
     ]),
   ),
 });
 
 /** Parses and validates an unknown value as a `LabelTemplateSpec`. */
-export function parseLabelTemplate(json: unknown): LabelTemplateSpec {
-  const result = labelTemplateSpecSchema.safeParse(json);
+export function parseLabelTemplate(json: unknown): LabelTemplateSpec;
+export function parseLabelTemplate<Spec extends LabelTemplateSpec>(
+  json: unknown,
+  schema: z.ZodType<Spec>,
+): Spec;
+export function parseLabelTemplate(
+  json: unknown,
+  schema: z.ZodType<LabelTemplateSpec> = labelTemplateSpecSchema,
+): LabelTemplateSpec {
+  const result = schema.safeParse(json);
   if (!result.success) {
     const firstIssue = result.error.issues[0];
     const pathStr = firstIssue?.path.join(".") ?? "";

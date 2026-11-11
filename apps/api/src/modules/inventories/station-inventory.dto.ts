@@ -2,6 +2,7 @@ import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
 
 import {
+  cloudLabelTemplateSpecStrictSchema,
   INVENTORY_CHZ_STATUSES,
   INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
   INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
@@ -10,7 +11,6 @@ import {
   INVENTORY_PROGRESS_CURSOR_PATTERN,
   inventoryEventBatchSchema,
   inventoryProgressCursorSchema,
-  labelTemplateSpecStrictSchema,
   parseLabelTemplate,
   type InventoryEventBatch,
   type InventoryEventBatchResponse,
@@ -495,14 +495,16 @@ export type LegacyStationInventoryManifest = Omit<
 
 // Reuse the strict domain contract for frozen print specs. Device read projection
 // negotiates extensions without modifying the stored manifest or code digests.
-const storedLabelTemplateSpecSchema = labelTemplateSpecStrictSchema.transform((value, context) => {
-  try {
-    return parseLabelTemplate(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid label template spec" });
-    return z.NEVER;
-  }
-});
+const storedLabelTemplateSpecSchema = cloudLabelTemplateSpecStrictSchema.transform(
+  (value, context) => {
+    try {
+      return parseLabelTemplate(value);
+    } catch {
+      context.addIssue({ code: "custom", message: "invalid label template spec" });
+      return z.NEVER;
+    }
+  },
+);
 
 const storedStationInventoryManifestSchema = z
   .object({
@@ -605,7 +607,7 @@ export function parseLegacyStationInventoryManifest(
 
 // Task-form rendering imports this DTO in the browser; keep NestJS out of its runtime graph.
 export const stationInventoryLabelTemplateSpecOpenApiSchema: SchemaObject = z.toJSONSchema(
-  labelTemplateSpecStrictSchema,
+  cloudLabelTemplateSpecStrictSchema,
   { target: "openapi-3.0", io: "input" },
 ) as SchemaObject;
 

@@ -3,7 +3,7 @@ import type { SchemaObject } from "@nestjs/swagger";
 import {
   validationPrintInputSchema,
   validationPrintPolicySchema,
-  labelTemplateSpecSchema,
+  cloudLabelTemplateSpecSchema,
   PRODUCT_LABEL_PROTOCOL,
   VALIDATION_REPROCESSING_PROTOCOL,
   type ValidationPrintPolicy,
@@ -324,7 +324,7 @@ export const shiftLabelTemplatePreviewSchema = z.strictObject({
   id: z.uuid(),
   name: z.string(),
   purpose: shiftLabelTemplatePreviewQuerySchema.shape.purpose,
-  spec: labelTemplateSpecSchema,
+  spec: cloudLabelTemplateSpecSchema,
 });
 export type ShiftLabelTemplatePreviewDto = z.infer<typeof shiftLabelTemplatePreviewSchema>;
 

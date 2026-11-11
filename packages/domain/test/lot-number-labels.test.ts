@@ -40,6 +40,33 @@ it("loads saved label fields from both sides of the lot-number upgrade", () => {
   expect(domain.labelFieldDataSchema.parse(data)).toEqual(data);
 });
 
+it("keeps lot number fields and conditional text out of the cloud thermal template contract", () => {
+  const caption = spec.elements[0];
+  const field = spec.elements[1];
+  expect(domain.cloudLabelTemplateSpecStrictSchema.safeParse(spec).success).toBe(false);
+  expect(
+    domain.cloudLabelTemplateSpecStrictSchema.safeParse({
+      ...spec,
+      elements: [{ ...field, field: "shift.no" }],
+    }).success,
+  ).toBe(true);
+  expect(domain.cloudLabelTemplateSpecSchema.parse({ ...spec, elements: [caption] })).toEqual({
+    ...spec,
+    elements: [
+      {
+        kind: caption.kind,
+        id: caption.id,
+        xMm: caption.xMm,
+        yMm: caption.yMm,
+        text: caption.text,
+        fontSizePt: caption.fontSizePt,
+      },
+    ],
+  });
+  expect(domain.cloudLabelTemplateSpecSchema.safeParse(spec).success).toBe(false);
+  expect(domain.labelTemplateSpecStrictSchema.safeParse(spec).success).toBe(true);
+});
+
 function recordingRaster() {
   const printed: { text: string; lines: string[]; fontSizePx: number }[] = [];
   const rasterizeText: domain.RasterizeTextFn = async (text, opts) => {
