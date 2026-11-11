@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { buildPalletLabelTemplates } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 import { expect, it, vi } from "vitest";
@@ -115,6 +115,29 @@ it("pauses scanner writes while a manual form owns focus", async () => {
   await at.scan(SECOND_SSCC);
   expect((await at.store.read()).open).toBeNull();
   fireEvent.change(field, { target: { value: BOX_SSCC } });
+  await at.press("Добавить короб");
+  expect((await at.store.read()).open?.boxes.map(({ sscc }) => sscc)).toEqual([BOX_SSCC]);
+});
+
+it("enters and corrects an SSCC on the touch keypad before adding the box", async () => {
+  const at = await station();
+  at.show();
+  await screen.findByText("Отсканируйте SSCC закрытого короба");
+  await at.press("Ввести SSCC");
+  const field = screen.getByRole<HTMLInputElement>("textbox", { name: "SSCC короба" });
+  const keypad = within(screen.getByRole("group", { name: "Цифровая клавиатура" }));
+  const tap = (name: string) => fireEvent.click(keypad.getByRole("button", { name }));
+
+  tap("9");
+  tap("Очистить");
+  for (const digit of BOX_SSCC.slice(0, -1)) tap(digit);
+  tap("9");
+  tap("Стереть цифру");
+  tap(BOX_SSCC.slice(-1));
+  tap("9");
+
+  expect(field.value).toBe(BOX_SSCC);
+  expect((await at.store.read()).open).toBeNull();
   await at.press("Добавить короб");
   expect((await at.store.read()).open?.boxes.map(({ sscc }) => sscc)).toEqual([BOX_SSCC]);
 });

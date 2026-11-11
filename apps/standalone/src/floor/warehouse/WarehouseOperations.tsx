@@ -22,6 +22,7 @@ export function WarehouseOperations({ onAssembly, onReprint, onBack }: Warehouse
     <FloorScreen
       title={t("floor.warehouseMenu.title")}
       titleRef={title}
+      className="warehouse-operations-screen"
       actions={
         <FloorFooter ariaLabel={t("floor.warehouseMenu.title")}>
           <Button
