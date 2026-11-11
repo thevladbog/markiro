@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.print
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -29,11 +30,9 @@ sealed interface PrinterStatus {
  * there: an automatic retry could put a second label on a box the server has already accepted. Only
  * a person who has looked at the printer resolves an unknown.
  *
- * What `Delivered` can honestly claim, measured against a printer that drops the link partway
- * through a job: the bytes left this device. Over a raw printing port that is as far as it goes.
- * Neither printer language acknowledges a job, and the kernel accepts a whole label into its send
- * buffer whether or not the printer is still listening, so a peer that disappears mid-job is not
- * always visible here. A lost Bluetooth link does surface, because that stack fails the write.
+ * `Delivered` means the local stream accepted all the bytes and reported no error. Neither printer
+ * language acknowledges a job here. The OS can buffer a whole label, so a peer that disappears
+ * mid-job is not always visible to the sender.
  *
  * This is why the operator confirms afterwards rather than being told the label printed. Making
  * `Delivered` stronger would mean querying the printer again after the job and treating silence as
@@ -62,11 +61,7 @@ interface PrinterTransport {
     suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome
 }
 
-/**
- * Status and send over any byte stream. Neither printer language acknowledges a print job, so
- * `Delivered` means the bytes left this device, not that paper moved. That is exactly why the status
- * query runs first and why the operator confirms afterwards.
- */
+/** Status and send over any byte stream. Callers check readiness before sending a job. */
 class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterConnector) : PrinterTransport {
 
     override suspend fun status(printer: PrinterEntity): PrinterStatus = PrinterOutput.serialized(printer) { withContext(Dispatchers.IO) {
@@ -111,6 +106,9 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
                     if (bluetooth) socket.withBluetoothTimeout(writeChunk) else writeChunk()
                     offset += length
                 }
+                if (bluetooth && printer.language == "tspl" && document.isNotEmpty()) {
+                    delay(TSPL_BLUETOOTH_CLOSE_DELAY_MS)
+                }
             }
             SendOutcome.Delivered
         } catch (e: IOException) {
@@ -128,6 +126,9 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
          * large enough not to turn one job into hundreds of writes.
          */
         const val CHUNK_BYTES = 512
+
+        // Alpha-40L printed the same job only when RFCOMM stayed open this long after the final flush.
+        const val TSPL_BLUETOOTH_CLOSE_DELAY_MS = 1_200L
     }
 }
 
