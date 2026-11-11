@@ -3,6 +3,7 @@ import { PRINTER_OUTPUT_MODES, type PrinterOutputMode } from "@markiro/domain";
 
 import type { PrintTarget, ScannerConfig } from "../../hardware/hardware.js";
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
+import { testLabelSizeSchema, type TestLabelSize } from "./test-label.js";
 
 /**
  * What a printer prints for (stage 2a spec, decision 23): the box label, the
@@ -57,6 +58,8 @@ export interface PrinterProfile {
    * for a label printer.
    */
   paper?: "a4";
+  /** Installed media for setup and scanner tests. Production jobs use their own templates. */
+  testLabelSize?: TestLabelSize;
 }
 
 /** The workstation's sound: the verdict tones' level, 0–100, or none at all. */
@@ -213,6 +216,8 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   if (paper !== undefined && (paper !== "a4" || mode !== "windows_driver" || dpi !== 300)) {
     return null;
   }
+  // A missing or invalid test size must not drop an existing production printer.
+  const testSize = testLabelSizeSchema.safeParse(row["testLabelSize"]);
   return {
     id,
     name,
@@ -222,6 +227,7 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
     ...(mode === undefined ? {} : { mode }),
     ...(outputMode === undefined ? {} : { outputMode }),
     ...(paper === "a4" ? { paper: "a4" as const } : {}),
+    ...(paper !== "a4" && testSize.success ? { testLabelSize: testSize.data } : {}),
   };
 }
 

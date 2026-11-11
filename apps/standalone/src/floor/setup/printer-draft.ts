@@ -5,6 +5,7 @@
 import type { PrinterOutputMode } from "@markiro/domain";
 import type { PrintTarget } from "../../hardware/hardware.js";
 import { addressInvalid } from "../kit/ip-entry.js";
+import { TEST_LABEL_PRESETS, testLabelSizeSchema } from "./test-label.js";
 import {
   parsePrinterProfile,
   printerMode,
@@ -40,6 +41,9 @@ export interface PrinterDraft {
   outputMode: PrinterOutputMode | undefined;
   /** «Лист А4» (plan А4): only a Windows queue in driver mode, at 300 dpi. */
   paper: "label" | "a4";
+  testLabelSizeKey: string;
+  testLabelWidth: string;
+  testLabelHeight: string;
 }
 
 export const NEW_PRINTER: PrinterDraft = {
@@ -57,10 +61,16 @@ export const NEW_PRINTER: PrinterDraft = {
   mode: "raw",
   outputMode: "normal",
   paper: "label",
+  testLabelSizeKey: "",
+  testLabelWidth: "",
+  testLabelHeight: "",
 };
 
 export function draftOf(profile: PrinterProfile): PrinterDraft {
-  const { target } = profile;
+  const { target, testLabelSize } = profile;
+  const preset = TEST_LABEL_PRESETS.find(
+    (size) => size.widthMm === testLabelSize?.widthMm && size.heightMm === testLabelSize?.heightMm,
+  );
   return {
     ...NEW_PRINTER,
     id: profile.id,
@@ -77,6 +87,9 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
     mode: printerMode(profile),
     outputMode: profile.outputMode,
     paper: profile.paper ?? "label",
+    testLabelSizeKey: testLabelSize === undefined ? "" : (preset?.key ?? "custom"),
+    testLabelWidth: testLabelSize === undefined ? "" : String(testLabelSize.widthMm),
+    testLabelHeight: testLabelSize === undefined ? "" : String(testLabelSize.heightMm),
   };
 }
 
@@ -112,7 +125,20 @@ export function settleDraft(draft: PrinterDraft, patch: Partial<PrinterDraft>): 
 
 /** The keys of `floor.setup.printers.errors`. */
 export type DraftError =
-  "name" | "host" | "address" | "port" | "serialPort" | "baud" | "usbPrinter" | "paper";
+  | "name"
+  | "host"
+  | "address"
+  | "port"
+  | "serialPort"
+  | "baud"
+  | "usbPrinter"
+  | "paper"
+  | "testLabelSize";
+
+function decimalMm(text: string): number {
+  const value = text.trim().replace(",", ".");
+  return /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : NaN;
+}
 
 function wholeNumber(text: string): number | null {
   return /^[0-9]+$/.test(text.trim()) ? Number(text.trim()) : null;
@@ -148,6 +174,16 @@ export function profileOf(
   const driver = draft.kind === "usb" && draft.mode === "windows_driver";
   // «Лист А4» is a driver page at 300 dpi and nothing else (plan А4).
   if (draft.paper === "a4" && !(driver && draft.dpi === "300")) return { error: "paper" };
+  const preset = TEST_LABEL_PRESETS.find((size) => size.key === draft.testLabelSizeKey);
+  const testSize = testLabelSizeSchema.safeParse(
+    preset ?? {
+      widthMm: decimalMm(draft.testLabelWidth),
+      heightMm: decimalMm(draft.testLabelHeight),
+    },
+  );
+  if (draft.paper === "label" && draft.testLabelSizeKey !== "" && !testSize.success) {
+    return { error: "testLabelSize" };
+  }
   const profile = parsePrinterProfile({
     id: draft.id ?? newId(),
     name: draft.name,
@@ -157,6 +193,9 @@ export function profileOf(
     ...(driver ? { mode: "windows_driver" } : {}),
     ...(!driver && draft.outputMode !== undefined ? { outputMode: draft.outputMode } : {}),
     ...(draft.paper === "a4" ? { paper: "a4" } : {}),
+    ...(draft.paper === "label" && draft.testLabelSizeKey !== "" && testSize.success
+      ? { testLabelSize: testSize.data }
+      : {}),
   });
   return profile === null ? { error: "name" } : { profile };
 }

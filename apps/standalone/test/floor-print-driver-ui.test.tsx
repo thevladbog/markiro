@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import i18n from "i18next";
 import { describe, expect, it, vi } from "vitest";
 
-import { formatSsccHri, sampleLabelData } from "@markiro/domain";
+import { decodeMonoRaster, formatSsccHri, sampleLabelData } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import {
@@ -13,6 +13,7 @@ import {
   type WindowsPrinting,
 } from "../src/hardware/hardware.js";
 import { LabelPanel } from "../src/floor/print/LabelPanel.js";
+import { renderLabel } from "../src/floor/print/label-render.js";
 import { FAILED_CODES, UNKNOWN_CODES, type PrintJob } from "../src/floor/print/print-jobs.js";
 import {
   createPrintRuntime,
@@ -29,7 +30,14 @@ import { fakeHardware } from "./support/hardware.js";
 import { choicesOf, setField, shownInList, usbListed } from "./support/floor-fields.js";
 import { openLocalDb } from "./support/local-db.js";
 import { km } from "./support/floor-work.js";
-import { FIRST_SSCC, fakeRender, printStation, setUpPrinting, ZEBRA } from "./support/printing.js";
+import {
+  FIRST_SSCC,
+  fakeRaster,
+  fakeRender,
+  printStation,
+  setUpPrinting,
+  ZEBRA,
+} from "./support/printing.js";
 import { renderWork } from "./support/work-screen.js";
 
 const GODEX: PrinterProfile = {
@@ -547,7 +555,7 @@ describe("the workstation setup's driver controls", () => {
       const { executor } = openLocalDb();
       const shell = fakeHardware();
       await setUpPrinting(executor, {
-        printers: [GODEX, ZEBRA],
+        printers: [{ ...GODEX, dpi: 300, testLabelSize: { widthMm: 75, heightMm: 120 } }, ZEBRA],
         assignments: { box: "godex", pallet: null, duplicate: null },
       });
       const shellWindows = windows(true);
@@ -557,15 +565,15 @@ describe("the workstation setup's driver controls", () => {
         );
       }
       const rendered: Parameters<typeof fakeRender>[2][] = [];
-      const renderLabel: typeof fakeRender = async (spec, fields, printer) => {
+      const renderTest: typeof fakeRender = async (spec, fields, printer) => {
         rendered.push(printer);
-        return fakeRender(spec, fields, printer);
+        return renderLabel(spec, fields, printer, fakeRaster);
       };
       setup({
         local: executor,
         shell,
         printing: createPrintRuntime(shell.hardware.printBytes, { windows: shellWindows }),
-        renderLabel,
+        renderLabel: renderTest,
       });
       await screen.findByRole("heading", { name: "Принтеры" });
       return { shell, shellWindows, rendered };
@@ -582,6 +590,11 @@ describe("the workstation setup's driver controls", () => {
       expect(shellWindows.printWindowsRaster).toHaveBeenCalledTimes(1);
       const call = vi.mocked(shellWindows.printWindowsRaster).mock.calls[0];
       expect(call?.[0]).toBe("Godex G500");
+      expect(decodeMonoRaster(call?.[1] ?? new Uint8Array())).toMatchObject({
+        widthMm: 75,
+        heightMm: 120,
+        dpi: 300,
+      });
       expect(call?.[2]).toMatch(/^Markiro:[0-9a-f-]{36}$/);
       expect(shell.hardware.printBytes).not.toHaveBeenCalled();
       expect(rendered[0]?.mode).toBe("windows_driver");
@@ -614,7 +627,8 @@ describe("the workstation setup's driver controls", () => {
         screen.getByRole("button", { name: "Пробная печать на «Godex через драйвер»" }),
       );
       expect(await screen.findByText(/Пробная этикетка не напечатана\./)).toBeTruthy();
-      expect(screen.getByText(/Размер бумаги или разрешение в драйвере Windows/)).toBeTruthy();
+      expect(screen.getByText(/Размер этикетки или разрешение не совпадают/)).toBeTruthy();
+      expect(screen.queryByText(/Для листа А4/)).toBeNull();
     });
 
     it("sends one test label at a time: a second press while it is on its way does nothing", async () => {
