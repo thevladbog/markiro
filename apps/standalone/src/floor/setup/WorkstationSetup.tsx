@@ -57,6 +57,10 @@ import {
   makeTestCode,
   scannedTestCode,
   selfTestDataMatrixSpec,
+  TEST_LABEL_HEIGHT_MIN_MM,
+  TEST_LABEL_MAX_MM,
+  TEST_LABEL_PRESETS,
+  TEST_LABEL_WIDTH_MIN_MM,
   testLabelSpec,
 } from "./test-label.js";
 import {
@@ -534,7 +538,14 @@ export function WorkstationSetup({
         assignments[purpose] = null;
       }
     }
-    if (exists && before.paper !== profile.paper) forgetTestOf(profile.id);
+    if (
+      exists &&
+      (before.paper !== profile.paper ||
+        before.testLabelSize?.widthMm !== profile.testLabelSize?.widthMm ||
+        before.testLabelSize?.heightMm !== profile.testLabelSize?.heightMm)
+    ) {
+      forgetTestOf(profile.id);
+    }
     change({
       ...draft,
       printers: exists
@@ -564,14 +575,21 @@ export function WorkstationSetup({
   const testPrint = async (printer: PrinterProfile) => {
     // One test label at a time: a press while one is on its way does nothing.
     if (testRef.current?.kind === "sending") return;
-    const sheet = printer.paper === "a4";
+    const media = printer.paper === "a4" ? "a4" : printer.testLabelSize;
+    if (media === undefined) {
+      setSubmitted(false);
+      setEditor(draftOf(printer));
+      setEditorError(t("floor.setup.printers.editor.testSizeNeeded"));
+      return;
+    }
     testOwner.current = printer.id;
     const generation = testGeneration.current;
     const stale = () => generation !== testGeneration.current;
     setTest({ kind: "sending", printerId: printer.id });
     let bytes: Uint8Array;
     let code: string;
-    if (sheet) {
+    const sheet = media === "a4";
+    if (media === "a4") {
       // The A4 test (plan А4): a sheet of the stock layout with a made-up SSCC, shown on the
       // screen as it is sent, and checked by a scan of that SSCC.
       code = makeA4TestSscc();
@@ -590,12 +608,17 @@ export function WorkstationSetup({
     } else {
       code = makeTestCode();
       try {
-        bytes = await render(testLabelSpec(code, printer.language), sampleLabelData(), printer);
+        bytes = await render(
+          testLabelSpec(code, printer.language, media),
+          sampleLabelData(),
+          printer,
+        );
       } catch {
         if (!stale()) setTest({ kind: "render_failed", sheet });
         return;
       }
     }
+    if (stale()) return;
     const outcome = sheet
       ? await printing.send(null, printer.target, bytes, printerMode(printer), "a4")
       : await printing.send(null, printer.target, bytes, printerMode(printer));
@@ -719,15 +742,20 @@ export function WorkstationSetup({
               ].join(" ")
             : t("floor.setup.printers.testResult.sent", { name: state.name }),
         };
-      case "failed":
+      case "failed": {
+        const detail =
+          state.code === "geometry_mismatch" && !state.sheet
+            ? t("floor.setup.printers.testResult.labelGeometryMismatch")
+            : t("floor.print.codes." + state.code);
         return {
           tone: "error",
           text: `${t(
             `floor.setup.printers.testResult.${state.unknown ? "unknown" : "failed"}${
               state.sheet ? "Sheet" : ""
             }`,
-          )} ${t(`floor.print.codes.${state.code}`)}`,
+          )} ${detail}`,
         };
+      }
       case "render_failed":
         return {
           tone: "error",
@@ -1063,6 +1091,69 @@ export function WorkstationSetup({
                     hint={t("floor.setup.printers.editor.dpiHint")}
                     onChange={(dpi) => set({ dpi })}
                   />
+                  {form.paper === "label" && (
+                    <>
+                      <Select
+                        custom
+                        size={controlSize}
+                        label={t("floor.setup.printers.editor.testSize")}
+                        hint={t("floor.setup.printers.editor.testSizeHint")}
+                        value={form.testLabelSizeKey}
+                        options={[
+                          { value: "", label: t("floor.setup.printers.editor.testSizeChoose") },
+                          ...TEST_LABEL_PRESETS.map(({ key, widthMm, heightMm }) => ({
+                            value: key,
+                            label: t("floor.setup.printers.editor.testSizePreset", {
+                              widthMm,
+                              heightMm,
+                            }),
+                          })),
+                          {
+                            value: "custom",
+                            label: t("floor.setup.printers.editor.testSizeCustom"),
+                          },
+                        ]}
+                        onValueChange={(testLabelSizeKey) => {
+                          const preset = TEST_LABEL_PRESETS.find(
+                            ({ key }) => key === testLabelSizeKey,
+                          );
+                          set({
+                            testLabelSizeKey,
+                            ...(preset === undefined
+                              ? {}
+                              : {
+                                  testLabelWidth: String(preset.widthMm),
+                                  testLabelHeight: String(preset.heightMm),
+                                }),
+                          });
+                        }}
+                      />
+                      {form.testLabelSizeKey === "custom" &&
+                        (
+                          [
+                            ["testLabelWidth", "testWidth", TEST_LABEL_WIDTH_MIN_MM],
+                            ["testLabelHeight", "testHeight", TEST_LABEL_HEIGHT_MIN_MM],
+                          ] as const
+                        ).map(([key, label, min]) => (
+                          <Input
+                            key={key}
+                            {...manualEntry}
+                            size={controlSize}
+                            inputMode="decimal"
+                            label={t("floor.setup.printers.editor." + label)}
+                            hint={t("floor.setup.printers.editor.testSizeRange", {
+                              min,
+                              max: TEST_LABEL_MAX_MM,
+                            })}
+                            value={form[key]}
+                            {...(refusedWith === "testLabelSize"
+                              ? { error: t("floor.setup.printers.errors.testLabelSize") }
+                              : {})}
+                            onChange={(event) => set({ [key]: event.target.value })}
+                          />
+                        ))}
+                    </>
+                  )}
                   {!driver && (
                     <Select
                       custom
@@ -1393,20 +1484,22 @@ export function WorkstationSetup({
     code: string,
   ): Promise<SelfTestPrintResult> => {
     const printer = draft.printers.find((candidate) => candidate.id === printerId);
-    if (printer === undefined) return "failed";
+    if (printer === undefined || printer.paper === "a4") return "failed";
+    const size = printer.testLabelSize;
+    if (size === undefined) return "size_required";
     let bytes: Uint8Array;
     try {
       bytes =
         kind === "dm"
           ? await render(
-              selfTestDataMatrixSpec(printer.language),
+              selfTestDataMatrixSpec(printer.language, size),
               { ...sampleLabelData(), "km.code": code },
               printer,
               undefined,
               null,
               { kmDataMatrix: "raster" },
             )
-          : await render(testLabelSpec(code, printer.language), sampleLabelData(), printer);
+          : await render(testLabelSpec(code, printer.language, size), sampleLabelData(), printer);
     } catch {
       return "render_failed";
     }

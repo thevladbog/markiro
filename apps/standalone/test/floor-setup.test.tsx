@@ -182,7 +182,7 @@ describe("the test label", () => {
     const code = makeTestCode((bytes) => bytes.set([0, 1, 2, 19, 20, 39]));
     expect(code).toBe("MKR-347Y3Y");
     expect(makeTestCode()).toMatch(/^MKR-[34789ACDEFHKMNPRTWXY]{6}$/);
-    const spec = testLabelSpec(code, "tspl");
+    const spec = testLabelSpec(code, "tspl", { widthMm: 58, heightMm: 40 });
     expect(spec).toMatchObject({ widthMm: 58, heightMm: 40, language: "tspl" });
     expect(JSON.stringify(spec)).toMatch(/^[\x20-\x7e]*$/);
     expect(scannedTestCode(` ]C0${code}\r`)).toBe(code);
@@ -292,7 +292,7 @@ describe("the workstation setup", () => {
     ).toBeTruthy();
     const spec = render.mock.calls[0]?.[0];
     const code = JSON.stringify(spec).match(/MKR-[A-Z0-9]{6}/)?.[0] ?? "";
-    expect(spec).toEqual(testLabelSpec(code, "zpl"));
+    expect(spec).toEqual(testLabelSpec(code, "zpl", { widthMm: 58, heightMm: 40 }));
     expect(render.mock.calls[0]?.[2]).toEqual(ZEBRA);
     expect(shell.sends).toEqual([
       { target: ZEBRA.target, text: expect.stringContaining(`^FD${code}^FS`) },
@@ -303,6 +303,41 @@ describe("the workstation setup", () => {
     // The check stays open for the right code.
     await scanner.read(`]C0${code}`);
     expect(screen.getByText("Код совпал: принтер и сканер работают.")).toBeTruthy();
+  });
+
+  it("asks for the installed media before printing and saves a custom size per printer", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local, {
+      printers: [{ id: "tsc", name: TSC.name, target: TSC.target, dpi: 300, language: "tspl" }],
+      assignments: { box: "tsc", pallet: null, duplicate: null },
+    });
+    const { shell } = await setup({ local, render: realRender });
+    const testButton = "Пробная печать на «TSC на COM4»";
+    click(testButton);
+    expect(shell.sends).toHaveLength(0);
+    setField("Размер пробной этикетки", "75 × 120 мм");
+    click("Готово");
+    click(testButton);
+    await screen.findByText(/Пробная этикетка ушла/);
+    expect(shell.sends[0]?.text).toMatch(/^SIZE 75 mm, 120 mm\n/);
+
+    click("Изменить принтер «TSC на COM4»");
+    setField("Размер пробной этикетки", "Свой размер");
+    type("Ширина, мм", "0");
+    type("Длина по ходу подачи, мм", "115");
+    click("Готово");
+    expect(screen.getByLabelText("Ширина, мм").getAttribute("aria-invalid")).toBe("true");
+    type("Ширина, мм", "82,5");
+    click("Готово");
+    click(testButton);
+    await screen.findByText(/Пробная этикетка ушла/);
+    expect(shell.sends[1]?.text).toMatch(/^SIZE 82\.5 mm, 115 mm\n/);
+
+    click("Сохранить");
+    await screen.findByText("Настройки сохранены");
+    expect((await readWorkstationSettings(local)).printers[0]).toMatchObject({
+      testLabelSize: { widthMm: 82.5, heightMm: 115 },
+    });
   });
 
   it("says why a test label did not print", async () => {
@@ -1768,7 +1803,10 @@ describe("«Проверка сканера» inside «Сканеры»", () => 
     ["tspl", 300],
   ] as const)("prints a bounded GS1 test raster on %s at %s dpi", async (language, dpi) => {
     const local = openLocalDb().executor;
-    const settings = { ...printingSettings(), printers: [{ ...ZEBRA, language, dpi }] };
+    const settings = {
+      ...printingSettings(),
+      printers: [{ ...ZEBRA, language, dpi, testLabelSize: { widthMm: 75, heightMm: 120 } }],
+    };
     await saveWorkstationSettings(local, {
       ...settings,
       assignments: { box: ZEBRA.id, pallet: null, duplicate: null },
@@ -1780,6 +1818,8 @@ describe("«Проверка сканера» inside «Сканеры»", () => 
     });
     await screen.findByText("Тестовый код отправлен на печать.");
     const text = shell.sends[0]?.text ?? "";
+    if (language === "tspl") expect(text).toMatch(/^SIZE 75 mm, 120 mm\n/);
+    else expect(text).toContain("^PW" + mmToDots(75, dpi) + "\n^LL" + mmToDots(120, dpi));
     // Compare the actual printer payload with the entire GS1 symbol, including quiet zones.
     const raster = rasterizeGs1DataMatrix(code, mmToDots(26, dpi));
     expect(text).toContain(

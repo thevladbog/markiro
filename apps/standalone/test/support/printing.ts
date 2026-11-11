@@ -53,6 +53,7 @@ export const ZEBRA: PrinterProfile = {
   target: { kind: "tcp", host: "192.168.1.50", port: 9100 },
   language: "zpl",
   dpi: 203,
+  testLabelSize: { widthMm: 58, heightMm: 40 },
 };
 
 /** A TSC on a COM port: TSPL, 300 dpi. */
@@ -62,6 +63,7 @@ export const TSC: PrinterProfile = {
   target: { kind: "serial", port: "COM4", baud: 9600 },
   language: "tspl",
   dpi: 300,
+  testLabelSize: { widthMm: 58, heightMm: 40 },
 };
 
 /** A laser printer of A4 sheets through its Windows driver (plan А4): pallets only, 300 dpi. */

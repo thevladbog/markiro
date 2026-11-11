@@ -5490,8 +5490,11 @@ says when it drops a change. A scanner's line is «Подключится пос
 field of the setup tells the scan source it takes typing (focus and blur; the
 source is told again when the printer form opens or closes or the setup goes, as a
 removed field sends no blur), so what is typed there is never a scan, and a test
-label that went clears what was typed ahead. The test print
-sends a 58 × 40 label of ASCII only («MARKIRO TEST» and a random `MKR-` code in
+label that went clears what was typed ahead. The test print uses the printer profile's
+selected roll dimensions (preset or custom), also used by the scanner's print test.
+A profile without a size can still print production jobs. Starting its printer test
+opens the editor to choose a size before sending. The printer test sends an ASCII-only
+label («MARKIRO TEST» and a random `MKR-` code in
 Code 128, `testLabelSpec`; no product data) through the same runtime and checks
 the scan of its code; a scan that is not that code is never shown (it may be a
 badge). It is no job: it takes no in-flight slot and queues behind a real send to

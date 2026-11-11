@@ -81,7 +81,7 @@ export interface SelfTestPrinter {
   name: string;
 }
 
-export type SelfTestPrintResult = "sent" | "failed" | "render_failed";
+export type SelfTestPrintResult = "sent" | "failed" | "render_failed" | "size_required";
 
 export interface ScannerSelfTestProps {
   presentation?: "floor" | "office";
@@ -269,15 +269,13 @@ export function ScannerSelfTest({
     if (chosen === null) return;
     setNote(null);
     const result = await print(chosen.id, kind, code);
-    setNote(
-      t(
-        result === "sent"
-          ? "floor.setup.selfTest.printSent"
-          : result === "failed"
-            ? "floor.setup.selfTest.printFailed"
-            : "floor.setup.selfTest.printRenderFailed",
-      ),
-    );
+    const message = {
+      sent: "printSent",
+      failed: "printFailed",
+      render_failed: "printRenderFailed",
+      size_required: "printSizeRequired",
+    } as const;
+    setNote(t("floor.setup.selfTest." + message[result]));
   };
 
   const actions = (
